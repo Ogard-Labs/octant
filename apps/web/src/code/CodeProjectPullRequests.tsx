@@ -93,11 +93,13 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         : undefined;
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const visibleRows = view?.rows.filter((row) => pullRequestMatches(row, normalizedSearch)) ?? [];
+  const freshnessStatus = view?.freshness.status ?? "loading";
 
   return (
     <section
       aria-label="Pull requests"
       className="code-project-pull-requests"
+      data-freshness={freshnessStatus}
       data-narrow={props.isNarrow === true ? "true" : "false"}
     >
       <header className="code-board__header">
@@ -150,10 +152,11 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
               </OctantButton>
             )}
           </label>
-          <span className="code-project-pull-requests__count">
-            {visibleRows.length === 1
-              ? "1 pull request"
-              : `${String(visibleRows.length)} pull requests`}
+          <span
+            className="code-project-pull-requests__count"
+            data-freshness={view.freshness.status}
+          >
+            {pullRequestCountCopy(view.freshness, visibleRows.length)}
           </span>
         </div>
       )}
@@ -175,7 +178,11 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         ) : null
       ) : (
         <>
-          <p className="code-project-pull-requests__status" role="status">
+          <p
+            className="code-project-pull-requests__status"
+            data-state={view.freshness.status}
+            role="status"
+          >
             {freshnessCopy(view.freshness)}
             {view.repositoriesTruncated
               ? " Some connected repositories were omitted after the preview bound of 25."
@@ -209,6 +216,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 rows={visibleRows.filter(
                   (row) => String(row.projectId) === String(project.projectId),
                 )}
+                freshness={view.freshness}
                 {...(props.onSelectRow === undefined ? {} : { onSelectRow: props.onSelectRow })}
                 {...(props.selectedRowKey === undefined
                   ? {}
@@ -225,6 +233,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
 function ProjectGroup(props: {
   readonly project: CodeProjectPullRequestConnection;
   readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
+  readonly freshness: CodeProjectPullRequestFreshness;
   readonly busy: boolean;
   readonly onRefresh: () => void;
   readonly selectedRowKey?: string;
@@ -237,7 +246,14 @@ function ProjectGroup(props: {
       className="code-project-pull-requests__project"
     >
       <header className="code-project-pull-requests__project-header">
-        <h2>{props.project.projectName}</h2>
+        <div className="code-project-pull-requests__project-heading">
+          <h2>{props.project.projectName}</h2>
+          {props.project.kind === "connected" ? (
+            <span className="code-project-pull-requests__project-repository">
+              {props.project.repositoryOwner}/{props.project.repositoryName}
+            </span>
+          ) : null}
+        </div>
         <OctantButton
           disabled={props.busy}
           onClick={props.onRefresh}
@@ -250,12 +266,10 @@ function ProjectGroup(props: {
       </header>
       {props.project.kind === "unconnected" ? (
         <p className="code-project-pull-requests__unconnected">
-          Not connected to a github.com origin. The Project stays usable.
+          No github.com origin detected. Add one to this Project to enable pull-request refresh.
         </p>
       ) : repositories.length === 0 ? (
-        <p className="code-project-pull-requests__empty">
-          No active pull requests in this snapshot.
-        </p>
+        <p className="code-project-pull-requests__empty">{projectEmptyCopy(props.freshness)}</p>
       ) : (
         repositories.map((group) => (
           <section
@@ -413,7 +427,7 @@ function groupByRepository(rows: ReadonlyArray<CodeProjectPullRequestRow>): Read
 
 function freshnessCopy(freshness: CodeProjectPullRequestFreshness): string {
   if (freshness.status === "empty") {
-    return "No GitHub snapshot yet. Refresh to load active pull requests.";
+    return "No GitHub snapshot yet. Refresh a connected Project to load active pull requests.";
   }
   if (freshness.status === "fresh") {
     return freshness.lastSuccessfulRefreshAt === undefined
@@ -438,7 +452,26 @@ function freshnessCopy(freshness: CodeProjectPullRequestFreshness): string {
     freshness.retryAfter === undefined
       ? ""
       : ` Retry after ${formatUpdatedAt(freshness.retryAfter)}.`;
-  return `${reason}.${last}${retry}`;
+  if (freshness.staleReason === "disconnected") {
+    return `GitHub access is unavailable. Check the GitHub CLI connection, then refresh.${last}${retry}`;
+  }
+  return `${reason}.${last}${retry} Cached results remain visible until a refresh succeeds.`;
+}
+
+function pullRequestCountCopy(freshness: CodeProjectPullRequestFreshness, count: number): string {
+  if (freshness.status === "empty") return "Refresh to load pull requests";
+  if (freshness.status === "stale") {
+    if (count === 0) return "No cached pull requests";
+    return count === 1 ? "1 cached pull request" : `${String(count)} cached pull requests`;
+  }
+  return count === 1 ? "1 pull request" : `${String(count)} pull requests`;
+}
+
+function projectEmptyCopy(freshness: CodeProjectPullRequestFreshness): string {
+  if (freshness.status === "empty")
+    return "Not refreshed yet. Refresh this Project to load pull requests.";
+  if (freshness.status === "stale") return "No cached pull requests for this Project.";
+  return "No open or draft pull requests.";
 }
 
 function reviewCopy(review: CodeProjectPullRequestRow["review"]): string {

@@ -105,7 +105,9 @@ describe("CodeProjectPullRequests", () => {
     expect(within(octant).getByText("Review approved")).toBeVisible();
     expect(within(octant).getByText("Linked: Manual refresh")).toBeVisible();
     expect(
-      within(notes).getByText("Not connected to a github.com origin. The Project stays usable."),
+      within(notes).getByText(
+        "No github.com origin detected. Add one to this Project to enable pull-request refresh.",
+      ),
     ).toBeVisible();
     expect(octant.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -186,6 +188,22 @@ describe("CodeProjectPullRequests", () => {
       "data-narrow",
       "true",
     );
+  });
+
+  it("does not present a failed GitHub refresh as an empty zero-count snapshot", async () => {
+    const stale = view({
+      rows: [],
+      freshness: { status: "stale", staleReason: "disconnected" },
+    });
+    renderWorkspace({ load: async () => stale, refresh: async () => stale });
+
+    expect(
+      await screen.findByText(
+        "GitHub access is unavailable. Check the GitHub CLI connection, then refresh.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText("No cached pull requests")).toBeVisible();
+    expect(screen.queryByText("0 pull requests")).not.toBeInTheDocument();
   });
 
   it("selects a pull request row without refreshing GitHub", async () => {
