@@ -550,14 +550,9 @@
   animation: chat-status-spin 900ms linear infinite;
 }
 
-/* Shimmer sweep across the streaming label so live state reads at a glance. */
+/* The spinner already names live state; keep its label readable and still. */
 .chat-transcript__attempt-status--streaming > span:first-of-type {
-  background: linear-gradient(90deg, var(--oct-meta) 20%, var(--oct-fg) 50%, var(--oct-meta) 80%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: chat-status-shimmer 1.4s linear infinite;
+  color: var(--oct-muted);
 }
 
 .chat-transcript__citations {
@@ -972,12 +967,6 @@
 @keyframes chat-status-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@keyframes chat-status-shimmer {
-  to {
-    background-position: -200% 0;
   }
 }
 

@@ -2159,7 +2159,6 @@ input.switch:checked::after {
   max-width: 380px;
   padding: var(--oct-space-3) var(--oct-space-4);
   border: 1px solid var(--oct-border);
-  border-left: 2px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
@@ -2167,10 +2166,10 @@ input.switch:checked::after {
   color: var(--oct-fg-2);
 }
 .toast-ok {
-  border-left-color: var(--oct-success-fg);
+  border-color: var(--oct-success-fg);
 }
 .toast-warn {
-  border-left-color: var(--oct-warn-fg);
+  border-color: var(--oct-warn-fg);
 }
 .toast-danger {
   border-left-color: var(--oct-danger-fg);
@@ -5707,7 +5706,6 @@ input.switch:checked::after {
    and where, and it stays put */
 .receipt {
   border: 1px solid var(--oct-border);
-  border-left: 2px solid var(--oct-success-fg);
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   padding: var(--oct-space-4);
@@ -7135,19 +7133,18 @@ input.switch:checked::after {
    status, not a variant of paused: the agent did not choose to stop. */
 .goal {
   border: 1px solid var(--oct-border);
-  border-left: 2px solid var(--oct-accent);
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   padding: var(--oct-space-4);
 }
 .goal[data-status="paused"] {
-  border-left-color: var(--oct-muted);
+  border-color: var(--oct-muted);
 }
 .goal[data-status="budget-limited"] {
-  border-left-color: var(--oct-warn-fg);
+  border-color: var(--oct-warn-fg);
 }
 .goal[data-status="complete"] {
-  border-left-color: var(--oct-success-fg);
+  border-color: var(--oct-success-fg);
 }
 .goal-head {
   display: flex;
