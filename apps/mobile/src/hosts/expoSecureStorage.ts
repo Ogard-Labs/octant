@@ -43,11 +43,21 @@ function createWebLocalStorage(): ExpoSecureStringStorage {
   };
 }
 
+export interface ExpoSecureStringStorageOptions {
+  /**
+   * Persist non-secret app data in browser localStorage. Device key storage
+   * leaves this disabled so private signing keys remain session-scoped.
+   */
+  readonly persistWeb?: boolean;
+}
+
 /**
- * SecureStore on native; localStorage (or memory) on web/Node so Expo web and
- * unit tests can pair without native vault APIs.
+ * SecureStore on native; session memory on web/Node by default. Web callers
+ * that only store non-secret app data must explicitly opt into localStorage.
  */
-export function createExpoSecureStringStorage(): ExpoSecureStringStorage {
+export function createExpoSecureStringStorage(
+  options: ExpoSecureStringStorageOptions = {},
+): ExpoSecureStringStorage {
   const isDom = typeof document !== "undefined";
   const isNode =
     typeof process !== "undefined" &&
@@ -55,9 +65,9 @@ export function createExpoSecureStringStorage(): ExpoSecureStringStorage {
     process.versions.node !== undefined;
 
   if (isDom) {
-    return typeof globalThis.localStorage === "undefined"
-      ? createMemoryStringStorage()
-      : createWebLocalStorage();
+    return options.persistWeb === true && typeof globalThis.localStorage !== "undefined"
+      ? createWebLocalStorage()
+      : createMemoryStringStorage();
   }
   if (isNode) {
     return createMemoryStringStorage();

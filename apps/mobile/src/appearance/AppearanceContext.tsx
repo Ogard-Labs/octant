@@ -37,7 +37,7 @@ export function AppearanceProvider(props: {
   readonly store?: AppearanceStore;
 }) {
   const store = useMemo(
-    () => props.store ?? createAppearanceStore(createExpoSecureStringStorage()),
+    () => props.store ?? createAppearanceStore(createExpoSecureStringStorage({ persistWeb: true })),
     [props.store],
   );
   const [preferences, setPreferences] = useState<AppearancePreferences>(DEFAULT_APPEARANCE);

@@ -77,9 +77,13 @@ function transportFromSlot(input: {
 }
 
 function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
-  const storage = useMemo(() => createExpoSecureStringStorage(), []);
-  const deviceKeyStore = useMemo(() => createExpoSecureDeviceKeyStore({ storage }), [storage]);
-  const registry = useMemo(() => createMobileHostRegistry(storage), [storage]);
+  const secureStorage = useMemo(() => createExpoSecureStringStorage(), []);
+  const registryStorage = useMemo(() => createExpoSecureStringStorage({ persistWeb: true }), []);
+  const deviceKeyStore = useMemo(
+    () => createExpoSecureDeviceKeyStore({ storage: secureStorage }),
+    [secureStorage],
+  );
+  const registry = useMemo(() => createMobileHostRegistry(registryStorage), [registryStorage]);
   const hub = useMemo(
     () =>
       createMobileHostSessionHub({

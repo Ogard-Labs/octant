@@ -78,6 +78,13 @@ export function createMobileHostSessionHub(input: {
     for (const listener of listeners) listener();
   };
 
+  const removeBridge = (origin: string): void => {
+    unsubscribers.get(origin)?.();
+    unsubscribers.delete(origin);
+    bridges.get(origin)?.disconnect();
+    bridges.delete(origin);
+  };
+
   const ensureBridge = (registration: MobileHostRegistration): RemoteSessionBridge => {
     const existing = bridges.get(registration.origin);
     if (existing !== undefined) return existing;
@@ -100,15 +107,19 @@ export function createMobileHostSessionHub(input: {
   return {
     syncRegistrations(next) {
       const nextOrigins = new Set(next.map((host) => host.origin));
-      for (const [origin, unsubscribe] of unsubscribers) {
+      for (const origin of unsubscribers.keys()) {
         if (nextOrigins.has(origin)) continue;
-        unsubscribe();
-        unsubscribers.delete(origin);
-        bridges.get(origin)?.disconnect();
-        bridges.delete(origin);
+        removeBridge(origin);
         registrations.delete(origin);
       }
       for (const registration of next) {
+        const previous = registrations.get(registration.origin);
+        if (
+          previous !== undefined &&
+          previous.credentialGeneration !== registration.credentialGeneration
+        ) {
+          removeBridge(registration.origin);
+        }
         registrations.set(registration.origin, registration);
         ensureBridge(registration);
       }
@@ -149,12 +160,7 @@ export function createMobileHostSessionHub(input: {
       return bridges.get(origin);
     },
     disconnectAll() {
-      for (const [origin, unsubscribe] of unsubscribers) {
-        unsubscribe();
-        unsubscribers.delete(origin);
-        bridges.get(origin)?.disconnect();
-        bridges.delete(origin);
-      }
+      for (const origin of unsubscribers.keys()) removeBridge(origin);
       registrations.clear();
       emit();
     },
