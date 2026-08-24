@@ -7,7 +7,9 @@ import {
   type ProviderUsageLimitsSource,
   type ProviderServiceLimits,
   type UtcTimestamp,
+  UtcTimestamp as UtcTimestampSchema,
 } from "@octant/contracts";
+import { Schema } from "effect";
 
 class ProviderUsageLimitsTimeout extends Error {
   override readonly name = "ProviderUsageLimitsTimeout";
@@ -37,6 +39,7 @@ export interface ProviderUsageLimitsServiceOptions {
 
 const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 15_000;
+const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 
 export class ProviderUsageLimitsService {
   readonly #options: ProviderUsageLimitsServiceOptions;
@@ -184,7 +187,7 @@ export class ProviderUsageLimitsService {
                   ? "protocol"
                   : "unavailable",
           message: "Provider limits could not be refreshed.",
-          ...(failureRetryAt === undefined ? {} : { retryAt: failureRetryAt as UtcTimestamp }),
+          ...(failureRetryAt === undefined ? {} : { retryAt: decodeUtcTimestamp(failureRetryAt) }),
         },
         ...(staleLimits === undefined ? {} : { staleLimits }),
         ...(lastSuccessfulAt === undefined ? {} : { lastSuccessfulAt }),

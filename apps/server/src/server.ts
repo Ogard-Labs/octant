@@ -39,11 +39,14 @@ import {
   type CodeThreadId,
   type OctantMode,
   type WorkThreadId,
+  UtcTimestamp as UtcTimestampSchema,
 } from "@octant/contracts";
 import type { ExtensionProviderFamily, StandaloneSkillScope } from "@octant/contracts/extensions";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AgentRunControlParentFacts } from "./agentRun/agentRunControlService";
 import { Data, Effect, Schema, Scope } from "effect";
+
+const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
 import { assistantTranscript } from "./chat/assistantTranscript";
 import { ChatService } from "./chat/chatService";
@@ -1435,11 +1438,11 @@ export function startOctantServer(
         // work, and unrelated turns keep the real limits.
         serviceLimits: makeUnobservedProviderCapacityFacts({
           scheduler: capacityScheduler,
-          now: () => new Date().toISOString() as UtcTimestamp,
+          now: () => decodeUtcTimestamp(new Date().toISOString()),
         }),
         onSessionStarted: ({ runId }) => agentRunLiveConversations.begin(runId),
         onTextDelta: ({ runId, text, occurredAt }) =>
-          agentRunLiveConversations.appendText(runId, text, occurredAt as UtcTimestamp),
+          agentRunLiveConversations.appendText(runId, text, decodeUtcTimestamp(occurredAt)),
         onSessionSettled: ({ runId, outcome }) => {
           if (outcome.kind === "completed") {
             agentRunLiveConversations.complete(runId);
@@ -2696,7 +2699,7 @@ export function startOctantServer(
     };
     const providerUsageLimitsService = new ProviderUsageLimitsService({
       listInstances: () => persistence.readProviderInstances(),
-      now: () => new Date().toISOString() as UtcTimestamp,
+      now: () => decodeUtcTimestamp(new Date().toISOString()),
       observe: async (instance, signal) => {
         let driver: ProviderDriver;
         try {
