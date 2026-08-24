@@ -38,6 +38,7 @@ import type {
   GhActivePullRequestRow,
   GhPullRequestReviewResult,
 } from "./ghPullRequestPort";
+import { mapConcurrentOrdered } from "./boundedReads";
 
 const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 const GITHUB_READ_CONCURRENCY = 4;
@@ -310,19 +311,32 @@ export class CodeProjectPullRequestService {
       repositories: connected,
       pullRequestsFor: () => [],
     });
+    // The view keeps at most MAX pull requests across every repository, so the
+    // read budget is global too. Asking each repository for the whole budget
+    // requested up to MAX+1 rows per repository to keep MAX in total, which is
+    // rate limit the user pays for and never sees. Workers claim repositories
+    // in order, so by the time a later one starts, earlier rows are counted and
+    // its request shrinks to what the budget can still hold.
+    //
+    // Repositories past the budget are still contacted, with a minimal request:
+    // skipping them would hide an unauthorized or rate-limited repository until
+    // some later refresh happened to reach it.
+    const listBudget = CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS + 1;
+    let listedRowCount = 0;
     const [threads, listedResults] = await Promise.all([
       this.#threads.list(windowId),
-      mapConcurrentOrdered(bounded.repositories, GITHUB_READ_CONCURRENCY, async (repository) => ({
-        repository,
-        listed: await this.#list.listActive(
+      mapConcurrentOrdered(bounded.repositories, GITHUB_READ_CONCURRENCY, async (repository) => {
+        const listed = await this.#list.listActive(
           {
             owner: repository.repositoryOwner,
             name: repository.repositoryName,
-            limit: CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS + 1,
+            limit: Math.max(1, listBudget - listedRowCount),
           },
           signal,
-        ),
-      })),
+        );
+        if (listed.status === "ok") listedRowCount += listed.rows.length;
+        return { repository, listed };
+      }),
     ]);
     const knownIdentityRefreshFailed = new Set<string>();
 
@@ -982,34 +996,4 @@ function summarizeObservedReviews(
   if (reviews.some((review) => review.state === "approved")) return "approved";
   if (reviews.some((review) => review.state === "pending")) return "pending";
   return reviews.length === 0 ? "none" : "unknown";
-}
-
-async function mapConcurrentOrdered<TItem, TResult>(
-  items: ReadonlyArray<TItem>,
-  concurrency: number,
-  run: (item: TItem, index: number) => Promise<TResult>,
-): Promise<ReadonlyArray<TResult>> {
-  const results: Array<{ readonly value: TResult } | undefined> = Array.from({
-    length: items.length,
-  });
-  let nextIndex = 0;
-  const workerCount = Math.min(Math.max(1, concurrency), items.length);
-
-  async function worker(): Promise<void> {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      const item = items[index];
-      if (item === undefined) continue;
-      results[index] = { value: await run(item, index) };
-    }
-  }
-
-  await Promise.all(Array.from({ length: workerCount }, worker));
-  return results.map((result, index) => {
-    if (result === undefined) {
-      throw new Error(`Concurrent GitHub read ${String(index)} did not produce a result.`);
-    }
-    return result.value;
-  });
 }

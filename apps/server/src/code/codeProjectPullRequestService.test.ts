@@ -649,6 +649,55 @@ describe("CodeProjectPullRequestService", () => {
     expect(truncatedPrs.pullRequestsTruncated).toBe(true);
   });
 
+  it("spends one pull-request read budget across every repository, not one budget each", async () => {
+    const projects = Array.from({ length: 25 }, (_, index) =>
+      codeProject({
+        id: decodeProjectId(`10000000-0000-4000-8000-0000000000${String(index).padStart(2, "0")}`),
+        name: `Repo ${index}`,
+        root: `/repos/r${index}`,
+      }),
+    );
+    const remotes = Object.fromEntries(
+      projects.map((project, index) => [
+        `/repos/r${index}`,
+        [
+          {
+            name: "origin",
+            fetchUrl: `https://github.com/octant/r${index}.git`,
+            pushUrl: `https://github.com/octant/r${index}.git`,
+          },
+        ],
+      ]),
+    );
+    let requestedRows = 0;
+    const busy = serviceFixture({
+      projects,
+      remotes,
+      list: async (request) => {
+        requestedRows += request.limit;
+        return {
+          status: "ok",
+          rows: Array.from({ length: request.limit }, (_, index) =>
+            ghRow({ number: index + 1, title: `PR ${index + 1}` }),
+          ),
+        };
+      },
+    });
+
+    const view = await busy.service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+
+    expect(view.rows).toHaveLength(100);
+    // Every repository is still contacted, so an unauthorized or rate-limited
+    // one cannot hide behind the budget.
+    expect(busy.listActive).toHaveBeenCalledTimes(25);
+    // A per-repository budget asked for 25 * 101 rows to keep 100.
+    expect(requestedRows).toBeLessThan(1000);
+  });
+
   it("keeps the last authorized snapshot when GitHub rate-limits, times out, or returns malformed output", async () => {
     let next: GhActivePullRequestListResult = { status: "ok", rows: [ghRow()] };
     const { service } = serviceFixture({

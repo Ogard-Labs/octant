@@ -46,7 +46,10 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
         value={props.height}
       />
       <header className="bottom-utility-panel__toolbar">
-        <div aria-label="Bottom panel tools" className="bottom-utility-panel__tabs" role="tablist">
+        {/* DockToolStrip owns the tablist and its arrow-key movement. Naming
+            this wrapper a second one nested the widget and swept the launcher,
+            which is a button and not a tab, inside it. */}
+        <div className="bottom-utility-panel__tabs">
           <DockToolStrip
             active={props.activeSurface.id}
             onClose={props.onClose}

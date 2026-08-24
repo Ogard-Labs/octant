@@ -18,6 +18,13 @@ import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import { joinCodeThreadBoardPullRequests } from "./threadBoardPullRequestJoin";
 import type { ThreadBoardPullRequestSnapshot } from "./threadBoardPullRequestJoin";
 import { CodeThreadMetadataService } from "./codeThreadMetadataService";
+import { mapConcurrentOrdered } from "./boundedReads";
+
+/**
+ * Ceiling on in-flight runtime observations while hydrating one board. Matches
+ * the GitHub read pool: both fan out over a list the user grows.
+ */
+const RUNTIME_OBSERVATION_CONCURRENCY = 4;
 
 const ALL_BOARD_STATUSES: readonly CodeBoardStatus[] = ["ready", "in-progress", "waiting", "done"];
 
@@ -154,7 +161,19 @@ export class CodeThreadBoardService {
     const boardThreadsPromise = this.#threads.list();
     const pullRequestSnapshotPromise = this.#pullRequests.snapshot();
     const boardThreads = await boardThreadsPromise;
-    const [pullRequestSnapshot, view] = await Promise.all([
+
+    // A runtime observation needs only the thread id, so it does not have to
+    // wait on the pull-request snapshot or the metadata projection. Starting
+    // all three together keeps one slow GitHub read from holding back every
+    // card's activity. The pool is bounded because a board's thread count is
+    // the user's to grow — unbounded, a large Project opened one provider
+    // read per thread at once.
+    const runtimePromise = mapConcurrentOrdered(
+      boardThreads,
+      RUNTIME_OBSERVATION_CONCURRENCY,
+      (entry) => this.#observeRuntime(entry.thread.id),
+    );
+    const [pullRequestSnapshot, view, runtimeByIndex] = await Promise.all([
       pullRequestSnapshotPromise,
       this.#metadata.project(
         boardThreads.map((entry) => ({
@@ -162,27 +181,23 @@ export class CodeThreadBoardService {
           projectProjectionPresent: entry.projectProjectionPresent,
         })),
       ),
+      runtimePromise,
     ]);
     const metadataByThread = new Map<string, CodeThreadOperationalMetadata>();
     for (const metadata of view.threads) {
       metadataByThread.set(String(metadata.threadId), metadata);
     }
 
-    // Runtime observations are independent per thread. Start them together so
-    // one slow provider or child-run snapshot cannot hold every other card
-    // behind it; Promise.all keeps the source order deterministic for the
-    // subsequent activity sort and query filtering.
-    const cards = (
-      await Promise.all(
-        boardThreads.map(async (entry): Promise<CodeBoardCard | undefined> => {
-          const metadata = metadataByThread.get(String(entry.thread.id));
-          // Archived threads are dropped by the metadata projection; skip them here.
-          if (metadata === undefined) return undefined;
-          const activity = await this.#observeRuntime(entry.thread.id);
-          return buildCard(entry, metadata, activity, pullRequestSnapshot);
-        }),
-      )
-    ).filter((card): card is CodeBoardCard => card !== undefined);
+    const cards = boardThreads
+      .map((entry, index): CodeBoardCard | undefined => {
+        const metadata = metadataByThread.get(String(entry.thread.id));
+        // Archived threads are dropped by the metadata projection; skip them here.
+        if (metadata === undefined) return undefined;
+        const activity = runtimeByIndex[index];
+        if (activity === undefined) return undefined;
+        return buildCard(entry, metadata, activity, pullRequestSnapshot);
+      })
+      .filter((card): card is CodeBoardCard => card !== undefined);
 
     const appliedStatuses = query.statuses ?? ALL_BOARD_STATUSES;
     const filtered = cards.filter((card) => matchesQuery(card, query, appliedStatuses));

@@ -464,6 +464,48 @@ describe("CodeThreadBoardService derivation", () => {
     });
   });
 
+  it("bounds runtime observations and does not hold them behind the pull-request read", async () => {
+    const threads = Array.from({ length: 12 }, () =>
+      boardThread({ thread: thread({ id: crypto.randomUUID() as typeof ids.ready }) }),
+    );
+    let inFlight = 0;
+    let peakInFlight = 0;
+    let pullRequestSettled = false;
+    let observedBeforePullRequest = 0;
+
+    const board = new CodeThreadBoardService({
+      threads: { list: () => threads },
+      metadata: metadataService(),
+      runtime: {
+        observe: async () => {
+          inFlight += 1;
+          peakInFlight = Math.max(peakInFlight, inFlight);
+          if (!pullRequestSettled) observedBeforePullRequest += 1;
+          await Promise.resolve();
+          inFlight -= 1;
+          return { executing: false, awaitingInput: false, interrupted: false };
+        },
+      },
+      pullRequests: {
+        snapshot: async () => {
+          // Stand in for a slow GitHub read.
+          for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+          pullRequestSettled = true;
+          return emptyPullRequestSnapshot();
+        },
+      },
+      clock: () => now,
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+
+    expect(view.cards).toHaveLength(threads.length);
+    // A large board must not open one provider read per thread at once.
+    expect(peakInFlight).toBeLessThanOrEqual(4);
+    // And a slow pull-request read must not gate them.
+    expect(observedBeforePullRequest).toBeGreaterThan(0);
+  });
+
   it("does not include a thread the window-filtered source omitted", async () => {
     const board = service({
       threads: [boardThread({ thread: thread({ id: ids.ready, projectId: ids.projectA }) })],

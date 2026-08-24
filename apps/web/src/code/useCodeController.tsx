@@ -476,6 +476,21 @@ export function useCodeController(options: CodeControllerOptions) {
   );
   const mounted = useRef(true);
   const bootstrapGeneration = useRef(0);
+  /**
+   * Apply a navigation read only when nothing newer has already landed.
+   *
+   * Several paths read the bootstrap concurrently — the timed refresh, the
+   * seen-activity read, and a full load — and the host does not answer them in
+   * the order they were asked. A read that observed a checkout still `waiting`
+   * could therefore complete after one that had already recovered it as
+   * `available` and put the stale state back, which left the thread's terminal
+   * attached to a checkout the UI believed was still coming up.
+   */
+  const navigationReadSequence = useRef(0);
+  const appliedNavigationRead = useRef(0);
+
+  const nextNavigationRead = useCallback(() => ++navigationReadSequence.current, []);
+
   /* Cancels a bootstrap that is still waiting to ask again when the hook goes. */
   const bootstrapAbort = useRef(new AbortController());
   const threadGeneration = useRef(0);
@@ -545,6 +560,7 @@ export function useCodeController(options: CodeControllerOptions) {
           const next = await client.bootstrap();
           if (!mounted.current || request !== bootstrapGeneration.current) return false;
           bootstrapRef.current = next;
+          appliedNavigationRead.current = ++navigationReadSequence.current;
           setBootstrap(next);
           setActiveView((current) => refreshActiveThreadView(current, next));
           reconcileDrafts(next.threads.map((thread) => String(thread.id)));
@@ -596,7 +612,9 @@ export function useCodeController(options: CodeControllerOptions) {
   );
 
   const applyNavigationRefresh = useCallback(
-    (next: CodeBootstrap) => {
+    (next: CodeBootstrap, read: number) => {
+      if (read <= appliedNavigationRead.current) return;
+      appliedNavigationRead.current = read;
       bootstrapRef.current = next;
       setBootstrap((current) =>
         current === undefined
@@ -628,9 +646,10 @@ export function useCodeController(options: CodeControllerOptions) {
   const recordSeenActivity = useCallback(
     async (threadId: CodeThreadId) => {
       try {
+        const read = nextNavigationRead();
         const next = await client.bootstrap();
         if (!mounted.current) return;
-        applyNavigationRefresh(next);
+        applyNavigationRefresh(next, read);
         const seen = next.activity.find(
           (entry) => String(entry.threadId) === String(threadId),
         )?.lastSequence;
@@ -640,7 +659,7 @@ export function useCodeController(options: CodeControllerOptions) {
         markRenderedActivity(threadId);
       }
     },
-    [applyNavigationRefresh, client, markRenderedActivity, readCursorStore],
+    [applyNavigationRefresh, client, markRenderedActivity, nextNavigationRead, readCursorStore],
   );
 
   /**
@@ -1297,9 +1316,10 @@ export function useCodeController(options: CodeControllerOptions) {
       if (!documentIsVisible() || inFlight) return;
       inFlight = true;
       try {
+        const read = nextNavigationRead();
         const next = await client.bootstrap();
         if (cancelled || !mounted.current) return;
-        applyNavigationRefresh(next);
+        applyNavigationRefresh(next, read);
       } catch {
         // A refresh that fails leaves the last list on screen; the stream and
         // the retry path are what report a host that has actually gone away.
@@ -1324,7 +1344,7 @@ export function useCodeController(options: CodeControllerOptions) {
       if (timer !== undefined) clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [applyNavigationRefresh, client, navigationRefreshMs]);
+  }, [applyNavigationRefresh, client, navigationRefreshMs, nextNavigationRead]);
 
   const execute = useCallback(
     async (command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult | undefined> => {

@@ -1988,6 +1988,55 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("does not let a slower navigation read undo a checkout another read recovered", async () => {
+    // The host answers concurrent bootstrap reads out of order. A read that saw
+    // the checkout still coming up could land after one that already reported it
+    // available, and putting that back left the thread's terminal waiting on a
+    // checkout the host had finished.
+    const waitingCheckout = { ...checkout(), availability: "waiting" as const };
+    const waiting = (): CodeBootstrap => ({ ...bootstrap(), checkouts: [waitingCheckout] });
+    const reads: ReturnType<typeof deferred<CodeBootstrap>>[] = [];
+    const client = fakeClient({
+      bootstrap: vi.fn(() => {
+        const read = deferred<CodeBootstrap>();
+        reads.push(read);
+        return read.promise;
+      }),
+      thread: vi.fn(async () => ({ ...view(1), checkout: waitingCheckout })),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 0,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await act(async () => {
+      reads[0]?.resolve(waiting());
+    });
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("waiting"));
+
+    // Ask for more reads while the first of them is still outstanding, so the
+    // controller has two answers in flight that it cannot order by arrival.
+    act(() => result.current.markThreadRead(ids.thread));
+    act(() => result.current.markThreadRead(ids.thread));
+    await waitFor(() => expect(reads.length).toBeGreaterThan(2));
+
+    const stale = reads[1];
+    await act(async () => {
+      for (const read of reads.slice(2)) read.resolve(bootstrap());
+    });
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("available"));
+
+    await act(async () => {
+      stale?.resolve(waiting());
+    });
+    expect(result.current.activeView?.checkout.availability).toBe("available");
+    unmount();
+  });
+
   it("does not overlap slow navigation refreshes", async () => {
     const slowRefresh = deferred<ReturnType<typeof bootstrap>>();
     let calls = 0;
