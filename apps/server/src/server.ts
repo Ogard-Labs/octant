@@ -2024,10 +2024,8 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       observeCodeProjectRepository: async (canonicalRoot) => {
-        const observation = await gitObservationPort.observe(canonicalRoot);
-        return observation.status === "ready"
-          ? resolveConnectedGitHubRepository(observation.remotes)
-          : undefined;
+        const remotes = await gitObservationPort.observeRemotes(canonicalRoot);
+        return remotes === undefined ? undefined : resolveConnectedGitHubRepository(remotes);
       },
     });
     const gitEnvironmentPort = options.gitEnvironmentPort ?? new GitEnvironmentPort();
