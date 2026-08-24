@@ -81,11 +81,11 @@ export function assertNativeTitlebarActionResult(
  * Validates a real CuaDriver window snapshot before the native click pass.
  * The frame is absolute screen geometry; the boundary comparison is made in
  * CSS/window points, not screenshot pixels, so Retina screenshots do not move
- * a target across the hiddenInset boundary.
+ * a target outside the compact title rail.
  */
-export function assertNativeTitlebarTargetsBelowInset(
+export function assertNativeTitlebarTargetsInRail(
   snapshot: NativeWindowSnapshot,
-  inset = NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
+  maximumCenterY = NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT + 6,
   requiredLabels: ReadonlyArray<string> = REQUIRED_CONTROL_LABELS,
 ): void {
   const available = snapshot.elements.filter(
@@ -105,9 +105,9 @@ export function assertNativeTitlebarTargetsBelowInset(
     const frame = element?.frame;
     if (frame === undefined) throw new Error(`Packaged titlebar target ${label} has no frame.`);
     const centerY = frame.y - snapshot.window_bounds.y + frame.h / 2;
-    if (centerY <= inset) {
+    if (centerY <= 0 || centerY > maximumCenterY) {
       throw new Error(
-        `Packaged titlebar target ${label} is inside the native movement strip (${centerY}px <= ${inset}px).`,
+        `Packaged titlebar target ${label} is outside the compact title rail (${centerY}px not within 0..${maximumCenterY}px).`,
       );
     }
   }
@@ -120,7 +120,7 @@ export function assertNativeTitlebarTargetsBelowInset(
  * 2. Open a Code thread with Environment, bottom panel, and dock actions
  *    visible, then capture `get_window_state` as JSON.
  * 3. Pass that JSON here. The script fails before any click if a target is in
- *    the native movement strip; then perform the five CuaDriver pixel clicks
+ *    the compact native title rail; then perform the five CuaDriver pixel clicks
  *    and inspect each post-action snapshot for the expected state change.
  *
  * CuaDriver owns the native click path because DOM/jsdom clicks bypass
@@ -138,9 +138,9 @@ async function main(): Promise<void> {
     );
   }
   const snapshot = await readSnapshot(snapshotPath);
-  assertNativeTitlebarTargetsBelowInset(snapshot);
+  assertNativeTitlebarTargetsInRail(snapshot);
   console.log(
-    `Packaged titlebar geometry passed: ${REQUIRED_CONTROL_LABELS.length} controls are below the ${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px native movement strip.`,
+    `Packaged titlebar geometry passed: ${REQUIRED_CONTROL_LABELS.length} controls are in the compact native title rail.`,
   );
   console.log(
     "Next: capture the interaction snapshots, or pass their directory as the second argument to validate them now.",

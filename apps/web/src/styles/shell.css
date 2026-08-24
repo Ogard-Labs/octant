@@ -75,12 +75,12 @@ html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
   pointer-events: none;
 }
 
-/* `hiddenInset` reserves the top strip for native window movement. Keep the
-   interactive chrome below that strip so macOS delivers pointer events to the
-   controls instead of treating them as window-drag gestures. Remote/web
-   clients do not have the native inset and keep the zero-offset row above. */
+/* Native controls share the visual title row with the top drag strip. They sit
+   above that strip and explicitly opt out of dragging; the unused rail remains
+   draggable underneath. */
 html[data-octant-native-host="true"] .shell-frame > .window-chrome {
-  top: var(--octant-native-hidden-inset-titlebar-height);
+  top: var(--oct-space-2);
+  z-index: 6;
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {

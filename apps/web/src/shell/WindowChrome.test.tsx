@@ -184,7 +184,10 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 0;");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: var(--octant-native-hidden-inset-titlebar-height);",
+      "top: var(--oct-space-2);",
+    );
+    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
+      "z-index: 6;",
     );
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
@@ -406,6 +409,22 @@ describe("WindowChrome", () => {
     );
   });
 
+  it("keeps the environment disclosure compact, neutral, and interface-typed", () => {
+    expect(cssRule(".thread-environment-disclosure")).toContain(
+      "width: min(320px, calc(100vw - 24px));",
+    );
+    expect(cssRule(".thread-environment-disclosure__header")).toContain("min-height: 44px;");
+    expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");
+    expect(cssRule(".environment-git-group__error")).toContain("background: transparent;");
+    expect(cssRule(".environment-git-group__error")).not.toMatch(/warn|yellow/i);
+    expect(
+      cssRule('.thread-environment-summary__button[data-environment-status="unavailable"]'),
+    ).toContain("color: var(--oct-muted);");
+    expect(cssRule(".thread-environment-disclosure .environment-group__summary")).toContain(
+      "font-family: var(--oct-font-display);",
+    );
+  });
+
   it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("background: transparent;");
     expect(cssRule('html[data-octant-native-host="true"] .shell.shell-frame')).toContain(
@@ -599,7 +618,7 @@ describe("WindowChrome", () => {
     expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
     expect(container.firstChild).not.toHaveClass("window-drag-region");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: var(--octant-native-hidden-inset-titlebar-height);",
+      "top: var(--oct-space-2);",
     );
     expect(container.querySelector(".window-chrome__drag-space")).toHaveClass("window-drag-region");
     expect(cssRule(".window-chrome__drag-space")).toContain("pointer-events: auto;");
