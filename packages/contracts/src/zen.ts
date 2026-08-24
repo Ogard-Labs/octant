@@ -806,6 +806,57 @@ export type ZenSpaceSnapshot = typeof ZenSpaceSnapshot.Type;
 export const ZenSpaceSnapshotRecorded = ZenSpaceSnapshot;
 export type ZenSpaceSnapshotRecorded = typeof ZenSpaceSnapshotRecorded.Type;
 
+/**
+ * V1 journal snapshots used a boolean `running` timer flag. Keep the legacy
+ * event schema explicit so replay validates the old bytes before the server
+ * projection migrates them to the current timer clock fields.
+ */
+const ZenLegacyTimerElementPayload = Schema.Struct({
+  elementId: ZenElementId,
+  kind: Schema.Literal("timer"),
+  durationMs: ZenTimerDurationMs,
+  remainingMs: Schema.Int.pipe(Schema.nonNegative()),
+  running: Schema.Boolean,
+  geometry: ZenGeometry,
+  zIndex: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(1000)),
+  minimized: Schema.Boolean,
+  locked: Schema.Boolean,
+  title: Schema.optional(Schema.NonEmptyTrimmedString),
+}).annotations(strict);
+
+const ZenLegacyElementPayload = Schema.Union(
+  ZenThreadElementPayload,
+  ZenTerminalElementPayload,
+  ZenCanvasElementPayload,
+  ZenNotesElementPayload,
+  ZenChecklistElementPayload,
+  ZenLegacyTimerElementPayload,
+  ZenReferenceElementPayload,
+  ZenRecipeElementPayload,
+);
+
+const ZenLegacySpace = Schema.Struct({
+  spaceId: ZenSpaceId,
+  windowId: WindowId,
+  version: AggregateVersion,
+  elements: Schema.Array(ZenLegacyElementPayload),
+  recipes: Schema.optional(Schema.Array(ZenWidgetRecipe).pipe(Schema.maxItems(20))),
+  viewport: ZenViewport,
+  appearance: ZenAppearance,
+  active: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  barCollapsed: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  assistant: Schema.NullOr(ZenAssistantBinding),
+  research: Schema.optionalWith(Schema.NullOr(ZenResearchDock), { default: () => null }),
+  createdAt: UtcTimestamp,
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+
+export const ZenSpaceSnapshotRecordedV1 = Schema.Struct({
+  spaceId: ZenSpaceId,
+  space: ZenLegacySpace,
+}).annotations(strict);
+export type ZenSpaceSnapshotRecordedV1 = typeof ZenSpaceSnapshotRecordedV1.Type;
+
 export const ZenWidgetMutation = Schema.Union(
   Schema.Struct({
     operation: Schema.Literal("widget-created"),
@@ -1562,6 +1613,9 @@ export const decodeZenFocusZoneCommand = Schema.decodeUnknownSync(ZenFocusZoneCo
 export const decodeZenFocusZoneRecorded = Schema.decodeUnknownSync(ZenFocusZoneRecorded);
 export const decodeZenFocusZoneResult = Schema.decodeUnknownSync(ZenFocusZoneResult);
 export const decodeZenSpace = Schema.decodeUnknownSync(ZenSpace);
+export const decodeZenSpaceSnapshotRecordedV1 = Schema.decodeUnknownSync(
+  ZenSpaceSnapshotRecordedV1,
+);
 export const decodeZenWidgetMutationRecorded = Schema.decodeUnknownSync(ZenWidgetMutationRecorded);
 export const decodeZenSpaceId = Schema.decodeUnknownSync(ZenSpaceId);
 export const decodeZenElementId = Schema.decodeUnknownSync(ZenElementId);
