@@ -13,6 +13,7 @@ import {
   type CodeDeliveryOutcomeKind,
   type CodeRuntimeWork,
   type CodeThread,
+  type CodeThreadId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -218,6 +219,38 @@ function cardFor(cards: readonly CodeBoardCard[], threadId: unknown): CodeBoardC
 }
 
 describe("CodeThreadBoardService derivation", () => {
+  it("observes every visible thread before any runtime observation resolves", async () => {
+    const visibleThreads = allThreads.slice(0, 3);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const observed: CodeThreadId[] = [];
+    const board = new CodeThreadBoardService({
+      threads: { list: () => visibleThreads },
+      metadata: metadataService(),
+      runtime: {
+        observe: vi.fn(async (threadId: CodeThreadId) => {
+          observed.push(threadId);
+          await gate;
+          return { executing: false, awaitingInput: false, interrupted: false };
+        }),
+      },
+      pullRequests: { snapshot: () => emptyPullRequestSnapshot() },
+      clock: () => now,
+    });
+
+    const query = board.query(decodeCodeBoardQuery({ version: 1 }));
+    await vi.waitFor(() => {
+      expect(observed.length).toBeGreaterThan(0);
+    });
+    const observedBeforeRelease = [...observed];
+    release?.();
+    await query;
+
+    expect(observedBeforeRelease).toEqual(visibleThreads.map((entry) => entry.thread.id));
+  });
+
   it("resolves one card per non-archived thread with a runtime-derived status", async () => {
     const board = service({
       threads: [

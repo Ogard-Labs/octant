@@ -7206,6 +7206,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   height: 100%;
   min-height: 0;
   padding: 18px var(--oct-space-5) 0;
+  /* Board metadata is ordinary interface content; only technical values in
+     the details disclosure need a dedicated editor face. */
+  font-family: var(--oct-font-display);
 }
 
 .code-board__header {
@@ -7588,6 +7591,120 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow: visible;
 }
 
+/* The status board is a reading surface, not four large cards. Keep columns
+   flat and give empty groups a small dashed target instead of an empty well. */
+.code-board .board {
+  gap: var(--oct-space-4);
+}
+
+.code-board .board-col {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.code-board__body[data-grouping="status"] .board-col + .board-col {
+  padding-left: var(--oct-space-4);
+  border-left: 1px solid var(--oct-border-soft);
+}
+
+.code-board .board-col-head {
+  min-height: 32px;
+  padding-inline: 0;
+  border-bottom: 1px solid var(--oct-border-soft);
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--oct-font-display);
+  font-size: 0.78rem;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--oct-fg-2);
+}
+
+.code-board .board-col-body {
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.code-board .board-col-empty {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  padding: 8px 10px;
+  border: 1px dashed var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
+  font-size: 0.76rem;
+  text-align: center;
+}
+
+.code-board .board-card {
+  padding: 9px 10px;
+  border-color: var(--oct-border-soft);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  font-family: var(--oct-font-display);
+}
+
+.code-board .board-card:hover {
+  border-color: var(--oct-border);
+  background: var(--oct-surface-warm);
+}
+
+.code-board .board-card-top {
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.code-board .board-card-title {
+  -webkit-line-clamp: 1;
+  font-family: var(--oct-font-display);
+  font-size: 0.82rem;
+  line-height: var(--oct-leading-snug);
+}
+
+.code-board .board-card-facts {
+  flex-wrap: nowrap;
+  gap: 2px 8px;
+  overflow: hidden;
+  font-family: var(--oct-font-display);
+  font-size: 0.7rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.code-board .board-card-facts .fact {
+  flex: 0 0 auto;
+}
+
+/* Waiting remains a server-derived status, but the board no longer turns
+   every blocked card into a brass warning banner. */
+.code-board .st-waiting,
+.code-board .board-card-facts .fact.warn,
+.code-board .board-card-blocked {
+  color: var(--oct-muted);
+}
+
+.code-board .board-card-blocked {
+  margin-top: 6px;
+  padding: 3px 7px;
+  border-color: var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fg-soft);
+  font-family: var(--oct-font-display);
+  font-size: 0.7rem;
+}
+
+.code-board .code-board__card-details {
+  margin-top: 4px;
+}
+
+.code-board .code-board__card-details summary,
+.code-board .code-board__card-meta {
+  font-family: var(--oct-font-display);
+}
+
 /* cards render in a semantic list; the system class carries the layout,
    this strips the list chrome the styleguide's plain divs never had */
 ul.board-col-body {
@@ -7745,7 +7862,7 @@ p.board-col-empty {
   align-items: center;
   gap: var(--oct-space-2);
   margin-bottom: var(--oct-space-2);
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
@@ -7771,6 +7888,11 @@ p.board-col-empty {
 .code-board__list .issuerow {
   display: grid;
   gap: var(--oct-space-1);
+}
+
+.code-board__list .issuerow .issuerow-title,
+.code-board__list .issuerow .issuerow-meta {
+  font-family: var(--oct-font-display);
 }
 
 .code-board__list .issuerow .unread {

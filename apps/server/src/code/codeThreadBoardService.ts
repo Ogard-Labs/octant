@@ -164,14 +164,21 @@ export class CodeThreadBoardService {
       metadataByThread.set(String(metadata.threadId), metadata);
     }
 
-    const cards: CodeBoardCard[] = [];
-    for (const entry of boardThreads) {
-      const metadata = metadataByThread.get(String(entry.thread.id));
-      // Archived threads are dropped by the metadata projection; skip them here.
-      if (metadata === undefined) continue;
-      const activity = await this.#observeRuntime(entry.thread.id);
-      cards.push(buildCard(entry, metadata, activity, pullRequestSnapshot));
-    }
+    // Runtime observations are independent per thread. Start them together so
+    // one slow provider or child-run snapshot cannot hold every other card
+    // behind it; Promise.all keeps the source order deterministic for the
+    // subsequent activity sort and query filtering.
+    const cards = (
+      await Promise.all(
+        boardThreads.map(async (entry): Promise<CodeBoardCard | undefined> => {
+          const metadata = metadataByThread.get(String(entry.thread.id));
+          // Archived threads are dropped by the metadata projection; skip them here.
+          if (metadata === undefined) return undefined;
+          const activity = await this.#observeRuntime(entry.thread.id);
+          return buildCard(entry, metadata, activity, pullRequestSnapshot);
+        }),
+      )
+    ).filter((card): card is CodeBoardCard => card !== undefined);
 
     const appliedStatuses = query.statuses ?? ALL_BOARD_STATUSES;
     const filtered = cards.filter((card) => matchesQuery(card, query, appliedStatuses));
