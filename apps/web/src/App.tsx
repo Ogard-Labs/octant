@@ -479,9 +479,14 @@ function LaunchedShell(
     readonly projectWindowCapability: string;
   },
 ) {
+  // Only the macOS hiddenInset window hands its titlebar area to the renderer.
+  // A system-framed host (Windows, Linux) and a remote client in a browser both
+  // keep their own title bar, so reserving the inset there wastes a strip of the
+  // window and lays a drag region over chrome the OS already draws.
+  const hostReservesTitlebarInset = props.hostBridge?.windowChrome === "hidden-inset";
   useLayoutEffect(() => {
     const root = document.documentElement;
-    if (props.hostBridge === undefined) {
+    if (!hostReservesTitlebarInset) {
       delete root.dataset.octantNativeHost;
       return;
     }
@@ -489,7 +494,7 @@ function LaunchedShell(
     return () => {
       delete root.dataset.octantNativeHost;
     };
-  }, [props.hostBridge]);
+  }, [hostReservesTitlebarInset]);
   // The near-opaque native sidebar wash relaxes only on the host's word that
   // window vibrancy is applied — never on the renderer's own preference, which
   // the host may have refused (Reduce Transparency, thermals, high contrast).
