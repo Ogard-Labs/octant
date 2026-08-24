@@ -40,6 +40,7 @@ import type {
 } from "./ghPullRequestPort";
 
 const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
+const GITHUB_READ_CONCURRENCY = 4;
 
 export interface CodeProjectPullRequestAuthorizedProject {
   readonly id: ProjectId;
@@ -311,8 +312,10 @@ export class CodeProjectPullRequestService {
     });
     const [threads, listedResults] = await Promise.all([
       this.#threads.list(windowId),
-      Promise.all(
-        bounded.repositories.map(async (repository) => ({
+      mapConcurrentOrdered(
+        bounded.repositories,
+        GITHUB_READ_CONCURRENCY,
+        async (repository) => ({
           repository,
           listed: await this.#list.listActive(
             {
@@ -322,7 +325,7 @@ export class CodeProjectPullRequestService {
             },
             signal,
           ),
-        })),
+        }),
       ),
     ]);
     const knownIdentityRefreshFailed = new Set<string>();
@@ -385,8 +388,10 @@ export class CodeProjectPullRequestService {
         }
       }
     }
-    const recoveredKnown = await Promise.all(
-      knownCandidates.map(async ({ repository, knownRow }) => {
+    const recoveredKnown = await mapConcurrentOrdered(
+      knownCandidates,
+      GITHUB_READ_CONCURRENCY,
+      async ({ repository, knownRow }) => {
         const observed = await this.#detail.observeReviewByIdentity(
           {
             owner: repository.repositoryOwner,
@@ -397,7 +402,7 @@ export class CodeProjectPullRequestService {
           signal,
         );
         return { repository, knownRow, observed };
-      }),
+      },
     );
     for (const { repository, knownRow, observed } of recoveredKnown) {
       if (observed.status === "observed" && observed.freshness === "fresh" && !observed.ambiguous) {
@@ -455,9 +460,10 @@ export class CodeProjectPullRequestService {
     windowId: WindowId,
   ): Promise<ReadonlyArray<CodeProjectPullRequestConnection>> {
     const bootstrap = await this.#projects.bootstrap(windowId);
-    const resolved = await Promise.all(
-      bootstrap.active.map(
-        async (project): Promise<CodeProjectPullRequestConnection | undefined> => {
+    const resolved = await mapConcurrentOrdered(
+      bootstrap.active,
+      GITHUB_READ_CONCURRENCY,
+      async (project): Promise<CodeProjectPullRequestConnection | undefined> => {
           if (project.type !== "code" || project.lifecycle !== "active") return undefined;
           const remotes =
             project.connectedRepository !== undefined || project.binding === undefined
@@ -479,8 +485,7 @@ export class CodeProjectPullRequestService {
                 repositoryOwner: identity.owner,
                 repositoryName: identity.name,
               };
-        },
-      ),
+      },
     );
     return resolved.filter(
       (connection): connection is CodeProjectPullRequestConnection => connection !== undefined,
@@ -981,4 +986,32 @@ function summarizeObservedReviews(
   if (reviews.some((review) => review.state === "approved")) return "approved";
   if (reviews.some((review) => review.state === "pending")) return "pending";
   return reviews.length === 0 ? "none" : "unknown";
+}
+
+async function mapConcurrentOrdered<TItem, TResult>(
+  items: ReadonlyArray<TItem>,
+  concurrency: number,
+  run: (item: TItem, index: number) => Promise<TResult>,
+): Promise<ReadonlyArray<TResult>> {
+  const results: Array<{ readonly value: TResult } | undefined> = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const item = items[index];
+      if (item === undefined) continue;
+      results[index] = { value: await run(item, index) };
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results.map((result, index) => {
+    if (result === undefined) {
+      throw new Error(`Concurrent GitHub read ${String(index)} did not produce a result.`);
+    }
+    return result.value;
+  });
 }

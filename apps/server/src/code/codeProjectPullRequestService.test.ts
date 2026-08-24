@@ -328,6 +328,49 @@ describe("CodeProjectPullRequestService", () => {
     expect(journal.append).not.toHaveBeenCalled();
   });
 
+  it("bounds concurrent repository reads while keeping refresh parallel", async () => {
+    const projects = Array.from({ length: 6 }, (_, index) =>
+      codeProject({
+        id: decodeProjectId(`10000000-0000-4000-8000-${String(index + 10).padStart(12, "0")}`),
+        name: `Project ${String(index + 1)}`,
+        root: `/repos/project-${String(index + 1)}`,
+      }),
+    );
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let maximumActive = 0;
+    const { service, listActive } = serviceFixture({
+      projects,
+      remoteLookup: async (root) => [
+        {
+          name: "origin",
+          fetchUrl: `https://github.com/octant/${root.split("/").at(-1)}.git`,
+          pushUrl: `https://github.com/octant/${root.split("/").at(-1)}.git`,
+        },
+      ],
+      list: async () => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise<void>((resolve) => releases.push(resolve));
+        active -= 1;
+        return { status: "ok", rows: [] };
+      },
+    });
+
+    const refresh = service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+    await vi.waitFor(() => expect(listActive).toHaveBeenCalledTimes(4));
+    releases.splice(0).forEach((release) => release());
+    await vi.waitFor(() => expect(listActive).toHaveBeenCalledTimes(6));
+    releases.splice(0).forEach((release) => release());
+    await refresh;
+
+    expect(maximumActive).toBe(4);
+  });
+
   it("keeps the Project workspace active-only while the board snapshot includes merged history", async () => {
     const { service } = serviceFixture({
       list: async () => ({
