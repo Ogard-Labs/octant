@@ -168,61 +168,43 @@
 .code-terminal-pane > [aria-label="Repository terminal"] {
   min-height: 0;
   flex: 1;
-  padding: var(--oct-space-3) var(--oct-space-4) var(--oct-space-4);
+  padding: var(--oct-space-2) var(--oct-space-4) var(--oct-space-3);
   overflow: hidden;
   background: var(--oct-surface-inset);
-  border-top: 1px solid var(--oct-border);
 }
 
-/* Terminal is a live tool, so its shell gets one compact title row and the
-   emulator owns every remaining pixel. This keeps controls discoverable
-   without turning the dock into a tall document header. */
-.code-terminal-pane .code-delivery-pane__toolbar {
-  min-height: 40px;
-  flex: 0 0 40px;
-  padding: 5px var(--oct-space-3);
-  background: var(--oct-surface);
+.code-terminal-pane {
+  position: relative;
 }
 
-.code-terminal-pane .code-delivery-pane__toolbar > div:first-child {
-  display: flex;
-  align-items: baseline;
-  gap: var(--oct-space-2);
+.code-terminal-pane__actions-menu {
+  position: absolute;
+  z-index: 3;
+  top: var(--oct-space-1);
+  right: var(--oct-space-2);
+  opacity: 0.58;
 }
 
-.code-terminal-pane .code-delivery-pane__toolbar span {
-  color: var(--oct-muted);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: normal;
-  text-transform: none;
+.code-terminal-pane:hover .code-terminal-pane__actions-menu,
+.code-terminal-pane:focus-within .code-terminal-pane__actions-menu {
+  opacity: 1;
 }
 
-.code-terminal-pane .code-delivery-pane__toolbar h1 {
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-}
-
-.code-terminal-pane .code-delivery-pane__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  min-width: 0;
-}
-
-.code-terminal-pane .code-delivery-pane__actions p {
-  margin-right: var(--oct-space-2);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  white-space: nowrap;
-}
-
-.code-terminal-pane .code-delivery-pane__actions .btn {
+.code-terminal-pane__actions-trigger {
+  width: 26px;
+  height: 26px;
   min-height: 26px;
-  padding-inline: var(--oct-space-2);
-  font-size: var(--oct-text-xs);
+  padding: 0;
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-terminal-pane__context-menu {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .code-test-pane__definition,

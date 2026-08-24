@@ -2,8 +2,10 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
 import type { CodeOperationId, CodeOperationResult } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantContextMenu } from "../ui/base/OctantContextMenu";
+import { OctantMenu } from "../ui/base/OctantMenu";
 import { XtermTerminalAdapter, type XtermAdapterRuntime } from "./XtermTerminalAdapter";
 
 type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-state" }>;
@@ -217,77 +219,65 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     }
   };
 
-  return (
+  const addSelectionToChat = () => {
+    const selected = readSelection.current?.() ?? "";
+    if (selected.trim() === "") {
+      setNotice("Select terminal output first, then add it to the chat.");
+      return;
+    }
+    setNotice(undefined);
+    props.onAddSelectionToChat?.(selected);
+  };
+
+  const actions = [
+    ...(props.onAddSelectionToChat === undefined
+      ? []
+      : [{ value: "add-selection", label: "Add selection to chat" }]),
+    ...(props.onPinTerminal === undefined
+      ? []
+      : [{ value: "pin", label: "Pin to focus zone" }]),
+    ...(props.onOpenAnotherTerminal === undefined
+      ? []
+      : [{ value: "new", label: "New terminal" }]),
+    ...(props.executionPolicy === "plan"
+      ? []
+      : result.state === "running"
+        ? [{ value: "stop", label: "Stop terminal" }]
+        : props.restart === undefined
+          ? []
+          : [{ value: "restart", label: "Restart terminal" }]),
+  ];
+  const selectAction = (value: string) => {
+    if (value === "add-selection") addSelectionToChat();
+    else if (value === "pin") props.onPinTerminal?.();
+    else if (value === "new") props.onOpenAnotherTerminal?.();
+    else if (value === "stop" || value === "restart") void control(value);
+  };
+
+  const pane = (
     <section aria-label="Terminal pane" className="code-delivery-pane code-terminal-pane">
-      <header className="code-delivery-pane__toolbar">
-        <div>
-          <span>Terminal</span>
-          <h1>Repository terminal</h1>
+      {actions.length === 0 ? null : (
+        <div className="code-terminal-pane__actions-menu">
+          <OctantMenu
+            items={actions}
+            onValueChange={selectAction}
+            selectionMode="action"
+            trigger={<MoreHorizontal aria-hidden="true" size={15} strokeWidth={1.7} />}
+            triggerClassName="code-terminal-pane__actions-trigger"
+            triggerLabel="More terminal actions"
+            value={actions[0]?.value ?? ""}
+          />
         </div>
-        <div className="code-delivery-pane__actions">
-          <p>{terminalState(result)}</p>
-          {props.onAddSelectionToChat === undefined ? null : (
-            <OctantButton
-              onClick={() => {
-                const selected = readSelection.current?.() ?? "";
-                if (selected.trim() === "") {
-                  setNotice("Select terminal output first, then add it to the chat.");
-                  return;
-                }
-                setNotice(undefined);
-                props.onAddSelectionToChat?.(selected);
-              }}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Add selection to chat
-            </OctantButton>
-          )}
-          {props.onPinTerminal === undefined ? null : (
-            <OctantButton
-              onClick={() => props.onPinTerminal?.()}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Pin to focus zone
-            </OctantButton>
-          )}
-          {props.onOpenAnotherTerminal === undefined ? null : (
-            <OctantButton
-              onClick={() => props.onOpenAnotherTerminal?.()}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              New terminal
-            </OctantButton>
-          )}
-          {props.executionPolicy !== "plan" && result.state === "running" ? (
-            <OctantButton
-              onClick={() => void control("stop")}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Stop terminal
-            </OctantButton>
-          ) : null}
-          {props.executionPolicy !== "plan" &&
-          result.state !== "running" &&
-          props.restart !== undefined ? (
-            <OctantButton
-              onClick={() => void control("restart")}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Restart terminal
-            </OctantButton>
-          ) : null}
-        </div>
-      </header>
+      )}
+      {result.state === "running" ? (
+        <span className="sr-only" role="status">
+          {terminalState(result)}
+        </span>
+      ) : (
+        <p className="code-delivery-pane__notice" role="status">
+          {terminalState(result)}
+        </p>
+      )}
       {result.transcript?.truncated === true ? (
         <p className="code-delivery-pane__warning" role="alert">
           Terminal output is truncated. Earlier output is no longer available.
@@ -314,6 +304,15 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         <p role="status">Loading terminal replay…</p>
       )}
     </section>
+  );
+  return (
+    <OctantContextMenu
+      items={actions}
+      onValueChange={selectAction}
+      triggerClassName="code-terminal-pane__context-menu"
+    >
+      {pane}
+    </OctantContextMenu>
   );
 }
 

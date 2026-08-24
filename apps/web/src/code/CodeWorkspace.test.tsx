@@ -78,7 +78,7 @@ describe("CodeWorkspace", () => {
         }),
       ),
     );
-    expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
   });
 
   it("opens a restored Terminal tab without asking the user to start it", async () => {
@@ -101,7 +101,7 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
     expect(client.executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "start-terminal", terminalId: ids.thread }),
     );
@@ -126,7 +126,7 @@ describe("CodeWorkspace", () => {
       </TabActivationProvider>,
     );
 
-    expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
     expect(client.executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "start-terminal", terminalId: ids.thread }),
     );
@@ -173,7 +173,7 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
     expect(client.executeOperation).not.toHaveBeenCalled();
   });
 
@@ -190,7 +190,7 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
     expect(client.executeOperation).toHaveBeenLastCalledWith(
       expect.objectContaining({
         kind: "attach-terminal",
@@ -209,7 +209,7 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
     expect(client.executeOperation).toHaveBeenCalledTimes(2);
     expect(
       (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.every(
@@ -239,7 +239,7 @@ describe("CodeWorkspace", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Repository terminal" }, { timeout: 2_000 }),
+      await screen.findByRole("region", { name: "Repository terminal" }, { timeout: 2_000 }),
     ).toBeVisible();
     expect(
       (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.map(

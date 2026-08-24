@@ -9,14 +9,43 @@ import { codeClient, ids, scope, terminalResult } from "./CodeDeliveryPane.test-
 const codeStyles = readFileSync(resolve(process.cwd(), "src/styles/code.css"), "utf8");
 
 describe("CodeTerminalPane", () => {
-  it("keeps the terminal toolbar compact and lets the emulator fill the pane", () => {
+  it("lets the emulator fill the pane without a second terminal toolbar", () => {
+    expect(codeStyles).not.toContain(".code-terminal-pane .code-delivery-pane__toolbar {");
     expect(codeStyles).toContain(
-      ".code-terminal-pane .code-delivery-pane__toolbar {\n  min-height: 40px;",
+      ".code-terminal-pane__context-menu {\n  display: block;\n  width: 100%;\n  height: 100%;",
     );
     expect(codeStyles).toContain(
       '.code-terminal-pane > [aria-label="Repository terminal"] {\n  min-height: 0;',
     );
+    expect(codeStyles).not.toContain(
+      '.code-terminal-pane > [aria-label="Repository terminal"] {\n  min-height: 0;\n  flex: 1;\n  padding: var(--oct-space-3)',
+    );
     expect(codeStyles).toContain("overflow: hidden;");
+  });
+
+  it("puts the terminal canvas directly under the tool tabs and groups secondary actions", async () => {
+    const onAddSelectionToChat = vi.fn();
+    const onOpenAnotherTerminal = vi.fn();
+    render(
+      <CodeTerminalPane
+        client={codeClient({ evidence: "ready" })}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={xtermRuntime("selected output").loadRuntime}
+        onAddSelectionToChat={onAddSelectionToChat}
+        onOpenAnotherTerminal={onOpenAnotherTerminal}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    expect(screen.queryByRole("heading", { name: "Repository terminal" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop terminal" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More terminal actions" })).toBeVisible();
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    expect(await screen.findByRole("menuitem", { name: "Add selection to chat" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "New terminal" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Stop terminal" })).toBeVisible();
   });
 
   it("loads authoritative replay and routes input and resize through codeClient", async () => {
@@ -394,7 +423,8 @@ describe("CodeTerminalPane", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop terminal" }));
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Stop terminal" }));
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "stop-terminal", terminalId: ids.terminal }),
@@ -416,7 +446,8 @@ describe("CodeTerminalPane", () => {
         scope={scope}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Restart terminal" }));
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restart terminal" }));
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith({
         kind: "start-terminal",
@@ -446,7 +477,8 @@ describe("CodeTerminalPane", () => {
     );
 
     await waitFor(() => expect(runtime.options).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: "Add selection to chat" }));
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Add selection to chat" }));
 
     expect(onAddSelectionToChat).toHaveBeenCalledWith("error: missing token\n");
   });
@@ -467,10 +499,11 @@ describe("CodeTerminalPane", () => {
     );
 
     await waitFor(() => expect(runtime.options).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: "Add selection to chat" }));
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Add selection to chat" }));
 
     expect(onAddSelectionToChat).not.toHaveBeenCalled();
-    expect(await screen.findByRole("status")).toHaveTextContent(/Select terminal output first/i);
+    expect(await screen.findByText(/Select terminal output first/i)).toBeVisible();
   });
 
   it("opens another terminal without disturbing this one", async () => {
@@ -488,7 +521,8 @@ describe("CodeTerminalPane", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "New terminal" }));
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New terminal" }));
 
     expect(onOpenAnotherTerminal).toHaveBeenCalledTimes(1);
     expect(client.executeOperation).not.toHaveBeenCalled();
