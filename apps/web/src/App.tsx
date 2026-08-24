@@ -2187,14 +2187,12 @@ function LaunchedShell(
     if (!bottomPanelAvailable) return;
     const nextSurface = activeBottomSurface ?? bottomPanelSurfaces[0];
     if (nextSurface === undefined) return;
+    const nextBottomState = openUtilityTabState(renderedBottomPanelState, nextSurface.id);
     if (dockThreadKey === undefined) {
-      setFallbackBottomPanelState((current) => openUtilityTabState(current, nextSurface.id));
+      setFallbackBottomPanelState(nextBottomState);
     } else {
       setBottomPanelStatesByThread((current) =>
-        new Map(current).set(
-          dockThreadKey,
-          openUtilityTabState(threadUtilityDockState(current, dockThreadKey), nextSurface.id),
-        ),
+        new Map(current).set(dockThreadKey, nextBottomState),
       );
     }
     closeDockTab(nextSurface.id);
@@ -2204,14 +2202,12 @@ function LaunchedShell(
 
   function openBottomTool(surface: RightUtilityDockSurfaceId) {
     if (!bottomPanelSurfaces.some((candidate) => candidate.id === surface)) return;
+    const nextBottomState = openUtilityTabState(renderedBottomPanelState, surface);
     if (dockThreadKey === undefined) {
-      setFallbackBottomPanelState((current) => openUtilityTabState(current, surface));
+      setFallbackBottomPanelState(nextBottomState);
     } else {
       setBottomPanelStatesByThread((current) =>
-        new Map(current).set(
-          dockThreadKey,
-          openUtilityTabState(threadUtilityDockState(current, dockThreadKey), surface),
-        ),
+        new Map(current).set(dockThreadKey, nextBottomState),
       );
     }
     closeDockTab(surface);
