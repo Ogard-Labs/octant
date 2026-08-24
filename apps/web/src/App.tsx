@@ -2405,6 +2405,20 @@ function LaunchedShell(
         : providerIdentityById.get(thread.providerInstanceId);
     return provider === undefined ? thread : { ...thread, provider };
   };
+  const providerByThreadId = new Map<string, ThreadProviderIdentity>();
+  const rememberThreadProvider = (thread: ChatThreadNavigationItem): void => {
+    if (thread.provider === undefined) return;
+    providerByThreadId.set(thread.threadId, thread.provider);
+  };
+  for (const thread of chatController.navigation.map(withProviderMark)) {
+    rememberThreadProvider(thread);
+  }
+  for (const thread of codeProjectThreads.map(withProviderMark)) {
+    rememberThreadProvider(thread);
+  }
+  for (const thread of workProjectThreads.map(withProviderMark)) {
+    rememberThreadProvider(thread);
+  }
   const markedThreadGroups =
     sidebarThreadGroups === undefined
       ? undefined
@@ -3634,6 +3648,14 @@ function LaunchedShell(
             {...(sidebarCollapsed && !isNarrow
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}
+            {...(sidebarCollapsed && !isNarrow
+              ? {
+                  onNewThread: () => {
+                    if (activeMode === "chat") createChat();
+                    else void openDraftInActiveProject(activeMode);
+                  },
+                }
+              : {})}
             onRecoverZen={() => void zen.recoverZen()}
             onToggleBottomPanel={toggleBottomPanel}
             onToggleDock={toggleDock}
@@ -4269,6 +4291,8 @@ function LaunchedShell(
                     draftProviderGroups={draftProviderGroups}
                     codeProviderGroups={codeProviderGroups}
                     workProviderGroups={workProviderGroups}
+                    providerByThreadId={providerByThreadId}
+                    showProviderIcons={controller.settings.showThreadProviderIcons}
                     {...(projectController.activeProject === undefined
                       ? {}
                       : { draftProjectName: projectController.activeProject.name })}

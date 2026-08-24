@@ -3730,9 +3730,9 @@ input.switch:checked::after {
 }
 .mode__icon-frame {
   display: grid;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
   place-items: center;
   line-height: 0;
 }

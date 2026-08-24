@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight } from "lucide-react";
+import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } from "lucide-react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
@@ -20,6 +20,8 @@ export interface WindowChromeProps {
   readonly onToggleBottomPanel?: (opener: HTMLElement) => void;
   /** Present only while the sidebar is hidden: the chrome takes over the leading edge. */
   readonly onExpandSidebar?: () => void;
+  /** Keeps the primary creation action reachable while navigation is collapsed. */
+  readonly onNewThread?: () => void;
   readonly zenRecoveryNeeded?: boolean;
 }
 
@@ -39,6 +41,14 @@ export function WindowChrome(props: WindowChromeProps) {
             label="Show sidebar"
             onClick={props.onExpandSidebar}
           />
+          {props.onNewThread === undefined ? null : (
+            <IconButton
+              className="window-chrome__button window-chrome__new-thread"
+              icon={SquarePen}
+              label="New thread"
+              onClick={props.onNewThread}
+            />
+          )}
         </div>
       )}
       <span aria-hidden="true" className="window-chrome__drag-space window-drag-region" />

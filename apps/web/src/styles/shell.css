@@ -98,7 +98,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   flex: 0 0 auto;
   height: 100%;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
   padding-right: 4px;
   pointer-events: auto;
 }
@@ -116,7 +116,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 /* Same reserve the sidebar keeps for the macOS traffic lights (see
    .sidebar__traffic-light-space); it moves here while the sidebar is hidden. */
 .window-chrome__traffic-light-space {
-  flex: 0 0 82px;
+  flex: 0 0 88px;
   height: 100%;
 }
 
@@ -223,6 +223,19 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   cursor: pointer;
 }
 
+.window-chrome__new-thread {
+  color: var(--oct-fg-2);
+  background: var(--oct-surface-muted);
+  border-color: var(--oct-border);
+}
+
+.window-chrome__new-thread:hover,
+.window-chrome__new-thread:focus-visible {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+  border-color: var(--oct-border-strong);
+}
+
 .window-chrome__button:hover,
 .window-chrome__button[aria-expanded="true"] {
   color: var(--oct-fg);
@@ -288,17 +301,18 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   height: 34px;
   flex: 0 0 34px;
   align-items: center;
+  gap: 6px;
   padding: 0 10px;
 }
 
 .sidebar__traffic-light-space {
-  flex: 0 0 66px;
+  flex: 0 0 74px;
   height: 100%;
 }
 
 .sidebar__native-collapse {
   position: relative;
-  top: 8px;
+  top: 0;
   width: 22px;
   height: 22px;
   min-width: 22px;
@@ -503,7 +517,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .sidebar-navigation__threads {
   display: grid;
   gap: 2px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .sidebar-navigation__thread {
@@ -520,7 +534,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   align-items: center;
   justify-content: flex-start;
   gap: var(--oct-space-2);
-  min-height: var(--oct-control-height-sm);
+  min-height: 28px;
   padding-block: 0;
   padding-inline: var(--oct-space-2);
   color: var(--oct-muted);

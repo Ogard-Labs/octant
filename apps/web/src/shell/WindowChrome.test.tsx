@@ -90,6 +90,20 @@ function atRuleBlock(atRule: string): string {
 }
 
 describe("WindowChrome", () => {
+  it("keeps creating a thread reachable beside the sidebar recovery control", async () => {
+    const user = userEvent.setup();
+    const onNewThread = vi.fn();
+    renderChrome({
+      onExpandSidebar: vi.fn(),
+      onNewThread,
+    });
+
+    const button = screen.getByRole("button", { name: "New thread" });
+    expect(button).toHaveClass("window-chrome__new-thread");
+    await user.click(button);
+    expect(onNewThread).toHaveBeenCalledOnce();
+  });
+
   it("makes development authentication visibly distinct", () => {
     render(
       <WindowChrome
@@ -226,6 +240,15 @@ describe("WindowChrome", () => {
     expect(cssRule('.project-row[data-active="true"]')).toContain("color: var(--oct-fg);");
     expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple|background/i);
     expect(styles).not.toMatch(/\.project-row__mark\[data-type=/);
+  });
+
+  it("keeps sidebar recovery and pane-tab controls aligned to compact hit targets", () => {
+    expect(cssRule(".sidebar__traffic-light-space")).toContain("flex: 0 0 74px;");
+    expect(cssRule(".sidebar__native-collapse")).toContain("top: 0;");
+    expect(cssRule(".window-chrome__new-thread")).toContain(
+      "background: var(--oct-surface-muted);",
+    );
+    expect(cssRule(".workspace-pane__provider")).toContain("width: 14px;");
   });
 
   it("keeps the Project tree readable and reserves status ink for active work", () => {
@@ -594,7 +617,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".window-chrome__leading .window-chrome__button")).toContain(
       "color: var(--oct-fg-2);",
     );
-    expect(cssRule(".window-chrome__traffic-light-space")).toContain("flex: 0 0 82px;");
+    expect(cssRule(".window-chrome__traffic-light-space")).toContain("flex: 0 0 88px;");
     await user.click(opener);
     expect(onExpandSidebar).toHaveBeenCalledOnce();
   });
