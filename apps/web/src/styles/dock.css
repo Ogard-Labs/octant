@@ -55,7 +55,7 @@
   padding-inline: 8px var(--octant-window-chrome-reserved-width, 96px);
   background: transparent;
   border-bottom: 0;
-  font-family: var(--oct-font-ui);
+  font-family: var(--oct-font-display);
   letter-spacing: normal;
   text-transform: none;
 }

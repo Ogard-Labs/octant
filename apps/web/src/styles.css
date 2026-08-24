@@ -1129,8 +1129,8 @@ button:focus-visible {
 
 .project-section > .sidebar-section {
   color: var(--octant-text-muted);
-  font-family: var(--oct-font-ui);
-  font-size: var(--oct-text-xs);
+  font-family: var(--oct-font-display);
+  font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
   font-weight: 500;
   letter-spacing: normal;
   text-transform: none;
@@ -1236,8 +1236,8 @@ button:focus-visible {
    register. Hierarchy comes from the disclosure and nesting. */
 .project-row__copy > span {
   overflow: hidden;
-  font-family: var(--oct-font-ui);
-  font-size: var(--oct-text-sm);
+  font-family: var(--oct-font-display);
+  font-size: var(--octant-ui-font-size);
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1677,7 +1677,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: grab;
-  font-size: var(--oct-text-xs);
+  font-family: var(--oct-font-display);
+  font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
   font-weight: 500;
   user-select: none;
   -webkit-user-select: none;

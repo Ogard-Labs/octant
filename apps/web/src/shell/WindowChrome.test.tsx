@@ -253,7 +253,7 @@ describe("WindowChrome", () => {
 
   it("keeps the Project tree readable and reserves status ink for active work", () => {
     const projectName = cssRule(".project-row__copy > span");
-    expect(projectName).toContain("font-family: var(--oct-font-ui);");
+    expect(projectName).toContain("font-family: var(--oct-font-display);");
     expect(projectName).toContain("font-weight: 400;");
     expect(projectName).not.toMatch(/text-transform|letter-spacing|mono/);
     expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
@@ -265,7 +265,7 @@ describe("WindowChrome", () => {
       "var(--oct-accent)",
     );
     const sectionLabel = cssRule(".project-section > .sidebar-section");
-    expect(sectionLabel).toContain("font-family: var(--oct-font-ui);");
+    expect(sectionLabel).toContain("font-family: var(--oct-font-display);");
     expect(sectionLabel).toContain("letter-spacing: normal;");
     expect(sectionLabel).toContain("text-transform: none;");
     expect(sectionLabel).not.toContain("mono");

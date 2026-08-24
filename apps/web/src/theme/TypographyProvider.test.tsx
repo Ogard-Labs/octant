@@ -12,11 +12,13 @@ const typographyBridge = readFileSync(
 const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
 const settingsStyles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+const appStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
 describe("ThemeTypographyProvider", () => {
   it("maps interface typography to sidebar, settings, and transcript text", () => {
     expect(typographyBridge).toMatch(/--oct-font-display:\s*var\(--octant-ui-font-family\);/);
     expect(typographyBridge).toMatch(/--oct-font-transcript:\s*var\(--octant-ui-font-family\);/);
+    expect(typographyBridge).not.toMatch(/--oct-font-(ui|sans)\s*:/);
   });
 
   it("keeps rendered navigation sidebars tied to the selected interface size", () => {
@@ -55,6 +57,27 @@ describe("ThemeTypographyProvider", () => {
     );
     expect(settingsStyles).toMatch(
       /\.settings-navigation \.setnav-item,[\s\S]*font-size:\s*var\(--octant-ui-font-size\);/s,
+    );
+    expect(shellStyles).toMatch(
+      /\.sidebar-navigation__thread\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
+    );
+    expect(appStyles).toMatch(
+      /\.project-row__copy > span\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
+    );
+    expect(systemStyles).toMatch(
+      /\.board-col-head\s*\{[^}]*font-family:\s*var\(--oct-font-display\);/s,
+    );
+    expect(systemStyles).toMatch(
+      /\.board-card-title\s*\{[^}]*font-family:\s*var\(--oct-font-display\);/s,
+    );
+    expect(systemStyles).toMatch(
+      /\.board-card-title\s*\{[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
+    );
+    expect(appStyles).toMatch(
+      /\.project-section > \.sidebar-section\s*\{[^}]*font-size:\s*clamp\([^}]*var\(--octant-ui-font-size\)/s,
+    );
+    expect(appStyles).toMatch(
+      /\.workspace-pane__grip\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*clamp\([^}]*var\(--octant-ui-font-size\)/s,
     );
   });
 

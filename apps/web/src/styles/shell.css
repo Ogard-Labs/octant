@@ -541,6 +541,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: transparent;
   border: 0;
   border-radius: 6px;
+  font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
   cursor: pointer;
   text-align: left;
