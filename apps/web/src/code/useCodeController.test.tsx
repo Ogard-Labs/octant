@@ -2065,7 +2065,7 @@ describe("useCodeController", () => {
   });
 
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
-    const executeFollowUp = vi.fn(async () => ({ kind: "code-follow-up-updated" }) as never);
+    const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({
       readFollowUp: vi.fn(async () => followUpView(false) as never),
       executeFollowUp,
@@ -2088,7 +2088,7 @@ describe("useCodeController", () => {
   });
 
   it("completes an open follow-up explicitly against its current trigger", async () => {
-    const executeFollowUp = vi.fn(async () => ({ kind: "code-follow-up-updated" }) as never);
+    const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({
       readFollowUp: vi.fn(async () => followUpView(true) as never),
       executeFollowUp,
@@ -2109,7 +2109,7 @@ describe("useCodeController", () => {
   });
 
   it("does not complete a follow-up that is not open", async () => {
-    const executeFollowUp = vi.fn(async () => ({ kind: "code-follow-up-updated" }) as never);
+    const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({
       readFollowUp: vi.fn(async () => followUpView(false) as never),
       executeFollowUp,
@@ -2163,7 +2163,7 @@ function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
     executeFollowUp: vi.fn(
       async () =>
         ({
-          kind: "code-follow-up-updated",
+          kind: "follow-up-updated",
           followUp: openFollowUp(),
         }) as never,
     ),
