@@ -323,7 +323,7 @@ export class CodeProjectPullRequestService {
         const retryAfter =
           listed.status === "rate-limited" ? retryAfterTimestamp(listed, this.#clock) : undefined;
         this.#markProjectStale(
-          repository.projectId,
+          repository,
           listed.status === "unauthorized" ? "disconnected" : listed.status,
           retryAfter,
         );
@@ -392,7 +392,7 @@ export class CodeProjectPullRequestService {
       const projectId = String(repository.projectId);
       const projectRows = rows.filter((row) => String(row.projectId) === projectId);
       const failed = knownIdentityRefreshFailed.has(projectId);
-      this.#projectFreshness.set(projectId, {
+      this.#projectFreshness.set(projectFreshnessKey(repository), {
         status: failed ? "stale" : projectRows.length === 0 ? "empty" : "fresh",
         lastSuccessfulRefreshAt: now,
         ...(failed ? { staleReason: "refresh-failed" as const } : {}),
@@ -642,7 +642,7 @@ export class CodeProjectPullRequestService {
   #projectFreshnessFor(project: CodeProjectPullRequestConnection): CodeProjectPullRequestFreshness {
     if (project.kind !== "connected") return { status: "empty" };
     if (this.#githubRevoked) {
-      const previous = this.#projectFreshness.get(String(project.projectId));
+      const previous = this.#projectFreshness.get(projectFreshnessKey(project));
       return {
         status: "stale",
         staleReason: "disconnected",
@@ -651,16 +651,17 @@ export class CodeProjectPullRequestService {
           : { lastSuccessfulRefreshAt: previous.lastSuccessfulRefreshAt }),
       };
     }
-    return this.#projectFreshness.get(String(project.projectId)) ?? { status: "empty" };
+    return this.#projectFreshness.get(projectFreshnessKey(project)) ?? { status: "empty" };
   }
 
   #markProjectStale(
-    projectId: ProjectId,
+    project: Extract<CodeProjectPullRequestConnection, { readonly kind: "connected" }>,
     reason: CodeProjectPullRequestStaleReason,
     retryAfter: UtcTimestamp | undefined,
   ): void {
-    const previous = this.#projectFreshness.get(String(projectId));
-    this.#projectFreshness.set(String(projectId), {
+    const key = projectFreshnessKey(project);
+    const previous = this.#projectFreshness.get(key);
+    this.#projectFreshness.set(key, {
       status: "stale",
       staleReason: reason,
       ...(previous?.lastSuccessfulRefreshAt === undefined
@@ -820,6 +821,12 @@ function githubIdentityFromRemotes(
 
 function repositoryKey(projectId: ProjectId, owner: string, name: string): string {
   return `${String(projectId)}:${owner}/${name}`;
+}
+
+function projectFreshnessKey(
+  project: Extract<CodeProjectPullRequestConnection, { readonly kind: "connected" }>,
+): string {
+  return repositoryKey(project.projectId, project.repositoryOwner, project.repositoryName);
 }
 
 function detailKey(identity: {
