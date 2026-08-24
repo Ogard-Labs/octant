@@ -51,7 +51,9 @@ describe("ShellFrame", () => {
     expect(nativeDragTarget).toContain("position: fixed;");
     expect(nativeDragTarget).toContain("top: 0;");
     expect(nativeDragTarget).toContain("left: 112px;");
-    expect(nativeDragTarget).toContain("right: var(--octant-native-window-actions-width);");
+    // One measured reserve now serves both the drag strip and the pane header,
+    // so the strip cannot end at a different place than the controls begin.
+    expect(nativeDragTarget).toContain("right: var(--octant-window-chrome-reserved-width, 148px);");
     expect(nativeDragTarget).toContain(
       "height: var(--octant-native-hidden-inset-titlebar-height);",
     );
@@ -295,7 +297,7 @@ describe("ShellFrame", () => {
       "top: calc(var(--oct-space-2) + 4px);",
     );
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "z-index: 6;",
+      "z-index: 7;",
     );
     expect(workspace).toContain("grid-row: 1 / -1;");
     expect(trailing).toContain("pointer-events: auto;");

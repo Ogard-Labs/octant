@@ -1,7 +1,10 @@
 .shell.shell-frame {
   --octant-rendered-sidebar-width: var(--octant-sidebar-width, 232px);
-  --octant-window-chrome-reserved-width: 96px;
-  --octant-native-window-actions-width: 196px;
+  /* Published by WindowChrome from the trailing cluster's measured width.
+     The literal is only the pre-measurement fallback: the cluster's real
+     width swings with which controls a thread renders, so no constant is
+     right for every thread. */
+  --octant-window-chrome-reserved-width: 148px;
   display: grid;
   width: 100%;
   max-width: 100vw;
@@ -47,7 +50,7 @@ html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
   position: fixed;
   z-index: 5;
   top: 0;
-  right: var(--octant-native-window-actions-width);
+  right: var(--octant-window-chrome-reserved-width, 148px);
   left: 112px;
   display: block;
   height: var(--octant-native-hidden-inset-titlebar-height);
@@ -76,12 +79,14 @@ html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
   pointer-events: none;
 }
 
-/* Native controls share the visual title row with the top drag strip. They sit
-   above that strip and explicitly opt out of dragging; the unused rail remains
-   draggable underneath. */
+/* Native controls share the visual title row with the top drag strip and the
+   pane header. They sit above both and explicitly opt out of dragging; the
+   unused rail remains draggable underneath. The chrome must outrank the pane
+   header outright — while the two merely tied, the header won on document
+   order and covered every control in this row. */
 html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   top: calc(var(--oct-space-2) + 4px);
-  z-index: 6;
+  z-index: 7;
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {

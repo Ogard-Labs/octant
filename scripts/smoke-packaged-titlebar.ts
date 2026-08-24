@@ -82,6 +82,13 @@ export function assertNativeTitlebarActionResult(
  * The frame is absolute screen geometry; the boundary comparison is made in
  * CSS/window points, not screenshot pixels, so Retina screenshots do not move
  * a target outside the compact title rail.
+ *
+ * Placement is a sanity check, not the hit-test guarantee. Measuring the
+ * running app showed macOS delivers pointer events to web content well inside
+ * this rail, so a control's height above the traffic lights never decided
+ * whether it was clickable. What actually swallowed these controls was renderer
+ * stacking — the pane header covering the chrome, and its trailing drag region
+ * reaching under them. The click pass below is what proves they still work.
  */
 export function assertNativeTitlebarTargetsInRail(
   snapshot: NativeWindowSnapshot,
@@ -119,9 +126,11 @@ export function assertNativeTitlebarTargetsInRail(
  * 1. Launch `out/Octant.app` with CuaDriver in the background.
  * 2. Open a Code thread with Environment, bottom panel, and dock actions
  *    visible, then capture `get_window_state` as JSON.
- * 3. Pass that JSON here. The script fails before any click if a target is in
- *    the compact native title rail; then perform the five CuaDriver pixel clicks
- *    and inspect each post-action snapshot for the expected state change.
+ * 3. Pass that JSON here. The script fails before any click if a target sits
+ *    outside the compact native title rail; then perform the five CuaDriver
+ *    pixel clicks and inspect each post-action snapshot for the state change.
+ *    The click pass is the part that catches a covered control — geometry
+ *    alone cannot see renderer stacking.
  *
  * CuaDriver owns the native click path because DOM/jsdom clicks bypass
  * Electron's titlebar hit testing entirely.

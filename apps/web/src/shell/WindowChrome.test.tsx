@@ -201,7 +201,7 @@ describe("WindowChrome", () => {
       "top: calc(var(--oct-space-2) + 4px);",
     );
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "z-index: 6;",
+      "z-index: 7;",
     );
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
@@ -620,6 +620,89 @@ describe("WindowChrome", () => {
     expect(cssRule(".window-chrome__traffic-light-space")).toContain("flex: 0 0 88px;");
     await user.click(opener);
     expect(onExpandSidebar).toHaveBeenCalledOnce();
+  });
+
+  it("reserves the title band for whichever window controls the thread actually renders", () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    // Stand in for layout: the cluster is as wide as the controls it holds.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const width = this.classList.contains("window-chrome__trailing")
+          ? this.querySelectorAll("button").length * 40
+          : 0;
+        return {
+          width,
+          height: 0,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: 0,
+          x: 0,
+          y: 0,
+        } as DOMRect;
+      },
+    );
+
+    const reserveFor = (dockAvailable: boolean): string => {
+      const surface = document.createElement("div");
+      surface.className = "shell-frame";
+      document.body.appendChild(surface);
+      const { unmount } = render(
+        <WindowChrome
+          activeSurface="Welcome to Code"
+          bottomPanelAvailable
+          bottomPanelExpanded={false}
+          dockAvailable={dockAvailable}
+          dockExpanded={false}
+          dockLabel="Right sidebar"
+          isNarrow={false}
+          material="opaque"
+          onToggleBottomPanel={vi.fn()}
+          onToggleDock={vi.fn()}
+        />,
+        { container: surface.appendChild(document.createElement("div")) },
+      );
+      const reserve = surface.style.getPropertyValue("--octant-window-chrome-reserved-width");
+      unmount();
+      surface.remove();
+      return reserve;
+    };
+
+    // A thread that renders the dock toggle needs a wider band than one that
+    // does not; a constant reserve is wrong for one of them by construction.
+    expect(reserveFor(false)).toBe("40px");
+    expect(reserveFor(true)).toBe("80px");
+
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("ends the pane header's box before the window controls instead of padding it", () => {
+    const header = cssRule(".workspace-pane__header");
+    // Padding stays inside the header's border box, so a padded reserve still
+    // won the hit test over every control in this row and swallowed the click.
+    expect(header).toContain("margin-right: var(--octant-window-chrome-reserved-width");
+    expect(header).not.toMatch(/padding:[^;]*--octant-window-chrome-reserved-width/);
+  });
+
+  it("keeps the window controls above the pane header rather than tied with it", () => {
+    const nativeChrome = atRuleBlock(
+      'html[data-octant-native-host="true"] .shell-frame > .window-chrome',
+    );
+    const nativeHeader = atRuleBlock(
+      'html[data-octant-native-host="true"] .workspace-pane__header',
+    );
+    const chromeLayer = Number(/z-index:\s*(\d+)/.exec(nativeChrome)?.[1] ?? "0");
+    const headerLayer = Number(/z-index:\s*(\d+)/.exec(nativeHeader)?.[1] ?? "0");
+    // Equal layers left the winner to document order, and the header — rendered
+    // after the chrome — covered every control in the title band.
+    expect(chromeLayer).toBeGreaterThan(headerLayer);
   });
 
   it("leaves native dragging to the shell strip so pointer controls have no nested drag region", () => {

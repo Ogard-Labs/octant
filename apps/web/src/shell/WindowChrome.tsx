@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } from "lucide-react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -25,8 +26,42 @@ export interface WindowChromeProps {
   readonly zenRecoveryNeeded?: boolean;
 }
 
+/**
+ * Publishes the trailing cluster's measured width so the pane header can end
+ * its box — and its drag region — before the window controls start. The
+ * cluster's width depends on which controls the active thread renders, so a
+ * constant here goes stale the moment a control is added or hidden.
+ */
+function useReservedChromeWidth(): RefObject<HTMLDivElement | null> {
+  const trailing = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = trailing.current;
+    if (node === null) return;
+    const surface = node.closest(".shell-frame") ?? document.documentElement;
+    const publish = () => {
+      const width = Math.ceil(node.getBoundingClientRect().width);
+      if (width > 0) {
+        (surface as HTMLElement).style.setProperty(
+          "--octant-window-chrome-reserved-width",
+          `${width}px`,
+        );
+      }
+    };
+    publish();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(publish);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      (surface as HTMLElement).style.removeProperty("--octant-window-chrome-reserved-width");
+    };
+  }, []);
+  return trailing;
+}
+
 export function WindowChrome(props: WindowChromeProps) {
   const recoverZen = props.onRecoverZen;
+  const trailing = useReservedChromeWidth();
   return (
     <header
       aria-label={`Workspace actions for ${props.activeSurface}`}
@@ -75,7 +110,7 @@ export function WindowChrome(props: WindowChromeProps) {
           )}
         </div>
       ) : null}
-      <div className="window-chrome__trailing window-no-drag">
+      <div className="window-chrome__trailing window-no-drag" ref={trailing}>
         <span className="window-chrome__open-in-action" data-octant-open-in-action />
         <span className="window-chrome__environment-action" data-octant-environment-action />
         {props.isNarrow ? (

@@ -27,9 +27,14 @@ export const MAX_SIDEBAR_WIDTH = 420;
 export const MIN_CONTEXT_SIDEBAR_WIDTH = 280;
 export const MAX_CONTEXT_SIDEBAR_WIDTH = 640;
 /**
- * Native macOS `hiddenInset` leaves this many CSS pixels above the renderer
- * before pointer events reach web content. Interactive window chrome is
- * rendered below it; remote/web clients keep the zero-offset presentation.
+ * Height of the top strip the renderer keeps as a plain window-drag target
+ * under macOS `hiddenInset`, which does not make the transparent top edge
+ * draggable on its own. Remote/web clients have no native inset and keep the
+ * zero-offset presentation.
+ *
+ * This is a drag affordance, not a hit-test boundary: measuring the running
+ * app showed macOS delivers pointer events to web content above this height,
+ * so controls do not have to clear it to be clickable.
  */
 export const NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT = 24;
 export const MIN_SPLIT_RATIO = 0.2;

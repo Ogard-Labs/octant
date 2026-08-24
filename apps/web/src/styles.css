@@ -1630,6 +1630,10 @@ button:focus-visible {
   border-color: var(--octant-border-strong);
 }
 
+/* The window controls sit in this same band. Keep the reserve a margin, not
+   padding: padding stays inside the header's box, so the header still won the
+   hit test over every control and swallowed their clicks. A margin ends the
+   box — and with it the trailing drag region — before the controls begin. */
 .workspace-pane__header {
   position: relative;
   z-index: 3;
@@ -1638,12 +1642,12 @@ button:focus-visible {
   min-height: 34px;
   align-items: center;
   gap: 4px;
-  padding: 2px var(--octant-window-chrome-reserved-width, 148px) 2px 4px;
+  margin-right: var(--octant-window-chrome-reserved-width, 148px);
+  padding: 2px 0 2px 4px;
 }
 
-/* Native hiddenInset owns the first 24px of the window. Use one shared visual
-   centerline for the pane tab and the trailing window controls: enough top air
-   to read as a title bar, but never inside macOS's dead drag strip. */
+/* One shared visual centerline for the pane tab and the trailing window
+   controls: enough top air to read as a title bar. */
 html[data-octant-native-host="true"] .workspace-pane__header {
   z-index: 6;
   min-height: 42px;
