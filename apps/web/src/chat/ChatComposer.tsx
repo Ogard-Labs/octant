@@ -451,6 +451,9 @@ export function ChatComposer(props: ChatComposerProps) {
     <>
       <ThreadMentionChips
         chips={props.threadMentions?.chips ?? []}
+        {...(props.threadMentions?.dialogueEnabled === undefined
+          ? {}
+          : { dialogueEnabled: props.threadMentions.dialogueEnabled })}
         onRemove={(threadId) => props.threadMentions?.onRemoveChip(threadId)}
         {...(props.threadMentions?.onOpenSideChat === undefined
           ? {}

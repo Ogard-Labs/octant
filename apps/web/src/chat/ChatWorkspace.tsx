@@ -256,6 +256,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: props.controller.pendingDraft,
+    dialogueEnabled: true,
     ...(props.onOpenSideChat === undefined ? {} : { onSideChatOpened: props.onOpenSideChat }),
   });
   const parallelReview = useLinkedThreadParallelReview({

@@ -74,6 +74,7 @@
     "./provider-usage-limits": "./src/providerUsageLimits.ts",
     "./shell": "./src/shell.ts",
     "./thread-draft": "./src/threadDraft.ts",
+    "./thread-dialogue": "./src/threadDialogue.ts",
     "./theme": "./src/theme.ts",
     "./user-profile": "./src/userProfile.ts",
     "./content-provenance": "./src/contentProvenance.ts",

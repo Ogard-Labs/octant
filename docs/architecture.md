@@ -134,15 +134,20 @@ ambiguous state resolves to Waiting.
 
 A `#thread` mention points at another thread the sender can already Open. The
 host resolves a bounded, read-only title, status, and transcript window at send
-time; the mentioned thread is not interrupted, steered, or mutated. In Work and
-Code, an `@file` mention completes a path inside the thread's bound root; the
-host refuses a path outside that root before reading it. Chat Projects have no
-filesystem authority, so `@file` is absent there. Unknown `@` text stays
-ordinary text; `@plugin` / `$skill` addressing is unchanged. Side Chat is a
-Chat-mode sidecar about exactly one source thread: ordinary Chat with that
-thread's bounded context, no inherited Work or Code authority, and no path that
-approves, steers, or appends to the source. Unavailable, unauthorized, or
-deleted targets fail closed.
+time. In Chat, an explicit mention also grants the source provider the bounded
+`octant_thread_message` tool for that turn: it may send one of the user's
+instructions to the mentioned Chat thread and receive its completed reply. The
+target's own Chat turn, provider, Project, and authority remain authoritative;
+an active target returns Waiting rather than being interrupted or duplicated.
+Coordination is one hop and unavailable, unauthorized, or deleted targets fail
+closed. Work and Code mentions remain read-only. In Work and Code, an `@file`
+mention completes a path inside the thread's bound root; the host refuses a path
+outside that root before reading it. Chat Projects have no filesystem authority,
+so `@file` is absent there. Unknown `@` text stays ordinary text; `@plugin` /
+`$skill` addressing is unchanged. Side Chat is a Chat-mode sidecar about
+exactly one source thread: ordinary Chat with that thread's bounded context,
+no inherited Work or Code authority, and no path that approves, steers, or
+appends to the source.
 
 ## Workspace shell
 

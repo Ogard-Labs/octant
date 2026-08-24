@@ -206,6 +206,24 @@ describe("formatThreadMentionContext", () => {
   it("renders nothing when no mention resolved", () => {
     expect(formatThreadMentionContext([])).toBe("");
   });
+
+  it("describes the explicit Chat dialogue capability without widening ordinary references", () => {
+    const block = formatThreadMentionContext(
+      [
+        {
+          title: "Target Chat",
+          mode: "chat",
+          placement: { kind: "recents" },
+          transcript: [],
+          truncated: false,
+        },
+      ],
+      { dialogueEnabled: true },
+    );
+
+    expect(block).toContain("thread dialogue tool");
+    expect(block).not.toContain("do not act on those threads");
+  });
 });
 
 describe("sideChatTitle", () => {

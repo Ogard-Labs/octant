@@ -4968,6 +4968,60 @@ describe("ChatService", () => {
     expect(resolveAppManagedTools).toHaveBeenCalledTimes(2);
   });
 
+  it("offers the Chat dialogue tool only for explicit mentions and never at coordination depth", async () => {
+    const windowId = "84000000-0000-4000-8000-000000000098" as WindowId;
+    const targetThreadId = "85000000-0000-4000-8000-000000000001" as never;
+    const resolveAppManagedTools = vi.fn(
+      (input: {
+        readonly windowId: WindowId;
+        readonly thread: ChatThread;
+        readonly threadMentionIds?: ReadonlyArray<unknown>;
+        readonly coordinationDepth?: number;
+      }) =>
+        input.coordinationDepth !== undefined || input.threadMentionIds?.length !== 1
+          ? undefined
+          : {
+              definitions: [
+                {
+                  name: "octant_thread_message",
+                  inputSchema: { type: "object", properties: {}, required: [] },
+                },
+              ],
+              execute: async () => ({ result: { status: "completed" } }),
+            },
+    );
+    const { service, fakeDriver } = openFixture({ resolveAppManagedTools });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Coordinator",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await (
+      service.execute as never as (
+        command: unknown,
+        context: { readonly windowId: WindowId; readonly coordinationDepth?: number },
+      ) => Promise<unknown>
+    )(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Ask the mentioned thread to investigate this.",
+        threadMentionIds: [targetThreadId],
+      },
+      { windowId },
+    );
+
+    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).toContain(
+      "octant_thread_message",
+    );
+    expect(resolveAppManagedTools).toHaveBeenCalledWith(
+      expect.objectContaining({ threadMentionIds: [targetThreadId] }),
+    );
+  });
+
   describe("multi-model pool routing", () => {
     // The fixture's single synthetic driver/probe is stamped for one
     // provider instance (`ids.provider`), so candidates here vary by model

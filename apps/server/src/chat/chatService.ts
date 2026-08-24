@@ -343,6 +343,8 @@ interface PreparedChatTurn {
 
 export interface ChatServiceExecutionContext {
   readonly windowId: WindowId;
+  /** One-hop coordination calls cannot expose the coordination tool again. */
+  readonly coordinationDepth?: number;
 }
 
 interface PreparedChatContent {
@@ -385,6 +387,8 @@ export interface ChatServiceOptions {
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
+    readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
+    readonly coordinationDepth?: number;
   }) => AppManagedToolSet | undefined;
   readonly resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   /**
@@ -424,6 +428,7 @@ export interface ChatServiceOptions {
   readonly resolveThreadMentionContext?: (input: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
     readonly windowId?: WindowId;
+    readonly dialogueEnabled?: boolean;
   }) => Promise<ReadonlyArray<ChatThreadMentionContext>>;
   /**
    * Gathers per-candidate runtime facts for multi-model pool routing.
@@ -2198,7 +2203,14 @@ export class ChatService {
       executionContext !== undefined &&
       this.#resolveAppManagedTools !== undefined &&
       this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) === "supported"
-        ? this.#resolveAppManagedTools({ windowId: executionContext.windowId, thread })
+        ? this.#resolveAppManagedTools({
+            windowId: executionContext.windowId,
+            thread,
+            ...(threadMentionIds === undefined ? {} : { threadMentionIds }),
+            ...(executionContext.coordinationDepth === undefined
+              ? {}
+              : { coordinationDepth: executionContext.coordinationDepth }),
+          })
         : undefined;
     const resolvedExtensions =
       preResolvedExtensions ??
@@ -2229,6 +2241,7 @@ export class ChatService {
     const threadMentionContexts = await this.#resolveThreadMentions(
       threadMentionIds,
       executionContext,
+      tools?.definitions.some((definition) => definition.name === "octant_thread_message") === true,
     );
     const context = this.#planContext(
       thread,
@@ -2313,6 +2326,7 @@ export class ChatService {
   async #resolveThreadMentions(
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
     executionContext: ChatServiceExecutionContext | undefined,
+    dialogueEnabled: boolean,
   ): Promise<ReadonlyArray<{ readonly threadId: MentionableThreadId; readonly text: string }>> {
     if (threadMentionIds === undefined || threadMentionIds.length === 0) return [];
     if (this.#resolveThreadMentionContext === undefined) {
@@ -2326,6 +2340,7 @@ export class ChatService {
       resolved = await this.#resolveThreadMentionContext({
         threadMentionIds,
         ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+        ...(dialogueEnabled ? { dialogueEnabled: true } : {}),
       });
     } catch {
       // A resolver that throws proves nothing about any one mention, so every
