@@ -542,7 +542,15 @@ describe("SettingsView", () => {
     expect(styles).toContain("font-family: var(--oct-font-display)");
     expect(styles).toContain("font-size: var(--octant-ui-font-size)");
     expect(styles).not.toContain("--octant-ui-font-family");
-    expect(styles).toContain(".settings-theme-editor__card");
+  });
+
+  it("lets a scheme card be as tall as the picture it shows", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    // The card is an OctantButton, and the button recipe fixes a single-line
+    // control height. Against the card's own `overflow: hidden` that clipped
+    // the preview and cut the System/Light/Dark labels off entirely.
+    expect(styles).toMatch(/\.settings-scheme__card\s*\{[^}]*height:\s*auto;/);
   });
 
   it("uses flat, dense setting groups instead of nested dashboard cards", () => {

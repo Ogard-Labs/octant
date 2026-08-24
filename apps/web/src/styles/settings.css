@@ -232,13 +232,21 @@
   scroll-margin-top: 16px;
 }
 
-/* Scope reads as quiet metadata inside the hint line, not a badge. */
+/* The scope belongs to assistive technology, not to the page. Printed, it
+   repeated "This app" on every row of every section it appeared in — the same
+   answer each time — and read as part of the setting's own description. It
+   stays in the hint paragraph so a screen reader still announces which
+   authority the setting carries. */
 .settings-scope-indicator {
-  color: var(--octant-text-muted);
-  font-family: var(--oct-font-display);
-  font-size: 10px;
-  letter-spacing: 0.01em;
-  opacity: 0.8;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* SettingGroup's optional description; the divider under it comes from the
@@ -390,7 +398,14 @@
   gap: 8px;
 }
 
-.settings-card-section > h2 {
+/* One section heading treatment for the whole surface. The Appearance blocks
+   reach it through `summary` and `legend` because a disclosure's heading is
+   also its trigger and a fieldset's heading must be its legend; before this
+   they each carried their own inline-card head, which is why Appearance and
+   General did not read as the same page. */
+.settings-card-section > h2,
+.settings-card-section > summary,
+.settings-card-section > legend {
   margin: 0;
   padding-inline: 2px;
   color: var(--octant-text-muted);
@@ -400,6 +415,36 @@
   letter-spacing: 0.06em;
   line-height: 1.25;
   text-transform: uppercase;
+}
+
+/* A legend is taken out of the fieldset's flow by default, so it has to be
+   placed back into the grid to sit above the group like every other heading. */
+.settings-card-section > legend {
+  float: none;
+  width: 100%;
+  padding-block: 0;
+}
+
+.settings-card-section > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-card-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-card-section > summary:hover {
+  color: var(--octant-text-secondary);
+}
+
+.settings-card-section > summary:focus-visible {
+  border-radius: var(--oct-radius-sm);
+  outline: none;
+  box-shadow: var(--oct-focus-ring);
 }
 
 .settings-card-section > .setgroup,
@@ -443,6 +488,20 @@
   column-gap: 24px;
   padding: 12px 16px;
   font-family: var(--oct-font-display);
+}
+
+/* Kept in the accessibility tree and in Settings search; only the printing is
+   dropped, because the section heading above already carries the same phrase. */
+.setrow-label[data-labelled-by-section="true"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .setrow-label {
@@ -544,37 +603,23 @@
   display: block;
 }
 
+/* Appearance's blocks are sections of the same page as General's, so they take
+   the same rhythm between them rather than a tighter one of their own. */
 .settings-theme-editor {
   display: grid;
-  gap: 16px;
+  gap: 28px;
   padding: 0;
   margin: 0;
 }
 
-.settings-theme-editor__card,
-.settings-theme-editor__disclosure {
-  overflow: hidden;
+/* The blocks carry no chrome themselves — the group inside each one does, the
+   same way a `.settings-card-section` does elsewhere. */
+.settings-theme-editor__disclosure,
+.settings-theme-editor__accessibility {
   padding: 0;
   margin: 0;
-  background: var(--octant-surface-muted);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-lg);
-  box-shadow: none;
-}
-
-.settings-theme-editor__disclosure {
-  padding-top: 0;
-}
-
-.settings-theme-editor__card > h3,
-.settings-theme-editor__accessibility legend {
-  margin: 0;
-  padding: 12px 16px 8px;
-  color: var(--octant-text-primary);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-  letter-spacing: normal;
+  background: none;
+  border: 0;
 }
 
 /* Color scheme cards: mini previews for System, Light, and Dark. */
@@ -583,14 +628,26 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--oct-space-2);
   max-width: none;
-  padding: 0 16px 12px;
+  padding: 12px 16px;
 }
 
+/* A scheme card is a picture that can be chosen, not a one-line control, so it
+   has to undo the button recipe's control metrics rather than sit inside them.
+   The recipe fixes a single-line height and centres a max-content row; against
+   the card's own `overflow: hidden` that clipped the 48px preview down to the
+   button's height and cut the System/Light/Dark labels off the bottom entirely,
+   which is why the picker read as three blank bars. */
 .settings-scheme__card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
+  height: auto;
   padding: 0;
+  align-items: stretch;
+  justify-content: stretch;
+  justify-items: stretch;
   overflow: hidden;
+  white-space: normal;
   text-align: center;
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
@@ -704,33 +761,16 @@
   color: var(--oct-fg);
 }
 
-.settings-theme-editor__card > .settings-view__field:last-child,
-.settings-theme-editor__disclosure-body > :last-child {
-  border-bottom: 0;
-}
-
-.settings-theme-editor__card > .settings-view__field {
-  margin: 0 16px;
-  padding: 10px 0;
+/* A labelled control inside a group is a row of that group, so it takes the
+   group's row metrics rather than the looser spacing it used when each block
+   was its own card. */
+.settings-theme-editor .setgroup > .settings-view__field {
+  padding: 10px 16px;
   border-top: 1px solid var(--oct-border-soft);
 }
 
-.settings-theme-editor__disclosure > summary {
-  display: flex;
-  min-height: 42px;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--octant-text-primary);
-  cursor: pointer;
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
-  list-style: none;
-  padding: 0 16px;
-}
-
-.settings-theme-editor__disclosure > summary::-webkit-details-marker {
-  display: none;
+.settings-theme-editor .setgroup > .settings-view__field:first-child {
+  border-top: 0;
 }
 
 .settings-theme-editor__disclosure-icon {
@@ -744,21 +784,7 @@
 }
 
 .settings-theme-editor__disclosure-body {
-  padding: 0 16px 8px;
-  border-top: 1px solid var(--oct-border-soft);
-}
-
-.settings-theme-editor__accessibility {
-  padding: 0 16px 8px;
-}
-
-.settings-theme-editor__accessibility legend {
-  padding: 12px 0 8px;
-}
-
-.settings-theme-editor__accessibility > .settings-view__field {
-  margin: 0;
-  padding: var(--oct-space-3) 0;
+  padding: 4px 16px 8px;
 }
 
 /* Unsaved-changes bar: note on the left, Apply/Cancel/Reset on the right.
@@ -794,14 +820,21 @@
 .settings-view__theme-group {
   display: grid;
   gap: 4px;
-  padding: 8px 0;
+  padding: 12px 0 8px;
   margin: 0;
   border: 0;
-  border-top: 1px solid var(--oct-border);
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+/* The first sub-group opens the disclosure body, so a rule above it would draw
+   a second edge immediately under the group's own. */
+.settings-view__theme-group:first-of-type {
+  padding-top: 4px;
+  border-top: 0;
 }
 
 .settings-view__theme-group legend {
-  padding: 0;
+  padding: 0 0 2px;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-strong);
