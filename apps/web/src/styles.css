@@ -3238,7 +3238,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .environment-git-group__identity-secondary {
   color: var(--octant-text-muted);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-family: var(--oct-font-mono);
   font-size: 9px;
 }
 
@@ -6164,7 +6164,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .scaffolds__command code {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-family: var(--oct-font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -6172,7 +6172,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   max-height: 200px;
   margin: 0;
   overflow: auto;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-family: var(--oct-font-mono);
   font-size: 11px;
   white-space: pre-wrap;
 }
@@ -6486,7 +6486,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   min-width: 0;
   font-size: 0.75rem;
   color: var(--octant-text-muted, rgba(255, 255, 255, 0.5));
-  font-family: var(--octant-mono, ui-monospace, monospace);
+  font-family: var(--oct-font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -6840,7 +6840,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .bedrock-mantle-guide__code {
-  font-family: var(--octant-mono, ui-monospace, monospace);
+  font-family: var(--oct-font-mono);
   font-size: 0.8rem;
   padding: 0.2rem 0.4rem;
   border-radius: 0.3rem;

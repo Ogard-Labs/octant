@@ -1767,7 +1767,7 @@ form > .work-composer-adapter__attachments {
 
 .code-worktree-source__disclosure-label {
   color: var(--octant-text-secondary);
-  font-family: var(--octant-font-mono, ui-monospace, monospace);
+  font-family: var(--oct-font-mono);
 }
 
 .code-worktree-source__disclosure-detail {

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import { NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT } from "@octant/contracts/shell";
+import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { describe, expect, it, vi } from "vitest";
 import { ShellFrame } from "./ShellFrame";
 
@@ -160,6 +161,44 @@ describe("ShellFrame", () => {
     expect(screen.queryByText("Chrome")).not.toBeInTheDocument();
     expect(screen.queryByText("Sidebar")).not.toBeInTheDocument();
     expect(screen.queryByText("Workspace")).not.toBeInTheDocument();
+  });
+
+  it("keeps selected typography applied when entering a standalone surface", () => {
+    const typography = {
+      ...DEFAULT_THEME_SETTINGS.typography,
+      ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, family: "Inter", size: 19 },
+    };
+
+    render(
+      <ShellFrame
+        availableFonts={["Inter"]}
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={360}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={<aside>Sidebar</aside>}
+        sidebarResizable={false}
+        sidebarWidth={232}
+        standaloneSurface={
+          <div className="settings-view">
+            <aside className="settings-view__sidebar">Settings navigation</aside>
+            <main>Settings content</main>
+          </div>
+        }
+        typography={typography}
+        theme={DEFAULT_THEME_SETTINGS}
+        wideContextOpen={false}
+        workspace={<main>Workspace</main>}
+      />,
+    );
+
+    expect(document.documentElement.style.getPropertyValue("--octant-ui-font-family")).toBe(
+      "Inter",
+    );
+    expect(document.documentElement.style.getPropertyValue("--octant-ui-font-size")).toBe("19px");
+    expect(screen.getByText("Settings navigation")).toBeInTheDocument();
+    expect(screen.getByText("Settings content")).toBeInTheDocument();
   });
 
   it("applies the shared wide-context geometry without inline grid ownership", () => {
