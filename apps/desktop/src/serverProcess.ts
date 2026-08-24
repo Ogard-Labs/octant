@@ -32,6 +32,23 @@ interface ServerSpawnSpecOptions {
   readonly env: NodeJS.ProcessEnv;
 }
 
+const trustedMacOsExecutablePaths = ["/opt/homebrew/bin", "/usr/local/bin"] as const;
+
+/**
+ * Packaged apps do not inherit the interactive shell PATH that users configure
+ * for developer CLIs. Keep the packaged child deterministic while allowing
+ * the server to discover binaries installed in the standard system package
+ * manager locations.
+ */
+export function resolvePackagedServerPath(
+  pathValue: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform !== "darwin") return pathValue;
+  const entries = pathValue?.split(":").filter((entry) => entry !== "") ?? [];
+  return [...new Set([...entries, ...trustedMacOsExecutablePaths])].join(":");
+}
+
 export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
   const inheritedEnv = options.packaged
     ? Object.fromEntries(
@@ -59,10 +76,16 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
       stdio: ["pipe", "inherit", "inherit"],
     } as const;
   }
+  const packagedPath = resolvePackagedServerPath(options.env.PATH);
   return {
     command: options.execPath,
     args: [`${options.root}/apps/server/dist/main.mjs`],
-    env: { ...env, ELECTRON_RUN_AS_NODE: "1", OCTANT_PACKAGED_RUNTIME: "1" },
+    env: {
+      ...env,
+      ...(packagedPath === undefined ? {} : { PATH: packagedPath }),
+      ELECTRON_RUN_AS_NODE: "1",
+      OCTANT_PACKAGED_RUNTIME: "1",
+    },
     stdio: ["pipe", "inherit", "inherit"],
   } as const;
 }

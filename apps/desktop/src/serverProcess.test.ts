@@ -11,6 +11,7 @@ import {
   reserveLoopbackPort,
   resolveStableHostAttachment,
   resolveManagedServerUrl,
+  resolvePackagedServerPath,
   serverSpawnSpec,
   shutdownManagedServer,
   waitForStorageReady,
@@ -271,6 +272,16 @@ describe("resolveStableHostAttachment", () => {
 });
 
 describe("serverSpawnSpec", () => {
+  it("adds trusted macOS package-manager paths for packaged servers", () => {
+    expect(
+      resolvePackagedServerPath(
+        "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/bin",
+        "darwin",
+      ),
+    ).toBe("/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin");
+    expect(resolvePackagedServerPath("/usr/bin:/bin", "linux")).toBe("/usr/bin:/bin");
+  });
+
   it("uses Bun only for source development", () => {
     expect(
       serverSpawnSpec({
@@ -328,7 +339,7 @@ describe("serverSpawnSpec", () => {
       command: "/Applications/Octant.app/Contents/MacOS/Octant",
       args: ["/repo/apps/server/dist/main.mjs"],
       env: {
-        PATH: "/usr/bin:/bin",
+        PATH: "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin",
         ELECTRON_RUN_AS_NODE: "1",
         OCTANT_BROWSER_BROKER_TOKEN: "browser-token",
         OCTANT_BROWSER_BROKER_URL: "http://127.0.0.1:42000/",
@@ -362,7 +373,7 @@ describe("serverSpawnSpec", () => {
       packaged: true,
       execPath: "/Applications/Octant.app/Contents/MacOS/Octant",
       env: {
-        PATH: "/usr/bin:/bin",
+        PATH: "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin",
         OCTANT_DEV_WEB_BOOTSTRAP: "1",
       },
     });
