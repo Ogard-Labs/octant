@@ -534,6 +534,25 @@ describe("SettingsView", () => {
     expect(styles).toContain("min-height: 28px");
   });
 
+  it("keeps Settings on the shared interface type scale with a centered reading column", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    expect(styles).toMatch(
+      /\.settings-view\s*\{[\s\S]*font-family:\s*var\(--octant-ui-font-family\);/,
+    );
+    expect(styles).toContain("width: min(calc(100% - 48px), 760px)");
+    expect(styles).toContain("font-family: var(--octant-ui-font-family)");
+    expect(styles).toContain(".settings-theme-editor__card");
+  });
+
+  it("uses flat, dense setting groups instead of nested dashboard cards", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    expect(styles).toContain("background: var(--octant-surface-muted)");
+    expect(styles).toContain("border-radius: var(--oct-radius-lg)");
+    expect(styles).toContain("gap: var(--oct-space-1)");
+  });
+
   it("keeps search and the existing mode-switcher mutation wired", () => {
     const { onSearchChange } = renderSettingsWithSearch("");
     navigateTo("Appearance");
