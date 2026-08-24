@@ -36,6 +36,36 @@ function mount(client: ThemeClient) {
 }
 
 describe("useThemeController", () => {
+  it("updates the rendered draft before the authoritative save returns", async () => {
+    let release: (() => void) | undefined;
+    const client = {
+      bootstrap: async () => ({ settings: DEFAULT_THEME_SETTINGS, version: 1 }),
+      execute: async (command: { settings: ThemeSettings }) => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return { settings: command.settings, version: 2 };
+      },
+    } as unknown as ThemeClient;
+    const view = mount(client);
+    await waitFor(() => expect(view.result.current.status).toBe("ready"));
+
+    let write: Promise<boolean> | undefined;
+    act(() => {
+      write = view.result.current.applyPatch({
+        typography: {
+          ...DEFAULT_THEME_SETTINGS.typography,
+          ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, size: 17 },
+        },
+      });
+    });
+    expect(view.result.current.draft?.typography.ui.size).toBe(17);
+
+    await waitFor(() => expect(release).toBeTypeOf("function"));
+    release?.();
+    await act(async () => expect(await write).toBe(true));
+  });
+
   it("does not let a second immediate change race the first", async () => {
     const { client, seen } = versionedClient();
     const view = mount(client);
@@ -57,6 +87,38 @@ describe("useThemeController", () => {
     ]);
     expect(view.result.current.settings?.mode).toBe("dark");
     expect(view.result.current.status).toBe("ready");
+  });
+
+  it("does not replace a newer optimistic preview when an older save completes", async () => {
+    const releases: Array<() => void> = [];
+    let version = 1;
+    const client = {
+      bootstrap: async () => ({ settings: DEFAULT_THEME_SETTINGS, version }),
+      execute: async (command: { settings: ThemeSettings }) => {
+        await new Promise<void>((resolve) => releases.push(resolve));
+        version += 1;
+        return { settings: command.settings, version };
+      },
+    } as unknown as ThemeClient;
+    const view = mount(client);
+    await waitFor(() => expect(view.result.current.status).toBe("ready"));
+
+    let first: Promise<boolean> | undefined;
+    let second: Promise<boolean> | undefined;
+    act(() => {
+      first = view.result.current.applyPatch({ mode: "light" });
+      second = view.result.current.applyPatch({ mode: "dark" });
+    });
+    expect(view.result.current.draft?.mode).toBe("dark");
+    await waitFor(() => expect(releases).toHaveLength(1));
+
+    releases[0]?.();
+    await act(async () => expect(await first).toBe(true));
+    await waitFor(() => expect(releases).toHaveLength(2));
+    expect(view.result.current.draft?.mode).toBe("dark");
+
+    releases[1]?.();
+    await act(async () => expect(await second).toBe(true));
   });
 
   it("stands down a queued write once another window has won", async () => {

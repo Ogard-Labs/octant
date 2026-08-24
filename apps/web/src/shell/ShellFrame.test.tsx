@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
+import { NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT } from "@octant/contracts/shell";
 import { describe, expect, it, vi } from "vitest";
 import { ShellFrame } from "./ShellFrame";
 
@@ -24,6 +25,37 @@ function cssRule(selector: string): string {
 }
 
 describe("ShellFrame", () => {
+  it("reserves a real native drag target at the top edge without covering the traffic lights", () => {
+    const { container } = render(
+      <ShellFrame
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={360}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={<aside>Sidebar</aside>}
+        sidebarResizable={false}
+        sidebarWidth={232}
+        wideContextOpen={false}
+        workspace={<main>Workspace</main>}
+      />,
+    );
+
+    const dragTarget = container.querySelector("[data-native-window-drag-strip]");
+    expect(dragTarget).toHaveClass("shell-frame__native-drag-strip", "window-drag-region");
+    expect(cssRule(".shell-frame__native-drag-strip")).toContain("display: none;");
+    const nativeDragTarget = cssRule(
+      'html[data-octant-native-host="true"] .shell-frame__native-drag-strip',
+    );
+    expect(nativeDragTarget).toContain("position: fixed;");
+    expect(nativeDragTarget).toContain("top: 0;");
+    expect(nativeDragTarget).toContain("left: 112px;");
+    expect(nativeDragTarget).toContain(
+      "height: var(--octant-native-hidden-inset-titlebar-height);",
+    );
+    expect(nativeDragTarget).toContain("pointer-events: auto;");
+  });
+
   it("owns one edge-to-edge landmark composition without an outer client frame", () => {
     const { container } = render(
       <ShellFrame
@@ -46,14 +78,16 @@ describe("ShellFrame", () => {
     expect(shell).toHaveAttribute("data-octant-sidebar-vibrancy", "strong");
     expect(shell).toHaveStyle({
       "--octant-context-sidebar-width": "360px",
+      "--octant-native-hidden-inset-titlebar-height": `${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px`,
       "--octant-sidebar-width": "244px",
     });
     expect(shell).not.toHaveAttribute("data-client-frame");
-    expect(shell?.children).toHaveLength(4);
+    expect(shell?.children).toHaveLength(5);
     expect(shell?.children[0]).toBe(screen.getByRole("banner", { name: "Workspace actions" }));
     expect(shell?.children[1]).toBe(screen.getByRole("complementary", { name: "Octant sidebar" }));
     expect(shell?.children[2]).toHaveClass("shell-frame__sidebar-resize");
     expect(shell?.children[3]).toHaveClass("workspace-layer");
+    expect(shell?.children[4]).toHaveClass("shell-frame__native-drag-strip");
     expect(screen.getAllByRole("banner")).toHaveLength(1);
     expect(screen.getAllByRole("main")).toHaveLength(1);
   });
@@ -174,6 +208,9 @@ describe("ShellFrame", () => {
     expect(chrome).toContain("background: transparent;");
     expect(chrome).toContain("border-bottom: 0;");
     expect(chrome).toContain("pointer-events: none;");
+    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
+      "top: var(--octant-native-hidden-inset-titlebar-height);",
+    );
     expect(workspace).toContain("grid-row: 1 / -1;");
     expect(trailing).toContain("pointer-events: auto;");
     expect(shellStyles).toMatch(

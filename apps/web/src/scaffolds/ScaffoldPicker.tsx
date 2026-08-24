@@ -3,6 +3,7 @@ import { planScaffold } from "@octant/domain";
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 
 export interface ScaffoldPickerProps {
   readonly entries: ReadonlyArray<ScaffoldEntry>;
@@ -51,16 +52,17 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
           const runnable = props.runnable.get(id) === true;
           return (
             <li className="scaffolds__entry" key={id}>
-              <button
+              <OctantButton
                 aria-pressed={selected === id}
                 className="scaffolds__entry-button"
                 disabled={!runnable || props.busy}
                 onClick={() => setSelected(selected === id ? undefined : id)}
                 type="button"
+                variant="ghost"
               >
                 <span className="scaffolds__entry-name">{candidate.displayName}</span>
                 <span className="scaffolds__entry-summary">{candidate.summary}</span>
-              </button>
+              </OctantButton>
               {runnable ? null : (
                 <p className="scaffolds__entry-blocked">
                   Needs {candidate.requiresTool}, which is not on this machine.
@@ -76,7 +78,7 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
           <label className="scaffolds__label" htmlFor="scaffold-directory">
             New directory
           </label>
-          <input
+          <OctantInput
             className="scaffolds__input"
             id="scaffold-directory"
             maxLength={64}

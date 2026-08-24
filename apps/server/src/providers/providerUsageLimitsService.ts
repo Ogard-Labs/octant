@@ -1,0 +1,241 @@
+import {
+  decodeProviderFailure,
+  decodeProviderUsageLimitsSnapshot,
+  type ProviderInstance,
+  type ProviderUsageLimitsEntry,
+  type ProviderUsageLimitsSnapshot,
+  type ProviderUsageLimitsSource,
+  type ProviderServiceLimits,
+  type UtcTimestamp,
+  UtcTimestamp as UtcTimestampSchema,
+} from "@octant/contracts";
+import { Schema } from "effect";
+
+class ProviderUsageLimitsTimeout extends Error {
+  override readonly name = "ProviderUsageLimitsTimeout";
+}
+
+class ProviderUsageLimitsStopped extends Error {
+  override readonly name = "ProviderUsageLimitsStopped";
+}
+
+export interface ProviderUsageLimitsObservation {
+  readonly source: ProviderUsageLimitsSource;
+  readonly limits: ProviderServiceLimits;
+}
+
+export interface ProviderUsageLimitsServiceOptions {
+  readonly listInstances: () => ReadonlyArray<ProviderInstance>;
+  readonly observe: (
+    instance: ProviderInstance,
+    signal: AbortSignal,
+  ) => Promise<ProviderUsageLimitsObservation | undefined>;
+  readonly now: () => UtcTimestamp;
+  readonly refreshIntervalMs?: number;
+  readonly refreshTimeoutMs?: number;
+  readonly schedule?: (callback: () => void, intervalMs: number) => ReturnType<typeof setInterval>;
+  readonly cancelSchedule?: (handle: ReturnType<typeof setInterval>) => void;
+}
+
+const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60_000;
+const DEFAULT_REFRESH_TIMEOUT_MS = 15_000;
+const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
+
+export class ProviderUsageLimitsService {
+  readonly #options: ProviderUsageLimitsServiceOptions;
+  readonly #entries = new Map<string, ProviderUsageLimitsEntry>();
+  #inFlight: Promise<ProviderUsageLimitsSnapshot> | undefined;
+  #refreshAbortController: AbortController | undefined;
+  #scheduleHandle: ReturnType<typeof setInterval> | undefined;
+
+  constructor(options: ProviderUsageLimitsServiceOptions) {
+    this.#options = options;
+  }
+
+  snapshot(): ProviderUsageLimitsSnapshot {
+    return this.#snapshot(this.#options.now());
+  }
+
+  refresh(): Promise<ProviderUsageLimitsSnapshot> {
+    if (this.#inFlight !== undefined) return this.#inFlight;
+    const abortController = new AbortController();
+    this.#refreshAbortController = abortController;
+    const running = this.#refresh(abortController.signal).finally(() => {
+      if (this.#inFlight === running) this.#inFlight = undefined;
+      if (this.#refreshAbortController === abortController) {
+        this.#refreshAbortController = undefined;
+      }
+    });
+    this.#inFlight = running;
+    return running;
+  }
+
+  start(): void {
+    if (this.#scheduleHandle !== undefined) return;
+    const schedule =
+      this.#options.schedule ?? ((callback, intervalMs) => setInterval(callback, intervalMs));
+    this.#scheduleHandle = schedule(() => {
+      void this.refresh().catch(() => undefined);
+    }, this.#options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS);
+  }
+
+  stop(): void {
+    this.#refreshAbortController?.abort();
+    if (this.#scheduleHandle === undefined) return;
+    const cancel = this.#options.cancelSchedule ?? clearInterval;
+    cancel(this.#scheduleHandle);
+    this.#scheduleHandle = undefined;
+  }
+
+  async #refresh(signal: AbortSignal): Promise<ProviderUsageLimitsSnapshot> {
+    const observedAt = this.#options.now();
+    const instances = this.#options.listInstances();
+    const next = await Promise.all(
+      instances.map((instance) => this.#observe(instance, observedAt, signal)),
+    );
+    if (signal.aborted) return this.#snapshot(this.#options.now());
+    this.#entries.clear();
+    for (const entry of next) this.#entries.set(String(entry.providerInstanceId), entry);
+    return this.#snapshot(observedAt);
+  }
+
+  async #observe(
+    instance: ProviderInstance,
+    observedAt: UtcTimestamp,
+    refreshSignal: AbortSignal,
+  ): Promise<ProviderUsageLimitsEntry> {
+    const previous = this.#entries.get(String(instance.id));
+    if (refreshSignal.aborted) {
+      return previous ?? this.#unavailable(instance, observedAt, "not-ready");
+    }
+    const retryAt = this.#retryAt(previous);
+    if (previous !== undefined && retryAt !== undefined && retryAt > observedAt) return previous;
+    if (!instance.enabled) {
+      return this.#unavailable(instance, observedAt, "not-configured");
+    }
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let rejectStopped: ((reason: ProviderUsageLimitsStopped) => void) | undefined;
+    const onRefreshAbort = () => {
+      const stopped = new ProviderUsageLimitsStopped();
+      controller.abort(stopped);
+      rejectStopped?.(stopped);
+    };
+    refreshSignal.addEventListener("abort", onRefreshAbort, { once: true });
+    try {
+      const observation = await Promise.race([
+        this.#options.observe(instance, controller.signal),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            controller.abort(new ProviderUsageLimitsTimeout());
+            reject(new ProviderUsageLimitsTimeout());
+          }, this.#options.refreshTimeoutMs ?? DEFAULT_REFRESH_TIMEOUT_MS);
+        }),
+        new Promise<never>((_, reject) => {
+          rejectStopped = reject;
+          if (refreshSignal.aborted) {
+            onRefreshAbort();
+            return;
+          }
+        }),
+      ]);
+      if (observation === undefined) {
+        return this.#unavailable(instance, observedAt, "unsupported");
+      }
+      return {
+        providerInstanceId: instance.id,
+        status: "available",
+        source: observation.source,
+        observedAt,
+        limits: observation.limits,
+      };
+    } catch (error) {
+      if (error instanceof ProviderUsageLimitsStopped) {
+        return previous ?? this.#unavailable(instance, observedAt, "not-ready");
+      }
+      const staleLimits =
+        previous?.status === "available"
+          ? previous.limits
+          : previous?.status === "failed"
+            ? previous.staleLimits
+            : undefined;
+      const lastSuccessfulAt =
+        previous?.status === "available"
+          ? previous.observedAt
+          : previous?.status === "failed"
+            ? previous.lastSuccessfulAt
+            : undefined;
+      const providerFailure = this.#providerFailure(error);
+      const retryAfterMs = providerFailure?.retryAfterMs;
+      const failureRetryAt =
+        retryAfterMs === undefined
+          ? undefined
+          : new Date(Date.parse(observedAt) + retryAfterMs).toISOString();
+      return {
+        providerInstanceId: instance.id,
+        status: "failed",
+        source: previous?.source ?? "provider-runtime",
+        observedAt,
+        failure: {
+          category:
+            error instanceof ProviderUsageLimitsTimeout ||
+            controller.signal.reason instanceof ProviderUsageLimitsTimeout
+              ? "timeout"
+              : providerFailure?.category === "rate-limited"
+                ? "rate-limited"
+                : providerFailure?.category === "protocol"
+                  ? "protocol"
+                  : "unavailable",
+          message: "Provider limits could not be refreshed.",
+          ...(failureRetryAt === undefined ? {} : { retryAt: decodeUtcTimestamp(failureRetryAt) }),
+        },
+        ...(staleLimits === undefined ? {} : { staleLimits }),
+        ...(lastSuccessfulAt === undefined ? {} : { lastSuccessfulAt }),
+      };
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      refreshSignal.removeEventListener("abort", onRefreshAbort);
+      rejectStopped = undefined;
+    }
+  }
+
+  #unavailable(
+    instance: ProviderInstance,
+    observedAt: UtcTimestamp,
+    reason: "unsupported" | "not-configured" | "not-ready",
+  ): ProviderUsageLimitsEntry {
+    return {
+      providerInstanceId: instance.id,
+      status: "unavailable",
+      source: "provider-runtime",
+      reason,
+      observedAt,
+    };
+  }
+
+  #retryAt(entry: ProviderUsageLimitsEntry | undefined): UtcTimestamp | undefined {
+    if (entry?.status === "failed") return entry.failure.retryAt;
+    if (entry?.status === "available" && entry.limits.retry.status === "active") {
+      return entry.limits.retry.until;
+    }
+    return undefined;
+  }
+
+  #providerFailure(error: unknown) {
+    try {
+      return decodeProviderFailure(error);
+    } catch {
+      return undefined;
+    }
+  }
+
+  #snapshot(refreshedAt: UtcTimestamp): ProviderUsageLimitsSnapshot {
+    return decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt,
+      entries: [...this.#entries.values()].sort((left, right) =>
+        String(left.providerInstanceId).localeCompare(String(right.providerInstanceId)),
+      ),
+    });
+  }
+}

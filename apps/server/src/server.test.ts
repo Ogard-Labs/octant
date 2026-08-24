@@ -661,6 +661,56 @@ describe("startOctantServer", () => {
     );
   });
 
+  it("serves provider limits through the authenticated local product route", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-provider-limits-route-"));
+    directories.push(directory);
+    let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+    const capability = "A".repeat(43);
+    const windowId = "00000000-0000-4000-8000-000000000482";
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            desktopBridgeSecret: "desktop-secret",
+            serve: (options) => {
+              routeHandler = options.fetch;
+              return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+            },
+          });
+
+          const registered = yield* Effect.promise(() =>
+            Promise.resolve(
+              routeHandler?.(
+                new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+                  method: "POST",
+                  headers: { "x-octant-desktop-secret": "desktop-secret" },
+                  body: JSON.stringify({ windowId, capability }),
+                }),
+              ),
+            ),
+          );
+          expect(registered?.status).toBe(204);
+
+          const response = yield* Effect.promise(() =>
+            Promise.resolve(
+              routeHandler?.(
+                new Request("http://127.0.0.1:13773/api/provider-usage-limits", {
+                  headers: { "x-octant-window-capability": capability },
+                }),
+              ),
+            ),
+          );
+          expect(response?.status).toBe(200);
+          const body = yield* Effect.promise(() => Promise.resolve(response?.json()));
+          expect(body).toMatchObject({ version: 1, entries: [] });
+        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+      ),
+    );
+  });
+
   it("registers authenticated Code routes while preserving the larger Chat outer ceiling", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-code-routes-"));
     directories.push(directory);

@@ -70,6 +70,10 @@ export type ImplementedSettingId =
   | "sidebar-background"
   | "mode-switcher"
   | "project-view-switcher"
+  | "transcript-text-size"
+  | "transcript-width"
+  | "thread-provider-icons"
+  | "open-in-applications"
   | "theme-mode"
   | "theme-preset"
   | "ui-typography"
@@ -277,6 +281,10 @@ const settingSearchText: Readonly<Record<ImplementedSettingId, string>> = {
     "sidebar background image preset gradient custom upload overlay color opacity vibrancy",
   "mode-switcher": "mode switcher compact buttons dropdown sidebar navigation",
   "project-view-switcher": "project view switcher icons dropdown sidebar code",
+  "transcript-text-size": "transcript conversation text font size small medium large",
+  "transcript-width": "transcript conversation composer width narrow medium wide centered",
+  "thread-provider-icons": "thread provider icon avatar logo sidebar compact visibility",
+  "open-in-applications": "open in vscode cursor zed finder terminal ghostty xcode",
   "theme-mode": "theme mode system light dark appearance",
   "theme-preset": "theme preset Octant palette light dark",
   "ui-typography": "ui typography font family size prose interface",

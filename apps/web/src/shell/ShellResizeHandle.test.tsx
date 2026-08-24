@@ -5,9 +5,10 @@ import { ShellResizeHandle } from "./ShellResizeHandle";
 function renderHandle(overrides: Partial<React.ComponentProps<typeof ShellResizeHandle>> = {}) {
   const onCommit = vi.fn();
   const onPreview = vi.fn();
+  const accessibleName = overrides.accessibleName ?? "Resize navigation sidebar";
   render(
     <ShellResizeHandle
-      accessibleName="Resize navigation sidebar"
+      accessibleName={accessibleName}
       edge="trailing"
       maximum={420}
       minimum={220}
@@ -17,7 +18,7 @@ function renderHandle(overrides: Partial<React.ComponentProps<typeof ShellResize
       {...overrides}
     />,
   );
-  const separator = screen.getByRole("separator", { name: "Resize navigation sidebar" });
+  const separator = screen.getByRole("separator", { name: accessibleName });
   Object.assign(separator, {
     hasPointerCapture: vi.fn(() => true),
     releasePointerCapture: vi.fn(),
@@ -107,5 +108,24 @@ describe("ShellResizeHandle", () => {
     fireEvent.pointerDown(separator, { clientX: 400, pointerId: 12 });
     fireEvent.pointerMove(separator, { clientX: 360, pointerId: 12 });
     expect(onPreview).toHaveBeenLastCalledWith(400);
+  });
+
+  it("resizes a bottom panel from its top edge", () => {
+    const { onCommit, onPreview, separator } = renderHandle({
+      accessibleName: "Resize bottom panel",
+      edge: "top",
+      maximum: 640,
+      minimum: 160,
+      value: 260,
+    });
+
+    expect(separator).toHaveAttribute("aria-orientation", "horizontal");
+    fireEvent.keyDown(separator, { key: "ArrowUp" });
+    expect(onPreview).toHaveBeenLastCalledWith(268);
+    expect(onCommit).toHaveBeenLastCalledWith(268);
+
+    fireEvent.pointerDown(separator, { clientY: 500, pointerId: 13 });
+    fireEvent.pointerMove(separator, { clientY: 450, pointerId: 13 });
+    expect(onPreview).toHaveBeenLastCalledWith(310);
   });
 });

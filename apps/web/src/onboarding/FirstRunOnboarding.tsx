@@ -184,6 +184,11 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     chatDefaultConfigured: props.chatDefault !== undefined,
     navigatorConfigured: props.navigatorDefault !== undefined,
   }).map((descriptor) => ({ ...descriptor, current: descriptor.current && !handoffOpen }));
+  const currentStepIndex = Math.max(
+    0,
+    steps.findIndex((descriptor) => descriptor.id === step),
+  );
+  const currentStep = steps[currentStepIndex];
 
   /**
    * Collect a setup write so the outcome can be withheld if it does not land.
@@ -329,13 +334,14 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           <ol className="first-run__rail-list">
             {steps.map((descriptor) => (
               <li key={descriptor.id}>
-                <button
+                <OctantButton
                   aria-current={descriptor.current ? "step" : undefined}
                   className="first-run__rail-step"
                   data-configured={descriptor.configured}
                   disabled={importing || (unnamed && descriptor.id !== "profile")}
                   onClick={() => goTo(descriptor.id)}
                   type="button"
+                  variant="ghost"
                 >
                   <span className="first-run__rail-marker" aria-hidden>
                     {descriptor.configured ? <Check size={13} /> : null}
@@ -343,13 +349,21 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   <span className="first-run__rail-title">{descriptor.title}</span>
                   <span className="first-run__rail-summary">{descriptor.summary}</span>
                   {descriptor.configured ? <span className="sr-only">Configured</span> : null}
-                </button>
+                </OctantButton>
               </li>
             ))}
           </ol>
         </nav>
 
         <div className="first-run__panel">
+          {handoffOpen ? null : (
+            <header className="first-run__step-header">
+              <h3 className="first-run__step-title">{currentStep?.title ?? "Setup"}</h3>
+              <span className="first-run__step-count">
+                Step {String(currentStepIndex + 1)} of {String(steps.length)}
+              </span>
+            </header>
+          )}
           {handoffOpen ? (
             <FirstRunReadinessStep
               handoff={handoff}
@@ -363,9 +377,8 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           {handoffOpen || step !== "profile" ? null : (
             <div className="first-run__step">
               <p className="first-run__intro">
-                Octant has no account and signs you in to nothing. This is only how you want to be
-                shown inside the app. Give a name Octant can call you by &mdash; a first name, a
-                nickname, a handle, whatever you answer to. Everything else here is optional.
+                Octant has no account and signs you in to nothing. Choose the name and avatar shown
+                inside the app. Everything except your name is optional and stays on this Mac.
               </p>
               <ProfileEditor
                 nameRef={nameField}
@@ -385,6 +398,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   track(props.onSaveProfile(next));
                 }}
                 profile={profileDraft}
+                requiredNameMessage="Enter a name to continue."
                 {...(props.avatarEnvironment === undefined
                   ? {}
                   : { environment: props.avatarEnvironment })}
@@ -453,12 +467,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             />
           )}
         </div>
-
-        {unnamed ? (
-          <p className="first-run__notice callout" data-tone="attention" role="status">
-            Octant needs something to call you before it can go on. It stays on this Mac.
-          </p>
-        ) : null}
 
         {controller.blockedMessage === undefined ? null : (
           <p className="first-run__notice callout" data-tone="attention" role="alert">

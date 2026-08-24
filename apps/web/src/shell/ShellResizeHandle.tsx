@@ -3,7 +3,7 @@ import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react
 export interface ShellResizeHandleProps {
   readonly accessibleName: string;
   readonly className?: string;
-  readonly edge: "leading" | "trailing";
+  readonly edge: "leading" | "trailing" | "top" | "bottom";
   readonly maximum: number;
   readonly minimum: number;
   readonly onCommit: (value: number) => void;
@@ -18,7 +18,7 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
     | {
         readonly pointerId: number;
         readonly startValue: number;
-        readonly startX: number;
+        readonly startPoint: number;
         lastValue: number;
         moved: boolean;
       }
@@ -46,8 +46,11 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
   function pointerValue(event: ReactPointerEvent<HTMLElement>): number | undefined {
     const pointer = activePointer.current;
     if (pointer === undefined || pointer.pointerId !== event.pointerId) return undefined;
-    const delta =
-      props.edge === "trailing" ? event.clientX - pointer.startX : pointer.startX - event.clientX;
+    const currentPoint = verticalResize(props.edge) ? event.clientY : event.clientX;
+    const growsWithPointer = props.edge === "trailing" || props.edge === "bottom";
+    const delta = growsWithPointer
+      ? currentPoint - pointer.startPoint
+      : pointer.startPoint - currentPoint;
     if (delta === 0 && !pointer.moved) return undefined;
     const value = clamp(pointer.startValue + delta, props.minimum, props.maximum);
     pointer.moved = true;
@@ -86,7 +89,7 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
   return (
     <div
       aria-label={props.accessibleName}
-      aria-orientation="vertical"
+      aria-orientation={verticalResize(props.edge) ? "horizontal" : "vertical"}
       aria-valuemax={props.maximum}
       aria-valuemin={props.minimum}
       aria-valuenow={props.value}
@@ -102,7 +105,7 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
         activePointer.current = {
           pointerId: event.pointerId,
           startValue: props.value,
-          startX: event.clientX,
+          startPoint: verticalResize(props.edge) ? event.clientY : event.clientX,
           lastValue: props.value,
           moved: false,
         };
@@ -137,7 +140,16 @@ function clamp(value: number, minimum: number, maximum: number): number {
 }
 
 function keyboardDirection(key: string, edge: ShellResizeHandleProps["edge"]): -1 | 1 | undefined {
+  if (verticalResize(edge)) {
+    if (key === "ArrowUp") return edge === "top" ? 1 : -1;
+    if (key === "ArrowDown") return edge === "top" ? -1 : 1;
+    return undefined;
+  }
   if (key === "ArrowRight") return edge === "trailing" ? 1 : -1;
   if (key === "ArrowLeft") return edge === "trailing" ? -1 : 1;
   return undefined;
+}
+
+function verticalResize(edge: ShellResizeHandleProps["edge"]): boolean {
+  return edge === "top" || edge === "bottom";
 }

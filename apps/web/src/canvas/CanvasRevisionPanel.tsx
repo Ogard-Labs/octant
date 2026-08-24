@@ -3,6 +3,8 @@ import type {
   CanvasVersionHistoryEntry,
 } from "@octant/contracts/canvas-revision";
 import { useCallback, useState } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 export interface ReviseCanvasDraftProps {
   readonly expectedSequence: number;
@@ -55,7 +57,7 @@ export function ReviseCanvasDraft(props: ReviseCanvasDraftProps) {
       <label className="canvas-revise-form__label" htmlFor="canvas-revise-prompt">
         Refine canvas
       </label>
-      <textarea
+      <OctantTextarea
         id="canvas-revise-prompt"
         aria-label="Revision prompt"
         className="textarea"
@@ -64,14 +66,16 @@ export function ReviseCanvasDraft(props: ReviseCanvasDraftProps) {
         onChange={(event) => setPrompt(event.target.value)}
         rows={3}
       />
-      <button
+      <OctantButton
         className="btn btn-secondary btn-sm"
         type="submit"
         data-testid="canvas-revise-submit"
         disabled={submitting}
+        size="sm"
+        variant="secondary"
       >
         Revise
-      </button>
+      </OctantButton>
       {message ? <div data-testid="canvas-revise-message">{message}</div> : null}
     </form>
   );
@@ -94,12 +98,13 @@ export function CanvasVersionHistoryPanel(props: CanvasVersionHistoryPanelProps)
           const isSelected = String(entry.versionId) === String(props.selectedVersionId);
           return (
             <li key={String(entry.versionId)}>
-              <button
+              <OctantButton
                 type="button"
                 className="canvas-version-history__item"
                 data-testid={`canvas-version-${entry.sequence}`}
                 aria-current={isSelected ? "true" : undefined}
                 onClick={() => props.onSelect(String(entry.versionId))}
+                variant="ghost"
               >
                 <span className="canvas-version-history__sequence">v{entry.sequence}</span>
                 <span className="canvas-version-history__label">
@@ -109,7 +114,7 @@ export function CanvasVersionHistoryPanel(props: CanvasVersionHistoryPanelProps)
                 {entry.promptSummary ? (
                   <span className="canvas-version-history__summary">{entry.promptSummary}</span>
                 ) : null}
-              </button>
+              </OctantButton>
             </li>
           );
         })}

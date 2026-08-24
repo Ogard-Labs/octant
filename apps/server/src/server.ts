@@ -39,11 +39,14 @@ import {
   type CodeThreadId,
   type OctantMode,
   type WorkThreadId,
+  UtcTimestamp as UtcTimestampSchema,
 } from "@octant/contracts";
 import type { ExtensionProviderFamily, StandaloneSkillScope } from "@octant/contracts/extensions";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AgentRunControlParentFacts } from "./agentRun/agentRunControlService";
 import { Data, Effect, Schema, Scope } from "effect";
+
+const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
 import { assistantTranscript } from "./chat/assistantTranscript";
 import { ChatService } from "./chat/chatService";
@@ -205,7 +208,9 @@ import {
   type CodeRouteService,
 } from "./codeRoutes";
 import {
+  createCodeCheckoutOpenRouteHandler,
   createCodeExternalEditorRouteHandler,
+  isCodeCheckoutOpenTargetCurrent,
   isCodeExternalEditorTargetCurrent,
 } from "./codeExternalEditorRoutes";
 import { createCodeOperationApprovalRouteHandler } from "./codeOperationApprovalRoutes";
@@ -279,6 +284,7 @@ import {
   createRecordedAgentRunContextSnapshotPort,
 } from "./agentRun/agentRunSessionRuntime";
 import { AgentRunSessionSupervisor } from "./agentRun/agentRunSessionSupervisor";
+import { AgentRunLiveConversationStore } from "./agentRun/agentRunLiveConversationStore";
 import { createFolderBrowseRouteHandler } from "./folderBrowseRoutes";
 import { createLinkedThreadRouteHandler } from "./linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
@@ -356,6 +362,8 @@ import { createProviderFromDiscoveryCandidate } from "./providers/discoveryProvi
 import { makeDiscoveryService } from "./providers/discoveryService";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import { ProviderService } from "./providers/providerService";
+import { ProviderUsageLimitsService } from "./providers/providerUsageLimitsService";
+import { createProviderUsageLimitsRouteHandler } from "./providers/providerUsageLimitsRoutes";
 import {
   createShellRouteHandler,
   isAllowedRendererOrigin,
@@ -1391,6 +1399,7 @@ export function startOctantServer(
       maxRetryJitterMs: 250,
       ambiguousReservationTtlMs: 60_000,
     });
+    const agentRunLiveConversations = new AgentRunLiveConversationStore();
     // Managed subagent execution. A managed child runs as an in-process
     // provider session, not a spawned process, so authority is re-derived from
     // the run rather than inherited from the parent thread at execution time.
@@ -1430,8 +1439,23 @@ export function startOctantServer(
         // work, and unrelated turns keep the real limits.
         serviceLimits: makeUnobservedProviderCapacityFacts({
           scheduler: capacityScheduler,
-          now: () => new Date().toISOString() as UtcTimestamp,
+          now: () => decodeUtcTimestamp(new Date().toISOString()),
         }),
+        onSessionStarted: ({ runId }) => agentRunLiveConversations.begin(runId),
+        onTextDelta: ({ runId, text, occurredAt }) =>
+          agentRunLiveConversations.appendText(runId, text, decodeUtcTimestamp(occurredAt)),
+        onSessionSettled: ({ runId, outcome }) => {
+          if (outcome.kind === "completed") {
+            agentRunLiveConversations.complete(runId);
+          } else {
+            agentRunLiveConversations.markStale(
+              runId,
+              outcome.kind === "failed"
+                ? outcome.failure.message
+                : "The child session ended before a complete transcript was retained.",
+            );
+          }
+        },
       }),
       // A settled managed session is the only signal that a child finished, so
       // orchestration records its terminal state durably. `agentRunOrchestration`
@@ -1470,6 +1494,7 @@ export function startOctantServer(
     const agentRunRoutes = createAgentRunRouteHandler({
       windowAuthorityStore,
       persistence: agentRunPersistence,
+      liveConversations: agentRunLiveConversations,
       orchestration: agentRunOrchestration,
       settings: agentRunSettingsStore,
       providerReadiness: {
@@ -2677,6 +2702,33 @@ export function startOctantServer(
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
     };
+    const providerUsageLimitsService = new ProviderUsageLimitsService({
+      listInstances: () => persistence.readProviderInstances(),
+      now: () => decodeUtcTimestamp(new Date().toISOString()),
+      observe: async (instance, signal) => {
+        let driver: ProviderDriver;
+        try {
+          driver = makeConfiguredProviderDriver(instance, {
+            ...configuredDriverOptions,
+          });
+        } catch {
+          return undefined;
+        }
+        const facts = driver.contextFacts;
+        if (facts === undefined) return undefined;
+        const limits = await Effect.runPromise(
+          Effect.scoped(facts.observeServiceLimits({ instanceId: instance.id })),
+          { signal },
+        );
+        return { source: "provider-runtime", limits };
+      },
+    });
+    providerUsageLimitsService.start();
+    void providerUsageLimitsService.refresh().catch(() => undefined);
+    const providerUsageLimitsRoutes = createProviderUsageLimitsRouteHandler({
+      service: providerUsageLimitsService,
+      windowAuthorityStore,
+    });
     const browserAuthority = new ServerBrowserAuthorityResolver({
       hostId: deriveToolHostId(providerDataDirectory),
       persistence,
@@ -3256,6 +3308,30 @@ export function startOctantServer(
           const file = await realpath(resolve(root.rootPath, relativePath));
           if (!pathIsProjectConfined(root.rootPath, file)) return undefined;
           return { file, editor };
+        } catch {
+          return undefined;
+        }
+      },
+    });
+    const codeCheckoutOpenRoutes = createCodeCheckoutOpenRouteHandler({
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      resolve: async (input) => {
+        const windowId = decodeWindowId(input.windowId);
+        const thread = persistence.readCodeThread(decodeCodeThreadId(input.threadId));
+        if (thread === undefined) return undefined;
+        const checkout = persistence.readCodeCheckout(thread.checkoutId);
+        if (checkout === undefined || !isCodeCheckoutOpenTargetCurrent({ thread, checkout })) {
+          return undefined;
+        }
+        try {
+          const rooted = await roots.resolve(
+            windowId,
+            thread,
+            checkout,
+            codeWorkingDirectoryProbePath,
+          );
+          if (rooted === undefined) return undefined;
+          return { checkoutRoot: await realpath(rooted.rootPath) };
         } catch {
           return undefined;
         }
@@ -5368,11 +5444,13 @@ export function startOctantServer(
       (await folderBrowseRoutes(request)) ??
       (await linkedThreadRoutes(request)) ??
       (await codeOperationApprovalRoutes(request)) ??
+      (await codeCheckoutOpenRoutes(request)) ??
       (await codeExternalEditorRoutes(request)) ??
       (await previewHandoffBridgeRoutes(request)) ??
       (await codeRoutes(request)) ??
       (await appleToolchainRoutes(request)) ??
       (await providerRoutes(request)) ??
+      (await providerUsageLimitsRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??
       (await threadCheckpointRoutes(request)) ??
@@ -5699,6 +5777,7 @@ export function startOctantServer(
           } catch (error) {
             shutdownFailure ??= error;
           }
+          providerUsageLimitsService.stop();
           try {
             managedCloneService.close();
           } catch (error) {

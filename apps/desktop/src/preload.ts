@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
+import type { OpenInApplicationId } from "@octant/contracts/shell";
 
 export const HOST_BRIDGE_KEY = "octantHost";
 
@@ -24,7 +25,10 @@ export const IPC_CHANNELS = {
   maximizeOrRestore: "octant:window:maximize-or-restore",
   minimize: "octant:window:minimize",
   openCodeExternalEditor: "octant:code:open-external-editor",
+  listOpenInApplications: "octant:code:list-open-in-applications",
+  openCodeCheckoutInApplication: "octant:code:open-checkout-in-application",
   openInNewWindow: "octant:window:open-project",
+  openSettings: "octant:menu:open-settings",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",
   startNewAgent: "octant:menu:start-new-agent",
@@ -228,6 +232,7 @@ export interface RemoteHostIdentityRotationResult {
 type MaterialListener = (event: unknown, material: unknown) => void;
 type DeepLinkListener = (event: unknown, target: unknown) => void;
 type AgentStartListener = (event: unknown) => void;
+type SettingsOpenListener = (event: unknown) => void;
 type BoundProjectType = "work" | "code";
 type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
 const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
@@ -245,6 +250,17 @@ export interface CodeExternalEditorRequest {
   readonly fileId: string;
   readonly line: number;
   readonly column: number;
+}
+
+export interface OpenInApplicationDescriptor {
+  readonly id: OpenInApplicationId;
+  readonly label: string;
+  readonly available: boolean;
+}
+
+export interface CodeCheckoutOpenRequest {
+  readonly threadId: string;
+  readonly applicationId: OpenInApplicationId;
 }
 
 export interface PreviewHandoffRequest {
@@ -318,6 +334,8 @@ export interface OctantHostBridge {
   readonly maximizeOrRestore: () => Promise<void>;
   readonly minimize: () => Promise<void>;
   readonly openCodeExternalEditor: (request: CodeExternalEditorRequest) => Promise<void>;
+  readonly listOpenInApplications: () => Promise<ReadonlyArray<OpenInApplicationDescriptor>>;
+  readonly openCodeCheckoutInApplication: (request: CodeCheckoutOpenRequest) => Promise<void>;
   readonly openInNewWindow: (target: ProjectWindowTarget) => Promise<void>;
   readonly previewHandoff: (request: PreviewHandoffRequest) => Promise<void>;
   readonly requestCodeOperationApproval: (
@@ -340,6 +358,7 @@ export interface OctantHostBridge {
     listener: (vibrancy: "sidebar" | null) => void,
   ) => () => void;
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
+  readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
   readonly enablePrivateListener: (
@@ -512,6 +531,17 @@ export function createHostBridge(
       validateCodeExternalEditorRequest(request);
       return invoke(IPC_CHANNELS.openCodeExternalEditor, request);
     },
+    listOpenInApplications: async () => {
+      const value: unknown = await ipc.invoke(IPC_CHANNELS.listOpenInApplications);
+      if (!Array.isArray(value) || !value.every(isOpenInApplicationDescriptor)) {
+        throw new Error("Octant received an invalid Open in application catalogue.");
+      }
+      return Object.freeze(value.map((entry) => Object.freeze({ ...entry })));
+    },
+    openCodeCheckoutInApplication: (request: CodeCheckoutOpenRequest) => {
+      validateCodeCheckoutOpenRequest(request);
+      return invoke(IPC_CHANNELS.openCodeCheckoutInApplication, request);
+    },
     openInNewWindow: async (target: ProjectWindowTarget) => {
       validateProjectWindowTarget(target);
       await invoke(IPC_CHANNELS.openInNewWindow, target);
@@ -622,6 +652,11 @@ export function createHostBridge(
       const receive: DeepLinkListener = (_event, target) => listener(target);
       ipc.on(IPC_CHANNELS.codeDeepLink, receive);
       return () => ipc.removeListener(IPC_CHANNELS.codeDeepLink, receive);
+    },
+    subscribeOpenSettings: (listener: () => void) => {
+      const receive: SettingsOpenListener = () => listener();
+      ipc.on(IPC_CHANNELS.openSettings, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.openSettings, receive);
     },
     subscribeStartNewAgent: (listener: () => void) => {
       const receive: AgentStartListener = () => listener();
@@ -993,6 +1028,41 @@ function validateCodeExternalEditorRequest(value: CodeExternalEditorRequest): vo
     value.column < 1
   ) {
     throw new TypeError("Invalid Code external editor request.");
+  }
+}
+
+const OPEN_IN_APPLICATION_IDS: ReadonlySet<string> = new Set([
+  "vscode",
+  "cursor",
+  "zed",
+  "finder",
+  "terminal",
+  "ghostty",
+  "xcode",
+]);
+
+function isOpenInApplicationDescriptor(value: unknown): value is OpenInApplicationDescriptor {
+  return (
+    isRecord(value) &&
+    Object.keys(value).sort().join("\0") === ["id", "label", "available"].sort().join("\0") &&
+    typeof value.id === "string" &&
+    OPEN_IN_APPLICATION_IDS.has(value.id) &&
+    typeof value.label === "string" &&
+    value.label.trim() !== "" &&
+    typeof value.available === "boolean"
+  );
+}
+
+function validateCodeCheckoutOpenRequest(value: CodeCheckoutOpenRequest): void {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).sort().join("\0") !== ["threadId", "applicationId"].sort().join("\0") ||
+    typeof value.threadId !== "string" ||
+    !PROVIDER_INSTANCE_ID_PATTERN.test(value.threadId) ||
+    typeof value.applicationId !== "string" ||
+    !OPEN_IN_APPLICATION_IDS.has(value.applicationId)
+  ) {
+    throw new TypeError("Invalid Code checkout Open in request.");
   }
 }
 

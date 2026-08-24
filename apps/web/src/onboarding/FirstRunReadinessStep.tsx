@@ -1,6 +1,7 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { Check, CircleDashed } from "lucide-react";
+import { OctantButton } from "../ui/base/OctantButton";
 import type { FirstRunHandoff, FirstRunHandoffSetupTarget } from "./firstRunHandoffModel";
 import type { WorkspaceChoices } from "./firstRunStepModel";
 
@@ -44,16 +45,17 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
           <div className="setgroup-head">Mode</div>
           <div className="first-run__choices">
             {modes.map((mode) => (
-              <button
+              <OctantButton
                 aria-checked={props.selectedMode === mode}
                 className="first-run__choice"
                 key={mode}
                 onClick={() => props.onSelectMode(mode)}
                 role="radio"
                 type="button"
+                variant="ghost"
               >
                 {MODE_COPY[mode]}
-              </button>
+              </OctantButton>
             ))}
           </div>
         </div>
@@ -77,13 +79,14 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
                 {fact.ready || target === undefined ? (
                   <span className="first-run__provider-name">{fact.label}</span>
                 ) : (
-                  <button
+                  <OctantButton
                     className="first-run__provider-name first-run__fact-action"
                     onClick={() => props.onSetup(target)}
                     type="button"
+                    variant="ghost"
                   >
                     {fact.label}
-                  </button>
+                  </OctantButton>
                 )}
                 <span className="first-run__provider-label">{fact.ready ? "Ready" : "Needed"}</span>
                 <span className="first-run__provider-detail">{fact.detail}</span>

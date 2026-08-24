@@ -1,11 +1,11 @@
 import { useContext, useState } from "react";
-import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantContextMenuRoot, OctantContextMenuTrigger } from "../ui/base/OctantContextMenu";
 
 /**
  * Thread rows and their honest states, shared by the Project sidebar and the
@@ -172,9 +172,6 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
                 busy and an idle title start on the same edge. It is never
                 colour alone: the label says the state in words. */}
             <ThreadStatusDot activity={activityOf(thread)} />
-            <span className="sidebar-navigation__thread-copy">
-              <span className="sidebar-navigation__thread-title">{thread.title}</span>
-            </span>
             {thread.provider === undefined ? null : (
               <span
                 className="sidebar-navigation__thread-provider"
@@ -183,18 +180,21 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
                 <ProviderGlyph
                   displayName={thread.provider.displayName}
                   driverKind={thread.provider.driverKind}
-                  size={15}
+                  size={14}
                 />
               </span>
             )}
+            <span className="sidebar-navigation__thread-copy">
+              <span className="sidebar-navigation__thread-title">{thread.title}</span>
+            </span>
           </OctantButton>
         );
         if (!hasMenu) return <div key={rowId}>{row}</div>;
         return (
-          <ContextMenuPrimitive.Root key={rowId}>
-            <ContextMenuPrimitive.Trigger render={row} />
+          <OctantContextMenuRoot key={rowId}>
+            <OctantContextMenuTrigger render={row} />
             <ThreadRowMenu actions={actions} thread={thread} />
-          </ContextMenuPrimitive.Root>
+          </OctantContextMenuRoot>
         );
       })}
     </>

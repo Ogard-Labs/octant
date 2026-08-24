@@ -27,11 +27,15 @@ describe("the thread environment summary", () => {
         }}
       />,
     );
+    const summary = screen.getByRole("button", { name: "Toggle environment" });
+    expect(summary).toBeVisible();
+    expect(summary).toHaveAttribute("aria-pressed", "false");
     expect(
-      screen.getByRole("button", {
-        name: "Show environment for Octant. feature/name · Dirty · packages/app · 2 servers",
-      }),
-    ).toBeVisible();
+      screen.getByText("Octant · feature/name · Dirty · packages/app · 2 servers"),
+    ).toHaveClass("sr-only");
+    expect(summary).not.toHaveTextContent(
+      /Octant|feature\/name|packages\/app|2 servers|available/i,
+    );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -43,7 +47,7 @@ describe("the thread environment summary", () => {
         <p>Checkout facts</p>
       </ThreadEnvironmentPanel>,
     );
-    await user.click(screen.getByRole("button", { name: /Show environment for Octant/ }));
+    await user.click(screen.getByRole("button", { name: "Toggle environment" }));
     expect(onOpenChange).toHaveBeenLastCalledWith(true);
 
     rerender(
@@ -51,8 +55,16 @@ describe("the thread environment summary", () => {
         <p>Checkout facts</p>
       </ThreadEnvironmentPanel>,
     );
-    expect(screen.getByRole("dialog", { name: "Environment for Octant" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Environment" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Environment" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Toggle environment" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(screen.getByText("Checkout facts")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Close environment" }));
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
@@ -99,11 +111,7 @@ describe("the thread environment summary", () => {
         }}
       />,
     );
-    expect(
-      screen.getByRole("button", {
-        name: "Show environment for Octant. feature/name · Dirty · packages/app · 1 server",
-      }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Toggle environment" })).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -113,7 +121,7 @@ describe("the thread environment summary", () => {
     render(
       <ThreadEnvironmentPanel onOpenChange={onOpenChange} open={false} summary={{ identity }} />,
     );
-    await user.click(screen.getByRole("button", { name: /Show environment for Octant/ }));
+    await user.click(screen.getByRole("button", { name: "Toggle environment" }));
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(true);
   });

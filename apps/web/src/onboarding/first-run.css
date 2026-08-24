@@ -7,9 +7,8 @@
  * larger text and 200% zoom.
  *
  * The look comes from the design system: groups and rows are `.setgroup`/
- * `.setrow`, notices are `.callout`, and buttons are the `.btn` recipes the
- * OctantButton adapter emits. The rules here are the residue those recipes do
- * not express — the wizard grid, the step rail, and the readiness rows.
+ * `.setrow`, notices are `.callout`, and buttons use the owned shadcn recipe.
+ * The rules here only own wizard layout, the step rail, and readiness rows.
  */
 
 /*
@@ -21,7 +20,7 @@
  */
 .first-run {
   --octant-dialog-width: 52rem;
-  --octant-dialog-height: min(86vh, 46rem);
+  --octant-dialog-height: min(92vh, 48rem);
 
   container-type: inline-size;
   container-name: first-run;
@@ -91,6 +90,8 @@
   flex-direction: column;
   gap: var(--oct-space-3);
   min-width: 0;
+  padding-inline-end: var(--oct-space-4);
+  border-inline-end: 1px solid var(--oct-border-soft);
 
   /*
    * Five steps and a title can outgrow the row they share with the panel when
@@ -111,21 +112,25 @@
   list-style: none;
 }
 
-/* The rail speaks the settings nav's language: quiet until hovered or
-   current, when it takes the same soft fill as `.setnav-item`. */
+/* The rail stays flat. Hover may tint a row, but the persistent current state
+   uses type and the progress marker rather than turning a step into a card. */
 .first-run__rail-step {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   column-gap: var(--oct-space-2);
+  row-gap: 2px;
   inline-size: 100%;
+  min-block-size: 3.25rem;
+  block-size: auto;
   padding: var(--oct-space-2);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   text-align: start;
+  white-space: normal;
   cursor: pointer;
 }
 
@@ -134,13 +139,18 @@
   color: var(--oct-fg);
 }
 
-/*
- * The current step is marked by `aria-current` in the markup as well as by the
- * fill here, so it is not announced by appearance alone.
- */
+/* `aria-current` carries the semantic state; stronger type and one filled
+   marker carry the visual state without a selected-card callout. */
 .first-run__rail-step[aria-current="step"] {
-  background: var(--oct-fg-soft);
+  background: transparent;
   color: var(--oct-fg);
+  box-shadow: none;
+}
+
+.first-run__rail-step[aria-current="step"] .first-run__rail-marker {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
 .first-run__rail-marker {
@@ -168,7 +178,9 @@
 .first-run__rail-summary {
   grid-column: 2;
   font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
   color: var(--oct-muted);
+  overflow-wrap: anywhere;
 }
 
 /* The step's own scroller. The footer stays put beside it; the rail scrolls
@@ -177,14 +189,52 @@
   grid-area: panel;
   min-width: 0;
   min-height: 0;
+  padding-inline-end: var(--oct-space-2);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.first-run__step-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  margin-block-end: var(--oct-space-3);
+  padding-block-end: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.first-run__step-title {
+  margin: 0;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-strong);
+}
+
+.first-run__step-count {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
 }
 
 .first-run__step {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-4);
+  gap: var(--oct-space-3);
   min-width: 0;
+}
+
+.first-run__step .profile-editor {
+  gap: var(--oct-space-3);
+}
+
+@container first-run (max-width: 40rem) {
+  .first-run__rail {
+    padding-inline-end: 0;
+    border-inline-end: 0;
+  }
 }
 
 /* Non-row content inside a `.setgroup` card supplies the padding `.setrow`
@@ -213,8 +263,8 @@
   min-height: var(--oct-control-height-sm);
   padding-inline: var(--oct-space-4);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: transparent;
+  border-radius: var(--radius-md);
+  background: var(--background);
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
@@ -222,8 +272,8 @@
 }
 
 .first-run__choice:hover {
-  background: var(--oct-surface-warm);
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  background: var(--accent);
+  border-color: var(--input);
 }
 
 /*
@@ -231,8 +281,9 @@
  * the accent here, so the choice is never communicated by appearance alone.
  */
 .first-run__choice[aria-checked="true"] {
-  border-color: var(--oct-accent-fg);
-  background: var(--oct-accent-soft);
+  border-color: var(--input);
+  background: var(--secondary);
+  box-shadow: var(--octant-shadow-sm);
   font-weight: var(--oct-weight-strong);
 }
 
@@ -252,6 +303,11 @@
   max-width: 64ch;
   font-size: var(--oct-text-sm);
   color: var(--oct-muted);
+}
+
+.first-run__loading-value {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
 }
 
 /* The readiness summary is a row inside the readiness `.setgroup`. */
@@ -316,12 +372,9 @@ button.first-run__fact-action {
   cursor: pointer;
 }
 
-/* The state word beside the icon: the settings vocabulary's mono label. */
+/* The state word beside the icon stays quiet without changing typeface. */
 .first-run__provider-label {
-  font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
   white-space: nowrap;
   color: var(--oct-muted);
 }
@@ -348,6 +401,14 @@ button.first-run__fact-action {
 
 .first-run__notice[data-tone="attention"] {
   border-left-color: var(--oct-warn-fg);
+}
+
+.first-run__empty {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+  padding-block: var(--oct-space-2);
 }
 
 .first-run__actions {

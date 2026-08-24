@@ -24,6 +24,8 @@ export type SidebarNavigationDescriptorId =
   | "pull-requests"
   | "projects";
 
+export type SidebarAppMenuDescriptorId = "agents" | "automations" | "artifact-library" | "plugins";
+
 export interface SidebarNavigationDescriptor {
   readonly id: SidebarNavigationDescriptorId;
   readonly label: string;
@@ -45,6 +47,8 @@ export interface ChatThreadNavigationSource {
   readonly followUpOpen?: boolean;
   readonly lastSequence?: number;
   readonly projectId?: string;
+  /** Provider identity carried from the host navigation projection. */
+  readonly providerInstanceId?: string;
   readonly readSequence: number;
   readonly threadId: string;
   readonly title: string;
@@ -97,6 +101,9 @@ export function buildChatThreadNavigation(
   return threads.map((thread) => ({
     ...(thread.followUpOpen === undefined ? {} : { followUp: thread.followUpOpen }),
     ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    ...(thread.providerInstanceId === undefined
+      ? {}
+      : { providerInstanceId: thread.providerInstanceId }),
     threadId: thread.threadId,
     title: thread.title,
     ...(thread.lastSequence === undefined
@@ -122,46 +129,40 @@ const descriptors = {
 export function buildSidebarNavigation(
   input: SidebarNavigationInput,
 ): ReadonlyArray<SidebarNavigationDescriptor> {
-  const automations = input.automationsEnabled ? [descriptors.automations] : [];
-  const agents = input.agentsCenterEnabled ? [descriptors.agents] : [];
-  // Skills and plugins are installed once and apply wherever the active mode
-  // allows them, so the destination belongs in every mode rather than only the
-  // two work modes.
-  const plugins = input.plugins === "available" ? [descriptors.plugins] : [];
-  // Artifacts are made in every mode and the library gathers all of them, so
-  // the destination belongs in every mode rather than only where Canvas is
-  // most used. A mode-scoped library would be the per-Project inventory again.
-  const artifacts = input.artifactLibrary === "available" ? [descriptors["artifact-library"]] : [];
-
   switch (input.activeMode) {
     case "chat":
       return [
         ...(input.createThread === "available" ? [descriptors["new-chat"]] : []),
-        ...agents,
-        ...artifacts,
-        ...plugins,
         ...(input.projects === "available" ? [descriptors.projects] : []),
       ];
     case "work":
       return [
         ...(input.createThread === "available" ? [descriptors["new-work-thread"]] : []),
-        ...agents,
-        ...automations,
-        ...artifacts,
-        ...plugins,
         ...(input.threadBoard === "available" ? [descriptors["thread-board"]] : []),
         ...(input.projects === "available" ? [descriptors.projects] : []),
       ];
     case "code":
       return [
         ...(input.createThread === "available" ? [descriptors["new-code-thread"]] : []),
-        ...agents,
-        ...automations,
-        ...artifacts,
-        ...plugins,
         ...(input.threadBoard === "available" ? [descriptors["thread-board"]] : []),
         ...(input.pullRequests === "available" ? [descriptors["pull-requests"]] : []),
         ...(input.projects === "available" ? [descriptors.projects] : []),
       ];
   }
+}
+
+/**
+ * Low-frequency destinations stay available without competing with the active
+ * thread and Project tree. The profile menu is host-wide, while availability
+ * remains mode-aware and fail-closed through the same input as primary nav.
+ */
+export function buildSidebarAppMenu(
+  input: SidebarNavigationInput,
+): ReadonlyArray<SidebarNavigationDescriptor & { readonly id: SidebarAppMenuDescriptorId }> {
+  return [
+    ...(input.agentsCenterEnabled ? [descriptors.agents] : []),
+    ...(input.activeMode !== "chat" && input.automationsEnabled ? [descriptors.automations] : []),
+    ...(input.artifactLibrary === "available" ? [descriptors["artifact-library"]] : []),
+    ...(input.plugins === "available" ? [descriptors.plugins] : []),
+  ];
 }

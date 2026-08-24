@@ -2,6 +2,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import { describe, expect, it } from "vitest";
 import {
   buildChatThreadNavigation,
+  buildSidebarAppMenu,
   buildSidebarNavigation,
   type NavigationAvailability,
   type SidebarNavigationDescriptorId,
@@ -34,17 +35,7 @@ describe("buildSidebarNavigation", () => {
     expect(descriptorIds({ activeMode, ...availableBaseCapabilities })).toEqual(expectedIds);
   });
 
-  it("adds Agents Center to every mode when enabled", () => {
-    expect(
-      descriptorIds({
-        activeMode: "chat",
-        ...availableBaseCapabilities,
-        agentsCenterEnabled: true,
-      }),
-    ).toEqual(["new-chat", "agents", "projects"]);
-  });
-
-  it("adds only the destinations supported by each mode", () => {
+  it("keeps secondary destinations out of primary navigation", () => {
     const capabilities = {
       ...availableBaseCapabilities,
       threadBoard: "available" as const,
@@ -54,27 +45,34 @@ describe("buildSidebarNavigation", () => {
       artifactLibrary: "unavailable" as const,
     } as const;
 
-    // Plugins reach every mode; Automations and the work-mode boards do not.
     expect(descriptorIds({ activeMode: "chat", ...capabilities })).toEqual([
       "new-chat",
-      "plugins",
       "projects",
     ]);
     expect(descriptorIds({ activeMode: "work", ...capabilities })).toEqual([
       "new-work-thread",
-      "automations",
-      "plugins",
       "thread-board",
       "projects",
     ]);
     expect(descriptorIds({ activeMode: "code", ...capabilities })).toEqual([
       "new-code-thread",
-      "automations",
-      "plugins",
       "thread-board",
       "pull-requests",
       "projects",
     ]);
+  });
+
+  it("groups capability-backed secondary destinations in the app menu", () => {
+    expect(
+      buildSidebarAppMenu({
+        activeMode: "code",
+        ...availableBaseCapabilities,
+        agentsCenterEnabled: true,
+        automationsEnabled: true,
+        artifactLibrary: "available",
+        plugins: "available",
+      }).map((descriptor) => descriptor.id),
+    ).toEqual(["agents", "automations", "artifact-library", "plugins"]);
   });
 
   it.each(["disabled", "unavailable", "unauthorized"] as const)(
@@ -98,7 +96,6 @@ describe("buildSidebarNavigation", () => {
 
   it.each([
     ["chat", "createThread", "new-chat"],
-    ["chat", "plugins", "plugins"],
     ["chat", "projects", "projects"],
     ["work", "createThread", "new-work-thread"],
     ["work", "projects", "projects"],
@@ -127,7 +124,7 @@ describe("buildSidebarNavigation", () => {
     expect(ids.has("search")).toBe(false);
   });
 
-  it("never exposes Automations in Chat before a separate Chat automation design", () => {
+  it("never exposes secondary destinations in primary navigation", () => {
     expect(
       descriptorIds({
         activeMode: "chat",
@@ -137,23 +134,6 @@ describe("buildSidebarNavigation", () => {
       }),
     ).toEqual(["new-chat", "projects"]);
   });
-
-  it.each(["work", "code"] as const)(
-    "shows Automations in %s only when explicitly enabled",
-    (activeMode) => {
-      const expectedIds = {
-        work: ["new-work-thread", "automations", "projects"],
-        code: ["new-code-thread", "automations", "projects"],
-      } as const;
-
-      expect(
-        descriptorIds({ activeMode, ...availableBaseCapabilities, automationsEnabled: true }),
-      ).toEqual(expectedIds[activeMode]);
-      expect(descriptorIds({ activeMode, ...availableBaseCapabilities })).not.toContain(
-        "automations",
-      );
-    },
-  );
 
   it("returns Octant-owned labels without fabricating project or thread records", () => {
     expect(buildSidebarNavigation({ activeMode: "chat", ...availableBaseCapabilities })).toEqual([
@@ -217,6 +197,25 @@ describe("buildSidebarNavigation", () => {
         threadId: "00000000-0000-4000-8000-000000000101",
         title: "Planning",
         updatedAt: "2026-08-14T12:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("forwards the source provider instance so the shared row can resolve its mark", () => {
+    expect(
+      buildChatThreadNavigation([
+        {
+          providerInstanceId: "00000000-0000-4000-8000-000000000901",
+          readSequence: 0,
+          threadId: "00000000-0000-4000-8000-000000000101",
+          title: "Provider thread",
+        },
+      ]),
+    ).toEqual([
+      {
+        providerInstanceId: "00000000-0000-4000-8000-000000000901",
+        threadId: "00000000-0000-4000-8000-000000000101",
+        title: "Provider thread",
       },
     ]);
   });
@@ -291,8 +290,8 @@ describe("buildSidebarNavigation", () => {
                   for (const id of ids) {
                     expect(allowedByMode[activeMode].has(id)).toBe(true);
                   }
-                  expect(ids.includes("artifact-library")).toBe(artifactLibrary === "available");
-                  expect(ids.includes("agents")).toBe(agentsCenterEnabled);
+                  expect(ids.includes("artifact-library")).toBe(false);
+                  expect(ids.includes("agents")).toBe(false);
                 }
               }
             }

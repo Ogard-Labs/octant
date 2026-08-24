@@ -2,6 +2,7 @@ import type { CodeEnvironmentObservation } from "@octant/contracts";
 import { Files, FolderGit2, GitBranch, GitCommitHorizontal, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import type { CodeEnvironmentControllerStatus } from "./useCodeEnvironmentController";
+import { OctantButton } from "../ui/base/OctantButton";
 
 export interface EnvironmentGitGroupProps {
   /**
@@ -145,12 +146,13 @@ function WayOut(props: {
 }) {
   if (props.action === undefined) return null;
   return (
-    <button
+    <OctantButton
       className="environment-group__action window-no-drag"
       onClick={props.action.onClick}
       type="button"
+      variant="ghost"
     >
       {props.action.label}
-    </button>
+    </OctantButton>
   );
 }

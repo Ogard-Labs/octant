@@ -1,5 +1,10 @@
 import { useThreadPlan } from "./ThreadPlanContext";
-import { ThreadTaskViewer } from "./ThreadTaskViewer";
+import { ThreadTaskViewer, type ThreadTaskChangedFiles } from "./ThreadTaskViewer";
+
+export interface InlineThreadPlanProps {
+  /** Server-derived checkout evidence, when the owning surface has it. */
+  readonly changedFiles?: ThreadTaskChangedFiles;
+}
 
 /**
  * The thread's plan, in the conversation it came out of.
@@ -9,13 +14,16 @@ import { ThreadTaskViewer } from "./ThreadTaskViewer";
  * a full plan card between every transcript and composer. Writing and revising
  * stay in the thread's Plan panel.
  */
-export function InlineThreadPlan() {
+export function InlineThreadPlan(props: InlineThreadPlanProps = {}) {
   const controller = useThreadPlan();
   const plan = controller?.plan;
   if (controller === undefined || plan == null || plan.status === "withdrawn") return null;
   return (
-    <div className="code-thread-workspace__plan">
-      <ThreadTaskViewer controller={controller} />
+    <div className="thread-task-viewer__placement">
+      <ThreadTaskViewer
+        controller={controller}
+        {...(props.changedFiles === undefined ? {} : { changedFiles: props.changedFiles })}
+      />
       {controller.commandMessage === undefined ? null : (
         <p className="thread-plan__command-error" role="alert">
           {controller.commandMessage}

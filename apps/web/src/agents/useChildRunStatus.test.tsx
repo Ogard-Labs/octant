@@ -10,6 +10,7 @@ const parentThreadId = "00000000-0000-4000-8000-000000000001" as AgentRunParentT
 
 function summaryEntry(runId: string, lifecycleStatus: string, parentRunId?: string) {
   return {
+    conversation: vi.fn(),
     runId,
     requestId: `req-${runId}`,
     parentThreadId,

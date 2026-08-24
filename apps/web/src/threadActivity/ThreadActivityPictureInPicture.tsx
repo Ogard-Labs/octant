@@ -243,11 +243,12 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
       <div className="thread-activity-frame__content">{props.children}</div>
       {!hasActivity ? null : collapsed ? (
         <>
-          <button
+          <OctantButton
             aria-label={`Show ${collapsedLabel} activity preview`}
             className="thread-activity-pip-trigger window-no-drag"
             onClick={() => setCollapsed(false)}
             type="button"
+            variant="ghost"
           >
             <span className="thread-activity-pip__pulse" />
             {activeKind === "browser" ? (
@@ -257,7 +258,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
             )}
             <span>{collapsedLabel} active</span>
             <Eye aria-hidden="true" size={13} strokeWidth={1.7} />
-          </button>
+          </OctantButton>
           {activeKind === "computer-use" && currentComputerSession !== undefined ? (
             <div className="thread-activity-pip__collapsed-controls">
               {currentComputerSession.pendingApproval === undefined ? null : (
@@ -330,20 +331,22 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
 
           {availableKinds.length < 2 ? null : (
             <div aria-label="Active tools" className="thread-activity-pip__sources" role="group">
-              <button
+              <OctantButton
                 aria-pressed={activeKind === "browser"}
                 onClick={() => setSelectedKind("browser")}
                 type="button"
+                variant="ghost"
               >
                 Browser
-              </button>
-              <button
+              </OctantButton>
+              <OctantButton
                 aria-pressed={activeKind === "computer-use"}
                 onClick={() => setSelectedKind("computer-use")}
                 type="button"
+                variant="ghost"
               >
                 Computer Use
-              </button>
+              </OctantButton>
             </div>
           )}
 
@@ -391,15 +394,16 @@ function BrowserActivityPreview(props: {
   const title = observation?.title ?? "Browser";
   if (screenshot !== undefined) {
     return (
-      <button
+      <OctantButton
         aria-label="Open Browser from preview"
         className="thread-activity-pip__visual thread-activity-pip__visual--interactive"
         disabled={props.onOpenBrowser === undefined}
         onClick={props.onOpenBrowser}
         type="button"
+        variant="ghost"
       >
         <img alt={`${title} browser activity`} src={screenshot} />
-      </button>
+      </OctantButton>
     );
   }
   return (

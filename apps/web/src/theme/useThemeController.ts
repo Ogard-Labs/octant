@@ -54,6 +54,7 @@ export function useThemeController(options: {
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string>();
   const mounted = useRef(true);
+  const draftRef = useRef<ThemeSettings | undefined>(undefined);
   // A write carries the version it expects, so two of them started from the
   // same render both claim it and the server rejects the second as a conflict.
   // Which one survives would then be whichever arrived first, not the one the
@@ -73,6 +74,7 @@ export function useThemeController(options: {
       if (!mounted.current) return;
       setSettings(bootstrap.settings);
       setDraft(bootstrap.settings);
+      draftRef.current = bootstrap.settings;
       setVersion(bootstrap.version);
       versionRef.current = bootstrap.version;
       setError(undefined);
@@ -93,7 +95,11 @@ export function useThemeController(options: {
   }, [load]);
 
   const updateDraft = useCallback((patch: Partial<ThemeSettings>) => {
-    setDraft((current) => (current === undefined ? undefined : { ...current, ...patch }));
+    const current = draftRef.current;
+    if (current === undefined) return;
+    const next = { ...current, ...patch };
+    draftRef.current = next;
+    setDraft(next);
   }, []);
 
   const send = useCallback(
@@ -107,7 +113,13 @@ export function useThemeController(options: {
         versionRef.current = result.version;
         if (!mounted.current) return false;
         setSettings(result.settings);
-        setDraft(result.settings);
+        // A later control may already be previewing another queued value. The
+        // older response advances authoritative version/settings, but it must
+        // not visually roll that newer choice back while its own write waits.
+        if (draftRef.current === next) {
+          draftRef.current = result.settings;
+          setDraft(result.settings);
+        }
         setVersion(result.version);
         setStatus("ready");
         setError(undefined);
@@ -133,7 +145,7 @@ export function useThemeController(options: {
 
   const applyExact = useCallback(
     async (next: ThemeSettings) => {
-      if (settings === undefined || draft === undefined) return false;
+      if (draftRef.current === undefined) return false;
       // Queued behind whatever is already in flight, so this write expects the
       // version that one produced rather than the version this render saw.
       const startedAt = conflicts.current;
@@ -144,7 +156,7 @@ export function useThemeController(options: {
       queue.current = write;
       return await write;
     },
-    [draft, send, settings],
+    [send],
   );
 
   const apply = useCallback(async () => {
@@ -164,36 +176,51 @@ export function useThemeController(options: {
    */
   const applyPatch = useCallback(
     async (patch: Partial<ThemeSettings>) => {
-      if (draft === undefined) return false;
-      return applyExact({ ...draft, ...patch });
+      const current = draftRef.current;
+      if (current === undefined) return false;
+      const next = { ...current, ...patch };
+      draftRef.current = next;
+      setDraft(next);
+      setError(undefined);
+      setStatus("ready");
+      return applyExact(next);
     },
-    [applyExact, draft],
+    [applyExact],
   );
 
   const cancel = useCallback(() => {
     if (settings === undefined) return;
+    draftRef.current = settings;
     setDraft(settings);
     setError(undefined);
     setStatus("ready");
   }, [settings]);
 
   const reset = useCallback(() => {
+    draftRef.current = DEFAULT_THEME_SETTINGS;
     setDraft(DEFAULT_THEME_SETTINGS);
     setError(undefined);
-  }, []);
+    void applyExact(DEFAULT_THEME_SETTINGS);
+  }, [applyExact]);
 
-  const importJson = useCallback((value: string) => {
-    if (value.length > 256_000) {
-      setError("Theme import is too large. Use a JSON file smaller than 256 KB.");
-      return;
-    }
-    try {
-      setDraft(importThemeSettings(JSON.parse(value)));
-      setError(undefined);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Theme import is invalid.");
-    }
-  }, []);
+  const importJson = useCallback(
+    (value: string) => {
+      if (value.length > 256_000) {
+        setError("Theme import is too large. Use a JSON file smaller than 256 KB.");
+        return;
+      }
+      try {
+        const imported = importThemeSettings(JSON.parse(value));
+        draftRef.current = imported;
+        setDraft(imported);
+        setError(undefined);
+        void applyExact(imported);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Theme import is invalid.");
+      }
+    },
+    [applyExact],
+  );
 
   const exportJson = useCallback(
     () => (settings === undefined ? undefined : serializeOctantTheme(draft ?? settings)),

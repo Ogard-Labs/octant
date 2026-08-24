@@ -14,6 +14,7 @@ import {
   type SidebarNavigationDescriptorId,
   type SidebarNavigationInput,
 } from "./navigationModel";
+import { OctantButton } from "../ui/base/OctantButton";
 
 export interface SidebarNavigationProps {
   readonly actions: Partial<Readonly<Record<SidebarNavigationDescriptorId, () => void>>>;
@@ -42,18 +43,19 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
         const Icon = navigationIcon(descriptor.id);
         if (Icon === undefined) return null;
         return (
-          <button
-            className="sidebar-item window-no-drag"
+          <OctantButton
+            className="sidebar-item window-no-drag justify-start"
             data-navigation-id={descriptor.id}
             key={descriptor.id}
             // Invoked without arguments: some handlers take an optional payload
             // (New chat's prompt) and must not receive the click event as one.
             onClick={() => action()}
             type="button"
+            variant="ghost"
           >
             <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
             <span className="sidebar-label">{descriptor.label}</span>
-          </button>
+          </OctantButton>
         );
       })}
     </div>

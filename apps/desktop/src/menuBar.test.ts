@@ -44,4 +44,19 @@ describe("macOS menu-bar host controls", () => {
     expect(diagnostics).not.toContain("private-token");
     expect(diagnostics).not.toMatch(/prompt|thread|credential|secret/i);
   });
+
+  it("always offers an explicit full application shutdown", () => {
+    const items = buildMenuBarItems({
+      state: "running",
+      ownership: "desktop-owned",
+      activeAgentCount: 1,
+      attentionRequired: false,
+    });
+
+    expect(items.at(-1)).toEqual({
+      id: "fully-quit",
+      label: "Fully quit Octant",
+      enabled: true,
+    });
+  });
 });

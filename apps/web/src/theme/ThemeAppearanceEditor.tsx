@@ -4,9 +4,11 @@ import { ChevronDown } from "lucide-react";
 import type { ThemeController } from "./useThemeController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { OctantSlider } from "../ui/base/OctantSlider";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { FontFamilyPicker } from "./FontFamilyPicker";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
   isAppearancePresetAvailable,
@@ -30,7 +32,7 @@ export function ThemeAppearanceEditor(props: {
     );
   }
   const setTypography = (surface: "ui" | "editor" | "terminal", patch: Record<string, unknown>) => {
-    theme.updateDraft({
+    void theme.applyPatch({
       typography: {
         ...draft.typography,
         [surface]: { ...draft.typography[surface], ...patch },
@@ -39,35 +41,12 @@ export function ThemeAppearanceEditor(props: {
   };
   const setOverride = (role: string, color: string) => {
     const rest = draft.semanticOverrides.filter((entry) => entry.role !== role);
-    theme.updateDraft({
+    void theme.applyPatch({
       semanticOverrides: [...rest, { role: role as never, color: color as never }],
     });
   };
   return (
     <div className="settings-theme-editor" aria-label="Appearance preview controls">
-      {theme.hasDraftChanges ? (
-        <div className="settings-theme-editor__draft-bar">
-          <p className="settings-view__preview-note" role="status">
-            Previewing unsaved changes. Apply saves them to this app.
-          </p>
-          <div className="settings-view__actions">
-            <OctantButton
-              disabled={theme.status === "loading"}
-              onClick={() => void theme.apply()}
-              size="sm"
-              type="button"
-            >
-              Apply
-            </OctantButton>
-            <OctantButton onClick={theme.cancel} size="sm" type="button" variant="secondary">
-              Cancel
-            </OctantButton>
-            <OctantButton onClick={theme.reset} size="sm" type="button" variant="secondary">
-              Reset
-            </OctantButton>
-          </div>
-        </div>
-      ) : null}
       {theme.error !== undefined ? (
         <p className="settings-view__error" role="alert">
           {theme.error}
@@ -83,13 +62,14 @@ export function ThemeAppearanceEditor(props: {
               { value: "dark", label: "Dark" },
             ] as const
           ).map((option) => (
-            <button
+            <OctantButton
               aria-checked={draft.mode === option.value}
               className="settings-scheme__card window-no-drag"
               key={option.value}
-              onClick={() => theme.updateDraft({ mode: option.value })}
+              onClick={() => void theme.applyPatch({ mode: option.value })}
               role="radio"
               type="button"
+              variant="ghost"
             >
               <span
                 aria-hidden="true"
@@ -113,7 +93,7 @@ export function ThemeAppearanceEditor(props: {
                 </span>
               </span>
               <span className="settings-scheme__label">{option.label}</span>
-            </button>
+            </OctantButton>
           ))}
         </div>
         <label className="settings-view__field">
@@ -122,7 +102,7 @@ export function ThemeAppearanceEditor(props: {
             aria-label="Light preset"
             className="settings-view__select"
             onChange={(event) =>
-              theme.updateDraft({ lightPresetId: event.currentTarget.value as never })
+              void theme.applyPatch({ lightPresetId: event.currentTarget.value as never })
             }
             value={draft.lightPresetId ?? "system"}
           >
@@ -141,7 +121,7 @@ export function ThemeAppearanceEditor(props: {
             aria-label="Dark preset"
             className="settings-view__select"
             onChange={(event) =>
-              theme.updateDraft({ darkPresetId: event.currentTarget.value as never })
+              void theme.applyPatch({ darkPresetId: event.currentTarget.value as never })
             }
             value={draft.darkPresetId ?? "system"}
           >
@@ -160,7 +140,9 @@ export function ThemeAppearanceEditor(props: {
             aria-label="Theme density"
             className="settings-view__select"
             onChange={(event) =>
-              theme.updateDraft({ density: event.currentTarget.value as ThemeSettings["density"] })
+              void theme.applyPatch({
+                density: event.currentTarget.value as ThemeSettings["density"],
+              })
             }
             value={draft.density}
           >
@@ -169,7 +151,7 @@ export function ThemeAppearanceEditor(props: {
           </OctantNativeSelect>
         </label>
       </section>
-      <details className="settings-theme-editor__disclosure">
+      <details className="settings-theme-editor__disclosure" open>
         <summary>
           <span>Typography</span>
           <ChevronDown
@@ -180,14 +162,16 @@ export function ThemeAppearanceEditor(props: {
         </summary>
         <div className="settings-theme-editor__disclosure-body">
           <TypographyControl
-            label="UI typography"
-            familyLabel="UI font family"
+            label="Interface typography"
+            familyLabel="Interface font"
+            surface="ui"
             value={draft.typography.ui}
             onChange={(patch) => setTypography("ui", patch)}
           />
           <TypographyControl
-            label="Editor typography"
-            familyLabel="Editor font family"
+            label="Code typography"
+            familyLabel="Code font"
+            surface="editor"
             value={draft.typography.editor}
             onChange={(patch) => setTypography("editor", patch)}
             extended
@@ -195,6 +179,7 @@ export function ThemeAppearanceEditor(props: {
           <TypographyControl
             label="Terminal typography"
             familyLabel="Terminal font family"
+            surface="terminal"
             value={draft.typography.terminal}
             onChange={(patch) => setTypography("terminal", patch)}
             extended
@@ -206,17 +191,17 @@ export function ThemeAppearanceEditor(props: {
         <SettingSwitch
           label="Increased contrast"
           checked={draft.increasedContrast}
-          onChange={(value) => theme.updateDraft({ increasedContrast: value })}
+          onChange={(value) => void theme.applyPatch({ increasedContrast: value })}
         />
         <SettingSwitch
           label="Reduced motion"
           checked={draft.reducedMotion}
-          onChange={(value) => theme.updateDraft({ reducedMotion: value })}
+          onChange={(value) => void theme.applyPatch({ reducedMotion: value })}
         />
         <SettingSwitch
           label="Reduced transparency"
           checked={draft.reducedTransparency}
-          onChange={(value) => theme.updateDraft({ reducedTransparency: value })}
+          onChange={(value) => void theme.applyPatch({ reducedTransparency: value })}
         />
         <label className="settings-view__field">
           <span>Focus ring color</span>
@@ -252,6 +237,7 @@ export function ThemeAppearanceEditor(props: {
 function TypographyControl(props: {
   readonly label: string;
   readonly familyLabel: string;
+  readonly surface: "ui" | "editor" | "terminal";
   readonly value: {
     readonly family: string;
     readonly size: number;
@@ -267,21 +253,29 @@ function TypographyControl(props: {
       <legend>{props.label}</legend>
       <label className="settings-view__field">
         <span>{props.familyLabel}</span>
-        <OctantInput
-          aria-label={props.familyLabel}
-          className="settings-view__text-input"
-          onChange={(event) => props.onChange({ family: event.currentTarget.value })}
+        <FontFamilyPicker
+          label={props.familyLabel}
+          onChange={(family) => props.onChange({ family })}
+          surface={props.surface}
           value={props.value.family}
         />
       </label>
+      <details className="settings-font-picker__custom">
+        <summary>Custom font stack</summary>
+        <OctantInput
+          aria-label={`${props.familyLabel} custom stack`}
+          onChange={(event) => props.onChange({ family: event.currentTarget.value })}
+          value={props.value.family}
+        />
+      </details>
       <label className="settings-view__field">
         <span>Font size</span>
-        <OctantSlider
-          aria-label={`${props.label} font size`}
-          className="settings-view__range"
-          min={8}
+        <OctantNumberStepper
+          label={`${props.label} font size`}
           max={32}
-          onChange={(event) => props.onChange({ size: Number(event.currentTarget.value) })}
+          min={8}
+          onChange={(size) => props.onChange({ size })}
+          suffix="px"
           value={props.value.size}
         />
       </label>
@@ -289,15 +283,12 @@ function TypographyControl(props: {
         <>
           <label className="settings-view__field">
             <span>Line height</span>
-            <OctantSlider
-              aria-label={`${props.label} line height`}
-              className="settings-view__range"
-              min={1}
+            <OctantNumberStepper
+              label={`${props.label} line height`}
               max={2.5}
+              min={1}
+              onChange={(lineHeight) => props.onChange({ lineHeight })}
               step={0.1}
-              onChange={(event) =>
-                props.onChange({ lineHeight: Number(event.currentTarget.value) })
-              }
               value={props.value.lineHeight ?? 1.4}
             />
           </label>
@@ -337,7 +328,7 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
       )}
       <label className="settings-view__field">
         <span>Theme JSON</span>
-        <textarea
+        <OctantTextarea
           aria-label="Theme JSON"
           className="textarea settings-view__textarea"
           onChange={(event) => setValue(event.currentTarget.value)}

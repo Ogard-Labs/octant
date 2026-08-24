@@ -6,20 +6,42 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
 import type { OctantMode } from "@octant/contracts/modes";
-import { ArtifactLibrarySurface } from "../artifacts/ArtifactLibrarySurface";
-import { AutomationCenter } from "../automation/AutomationCenter";
-import { AgentsCenter } from "../agents/AgentsCenter";
+import { lazy, Suspense, type ReactNode } from "react";
 import type { AgentsCenterThreadTarget } from "../agents/agentsCenterModel";
 import type {
   AutomationEditorCatalog,
   AutomationThreadTarget,
 } from "../automation/automationCenterModel";
-import { CodeProjectPullRequests } from "../code/CodeProjectPullRequests";
-import { CodeThreadBoard, type CodeThreadOpenTarget } from "../code/CodeThreadBoard";
+import type { CodeThreadOpenTarget } from "../code/CodeThreadBoard";
 import type { CodeBoardProjectRef } from "../code/codeBoardGrouping";
 import type { ThreadBoardProjectRef } from "../threadBoard/threadBoardGrouping";
-import { WorkThreadBoard, type WorkThreadOpenTarget } from "../work/WorkThreadBoard";
+import type { WorkThreadOpenTarget } from "../work/WorkThreadBoard";
 import { ShellState } from "./ShellState";
+
+const ArtifactLibrarySurface = lazy(() =>
+  import("../artifacts/ArtifactLibrarySurface").then((module) => ({
+    default: module.ArtifactLibrarySurface,
+  })),
+);
+const AutomationCenter = lazy(() =>
+  import("../automation/AutomationCenter").then((module) => ({
+    default: module.AutomationCenter,
+  })),
+);
+const AgentsCenter = lazy(() =>
+  import("../agents/AgentsCenter").then((module) => ({ default: module.AgentsCenter })),
+);
+const CodeProjectPullRequests = lazy(() =>
+  import("../code/CodeProjectPullRequests").then((module) => ({
+    default: module.CodeProjectPullRequests,
+  })),
+);
+const CodeThreadBoard = lazy(() =>
+  import("../code/CodeThreadBoard").then((module) => ({ default: module.CodeThreadBoard })),
+);
+const WorkThreadBoard = lazy(() =>
+  import("../work/WorkThreadBoard").then((module) => ({ default: module.WorkThreadBoard })),
+);
 
 export interface WorkspaceRailLayersProps {
   readonly railPlaceholder?: { readonly title: string; readonly message: string };
@@ -87,105 +109,131 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
       )}
       {props.codePullRequestsOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
-          <CodeProjectPullRequests
-            isNarrow={props.isNarrow}
-            load={(query) => props.codeClient.queryProjectPullRequests(query)}
-            onClose={props.onCloseCodePullRequests}
-            refresh={(command) => props.codeClient.refreshProjectPullRequests(command)}
-            {...(props.onSelectProjectPullRequest === undefined
-              ? {}
-              : { onSelectRow: props.onSelectProjectPullRequest })}
-            {...(props.selectedProjectPullRequestKey === undefined
-              ? {}
-              : { selectedRowKey: props.selectedProjectPullRequestKey })}
-          />
+          <LazyRailSurface label="Pull requests">
+            <CodeProjectPullRequests
+              isNarrow={props.isNarrow}
+              load={(query) => props.codeClient.queryProjectPullRequests(query)}
+              onClose={props.onCloseCodePullRequests}
+              refresh={(command) => props.codeClient.refreshProjectPullRequests(command)}
+              {...(props.onSelectProjectPullRequest === undefined
+                ? {}
+                : { onSelectRow: props.onSelectProjectPullRequest })}
+              {...(props.selectedProjectPullRequestKey === undefined
+                ? {}
+                : { selectedRowKey: props.selectedProjectPullRequestKey })}
+            />
+          </LazyRailSurface>
         </div>
       ) : null}
       {props.codeBoardOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
-          <CodeThreadBoard
-            isNarrow={props.isNarrow}
-            loadBoard={(query) => props.codeClient.queryBoard(query)}
-            projects={props.codeBoardProjects}
-            onClose={props.onCloseCodeBoard}
-            onOpenThread={props.onOpenCodeBoardThread}
-            {...(props.onSelectBoardPullRequest === undefined
-              ? {}
-              : { onSelectPullRequest: props.onSelectBoardPullRequest })}
-            {...(props.unreadThreadIds === undefined
-              ? {}
-              : { unreadThreadIds: props.unreadThreadIds })}
-            {...(props.providerLabels === undefined
-              ? {}
-              : { providerLabels: props.providerLabels })}
-          />
+          <LazyRailSurface label="Code Thread Board">
+            <CodeThreadBoard
+              isNarrow={props.isNarrow}
+              loadBoard={(query) => props.codeClient.queryBoard(query)}
+              projects={props.codeBoardProjects}
+              onClose={props.onCloseCodeBoard}
+              onOpenThread={props.onOpenCodeBoardThread}
+              {...(props.onSelectBoardPullRequest === undefined
+                ? {}
+                : { onSelectPullRequest: props.onSelectBoardPullRequest })}
+              {...(props.unreadThreadIds === undefined
+                ? {}
+                : { unreadThreadIds: props.unreadThreadIds })}
+              {...(props.providerLabels === undefined
+                ? {}
+                : { providerLabels: props.providerLabels })}
+            />
+          </LazyRailSurface>
         </div>
       ) : null}
       {props.workBoardOpen && props.activeMode === "work" ? (
         <div className="code-board-layer">
-          <WorkThreadBoard
-            isNarrow={props.isNarrow}
-            loadBoard={(query) => props.workThreadClient.queryBoard(query)}
-            projects={props.workBoardProjects}
-            onClose={props.onCloseWorkBoard}
-            onOpenThread={props.onOpenWorkBoardThread}
-            {...(props.onSelectBoardPullRequest === undefined
-              ? {}
-              : { onSelectPullRequest: props.onSelectBoardPullRequest })}
-            {...(props.unreadThreadIds === undefined
-              ? {}
-              : { unreadThreadIds: props.unreadThreadIds })}
-            {...(props.providerLabels === undefined
-              ? {}
-              : { providerLabels: props.providerLabels })}
-          />
+          <LazyRailSurface label="Work Thread Board">
+            <WorkThreadBoard
+              isNarrow={props.isNarrow}
+              loadBoard={(query) => props.workThreadClient.queryBoard(query)}
+              projects={props.workBoardProjects}
+              onClose={props.onCloseWorkBoard}
+              onOpenThread={props.onOpenWorkBoardThread}
+              {...(props.onSelectBoardPullRequest === undefined
+                ? {}
+                : { onSelectPullRequest: props.onSelectBoardPullRequest })}
+              {...(props.unreadThreadIds === undefined
+                ? {}
+                : { unreadThreadIds: props.unreadThreadIds })}
+              {...(props.providerLabels === undefined
+                ? {}
+                : { providerLabels: props.providerLabels })}
+            />
+          </LazyRailSurface>
         </div>
       ) : null}
       {props.artifactLibraryOpen ? (
         <div className="artifact-library-layer">
-          <ArtifactLibrarySurface
-            onClose={props.onCloseArtifactLibrary}
-            onCreate={props.onCreateArtifact}
-            onOpen={props.onOpenArtifact}
-            serverUrl={props.serverUrl}
-            {...(props.windowCapability === undefined
-              ? {}
-              : { windowCapability: props.windowCapability })}
-          />
+          <LazyRailSurface label="Artifacts">
+            <ArtifactLibrarySurface
+              onClose={props.onCloseArtifactLibrary}
+              onCreate={props.onCreateArtifact}
+              onOpen={props.onOpenArtifact}
+              serverUrl={props.serverUrl}
+              {...(props.windowCapability === undefined
+                ? {}
+                : { windowCapability: props.windowCapability })}
+            />
+          </LazyRailSurface>
         </div>
       ) : null}
       {props.automationCenterVisible ? (
         <div className="automation-center-layer">
-          <AutomationCenter
-            catalog={props.automationEditorCatalog}
-            client={props.automationClient}
-            // What each connected host is called, so a routine's row and
-            // the environment filter never disagree about a name. The
-            // host this window runs on is always "Local", whatever the
-            // machine is called and whatever it runs.
-            environmentNames={props.environmentNames}
-            localHostId={props.localHostId}
-            narrow={props.isNarrow}
-            notificationClient={props.notificationClient}
-            onClose={props.onCloseAutomationCenter}
-            onOpenThread={props.onOpenAutomationThread}
-          />
+          <LazyRailSurface label="Automation Center">
+            <AutomationCenter
+              catalog={props.automationEditorCatalog}
+              client={props.automationClient}
+              // What each connected host is called, so a routine's row and
+              // the environment filter never disagree about a name. The
+              // host this window runs on is always "Local", whatever the
+              // machine is called and whatever it runs.
+              environmentNames={props.environmentNames}
+              localHostId={props.localHostId}
+              narrow={props.isNarrow}
+              notificationClient={props.notificationClient}
+              onClose={props.onCloseAutomationCenter}
+              onOpenThread={props.onOpenAutomationThread}
+            />
+          </LazyRailSurface>
         </div>
       ) : null}
       {props.agentsCenterVisible ? (
         <div className="agents-center-layer">
-          <AgentsCenter
-            client={props.agentRunClient}
-            narrow={props.isNarrow}
-            onClose={props.onCloseAgentsCenter}
-            onOpenThread={props.onOpenAgentsThread}
-            projectNames={props.projectNames}
-            {...(props.providerLabels === undefined
-              ? {}
-              : { providerLabels: props.providerLabels })}
-          />
+          <LazyRailSurface label="Agents Center">
+            <AgentsCenter
+              client={props.agentRunClient}
+              narrow={props.isNarrow}
+              onClose={props.onCloseAgentsCenter}
+              onOpenThread={props.onOpenAgentsThread}
+              projectNames={props.projectNames}
+              {...(props.providerLabels === undefined
+                ? {}
+                : { providerLabels: props.providerLabels })}
+            />
+          </LazyRailSurface>
         </div>
       ) : null}
     </>
+  );
+}
+
+function LazyRailSurface(props: { readonly label: string; readonly children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div aria-label={`Opening ${props.label}`} className="workspace-rail-loading" role="status">
+          Opening {props.label}…
+        </div>
+      }
+    >
+      {props.children}
+    </Suspense>
   );
 }

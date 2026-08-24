@@ -25,6 +25,11 @@ export const MAX_TERMINAL_INPUT_BYTES = 64 * 1024;
  */
 export function shellStateEnvironment(directory: string): Record<string, string> {
   return {
+    // Shell-framework update prompts can consume the first byte a user sends
+    // while the PTY is still starting. Octant terminals update nothing on the
+    // user's behalf, so both current and legacy Oh My Zsh switches stay off.
+    DISABLE_AUTO_UPDATE: "true",
+    DISABLE_UPDATE_PROMPT: "true",
     HISTFILE: join(directory, "zsh_history"),
     XDG_CACHE_HOME: join(directory, "cache"),
     XDG_STATE_HOME: join(directory, "state"),

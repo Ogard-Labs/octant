@@ -1,7 +1,12 @@
 import type { CSSProperties, ReactNode } from "react";
-import { MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import {
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
+} from "@octant/contracts/shell";
 import type { SidebarVibrancyMode, ThemeSettings, ThemeTypography } from "@octant/contracts/theme";
 import type { ResolvedSidebarMaterial } from "./hostBridge";
+import type { TranscriptTextSize, TranscriptWidth } from "@octant/contracts/shell";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import { ThemeTypographyProvider } from "../theme/TypographyProvider";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
@@ -23,7 +28,12 @@ export interface ShellFrameProps {
   readonly theme?: ThemeSettings;
   readonly availableFonts?: ReadonlyArray<string>;
   readonly wideContextOpen: boolean;
+  readonly bottomPanelOpen?: boolean;
+  readonly bottomPanelHeight?: number;
   readonly workspace: ReactNode;
+  readonly transcriptTextSize?: TranscriptTextSize;
+  readonly transcriptWidth?: TranscriptWidth;
+  readonly showThreadProviderIcons?: boolean;
 }
 
 export interface ShellThemeRootProps {
@@ -69,9 +79,16 @@ export function ShellFrame(props: ShellFrameProps) {
             props.wideContextOpen ? " shell--wide-context-open" : ""
           }${props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""}`}
           data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
+          data-thread-provider-icons={props.showThreadProviderIcons === false ? "false" : "true"}
+          data-transcript-text-size={props.transcriptTextSize ?? "medium"}
+          data-transcript-width={props.transcriptWidth ?? "narrow"}
           style={
             {
+              ...(props.bottomPanelHeight === undefined
+                ? {}
+                : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
               "--octant-context-sidebar-width": `${props.contextSidebarWidth}px`,
+              "--octant-native-hidden-inset-titlebar-height": `${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px`,
               "--octant-sidebar-width": `${props.sidebarWidth}px`,
             } as CSSProperties
           }
@@ -93,10 +110,15 @@ export function ShellFrame(props: ShellFrameProps) {
           <div
             className={`workspace-layer${
               props.wideContextOpen ? " workspace-layer--wide-context-open" : ""
-            }`}
+            }${props.bottomPanelOpen ? " workspace-layer--bottom-panel-open" : ""}`}
           >
             {props.workspace}
           </div>
+          <div
+            aria-hidden="true"
+            className="shell-frame__native-drag-strip window-drag-region"
+            data-native-window-drag-strip
+          />
           {props.children}
         </div>
       </ThemeTypographyProvider>

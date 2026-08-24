@@ -21,11 +21,11 @@ import { createShipClient, type ShipClient } from "@octant/client-runtime/ship-c
 import { createPlanClient, type PlanClient } from "@octant/client-runtime/plan-client";
 import { createUsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
-import { UsageWorkspace } from "./usage/UsageWorkspace";
 import { createWorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import { createWorkRequestClient } from "@octant/client-runtime/work-request-client";
 import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import { createUsageClient } from "@octant/client-runtime/usage-client";
+import { createProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { createDiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createGithubClient } from "@octant/client-runtime/github-client";
@@ -116,7 +116,16 @@ import {
 } from "@octant/domain";
 import type { CreateHostViewScope, ModelPickerSelection } from "@octant/domain";
 import { resolveSidebarBackground } from "@octant/theme/backgrounds";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import "./styles.css";
 import "./styles/shell.css";
 import "./styles/dock.css";
@@ -143,6 +152,7 @@ import {
   type SidebarThreadDragTargets,
 } from "./shell/useWorkspaceTabDrag";
 import { WorkspaceRailLayers } from "./shell/WorkspaceRailLayers";
+import { BottomUtilityPanel } from "./shell/BottomUtilityPanel";
 import { ShellDialogHost } from "./shell/ShellDialogHost";
 import { ShellSettingsSurface } from "./shell/ShellSettingsSurface";
 import {
@@ -168,6 +178,7 @@ import {
   openLocalCodeThreadIds,
 } from "./shell/workspaceTabLifecycle";
 import {
+  readBottomPanelPresentation,
   readSidebarCollapsed,
   useAutomaticUpdateCheckSync,
   useHostReportedSidebarVibrancy,
@@ -176,6 +187,7 @@ import {
   useSidebarBackgroundFetcher,
   useSidebarVibrancyModeSync,
   useSidebarVibrancySupported,
+  writeBottomPanelPresentation,
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
 import {
@@ -277,6 +289,10 @@ import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePane
 import { OctantCommandProvider } from "./palette/CommandRegistry";
 import { buildOctantCommands, type CommandProject } from "./palette/buildOctantCommands";
 import { useCommandSkills } from "./palette/useCommandSkills";
+
+const UsageWorkspace = lazy(() =>
+  import("./usage/UsageWorkspace").then((module) => ({ default: module.UsageWorkspace })),
+);
 
 export type { ShellLaunch } from "./shell/shellLaunch";
 export { launchFromLocation } from "./shell/shellLaunch";
@@ -591,7 +607,6 @@ function LaunchedShell(
   const [draftModelId, setDraftModelId] =
     useState<import("@octant/contracts/providers").ProviderModelId>();
   const [searchOpen, setSearchOpen] = useState(false);
-  const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   // The Thread Search query lives here as well as in the overlay, because the
   // archived half of the Chat listing is fetched from the host per query.
   const [searchQuery, setSearchQuery] = useState("");
@@ -614,6 +629,17 @@ function LaunchedShell(
     { readonly projectId: ProjectId; readonly sequence: number } | undefined
   >(undefined);
   const [dockVisible, setDockVisible] = useState(false);
+  const [bottomPanelPresentation, setBottomPanelPresentation] = useState(() =>
+    readBottomPanelPresentation(globalThis, String(props.launch.windowId)),
+  );
+  const [previewBottomPanelHeight, setPreviewBottomPanelHeight] = useState<number>();
+  const persistBottomPanelPresentation = useCallback(
+    (next: typeof bottomPanelPresentation) => {
+      setBottomPanelPresentation(next);
+      writeBottomPanelPresentation(globalThis, String(props.launch.windowId), next);
+    },
+    [props.launch.windowId],
+  );
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
   const [fallbackDockState, setFallbackDockState] = useState<ThreadUtilityDockState>({ tabs: [] });
@@ -1021,6 +1047,19 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
+  const providerUsageLimitsClient = useMemo(() => {
+    try {
+      return createProviderUsageLimitsClient({
+        baseUrl: props.launch.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.projectWindowCapability,
+      });
+    } catch {
+      // Provider limit facts are a local-host capability. Remote clients keep
+      // the rest of Settings usable and omit this optional panel.
+      return undefined;
+    }
+  }, [props.launch.serverUrl, props.projectWindowCapability]);
   const diagnosticsExportClient = useMemo(
     () =>
       createDiagnosticsExportClient({
@@ -1387,6 +1426,14 @@ function LaunchedShell(
     });
   }, [controller, props.hostBridge]);
   useEffect(() => {
+    const subscribe = props.hostBridge?.subscribeOpenSettings;
+    if (subscribe === undefined) return;
+    return subscribe(() => {
+      if (controller.status !== "ready") return;
+      void controller.openSettings();
+    });
+  }, [controller, props.hostBridge]);
+  useEffect(() => {
     const target = pendingCodeDeepLink;
     if (target === undefined || controller.status !== "ready") return;
     if (target.kind === "project" || target.kind === "new-thread") {
@@ -1492,18 +1539,26 @@ function LaunchedShell(
       }).map((surface) => surface.id),
     ),
   );
-  const dockSurface = retainedDockState.active;
+  const bottomPanelAvailable =
+    activeMode === "code" && isDockToolLaunchable("terminal", dockToolCapabilities);
+  const bottomPanelOpen = bottomPanelPresentation.open && bottomPanelAvailable && !isNarrow;
+  const displayedDockState = bottomPanelOpen
+    ? closeUtilityTabState(retainedDockState, "terminal")
+    : retainedDockState;
+  const dockSurface = displayedDockState.active;
   const dockResolution = resolveDockSurface(dockSurface);
   const launchableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
     (surface) =>
       resolveDockSurface(surface.id).kind === "surface" &&
-      isDockToolLaunchable(surface.id, dockToolCapabilities),
+      isDockToolLaunchable(surface.id, dockToolCapabilities) &&
+      (!bottomPanelOpen || surface.id !== "terminal"),
   );
-  const dockTabs = retainedDockState.tabs.flatMap((surfaceId) => {
+  const dockTabs = displayedDockState.tabs.flatMap((surfaceId) => {
     const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
     return surface === undefined ? [] : [surface];
   });
   const dockOpen = dockVisible;
+  const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
     serverUrl: props.launch.serverUrl,
@@ -1990,6 +2045,9 @@ function LaunchedShell(
   function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    if (surface === "terminal" && bottomPanelPresentation.open) {
+      persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
+    }
     if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
     setDockVisible(true);
     if (dockThreadKey === undefined) {
@@ -2032,6 +2090,25 @@ function LaunchedShell(
   function closeDock() {
     pendingDockFocus.current = dockOpener.current;
     setDockVisible(false);
+  }
+  function closeBottomPanel(restoreFocus = true) {
+    persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
+    if (restoreFocus) {
+      queueMicrotask(() =>
+        document.querySelector<HTMLElement>('[data-bottom-panel-opener="true"]')?.focus(),
+      );
+    }
+  }
+  function toggleBottomPanel(opener: HTMLElement) {
+    if (bottomPanelOpen) {
+      closeBottomPanel(false);
+      opener.focus();
+      return;
+    }
+    if (!bottomPanelAvailable) return;
+    closeDockTab("terminal");
+    if (dockTabs.length === 1 && dockTabs[0]?.id === "terminal") setDockVisible(false);
+    persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
   }
   function toggleDock(opener: HTMLElement) {
     dockOpener.current = { element: opener, logicalTarget: "dock" };
@@ -2331,6 +2408,7 @@ function LaunchedShell(
           all: sidebarThreadGroups.all.map(withProviderMark),
           unfiled: sidebarThreadGroups.unfiled.map(withProviderMark),
         };
+  const markedChatNavigation = chatController.navigation.map(withProviderMark);
 
   // What a Code thread row offers on right-click. Each one carries the row's
   // navigation id, which for a Project-backed thread is its Code thread id;
@@ -2485,7 +2563,7 @@ function LaunchedShell(
         : { errorMessage: chatController.errorMessage }),
       onRetry: () => void chatController.retry(),
       onSelectThread: selectChatThread,
-      threads: chatController.navigation,
+      threads: markedChatNavigation,
     },
     code: {
       status: codeController.status,
@@ -3320,12 +3398,20 @@ function LaunchedShell(
   });
 
   const usageSurface = (
-    <UsageWorkspace
-      client={usageDashboardClient}
-      isNarrow={isNarrow}
-      onBack={() => setUsageOpen(false)}
-      {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
-    />
+    <Suspense
+      fallback={
+        <div aria-label="Opening usage" className="workspace-rail-loading" role="status">
+          Opening usage…
+        </div>
+      }
+    >
+      <UsageWorkspace
+        client={usageDashboardClient}
+        isNarrow={isNarrow}
+        onBack={() => setUsageOpen(false)}
+        {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
+      />
+    </Suspense>
   );
   const settingsSurface = (
     <ShellSettingsSurface
@@ -3371,9 +3457,11 @@ function LaunchedShell(
       themeController={themeController}
       diagnosticsExportClient={diagnosticsExportClient}
       hostControlClient={hostControlClient}
+      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
       githubClient={githubClient}
       usageClient={usageClient}
+      {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
       visibleSettings={controller.visibleSettings}
       announcement={controller.announcement}
       announcementSequence={controller.announcementSequence}
@@ -3527,6 +3615,8 @@ function LaunchedShell(
         chrome={
           <WindowChrome
             activeSurface={activeSurface}
+            bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
+            bottomPanelExpanded={bottomPanelOpen}
             {...(props.developmentAuthentication === undefined
               ? {}
               : { developmentAuthentication: props.developmentAuthentication })}
@@ -3539,13 +3629,15 @@ function LaunchedShell(
             {...(sidebarCollapsed && !isNarrow
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}
-            onOpenZen={() => void zen.enterZen()}
             onRecoverZen={() => void zen.recoverZen()}
+            onToggleBottomPanel={toggleBottomPanel}
             onToggleDock={toggleDock}
             zenRecoveryNeeded={zen.recoveryNeeded}
           />
         }
         contextSidebarWidth={contextSidebarWidth}
+        bottomPanelHeight={bottomPanelHeight}
+        bottomPanelOpen={bottomPanelOpen}
         material={material}
         onCommitSidebarWidth={(width) => {
           setPreviewSidebarWidth(width);
@@ -3554,6 +3646,9 @@ function LaunchedShell(
         onPreviewSidebarWidth={setPreviewSidebarWidth}
         sidebarCollapsed={sidebarCollapsed && !isNarrow}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
+        showThreadProviderIcons={controller.settings.showThreadProviderIcons}
+        transcriptTextSize={controller.settings.transcriptTextSize}
+        transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
           <ShellSidebar
             {...(activeMode === "chat"
@@ -3633,8 +3728,7 @@ function LaunchedShell(
               : {})}
             onAddFolder={() => openProjectCreate()}
             navigatorAvailable={navigatorAssistant.state.kind === "ready"}
-            onSearchQueryChange={setSidebarSearchQuery}
-            searchQuery={sidebarSearchQuery}
+            onOpenSearch={openThreadSearch}
             {...(isNarrow ? {} : { onCollapseSidebar: () => setSidebarCollapsedPersistent(true) })}
             onOpenNavigator={() => {
               navigatorOpener.current = document.querySelector<HTMLElement>(
@@ -3674,10 +3768,10 @@ function LaunchedShell(
                   </div>
                 ) : (
                   <ProjectSidebarSection
-                    searchQuery={sidebarSearchQuery}
-                    {...(activeMode === "code"
+                    {...(activeMode === "code" || activeMode === "work"
                       ? {
                           projectViewsEnabled: true,
+                          projectViewsMode: activeMode,
                           projectViewSwitcherPresentation: (
                             presentedShellSettings ?? controller.settings
                           ).projectViewSwitcherPresentation,
@@ -3754,7 +3848,7 @@ function LaunchedShell(
                       ? {
                           onSelectThread: selectChatThread,
                           threadActions: chatThreadRowActions,
-                          threads: chatController.navigation,
+                          threads: markedChatNavigation,
                         }
                       : activeMode === "code"
                         ? {
@@ -3947,6 +4041,9 @@ function LaunchedShell(
                     void contextController.setPinned(entryId, pinned)
                   }
                   status={contextController.status}
+                  {...(activeMode !== "code" || activeCodeThreadController === undefined
+                    ? {}
+                    : { fallback: activeCodeThreadController.threadUsage })}
                   {...(contextController.snapshot === undefined
                     ? {}
                     : { snapshot: contextController.snapshot })}
@@ -3962,6 +4059,7 @@ function LaunchedShell(
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
                     onAddAgent={invokeAddAgent}
+                    onOpenAgents={() => openDockTab("agents")}
                     chatClient={chatClient}
                     chatController={chatController}
                     chatReadCursorStore={chatReadCursorStore}
@@ -3983,6 +4081,7 @@ function LaunchedShell(
                     extensionClient={extensionClient}
                     workPromotionController={workPromotionController}
                     codeProviderChoices={codeProviderChoices}
+                    openInApplications={controller.settings.openInApplications}
                     hosts={hosts}
                     selectedCreateHostId={createHostId}
                     createHostViewScope={createHostViewScope}
@@ -4254,11 +4353,27 @@ function LaunchedShell(
               plan={threadUtility("plan")}
               resolution={dockResolution}
               sideChat={threadUtility("side-chat")}
-              terminal={threadUtility("terminal")}
+              {...(bottomPanelOpen ? {} : { terminal: threadUtility("terminal") })}
               tests={threadUtility("tests")}
               tabs={dockTabs}
               width={contextSidebarWidth}
             />
+            {bottomPanelOpen ? (
+              <BottomUtilityPanel
+                height={bottomPanelHeight}
+                onClose={() => closeBottomPanel()}
+                onCommitHeight={(height) => {
+                  setPreviewBottomPanelHeight(undefined);
+                  persistBottomPanelPresentation({
+                    ...bottomPanelPresentation,
+                    height,
+                    open: true,
+                  });
+                }}
+                onPreviewHeight={setPreviewBottomPanelHeight}
+                terminal={threadUtility("terminal")}
+              />
+            ) : null}
           </>
         }
       >
@@ -4288,6 +4403,18 @@ function LaunchedShell(
           searchArchivedListing={threadSearchArchivedListing}
           onSearchQueryChange={setSearchQuery}
           onCloseSearch={closeThreadSearch}
+          onNewSearchThread={() => {
+            closeThreadSearch();
+            void controller.openDraftThread(activeMode);
+          }}
+          onNewSearchProject={() => {
+            closeThreadSearch();
+            openProjectCreate(activeMode);
+          }}
+          onOpenSearchSettings={() => {
+            closeThreadSearch();
+            void controller.openSettings();
+          }}
           onOpenSearchHit={(hit) => {
             closeThreadSearch();
             // The hit keeps its source thread's Project so a cross-Project

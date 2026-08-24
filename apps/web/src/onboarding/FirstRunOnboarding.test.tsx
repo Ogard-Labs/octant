@@ -234,6 +234,8 @@ describe("FirstRunOnboarding", () => {
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Providers/ })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a name to continue");
+    expect(screen.queryByText(/needs something to call you/)).toBeNull();
 
     // Dismissing is one of this dialog's exits, and it would leave the host
     // with no name at all, so it refuses for the same reason Skip does.
@@ -317,9 +319,7 @@ describe("FirstRunOnboarding", () => {
     // Code has no switch: it is always available, and offering one that cannot
     // be turned off would say otherwise.
     expect(screen.queryByRole("switch", { name: /Code/ })).toBeNull();
-    expect(screen.getByRole("note")).toHaveTextContent(
-      /Turning Chat or Work off only hides the mode/,
-    );
+    expect(screen.getByRole("note")).toHaveTextContent(/Hiding Chat or Work never deletes/);
   });
 
   it("does not claim a colour scheme while appearance settings are still loading", async () => {
@@ -329,7 +329,7 @@ describe("FirstRunOnboarding", () => {
     await user.click(screen.getByRole("button", { name: /Workspace/ }));
 
     expect(screen.queryByRole("radiogroup")).toBeNull();
-    expect(screen.getByRole("status")).toHaveTextContent(/still loading its appearance settings/);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading…");
   });
 
   it("records the default Chat model from what the host actually found", async () => {
@@ -354,6 +354,7 @@ describe("FirstRunOnboarding", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "No provider on this Mac is ready, so there is nothing to choose from yet.",
     );
+    expect(screen.queryByRole("note")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Open provider settings" }));
     expect(props.onOpenProviderSettings).toHaveBeenCalledOnce();
     // Sending the user elsewhere must not answer first run for them.

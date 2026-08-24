@@ -18,6 +18,7 @@ import { ShellState } from "../shell/ShellState";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { parseUnifiedDiff, type ParsedDiffFile } from "./unifiedDiff";
+import { OctantButton } from "../ui/base/OctantButton";
 
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 type RunReviewed = Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>;
@@ -228,35 +229,35 @@ function AvailableDiff(
         </div>
         <p>{props.snapshot.changedPaths.length.toLocaleString()} changed paths</p>
         <div className="segmented" role="group" aria-label="Diff layout">
-          <button
+          <OctantButton
             aria-pressed={sideBySide}
             className="segment"
             onClick={() => setSideBySide(true)}
             type="button"
           >
             Side by side
-          </button>
-          <button
+          </OctantButton>
+          <OctantButton
             aria-pressed={!sideBySide}
             className="segment"
             onClick={() => setSideBySide(false)}
             type="button"
           >
             Inline
-          </button>
+          </OctantButton>
         </div>
       </header>
 
       {props.staleNotice === undefined ? null : (
         <div className="code-diff-pane__warning" role="alert">
           <strong>{props.staleNotice.message}</strong>
-          <button
+          <OctantButton
             className="btn btn-secondary btn-sm"
             onClick={props.staleNotice.onRefresh}
             type="button"
           >
             Refresh
-          </button>
+          </OctantButton>
         </div>
       )}
 
@@ -279,7 +280,7 @@ function AvailableDiff(
             <ul>
               {files.map((file) => (
                 <li key={file.id}>
-                  <button
+                  <OctantButton
                     aria-current={file.id === selected.id}
                     className="code-diff-pane__file"
                     onClick={() => setSelectedId(file.id)}
@@ -299,7 +300,7 @@ function AvailableDiff(
                         </span>
                       </span>
                     )}
-                  </button>
+                  </OctantButton>
                 </li>
               ))}
             </ul>
@@ -312,23 +313,23 @@ function AvailableDiff(
                 <p className="code-diff-pane__renamed-from">Renamed from {selected.previousPath}</p>
               )}
               {props.onOpenFile === undefined || selected.change === "deleted" ? null : (
-                <button
+                <OctantButton
                   className="btn btn-secondary btn-sm"
                   onClick={() => props.onOpenFile?.(selected.path)}
                   type="button"
                 >
                   Open in editor
-                </button>
+                </OctantButton>
               )}
               {mayDiscard && trackedPath !== undefined ? (
-                <button
+                <OctantButton
                   className="btn btn-danger btn-sm"
                   disabled={discarding}
                   onClick={() => setConfirmingDiscard(selected.path)}
                   type="button"
                 >
                   Discard changes
-                </button>
+                </OctantButton>
               ) : null}
             </div>
             {confirmingDiscard === selected.path && trackedPath !== undefined ? (
@@ -342,21 +343,21 @@ function AvailableDiff(
                   they cannot be recovered.
                 </p>
                 <div className="code-diff-pane__confirm-actions">
-                  <button
+                  <OctantButton
                     className="btn btn-danger btn-sm"
                     disabled={discarding}
                     onClick={() => void discard(trackedPath)}
                     type="button"
                   >
                     Discard permanently
-                  </button>
-                  <button
+                  </OctantButton>
+                  <OctantButton
                     className="btn btn-secondary btn-sm"
                     onClick={() => setConfirmingDiscard(undefined)}
                     type="button"
                   >
                     Keep changes
-                  </button>
+                  </OctantButton>
                 </div>
               </div>
             ) : null}

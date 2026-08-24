@@ -32,6 +32,7 @@ import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { useOctantCommands } from "../palette/CommandRegistry";
@@ -443,14 +444,14 @@ export function ChatComposer(props: ChatComposerProps) {
             <li key={String(attachmentSelection.id)} className="chip chat-composer__selection">
               <span>{attachmentSelection.displayName}</span>
               {props.onRemoveAttachment === undefined ? null : (
-                <button
+                <OctantButton
                   aria-label={`Remove ${attachmentSelection.displayName} attachment`}
                   className="chip-x window-no-drag"
                   onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
                   type="button"
                 >
                   <X aria-hidden="true" size={10} strokeWidth={1.8} />
-                </button>
+                </OctantButton>
               )}
             </li>
           ))}
@@ -531,7 +532,7 @@ export function ChatComposer(props: ChatComposerProps) {
   );
 
   const input = (
-    <textarea
+    <OctantTextarea
       aria-activedescendant={
         activeCommand !== undefined
           ? `${commandListId}-${activeCommand.id}`

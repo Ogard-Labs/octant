@@ -6,6 +6,7 @@ import {
   type CreateHostViewScope,
 } from "@octant/domain";
 import { useEffect, useMemo, useState } from "react";
+import { OctantNativeSelect } from "../ui/base/OctantSelect";
 
 export interface HostSelectorProps {
   /**
@@ -157,7 +158,7 @@ export function HostSelector(props: HostSelectorProps) {
       <span aria-hidden="true" className={`host-selector__dot ${dotClass(health)}`} />
       <label className="host-selector__label">
         <span className="host-selector__label-text">Destination host</span>
-        <select
+        <OctantNativeSelect
           aria-label="Destination host"
           className="host-selector__select"
           onChange={(event) => handleChange(event.target.value)}
@@ -181,7 +182,7 @@ export function HostSelector(props: HostSelectorProps) {
               </option>
             );
           })}
-        </select>
+        </OctantNativeSelect>
       </label>
     </span>
   );

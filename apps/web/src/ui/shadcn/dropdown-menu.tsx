@@ -5,7 +5,7 @@ import { useRef } from "react";
 import { cn } from "./utils";
 
 export function DropdownMenu(props: ComponentProps<typeof MenuPrimitive.Root>) {
-  return <MenuPrimitive.Root {...props} />;
+  return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
 }
 
 export function DropdownMenuTrigger({
@@ -15,9 +15,10 @@ export function DropdownMenuTrigger({
   return (
     <MenuPrimitive.Trigger
       className={cn(
-        "inline-flex items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "inline-flex cursor-pointer items-center justify-center rounded-md outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
         className,
       )}
+      data-slot="dropdown-menu-trigger"
       {...props}
     />
   );
@@ -30,9 +31,10 @@ export function DropdownMenuPopup({
   return (
     <MenuPrimitive.Popup
       className={cn(
-        "octant-glass octant-glass--overlay z-50 min-w-48 rounded-md p-1 text-popover-foreground outline-none",
+        "z-50 min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
         className,
       )}
+      data-slot="dropdown-menu-content"
       {...props}
     />
   );
@@ -46,7 +48,15 @@ export interface ShadcnMenuItem {
   readonly value: string;
 }
 
+export interface ShadcnMenuAction {
+  readonly disabled?: boolean;
+  readonly icon?: ReactNode;
+  readonly label: string;
+  readonly onSelect: () => void;
+}
+
 export interface ShadcnDropdownMenuProps {
+  readonly actions?: ReadonlyArray<ShadcnMenuAction>;
   readonly items: ReadonlyArray<ShadcnMenuItem>;
   readonly onValueChange: (value: string) => void;
   readonly trigger: ReactNode;
@@ -58,6 +68,8 @@ export interface ShadcnDropdownMenuProps {
   readonly triggerClassName?: string;
   readonly triggerLabel: string;
   readonly value: string;
+  /** Action menus invoke every enabled item, including the current value. */
+  readonly selectionMode?: "radio" | "action";
 }
 
 export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
@@ -79,33 +91,16 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
           sideOffset={4}
         >
           <DropdownMenuPopup className="window-no-drag" finalFocus={triggerRef}>
-            <MenuPrimitive.RadioGroup
-              onValueChange={(value) => {
-                if (
-                  typeof value === "string" &&
-                  props.items.some((item) => item.value === value && item.disabled !== true)
-                ) {
-                  props.onValueChange(value);
-                }
-              }}
-              value={props.value}
-            >
-              {props.items.map((item) => (
-                <MenuPrimitive.RadioItem
+            {props.selectionMode === "action" ? (
+              props.items.map((item) => (
+                <MenuPrimitive.Item
                   className={cn(
-                    "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
+                    "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
                   )}
                   closeOnClick
                   key={item.value}
-                  label={item.label}
                   {...(item.disabled === true ? { disabled: true } : {})}
-                  onKeyDown={(event) => {
-                    if (event.key === " ") {
-                      event.preventDefault();
-                      event.currentTarget.click();
-                    }
-                  }}
-                  value={item.value}
+                  onClick={() => props.onValueChange(item.value)}
                 >
                   <span aria-hidden="true" className="flex size-4 items-center justify-center">
                     {item.icon}
@@ -118,12 +113,74 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                       </span>
                     )}
                   </span>
-                  <MenuPrimitive.RadioItemIndicator className="octant-menu__indicator ml-auto text-foreground">
-                    <Check aria-hidden="true" size={14} strokeWidth={1.8} />
-                  </MenuPrimitive.RadioItemIndicator>
-                </MenuPrimitive.RadioItem>
-              ))}
-            </MenuPrimitive.RadioGroup>
+                </MenuPrimitive.Item>
+              ))
+            ) : (
+              <MenuPrimitive.RadioGroup
+                onValueChange={(value) => {
+                  if (
+                    typeof value === "string" &&
+                    props.items.some((item) => item.value === value && item.disabled !== true)
+                  ) {
+                    props.onValueChange(value);
+                  }
+                }}
+                value={props.value}
+              >
+                {props.items.map((item) => (
+                  <MenuPrimitive.RadioItem
+                    className={cn(
+                      "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
+                    )}
+                    closeOnClick
+                    key={item.value}
+                    label={item.label}
+                    {...(item.disabled === true ? { disabled: true } : {})}
+                    onKeyDown={(event) => {
+                      if (event.key === " ") {
+                        event.preventDefault();
+                        event.currentTarget.click();
+                      }
+                    }}
+                    value={item.value}
+                  >
+                    <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                      {item.icon}
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate font-medium">{item.label}</span>
+                      {item.description === undefined ? null : (
+                        <span className="truncate text-xs text-muted-foreground">
+                          {item.description}
+                        </span>
+                      )}
+                    </span>
+                    <MenuPrimitive.RadioItemIndicator className="octant-menu__indicator ml-auto text-foreground">
+                      <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+                    </MenuPrimitive.RadioItemIndicator>
+                  </MenuPrimitive.RadioItem>
+                ))}
+              </MenuPrimitive.RadioGroup>
+            )}
+            {props.actions === undefined || props.actions.length === 0 ? null : (
+              <>
+                <MenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />
+                {props.actions.map((action) => (
+                  <MenuPrimitive.Item
+                    className="relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag"
+                    closeOnClick
+                    key={action.label}
+                    {...(action.disabled === true ? { disabled: true } : {})}
+                    onClick={action.onSelect}
+                  >
+                    <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                      {action.icon}
+                    </span>
+                    <span className="truncate font-medium">{action.label}</span>
+                  </MenuPrimitive.Item>
+                ))}
+              </>
+            )}
           </DropdownMenuPopup>
         </MenuPrimitive.Positioner>
       </MenuPrimitive.Portal>

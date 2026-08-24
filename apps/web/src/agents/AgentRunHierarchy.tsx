@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
 import { AgentRunCreateForm, type AgentRunCreateFormValues } from "./AgentRunCreateForm";
+import { useAgentRunConversation } from "./useAgentRunConversation";
 
 export function AgentRunHierarchy(props: {
   readonly client: AgentRunClient;
@@ -41,6 +42,11 @@ export function AgentRunHierarchy(props: {
   const [facts, setFacts] = useState<AgentRunControlResolvedFacts>();
   const [factsStatus, setFactsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [role, setRole] = useState<AgentRunRole>();
+  const [conversationRunId, setConversationRunId] = useState<string>();
+  const conversationState = useAgentRunConversation(
+    props.client,
+    conversationRunId === undefined ? undefined : decodeAgentRunId(conversationRunId),
+  );
 
   const refresh = useCallback(async () => {
     setStatus((current) => (current === "ready" ? "refreshing" : "loading"));
@@ -273,6 +279,17 @@ export function AgentRunHierarchy(props: {
         onRetry={(input) => void command("retry", input)}
         onResume={(input) => void command("resume", input)}
         reconnecting={status === "refreshing"}
+        {...(conversationState.conversation === undefined
+          ? {}
+          : { conversation: conversationState.conversation })}
+        conversationReconnecting={conversationState.reconnecting}
+        conversationLoading={conversationState.loading}
+        {...(conversationState.errorMessage === undefined
+          ? {}
+          : { conversationError: conversationState.errorMessage })}
+        onInspectConversation={(runId) =>
+          setConversationRunId((current) => (current === runId ? undefined : runId))
+        }
       />
     </>
   );

@@ -69,11 +69,13 @@ describe("desktop preload bridge", () => {
       "getRemoteHostIdentityRecovery",
       "initialProjectTarget",
       "installAppUpdate",
+      "listOpenInApplications",
       "listRemotePairingRequests",
       "maximizeOrRestore",
       "minimize",
       "notifyAttention",
       "openBrowserExternal",
+      "openCodeCheckoutInApplication",
       "openCodeExternalEditor",
       "openInNewWindow",
       "previewHandoff",
@@ -98,6 +100,7 @@ describe("desktop preload bridge", () => {
       "subscribeAppUpdateState",
       "subscribeBrowserSurfaceState",
       "subscribeCodeDeepLinks",
+      "subscribeOpenSettings",
       "subscribeResolvedMaterial",
       "subscribeResolvedSidebarVibrancy",
       "subscribeStartNewAgent",
@@ -159,9 +162,13 @@ describe("desktop preload bridge", () => {
   });
 
   it("maps every operation to a fixed allowlisted channel", async () => {
-    const invoke = vi.fn(async (channel: string) =>
-      channel === IPC_CHANNELS.requestCodeOperationApproval ? undefined : { kind: "cancelled" },
-    );
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === IPC_CHANNELS.requestCodeOperationApproval) return undefined;
+      if (channel === IPC_CHANNELS.listOpenInApplications) {
+        return [{ id: "finder", label: "Finder", available: true }];
+      }
+      return { kind: "cancelled" };
+    });
     const bridge = createHostBridge(
       { invoke, on: vi.fn(), removeListener: vi.fn() },
       projectWindowCapability,
@@ -185,6 +192,11 @@ describe("desktop preload bridge", () => {
       fileId: "40000000-0000-4000-8000-000000000001",
       line: 12,
       column: 4,
+    });
+    await bridge.listOpenInApplications();
+    await bridge.openCodeCheckoutInApplication({
+      threadId: "20000000-0000-4000-8000-000000000001",
+      applicationId: "finder",
     });
     await bridge.openInNewWindow({ kind: "project", projectId });
     await bridge.requestCodeOperationApproval({
@@ -224,6 +236,14 @@ describe("desktop preload bridge", () => {
           fileId: "40000000-0000-4000-8000-000000000001",
           line: 12,
           column: 4,
+        },
+      ],
+      [IPC_CHANNELS.listOpenInApplications],
+      [
+        IPC_CHANNELS.openCodeCheckoutInApplication,
+        {
+          threadId: "20000000-0000-4000-8000-000000000001",
+          applicationId: "finder",
         },
       ],
       [IPC_CHANNELS.openInNewWindow, { kind: "project", projectId }],
@@ -524,6 +544,28 @@ describe("desktop preload bridge", () => {
     expect(listener).toHaveBeenCalledOnce();
     expect(ipc.on).toHaveBeenCalledWith(IPC_CHANNELS.startNewAgent, registered);
     expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.startNewAgent, registered);
+  });
+
+  it("forwards native Settings menu events without exposing IPC", () => {
+    let registered: ((event: unknown) => void) | undefined;
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(),
+      on: vi.fn((_channel, listener) => {
+        registered = listener as (event: unknown) => void;
+      }),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(ipc, projectWindowCapability).subscribeOpenSettings(
+      listener,
+    );
+
+    registered?.({});
+    unsubscribe();
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(ipc.on).toHaveBeenCalledWith(IPC_CHANNELS.openSettings, registered);
+    expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.openSettings, registered);
   });
 
   it("maps private listener status and enable/disable through fixed channels without secrets", async () => {

@@ -51,7 +51,7 @@ describe("discoveryService", () => {
     const exec = makeFakeExec(
       new Map([
         ["/usr/local/bin/codex --version", { stdout: "codex-cli 0.1.2507100955\n", stderr: "" }],
-        ["/usr/local/bin/codex account read --json", { stdout: "{}", stderr: "" }],
+        ["/usr/local/bin/codex login status", { stdout: "Logged in", stderr: "" }],
       ]),
     );
     const service = makeDiscoveryService({
@@ -213,7 +213,7 @@ describe("discoveryService", () => {
     const exec = makeFakeExec(
       new Map([
         ["/opt/codex/bin/codex --version", { stdout: "codex-cli 0.1.0\n", stderr: "" }],
-        ["/opt/codex/bin/codex account read --json", { stdout: "{}", stderr: "" }],
+        ["/opt/codex/bin/codex login status", { stdout: "Logged in", stderr: "" }],
       ]),
     );
     const service = makeDiscoveryService({
@@ -271,7 +271,7 @@ describe("discoveryService", () => {
     const exec = makeFakeExec(
       new Map([
         ["/usr/local/bin/codex --version", { stdout: "codex-cli 0.1.0\n", stderr: "" }],
-        ["/usr/local/bin/codex account read --json", { stdout: "{}", stderr: "" }],
+        ["/usr/local/bin/codex login status", { stdout: "Logged in", stderr: "" }],
       ]),
     );
     // /usr/local/bin is both in PATH and approved locations for codex
@@ -307,7 +307,7 @@ describe("discoveryService", () => {
     const exec = makeFakeExec(
       new Map([
         ["/usr/local/bin/codex --version", { stdout: "codex-cli 0.1.0\n", stderr: "" }],
-        ["/usr/local/bin/codex account read --json", { stdout: "{}", stderr: "" }],
+        ["/usr/local/bin/codex login status", { stdout: "Logged in", stderr: "" }],
       ]),
     );
     const controller = new AbortController();
@@ -335,7 +335,7 @@ describe("discoveryService", () => {
     const exec = makeFakeExec(
       new Map([
         ["/usr/local/bin/codex --version", { stdout: "codex-cli 0.1.0\n", stderr: "" }],
-        ["/usr/local/bin/codex account read --json", { stdout: "{}", stderr: "" }],
+        ["/usr/local/bin/codex login status", { stdout: "Logged in", stderr: "" }],
         ["/usr/local/bin/claude --version", { stdout: "1.0.0\n", stderr: "" }],
       ]),
     );
@@ -380,7 +380,7 @@ describe("discoveryService", () => {
     const exec = makeFakeExec(
       new Map([
         ["/Users/test/.local/bin/codex --version", { stdout: "codex-cli 0.1.0\n", stderr: "" }],
-        ["/Users/test/.local/bin/codex account read --json", { stdout: "{}", stderr: "" }],
+        ["/Users/test/.local/bin/codex login status", { stdout: "Logged in", stderr: "" }],
       ]),
     );
     const service = makeDiscoveryService({
@@ -407,7 +407,7 @@ describe("discoveryService", () => {
     const exec = makeFakeExec(
       new Map([
         ["/usr/local/bin/codex --version", { stdout: "codex-cli 0.1.0\n", stderr: "" }],
-        ["/usr/local/bin/codex account read --json", { stdout: "{}", stderr: "" }],
+        ["/usr/local/bin/codex login status", { stdout: "Logged in", stderr: "" }],
         ["/usr/local/bin/claude --version", { stdout: "1.0.33\n", stderr: "" }],
         ["/usr/local/bin/opencode --version", { stdout: "opencode 1.18.0\n", stderr: "" }],
       ]),

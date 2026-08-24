@@ -3,6 +3,12 @@ import { delimiter, isAbsolute, join } from "node:path";
 import type { HostRuntimeServiceMode } from "@octant/host-runtime";
 
 const DEFAULT_SERVER_PORT = 13_773;
+const TRUSTED_PACKAGED_GH_DIRECTORIES = [
+  "/usr/bin",
+  "/bin",
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+] as const;
 
 export function parseServerPort(value: string | undefined): number {
   if (value === undefined) return DEFAULT_SERVER_PORT;
@@ -42,10 +48,20 @@ export function parseCodeFileHelperPath(value: string | undefined): string | und
  * Resolve the host's `gh` command once during launch. Child processes later
  * receive this canonical absolute executable instead of consulting PATH again.
  */
-export function resolveGhExecutableFromPath(pathValue: string | undefined): string | undefined {
+export function resolveGhExecutableFromPath(
+  pathValue: string | undefined,
+  options: { readonly trustedOnly?: boolean } = {},
+): string | undefined {
   if (pathValue === undefined) return undefined;
   for (const directory of pathValue.split(delimiter)) {
     if (!isAbsolute(directory)) continue;
+    if (
+      options.trustedOnly === true &&
+      !TRUSTED_PACKAGED_GH_DIRECTORIES.includes(
+        directory as (typeof TRUSTED_PACKAGED_GH_DIRECTORIES)[number],
+      )
+    )
+      continue;
     try {
       const executable = realpathSync(join(directory, "gh"));
       if (!isAbsolute(executable) || !statSync(executable).isFile()) continue;
@@ -99,7 +115,9 @@ export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): S
   const isPackagedRuntime = packagedRuntime === "1" || environment.ELECTRON_RUN_AS_NODE === "1";
   const instanceId = parseServerInstanceId(environment.OCTANT_SERVER_INSTANCE_ID);
   const codeFileHelperPath = parseCodeFileHelperPath(environment.OCTANT_CODE_FILE_HELPER_PATH);
-  const ghExecutable = resolveGhExecutableFromPath(environment.PATH);
+  const ghExecutable = resolveGhExecutableFromPath(environment.PATH, {
+    trustedOnly: isPackagedRuntime,
+  });
   const desktopBridgeSecret = parseDesktopBridgeSecret(environment.OCTANT_DESKTOP_BRIDGE_SECRET);
   const developmentBootstrapValue = environment.OCTANT_DEV_WEB_BOOTSTRAP;
   if (isPackagedRuntime && developmentBootstrapValue !== undefined) {

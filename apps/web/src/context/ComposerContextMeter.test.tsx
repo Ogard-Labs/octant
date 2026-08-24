@@ -90,8 +90,11 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent(/MCP0 loaded· 3 deferred/);
     expect(popover).toHaveTextContent("Provider account limits");
     expect(popover).toHaveTextContent("Concurrent turns");
-    expect(popover).not.toHaveTextContent("Requests");
-    expect(popover).not.toHaveTextContent("Not reported");
+    expect(popover).toHaveTextContent("Requests");
+    expect(popover).toHaveTextContent("Tokens");
+    expect(popover).toHaveTextContent("Unavailable");
+    expect(popover).toHaveTextContent("Quota");
+    expect(popover).toHaveTextContent("Unknown");
     expect(inspect).not.toHaveBeenCalled();
 
     await user.keyboard("{Escape}");
@@ -119,8 +122,23 @@ describe("ComposerContextMeter", () => {
     expect(screen.getByRole("dialog", { name: "Context usage" })).toHaveTextContent(
       "Octant toolsUnknown",
     );
+    expect(screen.getByRole("dialog", { name: "Context usage" })).toHaveTextContent(
+      "Free spaceUnknown",
+    );
     await user.keyboard("{Escape}");
     expect(button).toHaveFocus();
+  });
+
+  it("keeps rate limits and reset windows explicit", async () => {
+    const user = userEvent.setup();
+    render(<Harness snapshot={contextFixture({ health: "rate-limited" })} />);
+    await user.click(screen.getByRole("button", { name: /Show context usage/i }));
+    const popover = screen.getByRole("dialog", { name: "Context usage" });
+    expect(popover).toHaveTextContent("Quota");
+    expect(popover).toHaveTextContent("Unknown");
+    expect(popover).toHaveTextContent("Retry");
+    expect(popover).toHaveTextContent("Rate limited until");
+    expect(popover).toHaveTextContent("Resets");
   });
 
   it("closes on an outside pointer press", async () => {
@@ -205,5 +223,43 @@ describe("ComposerContextMeter", () => {
     expect(screen.getByRole("dialog", { name: "Context usage" })).toHaveTextContent(
       "No context plan yet.",
     );
+  });
+
+  it("keeps provider usage and account limits useful when no context plan exists", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          inputTokens: 25_500,
+          outputTokens: 38,
+          limits: [
+            {
+              window: "five_hour",
+              status: "warning",
+              utilization: 0.91,
+              resetsAt: "2026-08-24T01:00:00.000Z" as never,
+            },
+          ],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    const button = screen.getByRole("button", {
+      name: /Provider reported 25\.5K input and 38 output/i,
+    });
+    await user.click(button);
+    const popover = screen.getByRole("dialog", { name: "Context usage" });
+    expect(popover).toHaveTextContent("Provider usage");
+    expect(popover).toHaveTextContent("Input25,500");
+    expect(popover).toHaveTextContent("Output38");
+    expect(popover).toHaveTextContent("Context maximumUnavailable");
+    expect(popover).toHaveTextContent("Provider account limits");
+    expect(popover).toHaveTextContent(/five hourLow · 91% used · resets/i);
   });
 });

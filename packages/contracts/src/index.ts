@@ -62,6 +62,7 @@ export * from "./projects";
 export * from "./settings";
 export * from "./providers";
 export * from "./providerDiscovery";
+export * from "./providerUsageLimits";
 export * from "./shell";
 export * from "./threadDraft";
 export * from "./threadMention";

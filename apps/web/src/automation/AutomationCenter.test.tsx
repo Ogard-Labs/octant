@@ -111,9 +111,9 @@ describe("AutomationCenter default surface", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Loading automations.");
     const rows = await screen.findByRole("list", { name: "Automations" });
     expect(screen.getByLabelText("Search automations")).toBeVisible();
-    expect(screen.getByRole("radio", { name: "All" })).toBeChecked();
-    expect(screen.getByRole("radio", { name: "Work" })).toBeVisible();
-    expect(screen.getByRole("radio", { name: "Code" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Work" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Code" })).toBeVisible();
     expect(screen.getByRole("button", { name: "New automation" })).toBeVisible();
 
     const workRow = within(rows).getByRole("listitem", { name: "Weekly summary" });
@@ -139,7 +139,7 @@ describe("AutomationCenter default surface", () => {
     const { client } = renderCenter();
     await screen.findByRole("list", { name: "Automations" });
 
-    await userEvent.click(screen.getByRole("radio", { name: "Work" }));
+    await userEvent.click(screen.getByRole("button", { name: "Work" }));
     await waitFor(() =>
       expect(client.list).toHaveBeenLastCalledWith(
         expect.objectContaining({ mode: "work" }),
@@ -479,7 +479,7 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
   it("uses one full-height detail view on narrow layouts and preserves list state", async () => {
     renderCenter({ narrow: true });
     await screen.findByRole("list", { name: "Automations" });
-    await userEvent.click(screen.getByRole("radio", { name: "Work" }));
+    await userEvent.click(screen.getByRole("button", { name: "Work" }));
     await userEvent.type(screen.getByLabelText("Search automations"), "weekly");
     const rows = await screen.findByRole("list", { name: "Automations" });
 
@@ -490,7 +490,7 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Back to list" }));
     expect(await screen.findByRole("list", { name: "Automations" })).toBeVisible();
-    expect(screen.getByRole("radio", { name: "Work" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Work" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("Search automations")).toHaveValue("weekly");
     expect(screen.getByRole("button", { name: "Weekly summary" })).toHaveFocus();
   });
@@ -536,7 +536,7 @@ describe("AutomationCenter calendar view", () => {
     renderCenter();
     expect(await screen.findByLabelText("Automations")).toBeTruthy();
 
-    await userEvent.click(screen.getByRole("radio", { name: "Calendar" }));
+    await userEvent.click(screen.getByRole("button", { name: "Calendar" }));
 
     const calendar = screen.getByRole("region", { name: "Routine calendar" });
     expect(
@@ -545,7 +545,7 @@ describe("AutomationCenter calendar view", () => {
     // The list is a view, not a place: switching away and back keeps the rows.
     expect(screen.queryByLabelText("Automations")).toBeNull();
 
-    await userEvent.click(screen.getByRole("radio", { name: "List" }));
+    await userEvent.click(screen.getByRole("button", { name: "List" }));
 
     expect(screen.getByLabelText("Automations")).toBeTruthy();
   });
@@ -553,7 +553,7 @@ describe("AutomationCenter calendar view", () => {
   it("moves between months without losing the routines", async () => {
     renderCenter();
     await screen.findByLabelText("Automations");
-    await userEvent.click(screen.getByRole("radio", { name: "Calendar" }));
+    await userEvent.click(screen.getByRole("button", { name: "Calendar" }));
     const heading = screen.getByRole("region", { name: "Routine calendar" });
     const before = within(heading).getByRole("heading").textContent;
 

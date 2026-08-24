@@ -42,6 +42,7 @@ export * from "./localServerClient";
 export * from "./navigatorAssistantClient";
 export * from "./projectClient";
 export * from "./providerClient";
+export * from "./providerUsageLimitsClient";
 export * from "./providerFederation";
 export * from "./pairingDeviceKeyAdapter";
 export * from "./remoteConnection";

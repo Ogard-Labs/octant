@@ -222,7 +222,7 @@ describe("AutomationDefinitionEditor creation", () => {
     expect(projectSelect).not.toHaveTextContent("Repo Project");
     await userEvent.selectOptions(projectSelect, String(workDraft.projectId));
 
-    await userEvent.click(screen.getByRole("radio", { name: "Code" }));
+    await userEvent.click(screen.getByRole("button", { name: "Code" }));
     expect(screen.getByLabelText("Project")).toHaveValue("");
     expect(screen.getByLabelText("Project")).toHaveTextContent("Repo Project");
     expect(screen.getByLabelText("Project")).not.toHaveTextContent("Docs Project");

@@ -10,6 +10,22 @@ interface TargetRequest {
   readonly fileId: string;
 }
 
+interface CheckoutTargetRequest {
+  readonly windowId: string;
+  readonly threadId: string;
+}
+
+export function isCodeCheckoutOpenTargetCurrent(input: {
+  readonly thread: Pick<CodeThread, "checkoutId" | "lifecycle">;
+  readonly checkout: Pick<CodeCheckoutIdentity, "id" | "availability">;
+}): boolean {
+  return (
+    input.thread.lifecycle === "active" &&
+    input.checkout.availability === "available" &&
+    String(input.thread.checkoutId) === String(input.checkout.id)
+  );
+}
+
 export function isCodeExternalEditorTargetCurrent(input: {
   readonly thread: Pick<CodeThread, "id" | "checkoutId" | "lifecycle">;
   readonly checkout: Pick<CodeCheckoutIdentity, "id" | "availability">;
@@ -91,6 +107,48 @@ export function createCodeExternalEditorRouteHandler(options: {
     }
     if (target === undefined) return failure("unavailable", 404);
     return Response.json({ ...target, line: body.line, column: body.column });
+  };
+}
+
+export function createCodeCheckoutOpenRouteHandler(options: {
+  readonly desktopBridgeSecret: string | undefined;
+  readonly resolve: (
+    input: CheckoutTargetRequest,
+  ) => Promise<{ readonly checkoutRoot: string } | undefined>;
+}) {
+  return async (request: Request): Promise<Response | undefined> => {
+    const url = new URL(request.url);
+    if (url.pathname !== "/api/desktop/code-checkout-open-target") return undefined;
+    if (
+      options.desktopBridgeSecret === undefined ||
+      url.hostname !== "127.0.0.1" ||
+      request.headers.has("origin") ||
+      !equal(options.desktopBridgeSecret, request.headers.get("x-octant-desktop-secret") ?? "")
+    ) {
+      return failure("unauthorized", 401);
+    }
+    if (request.method !== "POST" || url.search !== "") return failure("invalid", 400);
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return failure("invalid", 400);
+    }
+    if (!record(body) || !exact(body, ["windowId", "threadId"])) return failure("invalid", 400);
+    for (const key of ["windowId", "threadId"] as const) {
+      if (typeof body[key] !== "string" || !UUID.test(body[key])) return failure("invalid", 400);
+    }
+    try {
+      const target = await options.resolve({
+        windowId: body.windowId as string,
+        threadId: body.threadId as string,
+      });
+      return target === undefined
+        ? failure("unavailable", 404)
+        : Response.json({ checkoutRoot: target.checkoutRoot });
+    } catch {
+      return failure("unavailable", 503);
+    }
   };
 }
 

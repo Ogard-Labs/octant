@@ -103,6 +103,18 @@ describe("parseServerLaunchConfig", () => {
     });
   });
 
+  it("does not resolve packaged gh from a non-system PATH directory", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-packaged-gh-"));
+    directories.push(directory);
+    const executable = join(directory, "gh");
+    writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+    chmodSync(executable, 0o700);
+
+    expect(
+      parseServerLaunchConfig({ OCTANT_PACKAGED_RUNTIME: "1", PATH: directory }),
+    ).not.toHaveProperty("ghExecutable");
+  });
+
   it("fails closed when a packaged runtime receives the development bootstrap flag", () => {
     expect(() =>
       parseServerLaunchConfig({

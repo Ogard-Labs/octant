@@ -9,6 +9,9 @@ import type { AgentRunAuthority } from "@octant/contracts/agent-run";
 import type { HostId } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import { useCallback, useState } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 export interface CanvasCreationContext {
   readonly hostId: HostId;
@@ -73,14 +76,14 @@ export function CreateCanvasDraft({ context, onCreate }: CreateCanvasDraftProps)
         handleSubmit();
       }}
     >
-      <input
+      <OctantInput
         aria-label="Title"
         className="input"
         data-testid="title-input"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
       />
-      <textarea
+      <OctantTextarea
         aria-label="Prompt"
         className="textarea"
         data-testid="prompt-input"
@@ -92,9 +95,9 @@ export function CreateCanvasDraft({ context, onCreate }: CreateCanvasDraftProps)
           {denial}
         </div>
       ) : null}
-      <button className="btn btn-primary btn-sm" type="submit" data-testid="create-button">
+      <OctantButton type="submit" data-testid="create-button" size="sm">
         Create Canvas
-      </button>
+      </OctantButton>
     </form>
   );
 }

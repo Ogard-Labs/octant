@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
@@ -38,7 +38,14 @@ describe("AgentHierarchyPanel", () => {
     render(<AgentHierarchyPanel entries={entries} creationPosture="automatic" />);
     expect(screen.getByText("Active research")).toBeInTheDocument();
     expect(screen.queryByText("Completed review")).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("Agent hierarchy filter"), "history");
+    await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Agent hierarchy filter" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      ),
+    );
+    await user.click(screen.getByRole("option", { name: "History" }));
     expect(screen.getByText("Completed review")).toBeInTheDocument();
     expect(screen.getByText(/native read-only/i)).toBeInTheDocument();
   });
@@ -49,7 +56,14 @@ describe("AgentHierarchyPanel", () => {
     render(
       <AgentHierarchyPanel entries={entries} creationPosture="ask" onAcknowledge={onAcknowledge} />,
     );
-    await user.selectOptions(screen.getByLabelText("Agent hierarchy filter"), "history");
+    await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Agent hierarchy filter" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      ),
+    );
+    await user.click(screen.getByRole("option", { name: "History" }));
     await user.click(screen.getByRole("button", { name: /acknowledge result/i }));
     expect(onAcknowledge).toHaveBeenCalledWith({ runId: "run-2", version: 4 });
   });
@@ -89,7 +103,14 @@ describe("AgentHierarchyPanel", () => {
     await user.click(screen.getByRole("button", { name: "Cancel Active research" }));
     expect(onCancel).toHaveBeenCalledWith({ runId: "run-1" });
 
-    await user.selectOptions(screen.getByLabelText("Agent hierarchy filter"), "history");
+    await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Agent hierarchy filter" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      ),
+    );
+    await user.click(screen.getByRole("option", { name: "History" }));
     expect(
       screen.queryByRole("button", { name: "Cancel Completed review" }),
     ).not.toBeInTheDocument();

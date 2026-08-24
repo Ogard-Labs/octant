@@ -3,6 +3,7 @@ import type { CanvasDefinition, CanvasId } from "@octant/contracts/canvas";
 import { RotateCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CanvasDocument } from "../canvas/CanvasDocument";
+import { OctantButton } from "../ui/base/OctantButton";
 
 export interface ZenCanvasCardProps {
   readonly client: Pick<CanvasClient, "get">;
@@ -73,15 +74,17 @@ export function ZenCanvasCard(props: ZenCanvasCardProps) {
   return (
     <div className="zen-canvas-card">
       <div className="zen-canvas-card__chrome">
-        <button
+        <OctantButton
           aria-label="Re-read this canvas"
           className="btn-icon"
           disabled={reading}
           onClick={() => setAttempt((previous) => previous + 1)}
+          size="icon"
           type="button"
+          variant="ghost"
         >
           <RotateCw aria-hidden="true" size={12} />
-        </button>
+        </OctantButton>
         {notice === undefined ? null : (
           // The last good reading stays on screen; saying it is old is more
           // use than replacing a document with an error.

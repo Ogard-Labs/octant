@@ -253,6 +253,7 @@
      because a transcript interleaves code and tool output that wrap
      badly at prose width. */
   --oct-thread-measure: 760px;
+  --oct-transcript-font-size: 14px;
 
   /* app shell. The sidebar width is a token rather than a literal because
      the drag handle writes to it — resizing and the default come from the
@@ -900,6 +901,34 @@ h4 {
 .thread-column {
   width: min(100% - 40px, var(--oct-thread-measure));
   margin-inline: auto;
+}
+
+.shell[data-transcript-width="narrow"] {
+  --oct-thread-measure: 680px;
+}
+
+.shell[data-transcript-width="medium"] {
+  --oct-thread-measure: 800px;
+}
+
+.shell[data-transcript-width="wide"] {
+  --oct-thread-measure: 1040px;
+}
+
+.shell[data-transcript-text-size="small"] {
+  --oct-transcript-font-size: 13px;
+}
+
+.shell[data-transcript-text-size="medium"] {
+  --oct-transcript-font-size: 14px;
+}
+
+.shell[data-transcript-text-size="large"] {
+  --oct-transcript-font-size: 16px;
+}
+
+.shell[data-thread-provider-icons="false"] .sidebar-navigation__thread-provider {
+  display: none;
 }
 
 /* ─── form ──────────────────────────────────────────────────────────── */
@@ -2013,10 +2042,27 @@ input.switch:checked::after {
   max-height: calc(100vh - 96px);
   overflow: auto;
   padding: var(--oct-space-3);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--octant-shadow-pop);
+}
+
+.octant-tooltip__positioner {
+  z-index: var(--oct-z-toast);
+}
+
+.octant-tooltip {
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--oct-fg) 12%, var(--oct-border));
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fg);
+  color: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
+  font-size: var(--oct-text-sm);
+  line-height: 1.25;
 }
 
 /* ─── modal ───────────────────────────────────────────────────────────
@@ -2755,8 +2801,9 @@ input.switch:checked::after {
 }
 
 /* ─── kanban ──────────────────────────────────────────────────────────
-   The board scrolls horizontally; each column scrolls on its own. The
-   column head stays put so a long column keeps its label and count. */
+   Status boards are a balanced grid on desktop. The board body owns the
+   vertical scroll, so columns stop after their content instead of becoming
+   four tall empty wells. */
 .board {
   display: flex;
   gap: var(--oct-space-3);
@@ -2770,10 +2817,6 @@ input.switch:checked::after {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* Columns share the row instead of leaving a wide viewport half empty.
-     The floor keeps cards readable — below it the .board row scrolls
-     horizontally rather than squeezing; the ceiling stops a few columns
-     from stretching into slabs. */
   flex: 1 1 220px;
   min-width: 220px;
   max-width: 360px;
@@ -2782,12 +2825,14 @@ input.switch:checked::after {
   background: var(--oct-surface);
 }
 .board-col[data-empty="true"] {
-  flex: 0 0 148px;
-  min-width: 148px;
-  max-width: 168px;
+  /* Empty groups remain legible without narrowing the grid or creating a
+     visually separate rail. */
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: none;
 }
 .board-col[data-empty="true"] .board-col-empty {
-  padding: var(--oct-space-3) var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-2) var(--oct-space-4);
 }
 .board-col-head {
   display: flex;
@@ -2880,7 +2925,7 @@ input.switch:checked::after {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--oct-space-1) var(--oct-space-3);
+  gap: var(--oct-space-1) var(--oct-space-2);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);
@@ -2908,16 +2953,19 @@ input.switch:checked::after {
 }
 /* why a card cannot move — the one thing a triager needs and boards hide */
 .board-card-blocked {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--oct-space-2);
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
   margin-top: var(--oct-space-2);
-  padding: var(--oct-space-2);
-  border-radius: 6px;
-  background: var(--oct-warn-soft);
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border: 1px solid color-mix(in oklab, var(--oct-warn-fg) 32%, transparent);
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
   color: var(--oct-warn-fg);
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-xs);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 /* ─── issue list ──────────────────────────────────────────────────────
@@ -3565,16 +3613,17 @@ input.switch:checked::after {
 .sidebar-section {
   margin-top: var(--oct-space-4);
   padding: var(--oct-space-1) var(--oct-space-2);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  font-family: var(--oct-font-display);
+  font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
+  font-weight: 500;
+  letter-spacing: normal;
   color: var(--oct-meta);
   white-space: nowrap;
 }
 .sidebar-item {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: var(--oct-space-3);
   width: 100%;
   min-height: var(--oct-control-height-sm);
@@ -3584,17 +3633,17 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   text-align: left;
   text-decoration: none;
   white-space: nowrap;
 }
 .sidebar-item:hover {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 .sidebar-item[aria-current="page"] {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 .sidebar-item .count {
@@ -3674,20 +3723,32 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   text-align: left;
   text-decoration: none;
   white-space: nowrap;
 }
-.mode > .icon {
+.mode__icon-frame {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  place-items: center;
+  line-height: 0;
+}
+.mode__icon-frame > .icon {
+  display: block;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
+  margin: 0;
 }
 .mode:hover {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 .mode[aria-current="page"] {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 .mode .count {
@@ -3718,6 +3779,26 @@ input.switch:checked::after {
   border: 0;
   background: none;
 }
+.mode-switcher__brand {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--octant-ui-font-size);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modeswitch[data-oct-modeswitch="icons"] .mode-switcher__brand {
+  flex: 1 1 auto;
+  padding-inline: var(--oct-space-2);
+}
+.mode-switcher__context {
+  color: var(--oct-muted);
+  font-size: var(--octant-ui-font-size);
+  font-weight: 500;
+}
 .modeswitch[data-oct-modeswitch="icons"] .mode {
   position: relative;
   flex: 0 0 auto;
@@ -3747,6 +3828,15 @@ input.switch:checked::after {
 .app[data-compact="true"] .modeswitch[data-oct-modeswitch="icons"] {
   flex-direction: column;
 }
+.app[data-compact="true"] .mode-switcher__brand,
+.app[data-compact="true"] .mode-switcher__context {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* menu: a trigger that names the current surface, and the list of three
    in a popover. The trigger reads as the sidebar's heading rather than
@@ -3763,11 +3853,11 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   text-align: left;
 }
 .mode-trigger:hover {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
 }
 .mode-trigger .mode-caret {
   margin-left: auto;
@@ -6643,10 +6733,10 @@ input.switch:checked::after {
 .setnav-section {
   margin-top: var(--oct-space-4);
   padding: var(--oct-space-1) var(--oct-space-2);
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: normal;
   color: var(--oct-meta);
   white-space: nowrap;
 }
@@ -6656,6 +6746,7 @@ input.switch:checked::after {
 .setnav-item {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: var(--oct-space-3);
   width: 100%;
   min-height: var(--oct-control-height-sm);
@@ -6665,7 +6756,7 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   text-align: left;
   text-decoration: none;
   white-space: nowrap;
@@ -6674,11 +6765,11 @@ input.switch:checked::after {
   flex: 0 0 auto;
 }
 .setnav-item:hover {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 .setnav-item[aria-current="page"] {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 
@@ -6705,8 +6796,8 @@ input.switch:checked::after {
 
 .setgroup {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
-  background: var(--oct-surface);
+  border-radius: var(--radius-lg);
+  background: var(--card);
   overflow: hidden;
 }
 .setgroup + .setgroup {
@@ -6716,14 +6807,15 @@ input.switch:checked::after {
   display: flex;
   align-items: center;
   gap: var(--oct-space-3);
-  padding: var(--oct-space-3) var(--oct-space-4);
+  min-height: 48px;
+  padding: var(--oct-space-3) var(--oct-space-5);
   border-bottom: 1px solid var(--oct-border);
-  background: var(--oct-surface-warm);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-  color: var(--oct-meta);
+  background: transparent;
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+  color: var(--oct-fg);
 }
 .setgroup-head .setgroup-gap {
   flex: 1;
@@ -6754,7 +6846,7 @@ input.switch:checked::after {
   grid-template-rows: auto auto;
   align-items: center;
   column-gap: var(--oct-space-6);
-  padding: var(--oct-space-4);
+  padding: var(--oct-space-4) var(--oct-space-5);
   border-top: 1px solid var(--oct-border-soft);
 }
 .setrow:first-child {
@@ -6762,6 +6854,7 @@ input.switch:checked::after {
 }
 .setrow-label {
   font-size: var(--oct-text-sm);
+  font-weight: 500;
   color: var(--oct-fg);
 }
 .setrow-hint {

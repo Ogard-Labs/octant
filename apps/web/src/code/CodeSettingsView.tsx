@@ -1,9 +1,23 @@
 import type { CodeSettings } from "@octant/contracts/code";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import {
+  OctantCard,
+  OctantCardContent,
+  OctantCardDescription,
+  OctantCardHeader,
+  OctantCardTitle,
+} from "../ui/base/OctantCard";
+import {
+  OctantField,
+  OctantFieldDescription,
+  OctantFieldError,
+  OctantFieldGroup,
+  OctantFieldLabel,
+} from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
 export interface CodeSettingsUpdate {
   readonly defaultExecutionPolicy: CodeSettings["defaultExecutionPolicy"];
@@ -57,74 +71,94 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   }
 
   return (
-    <section aria-labelledby="settings-code-heading">
-      <h2 id="settings-code-heading">Code defaults</h2>
-      <p>These defaults apply only to new Code threads. Existing threads keep their access.</p>
-      <label className="settings-view__field">
-        <span>Default Code access</span>
-        <OctantNativeSelect
-          aria-label="Default Code access"
-          className="settings-view__select"
-          onChange={(event) =>
-            setExecutionPolicy(event.currentTarget.value as CodeSettings["defaultExecutionPolicy"])
-          }
-          value={executionPolicy}
-        >
-          <option value="approval-gated">Ask for approvals</option>
-          <option value="auto-accept-edits">Auto-accept edits</option>
-          <option value="plan">Plan mode (read-only)</option>
-          <option value="full-access">Full access</option>
-        </OctantNativeSelect>
-      </label>
-      <label className="settings-view__field">
-        <span>Default approval persistence</span>
-        <OctantNativeSelect
-          aria-label="Default approval persistence"
-          className="settings-view__select"
-          onChange={(event) =>
-            setPermissionPersistence(
-              event.currentTarget.value as CodeSettings["defaultPermissionPersistence"],
-            )
-          }
-          value={permissionPersistence}
-        >
-          <option value="current-session">Current session only</option>
-          <option value="project-default">Project default</option>
-        </OctantNativeSelect>
-      </label>
-      <label className="settings-view__field">
-        <span>External editor executable</span>
-        <OctantInput
-          aria-label="External editor executable"
-          className="settings-view__text-input"
-          onChange={(event) => setExecutable(event.currentTarget.value)}
-          placeholder="/usr/local/bin/code"
-          type="text"
-          value={executable}
-        />
-      </label>
-      <label className="settings-view__field">
-        <span>External editor arguments</span>
-        <OctantTextarea
-          aria-label="External editor arguments"
-          className="settings-view__text-input"
-          onChange={(event) => setArgumentsText(event.currentTarget.value)}
-          placeholder={"--goto\n{file}:{line}:{column}"}
-          value={argumentsText}
-        />
-      </label>
-      <p>
-        Use one argument per line. Available placeholders: {"{file}"}, {"{line}"}, {"{column}"}.
-      </p>
-      <OctantButton
-        className="settings-view__action"
-        onClick={() => void save()}
-        type="button"
-        variant="secondary"
-      >
-        Save Code defaults
-      </OctantButton>
-      {message === undefined ? null : <p role="status">{message}</p>}
-    </section>
+    <OctantCard aria-labelledby="settings-code-heading">
+      <OctantCardHeader>
+        <OctantCardTitle id="settings-code-heading">Code defaults</OctantCardTitle>
+        <OctantCardDescription>
+          These defaults apply only to new Code threads. Existing threads keep their access.
+        </OctantCardDescription>
+      </OctantCardHeader>
+      <OctantCardContent>
+        <OctantFieldGroup>
+          <OctantField>
+            <OctantFieldLabel>Default Code access</OctantFieldLabel>
+            <OctantFieldDescription>
+              Choose the authority new Code threads request at creation.
+            </OctantFieldDescription>
+            <OctantToggleGroup<CodeSettings["defaultExecutionPolicy"]>
+              className="max-w-full flex-wrap"
+              aria-label="Default Code access"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) setExecutionPolicy(selected);
+              }}
+              value={[executionPolicy]}
+            >
+              <OctantToggleGroupItem value="approval-gated">Ask</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="auto-accept-edits">Auto-edit</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="plan">Plan</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="full-access">Full access</OctantToggleGroupItem>
+            </OctantToggleGroup>
+          </OctantField>
+          <OctantField>
+            <OctantFieldLabel>Default approval persistence</OctantFieldLabel>
+            <OctantFieldDescription>
+              Decide whether approvals end with the session or follow the Project default.
+            </OctantFieldDescription>
+            <OctantToggleGroup<CodeSettings["defaultPermissionPersistence"]>
+              aria-label="Default approval persistence"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) setPermissionPersistence(selected);
+              }}
+              value={[permissionPersistence]}
+            >
+              <OctantToggleGroupItem value="current-session">Session</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="project-default">Project</OctantToggleGroupItem>
+            </OctantToggleGroup>
+          </OctantField>
+          <OctantField>
+            <OctantFieldLabel htmlFor="code-editor-executable">
+              External editor executable
+            </OctantFieldLabel>
+            <OctantInput
+              aria-label="External editor executable"
+              id="code-editor-executable"
+              onChange={(event) => setExecutable(event.currentTarget.value)}
+              placeholder="/usr/local/bin/code"
+              type="text"
+              value={executable}
+            />
+          </OctantField>
+          <OctantField>
+            <OctantFieldLabel htmlFor="code-editor-arguments">
+              External editor arguments
+            </OctantFieldLabel>
+            <OctantTextarea
+              aria-label="External editor arguments"
+              id="code-editor-arguments"
+              onChange={(event) => setArgumentsText(event.currentTarget.value)}
+              placeholder={"--goto\n{file}:{line}:{column}"}
+              value={argumentsText}
+            />
+            <OctantFieldDescription>
+              One argument per line. Available placeholders: {"{file}"}, {"{line}"}, {"{column}"}.
+            </OctantFieldDescription>
+          </OctantField>
+          <div className="flex items-center gap-3">
+            <OctantButton onClick={() => void save()} type="button">
+              Save Code defaults
+            </OctantButton>
+            {message === undefined ? null : message === "Code defaults saved." ? (
+              <p className="m-0 text-sm text-muted-foreground" role="status">
+                {message}
+              </p>
+            ) : (
+              <OctantFieldError>{message}</OctantFieldError>
+            )}
+          </div>
+        </OctantFieldGroup>
+      </OctantCardContent>
+    </OctantCard>
   );
 }

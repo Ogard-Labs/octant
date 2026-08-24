@@ -117,6 +117,18 @@ export const CodeProjectPullRequestConnection = Schema.Union(
 );
 export type CodeProjectPullRequestConnection = typeof CodeProjectPullRequestConnection.Type;
 
+/**
+ * Freshness is tracked per connected Project. A global snapshot timestamp is
+ * not enough: refreshing one repository must not make an untouched repository
+ * look like an authoritative empty result.
+ */
+export const CodeProjectPullRequestProjectFreshness = Schema.Struct({
+  projectId: ProjectId,
+  freshness: CodeProjectPullRequestFreshness,
+}).annotations(strict);
+export type CodeProjectPullRequestProjectFreshness =
+  typeof CodeProjectPullRequestProjectFreshness.Type;
+
 export const CodeProjectPullRequestChecksSummary = Schema.Literal(
   "unknown",
   "pending",
@@ -192,6 +204,15 @@ export const CodeProjectPullRequestView = Schema.Struct({
   repositoriesTruncated: Schema.Boolean,
   pullRequestsTruncated: Schema.Boolean,
   freshness: CodeProjectPullRequestFreshness,
+  projectFreshness: Schema.optional(
+    Schema.Array(CodeProjectPullRequestProjectFreshness).pipe(
+      Schema.filter(
+        (entries) =>
+          entries.length <= MAX_CODE_PROJECT_PULL_REQUEST_PROJECTS &&
+          new Set(entries.map((entry) => String(entry.projectId))).size === entries.length,
+      ),
+    ),
+  ),
   generatedAt: UtcTimestamp,
 }).annotations(strict);
 export type CodeProjectPullRequestView = typeof CodeProjectPullRequestView.Type;

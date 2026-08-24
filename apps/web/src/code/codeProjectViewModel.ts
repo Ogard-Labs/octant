@@ -1,4 +1,5 @@
 export const CODE_PROJECT_VIEWS_STORAGE_KEY = "octant.code.project-views.v1";
+export const WORK_PROJECT_VIEWS_STORAGE_KEY = "octant.work.project-views.v1";
 export const ALL_CODE_PROJECTS_VIEW_ID = "all";
 export const ALL_CODE_PROJECTS_VIEW_NAME = "All Projects";
 
@@ -41,12 +42,69 @@ export const CODE_PROJECT_VIEW_COLORS = [
 export type CodeProjectViewColor = (typeof CODE_PROJECT_VIEW_COLORS)[number];
 export const DEFAULT_CODE_PROJECT_VIEW_COLOR: CodeProjectViewColor = "neutral";
 
+/** The lifecycle scope used by a Project View. */
+export const PROJECT_VIEW_LIFECYCLES = ["active", "archived", "all"] as const;
+export type ProjectViewLifecycle = (typeof PROJECT_VIEW_LIFECYCLES)[number];
+
+/** Grouping choices intentionally stay at the Project-list seam. */
+export const PROJECT_VIEW_GROUPINGS = ["project", "environment", "status", "none"] as const;
+export type ProjectViewGrouping = (typeof PROJECT_VIEW_GROUPINGS)[number];
+
+export const PROJECT_VIEW_SORTS = ["recency", "alphabetical", "created"] as const;
+export type ProjectViewSort = (typeof PROJECT_VIEW_SORTS)[number];
+
+export const PROJECT_VIEW_ACTIVITY_PERIODS = [
+  "all",
+  "today",
+  "3-days",
+  "7-days",
+  "14-days",
+  "30-days",
+  "custom",
+] as const;
+export type ProjectViewActivityPeriod = (typeof PROJECT_VIEW_ACTIVITY_PERIODS)[number];
+
+export interface ProjectViewActivityRange {
+  readonly from?: string;
+  readonly to?: string;
+}
+
+export interface ProjectViewFilters {
+  readonly lifecycle: ProjectViewLifecycle;
+  /** Empty means every environment. `local` is the only implicit environment. */
+  readonly environmentIds: ReadonlyArray<string>;
+  readonly showEmptyProjects: boolean;
+  readonly grouping: ProjectViewGrouping;
+  readonly sorting: ProjectViewSort;
+  readonly activity: ProjectViewActivityPeriod;
+  readonly activityRange?: ProjectViewActivityRange;
+}
+
+export interface ProjectViewEnvironment {
+  readonly id: string;
+  readonly name: string;
+}
+
+export const DEFAULT_PROJECT_VIEW_FILTERS: ProjectViewFilters = {
+  lifecycle: "active",
+  environmentIds: [],
+  showEmptyProjects: true,
+  grouping: "project",
+  sorting: "recency",
+  activity: "all",
+};
+
+export const CODE_PROJECT_VIEW_PREFERENCES_STORAGE_KEY = "octant.code.project-view-preferences.v1";
+export const WORK_PROJECT_VIEW_PREFERENCES_STORAGE_KEY = "octant.work.project-view-preferences.v1";
+
 export interface CodeProjectView {
   readonly id: string;
   readonly name: string;
   readonly projectIds: ReadonlyArray<string>;
   readonly icon: CodeProjectViewIcon;
   readonly color: CodeProjectViewColor;
+  /** Omitted on legacy views; readers apply DEFAULT_PROJECT_VIEW_FILTERS. */
+  readonly filters?: ProjectViewFilters;
 }
 
 export interface CodeProjectViewInput {
@@ -55,6 +113,7 @@ export interface CodeProjectViewInput {
   readonly projectIds: ReadonlyArray<string>;
   readonly icon?: CodeProjectViewIcon;
   readonly color?: CodeProjectViewColor;
+  readonly filters?: ProjectViewFilters;
 }
 
 export interface CodeProjectViewState {
@@ -67,6 +126,22 @@ export interface CodeProjectViewCandidate {
   readonly name: string;
 }
 
+export interface ProjectViewPreferences {
+  readonly filters: ProjectViewFilters;
+}
+
+export type ProjectViewMode = "code" | "work";
+
+function projectViewStorageKey(mode: ProjectViewMode): string {
+  return mode === "code" ? CODE_PROJECT_VIEWS_STORAGE_KEY : WORK_PROJECT_VIEWS_STORAGE_KEY;
+}
+
+function projectViewPreferencesStorageKey(mode: ProjectViewMode): string {
+  return mode === "code"
+    ? CODE_PROJECT_VIEW_PREFERENCES_STORAGE_KEY
+    : WORK_PROJECT_VIEW_PREFERENCES_STORAGE_KEY;
+}
+
 export function defaultCodeProjectViewState(): CodeProjectViewState {
   return { activeViewId: ALL_CODE_PROJECTS_VIEW_ID, views: [] };
 }
@@ -74,9 +149,16 @@ export function defaultCodeProjectViewState(): CodeProjectViewState {
 export function readCodeProjectViewState(
   storage: Pick<Storage, "getItem"> | undefined = defaultStorage(),
 ): CodeProjectViewState {
+  return readProjectViewState("code", storage);
+}
+
+export function readProjectViewState(
+  mode: ProjectViewMode,
+  storage: Pick<Storage, "getItem"> | undefined = defaultStorage(),
+): CodeProjectViewState {
   if (storage === undefined) return defaultCodeProjectViewState();
   try {
-    const raw = storage.getItem(CODE_PROJECT_VIEWS_STORAGE_KEY);
+    const raw = storage.getItem(projectViewStorageKey(mode));
     if (raw === null || raw.trim() === "") return defaultCodeProjectViewState();
     return normalizeCodeProjectViewState(JSON.parse(raw));
   } catch {
@@ -88,15 +170,83 @@ export function writeCodeProjectViewState(
   state: CodeProjectViewState,
   storage: Pick<Storage, "setItem"> | undefined = defaultStorage(),
 ): void {
+  writeProjectViewState("code", state, storage);
+}
+
+export function writeProjectViewState(
+  mode: ProjectViewMode,
+  state: CodeProjectViewState,
+  storage: Pick<Storage, "setItem"> | undefined = defaultStorage(),
+): void {
   if (storage === undefined) return;
   try {
     storage.setItem(
-      CODE_PROJECT_VIEWS_STORAGE_KEY,
+      projectViewStorageKey(mode),
       JSON.stringify(normalizeCodeProjectViewState(state)),
     );
   } catch {
     // Presentation persistence is best-effort; the current session still switches.
   }
+}
+
+export function defaultProjectViewPreferences(): ProjectViewPreferences {
+  return { filters: DEFAULT_PROJECT_VIEW_FILTERS };
+}
+
+export function readProjectViewPreferences(
+  mode: ProjectViewMode,
+  storage: Pick<Storage, "getItem"> | undefined = defaultStorage(),
+): ProjectViewPreferences {
+  if (storage === undefined) return defaultProjectViewPreferences();
+  try {
+    const raw = storage.getItem(projectViewPreferencesStorageKey(mode));
+    if (raw === null || raw.trim() === "") return defaultProjectViewPreferences();
+    const value: unknown = JSON.parse(raw);
+    if (value === null || typeof value !== "object") return defaultProjectViewPreferences();
+    const record = value as { readonly filters?: unknown };
+    return { filters: normalizeProjectViewFilters(record.filters) };
+  } catch {
+    return defaultProjectViewPreferences();
+  }
+}
+
+export function writeProjectViewPreferences(
+  mode: ProjectViewMode,
+  preferences: ProjectViewPreferences,
+  storage: Pick<Storage, "setItem"> | undefined = defaultStorage(),
+): void {
+  if (storage === undefined) return;
+  try {
+    storage.setItem(
+      projectViewPreferencesStorageKey(mode),
+      JSON.stringify({ filters: normalizeProjectViewFilters(preferences.filters) }),
+    );
+  } catch {
+    // Presentation persistence is best-effort; the current session still filters.
+  }
+}
+
+export function projectViewFiltersFor(
+  state: CodeProjectViewState,
+  viewId: string,
+  allProjects: ProjectViewPreferences = defaultProjectViewPreferences(),
+): ProjectViewFilters {
+  if (viewId === ALL_CODE_PROJECTS_VIEW_ID) return normalizeProjectViewFilters(allProjects.filters);
+  return normalizeProjectViewFilters(state.views.find((view) => view.id === viewId)?.filters);
+}
+
+export function updateCodeProjectViewFilters(
+  state: CodeProjectViewState,
+  viewId: string,
+  filters: ProjectViewFilters,
+): CodeProjectViewState {
+  if (viewId === ALL_CODE_PROJECTS_VIEW_ID) return normalizeCodeProjectViewState(state);
+  return normalizeCodeProjectViewState({
+    ...state,
+    views: state.views.map((view) =>
+      view.id === viewId ? { ...view, filters: normalizeProjectViewFilters(filters) } : view,
+    ),
+  });
 }
 
 export function createCodeProjectView(
@@ -115,7 +265,13 @@ export function updateCodeProjectView(
 ): CodeProjectViewState {
   const view = normalizeView(input);
   if (view === undefined) return normalizeCodeProjectViewState(state);
-  const views = state.views.map((candidate) => (candidate.id === view.id ? view : candidate));
+  const views = state.views.map((candidate) =>
+    candidate.id === view.id && view.filters === undefined && candidate.filters !== undefined
+      ? { ...view, filters: candidate.filters }
+      : candidate.id === view.id
+        ? view
+        : candidate,
+  );
   if (!views.some((candidate) => candidate.id === view.id)) {
     return createCodeProjectView(state, view);
   }
@@ -155,6 +311,139 @@ export function visibleCodeProjects<T extends { readonly id: string }>(
   if (active === undefined) return projects;
   const allowed = new Set(active.projectIds);
   return projects.filter((project) => allowed.has(String(project.id)));
+}
+
+export interface ProjectViewProjectLike {
+  readonly id: string;
+  readonly lifecycle?: ProjectViewLifecycle;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+}
+
+export interface ProjectViewThreadLike {
+  readonly projectId?: string;
+  readonly updatedAt?: string;
+}
+
+/**
+ * Applies the saved Project View membership and its normalized filters to the
+ * server-authored Project summaries. Projects without an explicit environment
+ * projection are local by definition; no remote host is inferred.
+ */
+export function filterProjectsForView<T extends ProjectViewProjectLike>(
+  projects: ReadonlyArray<T>,
+  state: CodeProjectViewState,
+  preferences: ProjectViewPreferences = defaultProjectViewPreferences(),
+  environmentByProjectId: ReadonlyMap<string, ProjectViewEnvironment> = new Map(),
+): ReadonlyArray<T> {
+  const filters = projectViewFiltersFor(state, state.activeViewId, preferences);
+  const selected = visibleCodeProjects(projects, state);
+  return selected.filter((project) => {
+    const lifecycle = project.lifecycle ?? "active";
+    if (filters.lifecycle !== "all" && lifecycle !== filters.lifecycle) return false;
+    if (filters.environmentIds.length === 0) return true;
+    const environment = environmentByProjectId.get(String(project.id));
+    const environmentId = environment?.id ?? "local";
+    return filters.environmentIds.includes(environmentId);
+  });
+}
+
+/** Returns only server-authored thread activity in the requested inclusive window. */
+export function filterProjectViewThreads<T extends ProjectViewThreadLike>(
+  threads: ReadonlyArray<T>,
+  filters: ProjectViewFilters,
+  now: Date = new Date(),
+): ReadonlyArray<T> {
+  if (filters.activity === "all") return threads;
+  const range = projectViewActivityRange(filters, now);
+  if (range === undefined) return threads;
+  return threads.filter((thread) => {
+    if (thread.updatedAt === undefined) return false;
+    const timestamp = Date.parse(thread.updatedAt);
+    if (Number.isNaN(timestamp)) return false;
+    return timestamp >= range.from.getTime() && timestamp <= range.to.getTime();
+  });
+}
+
+export function projectViewActivityRange(
+  filters: ProjectViewFilters,
+  now: Date = new Date(),
+): { readonly from: Date; readonly to: Date } | undefined {
+  if (filters.activity === "all") return undefined;
+  if (filters.activity === "custom") {
+    if (projectViewActivityRangeError(filters) !== undefined) return undefined;
+    const from = parseLocalDateStart(filters.activityRange?.from);
+    const to = parseLocalDateEnd(filters.activityRange?.to);
+    if (from === undefined && to === undefined) return undefined;
+    return {
+      from: from ?? new Date(0),
+      to: to ?? new Date(8640000000000000),
+    };
+  }
+  const days =
+    filters.activity === "today"
+      ? 1
+      : filters.activity === "3-days"
+        ? 3
+        : filters.activity === "7-days"
+          ? 7
+          : filters.activity === "14-days"
+            ? 14
+            : 30;
+  const today = localDayStart(now);
+  return {
+    from: new Date(today.getFullYear(), today.getMonth(), today.getDate() - days + 1),
+    to: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 0, 0, 0, -1),
+  };
+}
+
+export function projectViewActivityRangeError(filters: ProjectViewFilters): string | undefined {
+  if (filters.activity !== "custom") return undefined;
+  const fromValue = filters.activityRange?.from;
+  const toValue = filters.activityRange?.to;
+  const from = parseLocalDateStart(fromValue);
+  const to = parseLocalDateStart(toValue);
+  if (fromValue !== undefined && fromValue !== "" && from === undefined) {
+    return "Choose a valid start date.";
+  }
+  if (toValue !== undefined && toValue !== "" && to === undefined) {
+    return "Choose a valid end date.";
+  }
+  if (from !== undefined && to !== undefined && from.getTime() > to.getTime()) {
+    return "Start date must be on or before end date.";
+  }
+  return undefined;
+}
+
+function parseLocalDateStart(value: string | undefined): Date | undefined {
+  if (value === undefined) return undefined;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (match === null) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return undefined;
+  }
+  return date;
+}
+
+function parseLocalDateEnd(value: string | undefined): Date | undefined {
+  const start = parseLocalDateStart(value);
+  if (start === undefined) return undefined;
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1);
+  end.setMilliseconds(-1);
+  return end;
+}
+
+function localDayStart(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
 }
 
 export function createCodeProjectViewId(): string {
@@ -201,6 +490,15 @@ function normalizeView(value: unknown): CodeProjectView | undefined {
     readonly projectIds?: unknown;
     readonly icon?: unknown;
     readonly color?: unknown;
+    readonly filters?: unknown;
+    readonly filter?: unknown;
+    readonly lifecycle?: unknown;
+    readonly environmentIds?: unknown;
+    readonly showEmptyProjects?: unknown;
+    readonly grouping?: unknown;
+    readonly sorting?: unknown;
+    readonly activity?: unknown;
+    readonly activityRange?: unknown;
   };
   if (
     typeof record.id !== "string" ||
@@ -225,11 +523,92 @@ function normalizeView(value: unknown): CodeProjectView | undefined {
   ];
   const icon = CODE_PROJECT_VIEW_ICONS.find((candidate) => candidate === record.icon);
   const color = CODE_PROJECT_VIEW_COLORS.find((candidate) => candidate === record.color);
+  const legacyFilters =
+    record.filters ??
+    record.filter ??
+    (record.lifecycle === undefined &&
+    record.environmentIds === undefined &&
+    record.showEmptyProjects === undefined &&
+    record.grouping === undefined &&
+    record.sorting === undefined &&
+    record.activity === undefined &&
+    record.activityRange === undefined
+      ? undefined
+      : {
+          lifecycle: record.lifecycle,
+          environmentIds: record.environmentIds,
+          showEmptyProjects: record.showEmptyProjects,
+          grouping: record.grouping,
+          sorting: record.sorting,
+          activity: record.activity,
+          activityRange: record.activityRange,
+        });
+  const filters = normalizeProjectViewFilters(legacyFilters);
   return {
     id: record.id,
     name,
     projectIds,
     icon: icon ?? DEFAULT_CODE_PROJECT_VIEW_ICON,
     color: color ?? DEFAULT_CODE_PROJECT_VIEW_COLOR,
+    ...(legacyFilters === undefined ? {} : { filters }),
   };
+}
+
+export function normalizeProjectViewFilters(value: unknown): ProjectViewFilters {
+  if (value === null || typeof value !== "object") return DEFAULT_PROJECT_VIEW_FILTERS;
+  const record = value as {
+    readonly lifecycle?: unknown;
+    readonly environmentIds?: unknown;
+    readonly environments?: unknown;
+    readonly showEmptyProjects?: unknown;
+    readonly grouping?: unknown;
+    readonly sorting?: unknown;
+    readonly activity?: unknown;
+    readonly activityRange?: unknown;
+  };
+  const lifecycle = PROJECT_VIEW_LIFECYCLES.find((candidate) => candidate === record.lifecycle);
+  const grouping = PROJECT_VIEW_GROUPINGS.find((candidate) => candidate === record.grouping);
+  const sorting = PROJECT_VIEW_SORTS.find((candidate) => candidate === record.sorting);
+  const activity = PROJECT_VIEW_ACTIVITY_PERIODS.find((candidate) => candidate === record.activity);
+  const environmentValue = record.environmentIds ?? record.environments;
+  const environmentIds = Array.isArray(environmentValue)
+    ? [
+        ...new Set(
+          environmentValue.filter(
+            (environment): environment is string =>
+              typeof environment === "string" && environment.trim() !== "",
+          ),
+        ),
+      ]
+    : [];
+  const range = normalizeActivityRange(record.activityRange);
+  return {
+    lifecycle: lifecycle ?? DEFAULT_PROJECT_VIEW_FILTERS.lifecycle,
+    environmentIds,
+    showEmptyProjects:
+      typeof record.showEmptyProjects === "boolean"
+        ? record.showEmptyProjects
+        : DEFAULT_PROJECT_VIEW_FILTERS.showEmptyProjects,
+    grouping: grouping ?? DEFAULT_PROJECT_VIEW_FILTERS.grouping,
+    sorting: sorting ?? DEFAULT_PROJECT_VIEW_FILTERS.sorting,
+    activity: activity ?? DEFAULT_PROJECT_VIEW_FILTERS.activity,
+    ...(range === undefined ? {} : { activityRange: range }),
+  };
+}
+
+function normalizeActivityRange(value: unknown): ProjectViewActivityRange | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const record = value as { readonly from?: unknown; readonly to?: unknown };
+  const from = normalizeDateOnly(record.from);
+  const to = normalizeDateOnly(record.to);
+  if (from === undefined && to === undefined) return undefined;
+  return {
+    ...(from === undefined ? {} : { from }),
+    ...(to === undefined ? {} : { to }),
+  };
+}
+
+function normalizeDateOnly(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return parseLocalDateStart(value) === undefined ? undefined : value;
 }

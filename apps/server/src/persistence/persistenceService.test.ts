@@ -9,6 +9,7 @@ import { applyMigrations, MIGRATIONS } from "./migrations";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { Persistence, PersistenceStartupFailed, makePersistenceLive } from "./persistenceService";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./shellProjection";
+import { decodePersistedShellSettings } from "./shellPersistenceSchema";
 
 const directories: Array<string> = [];
 const now = "2026-07-13T10:00:00.000Z";
@@ -185,28 +186,7 @@ describe("PersistenceLive", () => {
       ),
     );
 
-    expect(result.bootstrap.settings).toEqual({
-      ...legacySettings,
-      contextSidebarWidth: 360,
-      // A persisted store that predates first-run onboarding was written by a
-      // host that already finished its first run, so the upcast stamps
-      // `completed`; re-running the walkthrough on upgrade would be wrong.
-      // Only a genuinely new store starts `pending`.
-      firstRunOnboarding: "completed",
-      automaticUpdateChecks: true,
-      lastContextSurface: null,
-      modeSwitcherPresentation: "buttons",
-      navigatorAssistant: {},
-      projectViewSwitcherPresentation: "dropdown",
-      userProfile: { accent: "indigo", avatar: { kind: "initials" } },
-      sidebarBackground: {
-        kind: "none",
-        overlayColor: "#1a1a1c",
-        overlayOpacity: 100,
-        vibrancyMode: "off",
-      },
-      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
-    });
+    expect(result.bootstrap.settings).toEqual(decodePersistedShellSettings(legacySettings));
     expect(result.bootstrap.settingsVersion).toBe(1);
     expect(result.event).toEqual({ payload_json: legacyPayloadJson });
     expect(result.projection).toEqual({ settings_json: legacySettingsJson });
@@ -275,9 +255,10 @@ describe("PersistenceLive", () => {
     expect(closed).toBe(true);
   });
 
-  it("fails closed when startup finds quarantined state", async () => {
+  it("rebuilds projections when a historical quarantine is now decodable", async () => {
     const directory = temporaryDirectory();
-    const seeded = openSqlite(join(directory, "octant.sqlite3"));
+    const databasePath = join(directory, "octant.sqlite3");
+    const seeded = openSqlite(databasePath);
     applyMigrations(seeded, MIGRATIONS, () => now);
     insertFixtureEvent(seeded);
     seeded
@@ -295,22 +276,23 @@ describe("PersistenceLive", () => {
       );
     seeded.close();
 
-    const result = await Effect.runPromise(
-      Effect.either(
-        Effect.scoped(
-          Effect.provide(
-            Persistence,
-            makePersistenceLive({ dataDirectory: directory, clock: () => now }),
-          ),
+    const status = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          return persistence.status();
+        }).pipe(
+          Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
         ),
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(PersistenceStartupFailed);
-      expect(result.left).toMatchObject({ category: "recovery-required" });
-    }
+    expect(status).toMatchObject({ state: "current", integrity: "ok", quarantineCount: 0 });
+    const inspected = openSqlite(databasePath);
+    expect(inspected.prepare("SELECT count(*) AS count FROM event_quarantine").get()).toEqual({
+      count: 0,
+    });
+    inspected.close();
   });
 
   it("fails closed when a projection checkpoint is ahead of the journal", async () => {

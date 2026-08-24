@@ -108,7 +108,12 @@ describe("TerminalProcessPort", () => {
     // directory of its own bound root instead of failing against the read-only
     // home or sharing one history with every other repository.
     const stateDirectory = launchedStateDirectory(spawn);
+    const launchedEnvironment = (
+      spawn.mock.calls[0] as unknown as [string, string[], { env: EnvRecord }]
+    )[2].env;
     expect(dirname(stateDirectory)).toBe(shellStateDirectory);
+    expect(launchedEnvironment.DISABLE_AUTO_UPDATE).toBe("true");
+    expect(launchedEnvironment.DISABLE_UPDATE_PROMPT).toBe("true");
     expect(spawn).toHaveBeenCalledWith(
       fake.sandboxPath,
       expect.arrayContaining(["-p", "--", "/bin/zsh"]),

@@ -38,6 +38,16 @@ const chatFacts = {
 function emptyClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
   return {
     center: vi.fn(async () => ({ items: [] })),
+    conversation: vi.fn(async () => ({
+      runId: "00000000-0000-4000-8000-000000000001" as never,
+      parentThreadId,
+      executionKind: "octant-managed" as const,
+      modelId: "test-model" as never,
+      lifecycleStatus: "running" as const,
+      status: "live" as const,
+      entries: [],
+      truncated: false,
+    })),
     parentSummary: vi.fn(async () => ({ parentThreadId, entries: [] })),
     acknowledge: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
     preview: vi.fn(async () => chatFacts),
@@ -121,7 +131,14 @@ describe("AgentRunHierarchy", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Active / History" })).toBeVisible(),
     );
-    await user.selectOptions(screen.getByLabelText("Agent hierarchy filter"), "history");
+    await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Agent hierarchy filter" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      ),
+    );
+    await user.click(screen.getByRole("option", { name: "History" }));
     expect(screen.getByText("Verify the packaged child")).toBeVisible();
     await user.click(screen.getByRole("button", { name: /acknowledge result/i }));
 

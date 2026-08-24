@@ -40,6 +40,7 @@ describe("providerBootstrapPolicy", () => {
         scanning: false,
         attempted: false,
         hasSelectableModels: false,
+        hasUnobservedProviders: false,
       }),
     ).toBe(true);
     expect(
@@ -49,6 +50,7 @@ describe("providerBootstrapPolicy", () => {
         scanning: true,
         attempted: false,
         hasSelectableModels: false,
+        hasUnobservedProviders: false,
       }),
     ).toBe(false);
     expect(
@@ -58,6 +60,7 @@ describe("providerBootstrapPolicy", () => {
         scanning: false,
         attempted: true,
         hasSelectableModels: false,
+        hasUnobservedProviders: false,
       }),
     ).toBe(false);
     expect(
@@ -67,8 +70,19 @@ describe("providerBootstrapPolicy", () => {
         scanning: false,
         attempted: false,
         hasSelectableModels: false,
+        hasUnobservedProviders: false,
       }),
     ).toBe(false);
+    expect(
+      shouldRunProviderBootstrap({
+        enabled: true,
+        providerStatus: "ready",
+        scanning: false,
+        attempted: false,
+        hasSelectableModels: true,
+        hasUnobservedProviders: true,
+      }),
+    ).toBe(true);
   });
 
   it("probes an enabled provider whose runtime observation was lost after restart", () => {

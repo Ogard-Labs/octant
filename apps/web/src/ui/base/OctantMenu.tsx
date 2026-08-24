@@ -9,7 +9,15 @@ export interface OctantMenuItem {
   readonly value: string;
 }
 
+export interface OctantMenuAction {
+  readonly disabled?: boolean;
+  readonly icon?: ReactNode;
+  readonly label: string;
+  readonly onSelect: () => void;
+}
+
 export interface OctantMenuProps {
+  readonly actions?: ReadonlyArray<OctantMenuAction>;
   readonly items: ReadonlyArray<OctantMenuItem>;
   readonly onValueChange: (value: string) => void;
   readonly trigger: ReactNode;
@@ -17,6 +25,7 @@ export interface OctantMenuProps {
   readonly triggerClassName?: string;
   readonly triggerLabel: string;
   readonly value: string;
+  readonly selectionMode?: "radio" | "action";
 }
 
 /** Octant menu adapter over the owned shadcn/Base UI DropdownMenu recipe. */

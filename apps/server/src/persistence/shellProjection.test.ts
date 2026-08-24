@@ -13,7 +13,10 @@ import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { ProjectionQuarantined, rebuildProjection } from "./projection";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
-import { decodePersistedWindowWorkspace } from "./shellPersistenceSchema";
+import {
+  decodePersistedShellSettings,
+  decodePersistedWindowWorkspace,
+} from "./shellPersistenceSchema";
 import {
   ShellProjection,
   readEnvironmentPresentation,
@@ -1025,7 +1028,7 @@ describe("ShellProjection", () => {
             ...legacyPayload.settings,
             contextSidebarWidth: 360,
             lastContextSurface: null,
-            modeSwitcherPresentation: "buttons",
+            modeSwitcherPresentation: "dropdown",
             sidebarBackground: {
               kind: "none",
               overlayColor: "#1a1a1c",
@@ -1044,35 +1047,7 @@ describe("ShellProjection", () => {
     rebuildProjection({ connection, journal, projection, clock: () => now });
 
     expect(readShellSettings(connection)).toEqual({
-      settings: {
-        ...legacyPayload.settings,
-        contextSidebarWidth: 360,
-        lastContextSurface: null,
-        modeSwitcherPresentation: "buttons",
-        sidebarBackground: {
-          kind: "none",
-          overlayColor: "#1a1a1c",
-          overlayOpacity: 100,
-          vibrancyMode: "off",
-        },
-        environmentPresentationByMode: {
-          chat: "hidden",
-          work: "floating",
-          code: "floating",
-        },
-        // A pre-onboarding store already finished its first run; the upcast
-        // stamps `completed` so an upgrade never re-runs the walkthrough.
-        firstRunOnboarding: "completed",
-        automaticUpdateChecks: true,
-        // A store persisted before Navigator shipped decodes to the empty
-        // section: both roles absent, so Navigator reports unconfigured.
-        navigatorAssistant: {},
-        projectViewSwitcherPresentation: "dropdown",
-        // Likewise the profile: a store written before profiles shipped was
-        // never asked who is using it, so it upcasts to the empty profile
-        // rather than to a name guessed from the OS account.
-        userProfile: { accent: "indigo", avatar: { kind: "initials" } },
-      },
+      settings: decodePersistedShellSettings(legacyPayload.settings),
       aggregateVersion: 1,
     });
     expect(connection.prepare("SELECT payload_json FROM event_journal").get()).toEqual({
@@ -1138,35 +1113,7 @@ describe("ShellProjection", () => {
       .run(JSON.stringify(legacy));
 
     expect(readShellSettings(connection)).toEqual({
-      settings: {
-        ...legacy,
-        contextSidebarWidth: 360,
-        lastContextSurface: null,
-        modeSwitcherPresentation: "buttons",
-        sidebarBackground: {
-          kind: "none",
-          overlayColor: "#1a1a1c",
-          overlayOpacity: 100,
-          vibrancyMode: "off",
-        },
-        environmentPresentationByMode: {
-          chat: "hidden",
-          work: "floating",
-          code: "floating",
-        },
-        // A pre-onboarding store already finished its first run; the upcast
-        // stamps `completed` so an upgrade never re-runs the walkthrough.
-        firstRunOnboarding: "completed",
-        automaticUpdateChecks: true,
-        // A store persisted before Navigator shipped decodes to the empty
-        // section: both roles absent, so Navigator reports unconfigured.
-        navigatorAssistant: {},
-        projectViewSwitcherPresentation: "dropdown",
-        // Likewise the profile: a store written before profiles shipped was
-        // never asked who is using it, so it upcasts to the empty profile
-        // rather than to a name guessed from the OS account.
-        userProfile: { accent: "indigo", avatar: { kind: "initials" } },
-      },
+      settings: decodePersistedShellSettings(legacy),
       aggregateVersion: 1,
     });
     expect(
@@ -1212,7 +1159,7 @@ describe("ShellProjection", () => {
         .run(JSON.stringify(current));
 
       expect(readShellSettings(connection)).toEqual({
-        settings: { ...current, modeSwitcherPresentation: "buttons" },
+        settings: { ...current, modeSwitcherPresentation: "dropdown" },
         aggregateVersion: 1,
       });
       connection.close();

@@ -423,6 +423,27 @@ describe("createRecordedAgentRunContextSnapshotPort", () => {
 });
 
 describe("createAgentRunSessionRuntime", () => {
+  it("publishes managed response deltas without changing the terminal outcome", async () => {
+    const provider = fakeProvider();
+    const started: string[] = [];
+    const deltas: string[] = [];
+    const settledOutcomes: AgentRunSessionOutcome[] = [];
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        onSessionStarted: ({ runId: startedRunId }) => started.push(String(startedRunId)),
+        onTextDelta: ({ text }) => deltas.push(text),
+        onSessionSettled: ({ outcome }) => settledOutcomes.push(outcome),
+      }),
+    );
+    const outcome = settled(runtime.start(agentRun()));
+    await provider.emit({ kind: "text-delta", sessionId, text: "partial" });
+    await provider.emit({ kind: "completed", sessionId });
+    await expect(outcome).resolves.toMatchObject({ kind: "completed" });
+    expect(started).toHaveLength(1);
+    expect(deltas).toEqual(["partial"]);
+    expect(settledOutcomes).toHaveLength(1);
+  });
+
   it("runs the child as an in-process provider session under the clamped authority", async () => {
     const provider = fakeProvider({
       onSend: (emit) => {

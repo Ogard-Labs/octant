@@ -1,5 +1,14 @@
 import { useRef, useState, type KeyboardEvent } from "react";
-import { Archive, MessageSquare, Search, TriangleAlert } from "lucide-react";
+import {
+  Archive,
+  FolderPlus,
+  MessageSquare,
+  Search,
+  Settings,
+  SquarePen,
+  TriangleAlert,
+} from "lucide-react";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import type { SidebarActivityMode } from "./activityViewModel";
@@ -30,6 +39,9 @@ export interface ThreadSearchOverlayProps {
   /** Reports the typed query so the host can list its archived matches. */
   readonly onQueryChange?: (query: string) => void;
   readonly onClose: () => void;
+  readonly onNewThread?: () => void;
+  readonly onNewProject?: () => void;
+  readonly onOpenSettings?: () => void;
   readonly onOpenThread: (hit: ThreadSearchHit) => void;
 }
 
@@ -101,6 +113,12 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
     props.onOpenThread(hit);
   }
 
+  function runQuickAction(action: (() => void) | undefined): void {
+    if (action === undefined) return;
+    props.onClose();
+    action();
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
     if (hits.length === 0) return;
     if (event.key === "ArrowDown") {
@@ -159,9 +177,6 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
           value={query}
         />
       </div>
-      <p className="thread-search__scope" role="note">
-        {modeLabel} threads only. Project, Recents, and Unfiled are folder labels.
-      </p>
       {listing === "ready" ? null : (
         <p className="thread-search__listing" data-listing={listing} role="note">
           <TriangleAlert aria-hidden="true" size={13} strokeWidth={1.8} />
@@ -229,6 +244,49 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
           </div>
         ))}
       </div>
+      {props.onNewThread === undefined &&
+      props.onNewProject === undefined &&
+      props.onOpenSettings === undefined ? null : (
+        <div aria-label="Quick actions" className="thread-search__quick-actions" role="group">
+          <p className="thread-search__group-label">Quick actions</p>
+          {props.onNewThread === undefined ? null : (
+            <OctantButton
+              className="thread-search__quick-action justify-start"
+              onClick={() => runQuickAction(props.onNewThread)}
+              type="button"
+              variant="ghost"
+            >
+              <SquarePen aria-hidden="true" size={14} strokeWidth={1.7} />
+              <span>New thread</span>
+            </OctantButton>
+          )}
+          {props.onNewProject === undefined ? null : (
+            <OctantButton
+              className="thread-search__quick-action justify-start"
+              onClick={() => runQuickAction(props.onNewProject)}
+              type="button"
+              variant="ghost"
+            >
+              <FolderPlus aria-hidden="true" size={14} strokeWidth={1.7} />
+              <span>New Project</span>
+            </OctantButton>
+          )}
+          {props.onOpenSettings === undefined ? null : (
+            <OctantButton
+              className="thread-search__quick-action justify-start"
+              onClick={() => runQuickAction(props.onOpenSettings)}
+              type="button"
+              variant="ghost"
+            >
+              <Settings aria-hidden="true" size={14} strokeWidth={1.7} />
+              <span>Settings</span>
+            </OctantButton>
+          )}
+        </div>
+      )}
+      <p className="thread-search__scope" role="note">
+        {modeLabel} threads only. Project, Recents, and Unfiled are folder labels.
+      </p>
     </OctantDialog>
   );
 }

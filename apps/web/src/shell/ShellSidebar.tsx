@@ -8,22 +8,17 @@ import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
 import { PanelLeftClose, Search } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantInput } from "../ui/base/OctantInput";
 import { FIRST_PARTY_PLUGINS_EFFECTIVE, resolveSidebarContributions } from "./contributionRegistry";
+import { IconButton } from "./IconButton";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarProfile } from "./SidebarProfile";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
-
-const MODE_SEARCH_LABEL: Record<OctantMode, string> = {
-  chat: "Chat",
-  work: "Work",
-  code: "Code",
-};
+import { buildSidebarAppMenu, type SidebarNavigationInput } from "./navigationModel";
 
 export interface ShellSidebarProps {
   /**
@@ -64,8 +59,8 @@ export interface ShellSidebarProps {
   /** Absent until Navigator has a model, so the profile menu does not advertise it. */
   readonly navigatorAvailable?: boolean;
   readonly onOpenSettings: (deepLink?: SettingsDeepLink) => void;
-  readonly onSearchQueryChange: (query: string) => void;
-  readonly searchQuery: string;
+  /** Opens the App-level thread Search overlay. */
+  readonly onOpenSearch?: () => void;
   /** Absent on a window that cannot enter Zen, which keeps the row off the menu. */
   readonly onOpenZen?: () => void;
   /** Hides the sidebar; the window chrome then offers the matching Show control. */
@@ -80,8 +75,6 @@ export interface ShellSidebarProps {
 }
 
 export function ShellSidebar(props: ShellSidebarProps) {
-  const [searchOpen, setSearchOpen] = useState(false);
-  const searchVisible = searchOpen || props.searchQuery.trim() !== "";
   const modes = enabledModes(props.settings);
   const activeMode = props.workspace.activeMode;
   const chatReady = activeMode === "chat" && props.chatNavigation !== undefined;
@@ -104,6 +97,38 @@ export function ShellSidebar(props: ShellSidebarProps) {
             : props.chatStatus === "disconnected"
               ? "Chat is disconnected."
               : undefined));
+  const navigationActions = {
+    ...(chatReady ? props.chatNavigation.actions : {}),
+    ...codeActions,
+    ...workActions,
+  };
+  const navigationInput: SidebarNavigationInput = {
+    activeMode,
+    artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
+    automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
+    agentsCenterEnabled: props.agentsCenterEnabled ?? AGENTS_CENTER_NAVIGATION_ENABLED,
+    createThread:
+      chatReady ||
+      codeActions["new-code-thread"] !== undefined ||
+      workActions["new-work-thread"] !== undefined
+        ? "available"
+        : "unavailable",
+    plugins: "available",
+    projects: "available",
+    pullRequests:
+      codeActions["pull-requests"] === undefined || !sidebarContributions.has("pull-requests")
+        ? "unavailable"
+        : "available",
+    threadBoard:
+      (codeActions["thread-board"] !== undefined || workActions["thread-board"] !== undefined) &&
+      sidebarContributions.has("thread-board")
+        ? "available"
+        : "unavailable",
+  };
+  const secondaryActions = buildSidebarAppMenu(navigationInput).flatMap((descriptor) => {
+    const action = navigationActions[descriptor.id];
+    return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
+  });
   return (
     <aside aria-label="Octant sidebar" className="sidebar" data-octant-sidebar>
       {props.resolvedSidebarBackground !== undefined && props.backgroundFetcher !== undefined ? (
@@ -118,6 +143,14 @@ export function ShellSidebar(props: ShellSidebarProps) {
           className="sidebar__traffic-light-space"
           data-traffic-light-safe-space
         />
+        {props.onCollapseSidebar === undefined ? null : (
+          <IconButton
+            className="sidebar__native-collapse"
+            icon={PanelLeftClose}
+            label="Hide sidebar"
+            onClick={props.onCollapseSidebar}
+          />
+        )}
         <span aria-hidden="true" className="sidebar__drag-surface window-drag-region" />
       </div>
       <div className="sidebar__content window-no-drag" data-octant-sidebar-content>
@@ -134,30 +167,12 @@ export function ShellSidebar(props: ShellSidebarProps) {
         <ModeSwitcher
           actions={
             <>
-              {searchVisible ? null : (
-                <button
-                  aria-label="Search"
-                  className="btn-icon window-no-drag"
-                  data-navigation-id="search"
-                  onClick={() => setSearchOpen(true)}
-                  title="Search"
-                  type="button"
-                >
-                  <Search aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
-                </button>
-              )}
-              {props.onCollapseSidebar === undefined ? null : (
-                <button
-                  aria-label="Hide sidebar"
-                  className="btn-icon window-no-drag"
-                  data-navigation-id="hide-sidebar"
-                  onClick={props.onCollapseSidebar}
-                  title="Hide sidebar"
-                  type="button"
-                >
-                  <PanelLeftClose aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
-                </button>
-              )}
+              <IconButton
+                data-navigation-id="search"
+                icon={Search}
+                label="Search"
+                onClick={props.onOpenSearch}
+              />
               <span className="sidebar__chrome-activity" data-octant-sidebar-chrome-actions />
             </>
           }
@@ -166,49 +181,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
           onSelectMode={props.onSelectMode}
           presentation={props.settings.modeSwitcherPresentation}
         />
-        {searchVisible ? (
-          <SidebarSearchField
-            mode={activeMode}
-            onClose={() => setSearchOpen(false)}
-            onQueryChange={props.onSearchQueryChange}
-            query={props.searchQuery}
-          />
-        ) : null}
         <SidebarNavigation
-          actions={{
-            ...(chatReady ? props.chatNavigation.actions : {}),
-            ...codeActions,
-            ...workActions,
-          }}
-          input={{
-            activeMode,
-            // The library is a host read, so it is offered wherever the shell
-            // can reach the host at all; an unreachable one shows no row rather
-            // than a destination that opens onto an error.
-            artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
-            // Gated by A3/A4 integration: never expose a dead Automations destination.
-            automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
-            agentsCenterEnabled: props.agentsCenterEnabled ?? AGENTS_CENTER_NAVIGATION_ENABLED,
-            createThread:
-              chatReady ||
-              codeActions["new-code-thread"] !== undefined ||
-              workActions["new-work-thread"] !== undefined
-                ? "available"
-                : "unavailable",
-            plugins: "available",
-            projects: "available",
-            pullRequests:
-              codeActions["pull-requests"] === undefined ||
-              !sidebarContributions.has("pull-requests")
-                ? "unavailable"
-                : "available",
-            threadBoard:
-              (codeActions["thread-board"] !== undefined ||
-                workActions["thread-board"] !== undefined) &&
-              sidebarContributions.has("thread-board")
-                ? "available"
-                : "unavailable",
-          }}
+          actions={navigationActions}
+          input={navigationInput}
           projectSection={props.projectSection}
         />
         {chatStatusMessage === undefined ? null : (
@@ -236,45 +211,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
           onOpenSettings={props.onOpenSettings}
           {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}
           profile={props.settings?.userProfile ?? defaultShellSettings().userProfile}
+          secondaryActions={secondaryActions}
         />
       </div>
     </aside>
-  );
-}
-
-function SidebarSearchField(props: {
-  readonly mode: OctantMode;
-  readonly onClose: () => void;
-  readonly onQueryChange: (query: string) => void;
-  readonly query: string;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  return (
-    <div className="sidebar__search" data-navigation-id="search">
-      <Search aria-hidden="true" size={14} strokeWidth={1.7} />
-      <OctantInput
-        aria-label={`Search ${MODE_SEARCH_LABEL[props.mode]} threads`}
-        autoComplete="off"
-        onChange={(event) => props.onQueryChange(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
-          event.preventDefault();
-          if (props.query !== "") {
-            props.onQueryChange("");
-            return;
-          }
-          props.onClose();
-        }}
-        placeholder="Search threads"
-        ref={inputRef}
-        type="search"
-        value={props.query}
-      />
-    </div>
   );
 }

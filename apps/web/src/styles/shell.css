@@ -1,6 +1,6 @@
 .shell.shell-frame {
   --octant-rendered-sidebar-width: var(--octant-sidebar-width, 232px);
-  --octant-window-chrome-reserved-width: 148px;
+  --octant-window-chrome-reserved-width: 96px;
   display: grid;
   width: 100%;
   max-width: 100vw;
@@ -34,6 +34,25 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   app-region: drag;
 }
 
+.shell-frame__native-drag-strip {
+  display: none;
+}
+
+/* `hiddenInset` does not make the renderer's transparent top edge draggable.
+   Reserve one explicit top-edge target after the traffic lights and collapsed
+   sidebar control. It carries no content, so no interactive child has to carve
+   a hole through a drag overlay. */
+html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
+  position: fixed;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  left: 112px;
+  display: block;
+  height: var(--octant-native-hidden-inset-titlebar-height);
+  pointer-events: auto;
+}
+
 .window-no-drag,
 .window-no-drag * {
   -webkit-app-region: no-drag;
@@ -42,9 +61,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 .shell-frame > .window-chrome {
   position: relative;
-  /* hiddenInset reserves the top strip for native window movement. Controls in
-     that strip receive move gestures instead of pointer clicks on macOS. */
-  top: 24px;
+  top: 0;
   z-index: 4;
   display: flex;
   min-width: 0;
@@ -56,6 +73,14 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   background: transparent;
   border-bottom: 0;
   pointer-events: none;
+}
+
+/* `hiddenInset` reserves the top strip for native window movement. Keep the
+   interactive chrome below that strip so macOS delivers pointer events to the
+   controls instead of treating them as window-drag gestures. Remote/web
+   clients do not have the native inset and keep the zero-offset row above. */
+html[data-octant-native-host="true"] .shell-frame > .window-chrome {
+  top: var(--octant-native-hidden-inset-titlebar-height);
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {
@@ -78,10 +103,20 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   pointer-events: auto;
 }
 
+.window-chrome__leading .window-chrome__button {
+  position: relative;
+  top: 0;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  color: var(--oct-fg-2);
+}
+
 /* Same reserve the sidebar keeps for the macOS traffic lights (see
    .sidebar__traffic-light-space); it moves here while the sidebar is hidden. */
 .window-chrome__traffic-light-space {
-  flex: 0 0 76px;
+  flex: 0 0 82px;
   height: 100%;
 }
 
@@ -89,6 +124,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   align-self: stretch;
   flex: 1 1 auto;
   min-width: 12px;
+  pointer-events: auto;
 }
 
 /* The badge recipe carries the warning palette and type; the chrome only
@@ -131,6 +167,39 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   gap: 6px;
   padding: 0 10px;
   pointer-events: auto;
+}
+
+.window-chrome__environment-action,
+.window-chrome__open-in-action {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  pointer-events: auto;
+}
+
+.open-in-menu {
+  display: inline-flex;
+}
+
+.open-in-menu__trigger {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface-muted);
+  color: var(--oct-fg-2);
+  cursor: pointer;
+}
+
+.open-in-menu__trigger:hover,
+.open-in-menu__trigger:focus-visible,
+.open-in-menu__trigger[data-popup-open] {
+  color: var(--oct-fg);
+  border-color: var(--oct-border-strong);
+  background: var(--oct-fg-soft);
 }
 
 .window-chrome__development-auth,
@@ -225,6 +294,17 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 .sidebar__traffic-light-space {
   flex: 0 0 66px;
   height: 100%;
+}
+
+.sidebar__native-collapse {
+  position: relative;
+  top: 8px;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  flex: 0 0 auto;
+  margin-left: 2px;
 }
 
 .sidebar__native-leading .sidebar__drag-surface {
@@ -355,14 +435,13 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   min-width: 0;
 }
 
-/* The activity toggle is contributed by the Project section pass and still
-   wears the 28px shell-icon-button metric; its neighbors in this row are
-   var(--oct-control-height-sm) .btn-icon squares. One row, one size. */
+/* Search and Activity use the same compact shell icon recipe. */
+.sidebar__chrome-actions .shell-icon-button,
 .sidebar__chrome-activity .shell-icon-button {
-  width: var(--oct-control-height-sm);
-  min-width: var(--oct-control-height-sm);
-  height: var(--oct-control-height-sm);
-  min-height: var(--oct-control-height-sm);
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
 }
 
 .sidebar__chrome-actions,
@@ -371,23 +450,6 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   flex: 0 0 auto;
   align-items: center;
   gap: 2px;
-}
-
-.sidebar__search {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  margin: 6px 0 0;
-  padding: 0 4px;
-}
-
-.sidebar__search input {
-  min-width: 0;
-  height: 28px;
-  border-color: transparent;
-  background: var(--oct-fg-soft);
-  font-size: 12px;
 }
 
 /* Space separates the navigation actions from the Project tree. A rule here
@@ -399,7 +461,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 /* Navigation rows must not shrink when the Project tree below them grows. */
@@ -434,14 +496,14 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: transparent;
   border: 0;
   border-radius: 6px;
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   cursor: pointer;
   text-align: left;
 }
 
 .sidebar-navigation__thread:hover {
   color: var(--oct-fg);
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
 }
 
 /* The open thread reads louder than a hovered one.
@@ -454,8 +516,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
    rail is an inset shadow rather than a border, which would move the title. */
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-  box-shadow: inset 1px 0 0 var(--octant-border-strong);
+  background: var(--sidebar-accent);
+  box-shadow: none;
   font-weight: 500;
 }
 
@@ -519,19 +581,17 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   }
 }
 
-/* The provider's mark closes the row where the model name used to sit. The
-   model changes inside a thread and read as noise on every line; the provider
-   is what a reader scanning the list is telling apart. */
+/* Provider identity sits immediately before the title, like a compact file
+   type mark. It is stable across the row and does not consume a trailing
+   action slot or change the title's indentation when the row is hovered. */
 .sidebar-navigation__thread-provider {
   display: inline-flex;
   flex: none;
   align-items: center;
-  opacity: 0;
-}
-
-.sidebar-navigation__thread:hover .sidebar-navigation__thread-provider,
-.sidebar-navigation__thread:focus-visible .sidebar-navigation__thread-provider {
-  opacity: 0.7;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  opacity: 0.78;
 }
 
 .sidebar-navigation__thread-title {
@@ -765,15 +825,26 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   align-items: stretch;
   justify-content: center;
   min-height: 100%;
-  padding: clamp(32px, 10vh, 96px) 0;
+  padding: clamp(24px, 7vh, 64px) 0;
   margin: 0 auto;
-  gap: 18px;
+  gap: 10px;
 }
 
-.draft-thread__welcome,
+/* Ready new-thread surfaces are composer-first. Their heading remains in the
+   document outline for assistive technology without occupying the visual
+   center; the prerequisite-only Agent welcome keeps its visible guidance. */
+.draft-thread:not(.agent-mode-welcome) .draft-thread__welcome,
 .work-composer-adapter__welcome,
 .code-composer-adapter__welcome {
-  text-align: center;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .draft-thread__eyebrow,
@@ -806,6 +877,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   flex-wrap: wrap;
   justify-content: center;
   gap: 7px;
+  margin-top: 2px;
 }
 
 .draft-thread__intent-card {
@@ -1128,9 +1200,9 @@ form > .work-composer-adapter__attachments {
   align-items: stretch;
   min-height: 100%;
   justify-content: center;
-  padding: clamp(28px, 7vh, 72px) 0;
+  padding: clamp(24px, 7vh, 64px) 0;
   margin: 0 auto;
-  gap: 18px;
+  gap: 10px;
 }
 
 .work-composer-adapter__attach-btn {
@@ -1203,7 +1275,7 @@ form > .work-composer-adapter__attachments {
 
 .work-thread-workspace__transcript {
   display: grid;
-  width: min(100% - 40px, 680px);
+  width: min(100% - 40px, var(--oct-thread-measure));
   gap: 18px;
   padding: clamp(20px, 3vh, 36px) 0 28px;
   margin: 0 auto;
@@ -1223,14 +1295,14 @@ form > .work-composer-adapter__attachments {
 .work-thread-workspace__message p {
   max-width: 62ch;
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--oct-transcript-font-size);
   line-height: 1.55;
   text-wrap: pretty;
 }
 
 .work-thread-workspace__composer {
   display: grid;
-  width: min(100%, 720px);
+  width: min(100%, var(--oct-thread-measure));
   gap: 7px;
   padding: 8px clamp(16px, 3vw, 28px) 12px;
   margin: 0 auto;
@@ -1260,9 +1332,9 @@ form > .work-composer-adapter__attachments {
   align-items: stretch;
   justify-content: center;
   min-height: 100%;
-  padding: clamp(28px, 7vh, 72px) 0;
+  padding: clamp(24px, 7vh, 64px) 0;
   margin: 0 auto;
-  gap: 18px;
+  gap: 10px;
 }
 
 .code-composer-adapter__eyebrow {

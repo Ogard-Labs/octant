@@ -13,6 +13,8 @@ import { ChevronDown, Filter, Folder, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import {
   groupWorkBoardCards,
   workBoardStatusLabel,
@@ -185,7 +187,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
             <div className="code-board__grouping-options">
               {(["status", "project"] as const).map((option) => (
                 <label className="code-board__grouping-option" key={option}>
-                  <input
+                  <OctantInput
                     checked={grouping === option}
                     name="work-board-grouping"
                     onChange={() => changeGrouping(option)}
@@ -201,7 +203,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
           <label className="code-board__search">
             <span className="sr-only">Search threads</span>
             <Search aria-hidden="true" size={14} strokeWidth={1.8} />
-            <input
+            <OctantInput
               onChange={(event) => setFilters((prev) => ({ ...prev, text: event.target.value }))}
               placeholder="Search threads"
               type="search"
@@ -248,7 +250,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
                   <div className="code-board__status-options">
                     {ALL_STATUSES.map((status) => (
                       <label className="code-board__status-option" key={status}>
-                        <input
+                        <OctantInput
                           checked={filters.statuses.has(status)}
                           onChange={(event) =>
                             setFilters((prev) => toggleStatus(prev, status, event.target.checked))
@@ -268,7 +270,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
                   {props.projects.length === 0 ? null : (
                     <label>
                       <span>Project</span>
-                      <select
+                      <OctantNativeSelect
                         onChange={(event) =>
                           setFilters((prev) => ({
                             ...prev,
@@ -286,13 +288,13 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
                             {project.name}
                           </option>
                         ))}
-                      </select>
+                      </OctantNativeSelect>
                     </label>
                   )}
 
                   <label>
                     <span>Pending request</span>
-                    <select
+                    <OctantNativeSelect
                       onChange={(event) =>
                         setFilters((prev) => ({
                           ...prev,
@@ -304,12 +306,12 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
                       <option value="any">Any</option>
                       <option value="only">Only pending</option>
                       <option value="excluded">Exclude pending</option>
-                    </select>
+                    </OctantNativeSelect>
                   </label>
 
                   <label>
                     <span>Follow-up</span>
-                    <select
+                    <OctantNativeSelect
                       onChange={(event) =>
                         setFilters((prev) => ({
                           ...prev,
@@ -321,7 +323,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
                       <option value="any">Any</option>
                       <option value="only">Only follow-up</option>
                       <option value="excluded">Exclude follow-up</option>
-                    </select>
+                    </OctantNativeSelect>
                   </label>
                 </div>
 
@@ -360,7 +362,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
             </summary>
             <div className="code-board__view-popover">
               <label>
-                <input
+                <OctantInput
                   checked={showEmptyGroups}
                   onChange={(event) => {
                     setShowEmptyGroups(event.target.checked);
@@ -628,7 +630,7 @@ function WorkBoardCardView(props: {
     >
       <span className={props.layout === "list" ? "issuerow-main" : "board-card-top"}>
         {props.unread ? <span aria-label="Unread" className="unread" role="img" /> : null}
-        <button
+        <OctantButton
           className="code-board__card-open"
           onClick={() =>
             props.onOpen?.({
@@ -644,7 +646,7 @@ function WorkBoardCardView(props: {
           >
             {card.title}
           </span>
-        </button>
+        </OctantButton>
         <span className={props.statusPresentation === "visible" ? "badge" : "sr-only"}>
           {statusLabel}
         </span>

@@ -170,8 +170,15 @@ pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
 tool does not stop its server-owned lifecycle. At narrow widths the dock
-becomes an overlay drawer. Environment belongs to a thread as a compact header summary
-with a transient disclosure whose open state is renderer-only. Work and Code
+becomes an overlay drawer. Environment belongs to a thread as a compact header
+summary with a transient disclosure whose open state is renderer-only. It may
+summarize the active thread's server-authored child AgentRuns, including their
+lifecycle, resolved model, and retained final result; full AgentRun control
+stays in the Agents dock. The host also exposes a bounded, process-local child
+conversation read for managed runs: entries are cursor-readable and byte- and
+count-bounded, with explicit complete, stale, and unavailable states. Provider-
+native children remain transcript-unavailable unless their normalized provider
+capability supplies an equivalent host-authorized read. Work and Code
 have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
 Chat has no board. Code also has a Project-scoped Pull requests workspace that
@@ -197,7 +204,8 @@ fourth authority mode.
 [0044](decisions/0044-the-dock-hosts-live-thread-owned-tools.md) are the agreed
 interaction model for remaining renderer work. Environment is already a compact
 header summary with a transient disclosure whose open state is not persisted
-([0042](decisions/0042-environment-is-a-transient-disclosure.md)).
+and may include a truthful child-run summary
+([0045](decisions/0045-environment-summarizes-the-active-thread.md)).
 The dock already hosts live thread-owned tool instances — Files, Browser,
 Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery,
 thread-level Agents, and Review — rather than a generic Thread accordion.

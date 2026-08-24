@@ -53,6 +53,7 @@
     "./project-client": "./src/projectClient.ts",
     "./folder-browse-client": "./src/folderBrowseClient.ts",
     "./provider-client": "./src/providerClient.ts",
+    "./provider-usage-limits-client": "./src/providerUsageLimitsClient.ts",
     "./provider-federation": "./src/providerFederation.ts",
     "./shell-client": "./src/shellClient.ts",
     "./remote-pairing-client": "./src/remotePairingClient.ts",

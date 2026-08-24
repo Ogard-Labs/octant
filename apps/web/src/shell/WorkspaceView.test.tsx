@@ -183,8 +183,9 @@ async function closePaneShowing(title: string): Promise<void> {
 
 async function expandLocalServers(): Promise<void> {
   fireEvent.click(
-    await screen.findByRole("button", { name: /Show environment for/ }, { timeout: 5_000 }),
+    await screen.findByRole("button", { name: "Toggle environment" }, { timeout: 5_000 }),
   );
+  fireEvent.click(await screen.findByRole("button", { name: /^Local servers/ }));
 }
 
 describe("WorkspaceView Local servers wiring", () => {
@@ -1469,13 +1470,10 @@ describe("WorkspaceView Work thread tab", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Draft brief" })).toBeVisible();
-    expect(
-      await screen.findByRole("button", { name: /Show environment for Knowledge Base/ }),
-    ).toBeVisible();
-    expect(screen.getByText("work-root")).toBeVisible();
-    expect(
-      screen.queryByRole("dialog", { name: "Environment for Knowledge Base" }),
-    ).not.toBeInTheDocument();
+    const environment = await screen.findByRole("button", { name: "Toggle environment" });
+    expect(environment).toBeVisible();
+    expect(screen.getByText(/Knowledge Base · work-root/)).toHaveClass("sr-only");
+    expect(screen.queryByRole("dialog", { name: "Environment" })).not.toBeInTheDocument();
     const composer = screen.getByRole("textbox", { name: "Work prompt" });
     await userEvent.type(composer, "Ship the preview");
     await userEvent.click(screen.getByRole("button", { name: "Create artifact" }));
@@ -1827,12 +1825,10 @@ describe("WorkspaceView Chat thread Environment", () => {
       />,
     );
 
-    expect(
-      await screen.findByRole("button", { name: /Show environment for Planning/ }),
-    ).toBeVisible();
-    expect(screen.getByText("Virtual Project")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /Show environment for Planning/ }));
-    expect(await screen.findByRole("dialog", { name: "Environment for Planning" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Toggle environment" })).toBeVisible();
+    expect(screen.getByText(/Planning · Virtual Project/)).toHaveClass("sr-only");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle environment" }));
+    expect(await screen.findByRole("dialog", { name: "Environment" })).toBeVisible();
     expect(screen.getAllByText("Attachments").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Sources").length).toBeGreaterThan(0);
     expect(screen.queryByText("Git")).not.toBeInTheDocument();

@@ -4,6 +4,10 @@ import type {
   AgentRunCreationPosture,
   AgentRunRole,
 } from "@octant/contracts";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
 import "./agent-hierarchy.css";
 
 export interface AgentRunCreateFormValues {
@@ -67,6 +71,7 @@ export function AgentRunCreateForm(props: {
     <form
       aria-label="Create subagent"
       className="agent-run-create-form"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         props.onSubmit({
@@ -90,26 +95,22 @@ export function AgentRunCreateForm(props: {
 
       <label htmlFor={`${formId}-role`}>
         Role
-        <select
+        <OctantSelectField
           id={`${formId}-role`}
-          value={selectedRole}
-          onChange={(event) => {
-            const next = event.target.value as AgentRunRole;
+          onValueChange={(value) => {
+            const next = value as AgentRunRole;
             setRole(next);
             props.onRoleChange?.(next);
           }}
-        >
-          {allowed.map((value) => (
-            <option key={value} value={value}>
-              {ROLE_LABELS[value]}
-            </option>
-          ))}
-        </select>
+          options={allowed.map((value) => ({ id: value, label: ROLE_LABELS[value] }))}
+          value={selectedRole}
+        />
       </label>
 
       <label htmlFor={`${formId}-task`}>
         Task
-        <textarea
+        <OctantTextarea
+          className="agent-run-create-form__task resize-none"
           id={`${formId}-task`}
           required
           value={task}
@@ -117,9 +118,8 @@ export function AgentRunCreateForm(props: {
         />
       </label>
 
-      <label>
-        <input
-          type="checkbox"
+      <label className="agent-run-create-form__context">
+        <OctantCheckbox
           checked={includeParentContext}
           onChange={(event) => setIncludeParentContext(event.target.checked)}
         />
@@ -128,9 +128,9 @@ export function AgentRunCreateForm(props: {
 
       {props.facts === undefined ? null : <ResolvedFacts facts={props.facts} />}
 
-      <button type="submit" disabled={props.submitting === true || props.facts === undefined}>
+      <OctantButton type="submit" disabled={props.submitting === true || props.facts === undefined}>
         {props.submitting === true ? "Creating…" : "Create subagent"}
-      </button>
+      </OctantButton>
     </form>
   );
 }

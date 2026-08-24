@@ -404,7 +404,7 @@ describe("SettingsView", () => {
 
   it("selects subtle native vibrancy when translucency is enabled", async () => {
     const user = userEvent.setup();
-    const updateDraft = vi.fn();
+    const applyPatch = vi.fn(async () => true);
     renderSettings({
       settings: { ...defaultShellSettings(), sidebarMaterial: "opaque" },
       themeController: {
@@ -415,14 +415,14 @@ describe("SettingsView", () => {
             vibrancyMode: "off",
           },
         },
-        updateDraft,
+        applyPatch,
       } as never,
     });
     navigateTo("Appearance");
 
     await user.click(screen.getByRole("switch", { name: "Translucent sidebar" }));
 
-    expect(updateDraft).toHaveBeenCalledWith({
+    expect(applyPatch).toHaveBeenCalledWith({
       sidebarBackground: {
         ...DEFAULT_THEME_SETTINGS.sidebarBackground,
         vibrancyMode: "subtle",
@@ -508,16 +508,18 @@ describe("SettingsView", () => {
     expect(onSearchChange).toHaveBeenCalledWith("translucent");
     // With a query active, the search results panel replaces section content.
     expect(screen.getByRole("listbox", { name: "Settings search results" })).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Mode switcher" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Mode switcher" })).not.toBeInTheDocument();
   });
 
   it("changes the project view switcher presentation", () => {
     const { props } = renderSettings();
     navigateTo("Appearance");
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Project view switcher" }), {
-      target: { value: "inline" },
-    });
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Project view switcher" })).getByRole("button", {
+        name: "Buttons",
+      }),
+    );
     expect(props.onSettingsChange).toHaveBeenCalledWith({
       projectViewSwitcherPresentation: "inline",
     });
@@ -536,15 +538,20 @@ describe("SettingsView", () => {
     fireEvent.keyDown(listbox, { key: "Enter" });
     // Selecting the result clears the search and focuses the control.
     expect(onSearchChange).toHaveBeenLastCalledWith("");
-    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveFocus();
+    const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
+    expect(modeSwitcher).toBeInTheDocument();
+    expect(within(modeSwitcher).getByRole("button", { name: "Buttons" })).toHaveFocus();
   });
 
   it("applies an initial deep link on mount to open a section and focus a setting", () => {
     renderSettings({ initialDeepLink: { section: "appearance", setting: "mode-switcher" } });
 
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveFocus();
+    expect(
+      within(screen.getByRole("group", { name: "Mode switcher" })).getByRole("button", {
+        name: "Buttons",
+      }),
+    ).toHaveFocus();
   });
 
   it("applies a pending deep link from another app surface and reports it consumed", () => {
@@ -662,6 +669,39 @@ describe("SettingsView", () => {
     const table = await screen.findByRole("table", { name: "daily activity" });
     expect(table.className).toContain("usage-dashboard__table--narrow");
     expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);
+  });
+
+  it("mounts provider limits beside the local usage dashboard", async () => {
+    const usageClient = {
+      query: vi.fn(async () => {
+        throw new Error("No local usage records.");
+      }),
+      export: vi.fn(),
+      reset: vi.fn(),
+      retain: vi.fn(),
+    };
+    const providerUsageLimitsClient = {
+      list: vi.fn(async () => ({
+        version: 1 as const,
+        refreshedAt: now,
+        entries: [],
+      })),
+      refresh: vi.fn(async () => ({
+        version: 1 as const,
+        refreshedAt: now,
+        entries: [],
+      })),
+    };
+
+    renderSettings({
+      usageClient: usageClient as never,
+      providerUsageLimitsClient: providerUsageLimitsClient as never,
+      initialDeepLink: { section: "usage" },
+    });
+
+    expect(screen.getByRole("heading", { name: "Provider limits" })).toBeVisible();
+    expect(await screen.findByText("No configured providers have reported limits.")).toBeVisible();
+    expect(providerUsageLimitsClient.list).toHaveBeenCalledOnce();
   });
 
   it("hides the diagnostics export control in Advanced when no client is provided", () => {
@@ -863,11 +903,13 @@ describe("SettingsView", () => {
     expect(screen.getByRole("switch", { name: "Translucent sidebar" })).toHaveClass(
       "octant-switch",
     );
-    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveValue("buttons");
-    fireEvent.change(screen.getByRole("combobox", { name: "Mode switcher" }), {
-      target: { value: "dropdown" },
-    });
-    expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "dropdown" });
+    const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
+    expect(within(modeSwitcher).getByRole("button", { name: "Dropdown" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Buttons" }));
+    expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "buttons" });
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveClass(
       "settings-view__action",

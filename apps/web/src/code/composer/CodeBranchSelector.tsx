@@ -2,6 +2,8 @@ import type { CodeWorktreeRef } from "@octant/contracts/code";
 import { Check, ChevronDown, GitBranch, Search } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
+import { OctantButton } from "../../ui/base/OctantButton";
+import { OctantInput } from "../../ui/base/OctantInput";
 
 export interface CodeBranchSelectorProps {
   /** The currently selected base branch (short name, no remote prefix). */
@@ -67,7 +69,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
       className={`code-branch-selector${open ? " code-branch-selector--open" : ""}`}
       ref={rootRef}
     >
-      <button
+      <OctantButton
         aria-controls={menuId}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -89,7 +91,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
         <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
         <span className="code-branch-selector__trigger-label">{triggerLabel}</span>
         <ChevronDown aria-hidden="true" className="code-branch-selector__chevron" size={12} />
-      </button>
+      </OctantButton>
       {!open ? null : (
         <div
           aria-label="Choose base branch"
@@ -99,7 +101,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
         >
           <label className="code-branch-selector__search">
             <Search aria-hidden="true" size={13} />
-            <input
+            <OctantInput
               aria-label="Search refs"
               onChange={(event) => setQuery(event.currentTarget.value)}
               placeholder="Search refs…"
@@ -127,7 +129,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
                       ref.name === `${props.remoteName ?? "origin"}/${props.branch}`
                     : !props.startFromOrigin && ref.name === props.branch;
                 return (
-                  <button
+                  <OctantButton
                     aria-selected={selected}
                     className="code-branch-selector__option"
                     key={`${ref.kind}:${ref.name}`}
@@ -151,7 +153,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
                         </span>
                       ) : null}
                     </span>
-                  </button>
+                  </OctantButton>
                 );
               })
             )}

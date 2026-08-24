@@ -116,6 +116,7 @@ export class CodeProjectPullRequestService {
   readonly #threads: CodeProjectLinkedThreadSource;
   readonly #clock: () => string;
   #cache: CachedSnapshot | undefined;
+  readonly #projectFreshness = new Map<string, CodeProjectPullRequestFreshness>();
   readonly #detailCache = new Map<string, CachedDetail>();
   #freshness: CodeProjectPullRequestFreshness = { status: "empty" };
   readonly #detailFreshness = new Map<string, CodeProjectPullRequestFreshness>();
@@ -308,7 +309,7 @@ export class CodeProjectPullRequestService {
     });
     const collected: CodeProjectPullRequestRow[] = [];
     let pullRequestsTruncated = false;
-    let knownIdentityRefreshFailed = false;
+    const knownIdentityRefreshFailed = new Set<string>();
     const threads = await this.#threads.list(windowId);
 
     for (const repository of bounded.repositories) {
@@ -329,6 +330,11 @@ export class CodeProjectPullRequestService {
         if (listed.status === "unauthorized") this.revokeGithub();
         const retryAfter =
           listed.status === "rate-limited" ? retryAfterTimestamp(listed, this.#clock) : undefined;
+        this.#markProjectStale(
+          repository,
+          listed.status === "unauthorized" ? "disconnected" : listed.status,
+          retryAfter,
+        );
         return this.#staleView({
           projects,
           reason: listed.status === "unauthorized" ? "disconnected" : listed.status,
@@ -365,7 +371,7 @@ export class CodeProjectPullRequestService {
         ) {
           collected.push(this.#rowFromObserved(repository, observed, threads, knownRow.updatedAt));
         } else {
-          knownIdentityRefreshFailed = true;
+          knownIdentityRefreshFailed.add(String(repository.projectId));
           collected.push(knownRow);
         }
       }
@@ -390,9 +396,20 @@ export class CodeProjectPullRequestService {
       repositoriesTruncated: bounded.repositoriesTruncated,
       pullRequestsTruncated,
     };
-    this.#freshness = knownIdentityRefreshFailed
-      ? { status: "stale", staleReason: "refresh-failed", lastSuccessfulRefreshAt: now }
-      : { status: "fresh", lastSuccessfulRefreshAt: now };
+    for (const repository of bounded.repositories) {
+      const projectId = String(repository.projectId);
+      const projectRows = rows.filter((row) => String(row.projectId) === projectId);
+      const failed = knownIdentityRefreshFailed.has(projectId);
+      this.#projectFreshness.set(projectFreshnessKey(repository), {
+        status: failed ? "stale" : projectRows.length === 0 ? "empty" : "fresh",
+        lastSuccessfulRefreshAt: now,
+        ...(failed ? { staleReason: "refresh-failed" as const } : {}),
+      });
+    }
+    this.#freshness =
+      knownIdentityRefreshFailed.size > 0
+        ? { status: "stale", staleReason: "refresh-failed", lastSuccessfulRefreshAt: now }
+        : { status: "fresh", lastSuccessfulRefreshAt: now };
     return this.#view({
       query: { version: 1 },
       projects,
@@ -628,7 +645,43 @@ export class CodeProjectPullRequestService {
       repositoriesTruncated: input.repositoriesTruncated,
       pullRequestsTruncated: input.pullRequestsTruncated,
       freshness: input.freshness,
+      projectFreshness: input.projects.map((project) => ({
+        projectId: project.projectId,
+        freshness: this.#projectFreshnessFor(project),
+      })),
       generatedAt: decodeUtcTimestamp(this.#clock()),
+    });
+  }
+
+  #projectFreshnessFor(project: CodeProjectPullRequestConnection): CodeProjectPullRequestFreshness {
+    if (project.kind !== "connected") return { status: "empty" };
+    if (this.#githubRevoked) {
+      const previous = this.#projectFreshness.get(projectFreshnessKey(project));
+      return {
+        status: "stale",
+        staleReason: "disconnected",
+        ...(previous?.lastSuccessfulRefreshAt === undefined
+          ? {}
+          : { lastSuccessfulRefreshAt: previous.lastSuccessfulRefreshAt }),
+      };
+    }
+    return this.#projectFreshness.get(projectFreshnessKey(project)) ?? { status: "empty" };
+  }
+
+  #markProjectStale(
+    project: Extract<CodeProjectPullRequestConnection, { readonly kind: "connected" }>,
+    reason: CodeProjectPullRequestStaleReason,
+    retryAfter: UtcTimestamp | undefined,
+  ): void {
+    const key = projectFreshnessKey(project);
+    const previous = this.#projectFreshness.get(key);
+    this.#projectFreshness.set(key, {
+      status: "stale",
+      staleReason: reason,
+      ...(previous?.lastSuccessfulRefreshAt === undefined
+        ? {}
+        : { lastSuccessfulRefreshAt: previous.lastSuccessfulRefreshAt }),
+      ...(retryAfter === undefined ? {} : { retryAfter }),
     });
   }
 
@@ -792,6 +845,12 @@ function githubIdentityFromRemotes(
 
 function repositoryKey(projectId: ProjectId, owner: string, name: string): string {
   return `${String(projectId)}:${owner}/${name}`;
+}
+
+function projectFreshnessKey(
+  project: Extract<CodeProjectPullRequestConnection, { readonly kind: "connected" }>,
+): string {
+  return repositoryKey(project.projectId, project.repositoryOwner, project.repositoryName);
 }
 
 function detailKey(identity: {

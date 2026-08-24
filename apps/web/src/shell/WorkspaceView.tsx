@@ -78,6 +78,7 @@ import type { LocalServerClient } from "@octant/client-runtime";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { BrowserContextId, BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { LocalServerOpenTarget } from "@octant/contracts";
+import type { OpenInApplicationId } from "@octant/contracts/shell";
 import { BrowserWorkspace, makeBrowserToolAction } from "../browser/BrowserWorkspace";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import { WorkPromotionFlow } from "../work/WorkPromotionFlow";
@@ -119,6 +120,7 @@ export interface WorkspaceViewProps {
   readonly workRequestClient?: WorkRequestClient;
   readonly onWorkThreadUpdated?: (thread: WorkThread) => void;
   readonly codeProviderChoices: ReadonlyArray<CodeThreadProviderChoice>;
+  readonly openInApplications?: ReadonlyArray<OpenInApplicationId>;
   /**
    * The shared surface-drag pipeline, owned by the shell so sidebar rows and
    * pane grips feed the same drag. Its root ref lands on the split workspace.
@@ -205,6 +207,7 @@ export interface WorkspaceViewProps {
     readonly threadId: string;
     readonly mode: "work" | "code";
   }) => void;
+  readonly onOpenAgents?: () => void;
   readonly onOpenSurface?: (
     surface: WorkspaceSurfaceDescriptor["kind"],
     paneId: PaneId,
@@ -671,6 +674,12 @@ function renderCodeTab(
       >
         <CodeThreadEnvironment
           active={paneIsActive(props, paneId)}
+          {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+          {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(props.openInApplications === undefined
+            ? {}
+            : { openInApplications: props.openInApplications })}
           {...(project === undefined ? {} : { project })}
           {...(props.onNewThreadInProject === undefined
             ? {}
@@ -829,6 +838,8 @@ function renderNonCodeTab(
       <ChatThreadWorkspace
         chatClient={props.chatClient}
         chatReadCursorStore={props.chatReadCursorStore}
+        {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+        {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
         active={paneIsActive(props, paneId)}
@@ -877,6 +888,8 @@ function renderNonCodeTab(
     return (
       <WorkThreadEnvironment
         active={paneIsActive(props, paneId)}
+        {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+        {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
         key={tab.id}
         projects={props.projects}
         tab={tab}
@@ -1472,6 +1485,7 @@ function paneIsActive(props: WorkspaceViewProps, paneId: PaneId): boolean {
 }
 
 function ChatThreadWorkspace(props: {
+  readonly agentRunClient?: AgentRunClient;
   readonly chatClient: ChatClient;
   readonly chatReadCursorStore: ChatReadCursorStore;
   readonly active?: boolean;
@@ -1494,6 +1508,7 @@ function ChatThreadWorkspace(props: {
   readonly tab: Extract<WorkspaceTab, { kind: "chat-thread" }>;
   readonly threadId: Extract<WorkspaceTab, { kind: "chat-thread" }>["threadId"];
   readonly childRunStatus?: ReactNode;
+  readonly onOpenAgents?: () => void;
 }) {
   const controller = useChatController({
     activeThreadId: props.threadId,
@@ -1518,6 +1533,8 @@ function ChatThreadWorkspace(props: {
   return (
     <ChatThreadEnvironment
       {...(props.active === undefined ? {} : { active: props.active })}
+      {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+      {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
       controller={controller}
       projects={props.projects}
       tab={props.tab}

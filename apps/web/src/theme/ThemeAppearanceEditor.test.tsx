@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { ThemeAppearanceEditor } from "./ThemeAppearanceEditor";
@@ -24,6 +25,19 @@ function controller(): ThemeController {
 }
 
 describe("ThemeAppearanceEditor", () => {
+  it("saves appearance changes immediately without an Apply or Cancel bar", async () => {
+    const user = userEvent.setup();
+    const applyPatch = vi.fn(async () => true);
+    render(
+      <ThemeAppearanceEditor controller={{ ...controller(), applyPatch, hasDraftChanges: true }} />,
+    );
+
+    await user.click(screen.getByRole("radio", { name: "Light" }));
+    expect(applyPatch).toHaveBeenCalledWith({ mode: "light" });
+    expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+
   it("does not wrap switch controls in a second implicit label", () => {
     render(<ThemeAppearanceEditor controller={controller()} />);
 
@@ -34,13 +48,41 @@ describe("ThemeAppearanceEditor", () => {
     }
   });
 
-  it("keeps typography and theme transfer in deliberate advanced disclosures", () => {
+  it("keeps typography visible and theme transfer in an advanced disclosure", () => {
     render(<ThemeAppearanceEditor controller={controller()} />);
 
-    expect(screen.getByText("Typography").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("Typography").closest("details")).toHaveAttribute("open");
     expect(screen.getByText("Import or export theme").closest("details")).not.toHaveAttribute(
       "open",
     );
+  });
+
+  it("searches friendly font names and keeps raw stacks behind an advanced disclosure", async () => {
+    const applyPatch = vi.fn(async () => true);
+    render(<ThemeAppearanceEditor controller={{ ...controller(), applyPatch }} />);
+
+    const user = userEvent.setup();
+    const picker = screen.getByRole("combobox", { name: "Interface font" });
+    await user.click(picker);
+    await user.clear(picker);
+    await user.type(picker, "Inter");
+
+    const option = await screen.findByRole("option", { name: /Inter/ });
+    expect(option).toHaveTextContent("Aa 01");
+    await user.click(option);
+    expect(applyPatch).toHaveBeenCalledWith({
+      typography: {
+        ...DEFAULT_THEME_SETTINGS.typography,
+        ui: {
+          ...DEFAULT_THEME_SETTINGS.typography.ui,
+          family: "Inter, system-ui, sans-serif",
+        },
+      },
+    });
+    expect(screen.getAllByText("Custom font stack")[0]?.closest("details")).not.toHaveAttribute(
+      "open",
+    );
+    expect(screen.getByRole("textbox", { name: "Interface font custom stack" })).not.toBeVisible();
   });
 
   it("offers the Octant appearance pack while that plugin is effective", () => {

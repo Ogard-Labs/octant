@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
 import { useProductFeedback } from "./useProductFeedback";
 import type { OctantHostBridge } from "../shell/hostBridge";
@@ -416,24 +417,31 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     >
       <header className="browser-workspace__chrome">
         <div className="browser-workspace__history" aria-label="Browser history controls">
-          <button
+          <OctantButton
             aria-label="Back"
+            className="browser-workspace__history-button"
             disabled={!nativeContext || !nativeState?.canGoBack}
             onClick={() => nativeCommand("back")}
+            size="icon"
             type="button"
+            variant="ghost"
           >
             <ArrowLeft aria-hidden="true" size={14} />
-          </button>
-          <button
+          </OctantButton>
+          <OctantButton
             aria-label="Forward"
+            className="browser-workspace__history-button"
             disabled={!nativeContext || !nativeState?.canGoForward}
             onClick={() => nativeCommand("forward")}
+            size="icon"
             type="button"
+            variant="ghost"
           >
             <ArrowRight aria-hidden="true" size={14} />
-          </button>
-          <button
+          </OctantButton>
+          <OctantButton
             aria-label={nativeState?.loading ? "Stop loading" : "Reload"}
+            className="browser-workspace__history-button"
             disabled={!activeContext}
             onClick={() => {
               if (nativeContext) {
@@ -446,14 +454,16 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                 }
               }
             }}
+            size="icon"
             type="button"
+            variant="ghost"
           >
             {nativeState?.loading ? (
               <X aria-hidden="true" size={14} />
             ) : (
               <RotateCw aria-hidden="true" size={14} />
             )}
-          </button>
+          </OctantButton>
         </div>
         <form
           className="browser-workspace__omnibox"
@@ -479,7 +489,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               <Globe2 aria-hidden="true" size={12} />
             )}
           </span>
-          <input
+          <OctantInput
             aria-label="Browser URL"
             onChange={(event) => setUrl(event.target.value)}
             spellCheck={false}
@@ -502,22 +512,24 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         </span>
         {activeContext ? (
           props.hostBridge?.openBrowserExternal === undefined ? null : (
-            <button
+            <OctantButton
               aria-label="Open in default browser"
               className="browser-workspace__close"
               onClick={() => {
                 const target = validTargetUrl(committedAddress ?? url);
                 if (target !== undefined) void props.hostBridge!.openBrowserExternal!(target);
               }}
+              size="icon"
               title="Open in default browser"
               type="button"
+              variant="ghost"
             >
               <ExternalLink aria-hidden="true" size={13} />
-            </button>
+            </OctantButton>
           )
         ) : null}
         {props.onDockResearch === undefined || props.tab.threadId === undefined ? null : (
-          <button
+          <OctantButton
             aria-label="Dock in the focus zone"
             className="browser-workspace__close"
             onClick={() =>
@@ -526,21 +538,25 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                 mode: props.tab.mode,
               })
             }
+            size="icon"
             title="Dock in the focus zone"
             type="button"
+            variant="ghost"
           >
             <PanelRight aria-hidden="true" size={13} />
-          </button>
+          </OctantButton>
         )}
         {activeContext ? (
-          <button
+          <OctantButton
             aria-label="Stop"
             className="browser-workspace__close"
             onClick={() => void stop(false)}
+            size="icon"
             type="button"
+            variant="ghost"
           >
             <X aria-hidden="true" size={14} />
-          </button>
+          </OctantButton>
         ) : null}
         <span aria-live="polite" className="sr-only">
           <span>{statusLabel(status)}</span>

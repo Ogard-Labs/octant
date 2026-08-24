@@ -6,10 +6,12 @@ import type {
   CodeProjectPullRequestRow,
   CodeProjectPullRequestView,
 } from "@octant/contracts";
-import { RefreshCw } from "lucide-react";
+import { GitPullRequest, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
+import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 
 export interface CodeProjectPullRequestsProps {
   readonly load: (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView>;
@@ -34,6 +36,7 @@ type WorkspaceState =
 
 export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState>({ status: "loading" });
+  const [search, setSearch] = useState("");
   const loadRef = useRef(props.load);
   useEffect(() => {
     loadRef.current = props.load;
@@ -88,11 +91,15 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       : workspace.status === "error"
         ? workspace.view
         : undefined;
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const visibleRows = view?.rows.filter((row) => pullRequestMatches(row, normalizedSearch)) ?? [];
+  const freshnessStatus = view?.freshness.status ?? "loading";
 
   return (
     <section
       aria-label="Pull requests"
       className="code-project-pull-requests"
+      data-freshness={freshnessStatus}
       data-narrow={props.isNarrow === true ? "true" : "false"}
     >
       <header className="code-board__header">
@@ -121,6 +128,39 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         </div>
       </header>
 
+      {view === undefined ? null : (
+        <div className="code-project-pull-requests__toolbar">
+          <label className="code-project-pull-requests__search">
+            <Search aria-hidden="true" size={14} strokeWidth={1.7} />
+            <span className="sr-only">Search pull requests</span>
+            <OctantInput
+              aria-label="Search pull requests"
+              onChange={(event) => setSearch(event.currentTarget.value)}
+              placeholder="Search pull requests"
+              type="search"
+              value={search}
+            />
+            {search === "" ? null : (
+              <OctantButton
+                aria-label="Clear pull-request search"
+                className="code-project-pull-requests__search-clear"
+                onClick={() => setSearch("")}
+                type="button"
+                variant="ghost"
+              >
+                <X aria-hidden="true" size={14} strokeWidth={1.7} />
+              </OctantButton>
+            )}
+          </label>
+          <span
+            className="code-project-pull-requests__count"
+            data-freshness={view.freshness.status}
+          >
+            {pullRequestCountCopy(view.freshness, visibleRows.length)}
+          </span>
+        </div>
+      )}
+
       {workspace.status === "loading" ? (
         <ShellState
           eyebrow="Pull requests"
@@ -138,7 +178,11 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         ) : null
       ) : (
         <>
-          <p className="code-project-pull-requests__status" role="status">
+          <p
+            className="code-project-pull-requests__status"
+            data-state={view.freshness.status}
+            role="status"
+          >
             {freshnessCopy(view.freshness)}
             {view.repositoriesTruncated
               ? " Some connected repositories were omitted after the preview bound of 25."
@@ -152,6 +196,14 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
               {workspace.message}
             </p>
           ) : null}
+          {visibleRows.length === 0 && normalizedSearch !== "" ? (
+            <div className="code-project-pull-requests__no-results" role="status">
+              <strong>No pull requests match “{search.trim()}”.</strong>
+              <OctantButton onClick={() => setSearch("")} size="sm" type="button" variant="ghost">
+                Clear search
+              </OctantButton>
+            </div>
+          ) : null}
           <div className="code-project-pull-requests__groups">
             {view.projects.map((project) => (
               <ProjectGroup
@@ -161,9 +213,10 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                   void runRefresh({ kind: "refresh-project", projectId: project.projectId })
                 }
                 project={project}
-                rows={view.rows.filter(
+                rows={visibleRows.filter(
                   (row) => String(row.projectId) === String(project.projectId),
                 )}
+                freshness={projectFreshnessFor(view, project.projectId)}
                 {...(props.onSelectRow === undefined ? {} : { onSelectRow: props.onSelectRow })}
                 {...(props.selectedRowKey === undefined
                   ? {}
@@ -180,6 +233,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
 function ProjectGroup(props: {
   readonly project: CodeProjectPullRequestConnection;
   readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
+  readonly freshness: CodeProjectPullRequestFreshness;
   readonly busy: boolean;
   readonly onRefresh: () => void;
   readonly selectedRowKey?: string;
@@ -192,7 +246,14 @@ function ProjectGroup(props: {
       className="code-project-pull-requests__project"
     >
       <header className="code-project-pull-requests__project-header">
-        <h2>{props.project.projectName}</h2>
+        <div className="code-project-pull-requests__project-heading">
+          <h2>{props.project.projectName}</h2>
+          {props.project.kind === "connected" ? (
+            <span className="code-project-pull-requests__project-repository">
+              {props.project.repositoryOwner}/{props.project.repositoryName}
+            </span>
+          ) : null}
+        </div>
         <OctantButton
           disabled={props.busy}
           onClick={props.onRefresh}
@@ -205,12 +266,10 @@ function ProjectGroup(props: {
       </header>
       {props.project.kind === "unconnected" ? (
         <p className="code-project-pull-requests__unconnected">
-          Not connected to a github.com origin. The Project stays usable.
+          No github.com origin detected. Add one to this Project to enable pull-request refresh.
         </p>
       ) : repositories.length === 0 ? (
-        <p className="code-project-pull-requests__empty">
-          No active pull requests in this snapshot.
-        </p>
+        <p className="code-project-pull-requests__empty">{projectEmptyCopy(props.freshness)}</p>
       ) : (
         repositories.map((group) => (
           <section
@@ -227,32 +286,50 @@ function ProjectGroup(props: {
                 const selected = props.selectedRowKey === rowKey;
                 return (
                   <li key={rowKey}>
-                    <button
+                    <OctantButton
                       aria-pressed={selected}
                       className="code-project-pull-requests__row"
                       onClick={() => props.onSelectRow?.(row)}
                       type="button"
                     >
-                      <div className="code-project-pull-requests__title-line">
-                        <span className="code-project-pull-requests__title">{row.title}</span>
-                        <span>#{row.number}</span>
-                        {row.draft ? <span>Draft</span> : null}
-                      </div>
-                      <div className="code-project-pull-requests__meta">
-                        <span>{row.author}</span>
-                        <span>
+                      <GitPullRequest
+                        aria-hidden="true"
+                        className="code-project-pull-requests__icon"
+                        size={16}
+                        strokeWidth={1.7}
+                      />
+                      <div className="code-project-pull-requests__row-content">
+                        <div className="code-project-pull-requests__title-line">
+                          <span className="code-project-pull-requests__title">{row.title}</span>
+                          <span className="code-project-pull-requests__number">#{row.number}</span>
+                        </div>
+                        <div className="code-project-pull-requests__byline">
+                          <span>{row.author}</span>
+                          <span aria-hidden="true">·</span>
+                          <time dateTime={row.updatedAt}>{formatUpdatedAt(row.updatedAt)}</time>
+                        </div>
+                        <div className="code-project-pull-requests__branch">
                           {row.headBranch} → {row.baseBranch}
-                        </span>
-                        <time dateTime={row.updatedAt}>{formatUpdatedAt(row.updatedAt)}</time>
-                        <span>Checks {row.checks}</span>
-                        <span>Review {reviewCopy(row.review)}</span>
-                        <span>
+                        </div>
+                        <div className="code-project-pull-requests__meta">
+                          {row.draft ? <StatusChip label="Draft" status="neutral" /> : null}
+                          <StatusChip label={`Checks ${row.checks}`} status={checksStatus(row)} />
+                          <StatusChip
+                            label={`Review ${reviewCopy(row.review)}`}
+                            status={reviewStatus(row)}
+                          />
+                          <StatusChip
+                            label={mergeabilityCopy(row.mergeability)}
+                            status={mergeabilityStatus(row.mergeability)}
+                          />
+                        </div>
+                        <div className="code-project-pull-requests__linked">
                           {row.linkedThreads.length === 0
                             ? "No linked thread"
                             : `Linked: ${row.linkedThreads.map((thread) => thread.title).join(", ")}`}
-                        </span>
+                        </div>
                       </div>
-                    </button>
+                    </OctantButton>
                   </li>
                 );
               })}
@@ -262,6 +339,77 @@ function ProjectGroup(props: {
       )}
     </section>
   );
+}
+
+function StatusChip(props: {
+  readonly label: string;
+  readonly status: "positive" | "warning" | "negative" | "neutral";
+}) {
+  const variant: OctantBadgeProps["variant"] =
+    props.status === "positive"
+      ? "success"
+      : props.status === "warning"
+        ? "warning"
+        : props.status === "negative"
+          ? "destructive"
+          : "secondary";
+  return <OctantBadge variant={variant}>{props.label}</OctantBadge>;
+}
+
+function pullRequestMatches(row: CodeProjectPullRequestRow, query: string): boolean {
+  if (query === "") return true;
+  return [
+    row.title,
+    row.author,
+    row.headBranch,
+    row.baseBranch,
+    row.repositoryOwner,
+    row.repositoryName,
+    String(row.number),
+    ...row.linkedThreads.map((thread) => thread.title),
+  ].some((value) => value.toLocaleLowerCase().includes(query));
+}
+
+function projectFreshnessFor(
+  view: CodeProjectPullRequestView,
+  projectId: CodeProjectPullRequestConnection["projectId"],
+): CodeProjectPullRequestFreshness {
+  const entry = view.projectFreshness?.find(
+    (candidate) => String(candidate.projectId) === String(projectId),
+  );
+  return entry?.freshness ?? view.freshness;
+}
+
+function checksStatus(
+  row: CodeProjectPullRequestRow,
+): "positive" | "warning" | "negative" | "neutral" {
+  if (row.checks === "passing") return "positive";
+  if (row.checks === "failing") return "negative";
+  if (row.checks === "pending") return "warning";
+  return "neutral";
+}
+
+function reviewStatus(
+  row: CodeProjectPullRequestRow,
+): "positive" | "warning" | "negative" | "neutral" {
+  if (row.review === "approved") return "positive";
+  if (row.review === "changes-requested") return "negative";
+  if (row.review === "pending") return "warning";
+  return "neutral";
+}
+
+function mergeabilityCopy(value: CodeProjectPullRequestRow["mergeability"]): string {
+  if (value === "mergeable") return "Mergeable";
+  if (value === "conflicting") return "Conflicts";
+  return "Mergeability unknown";
+}
+
+function mergeabilityStatus(
+  value: CodeProjectPullRequestRow["mergeability"],
+): "positive" | "negative" | "neutral" {
+  if (value === "mergeable") return "positive";
+  if (value === "conflicting") return "negative";
+  return "neutral";
 }
 
 function groupByRepository(rows: ReadonlyArray<CodeProjectPullRequestRow>): ReadonlyArray<{
@@ -289,7 +437,7 @@ function groupByRepository(rows: ReadonlyArray<CodeProjectPullRequestRow>): Read
 
 function freshnessCopy(freshness: CodeProjectPullRequestFreshness): string {
   if (freshness.status === "empty") {
-    return "No GitHub snapshot yet. Refresh to load active pull requests.";
+    return "No GitHub snapshot yet. Refresh a connected Project to load active pull requests.";
   }
   if (freshness.status === "fresh") {
     return freshness.lastSuccessfulRefreshAt === undefined
@@ -314,7 +462,29 @@ function freshnessCopy(freshness: CodeProjectPullRequestFreshness): string {
     freshness.retryAfter === undefined
       ? ""
       : ` Retry after ${formatUpdatedAt(freshness.retryAfter)}.`;
-  return `${reason}.${last}${retry}`;
+  if (freshness.staleReason === "disconnected") {
+    return `GitHub access is unavailable. Check the GitHub CLI connection, then refresh.${last}${retry}`;
+  }
+  return `${reason}.${last}${retry} Cached results remain visible until a refresh succeeds.`;
+}
+
+function pullRequestCountCopy(freshness: CodeProjectPullRequestFreshness, count: number): string {
+  if (freshness.status === "empty") return "Refresh to load pull requests";
+  if (freshness.status === "stale") {
+    if (count === 0) return "No cached pull requests";
+    return count === 1 ? "1 cached pull request" : `${String(count)} cached pull requests`;
+  }
+  return count === 1 ? "1 pull request" : `${String(count)} pull requests`;
+}
+
+function projectEmptyCopy(freshness: CodeProjectPullRequestFreshness): string {
+  if (freshness.status === "empty") {
+    return freshness.lastSuccessfulRefreshAt === undefined
+      ? "Not refreshed yet. Refresh this Project to load pull requests."
+      : "No open or draft pull requests.";
+  }
+  if (freshness.status === "stale") return "No cached pull requests for this Project.";
+  return "No open or draft pull requests.";
 }
 
 function reviewCopy(review: CodeProjectPullRequestRow["review"]): string {

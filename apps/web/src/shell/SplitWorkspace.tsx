@@ -5,11 +5,18 @@ import type {
   WorkspacePane,
   WorkspaceTab,
 } from "@octant/contracts/shell";
-import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { GripVertical } from "lucide-react";
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { OctantSlider } from "../ui/base/OctantSlider";
-import { MENU_ITEM_CLASS } from "../projects/ThreadRowMenu";
+import {
+  OctantContextMenuContent,
+  OctantContextMenuGroup,
+  OctantContextMenuItem,
+  OctantContextMenuLabel,
+  OctantContextMenuRoot,
+  OctantContextMenuSeparator,
+  OctantContextMenuTrigger,
+} from "../ui/base/OctantContextMenu";
 import { WorkspaceDragStatus, WorkspaceDropOverlay } from "./WorkspaceDropOverlay";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 
@@ -271,11 +278,8 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       {/* The header spans the window's title band, so the space the grip and
           the launcher do not claim has to stay a native drag region: with the
           grip stretched across it the window could not be moved at all. */}
-      <ContextMenuPrimitive.Root>
-        <ContextMenuPrimitive.Trigger
-          className="workspace-pane__header window-drag-region"
-          render={<div />}
-        >
+      <OctantContextMenuRoot>
+        <OctantContextMenuTrigger className="workspace-pane__header" render={<div />}>
           <span
             className="workspace-pane__grip window-no-drag"
             onPointerCancel={props.drag.onPointerCancel}
@@ -294,7 +298,11 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
             <GripVertical aria-hidden="true" size={13} strokeWidth={1.8} />
             <span className="workspace-pane__title">{surface.title}</span>
           </span>
-        </ContextMenuPrimitive.Trigger>
+          <span
+            aria-hidden="true"
+            className="workspace-pane__window-drag-space window-drag-region"
+          />
+        </OctantContextMenuTrigger>
         <PaneMenu
           canSplit={canSplit}
           focused={focused}
@@ -304,7 +312,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
           onSplit={(orientation) => props.onSplitPane(pane.paneId, orientation, "after")}
           surface={surface}
         />
-      </ContextMenuPrimitive.Root>
+      </OctantContextMenuRoot>
       <div className="workspace-pane__panel">{props.renderSurface(surface, pane.paneId)}</div>
       {props.drag.active === null ? null : (
         <WorkspaceDropOverlay
@@ -336,56 +344,33 @@ function PaneMenu(props: {
 }) {
   const focusLabel = props.focused ? "Show all panes" : "Focus this pane";
   return (
-    <ContextMenuPrimitive.Portal>
-      <ContextMenuPrimitive.Positioner className="z-50 window-no-drag">
-        <ContextMenuPrimitive.Popup className="window-no-drag z-50 min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none">
-          <ContextMenuPrimitive.Group>
-            <ContextMenuPrimitive.GroupLabel className="truncate px-2 py-1.5 text-xs text-muted-foreground">
-              {props.surface.title}
-            </ContextMenuPrimitive.GroupLabel>
-          </ContextMenuPrimitive.Group>
-          <ContextMenuPrimitive.Item
-            className={MENU_ITEM_CLASS}
-            closeOnClick
-            label={focusLabel}
-            onClick={() => (props.focused ? props.onClearFocus() : props.onFocus())}
-          >
-            {focusLabel}
-          </ContextMenuPrimitive.Item>
-          {/* A focused pane is presented alone, so a split made now would land
+    <OctantContextMenuContent>
+      <OctantContextMenuGroup>
+        <OctantContextMenuLabel>{props.surface.title}</OctantContextMenuLabel>
+      </OctantContextMenuGroup>
+      <OctantContextMenuItem
+        label={focusLabel}
+        onClick={() => (props.focused ? props.onClearFocus() : props.onFocus())}
+      >
+        {focusLabel}
+      </OctantContextMenuItem>
+      {/* A focused pane is presented alone, so a split made now would land
               where nobody can see it. The same rule the edge-drop follows. */}
-          {props.canSplit && !props.focused ? (
-            <>
-              <ContextMenuPrimitive.Item
-                className={MENU_ITEM_CLASS}
-                closeOnClick
-                label="Split right"
-                onClick={() => props.onSplit("horizontal")}
-              >
-                Split right
-              </ContextMenuPrimitive.Item>
-              <ContextMenuPrimitive.Item
-                className={MENU_ITEM_CLASS}
-                closeOnClick
-                label="Split down"
-                onClick={() => props.onSplit("vertical")}
-              >
-                Split down
-              </ContextMenuPrimitive.Item>
-            </>
-          ) : null}
-          <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
-          <ContextMenuPrimitive.Item
-            className={MENU_ITEM_CLASS}
-            closeOnClick
-            label="Close pane"
-            onClick={props.onClose}
-          >
-            Close pane
-          </ContextMenuPrimitive.Item>
-        </ContextMenuPrimitive.Popup>
-      </ContextMenuPrimitive.Positioner>
-    </ContextMenuPrimitive.Portal>
+      {props.canSplit && !props.focused ? (
+        <>
+          <OctantContextMenuItem label="Split right" onClick={() => props.onSplit("horizontal")}>
+            Split right
+          </OctantContextMenuItem>
+          <OctantContextMenuItem label="Split down" onClick={() => props.onSplit("vertical")}>
+            Split down
+          </OctantContextMenuItem>
+        </>
+      ) : null}
+      <OctantContextMenuSeparator />
+      <OctantContextMenuItem label="Close pane" onClick={props.onClose}>
+        Close pane
+      </OctantContextMenuItem>
+    </OctantContextMenuContent>
   );
 }
 

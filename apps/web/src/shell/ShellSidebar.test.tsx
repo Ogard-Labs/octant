@@ -2,7 +2,6 @@ import { decodeWindowId } from "@octant/contracts/shell";
 import { defaultShellSettings, defaultWindowWorkspace } from "@octant/domain/shell-policy";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
 import { ShellSidebar } from "./ShellSidebar";
@@ -14,10 +13,9 @@ describe("ShellSidebar", () => {
     const { container } = render(
       <ShellSidebar
         onAddFolder={vi.fn()}
-        onSearchQueryChange={vi.fn()}
+        onCollapseSidebar={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
-        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={null}
         settings={defaultShellSettings()}
@@ -29,6 +27,9 @@ describe("ShellSidebar", () => {
     expect(container.querySelector(".sidebar__brand")).toBeNull();
     expect(container.querySelector("[data-traffic-light-safe-space]")).toBeInTheDocument();
     expect(container.querySelector(".sidebar__drag-surface")).toBeInTheDocument();
+    expect(container.querySelector(".sidebar__native-leading")).toContainElement(
+      screen.getByRole("button", { name: "Hide sidebar" }),
+    );
   });
 
   it("exposes Work destinations backed by exact actions, including the Thread board", async () => {
@@ -44,10 +45,8 @@ describe("ShellSidebar", () => {
         automationsEnabled={false}
         workNavigation={{ actions }}
         onAddFolder={vi.fn()}
-        onSearchQueryChange={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
-        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
         settings={defaultShellSettings()}
@@ -55,9 +54,11 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New thread", "Plugins", "Thread board"]) {
+    for (const label of ["New thread", "Thread board"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("menuitem", { name: "Plugins" }));
     expect(actions["new-work-thread"]).toHaveBeenCalledOnce();
     expect(actions.plugins).toHaveBeenCalledOnce();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
@@ -78,10 +79,8 @@ describe("ShellSidebar", () => {
         automationsEnabled={false}
         codeNavigation={{ actions }}
         onAddFolder={vi.fn()}
-        onSearchQueryChange={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
-        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
         settings={defaultShellSettings()}
@@ -89,15 +88,17 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New thread", "Plugins", "Thread board", "Pull requests"]) {
+    for (const label of ["New thread", "Thread board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("menuitem", { name: "Plugins" }));
     expect(actions["new-code-thread"]).toHaveBeenCalledOnce();
     expect(actions.automations).not.toHaveBeenCalled();
     expect(actions.plugins).toHaveBeenCalledOnce();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(actions["pull-requests"]).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Automations" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Threads" })).not.toBeInTheDocument();
   });
 
@@ -109,10 +110,8 @@ describe("ShellSidebar", () => {
         {...(automationsEnabled === undefined ? {} : { automationsEnabled })}
         codeNavigation={{ actions: { "new-code-thread": vi.fn(), automations } }}
         onAddFolder={vi.fn()}
-        onSearchQueryChange={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
-        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
         settings={defaultShellSettings()}
@@ -123,11 +122,13 @@ describe("ShellSidebar", () => {
     // Explicit false overrides the production gate so the prop still controls
     // visibility even when AUTOMATION_CENTER_NAVIGATION_ENABLED is true.
     const gated = render(sidebar(false));
-    expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    expect(screen.queryByRole("menuitem", { name: "Automations" })).not.toBeInTheDocument();
     gated.unmount();
 
     render(sidebar(true));
-    await user.click(screen.getByRole("button", { name: "Automations" }));
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("menuitem", { name: "Automations" }));
     expect(automations).toHaveBeenCalledOnce();
   });
 
@@ -136,10 +137,8 @@ describe("ShellSidebar", () => {
       <ShellSidebar
         codeNavigation={{ actions: { "new-code-thread": vi.fn() } }}
         onAddFolder={vi.fn()}
-        onSearchQueryChange={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
-        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Nested project threads live here</nav>}
         settings={defaultShellSettings()}
@@ -158,7 +157,7 @@ describe("ShellSidebar", () => {
     async (mode) => {
       const user = userEvent.setup();
       const onAddFolder = vi.fn();
-      const onSearchQueryChange = vi.fn();
+      const onOpenSearch = vi.fn();
       const onOpenSettings = vi.fn();
       const workspace = { ...defaultWindowWorkspace(windowId), activeMode: mode };
       const modeLabel = mode === "chat" ? "Chat" : mode === "work" ? "Work" : "Code";
@@ -172,10 +171,9 @@ describe("ShellSidebar", () => {
             : {})}
           {...(mode === "chat" ? { chatNavigation: { actions: { "new-chat": vi.fn() } } } : {})}
           onAddFolder={onAddFolder}
-          onSearchQueryChange={onSearchQueryChange}
           onOpenNavigator={vi.fn()}
+          onOpenSearch={onOpenSearch}
           onOpenSettings={onOpenSettings}
-          searchQuery=""
           onSelectMode={vi.fn()}
           projectSection={<nav aria-label="Projects">Project navigation</nav>}
           settings={defaultShellSettings()}
@@ -183,7 +181,7 @@ describe("ShellSidebar", () => {
         />,
       );
 
-      const modes = screen.getByRole("group", { name: "Workspace mode" });
+      const modes = screen.getByRole("button", { name: `Workspace mode, ${modeLabel}` });
       const search = screen.getByRole("button", { name: "Search" });
       const projects = screen.getByRole("navigation", { name: "Projects" });
       // The foot of the sidebar names the person, and their settings are one
@@ -194,18 +192,16 @@ describe("ShellSidebar", () => {
       expect(search.compareDocumentPosition(projects)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(projects.compareDocumentPosition(profile)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(container.querySelector(".sidebar__utility--filled")).toBeNull();
-      expect(search).toHaveClass("btn-icon");
+      expect(search).toHaveClass("shell-icon-button");
       expect(search).not.toHaveTextContent("Search");
       expect(search).toHaveAttribute("data-navigation-id", "search");
       expect(screen.queryByRole("button", { name: "Add folder" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "New Chat Project" })).not.toBeInTheDocument();
 
       await user.click(search);
-      const field = screen.getByRole("searchbox", { name: `Search ${modeLabel} threads` });
-      expect(field).toHaveFocus();
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(onOpenSearch).toHaveBeenCalledOnce();
       await user.click(profile);
-      await user.click(screen.getByRole("button", { name: "Settings" }));
+      await user.click(screen.getByRole("menuitem", { name: "Settings" }));
       expect(onOpenSettings).toHaveBeenCalledOnce();
     },
   );
@@ -214,10 +210,8 @@ describe("ShellSidebar", () => {
     render(
       <ShellSidebar
         onAddFolder={vi.fn()}
-        onSearchQueryChange={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
-        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={null}
         settings={{ ...defaultShellSettings(), chatEnabled: false, workEnabled: false }}
@@ -225,9 +219,10 @@ describe("ShellSidebar", () => {
       />,
     );
 
+    const trigger = screen.getByRole("button", { name: "Workspace mode, Code" });
+    expect(trigger).toHaveTextContent("Code");
     expect(screen.queryByRole("button", { name: "Chat" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Work" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Code" })).toBeVisible();
   });
 
   it("keeps New chat available while Chat is reconnecting or unauthorized", () => {
@@ -238,10 +233,8 @@ describe("ShellSidebar", () => {
         chatNavigation={{ actions: { "new-chat": onNewChat } }}
         chatStatus="disconnected"
         onAddFolder={vi.fn()}
-        onSearchQueryChange={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
-        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Projects</nav>}
         settings={defaultShellSettings()}
@@ -261,10 +254,8 @@ describe("ShellSidebar", () => {
         chatErrorMessage="Configure a default Chat provider and model before creating a conversation."
         chatNavigation={{ actions: { "new-chat": vi.fn() } }}
         onAddFolder={vi.fn()}
-        onSearchQueryChange={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={onOpenSettings}
-        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={null}
         settings={defaultShellSettings()}
@@ -285,10 +276,8 @@ describe("ShellSidebar", () => {
       <ShellSidebar
         chatNavigation={{ actions: { "new-chat": vi.fn() } }}
         onAddFolder={vi.fn()}
-        onSearchQueryChange={vi.fn()}
         onOpenNavigator={vi.fn()}
         onOpenSettings={vi.fn()}
-        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={
           <ProjectSidebarSection
@@ -315,67 +304,33 @@ describe("ShellSidebar", () => {
     expect(chrome).not.toBeNull();
     expect(chrome).toContainElement(search);
     expect(chrome).toContainElement(activity);
-    expect(search).toHaveClass("btn-icon");
+    expect(search).toHaveClass("shell-icon-button");
     expect(search).not.toHaveTextContent("Search");
-    // The activity toggle is contributed by the Project section, which the
-    // sidebar port does not own; it keeps its own icon-button recipe.
+    expect(search.querySelector("svg")).toHaveAttribute("width", "15");
     expect(activity).toHaveClass("shell-icon-button");
+    expect(activity.querySelector("svg")).toHaveAttribute("width", "15");
     expect(activity).not.toHaveTextContent("Turn on activity view");
     expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar-item");
   });
 
-  it("keeps keyboard focus on sidebar Search while it filters the current-mode list", async () => {
+  it("routes sidebar Search to the App-level overlay", async () => {
     const user = userEvent.setup();
-
-    function SearchableSidebar() {
-      const [query, setQuery] = useState("");
-      return (
-        <ShellSidebar
-          chatNavigation={{ actions: { "new-chat": vi.fn() } }}
-          onAddFolder={vi.fn()}
-          onOpenNavigator={vi.fn()}
-          onOpenSettings={vi.fn()}
-          onSearchQueryChange={setQuery}
-          onSelectMode={vi.fn()}
-          projectSection={
-            <ProjectSidebarSection
-              archivedProjects={[]}
-              availabilityByProject={new Map()}
-              onArchive={vi.fn()}
-              onMove={vi.fn()}
-              onProjectOpen={vi.fn()}
-              onReorder={vi.fn()}
-              onRestore={vi.fn()}
-              onSelectThread={vi.fn()}
-              projects={[]}
-              searchQuery={query}
-              threads={[
-                { threadId: "thread-planning", title: "Planning" },
-                { threadId: "thread-notes", title: "Notes" },
-              ]}
-            />
-          }
-          searchQuery={query}
-          settings={defaultShellSettings()}
-          workspace={defaultWindowWorkspace(windowId)}
-        />
-      );
-    }
-
-    render(<SearchableSidebar />);
+    const onOpenSearch = vi.fn();
+    render(
+      <ShellSidebar
+        chatNavigation={{ actions: { "new-chat": vi.fn() } }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSearch={onOpenSearch}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        settings={defaultShellSettings()}
+        workspace={defaultWindowWorkspace(windowId)}
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Search" }));
-    const field = screen.getByRole("searchbox", { name: "Search Chat threads" });
-    expect(field).toHaveFocus();
-    await user.type(field, "notes");
-    expect(field).toHaveFocus();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Notes/i })).toBeVisible();
-    expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
-
-    await user.clear(field);
-    expect(field).toHaveFocus();
-    expect(screen.getByRole("button", { name: /Planning/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /Notes/i })).toBeVisible();
+    expect(onOpenSearch).toHaveBeenCalledOnce();
   });
 });

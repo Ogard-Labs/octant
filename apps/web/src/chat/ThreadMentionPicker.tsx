@@ -228,7 +228,7 @@ export function ThreadMentionChips(props: {
               <span>{chip.hasSideChat === true ? "Reopen Side Chat" : "Side Chat"}</span>
             </OctantButton>
           )}
-          <button
+          <OctantButton
             aria-label={`Remove ${chip.title} thread mention`}
             className="chip-x window-no-drag"
             disabled={props.disabled === true}
@@ -236,7 +236,7 @@ export function ThreadMentionChips(props: {
             type="button"
           >
             <X aria-hidden="true" size={10} strokeWidth={1.8} />
-          </button>
+          </OctantButton>
         </li>
       ))}
     </ul>

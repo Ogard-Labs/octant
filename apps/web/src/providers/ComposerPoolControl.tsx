@@ -6,6 +6,7 @@ import type {
 import { Layers } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 
 export interface ComposerPoolControlProps {
@@ -163,7 +164,7 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
 
   return (
     <div className="composer-pool-control" ref={rootRef}>
-      <button
+      <OctantButton
         aria-describedby={statusId}
         aria-expanded={open}
         aria-label="Use multiple models"
@@ -173,10 +174,11 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
         onClick={() => (open ? setOpen(false) : openEditor())}
         title={disabledReason}
         type="button"
+        variant="ghost"
       >
         <Layers aria-hidden="true" size={14} strokeWidth={1.7} />
         <span>{active ? `Pool · ${props.pool!.candidates.length}` : "Use multiple models"}</span>
-      </button>
+      </OctantButton>
       <span
         className="composer-pool-control__status composer-pool-control__visually-hidden"
         id={statusId}
@@ -212,13 +214,12 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
                       checkboxDisabled ? " composer-pool-control__option-label--disabled" : ""
                     }`}
                   >
-                    <input
+                    <OctantCheckbox
                       aria-label={`${view.providerName} — ${view.modelName}`}
                       checked={selectedKeys.has(key)}
                       className="window-no-drag"
                       disabled={checkboxDisabled}
                       onChange={(event) => toggleCandidate(view, event.currentTarget.checked)}
-                      type="checkbox"
                     />
                     <span>
                       {view.providerName} — {view.modelName}
@@ -242,7 +243,7 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
           {ready.mixedVendorRequired ? (
             <div className="composer-pool-control__mixed-vendor">
               <label className="composer-pool-control__option-label">
-                <input
+                <OctantCheckbox
                   aria-label="Allow mixed-vendor routing"
                   checked={mixedVendorAllowed}
                   className="window-no-drag"
@@ -252,7 +253,6 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
                       ? setMixedVendorAllowed(true)
                       : withdrawMixedVendor()
                   }
-                  type="checkbox"
                 />
                 <span>Allow mixed-vendor routing</span>
               </label>

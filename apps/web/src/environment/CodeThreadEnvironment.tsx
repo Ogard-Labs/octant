@@ -1,6 +1,7 @@
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { LocalServerClient } from "@octant/client-runtime";
 import type { GithubClient } from "@octant/client-runtime/github-client";
+import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type {
   CodeCommand,
   CodeCommandResult,
@@ -8,6 +9,7 @@ import type {
   ProjectSummary,
   WorkspaceTab,
 } from "@octant/contracts";
+import type { OpenInApplicationId } from "@octant/contracts/shell";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useState, type ReactNode } from "react";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
@@ -19,6 +21,10 @@ import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { useCodeEnvironmentController } from "./useCodeEnvironmentController";
 import { useLocalServersController } from "./useLocalServersController";
 import { ChangeWorkingFolder } from "./WorkingDirectoryControl";
+import { OpenInMenu } from "./OpenInMenu";
+import type { OctantHostBridge } from "../shell/hostBridge";
+import { EnvironmentSubagents } from "./EnvironmentSubagents";
+import { OctantButton } from "../ui/base/OctantButton";
 
 type CodeThreadWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
@@ -54,6 +60,10 @@ export interface CodeThreadEnvironmentProps {
   readonly localServerClient?: LocalServerClient;
   readonly githubClient?: GithubClient;
   readonly pullRequestRepository?: string;
+  readonly hostBridge?: OctantHostBridge;
+  readonly openInApplications?: ReadonlyArray<OpenInApplicationId>;
+  readonly agentRunClient?: AgentRunClient;
+  readonly onOpenAgents?: () => void;
 }
 
 /**
@@ -108,6 +118,12 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
 
   return (
     <div className="code-thread-environment">
+      <OpenInMenu
+        {...(props.active === undefined ? {} : { active: props.active })}
+        applications={props.openInApplications ?? []}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        threadId={String(props.tab.threadId)}
+      />
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
         onOpenChange={setDisclosureOpen}
@@ -136,19 +152,26 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           status={controller.status}
         />
         {props.onOpenChanges === undefined || readyObservation === undefined ? null : (
-          <button
+          <OctantButton
             className="environment-group__action window-no-drag"
             onClick={() => {
               setDisclosureOpen(false);
               props.onOpenChanges?.();
             }}
             type="button"
+            variant="ghost"
           >
             View changes
-          </button>
+          </OctantButton>
+        )}
+        {props.agentRunClient === undefined ? null : (
+          <EnvironmentSubagents
+            client={props.agentRunClient}
+            {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+            threadId={String(props.tab.threadId)}
+          />
         )}
         <EnvironmentGroup
-          defaultOpen
           {...(localServers.snapshot === undefined
             ? {}
             : {
@@ -174,7 +197,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           />
         </EnvironmentGroup>
         {props.githubClient === undefined || props.pullRequestRepository === undefined ? null : (
-          <EnvironmentGroup defaultOpen title="Pull requests">
+          <EnvironmentGroup title="Pull requests">
             <EnvironmentPullRequests
               client={props.githubClient}
               enabled={disclosureOpen}
@@ -185,21 +208,27 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         {workingDirectory === undefined ||
         threadVersion === undefined ||
         props.onExecute === undefined ? null : (
-          <ChangeWorkingFolder
-            value={workingDirectory}
-            onApply={async (nextWorkingDirectory) => {
-              const result = await props.onExecute?.({
-                kind: "change-code-thread-working-directory",
-                threadId: props.tab.threadId,
-                expectedVersion: threadVersion,
-                workingDirectory: nextWorkingDirectory,
-              });
-              if (result === undefined || !("kind" in result) || result.kind !== "thread-updated") {
-                throw new Error("Code working directory was not updated.");
-              }
-              await controller.refresh();
-            }}
-          />
+          <EnvironmentGroup summary={String(workingDirectory)} title="Working folder">
+            <ChangeWorkingFolder
+              value={workingDirectory}
+              onApply={async (nextWorkingDirectory) => {
+                const result = await props.onExecute?.({
+                  kind: "change-code-thread-working-directory",
+                  threadId: props.tab.threadId,
+                  expectedVersion: threadVersion,
+                  workingDirectory: nextWorkingDirectory,
+                });
+                if (
+                  result === undefined ||
+                  !("kind" in result) ||
+                  result.kind !== "thread-updated"
+                ) {
+                  throw new Error("Code working directory was not updated.");
+                }
+                await controller.refresh();
+              }}
+            />
+          </EnvironmentGroup>
         )}
       </ThreadEnvironmentPanel>
       <div className="code-thread-environment__content">{props.children}</div>

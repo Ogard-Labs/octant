@@ -1,5 +1,6 @@
 import type { ContextEntryId } from "@octant/contracts/context";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
+import type { CodeProviderLimit } from "@octant/contracts/code-operations";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { ContextControllerStatus } from "./useContextController";
 
@@ -11,9 +12,17 @@ export interface ComposerContextMeterScopeValue {
   readonly setExcluded: (entryId: ContextEntryId, excluded: boolean) => void;
   readonly setPinned: (entryId: ContextEntryId, pinned: boolean) => void;
   readonly snapshot?: ContextInspectorSnapshot;
+  readonly fallback?: ComposerContextUsageFallback;
   readonly status: ContextControllerStatus;
   readonly subjectKey?: string;
   readonly visible: boolean;
+}
+
+export interface ComposerContextUsageFallback {
+  readonly costUsd?: number;
+  readonly inputTokens: number;
+  readonly limits: ReadonlyArray<CodeProviderLimit>;
+  readonly outputTokens: number;
 }
 
 function ignoredRebuild(): void {}
@@ -40,6 +49,7 @@ export interface ComposerContextMeterProviderProps {
   readonly onSetExcluded?: (entryId: ContextEntryId, excluded: boolean) => void;
   readonly onSetPinned?: (entryId: ContextEntryId, pinned: boolean) => void;
   readonly snapshot?: ContextInspectorSnapshot;
+  readonly fallback?: ComposerContextUsageFallback;
   readonly status: ContextControllerStatus;
   readonly subjectKey?: string;
 }
@@ -62,12 +72,14 @@ export function ComposerContextMeterProvider(props: ComposerContextMeterProvider
       setPinned,
       status: props.status,
       ...(props.snapshot === undefined ? {} : { snapshot: props.snapshot }),
+      ...(props.fallback === undefined ? {} : { fallback: props.fallback }),
       ...(props.subjectKey === undefined ? {} : { subjectKey: props.subjectKey }),
     }),
     [
       props.busy,
       openNonce,
       props.snapshot,
+      props.fallback,
       props.status,
       props.subjectKey,
       rebuild,

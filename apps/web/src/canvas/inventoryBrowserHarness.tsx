@@ -15,6 +15,7 @@ import {
   roadmapInventoryEntry,
 } from "../projects/canvasInventoryFixtures";
 import { canvasFixture } from "./test-fixtures";
+import { OctantButton } from "../ui/base/OctantButton";
 
 type CanvasTab = Extract<WorkspaceTab, { readonly kind: "canvas" }>;
 
@@ -153,26 +154,31 @@ function CanvasInventoryHarness() {
         <ul>
           {tabs.map((tab) => (
             <li key={String(tab.canvasId)}>
-              <button
+              <OctantButton
                 data-canvas-tab-id={String(tab.canvasId)}
                 onClick={() => setActiveCanvasId(String(tab.canvasId))}
                 type="button"
               >
                 {tab.title}
-              </button>
+              </OctantButton>
             </li>
           ))}
         </ul>
-        <button
+        <OctantButton
           data-canvas-inventory-evidence="close-active"
           onClick={closeActiveTab}
           type="button"
         >
           Close active tab
-        </button>
-        <button data-canvas-inventory-evidence="reload" onClick={reloadTabs} type="button">
+        </OctantButton>
+        <OctantButton
+          data-canvas-inventory-evidence="reload"
+          onClick={reloadTabs}
+          type="button"
+          variant="outline"
+        >
           Reload shell
-        </button>
+        </OctantButton>
       </section>
       <section data-canvas-inventory-evidence="workspace" data-reload-token={reloadToken}>
         {activeTab === undefined ? (

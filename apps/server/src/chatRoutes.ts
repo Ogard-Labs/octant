@@ -67,6 +67,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
     }
 
     const isBootstrap = url.pathname === "/api/chat/bootstrap";
+    const isNavigation = url.pathname === "/api/chat/navigation";
     const isSearch = url.pathname === "/api/chat/search";
     const isCommands = url.pathname === "/api/chat/commands";
     const isAttachments = url.pathname === "/api/chat/attachments";
@@ -78,6 +79,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
     const isAttachmentRead = attachmentMatch !== null;
     if (
       !isBootstrap &&
+      !isNavigation &&
       !isSearch &&
       !isCommands &&
       !isAttachments &&
@@ -147,6 +149,16 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           );
         }
         return jsonResponse(await dependencies.service.bootstrap(), 200, origin);
+      }
+      if (isNavigation) {
+        if (request.method !== "GET" || url.search !== "") {
+          return failureResponse(
+            { category: "invalid", message: "Chat request is invalid." },
+            400,
+            origin,
+          );
+        }
+        return jsonResponse(dependencies.service.navigation(), 200, origin);
       }
       if (isSearch) {
         if (request.method !== "GET") {

@@ -3,17 +3,53 @@ import {
   AGENT_RUN_EVENT_NAMES,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
+  MAX_AGENT_RUN_CONVERSATION_ENTRIES,
   decodeAgentRun,
   decodeAgentRunAdmittedContext,
   decodeAgentRunAuthority,
   decodeAgentRunCommand,
   decodeAgentRunCenterQuery,
   decodeAgentRunCenterResponse,
+  decodeAgentRunConversationResponse,
   decodeAgentRunLifecycleStatus,
   decodeAgentRunRoutingReceipt,
   decodeAgentRunStatusChanged,
   decodeAgentRunWorkspaceReceipt,
 } from "./agentRun";
+
+describe("AgentRunConversationResponse", () => {
+  it("accepts a bounded live snapshot and rejects oversized entry lists", () => {
+    const response = {
+      runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      parentThreadId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      executionKind: "octant-managed",
+      modelId: "gpt-5.6-luna",
+      lifecycleStatus: "running",
+      status: "live",
+      entries: [
+        {
+          sequence: 1,
+          kind: "assistant",
+          text: "Working",
+          occurredAt: "2026-08-23T00:00:00.000Z",
+        },
+      ],
+      truncated: false,
+    };
+    expect(decodeAgentRunConversationResponse(response).status).toBe("live");
+    expect(() =>
+      decodeAgentRunConversationResponse({
+        ...response,
+        entries: Array.from({ length: MAX_AGENT_RUN_CONVERSATION_ENTRIES + 1 }, (_, index) => ({
+          sequence: index + 1,
+          kind: "status",
+          text: "x",
+          occurredAt: "2026-08-23T00:00:00.000Z",
+        })),
+      }),
+    ).toThrow();
+  });
+});
 
 const ids = {
   run: "11111111-1111-4111-8111-111111111111",

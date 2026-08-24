@@ -233,6 +233,11 @@ const HISTORY_UNAVAILABLE_MESSAGE = "Conversation history could not be loaded.";
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
 
+/** Hidden windows should not spend a request cycle keeping a background list hot. */
+function documentIsVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
 /**
  * What a Code thread has consumed, and the provider usage windows it last
  * heard about. Every figure comes from the provider: a provider that reports
@@ -1255,21 +1260,38 @@ export function useCodeController(options: CodeControllerOptions) {
   useEffect(() => {
     if (navigationRefreshMs <= 0) return;
     let cancelled = false;
-    const timer = setInterval(() => {
-      void (async () => {
-        try {
-          const next = await client.bootstrap();
-          if (cancelled || !mounted.current) return;
-          applyNavigationRefresh(next);
-        } catch {
-          // A refresh that fails leaves the last list on screen; the stream and
-          // the retry path are what report a host that has actually gone away.
-        }
-      })();
-    }, navigationRefreshMs);
+    let inFlight = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const refresh = async () => {
+      if (!documentIsVisible() || inFlight) return;
+      inFlight = true;
+      try {
+        const next = await client.bootstrap();
+        if (cancelled || !mounted.current) return;
+        applyNavigationRefresh(next);
+      } catch {
+        // A refresh that fails leaves the last list on screen; the stream and
+        // the retry path are what report a host that has actually gone away.
+      } finally {
+        inFlight = false;
+      }
+    };
+    const schedule = () => {
+      if (timer !== undefined) clearInterval(timer);
+      timer = documentIsVisible()
+        ? setInterval(() => void refresh(), navigationRefreshMs)
+        : undefined;
+    };
+    const onVisibilityChange = () => {
+      schedule();
+      if (documentIsVisible()) void refresh();
+    };
+    schedule();
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer !== undefined) clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [applyNavigationRefresh, client, navigationRefreshMs]);
 

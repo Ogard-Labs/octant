@@ -6,6 +6,7 @@ import type {
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import { useEffect, useState } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
 import { CanvasThreadReferenceCard as CardView } from "./CanvasThreadReferenceCard";
 
 export interface CanvasThreadReferenceCardListProps {
@@ -50,13 +51,15 @@ export function CanvasThreadReferenceCardList(props: CanvasThreadReferenceCardLi
         <div key={String(card.cardId)}>
           <CardView card={card} />
           {props.onOpen ? (
-            <button
+            <OctantButton
               className="btn btn-secondary btn-sm"
               type="button"
               onClick={() => props.onOpen?.(card)}
+              size="sm"
+              variant="secondary"
             >
               Open Canvas
-            </button>
+            </OctantButton>
           ) : null}
         </div>
       ))}

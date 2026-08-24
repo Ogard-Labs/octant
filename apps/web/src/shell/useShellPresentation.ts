@@ -181,3 +181,62 @@ export function writeSidebarCollapsed(
     // Presentation persistence is best-effort.
   }
 }
+
+export const MIN_BOTTOM_PANEL_HEIGHT = 160;
+export const MAX_BOTTOM_PANEL_HEIGHT = 640;
+export const DEFAULT_BOTTOM_PANEL_HEIGHT = 260;
+
+export interface BottomPanelPresentation {
+  readonly open: boolean;
+  readonly height: number;
+}
+
+function bottomPanelStorageKey(windowId: string): string {
+  return `octant.shell.bottom-panel.${windowId}.v1`;
+}
+
+export function readBottomPanelPresentation(
+  scope: { readonly localStorage?: Storage },
+  windowId: string,
+): BottomPanelPresentation {
+  try {
+    const raw = scope.localStorage?.getItem(bottomPanelStorageKey(windowId));
+    if (raw === undefined || raw === null) {
+      return { open: false, height: DEFAULT_BOTTOM_PANEL_HEIGHT };
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") {
+      return { open: false, height: DEFAULT_BOTTOM_PANEL_HEIGHT };
+    }
+    const candidate = parsed as { readonly open?: unknown; readonly height?: unknown };
+    return {
+      open: candidate.open === true,
+      height: clampBottomPanelHeight(candidate.height),
+    };
+  } catch {
+    return { open: false, height: DEFAULT_BOTTOM_PANEL_HEIGHT };
+  }
+}
+
+export function writeBottomPanelPresentation(
+  scope: { readonly localStorage?: Storage },
+  windowId: string,
+  presentation: BottomPanelPresentation,
+): void {
+  try {
+    scope.localStorage?.setItem(
+      bottomPanelStorageKey(windowId),
+      JSON.stringify({
+        open: presentation.open,
+        height: clampBottomPanelHeight(presentation.height),
+      }),
+    );
+  } catch {
+    // Presentation persistence is best-effort.
+  }
+}
+
+function clampBottomPanelHeight(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_BOTTOM_PANEL_HEIGHT;
+  return Math.min(MAX_BOTTOM_PANEL_HEIGHT, Math.max(MIN_BOTTOM_PANEL_HEIGHT, Math.round(value)));
+}

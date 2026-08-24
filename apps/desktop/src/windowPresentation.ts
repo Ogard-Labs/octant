@@ -1,3 +1,5 @@
+import { NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT } from "@octant/contracts/shell";
+
 export type ResolvedSidebarMaterial = "opaque" | "translucent";
 export const INITIAL_SIDEBAR_MATERIAL_PREFERENCE = "opaque" as const;
 
@@ -12,10 +14,11 @@ export interface WindowPresentationInput {
 }
 
 export interface WindowPresentation {
+  /** CSS pixels reserved by macOS hiddenInset before renderer hit targets. */
+  readonly interactiveTitlebarInset: number;
   readonly browserWindow:
     | {
         readonly backgroundColor: "#00000000";
-        readonly frame: false;
         readonly titleBarStyle: "hiddenInset";
         readonly trafficLightPosition: { readonly x: 16; readonly y: 18 };
         readonly transparent: true;
@@ -92,11 +95,11 @@ export function resolveWindowPresentation(input: WindowPresentationInput): Windo
     !input.prefersReducedTransparency &&
     !input.highContrast;
   return {
+    interactiveTitlebarInset: input.platform === "darwin" ? NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT : 0,
     browserWindow:
       input.platform === "darwin"
         ? {
             backgroundColor: "#00000000",
-            frame: false,
             titleBarStyle: "hiddenInset",
             trafficLightPosition: { x: 16, y: 18 },
             transparent: true,

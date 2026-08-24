@@ -8,6 +8,8 @@ import type { HostId } from "@octant/contracts/host";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import { ChevronRight, FolderOpen, GitBranch, Home, Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 
 export interface FolderPickerProps {
   readonly client: FolderBrowseClient;
@@ -155,14 +157,21 @@ export function FolderPicker(props: FolderPickerProps) {
           <span>{props.mode === "code" ? "Code" : "Work"}</span>
           <h2 id="folder-picker-title">{title}</h2>
         </div>
-        <button aria-label="Cancel" disabled={selecting} onClick={requestClose} type="button">
+        <OctantButton
+          aria-label="Cancel"
+          disabled={selecting}
+          onClick={requestClose}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
           ×
-        </button>
+        </OctantButton>
       </div>
       <p className="folder-picker__hint">{hint}</p>
       <div className="folder-picker__search">
         <Search aria-hidden="true" size={14} strokeWidth={1.8} />
-        <input
+        <OctantInput
           aria-label="Search folders"
           onChange={(e) => handleSearchChange(e.target.value)}
           placeholder="Search folders…"
@@ -189,14 +198,15 @@ export function FolderPicker(props: FolderPickerProps) {
                     <span>{crumb.label}</span>
                   </span>
                 ) : (
-                  <button
+                  <OctantButton
                     className="folder-picker__breadcrumb"
                     onClick={() => navigateToBreadcrumb(candidateId)}
                     type="button"
+                    variant="ghost"
                   >
                     {i === 0 ? <Home aria-hidden="true" size={12} strokeWidth={1.8} /> : null}
                     <span>{crumb.label}</span>
-                  </button>
+                  </OctantButton>
                 )}
               </span>
             );
@@ -209,9 +219,9 @@ export function FolderPicker(props: FolderPickerProps) {
         ) : status === "error" ? (
           <div className="folder-picker__status folder-picker__status--error">
             <p>{errorMessage}</p>
-            <button onClick={() => void load()} type="button">
+            <OctantButton onClick={() => void load()} type="button" variant="outline">
               Retry
-            </button>
+            </OctantButton>
           </div>
         ) : result !== null && result.candidates.length === 0 ? (
           <p className="folder-picker__status">No folders found.</p>
@@ -225,10 +235,11 @@ export function FolderPicker(props: FolderPickerProps) {
               role="option"
               title={candidate.unselectableReason}
             >
-              <button
+              <OctantButton
                 className="folder-picker__item-nav"
                 onClick={() => navigateInto(candidate)}
                 type="button"
+                variant="ghost"
               >
                 {candidate.isGitRepository ? (
                   <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -239,24 +250,28 @@ export function FolderPicker(props: FolderPickerProps) {
                 {props.mode === "code" && !candidate.isGitRepository ? (
                   <span className="folder-picker__item-badge">Not a git repo</span>
                 ) : null}
-              </button>
+              </OctantButton>
               {candidate.isSelectable ? (
-                <button
+                <OctantButton
                   className="folder-picker__item-select"
                   disabled={selecting}
                   onClick={() => void selectCandidate(candidate)}
+                  size="sm"
                   type="button"
+                  variant="outline"
                 >
                   Select
-                </button>
+                </OctantButton>
               ) : (
-                <button
+                <OctantButton
                   className="folder-picker__item-open"
                   onClick={() => navigateInto(candidate)}
+                  size="sm"
                   type="button"
+                  variant="ghost"
                 >
                   Open
-                </button>
+                </OctantButton>
               )}
             </div>
           ))
@@ -268,14 +283,15 @@ export function FolderPicker(props: FolderPickerProps) {
         </p>
       )}
       <div className="folder-picker__actions">
-        <button
+        <OctantButton
           className="project-button project-button--quiet"
           disabled={selecting}
           onClick={requestClose}
           type="button"
+          variant="ghost"
         >
           Cancel
-        </button>
+        </OctantButton>
       </div>
     </dialog>
   );

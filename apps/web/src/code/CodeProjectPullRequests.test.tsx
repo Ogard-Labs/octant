@@ -86,6 +86,8 @@ describe("CodeProjectPullRequests", () => {
 
     expect(await screen.findByRole("heading", { name: "Pull requests" })).toBeVisible();
     expect(await screen.findByText("List active pull requests")).toBeVisible();
+    expect(screen.getByRole("searchbox", { name: "Search pull requests" })).toBeVisible();
+    expect(screen.getByText("1 pull request")).toBeVisible();
     expect(load).toHaveBeenCalledWith({ version: 1 });
     expect(refresh).not.toHaveBeenCalled();
   });
@@ -103,7 +105,9 @@ describe("CodeProjectPullRequests", () => {
     expect(within(octant).getByText("Review approved")).toBeVisible();
     expect(within(octant).getByText("Linked: Manual refresh")).toBeVisible();
     expect(
-      within(notes).getByText("Not connected to a github.com origin. The Project stays usable."),
+      within(notes).getByText(
+        "No github.com origin detected. Add one to this Project to enable pull-request refresh.",
+      ),
     ).toBeVisible();
     expect(octant.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -186,6 +190,60 @@ describe("CodeProjectPullRequests", () => {
     );
   });
 
+  it("does not present a failed GitHub refresh as an empty zero-count snapshot", async () => {
+    const stale = view({
+      rows: [],
+      freshness: { status: "stale", staleReason: "disconnected" },
+    });
+    renderWorkspace({ load: async () => stale, refresh: async () => stale });
+
+    expect(
+      await screen.findByText(
+        "GitHub access is unavailable. Check the GitHub CLI connection, then refresh.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText("No cached pull requests")).toBeVisible();
+    expect(screen.queryByText("0 pull requests")).not.toBeInTheDocument();
+  });
+
+  it("does not show an untouched connected Project as confirmed empty", async () => {
+    const perProject = view({
+      projects: [
+        {
+          kind: "connected",
+          projectId: projectA,
+          projectName: "AuroraDocs",
+          repositoryOwner: "octant",
+          repositoryName: "aurora",
+        },
+        {
+          kind: "connected",
+          projectId: projectB,
+          projectName: "Divetools",
+          repositoryOwner: "octant",
+          repositoryName: "divetools",
+        },
+      ],
+      rows: [],
+      freshness: { status: "fresh", lastSuccessfulRefreshAt: generatedAt },
+      projectFreshness: [
+        {
+          projectId: projectA,
+          freshness: { status: "empty", lastSuccessfulRefreshAt: generatedAt },
+        },
+        { projectId: projectB, freshness: { status: "empty" } },
+      ],
+    });
+    renderWorkspace({ load: async () => perProject, refresh: async () => perProject });
+
+    const aurora = await screen.findByRole("region", { name: "Project AuroraDocs" });
+    const divetools = screen.getByRole("region", { name: "Project Divetools" });
+    expect(within(aurora).getByText("No open or draft pull requests.")).toBeVisible();
+    expect(
+      within(divetools).getByText("Not refreshed yet. Refresh this Project to load pull requests."),
+    ).toBeVisible();
+  });
+
   it("selects a pull request row without refreshing GitHub", async () => {
     const user = userEvent.setup();
     const onSelectRow = vi.fn();
@@ -195,5 +253,21 @@ describe("CodeProjectPullRequests", () => {
     expect(onSelectRow).toHaveBeenCalledWith(
       expect.objectContaining({ number: 12, title: "List active pull requests" }),
     );
+  });
+
+  it("filters the cached snapshot locally and clears the query without contacting GitHub", async () => {
+    const user = userEvent.setup();
+    const { load, refresh } = renderWorkspace();
+    await screen.findByText("List active pull requests");
+
+    const search = screen.getByRole("searchbox", { name: "Search pull requests" });
+    await user.type(search, "missing title");
+    expect(screen.getByText("No pull requests match “missing title”.")).toBeVisible();
+    expect(screen.queryByText("List active pull requests")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear pull-request search" }));
+    expect(await screen.findByText("List active pull requests")).toBeVisible();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

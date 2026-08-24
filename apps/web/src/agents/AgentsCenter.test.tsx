@@ -43,6 +43,7 @@ const summary = decodeAgentRunCenterSummary({
 function createClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
   return {
     center: vi.fn(async () => ({ items: [summary] })),
+    conversation: vi.fn(),
     parentSummary: vi.fn(),
     acknowledge: vi.fn(),
     prepareWorkspace: vi.fn(),
@@ -85,6 +86,15 @@ describe("AgentsCenter", () => {
       threadId: String(summary.parentThreadId),
       title: summary.parentThreadTitle,
     });
+  });
+
+  it("uses accessible toggle groups for status and mode filters", async () => {
+    const user = userEvent.setup();
+    render(<AgentsCenter client={createClient()} />);
+    expect(await screen.findByText(summary.task)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByText("No agent runs match the current filters.")).toBeInTheDocument();
   });
 
   it("shows unavailable copy when the center query fails", async () => {

@@ -1,4 +1,5 @@
 import type { ThreadGoal } from "@octant/contracts";
+import { OctantButton } from "../ui/base/OctantButton";
 
 export interface GoalCardProps {
   readonly goal: ThreadGoal;
@@ -19,23 +20,23 @@ export function GoalCard(props: GoalCardProps) {
       <p data-testid="goal-objective">{goal.objective}</p>
       <div role="group" aria-label="Goal actions">
         {(goal.status === "active" || goal.status === "budget-limited") && (
-          <button type="button" onClick={props.onPause}>
+          <OctantButton type="button" onClick={props.onPause} size="sm" variant="outline">
             Pause
-          </button>
+          </OctantButton>
         )}
         {(goal.status === "paused" || goal.status === "budget-limited") && (
-          <button type="button" onClick={props.onResume}>
+          <OctantButton type="button" onClick={props.onResume} size="sm" variant="outline">
             Resume
-          </button>
+          </OctantButton>
         )}
         {goal.status !== "complete" && (
           <>
-            <button type="button" onClick={props.onRevise}>
+            <OctantButton type="button" onClick={props.onRevise} size="sm" variant="ghost">
               Revise
-            </button>
-            <button type="button" onClick={props.onComplete}>
+            </OctantButton>
+            <OctantButton type="button" onClick={props.onComplete} size="sm">
               Complete
-            </button>
+            </OctantButton>
           </>
         )}
       </div>

@@ -14,6 +14,67 @@ export function ContextMenuTrigger({
   return <ContextMenuPrimitive.Trigger className={cn(className)} {...props} />;
 }
 
+export function ContextMenuContent({
+  className,
+  ...props
+}: ComponentProps<typeof ContextMenuPrimitive.Popup>) {
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Positioner className="outline-none window-no-drag">
+        <ContextMenuPrimitive.Popup
+          className={cn(
+            "window-no-drag min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none",
+            className,
+          )}
+          {...props}
+        />
+      </ContextMenuPrimitive.Positioner>
+    </ContextMenuPrimitive.Portal>
+  );
+}
+
+export function ContextMenuGroup(props: ComponentProps<typeof ContextMenuPrimitive.Group>) {
+  return <ContextMenuPrimitive.Group {...props} />;
+}
+
+export function ContextMenuLabel({
+  className,
+  ...props
+}: ComponentProps<typeof ContextMenuPrimitive.GroupLabel>) {
+  return (
+    <ContextMenuPrimitive.GroupLabel
+      className={cn("truncate px-2 py-1.5 text-xs text-muted-foreground", className)}
+      {...props}
+    />
+  );
+}
+
+export function ContextMenuItem({
+  className,
+  closeOnClick = true,
+  ...props
+}: ComponentProps<typeof ContextMenuPrimitive.Item>) {
+  return (
+    <ContextMenuPrimitive.Item
+      className={cn(
+        "window-no-drag relative flex cursor-default items-center rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
+        className,
+      )}
+      closeOnClick={closeOnClick}
+      {...props}
+    />
+  );
+}
+
+export function ContextMenuSeparator({
+  className,
+  ...props
+}: ComponentProps<typeof ContextMenuPrimitive.Separator>) {
+  return (
+    <ContextMenuPrimitive.Separator className={cn("my-1 h-px bg-border", className)} {...props} />
+  );
+}
+
 export interface ShadcnContextMenuProps {
   readonly items: ReadonlyArray<ShadcnMenuItem>;
   readonly onValueChange: (value: string) => void;
@@ -31,41 +92,35 @@ export function ShadcnContextMenu(props: ShadcnContextMenuProps) {
       <ContextMenuTrigger className={cn(props.triggerClassName, "window-no-drag")}>
         {props.children}
       </ContextMenuTrigger>
-      <ContextMenuPrimitive.Portal>
-        <ContextMenuPrimitive.Positioner className="z-50 outline-none window-no-drag">
-          <ContextMenuPrimitive.Popup className="octant-glass octant-glass--overlay window-no-drag z-50 min-w-48 rounded-md p-1 text-popover-foreground outline-none">
-            {props.items.map((item) => (
-              <ContextMenuPrimitive.Item
-                className={cn(
-                  "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
-                )}
-                closeOnClick
-                key={item.value}
-                label={item.label}
-                {...(item.disabled === true ? { disabled: true } : {})}
-                onClick={() => {
-                  if (item.disabled === true) return;
-                  props.onValueChange(item.value);
-                }}
-              >
-                {item.icon === undefined ? null : (
-                  <span aria-hidden="true" className="flex size-4 items-center justify-center">
-                    {item.icon}
-                  </span>
-                )}
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate font-medium">{item.label}</span>
-                  {item.description === undefined ? null : (
-                    <span className="truncate text-xs text-muted-foreground">
-                      {item.description}
-                    </span>
-                  )}
-                </span>
-              </ContextMenuPrimitive.Item>
-            ))}
-          </ContextMenuPrimitive.Popup>
-        </ContextMenuPrimitive.Positioner>
-      </ContextMenuPrimitive.Portal>
+      <ContextMenuContent>
+        {props.items.map((item) => (
+          <ContextMenuItem
+            className={cn(
+              "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
+            )}
+            closeOnClick
+            key={item.value}
+            label={item.label}
+            {...(item.disabled === true ? { disabled: true } : {})}
+            onClick={() => {
+              if (item.disabled === true) return;
+              props.onValueChange(item.value);
+            }}
+          >
+            {item.icon === undefined ? null : (
+              <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                {item.icon}
+              </span>
+            )}
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate font-medium">{item.label}</span>
+              {item.description === undefined ? null : (
+                <span className="truncate text-xs text-muted-foreground">{item.description}</span>
+              )}
+            </span>
+          </ContextMenuItem>
+        ))}
+      </ContextMenuContent>
     </ContextMenu>
   );
 }

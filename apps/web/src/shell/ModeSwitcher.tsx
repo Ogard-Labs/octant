@@ -1,7 +1,14 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ModeSwitcherPresentation } from "@octant/contracts/shell";
-import { ChevronDown, Code2, FolderKanban, MessageSquare, type LucideIcon } from "lucide-react";
+import {
+  BriefcaseBusiness,
+  ChevronDown,
+  Code2,
+  MessageCircle,
+  type LucideIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 
 const modeOrder: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
@@ -16,8 +23,8 @@ const modeDescriptions: Record<OctantMode, string> = {
   code: "Build, debug, and ship software",
 };
 const modeIcons: Record<OctantMode, LucideIcon> = {
-  chat: MessageSquare,
-  work: FolderKanban,
+  chat: MessageCircle,
+  work: BriefcaseBusiness,
   code: Code2,
 };
 
@@ -41,7 +48,6 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
     if (mode !== props.activeMode) props.onSelectMode(mode);
   };
 
-  const ActiveIcon = modeIcons[props.activeMode];
   const items: Array<OctantMenuItem> = modes.map((mode) => {
     const ModeIcon = modeIcons[mode];
     return {
@@ -60,11 +66,12 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
         data-oct-modeswitch="icons"
         role="group"
       >
+        <span className="mode-switcher__brand">Octant</span>
         {modes.map((mode) => {
           const ModeIcon = modeIcons[mode];
           const active = props.activeMode === mode;
           return (
-            <button
+            <OctantButton
               {...(active ? { "aria-current": "page" as const } : {})}
               className="mode window-no-drag"
               key={mode}
@@ -73,10 +80,13 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
               // presentation, so the tooltip carries it for sighted hovers.
               title={modeLabels[mode]}
               type="button"
+              variant="ghost"
             >
-              <ModeIcon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+              <span aria-hidden="true" className="mode__icon-frame">
+                <ModeIcon className="icon" size={16} strokeWidth={1.5} />
+              </span>
               <span className="mode-label">{modeLabels[mode]}</span>
-            </button>
+            </OctantButton>
           );
         })}
       </div>
@@ -89,8 +99,8 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
         }}
         trigger={
           <>
-            <ActiveIcon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
-            <span>{modeLabels[props.activeMode]}</span>
+            <span className="mode-switcher__brand">Octant</span>
+            <span className="mode-switcher__context">{modeLabels[props.activeMode]}</span>
             <ChevronDown
               aria-hidden="true"
               className="icon mode-caret"

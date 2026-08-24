@@ -56,15 +56,11 @@ const SUMMARY_ICONS = {
  * are unknowns, so they say so rather than converting a missing answer into a
  * negative one the status above would contradict (`BOOT-02`).
  */
-const CAVEATS: Record<Exclude<FirstRunReadinessOverall, "ready">, string> = {
+const CAVEATS: Partial<Record<Exclude<FirstRunReadinessOverall, "ready">, string>> = {
   checking:
     "Octant is still checking this host, so it cannot say yet whether Chat can answer. You can open the composer while it finishes.",
   "authority-unavailable":
     "Octant cannot reach its own provider registry, so it cannot say whether Chat can answer. You can still open the composer and finish setup later in Settings.",
-  "none-configured":
-    "No provider is ready, so Chat cannot answer yet. You can still open the composer and finish setup later in Settings.",
-  "action-required":
-    "No provider is ready, so Chat cannot answer yet. You can still open the composer and finish setup later in Settings.",
 };
 
 /**
@@ -81,6 +77,7 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
   function FirstRunProviderStep(props, ref) {
     const { readiness } = props;
     const SummaryIcon = SUMMARY_ICONS[readiness.overall];
+    const caveat = readiness.overall === "ready" ? undefined : CAVEATS[readiness.overall];
 
     return (
       <div className="first-run__step">
@@ -144,9 +141,9 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
           </OctantButton>
         </div>
 
-        {readiness.overall === "ready" ? null : (
+        {caveat === undefined ? null : (
           <p className="first-run__caveat" role="note">
-            {CAVEATS[readiness.overall]}
+            {caveat}
           </p>
         )}
       </div>

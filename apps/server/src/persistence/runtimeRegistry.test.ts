@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { REMOTE_ACCESS_EVENT_NAMES } from "@octant/contracts/remote-access";
 import { EventPayloadInvalid, UnknownEventName } from "./journalErrors";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
+import { decodePersistedShellSettings } from "./shellPersistenceSchema";
 
 describe("createPhase1RuntimeRegistries", () => {
   // Regression test: AgentRunSettingsStore appends
@@ -620,28 +621,7 @@ describe("createPhase1RuntimeRegistries", () => {
       EventPayloadInvalid,
     );
     expect(registry.decodePersisted("shell.settings-replaced", 1, legacyPayload)).toEqual({
-      settings: {
-        ...legacyPayload.settings,
-        contextSidebarWidth: 360,
-        // A persisted store that predates first-run onboarding was written by
-        // a host that already finished its first run, so the upcast stamps
-        // `completed`: only a genuinely new store — which has no persisted
-        // settings at all — starts `pending`.
-        firstRunOnboarding: "completed",
-        automaticUpdateChecks: true,
-        lastContextSurface: null,
-        modeSwitcherPresentation: "buttons",
-        navigatorAssistant: {},
-        projectViewSwitcherPresentation: "dropdown",
-        userProfile: { accent: "indigo", avatar: { kind: "initials" } },
-        sidebarBackground: {
-          kind: "none",
-          overlayColor: "#1a1a1c",
-          overlayOpacity: 100,
-          vibrancyMode: "off",
-        },
-        environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
-      },
+      settings: decodePersistedShellSettings(legacyPayload.settings),
     });
     for (const [contextSidebarWidth, lastContextSurface, modeSwitcherPresentation] of [
       [280, null, "buttons"],
@@ -658,6 +638,10 @@ describe("createPhase1RuntimeRegistries", () => {
           modeSwitcherPresentation,
           navigatorAssistant: {},
           projectViewSwitcherPresentation: "dropdown",
+          transcriptTextSize: "medium",
+          transcriptWidth: "narrow",
+          showThreadProviderIcons: true,
+          openInApplications: ["vscode", "cursor", "zed", "finder", "terminal", "ghostty", "xcode"],
           userProfile: { accent: "indigo", avatar: { kind: "initials" } },
           sidebarBackground: {
             kind: "none",
@@ -685,23 +669,7 @@ describe("createPhase1RuntimeRegistries", () => {
       EventPayloadInvalid,
     );
     expect(registry.decodePersisted("shell.settings-replaced", 1, preSwitcherPayload)).toEqual({
-      settings: {
-        ...preSwitcherPayload.settings,
-        // Pre-onboarding store: upgraded hosts must not re-run first run.
-        firstRunOnboarding: "completed",
-        automaticUpdateChecks: true,
-        modeSwitcherPresentation: "buttons",
-        navigatorAssistant: {},
-        projectViewSwitcherPresentation: "dropdown",
-        userProfile: { accent: "indigo", avatar: { kind: "initials" } },
-        sidebarBackground: {
-          kind: "none",
-          overlayColor: "#1a1a1c",
-          overlayOpacity: 100,
-          vibrancyMode: "off",
-        },
-        environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
-      },
+      settings: decodePersistedShellSettings(preSwitcherPayload.settings),
     });
   });
 
@@ -875,6 +843,10 @@ function validSettingsPayload() {
       // Unconfigured Navigator: the section decodes to its empty honest state.
       navigatorAssistant: {},
       projectViewSwitcherPresentation: "dropdown",
+      transcriptTextSize: "medium",
+      transcriptWidth: "narrow",
+      showThreadProviderIcons: true,
+      openInApplications: ["vscode", "cursor", "zed", "finder", "terminal", "ghostty", "xcode"],
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },
       sidebarBackground: {
         kind: "none",

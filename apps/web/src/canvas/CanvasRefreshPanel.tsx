@@ -14,6 +14,7 @@ import type { CanvasSkillContribution } from "@octant/contracts/canvas-skill";
 import { Ban, Check, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 import { useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { CanvasSkillProvenance } from "./CanvasSkillProvenance";
 
 /**
@@ -210,7 +211,7 @@ export function CanvasRefreshPanel(props: CanvasRefreshPanelProps) {
       {skillOptions.length === 0 ? null : (
         <label className="canvas-refresh__skill">
           <span>Presentation skill</span>
-          <select
+          <OctantNativeSelect
             data-testid="canvas-refresh-skill"
             disabled={running}
             value={selectedSkillId}
@@ -225,7 +226,7 @@ export function CanvasRefreshPanel(props: CanvasRefreshPanelProps) {
                 {option.displayName}
               </option>
             ))}
-          </select>
+          </OctantNativeSelect>
         </label>
       )}
       <div className="canvas-refresh__row">

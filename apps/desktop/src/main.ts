@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   app,
@@ -40,6 +40,7 @@ import {
 import { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 import type { AppVersion } from "@octant/contracts/app-updates";
 import { createAppUpdateService } from "./appUpdateService";
+import { buildApplicationMenuTemplate } from "./applicationMenu";
 import { resolveUpdateFeedUrl } from "./appUpdateFeed";
 import {
   createBrowserSurfaceHost,
@@ -49,6 +50,11 @@ import {
 } from "./browserSurfaceHost";
 import { startBrowserRuntimeBroker, type BrowserRuntimeBroker } from "./browserRuntimeBroker";
 import { openCodeExternalEditorFromServer } from "./codeExternalEditor";
+import {
+  detectOpenInApplications,
+  launchOpenInApplication,
+  openCodeCheckoutInApplicationFromServer,
+} from "./openInApplications";
 import { createNativePreviewHandoffExecutor, openPreviewHandoffFromServer } from "./previewHandoff";
 import {
   requestCodeOperationApprovalFromServer,
@@ -92,13 +98,10 @@ import {
   shutdownManagedServer,
   waitForStorageReady,
 } from "./serverProcess";
-import {
-  createHostLifecycleController,
-  shouldConfirmQuit,
-  type LocalHostDescriptor,
-} from "./hostLifecycle";
+import { createHostLifecycleController, type LocalHostDescriptor } from "./hostLifecycle";
 import { buildMenuBarItems, formatRedactedHostDiagnostics } from "./menuBar";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
+import { buildQuitConfirmation, evaluateQuitRequest } from "./quitGuard";
 import {
   attentionBadgeLabel,
   attentionNotificationPresentation,
@@ -156,7 +159,10 @@ const IPC_CHANNELS = {
   maximizeOrRestore: "octant:window:maximize-or-restore",
   minimize: "octant:window:minimize",
   openCodeExternalEditor: "octant:code:open-external-editor",
+  listOpenInApplications: "octant:code:list-open-in-applications",
+  openCodeCheckoutInApplication: "octant:code:open-checkout-in-application",
   openInNewWindow: "octant:window:open-project",
+  openSettings: "octant:menu:open-settings",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",
   startNewAgent: "octant:menu:start-new-agent",
@@ -1628,6 +1634,8 @@ async function runMenuBarAction(
         title: "Octant host diagnostics",
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
       });
+    } else if (action === "fully-quit") {
+      app.quit();
     }
   } catch {
     dialog.showErrorBox(
@@ -1825,6 +1833,31 @@ function installIpcHandlers(): void {
       request: request as never,
       fetch: globalThis.fetch,
       spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.listOpenInApplications, () =>
+    detectOpenInApplications({ exists: existsSync, homeDirectory: homedir() }),
+  );
+  ipcMain.handle(IPC_CHANNELS.openCodeCheckoutInApplication, async (event, request: unknown) => {
+    const context = ownedWindowContext(event);
+    if (activeServerUrl === undefined) {
+      throw new Error("Octant Open in is unavailable.");
+    }
+    await openCodeCheckoutInApplicationFromServer({
+      serverUrl: activeServerUrl,
+      desktopBridgeSecret,
+      windowId: context.windowId,
+      request: request as never,
+      fetch: globalThis.fetch,
+      launch: ({ applicationId, checkoutRoot }) =>
+        launchOpenInApplication({
+          applicationId,
+          checkoutRoot,
+          exists: existsSync,
+          homeDirectory: homedir(),
+          shell,
+          spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
+        }),
     });
   });
   const activePreviewHandoffs = new Map<string, AbortController>();
@@ -2259,15 +2292,14 @@ async function shutdownSecondaryProjectWindows(): Promise<void> {
   for (const lifecycle of lifecycles) secondaryWindowLifecycles.delete(lifecycle);
 }
 
-async function confirmQuitWithActiveWork(): Promise<boolean> {
+async function confirmQuitWithActiveWork(
+  snapshot: ReturnType<typeof hostLifecycle.snapshot>,
+): Promise<boolean> {
+  const copy = buildQuitConfirmation(snapshot);
   const options = {
     type: "warning" as const,
-    title: "Quit Octant?",
-    message: "Active Octant work will be interrupted.",
-    detail: "Quit only if you want the desktop-owned host and its child resources to stop now.",
-    buttons: ["Cancel", "Quit Octant"],
-    defaultId: 0,
-    cancelId: 0,
+    ...copy,
+    buttons: [...copy.buttons],
   };
   const result =
     mainWindow === undefined
@@ -2277,8 +2309,12 @@ async function confirmQuitWithActiveWork(): Promise<boolean> {
 }
 
 async function prepareToQuit(): Promise<void> {
-  const hostBeforeQuit = hostLifecycle.snapshot();
-  if (shouldConfirmQuit(hostBeforeQuit) && !(await confirmQuitWithActiveWork())) {
+  const accepted = await evaluateQuitRequest({
+    refreshActivity: refreshHostActivity,
+    snapshot: hostLifecycle.snapshot,
+    confirm: confirmQuitWithActiveWork,
+  });
+  if (!accepted) {
     preparingQuit = false;
     return;
   }
@@ -2348,6 +2384,22 @@ const requestActiveWindow = () =>
     handleFailure: handleFatalStartup,
   });
 
+function installApplicationMenu(): void {
+  if (process.platform !== "darwin") return;
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      buildApplicationMenuTemplate({
+        appName: app.name,
+        onOpenSettings: () => {
+          const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+          if (window === undefined || window.isDestroyed()) return;
+          window.webContents.send(IPC_CHANNELS.openSettings);
+        },
+      }),
+    ),
+  );
+}
+
 function acceptCodeDeepLink(value: string): void {
   try {
     const target = parseCodeDeepLink(value);
@@ -2374,7 +2426,13 @@ else {
   });
   for (const argument of process.argv)
     if (argument.startsWith("octant://")) acceptCodeDeepLink(argument);
-  void app.whenReady().then(requestActiveWindow).catch(handleFatalStartup);
+  void app
+    .whenReady()
+    .then(() => {
+      installApplicationMenu();
+      return requestActiveWindow();
+    })
+    .catch(handleFatalStartup);
 }
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

@@ -27,7 +27,9 @@ describe("the right sidebar surface", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "No tool open" })).toBeVisible();
+    expect(screen.getByText("Open a tool beside the active pane.")).toBeVisible();
+    expect(screen.queryByText("Tools")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "No tool open" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Browser" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Files" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Add tool" })).not.toBeInTheDocument();

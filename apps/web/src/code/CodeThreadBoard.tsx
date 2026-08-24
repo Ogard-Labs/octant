@@ -13,6 +13,8 @@ import { ChevronDown, Filter, GitBranch, GitPullRequest, RefreshCw, Search } fro
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import {
   codeBoardStatusLabel,
   codeBoardStatusReasonLabel,
@@ -206,7 +208,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             <div className="code-board__grouping-options">
               {(["status", "project"] as const).map((option) => (
                 <label className="code-board__grouping-option" key={option}>
-                  <input
+                  <OctantInput
                     checked={grouping === option}
                     name="code-board-grouping"
                     onChange={() => changeGrouping(option)}
@@ -222,7 +224,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
           <label className="code-board__search">
             <span className="sr-only">Search threads</span>
             <Search aria-hidden="true" size={14} strokeWidth={1.8} />
-            <input
+            <OctantInput
               onChange={(event) => setFilters((prev) => ({ ...prev, text: event.target.value }))}
               placeholder="Search threads"
               type="search"
@@ -269,7 +271,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                   <div className="code-board__status-options">
                     {ALL_STATUSES.map((status) => (
                       <label className="code-board__status-option" key={status}>
-                        <input
+                        <OctantInput
                           checked={filters.statuses.has(status)}
                           onChange={(event) =>
                             setFilters((prev) => toggleStatus(prev, status, event.target.checked))
@@ -289,7 +291,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                   {props.projects.length === 0 ? null : (
                     <label>
                       <span>Project</span>
-                      <select
+                      <OctantNativeSelect
                         onChange={(event) =>
                           setFilters((prev) => ({
                             ...prev,
@@ -307,13 +309,13 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                             {project.name}
                           </option>
                         ))}
-                      </select>
+                      </OctantNativeSelect>
                     </label>
                   )}
 
                   <label>
                     <span>Pull request</span>
-                    <select
+                    <OctantNativeSelect
                       onChange={(event) =>
                         setFilters((prev) => ({
                           ...prev,
@@ -328,12 +330,12 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                       <option value="open">Open</option>
                       <option value="merged">Merged</option>
                       <option value="closed">Closed</option>
-                    </select>
+                    </OctantNativeSelect>
                   </label>
 
                   <label>
                     <span>Checks</span>
-                    <select
+                    <OctantNativeSelect
                       onChange={(event) =>
                         setFilters((prev) => ({
                           ...prev,
@@ -347,12 +349,12 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                       <option value="failing">Failing</option>
                       <option value="pending">Pending</option>
                       <option value="unknown">Unknown</option>
-                    </select>
+                    </OctantNativeSelect>
                   </label>
 
                   <label>
                     <span>Follow-up</span>
-                    <select
+                    <OctantNativeSelect
                       onChange={(event) =>
                         setFilters((prev) => ({
                           ...prev,
@@ -364,7 +366,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                       <option value="any">Any</option>
                       <option value="only">Only follow-up</option>
                       <option value="excluded">Exclude follow-up</option>
-                    </select>
+                    </OctantNativeSelect>
                   </label>
                 </div>
 
@@ -403,7 +405,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             </summary>
             <div className="code-board__view-popover">
               <label>
-                <input
+                <OctantInput
                   checked={showEmptyGroups}
                   onChange={(event) => {
                     setShowEmptyGroups(event.target.checked);
@@ -681,7 +683,7 @@ function CodeBoardCardView(props: {
             the label real — a generic empty span's aria-label is dropped from
             the accessibility tree. It is a client overlay, never a server field. */}
         {props.unread ? <span aria-label="Unread" className="unread" role="img" /> : null}
-        <button
+        <OctantButton
           className="code-board__card-open"
           onClick={() =>
             props.onOpen?.({
@@ -699,7 +701,7 @@ function CodeBoardCardView(props: {
           >
             {card.title}
           </span>
-        </button>
+        </OctantButton>
         {/*
          * The status is always text: a compact chip where the column does not
          * state it, and screen-reader-only where the Status column header

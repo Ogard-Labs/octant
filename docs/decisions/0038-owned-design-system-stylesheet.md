@@ -1,6 +1,6 @@
 # 0038. The owned design system stylesheet
 
-**Status:** Accepted
+**Status:** Superseded by 0046
 
 ## Context
 

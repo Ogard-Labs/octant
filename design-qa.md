@@ -2,7 +2,7 @@
 
 ## Visual truth
 
-- reference app utility-sidebar reference: `/var/folders/vb/jn90x_6d5s349fcjcv580w6w0000gn/T/codex-clipboard-dee51304-e5b8-4448-8577-31793af21204.png`
+- Utility-sidebar reference: `/var/folders/vb/jn90x_6d5s349fcjcv580w6w0000gn/T/codex-clipboard-dee51304-e5b8-4448-8577-31793af21204.png`
 - Codex tabbed-sidebar reference: `/var/folders/vb/jn90x_6d5s349fcjcv580w6w0000gn/T/codex-clipboard-457acfb1-c3fa-428f-a51d-90bf74990bc1.png`
 
 ## Implementation evidence

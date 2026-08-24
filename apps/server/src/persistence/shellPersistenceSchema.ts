@@ -1,5 +1,6 @@
 import {
   decodeWorkspaceTab,
+  DEFAULT_OPEN_IN_APPLICATIONS,
   DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
   EnvironmentPresentationReplaced,
   ShellSettings,
@@ -87,7 +88,7 @@ function upcastPersistedShellSettings(value: unknown): unknown {
   const withModeSwitcher =
     "modeSwitcherPresentation" in withContextSettings
       ? withContextSettings
-      : { ...withContextSettings, modeSwitcherPresentation: "buttons" };
+      : { ...withContextSettings, modeSwitcherPresentation: "dropdown" };
   const withSidebarBackground =
     "sidebarBackground" in withModeSwitcher
       ? withModeSwitcher
@@ -102,6 +103,20 @@ function upcastPersistedShellSettings(value: unknown): unknown {
         };
   return {
     ...withSidebarBackground,
+    openInApplications:
+      "openInApplications" in withSidebarBackground
+        ? withSidebarBackground.openInApplications
+        : [...DEFAULT_OPEN_IN_APPLICATIONS],
+    transcriptTextSize:
+      "transcriptTextSize" in withSidebarBackground
+        ? withSidebarBackground.transcriptTextSize
+        : "medium",
+    transcriptWidth:
+      "transcriptWidth" in withSidebarBackground ? withSidebarBackground.transcriptWidth : "narrow",
+    showThreadProviderIcons:
+      "showThreadProviderIcons" in withSidebarBackground
+        ? withSidebarBackground.showThreadProviderIcons
+        : true,
     // Open or closed is renderer state. Stored floating, pinned, or hidden
     // presentation is dropped before decode rather than restored as a panel.
     environmentPresentationByMode: DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,

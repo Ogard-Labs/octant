@@ -2,6 +2,7 @@ import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { Flag } from "lucide-react";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 
 export interface ThreadCheckpointControlsProps {
   /** The checkpoint already marked on this turn, when there is one. */
@@ -33,7 +34,7 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
     if (props.draft !== "mark") return null;
     return (
       <div className="thread-checkpoints" role="group" aria-label="Mark a checkpoint">
-        <input
+        <OctantInput
           aria-label="Checkpoint name"
           className="thread-checkpoints__input"
           maxLength={120}
@@ -80,7 +81,7 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
       </span>
       {props.draft === "restore" ? (
         <>
-          <input
+          <OctantInput
             aria-label="New thread name"
             className="thread-checkpoints__input"
             maxLength={200}

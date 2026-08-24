@@ -110,11 +110,12 @@
   --oct-chart-axis: var(--octant-border-strong);
 
   /* ─── type ──────────────────────────────────────────────────────────
-     These follow the user's typography settings (TypographyProvider).
-     Display and transcript are deliberately NOT mapped: the display
-     face is the brand mark and the transcript face is a reading
-     decision; neither has an equivalent role in the app. */
+     Interface typography is app-wide: navigation, settings, transcript,
+     headings, and ordinary body text must update together. Editor/terminal
+     retain their own dedicated settings. */
+  --oct-font-display: var(--octant-ui-font-family);
   --oct-font-body: var(--octant-ui-font-family);
+  --oct-font-transcript: var(--octant-ui-font-family);
   --oct-font-mono: var(--octant-editor-font-family);
 }
 

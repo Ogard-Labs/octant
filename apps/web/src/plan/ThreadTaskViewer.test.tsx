@@ -78,6 +78,24 @@ describe("ThreadTaskViewer", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("shows only server-provided changed-file evidence", async () => {
+    const user = userEvent.setup();
+    render(
+      <ThreadTaskViewer
+        changedFiles={{ kind: "observed", changedPathCount: 3, freshness: "stale" }}
+        controller={controller()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Show task progress" })).toHaveTextContent(
+      "3 files changed · stale",
+    );
+    await user.click(screen.getByRole("button", { name: "Show task progress" }));
+    expect(screen.getByRole("dialog", { name: "Task progress" })).toHaveTextContent(
+      "3 files changed · stale",
+    );
+  });
+
   it("lets the reader approve a proposed task plan", async () => {
     const user = userEvent.setup();
     const approve = vi.fn(async () => true);
