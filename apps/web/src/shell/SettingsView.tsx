@@ -711,6 +711,45 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               ) : null}
             </SettingRow>
           ) : null}
+          {isAvailable("workspace-material") ? (
+            <SettingRow
+              description="Extend translucency from the sidebar across the whole workspace."
+              focused={focusedSetting === settingId("workspace-material")}
+              label="Translucent workspace"
+              scope="app"
+              settingId="workspace-material"
+            >
+              <OctantSwitch
+                checked={
+                  props.settings.workspaceMaterial === "system" &&
+                  props.settings.sidebarMaterial === "system" &&
+                  (
+                    props.themeController?.draft?.sidebarBackground ??
+                    props.settings.sidebarBackground
+                  ).vibrancyMode !== "off"
+                }
+                describedBy="workspace-material-description"
+                disabled={
+                  props.settings.sidebarMaterial !== "system" ||
+                  (
+                    props.themeController?.draft?.sidebarBackground ??
+                    props.settings.sidebarBackground
+                  ).vibrancyMode === "off"
+                }
+                label="Translucent workspace"
+                onCheckedChange={(checked) => {
+                  props.onSettingsChange({ workspaceMaterial: checked ? "system" : "opaque" });
+                }}
+              />
+              {props.settings.sidebarMaterial !== "system" ||
+              (props.themeController?.draft?.sidebarBackground ?? props.settings.sidebarBackground)
+                .vibrancyMode === "off" ? (
+                <p className="settings-view__effective-note" id="workspace-material-effective-note">
+                  Turn on Translucent sidebar first.
+                </p>
+              ) : null}
+            </SettingRow>
+          ) : null}
           {isAvailable("mode-switcher") ? (
             <SettingRow
               focused={focusedSetting === settingId("mode-switcher")}

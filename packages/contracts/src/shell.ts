@@ -267,6 +267,15 @@ export const ShellSettings = Schema.Struct({
   contextSidebarWidth: ContextSidebarWidth,
   lastContextSurface: Schema.NullOr(ContextSurfaceId),
   sidebarMaterial: Schema.Literal("system", "opaque"),
+  /**
+   * Extends translucency from the sidebar to the workspace background
+   * (docs/decisions/0047). Only takes effect when the sidebar itself
+   * resolves translucent; a store persisted before this setting shipped
+   * decodes to opaque, matching the workspace's prior always-solid look.
+   */
+  workspaceMaterial: Schema.optionalWith(Schema.Literal("system", "opaque"), {
+    default: () => "opaque" as const,
+  }),
   modeSwitcherPresentation: ModeSwitcherPresentation,
   projectViewSwitcherPresentation: Schema.optionalWith(ProjectViewSwitcherPresentation, {
     default: () => "dropdown" as const,

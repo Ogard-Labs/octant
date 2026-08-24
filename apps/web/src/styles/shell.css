@@ -413,6 +413,37 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
 }
 
+/* Workspace translucency (docs/decisions/0047): an opt-in extension of the
+   sidebar glass to the workspace background. It only ever renders when the
+   sidebar is already translucent (the "Translucent workspace" setting is
+   disabled otherwise), so it reuses the sidebar's own intensity tier
+   (data-octant-sidebar-vibrancy) and native-vibrancy-active gate
+   (data-octant-host-vibrancy) rather than tracking a second set of gates. */
+.shell--workspace-material-translucent.shell-frame > .workspace-layer {
+  background: var(--octant-workspace-translucent);
+  backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
+}
+
+.shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
+  > .workspace-layer {
+  --octant-glass-blur: 16px;
+  --octant-glass-saturate: 120%;
+  background: var(--octant-workspace-translucent-subtle);
+}
+
+.shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
+  > .workspace-layer {
+  --octant-glass-blur: 34px;
+  --octant-glass-saturate: 165%;
+  background: var(--octant-workspace-translucent-strong);
+}
+
+html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"]))
+  .shell-frame.shell--workspace-material-translucent
+  > .workspace-layer {
+  background: color-mix(in srgb, var(--oct-bg) 97%, transparent);
+}
+
 .sidebar-navigation {
   display: flex;
   flex: 1 1 auto;
@@ -764,6 +795,18 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
   .shell--material-translucent.shell-frame > .sidebar [data-octant-sidebar-background]::after {
     content: none;
+  }
+
+  .shell--workspace-material-translucent.shell-frame > .workspace-layer,
+  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
+    > .workspace-layer,
+  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
+    > .workspace-layer,
+  html[data-octant-native-host="true"]
+    .shell-frame.shell--workspace-material-translucent
+    > .workspace-layer {
+    background: var(--oct-bg);
+    backdrop-filter: none;
   }
 }
 

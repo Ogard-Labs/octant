@@ -92,6 +92,49 @@ describe("ShellFrame", () => {
     expect(screen.getAllByRole("main")).toHaveLength(1);
   });
 
+  it("extends translucency to the workspace layer only when workspaceMaterial resolves translucent", () => {
+    const { container, rerender } = render(
+      <ShellFrame
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={360}
+        material="translucent"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={<aside>Sidebar</aside>}
+        sidebarResizable={false}
+        sidebarWidth={232}
+        wideContextOpen={false}
+        workspace={<main>Workspace</main>}
+        workspaceMaterial="opaque"
+      />,
+    );
+
+    const shell = container.firstElementChild;
+    expect(shell).not.toHaveClass("shell--workspace-material-translucent");
+
+    rerender(
+      <ShellFrame
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={360}
+        material="translucent"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={<aside>Sidebar</aside>}
+        sidebarResizable={false}
+        sidebarWidth={232}
+        wideContextOpen={false}
+        workspace={<main>Workspace</main>}
+        workspaceMaterial="translucent"
+      />,
+    );
+    expect(container.firstElementChild).toHaveClass(
+      "shell",
+      "shell-frame",
+      "shell--material-translucent",
+      "shell--workspace-material-translucent",
+    );
+  });
+
   it("preserves the resolved material around a standalone surface without workspace geometry", () => {
     const { container } = render(
       <ShellFrame
