@@ -11,6 +11,7 @@ import {
 import { SeatbeltConfinementError } from "../process/seatbeltProfile";
 
 export const DEFAULT_MAX_GIT_DIFF_BYTES = 256 * 1024;
+const MAX_OBSERVED_REMOTES = 32;
 
 export interface GitStatusEntry {
   readonly path: string;
@@ -518,8 +519,10 @@ async function readRemotes(
 ): Promise<GitObservation["remotes"] | undefined> {
   const remoteNamesResult = await run(["remote"]);
   if (remoteNamesResult.exitCode !== 0) return undefined;
+  const remoteNames = remoteNamesResult.stdout.split("\n").filter(Boolean).sort();
+  if (remoteNames.length > MAX_OBSERVED_REMOTES) return undefined;
   const remotes: Array<GitObservation["remotes"][number]> = [];
-  for (const name of remoteNamesResult.stdout.split("\n").filter(Boolean).sort()) {
+  for (const name of remoteNames) {
     if (!/^[A-Za-z0-9._-]+$/.test(name)) return undefined;
     const fetch = await run(["remote", "get-url", "--", name]);
     const push = await run(["remote", "get-url", "--push", "--", name]);

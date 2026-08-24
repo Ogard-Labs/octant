@@ -54,7 +54,11 @@ function serviceFixture(options: {
   readonly projects?: ReadonlyArray<CodeProjectPullRequestAuthorizedProject>;
   readonly remotes?: Record<
     string,
-    ReadonlyArray<{ readonly name: string; readonly fetchUrl: string }>
+    ReadonlyArray<{
+      readonly name: string;
+      readonly fetchUrl: string;
+      readonly pushUrl?: string;
+    }>
   >;
   readonly list?: (
     request: { readonly owner: string; readonly name: string; readonly limit: number },
@@ -97,11 +101,17 @@ function serviceFixture(options: {
       }),
     },
     remotes: {
-      remotes: async (root) =>
-        options.remotes?.[root] ??
-        (root === "/repos/octant"
-          ? [{ name: "origin", fetchUrl: "https://github.com/octant/octant.git" }]
-          : []),
+      remotes: async (root) => {
+        const remotes =
+          options.remotes?.[root] ??
+          (root === "/repos/octant"
+            ? [{ name: "origin", fetchUrl: "https://github.com/octant/octant.git" }]
+            : []);
+        return remotes.map((remote) => ({
+          ...remote,
+          pushUrl: remote.pushUrl ?? remote.fetchUrl,
+        }));
+      },
     },
     list: { listActive },
     detail: { observeReviewByIdentity },
@@ -513,6 +523,10 @@ describe("CodeProjectPullRequestService", () => {
                 {
                   name: "origin",
                   fetchUrl:
+                    root === "/repos/docs"
+                      ? "https://github.com/octant/docs.git"
+                      : "https://github.com/octant/octant.git",
+                  pushUrl:
                     root === "/repos/docs"
                       ? "https://github.com/octant/docs.git"
                       : "https://github.com/octant/octant.git",

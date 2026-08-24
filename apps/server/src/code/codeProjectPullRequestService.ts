@@ -61,7 +61,7 @@ export interface CodeProjectPullRequestRemoteSource {
     | ReadonlyArray<{
         readonly name: string;
         readonly fetchUrl: string;
-        readonly pushUrl?: string;
+        readonly pushUrl: string;
         readonly credentialed?: boolean;
       }>
     | undefined
@@ -775,7 +775,7 @@ function githubIdentityFromRemotes(
   remotes: ReadonlyArray<{
     readonly name: string;
     readonly fetchUrl: string;
-    readonly pushUrl?: string;
+    readonly pushUrl: string;
     readonly credentialed?: boolean;
   }>,
 ): { readonly owner: string; readonly name: string } | undefined {
@@ -783,7 +783,7 @@ function githubIdentityFromRemotes(
     remotes.map((remote) => ({
       name: remote.name,
       fetchUrl: remote.fetchUrl,
-      pushUrl: remote.pushUrl ?? remote.fetchUrl,
+      pushUrl: remote.pushUrl,
       ...(remote.credentialed === undefined ? {} : { credentialed: remote.credentialed }),
     })),
   );
