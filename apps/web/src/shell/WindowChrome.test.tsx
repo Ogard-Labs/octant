@@ -386,7 +386,7 @@ describe("WindowChrome", () => {
       "border-top: 1px solid var(--octant-border);",
     );
     expect(cssRule(".environment-git-group__identity-secondary", 1)).toContain(
-      'font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;',
+      "font-family: var(--oct-font-mono);",
     );
 
     expect(styles).toContain("@media (min-width: 681px) and (max-width: 960px)");

@@ -51,6 +51,7 @@ describe("ShellFrame", () => {
     expect(nativeDragTarget).toContain("position: fixed;");
     expect(nativeDragTarget).toContain("top: 0;");
     expect(nativeDragTarget).toContain("left: 112px;");
+    expect(nativeDragTarget).toContain("right: var(--octant-native-window-actions-width);");
     expect(nativeDragTarget).toContain(
       "height: var(--octant-native-hidden-inset-titlebar-height);",
     );
