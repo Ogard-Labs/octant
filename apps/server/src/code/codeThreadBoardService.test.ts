@@ -219,6 +219,37 @@ function cardFor(cards: readonly CodeBoardCard[], threadId: unknown): CodeBoardC
 }
 
 describe("CodeThreadBoardService derivation", () => {
+  it("starts the independent pull-request snapshot while thread metadata is loading", async () => {
+    let releaseThreads: (() => void) | undefined;
+    const threadGate = new Promise<void>((resolve) => {
+      releaseThreads = resolve;
+    });
+    const started: string[] = [];
+    const board = new CodeThreadBoardService({
+      threads: {
+        list: async () => {
+          started.push("threads");
+          await threadGate;
+          return allThreads.slice(0, 1);
+        },
+      },
+      metadata: metadataService(),
+      runtime: runtimeSource(),
+      pullRequests: {
+        snapshot: async () => {
+          started.push("pull-requests");
+          return emptyPullRequestSnapshot();
+        },
+      },
+      clock: () => now,
+    });
+
+    const query = board.query(decodeCodeBoardQuery({ version: 1 }));
+    await vi.waitFor(() => expect(started).toEqual(["threads", "pull-requests"]));
+    releaseThreads?.();
+    await query;
+  });
+
   it("observes every visible thread before any runtime observation resolves", async () => {
     const visibleThreads = allThreads.slice(0, 3);
     let release: (() => void) | undefined;

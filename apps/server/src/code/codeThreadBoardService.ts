@@ -151,14 +151,18 @@ export class CodeThreadBoardService {
   }
 
   async query(query: CodeBoardQuery): Promise<CodeBoardView> {
-    const boardThreads = await this.#threads.list();
-    const pullRequestSnapshot = await this.#pullRequests.snapshot();
-    const view = await this.#metadata.project(
-      boardThreads.map((entry) => ({
-        thread: entry.thread,
-        projectProjectionPresent: entry.projectProjectionPresent,
-      })),
-    );
+    const boardThreadsPromise = this.#threads.list();
+    const pullRequestSnapshotPromise = this.#pullRequests.snapshot();
+    const boardThreads = await boardThreadsPromise;
+    const [pullRequestSnapshot, view] = await Promise.all([
+      pullRequestSnapshotPromise,
+      this.#metadata.project(
+        boardThreads.map((entry) => ({
+          thread: entry.thread,
+          projectProjectionPresent: entry.projectProjectionPresent,
+        })),
+      ),
+    ]);
     const metadataByThread = new Map<string, CodeThreadOperationalMetadata>();
     for (const metadata of view.threads) {
       metadataByThread.set(String(metadata.threadId), metadata);
