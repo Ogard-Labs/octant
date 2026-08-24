@@ -284,26 +284,32 @@ export class ProviderUsageLimitsService {
         if (limits === undefined) {
           if (
             previous?.status === "available" &&
-            previous.source === "provider-runtime" &&
             this.#runtimeWindowOwners.has(String(instance.id)) &&
             previous.limits.rateLimitWindows !== undefined
           ) {
             const { rateLimitWindows: _expiredWindows, ...withoutWindows } = previous.limits;
-            const hasOtherEvidence =
-              withoutWindows.requests.status === "available" ||
-              withoutWindows.tokens.status === "available" ||
-              withoutWindows.concurrency.status === "available" ||
-              withoutWindows.retry.status === "active" ||
-              withoutWindows.quota === "available" ||
-              withoutWindows.quota === "exhausted";
             entries.set(
               String(instance.id),
-              hasOtherEvidence
+              hasServiceLimitEvidence(withoutWindows)
                 ? {
                     ...previous,
                     limits: withoutWindows,
                   }
                 : this.#unavailable(instance, refreshedAt, "unsupported"),
+            );
+          }
+          if (
+            previous?.status === "failed" &&
+            this.#runtimeWindowOwners.has(String(instance.id)) &&
+            previous.staleLimits?.rateLimitWindows !== undefined
+          ) {
+            const { staleLimits: _staleLimits, ...withoutStaleLimits } = previous;
+            const { rateLimitWindows: _expiredWindows, ...withoutWindows } = previous.staleLimits;
+            entries.set(
+              String(instance.id),
+              hasServiceLimitEvidence(withoutWindows)
+                ? { ...withoutStaleLimits, staleLimits: withoutWindows }
+                : withoutStaleLimits,
             );
           }
           continue;
@@ -322,14 +328,18 @@ export class ProviderUsageLimitsService {
           });
           continue;
         }
+        const previousAvailable = previous?.status === "available" ? previous : undefined;
         entries.set(String(instance.id), {
           providerInstanceId: instance.id,
           status: "available",
-          source: "provider-runtime",
-          observedAt: limits.updatedAt,
+          source: previousAvailable?.source ?? "provider-runtime",
+          observedAt:
+            previousAvailable === undefined
+              ? limits.updatedAt
+              : latestTimestamp(previousAvailable.observedAt, limits.updatedAt),
           limits:
-            previous?.status === "available" && limits.rateLimitWindows !== undefined
-              ? { ...previous.limits, rateLimitWindows: limits.rateLimitWindows }
+            previousAvailable !== undefined && limits.rateLimitWindows !== undefined
+              ? { ...previousAvailable.limits, rateLimitWindows: limits.rateLimitWindows }
               : limits,
         });
       }
@@ -349,4 +359,19 @@ export class ProviderUsageLimitsService {
       if (!currentIds.has(ownerId)) this.#runtimeWindowOwners.delete(ownerId);
     }
   }
+}
+
+function hasServiceLimitEvidence(limits: ProviderServiceLimits): boolean {
+  return (
+    limits.requests.status === "available" ||
+    limits.tokens.status === "available" ||
+    limits.concurrency.status === "available" ||
+    limits.retry.status === "active" ||
+    limits.quota === "available" ||
+    limits.quota === "exhausted"
+  );
+}
+
+function latestTimestamp(left: UtcTimestamp, right: UtcTimestamp): UtcTimestamp {
+  return Date.parse(left) >= Date.parse(right) ? left : right;
 }

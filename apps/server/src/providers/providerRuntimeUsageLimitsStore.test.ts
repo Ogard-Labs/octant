@@ -49,13 +49,24 @@ describe("ProviderRuntimeUsageLimitsStore", () => {
         utilization: 1,
       }),
     ]);
-    expect(store.serviceLimits(instanceId, timestamp("2026-08-24T01:01:00.000Z"))).toMatchObject({
+    expect(store.serviceLimits(instanceId, timestamp("2026-08-24T01:30:00.000Z"))).toMatchObject({
       providerInstanceId: instanceId,
       source: "runtime-reported",
       confidence: "high",
       quota: "unknown",
+      updatedAt: "2026-08-24T01:01:00.000Z",
       rateLimitWindows: [expect.objectContaining({ window: "five_hour", status: "exhausted" })],
     });
+  });
+
+  it("keeps the later equal-timestamp window update", () => {
+    const store = new ProviderRuntimeUsageLimitsStore();
+    store.record(windowEvent({ status: "warning", utilization: 0.87 }));
+    store.record(windowEvent({ sequence: 2, status: "exhausted", utilization: 1 }));
+
+    expect(store.windows(instanceId)).toEqual([
+      expect.objectContaining({ window: "five_hour", status: "exhausted", utilization: 1 }),
+    ]);
   });
 
   it("ignores stale and non-limit runtime events", () => {
@@ -102,6 +113,56 @@ describe("ProviderRuntimeUsageLimitsStore", () => {
 
     expect(store.serviceLimits(instanceId, timestamp("2026-08-24T02:00:00.000Z"))).toBeUndefined();
     expect(store.windows(instanceId)).toEqual([]);
+  });
+
+  it("does not resurrect a reset window from a late event", () => {
+    const store = new ProviderRuntimeUsageLimitsStore();
+    store.record(windowEvent());
+    expect(store.windows(instanceId, timestamp("2026-08-24T02:00:00.000Z"))).toEqual([]);
+
+    store.record(
+      windowEvent({
+        sequence: 2,
+        occurredAt: timestamp("2026-08-24T01:30:00.000Z"),
+      }),
+    );
+
+    expect(store.windows(instanceId)).toEqual([]);
+  });
+
+  it("does not resurrect a reset window when a late event omits its reset", () => {
+    const store = new ProviderRuntimeUsageLimitsStore();
+    store.record(windowEvent());
+    expect(store.windows(instanceId, timestamp("2026-08-24T02:00:00.000Z"))).toEqual([]);
+
+    store.record(
+      windowEvent({
+        sequence: 2,
+        occurredAt: timestamp("2026-08-24T01:30:00.000Z"),
+        resetsAt: undefined,
+      }),
+    );
+
+    expect(store.windows(instanceId)).toEqual([]);
+  });
+
+  it("accepts new post-reset evidence when the provider omits a reset instant", () => {
+    const store = new ProviderRuntimeUsageLimitsStore();
+    store.record(windowEvent());
+    expect(store.windows(instanceId, timestamp("2026-08-24T02:00:00.000Z"))).toEqual([]);
+
+    store.record(
+      windowEvent({
+        sequence: 2,
+        occurredAt: timestamp("2026-08-24T02:30:00.000Z"),
+        status: "allowed",
+        resetsAt: undefined,
+      }),
+    );
+
+    expect(store.windows(instanceId)).toEqual([
+      expect.objectContaining({ window: "five_hour", status: "allowed" }),
+    ]);
   });
 
   it("bounds retained provider identities as well as windows per provider", () => {

@@ -40,6 +40,31 @@ describe("attachProviderRuntimeUsageLimits", () => {
       expect.objectContaining({ window: "five_hour", utilization: 0.87 }),
     ]);
   });
+
+  it("ignores normalized events attributed to another provider instance", async () => {
+    const otherInstanceId = decodeProviderInstanceId("00000000-0000-4000-8000-000000000004");
+    const event = decodeProviderRuntimeEvent({
+      instanceId: otherInstanceId,
+      sessionId,
+      sequence: 1,
+      correlationId: "00000000-0000-4000-8000-000000000003",
+      occurredAt: "2026-08-24T01:00:00.000Z",
+      kind: "rate-limit-window",
+      window: "five_hour",
+      status: "warning",
+      utilization: 0.87,
+    });
+    const store = new ProviderRuntimeUsageLimitsStore();
+    const attached = attachProviderRuntimeUsageLimits(fixture(event), store);
+
+    const connection = await Effect.runPromise(
+      Effect.scoped(attached.acquire({ instanceId, projectRoot: "/tmp/octant-test" })),
+    );
+    await Effect.runPromise(Stream.runCollect(connection.events));
+
+    expect(store.windows(instanceId)).toEqual([]);
+    expect(store.windows(otherInstanceId)).toEqual([]);
+  });
 });
 
 function fixture(event: ProviderRuntimeEvent): ProviderDriver {

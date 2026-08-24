@@ -1,6 +1,10 @@
 import type { ProviderRuntimeEvent } from "@octant/contracts";
 import { Effect, Stream } from "effect";
-import type { ProviderDriver, ProviderConnection } from "@octant/provider-sdk/driver";
+import type {
+  ProviderAcquireInput,
+  ProviderDriver,
+  ProviderConnection,
+} from "@octant/provider-sdk/driver";
 import type { ProviderRuntimeUsageLimitsStore } from "./providerRuntimeUsageLimitsStore";
 
 /**
@@ -15,18 +19,25 @@ export function attachProviderRuntimeUsageLimits(
   return {
     ...driver,
     acquire: (input) =>
-      driver.acquire(input).pipe(Effect.map((connection) => wrapConnection(connection, store))),
+      driver
+        .acquire(input)
+        .pipe(Effect.map((connection) => wrapConnection(connection, input.instanceId, store))),
   };
 }
 
 function wrapConnection(
   connection: ProviderConnection,
+  instanceId: ProviderAcquireInput["instanceId"],
   store: Pick<ProviderRuntimeUsageLimitsStore, "record">,
 ): ProviderConnection {
   return {
     ...connection,
     events: connection.events.pipe(
-      Stream.tap((event: ProviderRuntimeEvent) => Effect.sync(() => store.record(event))),
+      Stream.tap((event: ProviderRuntimeEvent) =>
+        String(event.instanceId) === String(instanceId)
+          ? Effect.sync(() => store.record(event))
+          : Effect.void,
+      ),
     ),
   };
 }
