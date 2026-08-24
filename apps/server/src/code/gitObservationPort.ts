@@ -11,6 +11,7 @@ import {
 import { SeatbeltConfinementError } from "../process/seatbeltProfile";
 
 export const DEFAULT_MAX_GIT_DIFF_BYTES = 256 * 1024;
+const MAX_OBSERVED_REMOTES = 32;
 
 export interface GitStatusEntry {
   readonly path: string;
@@ -45,6 +46,8 @@ export interface GitObservation {
     readonly name: string;
     readonly fetchUrl: string;
     readonly pushUrl: string;
+    /** True only when Git's URL contained userinfo that was redacted. */
+    readonly credentialed?: boolean;
   }[];
   readonly upstream: {
     readonly remote: string;
@@ -166,6 +169,33 @@ export class GitObservationPort {
     this.#confinement = createGitSeatbeltConfinement(options);
   }
 
+  /**
+   * Read only the sanitized Git remotes needed for a credential-free
+   * repository identity. Status, diff, branch, and worktree facts stay on the
+   * full observation path so Project bootstrap does not eagerly collect them.
+   */
+  async observeRemotes(
+    root: string,
+    signal?: AbortSignal,
+  ): Promise<GitObservation["remotes"] | undefined> {
+    let checkoutRoot: string;
+    try {
+      checkoutRoot = await this.#dependencies.realpath(root);
+    } catch {
+      return undefined;
+    }
+    const run = (args: readonly string[]) => this.#run(["-C", checkoutRoot, ...args], signal);
+    try {
+      const top = await run(["rev-parse", "--show-toplevel"]);
+      const topPath = top.stdout.trim();
+      if (top.exitCode !== 0 || topPath.length === 0) return undefined;
+      if ((await this.#dependencies.realpath(topPath)) !== checkoutRoot) return undefined;
+      return await readRemotes(run);
+    } catch {
+      return undefined;
+    }
+  }
+
   async observe(root: string, signal?: AbortSignal): Promise<GitObservationResult> {
     if (!Number.isSafeInteger(this.#maxDiffBytes) || this.#maxDiffBytes < 1)
       return { status: "failed" };
@@ -233,20 +263,8 @@ export class GitObservationPort {
       const diffResult = await run(["diff", "--no-ext-diff", "--no-color", baseline, "--"]);
       if (diffResult.exitCode !== 0) return { status: "failed" };
       const diff = boundUtf8(diffResult.stdout, this.#maxDiffBytes);
-      const remoteNamesResult = await run(["remote"]);
-      if (remoteNamesResult.exitCode !== 0) return { status: "failed" };
-      const remotes = [];
-      for (const name of remoteNamesResult.stdout.split("\n").filter(Boolean).sort()) {
-        if (!/^[A-Za-z0-9._-]+$/.test(name)) return { status: "failed" };
-        const fetch = await run(["remote", "get-url", "--", name]);
-        const push = await run(["remote", "get-url", "--push", "--", name]);
-        if (fetch.exitCode !== 0 || push.exitCode !== 0) return { status: "failed" };
-        remotes.push({
-          name,
-          fetchUrl: redactUrl(fetch.stdout.trim()),
-          pushUrl: redactUrl(push.stdout.trim()),
-        });
-      }
+      const remotes = await readRemotes(run);
+      if (remotes === undefined) return { status: "failed" };
       let upstream: GitObservation["upstream"] = null;
       if (head.kind !== "detached") {
         const remote = await run(["config", "--get", `branch.${head.name}.remote`]);
@@ -496,6 +514,32 @@ export class GitObservationPort {
   }
 }
 
+async function readRemotes(
+  run: (args: readonly string[]) => Promise<CommandResult>,
+): Promise<GitObservation["remotes"] | undefined> {
+  const remoteNamesResult = await run(["remote"]);
+  if (remoteNamesResult.exitCode !== 0) return undefined;
+  const remoteNames = remoteNamesResult.stdout.split("\n").filter(Boolean).sort();
+  if (remoteNames.length > MAX_OBSERVED_REMOTES) return undefined;
+  const remotes: Array<GitObservation["remotes"][number]> = [];
+  for (const name of remoteNames) {
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) return undefined;
+    const fetch = await run(["remote", "get-url", "--", name]);
+    const push = await run(["remote", "get-url", "--push", "--", name]);
+    if (fetch.exitCode !== 0 || push.exitCode !== 0) return undefined;
+    const fetchUrl = fetch.stdout.trim();
+    const pushUrl = push.stdout.trim();
+    const credentialed = containsRemoteCredentials(fetchUrl) || containsRemoteCredentials(pushUrl);
+    remotes.push({
+      name,
+      fetchUrl: redactUrl(fetchUrl),
+      pushUrl: redactUrl(pushUrl),
+      ...(credentialed ? { credentialed: true } : {}),
+    });
+  }
+  return remotes;
+}
+
 function parseStatus(output: string): GitStatusEntry[] | undefined {
   const fields = output.split("\0");
   fields.pop();
@@ -558,5 +602,19 @@ function redactUrl(value: string): string {
     return url.toString();
   } catch {
     return value.replace(/^(https?:\/\/)[^/@]+@/i, "$1");
+  }
+}
+
+function containsRemoteCredentials(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.password !== "") return true;
+    return url.protocol === "https:"
+      ? url.username !== ""
+      : url.username !== "" && url.username !== "git";
+  } catch {
+    // SCP-style git@github.com remotes are conventional transport syntax, not
+    // credentials. Unknown forms are left to the identity parser to reject.
+    return false;
   }
 }

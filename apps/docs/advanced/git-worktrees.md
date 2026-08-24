@@ -21,6 +21,14 @@ moved checkout is unavailable until relinked. Submodules and bare
 repositories are reported honestly but are not eligible Code Project roots in
 V1.
 
+When a bound Project has exactly one matching, credential-free GitHub remote,
+the host projects only its `github.com` owner/repository identity to the Code
+composer. New threads use that identity as their PR base default, so a manual
+Pull Requests refresh can match the thread on its first read. Credentials,
+non-GitHub remotes, mismatched fetch/push identities, and multiple different
+remotes stay unconnected; the delivery target remains editable when a user
+intentionally needs another repository.
+
 ## New-thread checkout
 
 A Code Project remembers whether new threads bind the current checkout or

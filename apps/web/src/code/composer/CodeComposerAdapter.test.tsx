@@ -38,10 +38,37 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain('aria-expanded="false"');
   });
 
+  it("uses the server-observed GitHub repository as the delivery default", () => {
+    render(<CodeComposerAdapter {...defaultProps} baseRepository="acme/octant" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delivery target" }));
+
+    expect(screen.getByRole("textbox", { name: "Base repository" })).toHaveValue("acme/octant");
+  });
+
   it("renders disabled send button when empty", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
     expect(html).toContain('aria-label="Create thread"');
     expect(html).toContain("disabled");
+  });
+
+  it("blocks Code submission when the selected Project is unavailable", () => {
+    const html = renderToStaticMarkup(
+      <CodeComposerAdapter {...defaultProps} projectAvailable={false} />,
+    );
+
+    expect(html).toContain("The selected Project is unavailable. Choose another Project.");
+    expect(html).toContain('aria-label="Create thread"');
+    expect(html).toContain("disabled");
+  });
+
+  it("does not show unavailable-project guidance before a Project is selected", () => {
+    const { projectId: _projectId, projectName: _projectName, ...withoutProject } = defaultProps;
+    const html = renderToStaticMarkup(
+      <CodeComposerAdapter {...withoutProject} projectAvailable={false} />,
+    );
+
+    expect(html).not.toContain("The selected Project is unavailable");
   });
 
   it("renders error message when provided", () => {

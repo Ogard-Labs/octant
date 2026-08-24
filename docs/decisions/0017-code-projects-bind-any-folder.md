@@ -18,11 +18,14 @@ treats "not a Git repository" as an expected, typed observation
 
 - A Code Project binds exactly one existing, OS-confined local directory —
   the same rule as Work. Git top-level status is not a binding requirement.
-- Repository identity, checkout, worktree, branch, remote, and delivery
-  facts remain observed lazily by the Code services and are reported as
-  `unavailable` when the bound folder is not a Git repository. Features that
-  need them (managed worktrees, PR observation, Git tools) fail closed
-  per action with a typed failure; they never crash the thread or Project.
+- Repository checkout, worktree, branch, and delivery facts remain observed
+  lazily by the Code services and are reported as `unavailable` when the bound
+  folder is not a Git repository. Project bootstrap may perform one bounded,
+  read-only observation of sanitized remotes solely to project an exact,
+  credential-free GitHub owner/repository identity for UI defaults; it does not
+  collect status, diffs, worktrees, or branch facts. Features that need those
+  facts (managed worktrees, PR observation, Git tools) fail closed per action
+  with a typed failure; they never crash the thread or Project.
 - The Project availability check validates only that the canonical root
   exists and is a directory. "Relink required" therefore means the folder is
   gone or unreadable, not that Git is missing.

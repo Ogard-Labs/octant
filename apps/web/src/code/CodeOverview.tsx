@@ -41,6 +41,8 @@ export type CodeOverviewProps =
       readonly projectId: ProjectId;
       readonly projectName?: string;
       readonly projectRoot?: string;
+      /** Server-observed credential-free GitHub owner/repository identity. */
+      readonly baseRepository?: string;
       readonly hosts?: ReadonlyArray<HostIdentity>;
       readonly providerGroups?: ReadonlyArray<PickerGroup>;
       readonly selectedProviderInstanceId?: ProviderInstanceId;
@@ -378,6 +380,7 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
         {...(props.pendingMessage === undefined ? {} : { pendingMessage: props.pendingMessage })}
         {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
         {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+        {...(props.baseRepository === undefined ? {} : { baseRepository: props.baseRepository })}
         {...(remoteFacts === undefined ? {} : { remoteFacts })}
         {...(props.selectedModelId === undefined ? {} : { selectedModelId: props.selectedModelId })}
         {...(props.selectedProviderInstanceId === undefined
@@ -775,6 +778,7 @@ function CodeProjectQuickStart(props: {
   readonly projectId: ProjectId;
   readonly projectName?: string;
   readonly projectRoot?: string;
+  readonly baseRepository?: string;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
@@ -855,6 +859,9 @@ function CodeProjectQuickStart(props: {
             projectId={props.projectId}
             {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
             {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+            {...(props.baseRepository === undefined
+              ? {}
+              : { baseRepository: props.baseRepository })}
             defaultExecutionPolicy="approval-gated"
             defaultPermissionPersistence={
               props.controller.bootstrap.settings.defaultPermissionPersistence

@@ -227,6 +227,7 @@ import {
 import { createContextRouteHandler } from "./contextRoutes";
 import { GitEnvironmentPort } from "./gitEnvironmentPort";
 import { GitObservationPort } from "./code/gitObservationPort";
+import { resolveConnectedGitHubRepository } from "./code/connectedRepository";
 import { GitMutationPort } from "./code/gitMutationPort";
 import { GitService } from "./code/gitService";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
@@ -2015,15 +2016,19 @@ export function startOctantServer(
       projectRootPort,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const gitObservationPort = new GitObservationPort();
     const projectService = new ProjectService({
       persistence,
       bindingReceiptStore,
       projectRootPort,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+      observeCodeProjectRepository: async (canonicalRoot) => {
+        const remotes = await gitObservationPort.observeRemotes(canonicalRoot);
+        return remotes === undefined ? undefined : resolveConnectedGitHubRepository(remotes);
+      },
     });
     const gitEnvironmentPort = options.gitEnvironmentPort ?? new GitEnvironmentPort();
-    const gitObservationPort = new GitObservationPort();
     const codeContent = new CodeContentStore();
     const codeEvidence = new CodeEvidenceStore({ connection: persistence.connection });
     const codeAttachments = new CodeAttachmentStore(persistence.dataDirectory);
