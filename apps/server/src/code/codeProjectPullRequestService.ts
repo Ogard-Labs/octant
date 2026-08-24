@@ -989,7 +989,9 @@ async function mapConcurrentOrdered<TItem, TResult>(
   concurrency: number,
   run: (item: TItem, index: number) => Promise<TResult>,
 ): Promise<ReadonlyArray<TResult>> {
-  const results: Array<{ readonly value: TResult } | undefined> = new Array(items.length);
+  const results: Array<{ readonly value: TResult } | undefined> = Array.from({
+    length: items.length,
+  });
   let nextIndex = 0;
   const workerCount = Math.min(Math.max(1, concurrency), items.length);
 
