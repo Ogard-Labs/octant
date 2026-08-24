@@ -132,6 +132,25 @@ export interface CodeThreadNavigationItem {
   readonly pinned?: boolean;
 }
 
+function refreshActiveThreadView(
+  current: CodeThreadView | undefined,
+  next: CodeBootstrap,
+): CodeThreadView | undefined {
+  if (current === undefined) return current;
+  const checkout = next.checkouts.find(
+    (candidate) => String(candidate.id) === String(current.checkout.id),
+  );
+  const refreshedThread = next.threads.find(
+    (candidate) => String(candidate.id) === String(current.thread.id),
+  );
+  if (checkout === undefined && refreshedThread === undefined) return current;
+  return {
+    ...current,
+    ...(checkout === undefined ? {} : { checkout }),
+    ...(refreshedThread === undefined ? {} : { thread: refreshedThread }),
+  };
+}
+
 /**
  * Per-thread record of the activity sequence the user has actually seen.
  *
@@ -328,6 +347,8 @@ export function useCodeController(options: CodeControllerOptions) {
   );
   const [status, setStatus] = useState<CodeControllerStatus>("loading");
   const [bootstrap, setBootstrap] = useState<CodeBootstrap>();
+  const bootstrapRef = useRef(bootstrap);
+  bootstrapRef.current = bootstrap;
   const [activeView, setActiveView] = useState<CodeThreadView>();
   const [errorCategory, setErrorCategory] = useState<CodeFailure["category"]>();
   const [errorMessage, setErrorMessage] = useState<string>();
@@ -523,7 +544,9 @@ export function useCodeController(options: CodeControllerOptions) {
         try {
           const next = await client.bootstrap();
           if (!mounted.current || request !== bootstrapGeneration.current) return false;
+          bootstrapRef.current = next;
           setBootstrap(next);
+          setActiveView((current) => refreshActiveThreadView(current, next));
           reconcileDrafts(next.threads.map((thread) => String(thread.id)));
           clearFailure();
           setStatus("ready");
@@ -574,6 +597,7 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const applyNavigationRefresh = useCallback(
     (next: CodeBootstrap) => {
+      bootstrapRef.current = next;
       setBootstrap((current) =>
         current === undefined
           ? next
@@ -584,21 +608,7 @@ export function useCodeController(options: CodeControllerOptions) {
               activity: next.activity,
             },
       );
-      setActiveView((current) => {
-        if (current === undefined) return current;
-        const checkout = next.checkouts.find(
-          (candidate) => String(candidate.id) === String(current.checkout.id),
-        );
-        const refreshedThread = next.threads.find(
-          (candidate) => String(candidate.id) === String(current.thread.id),
-        );
-        if (checkout === undefined && refreshedThread === undefined) return current;
-        return {
-          ...current,
-          ...(checkout === undefined ? {} : { checkout }),
-          ...(refreshedThread === undefined ? {} : { thread: refreshedThread }),
-        };
-      });
+      setActiveView((current) => refreshActiveThreadView(current, next));
       reconcileDrafts(next.threads.map((thread) => String(thread.id)));
     },
     [reconcileDrafts],
@@ -649,14 +659,18 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const installView = useCallback(
     (view: CodeThreadView) => {
-      setActiveView(view);
+      const resolvedView =
+        bootstrapRef.current === undefined
+          ? view
+          : (refreshActiveThreadView(view, bootstrapRef.current) ?? view);
+      setActiveView(resolvedView);
       setBootstrap((current) =>
         current === undefined
           ? current
           : {
               ...current,
-              checkouts: replaceById(current.checkouts, view.checkout),
-              threads: replaceById(current.threads, view.thread),
+              checkouts: replaceById(current.checkouts, resolvedView.checkout),
+              threads: replaceById(current.threads, resolvedView.thread),
             },
       );
       setStatus("ready");
@@ -1222,9 +1236,6 @@ export function useCodeController(options: CodeControllerOptions) {
 
   // The current thread list, read inside callbacks that must not re-create
   // themselves every time a thread's version changes.
-  const bootstrapRef = useRef(bootstrap);
-  bootstrapRef.current = bootstrap;
-
   // How far each thread's own journaled activity has reached. A provider turn
   // never touches the thread aggregate, so this — not `thread.version` — is the
   // only number that moves when one runs or finishes.

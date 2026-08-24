@@ -1929,6 +1929,65 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("refreshes a restored active checkout when initial bootstrap recovers it", async () => {
+    const waitingCheckout = { ...checkout(), availability: "waiting" as const };
+    const recoveredBootstrap = deferred<CodeBootstrap>();
+    const laterBootstrap = deferred<CodeBootstrap>();
+    let bootstrapReads = 0;
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => {
+        bootstrapReads += 1;
+        return bootstrapReads === 1 ? recoveredBootstrap.promise : laterBootstrap.promise;
+      }),
+      thread: vi.fn(async () => ({ ...view(1), checkout: waitingCheckout })),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 0,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("waiting"));
+    recoveredBootstrap.resolve(bootstrap());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("available"));
+    unmount();
+  });
+
+  it("does not let a stale thread read replace the checkout recovered by bootstrap", async () => {
+    const waitingCheckout = { ...checkout(), availability: "waiting" as const };
+    const recoveredBootstrap = deferred<CodeBootstrap>();
+    const staleThreadView = deferred<CodeThreadView>();
+    const laterBootstrap = deferred<CodeBootstrap>();
+    let bootstrapReads = 0;
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => {
+        bootstrapReads += 1;
+        return bootstrapReads === 1 ? recoveredBootstrap.promise : laterBootstrap.promise;
+      }),
+      thread: vi.fn(async () => staleThreadView.promise),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 0,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await act(async () => {
+      recoveredBootstrap.resolve(bootstrap());
+      staleThreadView.resolve({ ...view(1), checkout: waitingCheckout });
+    });
+    await waitFor(() => expect(result.current.activeView).toBeDefined());
+    expect(result.current.activeView?.checkout.availability).toBe("available");
+    unmount();
+  });
+
   it("does not overlap slow navigation refreshes", async () => {
     const slowRefresh = deferred<ReturnType<typeof bootstrap>>();
     let calls = 0;
