@@ -32,20 +32,15 @@ export interface WindowChromeProps {
  * cluster's width depends on which controls the active thread renders, so a
  * constant here goes stale the moment a control is added or hidden.
  */
-function useReservedChromeWidth(): RefObject<HTMLDivElement | null> {
-  const trailing = useRef<HTMLDivElement | null>(null);
+function useMeasuredClusterWidth(property: string): RefObject<HTMLDivElement | null> {
+  const cluster = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    const node = trailing.current;
+    const node = cluster.current;
     if (node === null) return;
     const surface = node.closest(".shell-frame") ?? document.documentElement;
     const publish = () => {
       const width = Math.ceil(node.getBoundingClientRect().width);
-      if (width > 0) {
-        (surface as HTMLElement).style.setProperty(
-          "--octant-window-chrome-reserved-width",
-          `${width}px`,
-        );
-      }
+      if (width > 0) (surface as HTMLElement).style.setProperty(property, `${width}px`);
     };
     publish();
     if (typeof ResizeObserver === "undefined") return;
@@ -53,22 +48,23 @@ function useReservedChromeWidth(): RefObject<HTMLDivElement | null> {
     observer.observe(node);
     return () => {
       observer.disconnect();
-      (surface as HTMLElement).style.removeProperty("--octant-window-chrome-reserved-width");
+      (surface as HTMLElement).style.removeProperty(property);
     };
-  }, []);
-  return trailing;
+  }, [property]);
+  return cluster;
 }
 
 export function WindowChrome(props: WindowChromeProps) {
   const recoverZen = props.onRecoverZen;
-  const trailing = useReservedChromeWidth();
+  const trailing = useMeasuredClusterWidth("--octant-window-chrome-reserved-width");
+  const leading = useMeasuredClusterWidth("--octant-window-chrome-leading-width");
   return (
     <header
       aria-label={`Workspace actions for ${props.activeSurface}`}
       className={`window-chrome window-chrome--material-${props.material}`}
     >
       {props.onExpandSidebar === undefined ? null : (
-        <div className="window-chrome__leading window-no-drag">
+        <div className="window-chrome__leading window-no-drag" ref={leading}>
           <span aria-hidden="true" className="window-chrome__traffic-light-space" />
           <IconButton
             className="window-chrome__button"

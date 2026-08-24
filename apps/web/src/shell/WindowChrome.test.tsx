@@ -421,7 +421,7 @@ describe("WindowChrome", () => {
       cssRule(
         'html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header',
       ),
-    ).toContain("padding-left: 110px;");
+    ).toContain("padding-left: var(--octant-window-chrome-leading-width");
     expect(cssRule('.workspace-pane[data-active="true"]')).toContain(
       "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
     );
@@ -679,6 +679,57 @@ describe("WindowChrome", () => {
     expect(reserveFor(false)).toBe("40px");
     expect(reserveFor(true)).toBe("80px");
 
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("reserves the leading band for the controls that replace a collapsed sidebar", () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const width = this.classList.contains("window-chrome__leading") ? 148 : 0;
+        return {
+          width,
+          height: 0,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: 0,
+          x: 0,
+          y: 0,
+        } as DOMRect;
+      },
+    );
+
+    const surface = document.createElement("div");
+    surface.className = "shell-frame";
+    document.body.appendChild(surface);
+    const { unmount } = render(
+      <WindowChrome
+        activeSurface="Welcome to Code"
+        dockAvailable={false}
+        dockExpanded={false}
+        dockLabel="Right sidebar"
+        isNarrow={false}
+        material="opaque"
+        onExpandSidebar={vi.fn()}
+        onToggleDock={vi.fn()}
+      />,
+      { container: surface.appendChild(document.createElement("div")) },
+    );
+
+    // Measured, not assumed: a constant narrower than the traffic lights plus
+    // Show sidebar plus New thread drew the pane tab over them.
+    expect(surface.style.getPropertyValue("--octant-window-chrome-leading-width")).toBe("148px");
+
+    unmount();
+    surface.remove();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });

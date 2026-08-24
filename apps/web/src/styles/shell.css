@@ -1,10 +1,11 @@
 .shell.shell-frame {
   --octant-rendered-sidebar-width: var(--octant-sidebar-width, 232px);
-  /* Published by WindowChrome from the trailing cluster's measured width.
-     The literal is only the pre-measurement fallback: the cluster's real
-     width swings with which controls a thread renders, so no constant is
-     right for every thread. */
+  /* Published by WindowChrome from each cluster's measured width. The literals
+     are only the pre-measurement fallback: both clusters' real widths swing
+     with which controls a thread renders, so no constant is right for every
+     thread. The leading one exists only while the sidebar is collapsed. */
   --octant-window-chrome-reserved-width: 148px;
+  --octant-window-chrome-leading-width: 148px;
   display: grid;
   width: 100%;
   max-width: 100vw;
