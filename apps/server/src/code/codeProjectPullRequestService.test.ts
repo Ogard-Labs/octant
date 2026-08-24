@@ -429,9 +429,19 @@ describe("CodeProjectPullRequestService", () => {
         codeProject({ id: projectC, name: "Divetools", root: "/repos/divetools" }),
       ],
       remotes: {
-        "/repos/aurora": [{ name: "origin", fetchUrl: "https://github.com/octant/aurora.git" }],
+        "/repos/aurora": [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/aurora.git",
+            pushUrl: "https://github.com/octant/aurora.git",
+          },
+        ],
         "/repos/divetools": [
-          { name: "origin", fetchUrl: "https://github.com/octant/divetools.git" },
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/divetools.git",
+            pushUrl: "https://github.com/octant/divetools.git",
+          },
         ],
       },
       list: async (request) =>
