@@ -542,7 +542,37 @@ describe("SettingsView", () => {
     expect(styles).toContain("font-family: var(--oct-font-display)");
     expect(styles).toContain("font-size: var(--octant-ui-font-size)");
     expect(styles).not.toContain("--octant-ui-font-family");
-    expect(styles).toContain(".settings-theme-editor__card");
+  });
+
+  it("sizes every value control in Settings from one declared column", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    // Sized from their own content, the controls in one column measured 134,
+    // 150, 158 and 180 — seven staggered left edges under a right edge they
+    // already shared. A stepper's width in particular moved by 16px depending
+    // on whether it happened to spell out a unit.
+    expect(styles).toMatch(/--oct-settings-control:\s*180px;/);
+    for (const selector of [
+      "\\.settings-view__select",
+      "\\.settings-font-picker",
+      "\\.octant-number-stepper",
+    ]) {
+      expect(styles).toMatch(
+        new RegExp(`${selector}[^{}]*\\{[^}]*width:\\s*var\\(--oct-settings-control`),
+      );
+    }
+    expect(styles).toMatch(
+      /\.octant-number-stepper \{[^}]*grid-template-columns:\s*30px minmax\(0, 1fr\) auto 30px;/,
+    );
+  });
+
+  it("lets a scheme card be as tall as the picture it shows", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    // The card is an OctantButton, and the button recipe fixes a single-line
+    // control height. Against the card's own `overflow: hidden` that clipped
+    // the preview and cut the System/Light/Dark labels off entirely.
+    expect(styles).toMatch(/\.settings-scheme__card\s*\{[^}]*height:\s*auto;/);
   });
 
   it("uses flat, dense setting groups instead of nested dashboard cards", () => {

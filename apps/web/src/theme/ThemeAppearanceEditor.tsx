@@ -52,106 +52,108 @@ export function ThemeAppearanceEditor(props: {
           {theme.error}
         </p>
       ) : null}
-      <section aria-label="Theme" className="settings-theme-editor__card">
-        <h3>Color scheme</h3>
-        <div aria-label="Theme mode" className="settings-scheme" role="radiogroup">
-          {(
-            [
-              { value: "system", label: "System" },
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-            ] as const
-          ).map((option) => (
-            <OctantButton
-              aria-checked={draft.mode === option.value}
-              className="settings-scheme__card window-no-drag"
-              key={option.value}
-              onClick={() => void theme.applyPatch({ mode: option.value })}
-              role="radio"
-              type="button"
-              variant="ghost"
-            >
-              <span
-                aria-hidden="true"
-                className={`settings-scheme__preview settings-scheme__preview--${option.value}`}
+      <section aria-label="Theme" className="settings-card-section">
+        <h2>Color scheme</h2>
+        <div className="setgroup">
+          <div aria-label="Theme mode" className="settings-scheme" role="radiogroup">
+            {(
+              [
+                { value: "system", label: "System" },
+                { value: "light", label: "Light" },
+                { value: "dark", label: "Dark" },
+              ] as const
+            ).map((option) => (
+              <OctantButton
+                aria-checked={draft.mode === option.value}
+                className="settings-scheme__card window-no-drag"
+                key={option.value}
+                onClick={() => void theme.applyPatch({ mode: option.value })}
+                role="radio"
+                type="button"
+                variant="ghost"
               >
-                <span className="settings-scheme__preview-pane settings-scheme__preview-pane--light">
-                  <span className="settings-scheme__preview-sidebar" />
-                  <span className="settings-scheme__preview-content">
-                    <span />
-                    <span />
-                    <span className="settings-scheme__preview-dot" />
+                <span
+                  aria-hidden="true"
+                  className={`settings-scheme__preview settings-scheme__preview--${option.value}`}
+                >
+                  <span className="settings-scheme__preview-pane settings-scheme__preview-pane--light">
+                    <span className="settings-scheme__preview-sidebar" />
+                    <span className="settings-scheme__preview-content">
+                      <span />
+                      <span />
+                      <span className="settings-scheme__preview-dot" />
+                    </span>
+                  </span>
+                  <span className="settings-scheme__preview-pane settings-scheme__preview-pane--dark">
+                    <span className="settings-scheme__preview-sidebar" />
+                    <span className="settings-scheme__preview-content">
+                      <span />
+                      <span />
+                      <span className="settings-scheme__preview-dot" />
+                    </span>
                   </span>
                 </span>
-                <span className="settings-scheme__preview-pane settings-scheme__preview-pane--dark">
-                  <span className="settings-scheme__preview-sidebar" />
-                  <span className="settings-scheme__preview-content">
-                    <span />
-                    <span />
-                    <span className="settings-scheme__preview-dot" />
-                  </span>
-                </span>
-              </span>
-              <span className="settings-scheme__label">{option.label}</span>
-            </OctantButton>
-          ))}
+                <span className="settings-scheme__label">{option.label}</span>
+              </OctantButton>
+            ))}
+          </div>
+          <label className="settings-view__field">
+            <span>Light preset</span>
+            <OctantNativeSelect
+              aria-label="Light preset"
+              className="settings-view__select"
+              onChange={(event) =>
+                void theme.applyPatch({ lightPresetId: event.currentTarget.value as never })
+              }
+              value={draft.lightPresetId ?? "system"}
+            >
+              {availablePresets
+                .filter((preset) => preset.supportedModes.includes("light"))
+                .map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.displayName}
+                  </option>
+                ))}
+            </OctantNativeSelect>
+          </label>
+          <label className="settings-view__field">
+            <span>Dark preset</span>
+            <OctantNativeSelect
+              aria-label="Dark preset"
+              className="settings-view__select"
+              onChange={(event) =>
+                void theme.applyPatch({ darkPresetId: event.currentTarget.value as never })
+              }
+              value={draft.darkPresetId ?? "system"}
+            >
+              {availablePresets
+                .filter((preset) => preset.supportedModes.includes("dark"))
+                .map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.displayName}
+                  </option>
+                ))}
+            </OctantNativeSelect>
+          </label>
+          <label className="settings-view__field">
+            <span>Density</span>
+            <OctantNativeSelect
+              aria-label="Theme density"
+              className="settings-view__select"
+              onChange={(event) =>
+                void theme.applyPatch({
+                  density: event.currentTarget.value as ThemeSettings["density"],
+                })
+              }
+              value={draft.density}
+            >
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </OctantNativeSelect>
+          </label>
         </div>
-        <label className="settings-view__field">
-          <span>Light preset</span>
-          <OctantNativeSelect
-            aria-label="Light preset"
-            className="settings-view__select"
-            onChange={(event) =>
-              void theme.applyPatch({ lightPresetId: event.currentTarget.value as never })
-            }
-            value={draft.lightPresetId ?? "system"}
-          >
-            {availablePresets
-              .filter((preset) => preset.supportedModes.includes("light"))
-              .map((preset) => (
-                <option key={preset.id} value={preset.id}>
-                  {preset.displayName}
-                </option>
-              ))}
-          </OctantNativeSelect>
-        </label>
-        <label className="settings-view__field">
-          <span>Dark preset</span>
-          <OctantNativeSelect
-            aria-label="Dark preset"
-            className="settings-view__select"
-            onChange={(event) =>
-              void theme.applyPatch({ darkPresetId: event.currentTarget.value as never })
-            }
-            value={draft.darkPresetId ?? "system"}
-          >
-            {availablePresets
-              .filter((preset) => preset.supportedModes.includes("dark"))
-              .map((preset) => (
-                <option key={preset.id} value={preset.id}>
-                  {preset.displayName}
-                </option>
-              ))}
-          </OctantNativeSelect>
-        </label>
-        <label className="settings-view__field">
-          <span>Density</span>
-          <OctantNativeSelect
-            aria-label="Theme density"
-            className="settings-view__select"
-            onChange={(event) =>
-              void theme.applyPatch({
-                density: event.currentTarget.value as ThemeSettings["density"],
-              })
-            }
-            value={draft.density}
-          >
-            <option value="comfortable">Comfortable</option>
-            <option value="compact">Compact</option>
-          </OctantNativeSelect>
-        </label>
       </section>
-      <details className="settings-theme-editor__disclosure" open>
+      <details className="settings-card-section settings-theme-editor__disclosure" open>
         <summary>
           <span>Typography</span>
           <ChevronDown
@@ -160,7 +162,7 @@ export function ThemeAppearanceEditor(props: {
             size={15}
           />
         </summary>
-        <div className="settings-theme-editor__disclosure-body">
+        <div className="setgroup settings-theme-editor__disclosure-body">
           <TypographyControl
             label="Interface typography"
             familyLabel="Interface font"
@@ -186,38 +188,40 @@ export function ThemeAppearanceEditor(props: {
           />
         </div>
       </details>
-      <fieldset className="settings-theme-editor__card settings-theme-editor__accessibility">
+      <fieldset className="settings-card-section settings-theme-editor__accessibility">
         <legend>Accessibility</legend>
-        <SettingSwitch
-          label="Increased contrast"
-          checked={draft.increasedContrast}
-          onChange={(value) => void theme.applyPatch({ increasedContrast: value })}
-        />
-        <SettingSwitch
-          label="Reduced motion"
-          checked={draft.reducedMotion}
-          onChange={(value) => void theme.applyPatch({ reducedMotion: value })}
-        />
-        <SettingSwitch
-          label="Reduced transparency"
-          checked={draft.reducedTransparency}
-          onChange={(value) => void theme.applyPatch({ reducedTransparency: value })}
-        />
-        <label className="settings-view__field">
-          <span>Focus ring color</span>
-          <OctantInput
-            aria-label="Focus ring color"
-            className="settings-view__text-input"
-            type="color"
-            value={
-              draft.semanticOverrides.find((entry) => entry.role === "focus-ring")?.color ??
-              "#d8d8d4"
-            }
-            onChange={(event) => setOverride("focus-ring", event.currentTarget.value)}
+        <div className="setgroup">
+          <SettingSwitch
+            label="Increased contrast"
+            checked={draft.increasedContrast}
+            onChange={(value) => void theme.applyPatch({ increasedContrast: value })}
           />
-        </label>
+          <SettingSwitch
+            label="Reduced motion"
+            checked={draft.reducedMotion}
+            onChange={(value) => void theme.applyPatch({ reducedMotion: value })}
+          />
+          <SettingSwitch
+            label="Reduced transparency"
+            checked={draft.reducedTransparency}
+            onChange={(value) => void theme.applyPatch({ reducedTransparency: value })}
+          />
+          <label className="settings-view__field">
+            <span>Focus ring color</span>
+            <OctantInput
+              aria-label="Focus ring color"
+              className="settings-view__text-input"
+              type="color"
+              value={
+                draft.semanticOverrides.find((entry) => entry.role === "focus-ring")?.color ??
+                "#d8d8d4"
+              }
+              onChange={(event) => setOverride("focus-ring", event.currentTarget.value)}
+            />
+          </label>
+        </div>
       </fieldset>
-      <details className="settings-theme-editor__disclosure">
+      <details className="settings-card-section settings-theme-editor__disclosure">
         <summary>
           <span>Import or export theme</span>
           <ChevronDown
@@ -226,7 +230,7 @@ export function ThemeAppearanceEditor(props: {
             size={15}
           />
         </summary>
-        <div className="settings-theme-editor__disclosure-body">
+        <div className="setgroup settings-theme-editor__disclosure-body">
           <ThemeTransfer controller={theme} />
         </div>
       </details>
