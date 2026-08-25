@@ -89,7 +89,6 @@ jobs:
           bun_path=$(command -v bun)
           sudo install --mode 0755 "$bun_path" /usr/local/bin/bun
           sudo useradd --create-home --home-dir /var/lib/octant --shell /bin/bash octant
-          sudo usermod --add-subuids 200000-265535 --add-subgids 200000-265535 octant
           sudo truncate --size 12G /var/tmp/octant-capsule-ci.xfs
           sudo mkfs.xfs -f /var/tmp/octant-capsule-ci.xfs
           sudo mkdir --parents /var/lib/octant-capsule-ci
