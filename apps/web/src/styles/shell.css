@@ -540,10 +540,13 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   min-width: 0;
   align-items: center;
   justify-content: flex-start;
-  gap: var(--oct-space-2);
-  min-height: 28px;
+  /* The marker, the provider mark, and the title are one identifying phrase,
+     not three controls, so they sit at glyph spacing. At list spacing the row
+     spent 46px before the first letter of the title. */
+  gap: var(--oct-space-1);
+  min-height: 26px;
   padding-block: 0;
-  padding-inline: var(--oct-space-2);
+  padding-inline: 6px;
   color: var(--oct-muted);
   background: transparent;
   border: 0;

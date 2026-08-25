@@ -1110,7 +1110,10 @@ button:focus-visible {
   display: grid;
   gap: 2px;
   margin: 2px 0 0;
-  padding-left: 12px;
+  /* Enough to read as nested under its Project, and no more: the row inside
+     adds its own inset, and the two together were pushing thread titles most
+     of the way across the sidebar before the first letter. */
+  padding-left: var(--oct-space-2);
 }
 
 /* The container carries the system's .sidebar-section label treatment; the h2
@@ -1648,11 +1651,18 @@ button:focus-visible {
 
 /* One shared visual centerline for the pane tab and the trailing window
    controls: enough top air to read as a title bar. */
+/* The tab sits in the corner the sidebar and the title band make, so it takes
+   the same inset from both. The vertical inset is not the padding: the rail
+   keeps one centerline with the trailing window controls, so the tab settles
+   12px down inside a 42px band whatever the padding says. A 4px left against
+   that read as the tab being pushed up against the sidebar, so the left inset
+   matches where the tab actually lands rather than what it is padded by. */
 html[data-octant-native-host="true"] .workspace-pane__header {
   z-index: 6;
   min-height: 42px;
   padding-top: var(--oct-space-2);
   padding-bottom: 0;
+  padding-left: var(--oct-space-3);
 }
 
 /* Published by WindowChrome from the leading cluster's measured width. The
