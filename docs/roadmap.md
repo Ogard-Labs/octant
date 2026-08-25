@@ -89,10 +89,10 @@ Hardening in progress for the preview:
   read-only.
   - The first isolation tracer is in progress: a Linux Station owns one gVisor
     execution capsule per Code thread or writing child, with independent clones,
-    resource admission, deny-default networking, reviewed bundle export, and
-    explicit release. Product thread wiring, Station provisioning, Devices and
-    Machines navigation, and E2B Disposable Desktops remain separate follow-up
-    deliveries.
+    fixed-size private disk images, resource admission, deny-default networking,
+    reviewed bundle export, and explicit release. Product thread wiring,
+    Station provisioning, Devices and Machines navigation, and E2B Disposable
+    Desktops remain separate follow-up deliveries.
 - **Canvas artifacts** — provider-neutral interactive reports, dashboards, and
   agent controls with journaled lifecycle; sharing only after secure local use.
 - **Automation Center** — host-owned, Project-bound agent schedules that create

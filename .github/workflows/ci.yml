@@ -77,23 +77,19 @@ jobs:
       - name: Install the protected runtime
         run: |
           sudo apt-get update
-          sudo apt-get install --yes ca-certificates curl dbus-user-session gnupg podman rsync uidmap xfsprogs
+          sudo apt-get install --yes ca-certificates curl dbus-user-session e2fsprogs fuse2fs fuse3 gnupg podman rsync uidmap
           curl --fail --silent --show-error --location https://gvisor.dev/archive.key --output /tmp/gvisor.key
           gpg --dearmor --output /tmp/gvisor-archive-keyring.gpg /tmp/gvisor.key
           sudo install --mode 0644 /tmp/gvisor-archive-keyring.gpg /usr/share/keyrings/gvisor-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
           sudo apt-get update
           sudo apt-get install --yes runsc
-      - name: Prepare the dedicated Station identity and quota-backed rootless store
+      - name: Prepare the dedicated Station identity and rootless store
         run: |
           bun_path=$(command -v bun)
           sudo install --mode 0755 "$bun_path" /usr/local/bin/bun
           sudo useradd --create-home --home-dir /var/lib/octant --shell /bin/bash octant
-          sudo truncate --size 12G /var/tmp/octant-capsule-ci.xfs
-          sudo mkfs.xfs -f /var/tmp/octant-capsule-ci.xfs
-          sudo mkdir --parents /var/lib/octant-capsule-ci
-          sudo mount --options loop,pquota,nodev,nosuid /var/tmp/octant-capsule-ci.xfs /var/lib/octant-capsule-ci
-          sudo chown octant:octant /var/lib/octant-capsule-ci
+          test -c /dev/fuse
           octant_uid=$(id --user octant)
           sudo install --directory --mode 0700 --owner octant --group octant "/run/user/${octant_uid}"
           sudo loginctl enable-linger octant
@@ -102,7 +98,7 @@ jobs:
           printf '%s\n' \
             '[storage]' \
             'driver = "overlay"' \
-            'graphroot = "/var/lib/octant-capsule-ci/storage"' \
+            'graphroot = "/var/lib/octant/podman/storage"' \
             "runroot = \"/run/user/${octant_uid}/containers\"" \
             | sudo --user octant tee /var/lib/octant/.config/containers/storage.conf >/dev/null
           sudo install --directory --mode 0700 --owner octant --group octant /var/lib/octant/ci
@@ -133,7 +129,7 @@ jobs:
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
             PATH=/usr/local/bin:/usr/bin:/bin \
             OCTANT_GVISOR_CAPSULE_IMAGE="$OCTANT_GVISOR_CAPSULE_IMAGE" \
-            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/podman --runtime /usr/bin/runsc --runtime-flag platform=systrap --runtime-flag systemd-cgroup run --rm --network none --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --cpus 0.1 --memory 268435456 --pids-limit 64 --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true'
+            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/podman --runtime /usr/bin/runsc --runtime-flag platform=systrap --runtime-flag systemd-cgroup --runtime-flag network=none run --rm --log-driver none --network none --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --cpus 0.1 --memory 268435456 --pids-limit 64 --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true'
       - name: Prove two protected capsules and a reviewed bundle export
         env:
           OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf

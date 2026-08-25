@@ -46,6 +46,11 @@ host becomes a first-class destination.
 - A Project owns a digest-pinned capsule recipe. The host admits work only when
   it can honor the declared CPU, memory, disk, and PID budget; otherwise work
   queues or refuses before a capsule starts.
+- The entire mutable Podman VFS store for one capsule lives in its own
+  fixed-size ext4 image, mounted by the unprivileged Station identity through
+  `fuse2fs` with `nodev` and `nosuid`. Image layers, runtime metadata,
+  dependencies, and the independent clone all count against the same hard disk
+  ceiling. No capsule store is a host-checkout bind mount.
 - Capsule egress is deny-default and later passes through a host-owned broker
   with destination, DNS, expiry, and audit checks. Selected preview ports pass
   through an authenticated thread-scoped host proxy, never a direct bind.
@@ -71,6 +76,9 @@ host becomes a first-class destination.
   is not a usable Station.
 - Independent clones cost more disk and setup time than worktrees. They remove
   the shared Git store that would otherwise let one issue alter another.
+- Per-capsule VFS stores duplicate image data and trade startup speed for a
+  durable hard disk ceiling that does not grant the Station identity project-
+  quota or block-device authority.
 - Some provider CLIs cannot run until they accept brokered credentials. Octant
   reports that incompatibility instead of copying login state into the capsule.
 - gVisor compatibility limits are visible Project-recipe facts. Firecracker or

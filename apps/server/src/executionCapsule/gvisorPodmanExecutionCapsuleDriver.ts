@@ -15,6 +15,11 @@ import type {
   ExecutionCapsuleDriverExportResult,
   ExecutionCapsuleDriverProbe,
 } from "./executionCapsuleService";
+import {
+  FuseExecutionCapsuleDiskStore,
+  type ExecutionCapsuleDiskLocation,
+  type ExecutionCapsuleDiskStore,
+} from "./fuseExecutionCapsuleDiskStore";
 
 const execFileAsync = promisify(execFile);
 
@@ -61,6 +66,7 @@ export interface GvisorPodmanExecutionCapsuleDriverOptions {
   readonly gid?: number;
   readonly supplementaryGroups?: ReadonlyArray<number>;
   readonly identityProbe?: ExecutionCapsuleStationIdentityProbe;
+  readonly diskStore?: ExecutionCapsuleDiskStore;
 }
 
 export interface ExecutionCapsuleRuntimeEnvironment {
@@ -80,7 +86,7 @@ interface GvisorPodmanRuntime {
   readonly runtimeId: string;
   readonly capsuleId: string;
   readonly image: string;
-  readonly diskBytes: number;
+  readonly disk: ExecutionCapsuleDiskLocation;
   readonly state: "ready" | "stopped";
 }
 
@@ -104,6 +110,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
   readonly #sourceBundleStore: ExecutionCapsuleSourceBundleStore;
   readonly #bundleStore: ExecutionCapsuleGitBundleStore;
   readonly #identityProbe: ExecutionCapsuleStationIdentityProbe;
+  readonly #diskStore: ExecutionCapsuleDiskStore;
   readonly #runtimes = new Map<string, GvisorPodmanRuntime>();
 
   constructor(options: GvisorPodmanExecutionCapsuleDriverOptions) {
@@ -133,6 +140,14 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       });
     this.#identityProbe =
       options.identityProbe ?? createStationIdentityProbe({ runner: this.#runner });
+    this.#diskStore =
+      options.diskStore ??
+      new FuseExecutionCapsuleDiskStore({
+        stateRoot: this.#stateRoot,
+        expectedUid: this.#uid,
+        expectedGid: this.#gid,
+        runner: this.#runner,
+      });
   }
 
   async probe(): Promise<ExecutionCapsuleDriverProbe> {
@@ -224,18 +239,33 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       return { status: "refused", reason: "source-unavailable" };
     }
 
+    let disk: ExecutionCapsuleDiskLocation;
+    try {
+      disk = await this.#diskStore.create({
+        runtimeId,
+        diskBytes: input.request.budget.diskBytes,
+      });
+    } catch {
+      return { status: "refused", reason: "creation-failed" };
+    }
+
     let created = false;
     try {
       const create = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(disk),
         "--runtime",
         this.#runscPath,
         "--runtime-flag",
         "platform=systrap",
         "--runtime-flag",
         "systemd-cgroup",
+        "--runtime-flag",
+        "network=none",
         "create",
         "--name",
         runtimeId,
+        "--log-driver",
+        "none",
         "--network",
         "none",
         "--userns",
@@ -252,8 +282,6 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         String(input.request.budget.memoryBytes),
         "--pids-limit",
         String(input.request.budget.pidLimit),
-        "--storage-opt",
-        `size=${String(input.request.budget.diskBytes)}`,
         "--workdir",
         "/",
         "--env",
@@ -272,14 +300,20 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       created = true;
 
       const copied = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(disk),
         "cp",
         input.source.bundlePath,
         `${runtimeId}:/tmp/octant-source.bundle`,
       ]);
       if (copied.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
-      const started = await this.#runner.run(this.#podmanPath, ["start", runtimeId]);
+      const started = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(disk),
+        "start",
+        runtimeId,
+      ]);
       if (started.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
       const cloned = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(disk),
         "exec",
         "--workdir",
         "/",
@@ -292,6 +326,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (cloned.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
       const checkedOut = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(disk),
         "exec",
         "--workdir",
         "/workspace",
@@ -305,6 +340,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (checkedOut.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
       const home = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(disk),
         "exec",
         "--workdir",
         "/workspace",
@@ -317,6 +353,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       if (home.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
       await this.#runner
         .run(this.#podmanPath, [
+          ...podmanStoreArgs(disk),
           "exec",
           "--workdir",
           "/workspace",
@@ -329,6 +366,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         .catch(() => undefined);
       for (const argv of input.request.recipe.setup) {
         const setup = await this.#runner.run(this.#podmanPath, [
+          ...podmanStoreArgs(disk),
           "exec",
           "--workdir",
           "/workspace",
@@ -343,15 +381,25 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         runtimeId,
         capsuleId: String(input.request.capsuleId),
         image: String(input.request.recipe.image),
-        diskBytes: input.request.budget.diskBytes,
+        disk,
         state: "ready",
       });
       return { status: "ready", runtimeId };
     } finally {
       if (created && !this.#runtimes.has(runtimeId)) {
         await this.#runner
-          .run(this.#podmanPath, ["rm", "--force", "--time", "10", runtimeId])
+          .run(this.#podmanPath, [
+            ...podmanStoreArgs(disk),
+            "rm",
+            "--force",
+            "--time",
+            "10",
+            runtimeId,
+          ])
           .catch(() => undefined);
+      }
+      if (!this.#runtimes.has(runtimeId)) {
+        await this.#diskStore.release(disk).catch(() => undefined);
       }
     }
   }
@@ -359,11 +407,13 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
   async execute(
     input: ExecutionCapsuleDriverExecuteInput,
   ): Promise<Exclude<ExecutionCapsuleCommandResult, { readonly status: "refused" }>> {
-    if (this.#runtimes.get(input.runtimeId)?.state !== "ready") {
+    const runtime = this.#runtimes.get(input.runtimeId);
+    if (runtime?.state !== "ready") {
       return { status: "failed", reason: "runtime-unavailable" };
     }
     const executed = await this.#runner
       .run(this.#podmanPath, [
+        ...podmanStoreArgs(runtime.disk),
         "exec",
         "--workdir",
         "/workspace",
@@ -391,6 +441,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     let capsuleBundleCreated = false;
     try {
       const head = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(runtime.disk),
         "exec",
         "--workdir",
         "/workspace",
@@ -408,6 +459,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       }
       capsuleBundleCreated = true;
       const bundled = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(runtime.disk),
         "exec",
         "--workdir",
         "/workspace",
@@ -423,6 +475,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (bundled.exitCode !== 0) return { status: "failed", reason: "export-failed" };
       const bundleVerified = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(runtime.disk),
         "exec",
         "--workdir",
         "/workspace",
@@ -435,6 +488,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (bundleVerified.exitCode !== 0) return { status: "failed", reason: "export-failed" };
       const digested = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(runtime.disk),
         "exec",
         "--workdir",
         "/workspace",
@@ -450,6 +504,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
 
       artifactPath = await this.#bundleStore.reserve(input.runtimeId);
       const copied = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(runtime.disk),
         "cp",
         `${input.runtimeId}:/tmp/octant-export.bundle`,
         artifactPath,
@@ -463,7 +518,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         runtimeId: input.runtimeId,
         artifactPath,
         image: runtime.image,
-        diskBytes: runtime.diskBytes,
+        disk: runtime.disk,
       });
       if (!verifiedOutsideProducer) throw new Error("Execution capsule bundle verifier refused.");
       return {
@@ -482,6 +537,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       if (capsuleBundleCreated) {
         await this.#runner
           .run(this.#podmanPath, [
+            ...podmanStoreArgs(runtime.disk),
             "exec",
             "--workdir",
             "/workspace",
@@ -505,7 +561,13 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     if (runtime === undefined) return { status: "failed", reason: "stop-failed" };
     if (runtime.state === "stopped") return { status: "stopped" };
     const stopped = await this.#runner
-      .run(this.#podmanPath, ["stop", "--time", "10", input.runtimeId])
+      .run(this.#podmanPath, [
+        ...podmanStoreArgs(runtime.disk),
+        "stop",
+        "--time",
+        "10",
+        input.runtimeId,
+      ])
       .catch(() => undefined);
     if (stopped?.exitCode !== 0) return { status: "failed", reason: "stop-failed" };
     this.#runtimes.set(input.runtimeId, { ...runtime, state: "stopped" });
@@ -516,21 +578,26 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     readonly runtimeId: string;
     readonly artifactPath: string;
     readonly image: string;
-    readonly diskBytes: number;
+    readonly disk: ExecutionCapsuleDiskLocation;
   }): Promise<boolean> {
     const verifierId = `${input.runtimeId}-verify-${randomUUID().replaceAll("-", "").slice(0, 8)}`;
     let created = false;
     try {
       const create = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(input.disk),
         "--runtime",
         this.#runscPath,
         "--runtime-flag",
         "platform=systrap",
         "--runtime-flag",
         "systemd-cgroup",
+        "--runtime-flag",
+        "network=none",
         "create",
         "--name",
         verifierId,
+        "--log-driver",
+        "none",
         "--network",
         "none",
         "--userns",
@@ -547,8 +614,6 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         String(256 * 1_024 * 1_024),
         "--pids-limit",
         "64",
-        "--storage-opt",
-        `size=${String(input.diskBytes)}`,
         "--workdir",
         "/",
         "--entrypoint",
@@ -559,15 +624,21 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (create.exitCode !== 0) return false;
       created = true;
-      const started = await this.#runner.run(this.#podmanPath, ["start", verifierId]);
+      const started = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(input.disk),
+        "start",
+        verifierId,
+      ]);
       if (started.exitCode !== 0) return false;
       const copied = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(input.disk),
         "cp",
         input.artifactPath,
         `${verifierId}:/tmp/capsule.bundle`,
       ]);
       if (copied.exitCode !== 0) return false;
       const initialized = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(input.disk),
         "exec",
         "--workdir",
         "/",
@@ -580,6 +651,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (initialized.exitCode !== 0) return false;
       const verified = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(input.disk),
         "exec",
         "--workdir",
         "/verify",
@@ -596,7 +668,14 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     } finally {
       if (created) {
         await this.#runner
-          .run(this.#podmanPath, ["rm", "--force", "--time", "10", verifierId])
+          .run(this.#podmanPath, [
+            ...podmanStoreArgs(input.disk),
+            "rm",
+            "--force",
+            "--time",
+            "10",
+            verifierId,
+          ])
           .catch(() => undefined);
       }
     }
@@ -625,9 +704,22 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     const runtime = this.#runtimes.get(input.runtimeId);
     if (runtime?.capsuleId !== String(input.capsuleId)) return;
     const removed = await this.#runner
-      .run(this.#podmanPath, ["rm", "--force", "--time", "10", input.runtimeId])
+      .run(this.#podmanPath, [
+        ...podmanStoreArgs(runtime.disk),
+        "rm",
+        "--force",
+        "--time",
+        "10",
+        input.runtimeId,
+      ])
       .catch(() => undefined);
-    if (removed?.exitCode === 0) this.#runtimes.delete(input.runtimeId);
+    if (removed?.exitCode !== 0) return;
+    try {
+      await this.#diskStore.release(runtime.disk);
+      this.#runtimes.delete(input.runtimeId);
+    } catch {
+      // A failed exact-store cleanup remains owned for an explicit retry.
+    }
   }
 
   async recover(
@@ -652,8 +744,17 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       return { status: "refused", reason: "source-unavailable" };
     }
     const runtimeId = capsuleRuntimeId(String(input.request.capsuleId));
+    let disk: ExecutionCapsuleDiskLocation;
+    try {
+      disk = await this.#diskStore.recover({
+        runtimeId,
+        diskBytes: input.request.budget.diskBytes,
+      });
+    } catch {
+      return { status: "refused", reason: "runtime-unavailable" };
+    }
     const inspected = await this.#runner
-      .run(this.#podmanPath, ["inspect", "--format", "json", runtimeId])
+      .run(this.#podmanPath, [...podmanStoreArgs(disk), "inspect", "--format", "json", runtimeId])
       .catch(() => undefined);
     const recovered =
       inspected?.exitCode === 0 ? decodeRecoveredRuntime(inspected.stdout) : undefined;
@@ -662,21 +763,25 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       recovered.name.replace(/^\//, "") !== runtimeId ||
       recovered.image !== String(input.request.recipe.image) ||
       recovered.capsuleId !== String(input.request.capsuleId) ||
-      !matchesProtectedRuntime(recovered, input, this.#runscPath)
+      !matchesProtectedRuntime(recovered, input, this.#runscPath, disk)
     ) {
+      await this.#diskStore.close(disk).catch(() => undefined);
       return { status: "refused", reason: "runtime-unavailable" };
     }
     if (recovered.running) {
       const stopped = await this.#runner
-        .run(this.#podmanPath, ["stop", "--time", "10", runtimeId])
+        .run(this.#podmanPath, [...podmanStoreArgs(disk), "stop", "--time", "10", runtimeId])
         .catch(() => undefined);
-      if (stopped?.exitCode !== 0) return { status: "refused", reason: "runtime-unavailable" };
+      if (stopped?.exitCode !== 0) {
+        await this.#diskStore.close(disk).catch(() => undefined);
+        return { status: "refused", reason: "runtime-unavailable" };
+      }
     }
     this.#runtimes.set(runtimeId, {
       runtimeId,
       capsuleId: String(input.request.capsuleId),
       image: String(input.request.recipe.image),
-      diskBytes: input.request.budget.diskBytes,
+      disk,
       state: "stopped",
     });
     return { status: "stopped", runtimeId };
@@ -688,13 +793,26 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     | { readonly status: "released" }
     | { readonly status: "failed"; readonly reason: "release-failed" }
   > {
-    if (!this.#runtimes.has(input.runtimeId)) {
+    const runtime = this.#runtimes.get(input.runtimeId);
+    if (runtime === undefined) {
       return { status: "failed", reason: "release-failed" };
     }
     const removed = await this.#runner
-      .run(this.#podmanPath, ["rm", "--force", "--time", "10", input.runtimeId])
+      .run(this.#podmanPath, [
+        ...podmanStoreArgs(runtime.disk),
+        "rm",
+        "--force",
+        "--time",
+        "10",
+        input.runtimeId,
+      ])
       .catch(() => undefined);
     if (removed?.exitCode !== 0) return { status: "failed", reason: "release-failed" };
+    try {
+      await this.#diskStore.release(runtime.disk);
+    } catch {
+      return { status: "failed", reason: "release-failed" };
+    }
     this.#runtimes.delete(input.runtimeId);
     return { status: "released" };
   }
@@ -720,6 +838,10 @@ function unavailableProbe(
 
 function capsuleRuntimeId(capsuleId: string): string {
   return `octant-capsule-${capsuleId.replaceAll("-", "")}`;
+}
+
+function podmanStoreArgs(disk: ExecutionCapsuleDiskLocation): ReadonlyArray<string> {
+  return ["--root", disk.graphRoot, "--runroot", disk.runRoot, "--storage-driver", "vfs"];
 }
 
 function formatCpus(cpuMillicores: number): string {
@@ -930,6 +1052,7 @@ function matchesProtectedRuntime(
   recovered: NonNullable<ReturnType<typeof decodeRecoveredRuntime>>,
   input: ExecutionCapsuleDriverCreateInput,
   runscPath: string,
+  disk: ExecutionCapsuleDiskLocation,
 ): boolean {
   const command = recovered.createCommand;
   return (
@@ -944,14 +1067,18 @@ function matchesProtectedRuntime(
     recovered.memoryBytes === input.request.budget.memoryBytes &&
     recovered.nanoCpus === input.request.budget.cpuMillicores * 1_000_000 &&
     recovered.pidLimit === input.request.budget.pidLimit &&
+    hasFlagValue(command, "--root", disk.graphRoot) &&
+    hasFlagValue(command, "--runroot", disk.runRoot) &&
+    hasFlagValue(command, "--storage-driver", "vfs") &&
     hasFlagValue(command, "--runtime", runscPath) &&
     hasFlagValue(command, "--runtime-flag", "platform=systrap") &&
     hasFlagValue(command, "--runtime-flag", "systemd-cgroup") &&
+    hasFlagValue(command, "--runtime-flag", "network=none") &&
+    hasFlagValue(command, "--log-driver", "none") &&
     hasFlagValue(command, "--network", "none") &&
     hasFlagValue(command, "--userns", "auto") &&
     hasFlagValue(command, "--cap-drop", "all") &&
-    hasFlagValue(command, "--security-opt", "no-new-privileges") &&
-    hasFlagValue(command, "--storage-opt", `size=${String(input.request.budget.diskBytes)}`)
+    hasFlagValue(command, "--security-opt", "no-new-privileges")
   );
 }
 
@@ -1028,10 +1155,12 @@ function createNodeCommandRunner(
   return {
     run: async (command, args) => {
       const longRunning =
-        command.endsWith("/podman") &&
-        args.some(
-          (argument) => argument === "create" || argument === "cp" || argument === "bundle",
-        );
+        (command.endsWith("/podman") &&
+          args.some(
+            (argument) => argument === "create" || argument === "cp" || argument === "bundle",
+          )) ||
+        command.endsWith("/mkfs.ext4") ||
+        command.endsWith("/fuse2fs");
       try {
         const result = await execFileAsync(command, [...args], {
           shell: false,

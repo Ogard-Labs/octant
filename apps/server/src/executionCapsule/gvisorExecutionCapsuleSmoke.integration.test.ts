@@ -129,6 +129,14 @@ evidence("gVisor execution capsule evidence", () => {
         throw new Error(`Second capsule acquisition ${JSON.stringify(secondAcquisition)}.`);
       }
 
+      const firstDisk = await stat(join(stateRoot, "stores", runtimeId(first), "capsule.ext4"));
+      const secondDisk = await stat(join(stateRoot, "stores", runtimeId(second), "capsule.ext4"));
+      expect(firstDisk.size).toBe(first.budget.diskBytes);
+      expect(secondDisk.size).toBe(second.budget.diskBytes);
+      expect(firstDisk.nlink).toBe(1);
+      expect(secondDisk.nlink).toBe(1);
+      expect(firstDisk.ino).not.toBe(secondDisk.ino);
+
       await expect(
         service.execute({
           capsuleId: first.capsuleId,
@@ -136,14 +144,38 @@ evidence("gVisor execution capsule evidence", () => {
         }),
       ).resolves.toMatchObject({ status: "exited", exitCode: 0 });
       const firstHostPid = Number(
-        (await podman(["inspect", "--format", "{{.State.Pid}}", runtimeId(first)])).trim(),
+        (
+          await podman(stateRoot, runtimeId(first), [
+            "inspect",
+            "--format",
+            "{{.State.Pid}}",
+            runtimeId(first),
+          ])
+        ).trim(),
       );
       const secondHostPid = Number(
-        (await podman(["inspect", "--format", "{{.State.Pid}}", runtimeId(second)])).trim(),
+        (
+          await podman(stateRoot, runtimeId(second), [
+            "inspect",
+            "--format",
+            "{{.State.Pid}}",
+            runtimeId(second),
+          ])
+        ).trim(),
       );
       expect(firstHostPid).toBeGreaterThan(1);
       expect(secondHostPid).toBeGreaterThan(1);
       expect(firstHostPid).not.toBe(secondHostPid);
+      await expect(cgroupBudget(firstHostPid)).resolves.toEqual({
+        memoryBytes: String(first.budget.memoryBytes),
+        pidLimit: String(first.budget.pidLimit),
+        cpuRatio: first.budget.cpuMillicores / 1_000,
+      });
+      await expect(cgroupBudget(secondHostPid)).resolves.toEqual({
+        memoryBytes: String(second.budget.memoryBytes),
+        pidLimit: String(second.budget.pidLimit),
+        cpuRatio: second.budget.cpuMillicores / 1_000,
+      });
       await expect(
         service.execute({
           capsuleId: second.capsuleId,
@@ -255,7 +287,14 @@ evidence("gVisor execution capsule evidence", () => {
         receipt: { capsuleId: second.capsuleId, status: "stopped" },
       });
       expect(
-        (await podman(["inspect", "--format", "{{.State.Running}}", runtimeId(second)])).trim(),
+        (
+          await podman(stateRoot, runtimeId(second), [
+            "inspect",
+            "--format",
+            "{{.State.Running}}",
+            runtimeId(second),
+          ])
+        ).trim(),
       ).toBe("false");
       await expect(
         afterRestart.execute({ capsuleId: second.capsuleId, argv: ["git", "status"] }),
@@ -294,24 +333,66 @@ async function git(repositoryRoot: string, args: ReadonlyArray<string>): Promise
   return result.stdout;
 }
 
-async function podman(args: ReadonlyArray<string>): Promise<string> {
+async function podman(
+  stateRoot: string,
+  capsuleRuntimeId: string,
+  args: ReadonlyArray<string>,
+): Promise<string> {
   const homeDirectory = process.env.HOME;
   const runtimeDirectory = process.env.XDG_RUNTIME_DIR;
   const sessionBusAddress = process.env.DBUS_SESSION_BUS_ADDRESS;
-  const result = await execFileAsync(process.env.OCTANT_PODMAN_PATH ?? "/usr/bin/podman", args, {
-    shell: false,
-    timeout: 30_000,
-    maxBuffer: 4 * 1_024 * 1_024,
-    encoding: "utf8",
-    env: {
-      PATH: "/usr/bin:/bin",
-      LC_ALL: "C",
-      ...(homeDirectory === undefined ? {} : { HOME: homeDirectory }),
-      ...(runtimeDirectory === undefined ? {} : { XDG_RUNTIME_DIR: runtimeDirectory }),
-      ...(sessionBusAddress === undefined ? {} : { DBUS_SESSION_BUS_ADDRESS: sessionBusAddress }),
+  const mountPath = join(stateRoot, "stores", capsuleRuntimeId, "mount");
+  const result = await execFileAsync(
+    process.env.OCTANT_PODMAN_PATH ?? "/usr/bin/podman",
+    [
+      "--root",
+      join(mountPath, "graph"),
+      "--runroot",
+      join(mountPath, "run"),
+      "--storage-driver",
+      "vfs",
+      ...args,
+    ],
+    {
+      shell: false,
+      timeout: 30_000,
+      maxBuffer: 4 * 1_024 * 1_024,
+      encoding: "utf8",
+      env: {
+        PATH: "/usr/bin:/bin",
+        LC_ALL: "C",
+        ...(homeDirectory === undefined ? {} : { HOME: homeDirectory }),
+        ...(runtimeDirectory === undefined ? {} : { XDG_RUNTIME_DIR: runtimeDirectory }),
+        ...(sessionBusAddress === undefined ? {} : { DBUS_SESSION_BUS_ADDRESS: sessionBusAddress }),
+      },
     },
-  });
+  );
   return result.stdout;
+}
+
+async function cgroupBudget(pid: number): Promise<{
+  readonly memoryBytes: string;
+  readonly pidLimit: string;
+  readonly cpuRatio: number;
+}> {
+  const membership = await readFile(`/proc/${String(pid)}/cgroup`, "utf8");
+  const unified = membership.split("\n").find((line) => line.startsWith("0::"));
+  if (unified === undefined) throw new Error("Sandbox PID has no unified cgroup membership.");
+  const cgroupRoot = join("/sys/fs/cgroup", unified.slice(3).replace(/^\/+/, ""));
+  const [memoryBytes, pidLimit, cpuMax] = await Promise.all([
+    readFile(join(cgroupRoot, "memory.max"), "utf8"),
+    readFile(join(cgroupRoot, "pids.max"), "utf8"),
+    readFile(join(cgroupRoot, "cpu.max"), "utf8"),
+  ]);
+  const [quota, period] = cpuMax.trim().split(" ");
+  if (quota === undefined || period === undefined || quota === "max") {
+    throw new Error("Sandbox cgroup has no finite CPU limit.");
+  }
+  return {
+    memoryBytes: memoryBytes.trim(),
+    pidLimit: pidLimit.trim(),
+    cpuRatio: Number(quota) / Number(period),
+  };
 }
 
 function runtimeId(request: ExecutionCapsuleAcquireRequest): string {

@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeExecutionCapsuleAcquireRequest } from "@octant/contracts/execution-capsule";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+  ExecutionCapsuleDiskLocation,
+  ExecutionCapsuleDiskStore,
+} from "./fuseExecutionCapsuleDiskStore";
 import {
   GvisorPodmanExecutionCapsuleDriver,
   type ExecutionCapsuleCommandRunner,
@@ -18,6 +22,40 @@ const capacity = {
   pidLimit: 2_048,
 };
 
+const fixtureRuntimeId = "octant-capsule-11111111111141118111111111111111";
+
+function fixturePodmanArgs(args: ReadonlyArray<string>): ReadonlyArray<string> {
+  return [
+    "--root",
+    `/var/lib/octant/capsules/stores/${fixtureRuntimeId}/mount/graph`,
+    "--runroot",
+    `/var/lib/octant/capsules/stores/${fixtureRuntimeId}/mount/run`,
+    "--storage-driver",
+    "vfs",
+    ...args,
+  ];
+}
+
+function diskLocation(runtimeId: string, diskBytes: number): ExecutionCapsuleDiskLocation {
+  const directory = `/var/lib/octant/capsules/stores/${runtimeId}`;
+  const mountPath = `${directory}/mount`;
+  return {
+    directory,
+    imagePath: `${directory}/capsule.ext4`,
+    mountPath,
+    graphRoot: `${mountPath}/graph`,
+    runRoot: `${mountPath}/run`,
+    diskBytes,
+  };
+}
+
+const diskStore: ExecutionCapsuleDiskStore = {
+  create: async ({ runtimeId, diskBytes }) => diskLocation(runtimeId, diskBytes),
+  recover: async ({ runtimeId, diskBytes }) => diskLocation(runtimeId, diskBytes),
+  close: async () => undefined,
+  release: async () => undefined,
+};
+
 const stationIdentity = {
   homeDirectory: "/var/lib/octant",
   expectedHomeDirectory: "/var/lib/octant",
@@ -26,6 +64,7 @@ const stationIdentity = {
   identityProbe: {
     probe: async () => ({ passwordlessSudo: false, dockerSocketAccessible: false }),
   },
+  diskStore,
 } as const;
 
 const capsuleRequest = decodeExecutionCapsuleAcquireRequest({
@@ -230,15 +269,25 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       ([command, args]) => command === "/usr/bin/podman" && args.includes("create"),
     );
     expect(createCall?.[1]).toEqual([
+      "--root",
+      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/graph",
+      "--runroot",
+      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/run",
+      "--storage-driver",
+      "vfs",
       "--runtime",
       "/usr/bin/runsc",
       "--runtime-flag",
       "platform=systrap",
       "--runtime-flag",
       "systemd-cgroup",
+      "--runtime-flag",
+      "network=none",
       "create",
       "--name",
       "octant-capsule-11111111111141118111111111111111",
+      "--log-driver",
+      "none",
       "--network",
       "none",
       "--userns",
@@ -255,8 +304,6 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       String(capsuleRequest.budget.memoryBytes),
       "--pids-limit",
       String(capsuleRequest.budget.pidLimit),
-      "--storage-opt",
-      `size=${String(capsuleRequest.budget.diskBytes)}`,
       "--workdir",
       "/",
       "--env",
@@ -273,25 +320,40 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     ]);
     expect(createCall?.[1].join(" ")).not.toContain(source.bundlePath);
     expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
+      "--root",
+      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/graph",
+      "--runroot",
+      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/run",
+      "--storage-driver",
+      "vfs",
       "cp",
       source.bundlePath,
       "octant-capsule-11111111111141118111111111111111:/tmp/octant-source.bundle",
     ]);
     expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
+      "--root",
+      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/graph",
+      "--runroot",
+      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/run",
+      "--storage-driver",
+      "vfs",
       "start",
       "octant-capsule-11111111111141118111111111111111",
     ]);
-    expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
-      "exec",
-      "--workdir",
-      "/",
-      "--",
-      "octant-capsule-11111111111141118111111111111111",
-      "git",
-      "clone",
-      "/tmp/octant-source.bundle",
-      "/workspace",
-    ]);
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs([
+        "exec",
+        "--workdir",
+        "/",
+        "--",
+        "octant-capsule-11111111111141118111111111111111",
+        "git",
+        "clone",
+        "/tmp/octant-source.bundle",
+        "/workspace",
+      ]),
+    );
   });
 
   it("executes argv only inside a runtime the driver created", async () => {
@@ -334,16 +396,19 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       stdout: "M src/index.ts\n",
       stderr: "",
     });
-    expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
-      "exec",
-      "--workdir",
-      "/workspace",
-      "--",
-      created.runtimeId,
-      "git",
-      "status",
-      "--short",
-    ]);
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs([
+        "exec",
+        "--workdir",
+        "/workspace",
+        "--",
+        created.runtimeId,
+        "git",
+        "status",
+        "--short",
+      ]),
+    );
 
     await expect(
       driver.execute({ runtimeId: "octant-capsule-unknown", argv: ["git", "status"] }),
@@ -404,25 +469,31 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       byteLength: 4_096,
       headRevision: "c".repeat(40),
     });
-    expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
-      "exec",
-      "--workdir",
-      "/workspace",
-      "--",
-      created.runtimeId,
-      "git",
-      "-C",
-      "/workspace",
-      "bundle",
-      "create",
-      "/tmp/octant-export.bundle",
-      "--all",
-    ]);
-    expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
-      "cp",
-      `${created.runtimeId}:/tmp/octant-export.bundle`,
-      "/var/lib/octant/capsules/exports/capsule.bundle",
-    ]);
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs([
+        "exec",
+        "--workdir",
+        "/workspace",
+        "--",
+        created.runtimeId,
+        "git",
+        "-C",
+        "/workspace",
+        "bundle",
+        "create",
+        "/tmp/octant-export.bundle",
+        "--all",
+      ]),
+    );
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs([
+        "cp",
+        `${created.runtimeId}:/tmp/octant-export.bundle`,
+        "/var/lib/octant/capsules/exports/capsule.bundle",
+      ]),
+    );
     expect(verify).toHaveBeenCalledWith({
       artifactPath: "/var/lib/octant/capsules/exports/capsule.bundle",
       expectedSha256: "b".repeat(64),
@@ -470,13 +541,10 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     await expect(driver.release({ runtimeId: created.runtimeId })).resolves.toEqual({
       status: "released",
     });
-    expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
-      "rm",
-      "--force",
-      "--time",
-      "10",
-      created.runtimeId,
-    ]);
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["rm", "--force", "--time", "10", created.runtimeId]),
+    );
     await expect(
       driver.execute({ runtimeId: created.runtimeId, argv: ["git", "status"] }),
     ).resolves.toEqual({ status: "failed", reason: "runtime-unavailable" });
@@ -497,7 +565,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
           stderr: "",
         };
       }
-      if (command === "/usr/bin/podman" && args[0] === "inspect") {
+      if (command === "/usr/bin/podman" && args.includes("inspect")) {
         return {
           exitCode: 0,
           stdout: JSON.stringify([
@@ -512,13 +580,23 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
                 User: "0:0",
                 CreateCommand: [
                   "podman",
+                  "--root",
+                  "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/graph",
+                  "--runroot",
+                  "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/run",
+                  "--storage-driver",
+                  "vfs",
                   "--runtime",
                   "/usr/bin/runsc",
                   "--runtime-flag",
                   "platform=systrap",
                   "--runtime-flag",
                   "systemd-cgroup",
+                  "--runtime-flag",
+                  "network=none",
                   "create",
+                  "--log-driver",
+                  "none",
                   "--network",
                   "none",
                   "--userns",
@@ -527,8 +605,6 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
                   "all",
                   "--security-opt",
                   "no-new-privileges",
-                  "--storage-opt",
-                  `size=${String(capsuleRequest.budget.diskBytes)}`,
                 ],
                 Labels: { "app.octant.capsule": String(capsuleRequest.capsuleId) },
               },
@@ -566,7 +642,10 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     await expect(driver.stop({ runtimeId: created.runtimeId })).resolves.toEqual({
       status: "stopped",
     });
-    expect(run).toHaveBeenCalledWith("/usr/bin/podman", ["stop", "--time", "10", runtimeId]);
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["stop", "--time", "10", runtimeId]),
+    );
 
     const afterRestart = new GvisorPodmanExecutionCapsuleDriver({
       platform: "linux",
@@ -584,7 +663,10 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       status: "stopped",
       runtimeId,
     });
-    expect(run).toHaveBeenCalledWith("/usr/bin/podman", ["inspect", "--format", "json", runtimeId]);
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["inspect", "--format", "json", runtimeId]),
+    );
     await expect(afterRestart.execute({ runtimeId, argv: ["git", "status"] })).resolves.toEqual({
       status: "failed",
       reason: "runtime-unavailable",
