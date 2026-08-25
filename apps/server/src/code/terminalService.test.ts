@@ -180,6 +180,141 @@ describe("TerminalService", () => {
     }
   });
 
+  it("keeps sending appends after the transcript passes its ceiling", async () => {
+    // A terminal that has printed a few builds' worth of output crosses the
+    // ceiling and never comes back under it. Every line after that used to be
+    // published as a full-window replace, so the pane wiped and repainted 64 KiB
+    // to show eight characters — the observed "terminal hangs and loses
+    // scrollback" on a long-lived shell.
+    vi.useFakeTimers();
+    try {
+      const process = fakeProcess();
+      const service = new TerminalService({
+        port: { start: () => process },
+        inheritedEnvironment: {},
+        credentials: { resolve: async () => "" },
+      });
+      await service.launch({
+        terminalId: "terminal-1",
+        shell: "/bin/zsh",
+        cwd: "/repo",
+        stateScope: "repo_test",
+        columns: 80,
+        rows: 24,
+        credentialReferences: [],
+      });
+      const observer = vi.fn();
+      service.observe("terminal-1", observer);
+
+      const line = `${"x".repeat(1_000)}\n`;
+      for (
+        let index = 0;
+        index < Math.ceil(MAX_TERMINAL_TRANSCRIPT_BYTES / line.length) + 20;
+        index++
+      ) {
+        process.emitData(line);
+      }
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(service.attach("terminal-1").transcript.truncated).toBe(true);
+
+      observer.mockClear();
+      process.emitData("done\n");
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(observer).toHaveBeenCalledOnce();
+      expect(observer).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "done\n", replace: false }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("publishes a line at the ceiling as promptly as one below it", async () => {
+    // The delay was raised to a second once the transcript reported truncated,
+    // and nothing ever lowered it again, so a long-lived shell answered every
+    // keystroke a second late for the rest of its life.
+    vi.useFakeTimers();
+    try {
+      const process = fakeProcess();
+      const service = new TerminalService({
+        port: { start: () => process },
+        inheritedEnvironment: {},
+        credentials: { resolve: async () => "" },
+      });
+      await service.launch({
+        terminalId: "terminal-1",
+        shell: "/bin/zsh",
+        cwd: "/repo",
+        stateScope: "repo_test",
+        columns: 80,
+        rows: 24,
+        credentialReferences: [],
+      });
+      const observer = vi.fn();
+      service.observe("terminal-1", observer);
+      const line = `${"x".repeat(1_000)}\n`;
+      for (
+        let index = 0;
+        index < Math.ceil(MAX_TERMINAL_TRANSCRIPT_BYTES / line.length) + 20;
+        index++
+      ) {
+        process.emitData(line);
+      }
+      await vi.advanceTimersByTimeAsync(2_000);
+      observer.mockClear();
+
+      process.emitData("prompt\n");
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(observer).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("replaces rather than appends for a reader the transcript ceiling left behind", async () => {
+    // The one case a replace is still the honest answer: the reader's position
+    // was discarded to stay under the ceiling, so there is no delta to send.
+    vi.useFakeTimers();
+    try {
+      const process = fakeProcess();
+      const service = new TerminalService({
+        port: { start: () => process },
+        inheritedEnvironment: {},
+        credentials: { resolve: async () => "" },
+      });
+      await service.launch({
+        terminalId: "terminal-1",
+        shell: "/bin/zsh",
+        cwd: "/repo",
+        stateScope: "repo_test",
+        columns: 80,
+        rows: 24,
+        credentialReferences: [],
+      });
+      const observer = vi.fn();
+      service.observe("terminal-1", observer, { afterCharacters: 0 });
+
+      const line = `${"x".repeat(1_000)}\n`;
+      for (
+        let index = 0;
+        index < Math.ceil(MAX_TERMINAL_TRANSCRIPT_BYTES / line.length) + 20;
+        index++
+      ) {
+        process.emitData(line);
+      }
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const first = observer.mock.calls[0]?.[0] as { replace: boolean; text: string };
+      expect(first.replace).toBe(true);
+      expect(first.text.length).toBeLessThanOrEqual(64 * 1024);
+      expect(first.text).toContain("[Octant terminal output truncated]");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("publishes output buffered after the launch snapshot when the observer attaches", async () => {
     vi.useFakeTimers();
     try {
