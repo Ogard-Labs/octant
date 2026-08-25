@@ -167,7 +167,9 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       .run(this.#podmanPath, [
         "unshare",
         this.#runscPath,
-        "--systemd-cgroup",
+        // `runsc do` has no OCI cgroup path. Real capsules use the systemd
+        // driver below; this probe proves only that systrap executes.
+        "--ignore-cgroups",
         "--platform=systrap",
         "--network=none",
         "do",

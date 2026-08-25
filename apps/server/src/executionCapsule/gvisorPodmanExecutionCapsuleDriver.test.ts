@@ -100,7 +100,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     expect(run).toHaveBeenNthCalledWith(2, "/usr/bin/podman", [
       "unshare",
       "/usr/bin/runsc",
-      "--systemd-cgroup",
+      "--ignore-cgroups",
       "--platform=systrap",
       "--network=none",
       "do",
