@@ -75,7 +75,7 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
                 data-state={fact.ready ? "ready" : "missing"}
                 key={fact.id}
               >
-                <Icon size={15} />
+                <Icon size={16} />
                 {fact.ready || target === undefined ? (
                   <span className="first-run__provider-name">{fact.label}</span>
                 ) : (

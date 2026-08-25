@@ -42,6 +42,11 @@ export interface SettingRowProps {
   readonly description?: ReactNode;
   readonly scope: SettingsScope;
   readonly focused?: boolean;
+  /**
+   * The section label above this row already names it, so the row does not
+   * print its own label a second time.
+   */
+  readonly labelledBySection?: boolean;
   readonly children: ReactNode;
 }
 
@@ -60,6 +65,7 @@ export function SettingRow({
   description,
   scope,
   focused = false,
+  labelledBySection = false,
   children,
 }: SettingRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
@@ -85,7 +91,16 @@ export function SettingRow({
       data-testid="setting-row"
       ref={rowRef}
     >
-      <span className="setrow-label">{label}</span>
+      {/* The label always exists — Settings search and deep links resolve
+          against it, and a screen reader still needs it to say which setting
+          the control belongs to. When the section heading is the same phrase,
+          only the printing of it is dropped. */}
+      <span
+        className="setrow-label"
+        data-labelled-by-section={labelledBySection ? "true" : "false"}
+      >
+        {label}
+      </span>
       {/* The scope rides inside the hint line because .setrow declares exactly
           two rows; a third child in column 1 would land in an implicit track
           the control's `grid-row: 1 / -1` span does not cover. */}

@@ -1333,6 +1333,13 @@ export function startOctantServer(
     const codeSessionAuthority = new CodeSessionAuthorityStore();
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
+    const requireBrowserAutomationService = (): BrowserAutomationService => {
+      const service = browserAutomationService;
+      if (service === undefined) {
+        throw new Error("Browser automation service is unavailable during server composition.");
+      }
+      return service;
+    };
     let productFeedbackService: ProductFeedbackService;
     let activeComputerUseRuntime: ComputerUseRuntime | undefined;
     let workRequestRuntime: WorkRequestRuntime | undefined;
@@ -2918,11 +2925,11 @@ export function startOctantServer(
         browserAutomation: {
           resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
           inspectThread: (windowId, threadId) =>
-            browserAutomationService!.inspectThread(windowId, threadId),
-          create: (input) => browserAutomationService!.create(input),
-          act: (input) => browserAutomationService!.act(input),
+            requireBrowserAutomationService().inspectThread(windowId, threadId),
+          create: (input) => requireBrowserAutomationService().create(input),
+          act: (input) => requireBrowserAutomationService().act(input),
           releaseThread: (windowId, threadId) =>
-            browserAutomationService!.releaseThread(windowId, threadId),
+            requireBrowserAutomationService().releaseThread(windowId, threadId),
         },
         // The agent's Apple capability resolves its execution context through
         // exactly the resolver the workbench route uses, so a tool call and a

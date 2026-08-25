@@ -63,7 +63,7 @@
 }
 
 .context-window-popover__header {
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .context-window-popover__header strong,
@@ -88,7 +88,7 @@
 .context-window-popover__facts dt,
 .context-window-popover__facts dd {
   margin: 0;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .context-window-popover__facts dt {
@@ -98,7 +98,7 @@
 .context-window-popover__source {
   margin: 3px 0 10px;
   color: var(--octant-text-secondary);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .context-window-popover__meter {
@@ -162,7 +162,7 @@
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .context-window-popover__breakdown dt > span {
@@ -190,7 +190,7 @@
 .context-window-popover__limits p {
   margin: 4px 0 0;
   color: var(--octant-text-secondary);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .context-window-popover__capabilities p > span:first-child,
@@ -202,7 +202,7 @@
 .context-window-popover__limits h3 {
   margin: 0 0 5px;
   color: var(--octant-text-secondary);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 500;
 }
 
@@ -217,7 +217,7 @@
 .context-window-popover__reset,
 .context-window-popover__limit-state {
   color: var(--octant-text-secondary);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .context-window-popover__limits-heading time {
@@ -270,7 +270,7 @@
   border: 1px solid var(--octant-border);
   border-radius: 999px;
   cursor: pointer;
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
 }
 
 .context-health-warning:hover,
@@ -320,12 +320,12 @@
 .context-inspector__freshness,
 .context-inspector__section-heading > span {
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .context-inspector__header h2 {
   margin-top: 2px;
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
 }
 
 .context-inspector button {
@@ -335,7 +335,7 @@
   border: 1px solid var(--octant-border);
   border-radius: 5px;
   cursor: pointer;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .context-inspector button:hover:not(:disabled),
@@ -365,12 +365,12 @@
 }
 
 .context-inspector__section h3 {
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .context-inspector__section h4 {
   margin-top: 10px;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .context-inspector__health {
@@ -380,7 +380,7 @@
   padding: 8px;
   border: 1px solid var(--octant-border);
   border-radius: 6px;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .context-inspector__facts,
@@ -402,7 +402,7 @@
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .context-inspector dt {
@@ -435,7 +435,7 @@
 
 .context-entry-card h4 {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .context-entry-card__actions {
