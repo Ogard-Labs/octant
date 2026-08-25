@@ -182,6 +182,69 @@ describe("useCodeController", () => {
     );
   });
 
+  it("puts a rebound thread on its new checkout so the fail-closed banner clears", async () => {
+    const reboundCheckoutId = "40000000-0000-4000-8000-000000000011";
+    const reboundCheckout = {
+      id: reboundCheckoutId as never,
+      repositoryId: repositoryId as never,
+      kind: "existing-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "development" as never, oid: "b".repeat(40) as never },
+      observedAt: now as never,
+    };
+    const client = fakeClient({
+      execute: vi.fn(
+        async () =>
+          ({
+            kind: "thread-checkout-rebind",
+            threadId: thread(1).id,
+            outcome: {
+              status: "rebound",
+              thread: { ...thread(1), checkoutId: reboundCheckoutId as never, version: 2 },
+              checkout: reboundCheckout,
+            },
+          }) as never,
+      ),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.rebindThreadCheckout(thread(1).id);
+    });
+
+    expect(outcome).toMatchObject({ status: "rebound" });
+    expect(result.current.bootstrap?.checkouts.some((c) => c.id === reboundCheckoutId)).toBe(true);
+    expect(result.current.bootstrap?.threads.some((t) => t.checkoutId === reboundCheckoutId)).toBe(
+      true,
+    );
+  });
+
+  it("leaves the projection alone when the host refuses to rebind", async () => {
+    const client = fakeClient({
+      execute: vi.fn(
+        async () =>
+          ({
+            kind: "thread-checkout-rebind",
+            threadId: thread(1).id,
+            outcome: { status: "refused", reason: "already-bound" },
+          }) as never,
+      ),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const before = result.current.bootstrap;
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.rebindThreadCheckout(thread(1).id);
+    });
+
+    expect(outcome).toEqual({ status: "refused", reason: "already-bound" });
+    expect(result.current.bootstrap).toEqual(before);
+  });
+
   it("F4: exposes the typed actionable failure from a rejected managed creation", async () => {
     const client = fakeClient({
       execute: vi.fn(async () => {

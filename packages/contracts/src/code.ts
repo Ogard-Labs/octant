@@ -448,6 +448,20 @@ export const CodeCommand = Schema.Union(
     ...CodeThreadCommandFields,
     pinned: Schema.Boolean,
   }).annotations(strict),
+  /**
+   * Move a thread onto the checkout its Project binds now.
+   *
+   * A thread's checkout id is derived from the binding revision it was created
+   * against, so rebinding the Project supersedes it and no later observation
+   * can produce the thread's own id again. Without this the thread is
+   * fail-closed for good, which 0032 refuses as a resting state. The act is
+   * the user's, never inferred from a matching filesystem root: what authority
+   * a thread holds only changes because someone asked.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("rebind-code-thread-checkout"),
+    ...CodeThreadCommandFields,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-access"),
     ...CodeThreadCommandFields,
@@ -743,6 +757,48 @@ export const CodeWorktreeRefsListed = Schema.Struct({
   refs: Schema.Array(CodeWorktreeRef),
 }).annotations(strict);
 export type CodeWorktreeRefsListed = typeof CodeWorktreeRefsListed.Type;
+/**
+ * Why a checkout rebind was refused.
+ *
+ * `already-bound` means the thread is on the checkout its Project binds, so
+ * there is nothing to recover. `managed-worktree` means the thread owns its own
+ * worktree: that checkout is the thread's, not the Project's, and moving it
+ * would hand the thread a tree it never asked for. `checkout-unavailable` means
+ * the Project's own checkout could not be observed, so there is no destination
+ * to name.
+ */
+export const CodeThreadCheckoutRebindRefusal = Schema.Literal(
+  "already-bound",
+  "managed-worktree",
+  "checkout-unavailable",
+);
+export type CodeThreadCheckoutRebindRefusal = typeof CodeThreadCheckoutRebindRefusal.Type;
+
+export const CodeThreadCheckoutRebindOutcome = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("rebound"),
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: CodeThreadCheckoutRebindRefusal,
+  }).annotations(strict),
+);
+export type CodeThreadCheckoutRebindOutcome = typeof CodeThreadCheckoutRebindOutcome.Type;
+
+/**
+ * A refusal here is an expected answer, not a fault: the Project may be
+ * unreadable or the thread may already be where it belongs. Carrying it as a
+ * value keeps every caller handling it instead of catching it.
+ */
+export const CodeThreadCheckoutRebound = Schema.Struct({
+  kind: Schema.Literal("thread-checkout-rebind"),
+  threadId: CodeThreadId,
+  outcome: CodeThreadCheckoutRebindOutcome,
+}).annotations(strict);
+export type CodeThreadCheckoutRebound = typeof CodeThreadCheckoutRebound.Type;
+
 export const CodeCommandResult = Schema.Union(
   CodePublicEvent,
   CodeCheckoutPrepared,
@@ -750,6 +806,7 @@ export const CodeCommandResult = Schema.Union(
   CodeManagedThreadCreated,
   CodeWorktreeRemoteFactsRetrieved,
   CodeWorktreeRefsListed,
+  CodeThreadCheckoutRebound,
 );
 export type CodeCommandResult = typeof CodeCommandResult.Type;
 

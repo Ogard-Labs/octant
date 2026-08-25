@@ -458,6 +458,7 @@ function controller(): CodeController {
     forkThread: vi.fn(async () => undefined),
     renameThread: vi.fn(async () => true),
     pinThread: vi.fn(async () => true),
+    rebindThreadCheckout: vi.fn(async () => undefined),
 
     turnActivity: new Map(),
     providerRequests: [],

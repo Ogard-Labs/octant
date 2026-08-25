@@ -7,6 +7,7 @@ import type {
 } from "@octant/contracts/code-operations";
 import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-definitions";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import type { CodeThreadCheckoutRebindRefusal } from "@octant/contracts/code";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { LoaderCircle } from "lucide-react";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -738,6 +739,18 @@ export function appendTerminalSelection(draft: string, selection: string): strin
   return existing === "" ? block : `${existing}\n\n${block}`;
 }
 
+/** What to tell the reader when the host declines to move the thread. */
+function checkoutRebindRefusal(reason: CodeThreadCheckoutRebindRefusal): string {
+  switch (reason) {
+    case "already-bound":
+      return "This thread is already on the checkout its Project binds. Reload the window to pick up the current state.";
+    case "managed-worktree":
+      return "This thread owns its own worktree, so it cannot take up the Project's checkout. Start a fresh Code thread instead.";
+    case "checkout-unavailable":
+      return "Octant could not read the Project's repository, so there is no checkout to move to. Relink the Project and try again.";
+  }
+}
+
 function TerminalWorkspaceSurface(
   props: CodeWorkspaceProps & {
     readonly nextUuid: () => string;
@@ -754,6 +767,7 @@ function TerminalWorkspaceSurface(
   const terminalRefreshIntervalMs = 500;
   const [terminal, setTerminal] = useState(props.terminal);
   const [failure, setFailure] = useState<string>();
+  const [rebindRefusal, setRebindRefusal] = useState<string>();
   const [reattaching, setReattaching] = useState(
     props.terminal === undefined && props.checkoutAvailability === "available",
   );
@@ -871,6 +885,17 @@ function TerminalWorkspaceSurface(
   };
   startRef.current = start;
 
+  const rebindCheckout = async () => {
+    setRebindRefusal(undefined);
+    const outcome = await props.controller.rebindThreadCheckout(props.scope.threadId);
+    // A successful rebind reinstalls the thread view, so this surface is
+    // replaced by the terminal rather than needing to clear anything itself.
+    if (outcome === undefined) {
+      setRebindRefusal("Octant could not reach the host. Reconnect and try again.");
+      return;
+    }
+    if (outcome.status === "refused") setRebindRefusal(checkoutRebindRefusal(outcome.reason));
+  };
   if (props.checkoutAvailability === "waiting") {
     return (
       <ShellState
@@ -884,8 +909,13 @@ function TerminalWorkspaceSurface(
   if (props.checkoutAvailability === "unavailable") {
     return (
       <ShellState
+        action={{ label: "Use the Project's checkout", onClick: () => void rebindCheckout() }}
         eyebrow="Code terminal"
-        message="The repository identity changed, so Octant kept this checkout fail-closed. Relink the Project or create a fresh Code thread before starting repository processes."
+        message={
+          rebindRefusal ??
+          "The Project now binds a different checkout, so Octant kept this thread fail-closed rather than move its authority on its own. Put the thread on the Project's current checkout to start repository processes again."
+        }
+        role="alert"
         state="warning"
         title="Repository checkout changed"
       />

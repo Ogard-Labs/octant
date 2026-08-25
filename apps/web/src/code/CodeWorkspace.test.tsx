@@ -1,5 +1,5 @@
 import type { WorkspaceTab, WorkspaceTabId } from "@octant/contracts/shell";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { appendTerminalSelection, CodeWorkspace } from "./CodeWorkspace";
@@ -288,19 +288,40 @@ describe("CodeWorkspace", () => {
     expect(planClient.executeOperation).not.toHaveBeenCalled();
   });
 
-  it("explains stale checkout recovery instead of offering a dead terminal action", () => {
+  it("offers the way off a superseded checkout instead of telling the user to abandon the thread", async () => {
+    const rebind = vi.fn(async () => undefined as unknown);
     render(
       <CodeWorkspace
         client={codeClient()}
-        controller={controller("full-access", "unavailable")}
+        controller={controller("full-access", "unavailable", rebind)}
         createUuid={uuidFactory()}
         tab={tab("code-terminal", "Terminal")}
       />,
     );
 
     expect(screen.getByRole("heading", { name: "Repository checkout changed" })).toBeVisible();
-    expect(screen.getByText(/create a fresh Code thread/i)).toBeVisible();
+    // The old copy sent the reader off to start over. Recovery exists now, so
+    // abandoning the thread is no longer the advice.
+    expect(screen.queryByText(/create a fresh Code thread/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start terminal" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Use the Project's checkout" }));
+    await waitFor(() => expect(rebind).toHaveBeenCalledWith(ids.thread));
+  });
+
+  it("says why the host declined to move the thread rather than looking like nothing happened", async () => {
+    const rebind = vi.fn(async () => ({ status: "refused", reason: "managed-worktree" }));
+    render(
+      <CodeWorkspace
+        client={codeClient()}
+        controller={controller("full-access", "unavailable", rebind as never)}
+        createUuid={uuidFactory()}
+        tab={tab("code-terminal", "Terminal")}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Use the Project's checkout" }));
+    expect(await screen.findByText(/owns its own worktree/i)).toBeVisible();
   });
 
   it("keeps a reconnecting checkout in a loading state instead of calling it stale", () => {
@@ -352,8 +373,10 @@ describe("CodeWorkspace", () => {
 function controller(
   executionPolicy: "plan" | "approval-gated" | "full-access",
   availability: "available" | "unavailable" | "waiting" = "available",
+  rebindThreadCheckout = vi.fn(async () => undefined as unknown),
 ) {
   return {
+    rebindThreadCheckout,
     activeView: {
       checkout: {
         id: ids.checkout,

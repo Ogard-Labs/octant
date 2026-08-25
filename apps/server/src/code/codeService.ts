@@ -31,6 +31,7 @@ import {
   type CodeCheckoutId,
   type CodeCheckoutIdentity,
   type CodeCommandResult,
+  type CodeThreadCheckoutRebindRefusal,
   type CodeRepositoryId,
   type CodeWorktreeSourcePreview,
   type CodeWorktreeRef,
@@ -1211,6 +1212,69 @@ export class CodeService {
         current,
       );
       const updatedAt = decodeTimestamp(this.#clock());
+      if (command.kind === "rebind-code-thread-checkout") {
+        // Recovery from a superseded checkout. The thread's id was derived from
+        // the binding revision it was created against, so once the Project is
+        // rebound the recovery loop can only ever call it unavailable. This is
+        // the way back out, and 0032 requires one to exist: explicit, journaled,
+        // and never inferred from a filesystem root that happens to match.
+        const bound = this.#persistence.readCodeCheckout(current.checkoutId);
+        if (bound?.kind === "managed-worktree") {
+          return this.#rebindRefused(current.id, "managed-worktree");
+        }
+        let prepared;
+        try {
+          prepared = await this.#checkouts.observe(authenticatedWindowId, current.projectId);
+        } catch {
+          return this.#rebindRefused(current.id, "checkout-unavailable");
+        }
+        if (prepared.checkout.availability !== "available") {
+          return this.#rebindRefused(current.id, "checkout-unavailable");
+        }
+        if (String(prepared.checkout.id) === String(current.checkoutId)) {
+          return this.#rebindRefused(current.id, "already-bound");
+        }
+        if (
+          !repeatsJournaledCheckout(
+            this.#persistence.readCodeCheckout(prepared.checkout.id),
+            prepared.checkout,
+          )
+        ) {
+          this.#append(
+            "code-checkout",
+            prepared.checkout.id,
+            this.#persistence.readCodeCheckoutAggregateVersion(prepared.checkout.id),
+            "code.checkout-observed@1",
+            { kind: "checkout-observed", checkout: prepared.checkout },
+          );
+        }
+        const rebound = decodeCodeThread({
+          ...current,
+          bindingRevisionId: prepared.bindingRevisionId,
+          repositoryId: prepared.checkout.repositoryId,
+          checkoutId: prepared.checkout.id,
+          version: command.expectedVersion + 1,
+          updatedAt,
+        });
+        this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
+          kind: "thread-updated",
+          thread: rebound,
+        });
+        // 0032: recovery discards, never revalidates. A session grant of Full
+        // access was minted against the checkout the thread just left, so it
+        // does not carry onto the new one; the thread returns to its persisted
+        // posture and the user re-grants if they still want it.
+        this.#sessionAuthority.revokeThread(authenticatedWindowId, current.id);
+        return {
+          kind: "thread-checkout-rebind",
+          threadId: current.id,
+          outcome: {
+            status: "rebound",
+            thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, rebound),
+            checkout: prepared.checkout,
+          },
+        };
+      }
       const currentContextDigest = currentCheckoutDigest(
         this.#persistence.readCodeCheckout(current.checkoutId),
         current,
@@ -2103,6 +2167,13 @@ export class CodeService {
       version: 0 as AggregateVersion,
       updatedAt: decodeTimestamp(this.#clock()),
     };
+  }
+
+  #rebindRefused(
+    threadId: CodeThreadId,
+    reason: CodeThreadCheckoutRebindRefusal,
+  ): CodeCommandResult {
+    return { kind: "thread-checkout-rebind", threadId, outcome: { status: "refused", reason } };
   }
 
   async #authorizeThread(authenticatedWindowId: WindowId, thread: CodeThread): Promise<void> {
