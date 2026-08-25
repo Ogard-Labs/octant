@@ -80,7 +80,10 @@ host becomes a first-class destination.
   through an authenticated thread-scoped host proxy, never a direct bind.
 - The filesystem may persist across turns and Station restarts. Processes do
   not. Restart revalidates the owner, Project, recipe, provider, authority, and
-  network grant before new work starts.
+  network grant before new work starts. Recovery tries a bounded graceful stop,
+  then a force signal that preserves the container filesystem; if both fail,
+  the driver refuses recovery and keeps the runtime tracked for explicit
+  cleanup.
 - Code returns through an explicit commit, Git bundle, patch, or named artifact
   with provenance and diff. Import and destruction require user confirmation;
   no capsule pushes, merges, or deletes itself as a side effect.

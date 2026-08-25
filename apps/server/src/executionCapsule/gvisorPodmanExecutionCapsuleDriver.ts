@@ -115,7 +115,7 @@ interface GvisorPodmanRuntime {
   readonly capsuleId: string;
   readonly image: string;
   readonly disk: ExecutionCapsuleDiskLocation;
-  readonly state: "container-removed" | "ready" | "stopped";
+  readonly state: "container-removed" | "ready" | "stop-failed" | "stopped";
 }
 
 /**
@@ -956,7 +956,21 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         .run(this.#podmanPath, [...podmanStoreArgs(disk), "stop", "--time", "10", runtimeId])
         .catch(() => undefined);
       if (stopped?.exitCode !== 0) {
-        this.#reportDiagnostic("recover-stop", "live recovered runtime did not stop");
+        const killed = await this.#runner
+          .run(this.#podmanPath, [...podmanStoreArgs(disk), "kill", "--signal", "KILL", runtimeId])
+          .catch(() => undefined);
+        if (killed?.exitCode !== 0) {
+          this.#reportDiagnostic("recover-stop", "live recovered runtime could not be stopped");
+          this.#runtimes.set(runtimeId, {
+            runtimeId,
+            capsuleId: String(input.request.capsuleId),
+            image: String(input.request.recipe.image),
+            disk,
+            state: "stop-failed",
+          });
+          return { status: "refused", reason: "runtime-unavailable" };
+        }
+        this.#reportDiagnostic("recover-stop", "live recovered runtime required a forced stop");
         await this.#diskStore.close(disk).catch(() => undefined);
         return { status: "refused", reason: "runtime-unavailable" };
       }

@@ -738,6 +738,8 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     let recoveredEffectiveCaps: unknown = [];
     let recoveredMounts: unknown = [];
     let recoveredRunning = false;
+    let recoveredStopExitCode = 0;
+    let recoveredKillExitCode = 0;
     const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
       if (command === "/usr/bin/podman" && args[0] === "info") {
         return {
@@ -807,6 +809,12 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
           ]),
           stderr: "",
         };
+      }
+      if (command === "/usr/bin/podman" && args.includes("stop")) {
+        return { exitCode: recoveredStopExitCode, stdout: "", stderr: "" };
+      }
+      if (command === "/usr/bin/podman" && args.includes("kill")) {
+        return { exitCode: recoveredKillExitCode, stdout: "", stderr: "" };
       }
       return { exitCode: 0, stdout: "", stderr: "" };
     });
@@ -992,7 +1000,51 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       fixturePodmanArgs(["stop", "--time", "10", runtimeId]),
     );
 
+    recoveredStopExitCode = 1;
+    recoveredKillExitCode = 0;
+    const forcedStop = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    await expect(forcedStop.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["kill", "--signal", "KILL", runtimeId]),
+    );
+
+    recoveredKillExitCode = 1;
+    const failedStop = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    await expect(failedStop.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    await expect(failedStop.release({ runtimeId })).resolves.toEqual({ status: "released" });
+
     recoveredRunning = false;
+    recoveredStopExitCode = 0;
+    recoveredKillExitCode = 0;
     recoveredMounts = [];
     recoveredEffectiveCaps = 7;
     const inspectShapeDiagnostic = vi.fn();
