@@ -99,6 +99,10 @@ evidence("gVisor execution capsule evidence", () => {
       runscPath: process.env.OCTANT_RUNSC_PATH ?? "/usr/bin/runsc",
       runner,
       diskStore,
+      recordDiagnostic: (diagnostic) =>
+        console.error(
+          JSON.stringify({ kind: "execution-capsule-evidence-driver-failed", ...diagnostic }),
+        ),
     });
     const exportIds = [
       "77777777-7777-4777-8777-777777777777",

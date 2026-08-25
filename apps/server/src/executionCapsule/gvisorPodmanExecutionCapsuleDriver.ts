@@ -68,6 +68,10 @@ export interface GvisorPodmanExecutionCapsuleDriverOptions {
   readonly supplementaryGroups?: ReadonlyArray<number>;
   readonly identityProbe?: ExecutionCapsuleStationIdentityProbe;
   readonly diskStore?: ExecutionCapsuleDiskStore;
+  readonly recordDiagnostic?: (diagnostic: {
+    readonly operation: string;
+    readonly message: string;
+  }) => void;
 }
 
 export interface ExecutionCapsuleRuntimeEnvironment {
@@ -113,6 +117,9 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
   readonly #bundleStore: ExecutionCapsuleGitBundleStore;
   readonly #identityProbe: ExecutionCapsuleStationIdentityProbe;
   readonly #diskStore: ExecutionCapsuleDiskStore;
+  readonly #recordDiagnostic:
+    | ((diagnostic: { readonly operation: string; readonly message: string }) => void)
+    | undefined;
   readonly #runtimes = new Map<string, GvisorPodmanRuntime>();
 
   constructor(options: GvisorPodmanExecutionCapsuleDriverOptions) {
@@ -154,6 +161,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         expectedGid: this.#gid,
         runner: this.#runner,
       });
+    this.#recordDiagnostic = options.recordDiagnostic;
   }
 
   async probe(): Promise<ExecutionCapsuleDriverProbe> {
@@ -492,6 +500,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
 
     let artifactPath: string | undefined;
     let capsuleBundleCreated = false;
+    let operation = "read-head";
     try {
       const head = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(runtime.disk),
@@ -511,6 +520,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         return { status: "failed", reason: "export-failed" };
       }
       capsuleBundleCreated = true;
+      operation = "create-bundle";
       const bundled = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(runtime.disk),
         "exec",
@@ -527,6 +537,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         "--all",
       ]);
       if (bundled.exitCode !== 0) return { status: "failed", reason: "export-failed" };
+      operation = "verify-producer-bundle";
       const bundleVerified = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(runtime.disk),
         "exec",
@@ -540,6 +551,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         "/tmp/octant-export.bundle",
       ]);
       if (bundleVerified.exitCode !== 0) return { status: "failed", reason: "export-failed" };
+      operation = "digest-producer-bundle";
       const digested = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(runtime.disk),
         "exec",
@@ -555,7 +567,9 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         return { status: "failed", reason: "export-failed" };
       }
 
+      operation = "reserve-host-artifact";
       artifactPath = await this.#bundleStore.reserve(input.runtimeId);
+      operation = "copy-host-artifact";
       const copied = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(runtime.disk),
         "cp",
@@ -564,10 +578,12 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         artifactPath,
       ]);
       if (copied.exitCode !== 0) throw new Error("Execution capsule bundle copy failed.");
+      operation = "verify-host-artifact";
       const verified = await this.#bundleStore.verify({
         artifactPath,
         expectedSha256,
       });
+      operation = "verify-outside-producer";
       const verifiedOutsideProducer = await this.#verifyExportOutsideProducer({
         runtimeId: input.runtimeId,
         artifactPath,
@@ -582,7 +598,15 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         byteLength: verified.byteLength,
         headRevision,
       };
-    } catch {
+    } catch (error) {
+      try {
+        this.#recordDiagnostic?.({
+          operation,
+          message: error instanceof Error ? error.message : "unknown export failure",
+        });
+      } catch {
+        // Diagnostics never change the user-visible export outcome.
+      }
       if (artifactPath !== undefined) {
         await this.#bundleStore.discard?.(artifactPath).catch(() => undefined);
       }
