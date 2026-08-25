@@ -60,6 +60,10 @@ host becomes a first-class destination.
   traverse-only allowance, and is recreated during recovery;
   it contains no capsule filesystem or source data. No capsule store is a
   host-checkout bind mount.
+- gVisor's additional self-backed root overlay is disabled. Each rootfs is
+  already an independent private VFS layer inside that capsule's fixed-size
+  image, and direct propagation lets the host export broker read only the
+  explicitly requested bundle through Podman after the in-capsule checks.
 - The Station starts each Podman `no-conmon` and `runsc` capsule inside a
   transient scope owned by the Station identity's systemd user manager. That
   outer scope applies the CPU, memory, and PID limits. Rootless `runsc` ignores

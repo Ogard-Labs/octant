@@ -130,7 +130,7 @@ jobs:
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
             PATH=/usr/local/bin:/usr/bin:/bin \
             OCTANT_GVISOR_CAPSULE_IMAGE="$OCTANT_GVISOR_CAPSULE_IMAGE" \
-            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/systemd-run --user --scope --quiet --collect --unit octant-runsc-preflight.scope --property CPUQuota=10% --property MemoryMax=268435456 --property TasksMax=64 /usr/bin/podman --cgroup-manager cgroupfs --runtime /usr/bin/runsc --runtime-flag platform=systrap --runtime-flag ignore-cgroups --runtime-flag network=none run --rm --log-driver none --network none --cgroups no-conmon --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true'
+            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/systemd-run --user --scope --quiet --collect --unit octant-runsc-preflight.scope --property CPUQuota=10% --property MemoryMax=268435456 --property TasksMax=64 /usr/bin/podman --cgroup-manager cgroupfs --runtime /usr/bin/runsc --runtime-flag platform=systrap --runtime-flag ignore-cgroups --runtime-flag network=none --runtime-flag overlay2=none run --rm --log-driver none --network none --cgroups no-conmon --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true'
       - name: Prove a fixed-size private VFS store
         env:
           OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
@@ -160,7 +160,7 @@ jobs:
               chmod 0700 "$root/mount"
               mkdir -m 0700 "$root/mount/graph" "$root/mount/run"
               mkdir -m 0700 "$root/debug"
-              if ! /usr/bin/systemd-run --user --scope --quiet --collect --unit octant-vfs-preflight.scope --property CPUQuota=10% --property MemoryMax=268435456 --property TasksMax=64 /usr/bin/podman --root "$root/mount/graph" --runroot "$root/mount/run" --storage-driver vfs --cgroup-manager cgroupfs --runtime /usr/bin/runsc --runtime-flag debug --runtime-flag "debug-log=$root/debug/" --runtime-flag platform=systrap --runtime-flag ignore-cgroups --runtime-flag network=none run --rm --log-driver none --network none --cgroups no-conmon --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true; then
+              if ! /usr/bin/systemd-run --user --scope --quiet --collect --unit octant-vfs-preflight.scope --property CPUQuota=10% --property MemoryMax=268435456 --property TasksMax=64 /usr/bin/podman --root "$root/mount/graph" --runroot "$root/mount/run" --storage-driver vfs --cgroup-manager cgroupfs --runtime /usr/bin/runsc --runtime-flag debug --runtime-flag "debug-log=$root/debug/" --runtime-flag platform=systrap --runtime-flag ignore-cgroups --runtime-flag network=none --runtime-flag overlay2=none run --rm --log-driver none --network none --cgroups no-conmon --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true; then
                 find "$root/debug" -maxdepth 1 -type f -exec /usr/bin/tail -n 160 {} \;
                 exit 1
               fi

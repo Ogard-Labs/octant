@@ -934,6 +934,8 @@ function gvisorRuntimeArgs(runscPath: string): ReadonlyArray<string> {
     "ignore-cgroups",
     "--runtime-flag",
     "network=none",
+    "--runtime-flag",
+    "overlay2=none",
   ];
 }
 
@@ -1184,6 +1186,7 @@ function matchesProtectedRuntime(
     hasFlagValue(command, "--runtime-flag", "platform=systrap") &&
     hasFlagValue(command, "--runtime-flag", "ignore-cgroups") &&
     hasFlagValue(command, "--runtime-flag", "network=none") &&
+    hasFlagValue(command, "--runtime-flag", "overlay2=none") &&
     hasFlagValue(command, "--log-driver", "none") &&
     hasFlagValue(command, "--network", "none") &&
     hasFlagValue(command, "--cgroups", "no-conmon") &&
