@@ -43,7 +43,8 @@ describe("ModeSwitcher", () => {
       expect(frame).toContainElement(frame.querySelector("svg.icon"));
     }
     expect(cssRule(".mode__icon-frame")).toContain("place-items: center;");
-    expect(cssRule(".mode__icon-frame")).toContain("width: 18px;");
+    expect(cssRule(".mode__icon-frame")).toContain("width: 20px;");
+    expect(cssRule(".mode__icon-frame")).toContain("height: 20px;");
     expect(cssRule(".mode__icon-frame > .icon")).toContain("width: 16px;");
     expect(cssRule(".mode__icon-frame > .icon")).toContain("height: 16px;");
 

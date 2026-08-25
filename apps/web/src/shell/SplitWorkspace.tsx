@@ -19,6 +19,8 @@ import {
 } from "../ui/base/OctantContextMenu";
 import { WorkspaceDragStatus, WorkspaceDropOverlay } from "./WorkspaceDropOverlay";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
+import { ProviderGlyph } from "../providers/ProviderGlyph";
+import type { ThreadProviderIdentity } from "./navigationModel";
 
 const splitContainerStyle = { height: "100%", minHeight: 0, minWidth: 0, width: "100%" };
 
@@ -52,6 +54,10 @@ export interface SplitWorkspaceProps {
     placement: "before" | "after",
   ) => void;
   readonly renderSurface: (surface: WorkspaceTab, paneId: PaneId) => React.ReactNode;
+  /** Provider identity for thread-owned surfaces, used by the compact pane tab. */
+  readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
+  /** The same preference controls provider marks in navigation and pane tabs. */
+  readonly showProviderIcons?: boolean;
   readonly totalWorkspacePaneCount: number;
 }
 
@@ -263,6 +269,10 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
   const canSplit = canSplitPane(props.layout, pane.paneId, props.totalWorkspacePaneCount);
   const dragKey = `pane:${String(pane.paneId)}`;
   const [menuOpen, setMenuOpen] = useState(false);
+  const provider =
+    props.showProviderIcons === false || !("threadId" in surface)
+      ? undefined
+      : props.providerByThreadId?.get(String(surface.threadId));
   return (
     <section
       aria-current={active ? "true" : undefined}
@@ -300,7 +310,20 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
             onPointerUp={props.drag.onPointerUp}
             title="Drag to move or split"
           >
-            <GripVertical aria-hidden="true" size={13} strokeWidth={1.8} />
+            <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
+            {provider === undefined ? null : (
+              <span
+                aria-hidden="true"
+                className="workspace-pane__provider"
+                title={provider.displayName}
+              >
+                <ProviderGlyph
+                  displayName={provider.displayName}
+                  driverKind={provider.driverKind}
+                  size={14}
+                />
+              </span>
+            )}
             <span className="workspace-pane__title">{surface.title}</span>
           </span>
           <span

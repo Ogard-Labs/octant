@@ -42,7 +42,7 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
   return (
     <section aria-label="Start a project" className="scaffolds">
       <header className="scaffolds__header">
-        <Sparkles aria-hidden="true" size={13} strokeWidth={1.8} />
+        <Sparkles aria-hidden="true" size={14} strokeWidth={1.8} />
         <span>Start a project</span>
       </header>
 

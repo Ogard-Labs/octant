@@ -26,6 +26,22 @@ describe("ProjectThreadRows", () => {
     expect(provider?.nextElementSibling).toBe(title);
   });
 
+  it("keeps activity at the left edge of the thread title", () => {
+    render(
+      <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, activity: "working" }]} />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    const activity = row.querySelector(".sidebar-navigation__thread-status");
+    const provider = row.querySelector(".sidebar-navigation__thread-provider");
+    const title = row.querySelector(".sidebar-navigation__thread-copy");
+    expect(activity).toHaveAttribute("data-activity", "working");
+    expect(activity?.compareDocumentPosition(provider ?? row)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(provider?.compareDocumentPosition(title ?? row)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("says a thread needs attention through a labelled dot rather than a badge", () => {
     render(
       <ProjectThreadRows

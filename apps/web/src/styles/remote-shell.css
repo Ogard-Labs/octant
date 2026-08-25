@@ -185,7 +185,7 @@
 .remote-shell__device-fact dt {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }

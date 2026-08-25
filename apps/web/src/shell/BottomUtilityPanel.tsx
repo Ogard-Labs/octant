@@ -1,16 +1,25 @@
 import { X } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
-import { DockToolIcon } from "./dockToolIcons";
+import { DockUtilityLauncher } from "./DockUtilityLauncher";
 import { IconButton } from "./IconButton";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import { MAX_BOTTOM_PANEL_HEIGHT, MIN_BOTTOM_PANEL_HEIGHT } from "./useShellPresentation";
+import type {
+  RightUtilityDockSurfaceDescriptor,
+  RightUtilityDockSurfaceId,
+} from "./rightUtilityDockModel";
+import { DockToolStrip } from "./DockToolStrip";
 
 export interface BottomUtilityPanelProps {
   readonly height: number;
-  readonly onClose: () => void;
+  readonly onClose: (surface?: RightUtilityDockSurfaceId) => void;
   readonly onCommitHeight: (height: number) => void;
   readonly onPreviewHeight: (height: number) => void;
-  readonly terminal: ReactNode;
+  readonly onOpenTool: (surface: RightUtilityDockSurfaceId) => void;
+  readonly activeSurface: RightUtilityDockSurfaceDescriptor;
+  readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+  readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+  readonly content: ReactNode;
 }
 
 /**
@@ -37,15 +46,26 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
         value={props.height}
       />
       <header className="bottom-utility-panel__toolbar">
-        <div aria-label="Bottom panel tools" className="bottom-utility-panel__tabs" role="tablist">
-          <span aria-selected="true" className="bottom-utility-panel__tab" role="tab" tabIndex={0}>
-            <DockToolIcon surface="terminal" />
-            <span>Terminal</span>
-          </span>
+        {/* DockToolStrip owns the tablist and its arrow-key movement. Naming
+            this wrapper a second one nested the widget and swept the launcher,
+            which is a button and not a tab, inside it. */}
+        <div className="bottom-utility-panel__tabs">
+          <DockToolStrip
+            active={props.activeSurface.id}
+            onClose={props.onClose}
+            onSelect={props.onOpenTool}
+            tabs={props.tabs}
+          />
+          <DockUtilityLauncher
+            onOpen={props.onOpenTool}
+            surfaces={props.launchableSurfaces.filter(
+              (surface) => !props.tabs.some((tab) => tab.id === surface.id),
+            )}
+          />
         </div>
-        <IconButton icon={X} label="Hide bottom panel" onClick={props.onClose} />
+        <IconButton icon={X} label="Hide bottom panel" onClick={() => props.onClose()} />
       </header>
-      <div className="bottom-utility-panel__content">{props.terminal}</div>
+      <div className="bottom-utility-panel__content">{props.content}</div>
     </section>
   );
 }

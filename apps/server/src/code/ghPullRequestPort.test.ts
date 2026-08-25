@@ -474,7 +474,7 @@ describe("GhPullRequestPort active list", () => {
     mergeable: "MERGEABLE",
   };
 
-  it("lists bounded pull-request history with mergeability without mutating GitHub", async () => {
+  it("lists bounded active pull requests with mergeability without mutating GitHub", async () => {
     const { command, port } = fixture([
       {
         exitCode: 0,
@@ -526,7 +526,7 @@ describe("GhPullRequestPort active list", () => {
       "--repo",
       "octant/octant",
       "--state",
-      "all",
+      "open",
       "--limit",
       "100",
       "--json",
@@ -535,13 +535,13 @@ describe("GhPullRequestPort active list", () => {
     expect(vi.mocked(command.run).mock.calls.some(([args]) => args.includes("merge"))).toBe(false);
   });
 
-  it("normalizes merged and closed history", async () => {
+  it("normalizes the active list state and mergeability", async () => {
     const { port } = fixture([
       {
         exitCode: 0,
         stdout: JSON.stringify([
-          { ...activeRow, state: "MERGED", mergeable: "UNKNOWN" },
-          { ...activeRow, number: 13, state: "CLOSED", mergeable: "CONFLICTING" },
+          { ...activeRow, state: "OPEN", mergeable: "UNKNOWN" },
+          { ...activeRow, number: 13, state: "OPEN", isDraft: true, mergeable: "CONFLICTING" },
         ]),
       },
     ]);
@@ -553,8 +553,8 @@ describe("GhPullRequestPort active list", () => {
     expect(result).toMatchObject({
       status: "ok",
       rows: [
-        { state: "merged", mergeability: "unknown" },
-        { state: "closed", mergeability: "conflicting" },
+        { state: "open", mergeability: "unknown" },
+        { state: "open", mergeability: "conflicting" },
       ],
     });
   });

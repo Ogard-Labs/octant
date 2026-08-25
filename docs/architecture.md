@@ -186,7 +186,8 @@ lists active open and draft pull requests from authorized connected Code
 Projects. The list is a cached read of an in-memory snapshot: opening it,
 navigating, and ordinary board queries do not call GitHub. Only an explicit
 Refresh all or per-Project refresh talks to the installed authenticated `gh`
-CLI, sequentially and within preview bounds. The journal never stores that
+CLI. Independent repository reads run concurrently, results reconcile in stable
+Project order, and the refresh remains within preview bounds. The journal never stores that
 cache. It stores only exact PR identities already produced by Code operations,
 so a restart can show an identity as stale and unknown until the next explicit
 refresh. Context usage is a circular used-versus-available meter on
