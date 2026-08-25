@@ -64,6 +64,7 @@ host becomes a first-class destination.
   already an independent private VFS layer inside that capsule's fixed-size
   image, and direct propagation lets the host export broker read only the
   explicitly requested bundle through Podman after the in-capsule checks.
+  Shared rootfs revalidation is enabled for that controlled copy boundary.
 - The Station starts each Podman `no-conmon` and `runsc` capsule inside a
   transient scope owned by the Station identity's systemd user manager. That
   outer scope applies the CPU, memory, and PID limits. Rootless `runsc` ignores
