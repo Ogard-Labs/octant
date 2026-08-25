@@ -15,9 +15,14 @@ afterEach(async () => {
 
 function fixture() {
   let mounted = false;
-  const run = vi.fn<ExecutionCapsuleDiskCommandRunner["run"]>(async (command) => {
+  const run = vi.fn<ExecutionCapsuleDiskCommandRunner["run"]>(async (command, args) => {
     if (command === "/usr/bin/fuse2fs") mounted = true;
     if (command === "/usr/bin/fusermount3") mounted = false;
+    if (command === "/usr/bin/podman" && args[0] === "unshare") {
+      const target = args.at(-1);
+      if (target === undefined) throw new Error("Mapped cleanup target is missing.");
+      await rm(target, { force: true, recursive: true });
+    }
     return { exitCode: 0, stdout: "", stderr: "" };
   });
   return {
@@ -130,6 +135,15 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     });
     expect(run.mock.calls.some(([command]) => command === "/usr/sbin/mkfs.ext4")).toBe(false);
     expect(run.mock.calls.some(([command]) => command === "/usr/bin/fuse2fs")).toBe(true);
+    expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
+      "unshare",
+      "/usr/bin/rm",
+      "--recursive",
+      "--force",
+      "--one-file-system",
+      "--",
+      recovered.runRoot,
+    ]);
   });
 
   it("refuses a resized backing image before remounting it", async () => {

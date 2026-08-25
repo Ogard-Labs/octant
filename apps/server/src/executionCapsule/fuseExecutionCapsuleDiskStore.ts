@@ -45,6 +45,8 @@ export interface FuseExecutionCapsuleDiskStoreOptions {
   readonly mkfsPath?: string;
   readonly fuse2fsPath?: string;
   readonly fusermountPath?: string;
+  readonly podmanPath?: string;
+  readonly rmPath?: string;
 }
 
 /**
@@ -61,6 +63,8 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
   readonly #mkfsPath: string;
   readonly #fuse2fsPath: string;
   readonly #fusermountPath: string;
+  readonly #podmanPath: string;
+  readonly #rmPath: string;
 
   constructor(options: FuseExecutionCapsuleDiskStoreOptions) {
     this.#stateRoot = options.stateRoot;
@@ -72,6 +76,8 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     this.#mkfsPath = options.mkfsPath ?? "/usr/sbin/mkfs.ext4";
     this.#fuse2fsPath = options.fuse2fsPath ?? "/usr/bin/fuse2fs";
     this.#fusermountPath = options.fusermountPath ?? "/usr/bin/fusermount3";
+    this.#podmanPath = options.podmanPath ?? "/usr/bin/podman";
+    this.#rmPath = options.rmPath ?? "/usr/bin/rm";
   }
 
   async create(input: {
@@ -148,7 +154,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
         throw new Error("Execution capsule disk unmount failed.");
       }
     }
-    await rm(location.runRoot, { force: true, recursive: true });
+    await this.#removeRunRoot(location);
   }
 
   async release(location: ExecutionCapsuleDiskLocation): Promise<void> {
@@ -164,6 +170,8 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     if (
       !isAbsolute(this.#stateRoot) ||
       !isAbsolute(this.#runRootBase) ||
+      !isAbsolute(this.#podmanPath) ||
+      !isAbsolute(this.#rmPath) ||
       Buffer.byteLength(runRoot) > 50 ||
       !/^octant-capsule-[a-f0-9]{32}$/.test(input.runtimeId) ||
       !Number.isSafeInteger(input.diskBytes) ||
@@ -241,9 +249,24 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     location: ExecutionCapsuleDiskLocation,
     replaceExisting: boolean,
   ): Promise<void> {
-    if (replaceExisting) await rm(location.runRoot, { force: true, recursive: true });
+    if (replaceExisting) await this.#removeRunRoot(location);
     await mkdir(location.runRoot, { mode: 0o700 });
     await ensurePrivateDirectory(location.runRoot, this.#expectedUid, false);
+  }
+
+  async #removeRunRoot(location: ExecutionCapsuleDiskLocation): Promise<void> {
+    const removed = await this.#runner.run(this.#podmanPath, [
+      "unshare",
+      this.#rmPath,
+      "--recursive",
+      "--force",
+      "--one-file-system",
+      "--",
+      location.runRoot,
+    ]);
+    if (removed.exitCode !== 0) {
+      throw new Error("Execution capsule run state cleanup failed.");
+    }
   }
 }
 

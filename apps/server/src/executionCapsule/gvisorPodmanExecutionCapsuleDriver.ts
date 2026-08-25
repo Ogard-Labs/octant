@@ -172,6 +172,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         ),
         expectedUid: this.#uid,
         expectedGid: this.#gid,
+        podmanPath: this.#podmanPath,
         runner: this.#runner,
       });
     this.#recordDiagnostic = options.recordDiagnostic;
