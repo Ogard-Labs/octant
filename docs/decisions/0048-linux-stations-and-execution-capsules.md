@@ -60,7 +60,7 @@ host becomes a first-class destination.
   traverse-only allowance, and is recreated during recovery;
   it contains no capsule filesystem or source data. No capsule store is a
   host-checkout bind mount.
-- The Station starts each cgroup-disabled Podman and `runsc` capsule inside a
+- The Station starts each Podman `no-conmon` and `runsc` capsule inside a
   transient scope owned by the Station identity's systemd user manager. That
   outer scope applies the CPU, memory, and PID limits. Rootless `runsc` ignores
   its unsupported duplicate cgroup setup; evidence reads the live sandbox

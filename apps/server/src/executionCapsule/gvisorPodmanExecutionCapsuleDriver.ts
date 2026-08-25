@@ -269,7 +269,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         "--network",
         "none",
         "--cgroups",
-        "disabled",
+        "no-conmon",
         "--userns",
         "auto",
         "--user",
@@ -647,7 +647,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         "--network",
         "none",
         "--cgroups",
-        "disabled",
+        "no-conmon",
         "--userns",
         "auto",
         "--user",
@@ -1141,7 +1141,7 @@ function matchesProtectedRuntime(
     hasFlagValue(command, "--runtime-flag", "network=none") &&
     hasFlagValue(command, "--log-driver", "none") &&
     hasFlagValue(command, "--network", "none") &&
-    hasFlagValue(command, "--cgroups", "disabled") &&
+    hasFlagValue(command, "--cgroups", "no-conmon") &&
     hasFlagValue(command, "--userns", "auto") &&
     hasFlagValue(command, "--cap-drop", "all") &&
     hasFlagValue(command, "--security-opt", "no-new-privileges")
