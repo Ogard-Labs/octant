@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import {
   cancelMobileChatWorkItem,
@@ -40,6 +40,11 @@ import { IconButton } from "../ui/IconButton";
 import { MessageBubble } from "../ui/MessageBubble";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { ThreadWorkShelf } from "../ui/ThreadWorkShelf";
+import {
+  MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS,
+  enteredMobileForeground,
+  nextMobileChatIdleRefreshDelay,
+} from "./threadRefreshPolicy";
 
 const IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
@@ -63,6 +68,41 @@ function guessImageMediaType(uri: string, reported?: string | null): string {
   if (lower.endsWith(".webp")) return "image/webp";
   if (lower.endsWith(".gif")) return "image/gif";
   return "image/jpeg";
+}
+
+async function waitForMobileChatForeground(signal: AbortSignal): Promise<boolean> {
+  if (AppState.currentState === "active") return true;
+  return new Promise((resolve) => {
+    let settled = false;
+    let subscription: { remove: () => void } | undefined;
+    const abort = () => finish(false);
+    const finish = (active: boolean) => {
+      if (settled) return;
+      settled = true;
+      subscription?.remove();
+      signal.removeEventListener("abort", abort);
+      resolve(active);
+    };
+    subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active") finish(true);
+    });
+    signal.addEventListener("abort", abort, { once: true });
+    if (AppState.currentState === "active") finish(true);
+  });
+}
+
+async function waitForMobileChatRefresh(signal: AbortSignal, delayMs: number): Promise<boolean> {
+  if (signal.aborted) return false;
+  return new Promise((resolve) => {
+    const finish = (completed: boolean) => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      resolve(completed);
+    };
+    const abort = () => finish(false);
+    const timer = setTimeout(() => finish(true), delayMs);
+    signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 export interface ThreadScreenProps {
@@ -174,6 +214,17 @@ export function ThreadScreen(props: ThreadScreenProps) {
   }, [refresh]);
 
   useEffect(() => {
+    if (props.selected?.mode !== "chat") return;
+    let previous = AppState.currentState;
+    const subscription = AppState.addEventListener("change", (next) => {
+      const returnedToForeground = enteredMobileForeground(previous, next);
+      previous = next;
+      if (returnedToForeground) void refresh({ quiet: true });
+    });
+    return () => subscription.remove();
+  }, [props.selected?.mode, refresh]);
+
+  useEffect(() => {
     if (transport === undefined || props.selected?.mode !== "chat") {
       return;
     }
@@ -182,12 +233,15 @@ export function ThreadScreen(props: ThreadScreenProps) {
     let stopped = false;
 
     const run = async () => {
+      let idleDelayMs = MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS;
       while (!stopped && !controller.signal.aborted && viewRef.current === undefined) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       if (stopped || controller.signal.aborted || viewRef.current === undefined) return;
       let cursor = viewRef.current.lastSequence;
       while (!stopped && !controller.signal.aborted) {
+        if (!(await waitForMobileChatForeground(controller.signal))) return;
+        let receivedFrame = false;
         try {
           for await (const _frame of subscribeMobileChatEvents({
             transport,
@@ -196,17 +250,22 @@ export function ThreadScreen(props: ThreadScreenProps) {
             signal: controller.signal,
           })) {
             if (stopped || controller.signal.aborted) return;
+            receivedFrame = true;
+            cursor = _frame.sequence;
+          }
+          if (stopped || controller.signal.aborted) return;
+          if (receivedFrame) {
             const next = await loadMobileChatThread(transport, threadId);
             if (stopped || controller.signal.aborted) return;
             setView(next);
             cursor = next.lastSequence;
           }
-          if (stopped || controller.signal.aborted) return;
-          const next = await loadMobileChatThread(transport, threadId);
-          if (stopped || controller.signal.aborted) return;
-          setView(next);
-          cursor = next.lastSequence;
-          await new Promise((resolve) => setTimeout(resolve, 750));
+          const delayMs = receivedFrame ? MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS : idleDelayMs;
+          if (!(await waitForMobileChatRefresh(controller.signal, delayMs))) return;
+          idleDelayMs = nextMobileChatIdleRefreshDelay({
+            currentDelayMs: idleDelayMs,
+            receivedFrame,
+          });
         } catch {
           if (stopped || controller.signal.aborted) return;
           try {
@@ -218,7 +277,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
           } catch {
             // Keep reconnecting while the thread is open.
           }
-          await new Promise((resolve) => setTimeout(resolve, 1_500));
+          if (!(await waitForMobileChatRefresh(controller.signal, idleDelayMs))) return;
+          idleDelayMs = nextMobileChatIdleRefreshDelay({
+            currentDelayMs: idleDelayMs,
+            receivedFrame: false,
+          });
         }
       }
     };
