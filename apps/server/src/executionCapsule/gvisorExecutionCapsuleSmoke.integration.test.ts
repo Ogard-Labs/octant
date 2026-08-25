@@ -282,6 +282,7 @@ evidence("gVisor execution capsule evidence", () => {
       });
       const recovery = service.recoveryRecord(second.capsuleId);
       if (recovery.status !== "ready") throw new Error("Capsule recovery record is unavailable.");
+      const recoveredRunner = evidenceCommandRunner();
       recoveredDriver = new GvisorPodmanExecutionCapsuleDriver({
         stateRoot,
         capacity: {
@@ -292,6 +293,8 @@ evidence("gVisor execution capsule evidence", () => {
         },
         podmanPath: process.env.OCTANT_PODMAN_PATH ?? "/usr/bin/podman",
         runscPath: process.env.OCTANT_RUNSC_PATH ?? "/usr/bin/runsc",
+        runner: recoveredRunner,
+        diskStore: evidenceDiskStore({ stateRoot, runner: recoveredRunner }),
         recordDiagnostic: (diagnostic) =>
           console.error(
             JSON.stringify({ kind: "execution-capsule-evidence-driver-failed", ...diagnostic }),
