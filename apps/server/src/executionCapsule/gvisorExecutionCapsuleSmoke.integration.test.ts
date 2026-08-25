@@ -301,7 +301,11 @@ evidence("gVisor execution capsule evidence", () => {
         driver: recoveredDriver,
         revalidateRecovery: async () => ({ status: "valid" }),
       });
-      await expect(afterRestart.recover(recovery.record)).resolves.toMatchObject({
+      const recovered = await afterRestart.recover(recovery.record);
+      if (recovered.status !== "stopped") {
+        throw new Error(`Capsule recovery ${JSON.stringify(recovered)}.`);
+      }
+      expect(recovered).toMatchObject({
         status: "stopped",
         receipt: { capsuleId: second.capsuleId, status: "stopped" },
       });
