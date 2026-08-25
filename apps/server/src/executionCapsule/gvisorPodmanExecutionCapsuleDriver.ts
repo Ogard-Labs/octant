@@ -1381,7 +1381,7 @@ function createNodeArtifactWriter(
       const piped = pipeline(
         child.stdout,
         limiter,
-        artifact.createWriteStream({ autoClose: false }),
+        artifact.createWriteStream({ autoClose: true }),
       ).catch((error: unknown) => {
         child.kill("SIGKILL");
         throw error;
@@ -1396,7 +1396,7 @@ function createNodeArtifactWriter(
         }
         return { exitCode: exitResult.value, stderr };
       } finally {
-        await artifact.close();
+        await artifact.close().catch(() => undefined);
       }
     },
   };
