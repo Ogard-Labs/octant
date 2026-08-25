@@ -11,6 +11,10 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import { ExecutionCapsuleService } from "./executionCapsuleService";
 import {
+  FuseExecutionCapsuleDiskStore,
+  type ExecutionCapsuleDiskStore,
+} from "./fuseExecutionCapsuleDiskStore";
+import {
   GvisorPodmanExecutionCapsuleDriver,
   type ExecutionCapsuleCommandRunner,
 } from "./gvisorPodmanExecutionCapsuleDriver";
@@ -81,6 +85,8 @@ evidence("gVisor execution capsule evidence", () => {
     const sourceBranchBefore = (await git(sourceRoot, ["branch", "--show-current"])).trim();
     const sourceStatusBefore = await git(sourceRoot, ["status", "--short"]);
 
+    const runner = evidenceCommandRunner();
+    const diskStore = evidenceDiskStore({ stateRoot, runner });
     const driver = new GvisorPodmanExecutionCapsuleDriver({
       stateRoot,
       capacity: {
@@ -91,7 +97,8 @@ evidence("gVisor execution capsule evidence", () => {
       },
       podmanPath: process.env.OCTANT_PODMAN_PATH ?? "/usr/bin/podman",
       runscPath: process.env.OCTANT_RUNSC_PATH ?? "/usr/bin/runsc",
-      runner: evidenceCommandRunner(),
+      runner,
+      diskStore,
     });
     const exportIds = [
       "77777777-7777-4777-8777-777777777777",
@@ -373,6 +380,43 @@ function evidenceCommandRunner(): ExecutionCapsuleCommandRunner {
       }
     },
   };
+}
+
+function evidenceDiskStore(input: {
+  readonly stateRoot: string;
+  readonly runner: ExecutionCapsuleCommandRunner;
+}): ExecutionCapsuleDiskStore {
+  const uid = process.getuid?.() ?? 0;
+  const gid = process.getgid?.() ?? 0;
+  const runtimeDirectory = process.env.XDG_RUNTIME_DIR ?? `/run/user/${String(uid)}`;
+  const store = new FuseExecutionCapsuleDiskStore({
+    stateRoot: input.stateRoot,
+    runRootBase: join(runtimeDirectory, "o"),
+    expectedUid: uid,
+    expectedGid: gid,
+    runner: input.runner,
+  });
+  return {
+    create: (request) => recordDiskOperation("create", () => store.create(request)),
+    recover: (request) => recordDiskOperation("recover", () => store.recover(request)),
+    close: (location) => recordDiskOperation("close", () => store.close(location)),
+    release: (location) => recordDiskOperation("release", () => store.release(location)),
+  };
+}
+
+async function recordDiskOperation<T>(operation: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        kind: "execution-capsule-evidence-disk-failed",
+        operation,
+        message: error instanceof Error ? error.message : "unknown disk failure",
+      }),
+    );
+    throw error;
+  }
 }
 
 function commandOperation(command: string, args: ReadonlyArray<string>): string {
