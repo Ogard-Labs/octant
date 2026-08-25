@@ -343,6 +343,8 @@ interface PreparedChatTurn {
 
 export interface ChatServiceExecutionContext {
   readonly windowId: WindowId;
+  /** One-hop coordination calls cannot expose the coordination tool again. */
+  readonly coordinationDepth?: number;
 }
 
 interface PreparedChatContent {
@@ -385,6 +387,8 @@ export interface ChatServiceOptions {
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
+    readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
+    readonly coordinationDepth?: number;
   }) => AppManagedToolSet | undefined;
   readonly resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   /**
@@ -424,6 +428,7 @@ export interface ChatServiceOptions {
   readonly resolveThreadMentionContext?: (input: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
     readonly windowId?: WindowId;
+    readonly dialogueEnabled?: boolean;
   }) => Promise<ReadonlyArray<ChatThreadMentionContext>>;
   /**
    * Gathers per-candidate runtime facts for multi-model pool routing.
@@ -1476,6 +1481,31 @@ export class ChatService {
   ): Promise<ChatCommandResult> {
     const accepted = await this.#withThreadAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
+      if (command.submissionId !== undefined) {
+        // Match on submissionId alone. A turn whose only attempt ended
+        // failed, cancelled, or interrupted is still the turn this
+        // submission already created — excluding those outcomes let a
+        // retried send with the same submissionId fall through to turn
+        // creation and mint a second turn under the same submission
+        // identity.
+        const existing = [...(this.#persistence.readChatThreadView(thread.id)?.turns ?? [])]
+          .reverse()
+          .find((candidate) => String(candidate.submissionId) === String(command.submissionId));
+        if (existing !== undefined) {
+          const content = this.#persistence.readChatContent(
+            String(existing.userMessageRef.contentId),
+          );
+          if (content === undefined || content.body !== command.prompt) {
+            throw new ChatServiceError(
+              decodeChatFailure({
+                category: "invalid",
+                message: "Chat submission identity was reused for different message text.",
+              }),
+            );
+          }
+          return { kind: "existing" as const, turn: existing };
+        }
+      }
       this.#assertExpectedThreadVersion(thread, command.expectedVersion);
       const timestamp = decodeTimestamp(this.#clock());
       const userMessage = this.#prepareContent(thread.id, "user", command.prompt);
@@ -1525,6 +1555,7 @@ export class ChatService {
       const attachmentIds = command.attachmentIds;
       const turn = beginChatTurn(executionThread, {
         turnId,
+        ...(command.submissionId === undefined ? {} : { submissionId: command.submissionId }),
         attemptId: this.#uuid() as ChatAttempt["id"],
         providerSessionId: decodeProviderSessionId(this.#uuid()),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
@@ -1569,8 +1600,15 @@ export class ChatService {
         },
         { beforeEvents: (connection) => this.#writePreparedContent(connection, userMessage) },
       );
-      return { thread: updatedThread, turn, attempt: turn.attempts[0]!, prepared };
+      return {
+        kind: "accepted" as const,
+        thread: updatedThread,
+        turn,
+        attempt: turn.attempts[0]!,
+        prepared,
+      };
     });
+    if (accepted.kind === "existing") return { kind: "turn-created", turn: accepted.turn };
     await this.#runAttempt({
       thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
       turn: accepted.turn,
@@ -2198,7 +2236,14 @@ export class ChatService {
       executionContext !== undefined &&
       this.#resolveAppManagedTools !== undefined &&
       this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) === "supported"
-        ? this.#resolveAppManagedTools({ windowId: executionContext.windowId, thread })
+        ? this.#resolveAppManagedTools({
+            windowId: executionContext.windowId,
+            thread,
+            ...(threadMentionIds === undefined ? {} : { threadMentionIds }),
+            ...(executionContext.coordinationDepth === undefined
+              ? {}
+              : { coordinationDepth: executionContext.coordinationDepth }),
+          })
         : undefined;
     const resolvedExtensions =
       preResolvedExtensions ??
@@ -2229,6 +2274,7 @@ export class ChatService {
     const threadMentionContexts = await this.#resolveThreadMentions(
       threadMentionIds,
       executionContext,
+      tools?.definitions.some((definition) => definition.name === "octant_thread_message") === true,
     );
     const context = this.#planContext(
       thread,
@@ -2313,6 +2359,7 @@ export class ChatService {
   async #resolveThreadMentions(
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
     executionContext: ChatServiceExecutionContext | undefined,
+    dialogueEnabled: boolean,
   ): Promise<ReadonlyArray<{ readonly threadId: MentionableThreadId; readonly text: string }>> {
     if (threadMentionIds === undefined || threadMentionIds.length === 0) return [];
     if (this.#resolveThreadMentionContext === undefined) {
@@ -2326,6 +2373,7 @@ export class ChatService {
       resolved = await this.#resolveThreadMentionContext({
         threadMentionIds,
         ...(executionContext === undefined ? {} : { windowId: executionContext.windowId }),
+        ...(dialogueEnabled ? { dialogueEnabled: true } : {}),
       });
     } catch {
       // A resolver that throws proves nothing about any one mention, so every

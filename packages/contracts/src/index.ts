@@ -67,6 +67,7 @@ export * from "./providerUsageLimits";
 export * from "./shell";
 export * from "./threadDraft";
 export * from "./threadMention";
+export * from "./threadDialogue";
 export * from "./fileMention";
 export * from "./theme";
 export * from "./contentProvenance";
