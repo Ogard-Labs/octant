@@ -401,6 +401,30 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("keeps the active view's identity stable across unchanged navigation polls", async () => {
+    // Every navigation refresh hands back freshly decoded checkout and thread
+    // objects even when nothing on the host changed. Rebuilding the active
+    // view from those on every tick would rerender any surface watching it on
+    // a timer, for data that never moved.
+    const bootstrapRead = vi.fn(async () => bootstrap());
+    const client = fakeClient({ bootstrap: bootstrapRead });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 10,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    const firstView = result.current.activeView;
+
+    await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(2));
+    expect(result.current.activeView).toBe(firstView);
+    unmount();
+  });
+
   it("recovers a replay gap from a snapshot without dropping the pending draft", async () => {
     const gap = deferred<void>();
     const recovered = view(2);

@@ -207,26 +207,39 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   useEffect(() => {
     const turnClient = props.turnClient;
-    if (turnClient === undefined) return;
+    const requestClient = props.requestClient;
+    if (turnClient === undefined && requestClient === undefined) return;
     let cancelled = false;
+    // A cycle that outlives the interval must finish before the next one
+    // starts. Without this guard, a poll slower than the interval is always
+    // superseded by the next tick's generation bump before its response
+    // arrives, so a host that consistently takes longer than 1s to answer
+    // would never see its transcript or pending requests update at all.
+    let inFlight = false;
     const timer = globalThis.setInterval(() => {
-      if (cancelled) return;
+      if (cancelled || inFlight) return;
+      inFlight = true;
       const requestGeneration = ++transcriptGeneration.current;
-      const transcript = turnClient.transcript(props.threadId).then((next) => {
-        if (cancelled || requestGeneration !== transcriptGeneration.current) return;
-        setTurns((current) => (samePollingData(current, next.turns) ? current : next.turns));
-      });
-      const requests =
-        props.requestClient === undefined || projectId === undefined
+      const transcript =
+        turnClient === undefined
           ? Promise.resolve()
-          : props.requestClient.list(projectId, props.threadId).then((next) => {
+          : turnClient.transcript(props.threadId).then((next) => {
+              if (cancelled || requestGeneration !== transcriptGeneration.current) return;
+              setTurns((current) => (samePollingData(current, next.turns) ? current : next.turns));
+            });
+      const requests =
+        requestClient === undefined || projectId === undefined
+          ? Promise.resolve()
+          : requestClient.list(projectId, props.threadId).then((next) => {
               if (cancelled || requestGeneration !== transcriptGeneration.current) return;
               const pending = next.requests.filter((request) => request.status === "pending");
               setPendingRequests((current) =>
                 samePollingData(current, pending) ? current : pending,
               );
             });
-      void Promise.allSettled([transcript, requests]);
+      void Promise.allSettled([transcript, requests]).finally(() => {
+        inFlight = false;
+      });
     }, 1_000);
     return () => {
       cancelled = true;

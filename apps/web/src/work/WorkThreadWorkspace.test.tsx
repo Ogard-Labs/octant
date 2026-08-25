@@ -280,16 +280,26 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
-  it("does not let an older transcript poll replace newer data", async () => {
+  it("keeps a slow initial transcript read from overwriting a newer polled result", async () => {
+    // The initial bootstrap read and the interval poll are separate effects
+    // that share one generation counter. A read the initial effect started
+    // before the interval ever ticked must still lose to a poll that
+    // completed after it, even though it settles later.
     const older = deferred<ReadonlyArray<ReturnType<typeof workTurn>>>();
-    const newer = deferred<ReadonlyArray<ReturnType<typeof workTurn>>>();
     let reads = 0;
     const turnClient = {
       transcript: vi.fn(async () => {
         reads += 1;
-        if (reads === 1) return { threadId, turns: [workTurn({ prompt: "Initial" })] };
-        if (reads === 2) return { threadId, turns: await older.promise };
-        return { threadId, turns: await newer.promise };
+        if (reads === 1) return { threadId, turns: await older.promise };
+        return {
+          threadId,
+          turns: [
+            workTurn({
+              prompt: "Newest transcript",
+              transcript: [{ role: "user", text: "Newest transcript" }],
+            }),
+          ],
+        };
       }),
     };
     const threadClient = {
@@ -310,25 +320,105 @@ describe("WorkThreadWorkspace", () => {
     await waitFor(() => expect(turnClient.transcript).toHaveBeenCalledTimes(2), {
       timeout: 2_500,
     });
-    await waitFor(() => expect(turnClient.transcript).toHaveBeenCalledTimes(3), {
-      timeout: 2_500,
-    });
+    expect(await screen.findByText("Newest transcript")).toBeInTheDocument();
 
-    newer.resolve([
-      workTurn({
-        prompt: "Newest transcript",
-        transcript: [{ role: "user", text: "Newest transcript" }],
-      }),
-    ]);
     older.resolve([
       workTurn({
         prompt: "Stale transcript",
         transcript: [{ role: "user", text: "Stale transcript" }],
       }),
     ]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(await screen.findByText("Newest transcript")).toBeInTheDocument();
     expect(screen.queryByText("Stale transcript")).not.toBeInTheDocument();
+  });
+
+  it("waits for a slow polling cycle to settle before starting the next one", async () => {
+    // Promise.allSettled from a polling tick used to run unawaited, so the
+    // very next tick would bump the generation before a slow response came
+    // back - discarding it. A host that consistently answers a little slower
+    // than the 1s interval would then never see its transcript update again.
+    const slow = deferred<ReadonlyArray<ReturnType<typeof workTurn>>>();
+    let reads = 0;
+    const transcript = vi.fn(async () => {
+      reads += 1;
+      if (reads === 1) return { threadId, turns: [] };
+      return { threadId, turns: await slow.promise };
+    });
+    const turnClient = { transcript };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+
+    render(
+      <WorkThreadWorkspace
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await waitFor(() => expect(transcript).toHaveBeenCalledOnce());
+    await waitFor(() => expect(transcript).toHaveBeenCalledTimes(2), { timeout: 2_500 });
+
+    // The second read is still pending. Two more interval ticks pass without
+    // a third call, proving the next cycle waited instead of piling on.
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+    expect(transcript).toHaveBeenCalledTimes(2);
+
+    slow.resolve([
+      workTurn({
+        prompt: "Recovered after a slow poll",
+        transcript: [{ role: "user", text: "Recovered after a slow poll" }],
+      }),
+    ]);
+
+    expect(await screen.findByText("Recovered after a slow poll")).toBeInTheDocument();
+    await waitFor(() => expect(transcript).toHaveBeenCalledTimes(3), { timeout: 2_500 });
+  });
+
+  it("keeps polling pending requests on a schedule without a turn client", async () => {
+    // requestClient and turnClient are supplied independently by the host, so
+    // request polling must not be gated on turnClient being present.
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    let pending: ReadonlyArray<Record<string, unknown>> = [];
+    const list = vi.fn(async () => ({ requests: pending }));
+    const requestClient = { list };
+
+    render(
+      <WorkThreadWorkspace
+        requestClient={requestClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    await waitFor(() => expect(list).toHaveBeenCalledOnce());
+
+    pending = [
+      {
+        requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        projectId: "20000000-0000-4000-8000-000000000101",
+        threadId,
+        status: "pending",
+        detail: {
+          kind: "approval",
+          action: "write-file",
+          description: "Save notes.md in the Project root.",
+        },
+        createdAt: "2026-08-01T20:01:30.000Z",
+        updatedAt: "2026-08-01T20:01:30.000Z",
+      },
+    ];
+
+    await waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(1), { timeout: 2_500 });
+    expect(await screen.findByText("Approval required")).toBeInTheDocument();
   });
 
   it("does not commit again when transcript polling returns the same data", async () => {

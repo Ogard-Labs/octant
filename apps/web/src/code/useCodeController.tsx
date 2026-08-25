@@ -145,6 +145,12 @@ function refreshActiveThreadView(
     (candidate) => String(candidate.id) === String(current.thread.id),
   );
   if (checkout === undefined && refreshedThread === undefined) return current;
+  if (
+    (checkout === undefined || samePollingData(checkout, current.checkout)) &&
+    (refreshedThread === undefined || samePollingData(refreshedThread, current.thread))
+  ) {
+    return current;
+  }
   return {
     ...current,
     ...(checkout === undefined ? {} : { checkout }),
