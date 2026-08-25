@@ -86,7 +86,11 @@ for (;;) {
 console.log("[dev] launching Electron");
 const electron = Bun.spawn(["bun", "run", "--cwd", "apps/desktop", "start"], {
   cwd: root,
-  env: { ...process.env, OCTANT_WEB_URL: webUrl },
+  env: {
+    ...process.env,
+    OCTANT_DEV_WEB_BOOTSTRAP: "1",
+    OCTANT_WEB_URL: webUrl,
+  },
   stdio: ["inherit", "inherit", "inherit"],
 });
 children.push(electron);

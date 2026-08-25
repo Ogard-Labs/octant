@@ -32,6 +32,7 @@ describe("Project window authority", () => {
     });
 
     expect(authority.capability).toBe(Buffer.alloc(32, 7).toString("base64url"));
+    expect(authority.rendererIdentity).toBe(Buffer.alloc(32, 7).toString("base64url"));
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       "http://127.0.0.1:13773/api/desktop/window-authorities",
@@ -41,7 +42,11 @@ describe("Project window authority", () => {
           "content-type": "application/json",
           "x-octant-desktop-secret": desktopBridgeSecret,
         },
-        body: JSON.stringify({ windowId, capability: authority.capability }),
+        body: JSON.stringify({
+          windowId,
+          capability: authority.capability,
+          rendererIdentity: authority.rendererIdentity,
+        }),
       }),
     );
 

@@ -102,7 +102,16 @@ material. It uses the same contracts and client runtime as the browser.
 **Window authority.** Each desktop window receives a 256-bit opaque token with a
 bounded lifetime. Routes bind reads and writes to the Projects that window is
 bound to, so two windows on the same host cannot see across each other's
-Project scope by accident.
+Project scope by accident. The packaged renderer sends that capability on its
+shell requests. `POST /api/shell/bootstrap` registers the capability-bound
+window, while `GET` only reads an existing registration and never accepts a
+caller-selected `windowId`. An opaque `file://` origin or a missing Origin is
+accepted only with the renderer identity bound at desktop window registration
+and that exact window capability; the scheme alone is never authority. The
+desktop injects that renderer proof only for the exact packaged frame (or the
+configured development origin), not from renderer-controlled state. The
+loopback transport validates the actual Host header before dispatch, and
+closing or revoking the window removes its shell registration as well.
 
 ## Modes: Chat, Work, and Code
 

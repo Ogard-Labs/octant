@@ -1,10 +1,23 @@
-import { decodeShellCommand, decodeWindowId, type ShellFailure } from "@octant/contracts";
+import { decodeShellCommand, type ShellFailure } from "@octant/contracts";
+import { WINDOW_CAPABILITY_HEADER } from "./clientPrincipal";
+import { authenticateRouteWindowId } from "./principalRouteContext";
 import { ShellServiceError, type ShellServiceApi } from "./shellService";
+import { isCanonical256BitToken, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 const METHODS = "GET, POST, OPTIONS";
-const HEADERS = "content-type";
+export const SHELL_RENDERER_IDENTITY_HEADER = "x-octant-renderer-identity";
+const HEADERS = `content-type, x-octant-window-capability, ${SHELL_RENDERER_IDENTITY_HEADER}`;
 
-export function createShellRouteHandler(service: ShellServiceApi) {
+export interface ShellRouteDependencies {
+  readonly windowAuthorityStore: WindowAuthorityStore;
+  readonly now?: () => number;
+}
+
+export function createShellRouteHandler(
+  service: ShellServiceApi,
+  dependencies: ShellRouteDependencies,
+) {
+  const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const isShellRoute =
@@ -18,7 +31,8 @@ export function createShellRouteHandler(service: ShellServiceApi) {
         origin,
       );
     }
-    if (origin !== null && !isAllowedRendererOrigin(origin)) {
+    const opaqueOrigin = origin === "file://" || origin === "null";
+    if (origin !== null && !opaqueOrigin && !isAllowedRendererOrigin(origin)) {
       return failureResponse(
         { category: "unsupported", message: "Renderer origin is not allowed." },
         null,
@@ -26,22 +40,82 @@ export function createShellRouteHandler(service: ShellServiceApi) {
     }
 
     if (request.method === "OPTIONS") {
+      if (origin === null) {
+        return failureResponse(
+          { category: "unsupported", message: "Renderer origin is required." },
+          null,
+        );
+      }
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
     try {
+      // Electron's packaged renderer may report an opaque file origin or no
+      // Origin at all. Neither form is trusted by itself: both the capability
+      // and the server-bound renderer identity must resolve to this window.
+      const requiresRendererIdentity = origin === null || opaqueOrigin;
+      const rendererIdentity = request.headers.get(SHELL_RENDERER_IDENTITY_HEADER) ?? "";
+      if (
+        requiresRendererIdentity &&
+        (!request.headers.has(WINDOW_CAPABILITY_HEADER) ||
+          !isCanonical256BitToken(rendererIdentity))
+      ) {
+        return failureResponse(
+          { category: "unsupported", message: "Packaged renderer identity is required." },
+          null,
+        );
+      }
+      if (url.search !== "") {
+        return failureResponse(
+          { category: "invalid", message: "Shell requests cannot supply window identity." },
+          origin,
+        );
+      }
+      let windowId;
+      try {
+        windowId = requiresRendererIdentity
+          ? dependencies.windowAuthorityStore.authenticateRenderer(
+              request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "",
+              rendererIdentity,
+              now(),
+            )
+          : authenticateRouteWindowId({
+              request,
+              store: dependencies.windowAuthorityStore,
+              now: now(),
+            });
+      } catch {
+        return failureResponse(
+          { category: "invalid", message: "Shell request is unauthorized." },
+          origin,
+          401,
+        );
+      }
+
       if (url.pathname === "/api/shell/bootstrap") {
-        if (request.method !== "GET") return unsupportedMethod(origin);
-        let windowId;
-        try {
-          windowId = decodeWindowId(url.searchParams.get("windowId"));
-        } catch {
+        if (request.method !== "GET" && request.method !== "POST") {
+          return unsupportedMethod(origin);
+        }
+        if (request.method === "POST") {
+          if (await hasUnexpectedBody(request)) {
+            return failureResponse(
+              {
+                category: "invalid",
+                message: "Shell bootstrap registration must not supply a body.",
+              },
+              origin,
+            );
+          }
+          return jsonResponse(service.bootstrap(windowId), 200, origin);
+        }
+        const bootstrap = service.readBootstrap(windowId);
+        if (bootstrap === undefined) {
           return failureResponse(
-            { category: "invalid", message: "A valid windowId is required." },
+            { category: "invalid", message: "Shell bootstrap window is not registered." },
             origin,
           );
         }
-        return jsonResponse(service.bootstrap(windowId), 200, origin);
+        return jsonResponse(bootstrap, 200, origin);
       }
 
       if (request.method !== "POST") return unsupportedMethod(origin);
@@ -60,6 +134,12 @@ export function createShellRouteHandler(service: ShellServiceApi) {
       } catch {
         return failureResponse(
           { category: "invalid", message: "Shell command is invalid." },
+          origin,
+        );
+      }
+      if (String(command.windowId) !== String(windowId)) {
+        return failureResponse(
+          { category: "invalid", message: "Shell command window does not match its capability." },
           origin,
         );
       }
@@ -106,13 +186,18 @@ function unsupportedMethod(origin: string | null): Response {
   );
 }
 
-function failureResponse(failure: ShellFailure, origin: string | null): Response {
+function failureResponse(
+  failure: ShellFailure,
+  origin: string | null,
+  explicitStatus?: number,
+): Response {
   const status =
-    failure.category === "conflict"
+    explicitStatus ??
+    (failure.category === "conflict"
       ? 409
       : failure.category === "unavailable" || failure.category === "recovery-required"
         ? 503
-        : 400;
+        : 400);
   return jsonResponse(failure, status, origin);
 }
 
@@ -126,8 +211,15 @@ function corsHeaders(origin: string | null): Headers {
     "access-control-allow-headers": HEADERS,
     vary: "Origin",
   });
-  if (origin !== null && isAllowedRendererOrigin(origin)) {
+  if (origin === "null") {
+    headers.set("access-control-allow-origin", origin);
+  } else if (origin !== null && isAllowedRendererOrigin(origin)) {
     headers.set("access-control-allow-origin", origin);
   }
   return headers;
+}
+
+async function hasUnexpectedBody(request: Request): Promise<boolean> {
+  if (request.body === null) return false;
+  return (await request.text()).length > 0;
 }
