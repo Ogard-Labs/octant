@@ -682,7 +682,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
                 NetworkMode: "none",
                 SecurityOpt: ["no-new-privileges"],
                 Privileged: false,
-                UsernsMode: "auto",
+                UsernsMode: "private",
                 Memory: capsuleRequest.budget.memoryBytes,
                 NanoCpus: capsuleRequest.budget.cpuMillicores * 1_000_000,
                 PidsLimit: capsuleRequest.budget.pidLimit,

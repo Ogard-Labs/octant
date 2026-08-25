@@ -1197,6 +1197,8 @@ function matchesProtectedRuntime(
   disk: ExecutionCapsuleDiskLocation,
 ): boolean {
   const command = recovered.createCommand;
+  // Podman reports an auto-allocated user namespace as effective mode
+  // `private`; the preserved create command separately proves `--userns auto`.
   return (
     basename(recovered.ociRuntime) === basename(runscPath) &&
     recovered.effectiveCaps.length === 0 &&
@@ -1205,7 +1207,7 @@ function matchesProtectedRuntime(
     recovered.networkMode === "none" &&
     recovered.securityOptions.some((option) => option.startsWith("no-new-privileges")) &&
     !recovered.privileged &&
-    recovered.usernsMode.startsWith("auto") &&
+    recovered.usernsMode === "private" &&
     hasFlagValue(command, "--root", disk.graphRoot) &&
     hasFlagValue(command, "--runroot", disk.runRoot) &&
     hasFlagValue(command, "--storage-driver", "vfs") &&
