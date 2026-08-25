@@ -531,11 +531,14 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 }
 
 /* The run of marks reads as one track rather than four loose dots, so the
-   connector is drawn between them and stopped short of the last. */
+   connector is drawn between them and stopped short of the last. The rows sit
+   flush against each other, so reaching the next mark means clearing that row's
+   6px top padding and the mark's own 3px offset; anything shorter leaves a gap
+   that reads as a break in the sequence. */
 .thread-task-viewer__steps > li:not(:last-child)::before {
   position: absolute;
   top: 26px;
-  bottom: -2px;
+  bottom: -9px;
   left: 11.25px;
   width: 1.5px;
   background: var(--octant-border);
