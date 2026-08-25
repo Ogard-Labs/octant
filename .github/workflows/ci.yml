@@ -88,6 +88,7 @@ jobs:
         run: |
           bun_path=$(command -v bun)
           sudo install --mode 0755 "$bun_path" /usr/local/bin/bun
+          echo user_allow_other | sudo tee --append /etc/fuse.conf >/dev/null
           sudo useradd --create-home --home-dir /var/lib/octant --shell /bin/bash octant
           test -c /dev/fuse
           octant_uid=$(id --user octant)
@@ -155,7 +156,7 @@ jobs:
               chmod 0600 "$root/capsule.ext4"
               /usr/sbin/mkfs.ext4 -q -t ext4 -F -E "root_owner=$(id -u):$(id -g)" "$root/capsule.ext4"
               mkdir -m 0700 "$root/mount"
-              /usr/bin/fuse2fs -o rw,fakeroot,nodev,nosuid "$root/capsule.ext4" "$root/mount"
+              /usr/bin/fuse2fs -o rw,allow_other,fakeroot,nodev,nosuid "$root/capsule.ext4" "$root/mount"
               chmod 0700 "$root/mount"
               mkdir -m 0700 "$root/mount/graph" "$root/mount/run"
               mkdir -m 0700 "$root/debug"

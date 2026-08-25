@@ -48,9 +48,11 @@ host becomes a first-class destination.
   queues or refuses before a capsule starts.
 - The entire mutable Podman VFS store for one capsule lives in its own
   fixed-size ext4 image, mounted by the unprivileged Station identity through
-  `fuse2fs` with `nodev` and `nosuid`. Image layers, runtime metadata,
-  dependencies, and the independent clone all count against the same hard disk
-  ceiling. No capsule store is a host-checkout bind mount.
+  `fuse2fs` at an owner-only mount point with `nodev` and `nosuid`.
+  `allow_other` lets the rootless gVisor gofer enter that private tree; the
+  mount-point permissions still exclude unrelated host accounts. Image layers,
+  runtime metadata, dependencies, and the independent clone all count against
+  the same hard disk ceiling. No capsule store is a host-checkout bind mount.
 - Podman owns the capsule's outer systemd cgroup and applies its CPU, memory,
   and PID limits. Rootless `runsc` ignores duplicate cgroup setup inside its
   user namespace; evidence reads the live sandbox process cgroup before the

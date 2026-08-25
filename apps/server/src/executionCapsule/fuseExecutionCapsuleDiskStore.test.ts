@@ -89,7 +89,7 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     ]);
     expect(run).toHaveBeenCalledWith("/usr/bin/fuse2fs", [
       "-o",
-      "rw,fakeroot,nodev,nosuid",
+      "rw,allow_other,fakeroot,nodev,nosuid",
       disk.imagePath,
       disk.mountPath,
     ]);

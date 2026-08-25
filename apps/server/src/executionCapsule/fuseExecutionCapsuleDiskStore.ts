@@ -208,7 +208,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
   async #mount(location: ExecutionCapsuleDiskLocation): Promise<void> {
     const mounted = await this.#runner.run(this.#fuse2fsPath, [
       "-o",
-      "rw,fakeroot,nodev,nosuid",
+      "rw,allow_other,fakeroot,nodev,nosuid",
       location.imagePath,
       location.mountPath,
     ]);
