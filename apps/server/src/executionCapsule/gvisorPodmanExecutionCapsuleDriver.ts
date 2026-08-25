@@ -841,7 +841,16 @@ function capsuleRuntimeId(capsuleId: string): string {
 }
 
 function podmanStoreArgs(disk: ExecutionCapsuleDiskLocation): ReadonlyArray<string> {
-  return ["--root", disk.graphRoot, "--runroot", disk.runRoot, "--storage-driver", "vfs"];
+  return [
+    "--root",
+    disk.graphRoot,
+    "--runroot",
+    disk.runRoot,
+    "--storage-driver",
+    "vfs",
+    "--cgroup-manager",
+    "systemd",
+  ];
 }
 
 function formatCpus(cpuMillicores: number): string {
@@ -1070,6 +1079,7 @@ function matchesProtectedRuntime(
     hasFlagValue(command, "--root", disk.graphRoot) &&
     hasFlagValue(command, "--runroot", disk.runRoot) &&
     hasFlagValue(command, "--storage-driver", "vfs") &&
+    hasFlagValue(command, "--cgroup-manager", "systemd") &&
     hasFlagValue(command, "--runtime", runscPath) &&
     hasFlagValue(command, "--runtime-flag", "platform=systrap") &&
     hasFlagValue(command, "--runtime-flag", "systemd-cgroup") &&

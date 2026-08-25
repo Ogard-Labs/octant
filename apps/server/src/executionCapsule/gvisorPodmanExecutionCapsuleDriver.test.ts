@@ -32,6 +32,8 @@ function fixturePodmanArgs(args: ReadonlyArray<string>): ReadonlyArray<string> {
     `/var/lib/octant/capsules/stores/${fixtureRuntimeId}/mount/run`,
     "--storage-driver",
     "vfs",
+    "--cgroup-manager",
+    "systemd",
     ...args,
   ];
 }
@@ -275,6 +277,8 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/run",
       "--storage-driver",
       "vfs",
+      "--cgroup-manager",
+      "systemd",
       "--runtime",
       "/usr/bin/runsc",
       "--runtime-flag",
@@ -319,27 +323,18 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       "while :; do sleep 3600; done",
     ]);
     expect(createCall?.[1].join(" ")).not.toContain(source.bundlePath);
-    expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
-      "--root",
-      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/graph",
-      "--runroot",
-      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/run",
-      "--storage-driver",
-      "vfs",
-      "cp",
-      source.bundlePath,
-      "octant-capsule-11111111111141118111111111111111:/tmp/octant-source.bundle",
-    ]);
-    expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
-      "--root",
-      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/graph",
-      "--runroot",
-      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/run",
-      "--storage-driver",
-      "vfs",
-      "start",
-      "octant-capsule-11111111111141118111111111111111",
-    ]);
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs([
+        "cp",
+        source.bundlePath,
+        "octant-capsule-11111111111141118111111111111111:/tmp/octant-source.bundle",
+      ]),
+    );
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["start", "octant-capsule-11111111111141118111111111111111"]),
+    );
     expect(run).toHaveBeenCalledWith(
       "/usr/bin/podman",
       fixturePodmanArgs([
@@ -586,6 +581,8 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
                   "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/run",
                   "--storage-driver",
                   "vfs",
+                  "--cgroup-manager",
+                  "systemd",
                   "--runtime",
                   "/usr/bin/runsc",
                   "--runtime-flag",
