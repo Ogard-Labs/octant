@@ -765,5 +765,34 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       operation: "recover-inspected-runtime",
       message: "runtime protection mismatch: oci-runtime",
     });
+
+    const diskRecoveryDiagnostic = vi.fn();
+    const unavailableDisk = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      diskStore: {
+        ...diskStore,
+        recover: async () => {
+          throw new Error("private path must not escape diagnostics");
+        },
+      },
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      recordDiagnostic: diskRecoveryDiagnostic,
+    });
+    await expect(unavailableDisk.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    expect(diskRecoveryDiagnostic).toHaveBeenCalledWith({
+      operation: "recover-disk",
+      message: "capsule disk recovery failed",
+    });
   });
 });

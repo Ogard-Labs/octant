@@ -178,6 +178,14 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     this.#artifactWriter = options.artifactWriter ?? createNodeArtifactWriter(runtimeEnvironment);
   }
 
+  #reportDiagnostic(operation: string, message: string): void {
+    try {
+      this.#recordDiagnostic?.({ operation, message });
+    } catch {
+      // Diagnostics never change the user-visible outcome.
+    }
+  }
+
   async probe(): Promise<ExecutionCapsuleDriverProbe> {
     const identity = await this.#identityProbe.probe().catch(() => ({
       passwordlessSudo: true,
@@ -831,11 +839,13 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       !probe.host.cgroupsV2 ||
       !probe.host.dedicatedIdentity
     ) {
+      this.#reportDiagnostic("recover-probe", "protected runtime probe failed");
       return { status: "refused", reason: "runtime-unavailable" };
     }
     try {
       await this.#sourceBundleStore.verify(input.source);
     } catch {
+      this.#reportDiagnostic("recover-source", "source bundle verification failed");
       return { status: "refused", reason: "source-unavailable" };
     }
     const runtimeId = capsuleRuntimeId(String(input.request.capsuleId));
@@ -846,6 +856,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         diskBytes: input.request.budget.diskBytes,
       });
     } catch {
+      this.#reportDiagnostic("recover-disk", "capsule disk recovery failed");
       return { status: "refused", reason: "runtime-unavailable" };
     }
     const inspected = await this.#runner
@@ -869,14 +880,10 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
                 ...protectedRuntimeMismatches(recovered, this.#runscPath, disk),
               ];
     if (recovered === undefined || mismatches.length > 0) {
-      try {
-        this.#recordDiagnostic?.({
-          operation: "recover-inspected-runtime",
-          message: `runtime protection mismatch: ${mismatches.join(",")}`,
-        });
-      } catch {
-        // Diagnostics never change the recovery outcome.
-      }
+      this.#reportDiagnostic(
+        "recover-inspected-runtime",
+        `runtime protection mismatch: ${mismatches.join(",")}`,
+      );
       await this.#diskStore.close(disk).catch(() => undefined);
       return { status: "refused", reason: "runtime-unavailable" };
     }
@@ -885,6 +892,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         .run(this.#podmanPath, [...podmanStoreArgs(disk), "stop", "--time", "10", runtimeId])
         .catch(() => undefined);
       if (stopped?.exitCode !== 0) {
+        this.#reportDiagnostic("recover-stop", "live recovered runtime did not stop");
         await this.#diskStore.close(disk).catch(() => undefined);
         return { status: "refused", reason: "runtime-unavailable" };
       }
