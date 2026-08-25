@@ -52,8 +52,8 @@ host becomes a first-class destination.
   `allow_other` lets the rootless gVisor gofer enter that private tree; the
   mount-point permissions still exclude unrelated host accounts. Podman may
   make intermediate state directories traverse-only (`0711`) for the remapped
-  gofer, but only below a verified owner-only (`0700`) Station anchor; those
-  paths never grant group or other read or write access. Image layers,
+  gofer; those paths remain owned by the Station identity and never grant group
+  or other read or write access. Backing images remain owner-only (`0600`). Image layers,
   dependencies, and the independent clone all count against the same hard disk
   ceiling. Podman's disposable runroot uses a short, owner-only directory below
   the Station identity's runtime directory and is recreated during recovery;

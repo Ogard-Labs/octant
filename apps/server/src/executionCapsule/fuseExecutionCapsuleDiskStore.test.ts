@@ -232,10 +232,10 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("accepts a traverse-only state path beneath an owner-only anchor", async () => {
+  it("accepts a traverse-only state path beneath a traverse-only owned parent", async () => {
     const ownerRoot = await mkdtemp(join(tmpdir(), "octant-capsule-owner-test-"));
     roots.push(ownerRoot);
-    await chmod(ownerRoot, 0o700);
+    await chmod(ownerRoot, 0o711);
     const stateRoot = join(ownerRoot, "state");
     await mkdir(stateRoot, { mode: 0o711 });
     const runRootBase = await mkdtemp(join("/tmp", "ocr-"));

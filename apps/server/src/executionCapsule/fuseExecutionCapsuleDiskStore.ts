@@ -79,7 +79,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     readonly diskBytes: number;
   }): Promise<ExecutionCapsuleDiskLocation> {
     const location = this.#location(input);
-    await ensurePrivateDirectory(dirname(this.#stateRoot), this.#expectedUid, false);
+    await ensureProtectedPathDirectory(dirname(this.#stateRoot), this.#expectedUid, false);
     await ensureProtectedPathDirectory(this.#stateRoot, this.#expectedUid, true);
     await ensurePrivateDirectory(this.#runRootBase, this.#expectedUid, true);
     const storesRoot = join(this.#stateRoot, "stores");
@@ -127,7 +127,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     readonly diskBytes: number;
   }): Promise<ExecutionCapsuleDiskLocation> {
     const location = this.#location(input);
-    await ensurePrivateDirectory(dirname(this.#stateRoot), this.#expectedUid, false);
+    await ensureProtectedPathDirectory(dirname(this.#stateRoot), this.#expectedUid, false);
     await ensureProtectedPathDirectory(this.#stateRoot, this.#expectedUid, false);
     await ensurePrivateDirectory(this.#runRootBase, this.#expectedUid, true);
     await ensureProtectedPathDirectory(join(this.#stateRoot, "stores"), this.#expectedUid, false);
