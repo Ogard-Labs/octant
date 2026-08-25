@@ -439,7 +439,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       if (String(props.threadId) !== threadKey) return;
       // A queued send is still an ordinary, refusal-capable command. The
       // staged images were never taken, so restoring the text alone is
-      // enough to leave the whole queued message retryable.
+      // enough to leave the whole queued message retryable — but only when
+      // the composer still holds the empty state this queued send cleared
+      // it to. If the user typed a newer draft while resolveForSend or
+      // sendFollowUp was pending, that draft is the one worth keeping; a
+      // stale queued prompt must not overwrite it.
+      if (draftRef.current.length > 0) return;
       setDraft(prompt);
       props.controller.setPendingDraft?.(prompt);
     };

@@ -6,7 +6,9 @@ import { StrictMode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentProfileNamesProvider } from "../agentProfile/AgentProfileNames";
 import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
+import type { CodeAttachmentClient } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
+import type { CodeAttachmentId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 
 const threadId = "10000000-0000-4000-8000-000000000001" as never;
@@ -1352,6 +1354,44 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledOnce();
   });
 
+  it("keeps a later draft after a queued send fails", async () => {
+    // restoreQueuedSend used to restore the queued prompt unconditionally on
+    // failure, so a draft the user typed while the queued send was still
+    // resolving got silently overwritten by the stale, already-refused text.
+    const user = userEvent.setup();
+    let finish: ((value: boolean) => void) | undefined;
+    const sendFollowUp = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("Follow-up message"), "and then push");
+    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ pendingDraft: "and then push", sendFollowUp, turnStatus: "idle" })}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() =>
+      expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], [], [], "approval-gated"),
+    );
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "later draft");
+    finish?.(false);
+    await screen.findByText("The response was refused. The queued message was not sent.");
+    expect(sendFollowUp).toHaveBeenCalledOnce();
+    expect(composer).toHaveValue("later draft");
+  });
+
   it("keeps the queued draft when its automatic send is refused", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => false);
@@ -1389,17 +1429,17 @@ describe("CodeThreadWorkspace", () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => false);
     const reference = {
-      attachmentId: "40000000-0000-4000-8000-000000000010",
+      attachmentId: "40000000-0000-4000-8000-000000000010" as CodeAttachmentId,
       displayName: "pasted.png",
       mediaType: "image/png" as const,
       byteLength: 3,
       digest: "d".repeat(64),
     };
-    const attachmentClient = {
+    const attachmentClient: CodeAttachmentClient = {
       putAttachment: vi.fn(async () => reference),
       discardAttachment: vi.fn(async () => undefined),
       attachment: vi.fn(),
-    } as never;
+    };
     const { rerender } = render(
       <CodeThreadWorkspace
         attachmentClient={attachmentClient}
