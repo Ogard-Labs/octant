@@ -88,7 +88,7 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
         variant="secondary"
       >
         <span>Add provider manually</span>
-        <ChevronDown aria-hidden="true" className="provider-settings__disclosure-icon" size={15} />
+        <ChevronDown aria-hidden="true" className="provider-settings__disclosure-icon" size={16} />
       </OctantButton>
       {manualOpen ? (
         <div className="provider-settings__manual-body">

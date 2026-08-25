@@ -54,6 +54,7 @@ distilled successor of the earlier long-form design specifications.
 | [0044](0044-the-dock-hosts-live-thread-owned-tools.md)        | The dock hosts live thread-owned tools                            | Proposed           |
 | [0045](0045-environment-summarizes-the-active-thread.md)      | Environment summarizes the active thread                          | Accepted           |
 | [0046](0046-shadcn-recipes-own-product-controls.md)           | shadcn recipes own product controls                               | Accepted           |
+| [0047](0047-workspace-translucency-opt-in.md)                 | Workspace translucency opt-in                                     | Accepted           |
 
 ## Adding an ADR
 

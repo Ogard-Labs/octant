@@ -67,6 +67,7 @@ export type ImplementedSettingId =
   | "enable-work"
   | "sidebar-width"
   | "sidebar-material"
+  | "workspace-material"
   | "sidebar-background"
   | "mode-switcher"
   | "project-view-switcher"
@@ -277,6 +278,8 @@ const settingSearchText: Readonly<Record<ImplementedSettingId, string>> = {
   "enable-work": "enable work mode",
   "sidebar-width": "sidebar width",
   "sidebar-material": "appearance translucent sidebar translucency material system opaque",
+  "workspace-material":
+    "appearance translucent workspace window translucency material vibrancy glass system opaque",
   "sidebar-background":
     "sidebar background image preset gradient custom upload overlay color opacity vibrancy",
   "mode-switcher": "mode switcher compact buttons dropdown sidebar navigation",

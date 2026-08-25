@@ -770,7 +770,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                     return (
                       <li className="extcard" key={entryKey}>
                         <span aria-hidden="true" className="icon-mark">
-                          <Puzzle aria-hidden="true" className="icon" size={18} strokeWidth={1.5} />
+                          <Puzzle aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
                         </span>
                         <span className="extcard-name">{entry.displayName}</span>
                         <span className="extcard-right">
@@ -903,7 +903,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               {localPreview !== undefined ? (
                 <div className="extcard">
                   <span aria-hidden="true" className="icon-mark">
-                    <Puzzle aria-hidden="true" className="icon" size={18} strokeWidth={1.5} />
+                    <Puzzle aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
                   </span>
                   <span className="extcard-name">{localPreview.entry.displayName}</span>
                   <span className="extcard-src">
@@ -1041,7 +1041,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                           <BookOpen
                             aria-hidden="true"
                             className="icon"
-                            size={18}
+                            size={16}
                             strokeWidth={1.5}
                           />
                         </span>
@@ -1155,7 +1155,7 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
   return (
     <li className="extcard">
       <span aria-hidden="true" className="icon-mark">
-        <BookOpen aria-hidden="true" className="icon" size={18} strokeWidth={1.5} />
+        <BookOpen aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
       </span>
       <span className="extcard-name">{skill.displayName}</span>
       <span className="extcard-right">
@@ -1224,7 +1224,7 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
   return (
     <li className="extcard">
       <span aria-hidden="true" className="icon-mark">
-        <Puzzle aria-hidden="true" className="icon" size={18} strokeWidth={1.5} />
+        <Puzzle aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
       </span>
       <span className="extcard-name">{pkg.displayName ?? pkg.slug ?? pkg.extensionId}</span>
       <span className="extcard-right">

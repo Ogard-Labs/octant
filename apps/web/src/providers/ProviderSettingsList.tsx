@@ -254,7 +254,7 @@ function AgentEligibleModelsControls(props: {
         <ChevronDown
           aria-hidden="true"
           className="agent-eligible-models__disclosure-icon"
-          size={15}
+          size={16}
         />
       </OctantButton>
       {open ? (
@@ -421,7 +421,7 @@ function ProviderRow(props: ProviderRowProps) {
           type="button"
           variant="ghost"
         >
-          <ChevronUp aria-hidden="true" size={13} />
+          <ChevronUp aria-hidden="true" size={14} />
         </OctantButton>
         <OctantButton
           aria-label={`Move ${name} down`}
@@ -432,7 +432,7 @@ function ProviderRow(props: ProviderRowProps) {
           type="button"
           variant="ghost"
         >
-          <ChevronDown aria-hidden="true" size={13} />
+          <ChevronDown aria-hidden="true" size={14} />
         </OctantButton>
       </span>
       <span className="icon-mark">

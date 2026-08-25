@@ -15,12 +15,14 @@ function surface(id: "browser" | "terminal" | "files") {
 }
 
 describe("the right sidebar surface", () => {
-  it("shows a compact launcher with no tool open", () => {
+  it("shows a compact launcher with no tool open", async () => {
+    const user = userEvent.setup();
+    const onOpenTab = vi.fn();
     render(
       <RightUtilityDockSurface
         launchableSurfaces={[browser, terminal, files]}
         onCloseTab={vi.fn()}
-        onOpenTab={vi.fn()}
+        onOpenTab={onOpenTab}
         onSelectSurface={vi.fn()}
         resolution={{ kind: "closed", reason: "no-surface" }}
         tabs={[]}
@@ -32,7 +34,10 @@ describe("the right sidebar surface", () => {
     expect(screen.queryByRole("heading", { name: "No tool open" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Browser" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Files" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Add tool" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add tool" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Add tool" }));
+    await user.click(screen.getAllByRole("button", { name: "Terminal" })[1]!);
+    expect(onOpenTab).toHaveBeenCalledWith("terminal");
     expect(screen.queryByRole("tab", { name: "Thread tools" })).not.toBeInTheDocument();
   });
 

@@ -101,7 +101,7 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
           type="button"
           variant="ghost"
         >
-          <SlidersHorizontal aria-hidden="true" size={15} strokeWidth={1.7} />
+          <SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.7} />
         </OctantButton>
       </OctantTooltip>
       {props.open ? (
@@ -125,7 +125,7 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
               type="button"
               variant="ghost"
             >
-              <X aria-hidden="true" size={15} strokeWidth={1.7} />
+              <X aria-hidden="true" size={16} strokeWidth={1.7} />
             </OctantButton>
           </header>
           <div className="thread-environment-disclosure__body">{props.children}</div>

@@ -246,7 +246,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                     type="button"
                     variant="ghost"
                   >
-                    <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+                    <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
                   </OctantButton>
                   <span className="work-composer-adapter__context-picker">
                     <ComposerModelPicker

@@ -71,7 +71,7 @@ function detailJson(number: number): string {
 }
 
 describe("fake-gh project pull-request port", () => {
-  it("executes zero gh commands on query and only sequential bounded list commands on refresh", async () => {
+  it("executes zero gh commands on query and only bounded list commands on refresh", async () => {
     const calls: string[][] = [];
     const command: GhCommandPort = {
       run: vi.fn(async (arguments_) => {
@@ -127,7 +127,7 @@ describe("fake-gh project pull-request port", () => {
       "--repo",
       "octant/r1",
       "--state",
-      "all",
+      "open",
       "--limit",
       "101",
       "--json",
