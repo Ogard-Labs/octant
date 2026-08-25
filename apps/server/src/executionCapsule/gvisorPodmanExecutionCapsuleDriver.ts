@@ -955,7 +955,14 @@ function createExecutionCapsuleGitBundleStore(input: {
       await ensurePrivateDirectory(exportRoot, input.expectedUid);
       const directory = await mkdtemp(join(exportRoot, `${runtimeId}-`));
       await ensurePrivateDirectory(directory, input.expectedUid);
-      return join(directory, "capsule.bundle");
+      const artifactPath = join(directory, "capsule.bundle");
+      const artifact = await open(
+        artifactPath,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+        0o600,
+      );
+      await artifact.close();
+      return artifactPath;
     },
     verify: ({ artifactPath, expectedSha256 }) =>
       verifyOwnedFile(artifactPath, {
