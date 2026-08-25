@@ -121,6 +121,51 @@ describe("shared Seatbelt profile builder", () => {
     );
   });
 
+  it("keeps a toolchain launch able to read its own roots without restating them", () => {
+    // The broad-read escape hatch exists for runtimes like Git and provider
+    // CLIs. macOS resolves the temporary directory beneath `/private`, so a
+    // launch that did not repeat its roots in `readRoots` lost the one
+    // directory every one of those runtimes writes through.
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: "/private/tmp/octant-project",
+      temporaryDirectory: "/private/tmp/octant-temporary",
+      additionalWriteRoots: ["/private/tmp/octant-provider-home"],
+      networkEgress: "none",
+      allowFileReadStar: true,
+      privateHomeAllowPaths: [],
+    });
+
+    for (const path of [
+      "/private/tmp/octant-project",
+      "/private/tmp/octant-temporary",
+      "/private/tmp/octant-provider-home",
+    ]) {
+      expect(profile).toContain(seatbeltAllowRule("file-read*", path));
+      expect(profile.indexOf(seatbeltDenyRule("file-read*", "/private"))).toBeLessThan(
+        profile.indexOf(seatbeltAllowRule("file-read*", path)),
+      );
+    }
+  });
+
+  it("denies the sensitive paths no matter what a caller asks for", () => {
+    // The boundary is the product's, not the caller's: a launch that could
+    // replace it would pair an empty list with the broad read rule and reach
+    // the Keychain.
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: "/private/tmp/octant-project",
+      temporaryDirectory: "/private/tmp/octant-temporary",
+      networkEgress: "none",
+      allowFileReadStar: true,
+      additionalDenyReadPaths: ["/private/tmp/octant-sibling"],
+      privateHomeAllowPaths: [],
+    });
+
+    for (const path of ["/Volumes", "/Network", "/etc/ssh", "/var/root", "/Library/Keychains"]) {
+      expect(profile).toContain(seatbeltDenyRule("file-read*", path));
+    }
+    expect(profile).toContain(seatbeltDenyRule("file-read*", "/private/tmp/octant-sibling"));
+  });
+
   it("escapes Seatbelt path literals", () => {
     expect(escapeSeatbeltPath('/tmp/weird"path\\here')).toBe('/tmp/weird\\"path\\\\here');
     expect(seatbeltAllowRule("file-read*", '/tmp/x"y')).toBe(

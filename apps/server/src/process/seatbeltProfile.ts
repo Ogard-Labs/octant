@@ -44,7 +44,6 @@ export interface SeatbeltProfileInput {
   readonly allowProcessFork?: boolean;
   readonly allowFileReadStar?: boolean;
   readonly writeBoundRoot?: boolean;
-  readonly denyReadPaths?: ReadonlyArray<string>;
   /**
    * Extra read denials kept alongside the defaults instead of replacing them.
    *
@@ -199,10 +198,12 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
   const writeBoundRoot = input.writeBoundRoot !== false;
   const allowProcessExec = input.allowProcessExec !== false;
   const allowProcessFork = input.allowProcessFork !== false;
-  const denyReadPaths = [
-    ...(input.denyReadPaths ?? DEFAULT_DENY_READ_PATHS),
-    ...(input.additionalDenyReadPaths ?? []),
-  ];
+  // The sensitive boundary is not a default a caller can swap out. It was
+  // reachable as `denyReadPaths`, where an empty array replaced every entry and
+  // left `allowFileReadStar` granting the Keychain and the rest of the private
+  // system state. Callers extend the boundary through `additionalDenyReadPaths`
+  // and never narrow it.
+  const denyReadPaths = [...DEFAULT_DENY_READ_PATHS, ...(input.additionalDenyReadPaths ?? [])];
   for (const path of input.additionalDenyReadPaths ?? [])
     assertAbsolute(path, "additional deny read path");
   const additionalDenyWritePaths = input.additionalDenyWritePaths ?? [];
@@ -234,11 +235,16 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     ...(input.allowFileReadStar === true ? ["(allow file-read*)"] : []),
     ...denyReadPaths.map((path) => seatbeltDenyRule("file-read*", path)),
     ...privateRules,
+    // The launch roots are re-allowed under every denial above, `file-read*`
+    // included. Skipping them there left the `/private` denial covering the
+    // temporary directory, which macOS resolves beneath `/private/var`, so the
+    // broad-read escape hatch that exists for Git and provider CLIs took away
+    // the one directory those runtimes always need.
     ...uniqueAbsolutePaths([
       ...readRoots,
-      ...(input.allowFileReadStar === true
-        ? []
-        : [input.boundRoot, input.temporaryDirectory, ...additionalWriteRoots]),
+      input.boundRoot,
+      input.temporaryDirectory,
+      ...additionalWriteRoots,
     ]).map((path) => seatbeltAllowRule("file-read*", path)),
     ...(writeBoundRoot ? [seatbeltAllowRule("file-write*", input.boundRoot)] : []),
     seatbeltAllowRule("file-write*", input.temporaryDirectory),
