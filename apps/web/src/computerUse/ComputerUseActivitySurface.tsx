@@ -2,6 +2,7 @@ import type { ComputerUseClient } from "@octant/client-runtime/computer-use-clie
 import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
 import { useEffect, useState } from "react";
 import { ComputerUseLifecycleSurface } from "./ComputerUseLifecycleSurface";
+import { samePollingData } from "../polling/samePollingData";
 
 export function ComputerUseActivitySurface(props: {
   readonly client: ComputerUseClient;
@@ -18,9 +19,9 @@ export function ComputerUseActivitySurface(props: {
       try {
         const next = await props.client.list();
         if (!active) return;
-        setSessions(next);
+        setSessions((current) => (samePollingData(current, next) ? current : next));
       } catch {
-        if (active) setSessions([]);
+        if (active) setSessions((current) => (current.length === 0 ? current : []));
       } finally {
         inFlight = false;
       }
