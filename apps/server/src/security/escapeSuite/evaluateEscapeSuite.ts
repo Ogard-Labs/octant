@@ -2,8 +2,6 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  assertAuditPayloadRedacted,
-  assertNoPrincipalIdentityInAuditInput,
   decodeAuditActingPrincipal,
   decodeAuditEvent,
   type AuditActingPrincipal,
@@ -20,6 +18,8 @@ import {
   WorkConfinementRejected,
   canonicalizeWorkRelativePath,
   evaluateSession,
+  assertAuditPayloadRedacted,
+  assertNoPrincipalIdentityInAuditInput,
   validateAgentRunDepth,
   validateWorkspaceReceipt,
 } from "@octant/domain";
