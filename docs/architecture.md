@@ -423,11 +423,12 @@ mechanisms are:
   `systrap` driver. The tracer accepts only digest-pinned images, independent
   clones created inside gVisor from owner-only source bundles, explicit
   resource budgets, no network, and no host bind mounts. Each capsule's full
-  mutable Podman VFS store lives in an owner-only fixed-size ext4 image mounted
-  through `fuse2fs`, so its image, runtime, dependencies, and clone share one
-  hard disk ceiling without privileged project-quota administration. Podman
-  owns the outer systemd cgroup; the evidence reads its live CPU, memory, and
-  PID limits from the sandbox process. The tracer can execute argv, verify and
+  persistent Podman VFS graph store lives in an owner-only fixed-size ext4
+  image mounted through `fuse2fs`, so its image, dependencies, and clone share
+  one hard disk ceiling without privileged project-quota administration. Its
+  disposable Podman runroot is a short owner-only runtime directory recreated
+  during recovery. Podman owns the outer systemd cgroup; the evidence reads its
+  live CPU, memory, and PID limits from the sandbox process. The tracer can execute argv, verify and
   export a Git bundle, stop without deleting the filesystem, recover only as
   stopped after live-authority revalidation, and release the exact runtime
   after an explicit export. A dedicated Linux CI job proves two real capsules

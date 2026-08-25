@@ -115,6 +115,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
 
   constructor(options: GvisorPodmanExecutionCapsuleDriverOptions) {
     const currentUser = userInfo();
+    const runtimeEnvironment = options.runtimeEnvironment ?? defaultRuntimeEnvironment();
     this.#stateRoot = options.stateRoot;
     this.#capacity = options.capacity;
     this.#platform = options.platform ?? process.platform;
@@ -126,9 +127,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     this.#expectedHomeDirectory = options.expectedHomeDirectory ?? "/var/lib/octant";
     this.#podmanPath = options.podmanPath ?? "/usr/bin/podman";
     this.#runscPath = options.runscPath ?? "/usr/bin/runsc";
-    this.#runner =
-      options.runner ??
-      createNodeCommandRunner(options.runtimeEnvironment ?? defaultRuntimeEnvironment());
+    this.#runner = options.runner ?? createNodeCommandRunner(runtimeEnvironment);
     this.#sourceBundleStore =
       options.sourceBundleStore ??
       createExecutionCapsuleSourceBundleStore({ expectedUid: this.#uid });
@@ -144,6 +143,10 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       options.diskStore ??
       new FuseExecutionCapsuleDiskStore({
         stateRoot: this.#stateRoot,
+        runRootBase: join(
+          runtimeEnvironment.runtimeDirectory ?? `/run/user/${String(this.#uid)}`,
+          "o",
+        ),
         expectedUid: this.#uid,
         expectedGid: this.#gid,
         runner: this.#runner,

@@ -360,13 +360,15 @@ function evidenceCommandRunner(): ExecutionCapsuleCommandRunner {
           stdout: commandOutput(error, "stdout"),
           stderr: commandOutput(error, "stderr"),
         };
-        console.error(
-          JSON.stringify({
-            kind: "execution-capsule-evidence-command-failed",
-            operation: commandOperation(command, args),
-            ...failure,
-          }),
-        );
+        if (!command.endsWith("/sudo")) {
+          console.error(
+            JSON.stringify({
+              kind: "execution-capsule-evidence-command-failed",
+              operation: commandOperation(command, args),
+              ...failure,
+            }),
+          );
+        }
         return failure;
       }
     },
@@ -424,17 +426,14 @@ async function podman(
   const runtimeDirectory = process.env.XDG_RUNTIME_DIR;
   const sessionBusAddress = process.env.DBUS_SESSION_BUS_ADDRESS;
   const mountPath = join(stateRoot, "stores", capsuleRuntimeId, "mount");
+  const runRoot = join(
+    runtimeDirectory ?? `/run/user/${String(process.getuid?.() ?? 0)}`,
+    "o",
+    capsuleRuntimeId.slice("octant-capsule-".length),
+  );
   const result = await execFileAsync(
     process.env.OCTANT_PODMAN_PATH ?? "/usr/bin/podman",
-    [
-      "--root",
-      join(mountPath, "graph"),
-      "--runroot",
-      join(mountPath, "run"),
-      "--storage-driver",
-      "vfs",
-      ...args,
-    ],
+    ["--root", join(mountPath, "graph"), "--runroot", runRoot, "--storage-driver", "vfs", ...args],
     {
       shell: false,
       timeout: 30_000,

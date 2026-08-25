@@ -46,13 +46,16 @@ host becomes a first-class destination.
 - A Project owns a digest-pinned capsule recipe. The host admits work only when
   it can honor the declared CPU, memory, disk, and PID budget; otherwise work
   queues or refuses before a capsule starts.
-- The entire mutable Podman VFS store for one capsule lives in its own
+- The entire persistent Podman VFS graph store for one capsule lives in its own
   fixed-size ext4 image, mounted by the unprivileged Station identity through
   `fuse2fs` at an owner-only mount point with `nodev` and `nosuid`.
   `allow_other` lets the rootless gVisor gofer enter that private tree; the
   mount-point permissions still exclude unrelated host accounts. Image layers,
-  runtime metadata, dependencies, and the independent clone all count against
-  the same hard disk ceiling. No capsule store is a host-checkout bind mount.
+  dependencies, and the independent clone all count against the same hard disk
+  ceiling. Podman's disposable runroot uses a short, owner-only directory below
+  the Station identity's runtime directory and is recreated during recovery;
+  it contains no capsule filesystem or source data. No capsule store is a
+  host-checkout bind mount.
 - Podman owns the capsule's outer systemd cgroup and applies its CPU, memory,
   and PID limits. Rootless `runsc` ignores duplicate cgroup setup inside its
   user namespace; evidence reads the live sandbox process cgroup before the

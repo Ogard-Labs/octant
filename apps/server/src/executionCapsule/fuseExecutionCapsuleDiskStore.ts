@@ -37,6 +37,7 @@ export interface ExecutionCapsuleDiskStore {
 
 export interface FuseExecutionCapsuleDiskStoreOptions {
   readonly stateRoot: string;
+  readonly runRootBase: string;
   readonly expectedUid: number;
   readonly expectedGid: number;
   readonly runner: ExecutionCapsuleDiskCommandRunner;
@@ -52,6 +53,7 @@ export interface FuseExecutionCapsuleDiskStoreOptions {
  */
 export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore {
   readonly #stateRoot: string;
+  readonly #runRootBase: string;
   readonly #expectedUid: number;
   readonly #expectedGid: number;
   readonly #runner: ExecutionCapsuleDiskCommandRunner;
@@ -62,6 +64,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
 
   constructor(options: FuseExecutionCapsuleDiskStoreOptions) {
     this.#stateRoot = options.stateRoot;
+    this.#runRootBase = options.runRootBase;
     this.#expectedUid = options.expectedUid;
     this.#expectedGid = options.expectedGid;
     this.#runner = options.runner;
@@ -77,6 +80,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
   }): Promise<ExecutionCapsuleDiskLocation> {
     const location = this.#location(input);
     await ensurePrivateDirectory(this.#stateRoot, this.#expectedUid, true);
+    await ensurePrivateDirectory(this.#runRootBase, this.#expectedUid, true);
     const storesRoot = join(this.#stateRoot, "stores");
     await ensurePrivateDirectory(storesRoot, this.#expectedUid, true);
     await mkdir(location.directory, { mode: 0o700 });
@@ -108,6 +112,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
       await ensurePrivateDirectory(location.mountPath, this.#expectedUid, false);
       await this.#mount(location);
       await this.#prepareMountedStore(location);
+      await this.#prepareRunRoot(location, false);
       return location;
     } catch (error) {
       await this.close(location).catch(() => undefined);
@@ -122,22 +127,26 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
   }): Promise<ExecutionCapsuleDiskLocation> {
     const location = this.#location(input);
     await ensurePrivateDirectory(this.#stateRoot, this.#expectedUid, false);
+    await ensurePrivateDirectory(this.#runRootBase, this.#expectedUid, true);
     await ensurePrivateDirectory(join(this.#stateRoot, "stores"), this.#expectedUid, false);
     await ensurePrivateDirectory(location.directory, this.#expectedUid, false);
     await this.#verifyImage(location);
     await ensurePrivateDirectory(location.mountPath, this.#expectedUid, false);
     if (!(await this.#mountProbe.isMounted(location.mountPath))) await this.#mount(location);
     await this.#prepareMountedStore(location);
+    await this.#prepareRunRoot(location, true);
     return location;
   }
 
   async close(location: ExecutionCapsuleDiskLocation): Promise<void> {
     this.#assertOwnedLocation(location);
-    if (!(await this.#mountProbe.isMounted(location.mountPath))) return;
-    const unmounted = await this.#runner.run(this.#fusermountPath, ["-u", location.mountPath]);
-    if (unmounted.exitCode !== 0 || (await this.#mountProbe.isMounted(location.mountPath))) {
-      throw new Error("Execution capsule disk unmount failed.");
+    if (await this.#mountProbe.isMounted(location.mountPath)) {
+      const unmounted = await this.#runner.run(this.#fusermountPath, ["-u", location.mountPath]);
+      if (unmounted.exitCode !== 0 || (await this.#mountProbe.isMounted(location.mountPath))) {
+        throw new Error("Execution capsule disk unmount failed.");
+      }
     }
+    await rm(location.runRoot, { force: true, recursive: true });
   }
 
   async release(location: ExecutionCapsuleDiskLocation): Promise<void> {
@@ -149,8 +158,11 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     readonly runtimeId: string;
     readonly diskBytes: number;
   }): ExecutionCapsuleDiskLocation {
+    const runRoot = join(this.#runRootBase, input.runtimeId.slice("octant-capsule-".length));
     if (
       !isAbsolute(this.#stateRoot) ||
+      !isAbsolute(this.#runRootBase) ||
+      Buffer.byteLength(runRoot) > 50 ||
       !/^octant-capsule-[a-f0-9]{32}$/.test(input.runtimeId) ||
       !Number.isSafeInteger(input.diskBytes) ||
       input.diskBytes < 256 * 1_024 * 1_024 ||
@@ -165,7 +177,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
       imagePath: join(directory, "capsule.ext4"),
       mountPath,
       graphRoot: join(mountPath, "graph"),
-      runRoot: join(mountPath, "run"),
+      runRoot,
       diskBytes: input.diskBytes,
     };
   }
@@ -221,8 +233,15 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     await chmod(location.mountPath, 0o700);
     await ensurePrivateMountedDirectory(location.mountPath, this.#expectedUid, false);
     await ensurePrivateMountedDirectory(location.graphRoot, this.#expectedUid, true);
-    await rm(location.runRoot, { force: true, recursive: true });
-    await ensurePrivateMountedDirectory(location.runRoot, this.#expectedUid, true);
+  }
+
+  async #prepareRunRoot(
+    location: ExecutionCapsuleDiskLocation,
+    replaceExisting: boolean,
+  ): Promise<void> {
+    if (replaceExisting) await rm(location.runRoot, { force: true, recursive: true });
+    await mkdir(location.runRoot, { mode: 0o700 });
+    await ensurePrivateDirectory(location.runRoot, this.#expectedUid, false);
   }
 }
 

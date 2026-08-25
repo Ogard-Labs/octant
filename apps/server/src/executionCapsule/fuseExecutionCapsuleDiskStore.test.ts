@@ -31,9 +31,12 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "octant-capsule-disk-test-"));
     roots.push(stateRoot);
     await chmod(stateRoot, 0o700);
+    const runRootBase = await mkdtemp(join("/tmp", "ocr-"));
+    roots.push(runRootBase);
     const { run, mountProbe } = fixture();
     const store = new FuseExecutionCapsuleDiskStore({
       stateRoot,
+      runRootBase,
       expectedUid: process.getuid?.() ?? 0,
       expectedGid: process.getgid?.() ?? 0,
       runner: { run },
@@ -66,13 +69,7 @@ describe("FuseExecutionCapsuleDiskStore", () => {
         "mount",
         "graph",
       ),
-      runRoot: join(
-        stateRoot,
-        "stores",
-        "octant-capsule-11111111111141118111111111111111",
-        "mount",
-        "run",
-      ),
+      runRoot: join(runRootBase, "11111111111141118111111111111111"),
       diskBytes: 256 * 1_024 * 1_024,
     });
     const image = await lstat(disk.imagePath);
@@ -99,9 +96,12 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "octant-capsule-disk-test-"));
     roots.push(stateRoot);
     await chmod(stateRoot, 0o700);
+    const runRootBase = await mkdtemp(join("/tmp", "ocr-"));
+    roots.push(runRootBase);
     const { run, mountProbe } = fixture();
     const store = new FuseExecutionCapsuleDiskStore({
       stateRoot,
+      runRootBase,
       expectedUid: process.getuid?.() ?? 0,
       expectedGid: process.getgid?.() ?? 0,
       runner: { run },
@@ -131,9 +131,12 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "octant-capsule-disk-test-"));
     roots.push(stateRoot);
     await chmod(stateRoot, 0o700);
+    const runRootBase = await mkdtemp(join("/tmp", "ocr-"));
+    roots.push(runRootBase);
     const { run, mountProbe } = fixture();
     const store = new FuseExecutionCapsuleDiskStore({
       stateRoot,
+      runRootBase,
       expectedUid: process.getuid?.() ?? 0,
       expectedGid: process.getgid?.() ?? 0,
       runner: { run },
@@ -156,9 +159,12 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "octant-capsule-disk-test-"));
     roots.push(stateRoot);
     await chmod(stateRoot, 0o700);
+    const runRootBase = await mkdtemp(join("/tmp", "ocr-"));
+    roots.push(runRootBase);
     const { run, mountProbe } = fixture();
     const store = new FuseExecutionCapsuleDiskStore({
       stateRoot,
+      runRootBase,
       expectedUid: process.getuid?.() ?? 0,
       expectedGid: process.getgid?.() ?? 0,
       runner: { run },
@@ -173,15 +179,19 @@ describe("FuseExecutionCapsuleDiskStore", () => {
 
     expect(run).toHaveBeenCalledWith("/usr/bin/fusermount3", ["-u", disk.mountPath]);
     await expect(lstat(disk.directory)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(disk.runRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("refuses a forged cleanup location without touching the unrelated directory", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "octant-capsule-disk-test-"));
     roots.push(stateRoot);
     await chmod(stateRoot, 0o700);
+    const runRootBase = await mkdtemp(join("/tmp", "ocr-"));
+    roots.push(runRootBase);
     const { run, mountProbe } = fixture();
     const store = new FuseExecutionCapsuleDiskStore({
       stateRoot,
+      runRootBase,
       expectedUid: process.getuid?.() ?? 0,
       expectedGid: process.getgid?.() ?? 0,
       runner: { run },
@@ -200,5 +210,28 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     );
 
     expect(await readFile(join(unrelated, "kept"), "utf8")).toBe("kept");
+  });
+
+  it("refuses an ephemeral run root longer than Podman can use", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "octant-capsule-disk-test-"));
+    roots.push(stateRoot);
+    await chmod(stateRoot, 0o700);
+    const { run, mountProbe } = fixture();
+    const store = new FuseExecutionCapsuleDiskStore({
+      stateRoot,
+      runRootBase: join("/tmp", "octant-runtime-root-is-deliberately-too-long"),
+      expectedUid: process.getuid?.() ?? 0,
+      expectedGid: process.getgid?.() ?? 0,
+      runner: { run },
+      mountProbe,
+    });
+
+    await expect(
+      store.create({
+        runtimeId: "octant-capsule-11111111111141118111111111111111",
+        diskBytes: 256 * 1_024 * 1_024,
+      }),
+    ).rejects.toThrow("disk request is invalid");
+    expect(run).not.toHaveBeenCalled();
   });
 });
