@@ -498,6 +498,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     <ComposerModelPicker
                       ariaLabel="Provider and model"
                       groups={props.providerGroups}
+                      menuSide="bottom"
                       onSelect={props.onSelectProvider}
                       {...(props.selectedModelId === undefined
                         ? {}

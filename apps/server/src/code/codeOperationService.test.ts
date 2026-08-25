@@ -66,7 +66,12 @@ describe("CodeOperationService", () => {
         terminalId: ids.terminal,
         status: "running" as const,
         canRerun: false,
-        transcript: { chunks: ["private output"], byteLength: 14, truncated: false },
+        transcript: {
+          chunks: ["private output"],
+          byteLength: 14,
+          truncated: false,
+          characters: 14,
+        },
       })),
       attach: vi.fn(),
       observe: vi.fn((_terminalId, listener) => {
@@ -237,7 +242,7 @@ describe("CodeOperationService", () => {
       terminalId: ids.terminal,
       status: "running",
       canRerun: false,
-      transcript: { chunks: ["private output"], byteLength: 14, truncated: false },
+      transcript: { chunks: ["private output"], byteLength: 14, truncated: false, characters: 14 },
     });
     approved = false;
     const attached = await service.execute(ids.window, {
@@ -278,8 +283,10 @@ describe("CodeOperationService", () => {
     expect(terminals.write).toHaveBeenLastCalledWith(ids.terminal, "\u0003");
     expect(events.append).toHaveBeenCalledTimes(journalCallsBeforeInterrupt);
     terminals.write.mockClear();
+    // The surface resumes from where the snapshot it was already sent ends, so
+    // output between the attach and the observe is neither lost nor repeated.
     expect(terminals.observe).toHaveBeenLastCalledWith(ids.terminal, expect.any(Function), {
-      afterTranscript: "private output",
+      afterCharacters: 14,
     });
     approved = true;
     terminalOutputObserver?.({
@@ -293,6 +300,7 @@ describe("CodeOperationService", () => {
           chunks: ["private output\nTERMINAL_OK\n"],
           byteLength: 27,
           truncated: false,
+          characters: 0,
         },
       },
     });
@@ -404,6 +412,7 @@ describe("CodeOperationService", () => {
           chunks: ["private output\nTERMINAL_OK\n"],
           byteLength: 27,
           truncated: false,
+          characters: 0,
         },
       },
     });
@@ -655,7 +664,7 @@ describe("CodeOperationService", () => {
       terminalId: approvalTerminal,
       status: "running",
       canRerun: false,
-      transcript: { chunks: [], byteLength: 0, truncated: false },
+      transcript: { chunks: [], byteLength: 0, truncated: false, characters: 0 },
     });
     const approvalChecksAfterStart = approvals.validate.mock.calls.length;
     const resizeOperation = decodeCodeOperationId("67676767-6767-4676-8676-676767676767");
@@ -722,6 +731,7 @@ describe("CodeOperationService", () => {
           chunks: ["unpersisted output"],
           byteLength: 18,
           truncated: false,
+          characters: 0,
         },
       },
     });
@@ -1511,7 +1521,7 @@ describe("CodeOperationService terminal readers", () => {
       terminalId: ids.terminal,
       status: "running" as const,
       canRerun: false,
-      transcript: { chunks, byteLength: chunks.join("").length, truncated: false },
+      transcript: { chunks, byteLength: chunks.join("").length, truncated: false, characters: 0 },
     });
     const terminals = {
       launch: vi.fn(async () => snapshot(["boot"])),

@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import {
   groupWorkBoardCards,
@@ -28,7 +29,6 @@ import { ThreadBoardPullRequestSummaries } from "../threadBoard/ThreadBoardPullR
 const GROUPING_STORAGE_KEY = "octant.work.board.grouping";
 const SHOW_EMPTY_GROUPS_STORAGE_KEY = "octant.work.board.show-empty-groups";
 const ALL_STATUSES: readonly WorkBoardStatus[] = THREAD_BOARD_STATUS_COLUMN_ORDER;
-const FILTERS_PANEL_ID = "work-board-advanced-filters";
 
 export interface WorkThreadOpenTarget {
   readonly threadId: WorkThreadId;
@@ -90,8 +90,6 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
   );
   const [board, setBoard] = useState<BoardState>({ status: "loading" });
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const filtersRootRef = useRef<HTMLDivElement>(null);
-  const filtersToggleRef = useRef<HTMLButtonElement>(null);
 
   const query = useMemo(() => buildQuery(filters), [filters]);
   const queryKey = JSON.stringify(query);
@@ -127,26 +125,6 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
       active = false;
     };
   }, [queryKey, refreshNonce]);
-
-  useEffect(() => {
-    if (!filtersOpen) return;
-    function onPointerDown(event: PointerEvent) {
-      if (filtersRootRef.current === null) return;
-      if (event.target instanceof Node && filtersRootRef.current.contains(event.target)) return;
-      setFiltersOpen(false);
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setFiltersOpen(false);
-      filtersToggleRef.current?.focus();
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [filtersOpen]);
 
   function changeGrouping(next: WorkBoardGrouping) {
     setGrouping(next);
@@ -211,136 +189,127 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
             />
           </label>
 
-          <div className="code-board__filters" ref={filtersRootRef}>
-            <OctantButton
-              ref={filtersToggleRef}
-              aria-controls={FILTERS_PANEL_ID}
-              aria-expanded={filtersOpen}
-              aria-haspopup="dialog"
-              aria-label={
+          <div className="code-board__filters">
+            <OctantPopover
+              className="code-board__filters-panel"
+              onOpenChange={setFiltersOpen}
+              open={filtersOpen}
+              title="Filters"
+              trigger={
+                <>
+                  <Filter aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>Filters</span>
+                  {activeAdvancedFilterCount === 0 ? null : (
+                    <span aria-hidden="true" className="code-board__filter-count">
+                      {activeAdvancedFilterCount}
+                    </span>
+                  )}
+                </>
+              }
+              triggerClassName="code-board__filters-toggle"
+              triggerDataAttributes={{ "data-active": activeAdvancedFilterCount > 0 }}
+              triggerLabel={
                 activeAdvancedFilterCount === 0
                   ? "Filters"
                   : `Filters, ${activeAdvancedFilterCount} active`
               }
-              className="code-board__filters-toggle"
-              data-active={activeAdvancedFilterCount > 0 ? "true" : "false"}
-              onClick={() => setFiltersOpen((open) => !open)}
-              size="sm"
-              type="button"
-              variant="ghost"
+              triggerVariant="ghost"
             >
-              <Filter aria-hidden="true" size={14} strokeWidth={1.8} />
-              <span>Filters</span>
-              {activeAdvancedFilterCount === 0 ? null : (
-                <span aria-hidden="true" className="code-board__filter-count">
-                  {activeAdvancedFilterCount}
-                </span>
-              )}
-            </OctantButton>
-
-            {filtersOpen ? (
-              <div
-                aria-label="Filters"
-                className="code-board__filters-panel"
-                id={FILTERS_PANEL_ID}
-                role="dialog"
-              >
-                <fieldset className="code-board__status-filter">
-                  <legend>Status</legend>
-                  <div className="code-board__status-options">
-                    {ALL_STATUSES.map((status) => (
-                      <label className="code-board__status-option" key={status}>
-                        <OctantInput
-                          checked={filters.statuses.has(status)}
-                          onChange={(event) =>
-                            setFilters((prev) => toggleStatus(prev, status, event.target.checked))
-                          }
-                          type="checkbox"
-                        />
-                        <span>
-                          <span aria-hidden="true" className={`st st-${status}`} />
-                          {workBoardStatusLabel(status)}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-
-                <div className="code-board__filter-fields">
-                  {props.projects.length === 0 ? null : (
-                    <label>
-                      <span>Project</span>
-                      <OctantNativeSelect
+              <fieldset className="code-board__status-filter">
+                <legend>Status</legend>
+                <div className="code-board__status-options">
+                  {ALL_STATUSES.map((status) => (
+                    <label className="code-board__status-option" key={status}>
+                      <OctantInput
+                        checked={filters.statuses.has(status)}
                         onChange={(event) =>
-                          setFilters((prev) => ({
-                            ...prev,
-                            projectIds:
-                              event.target.value === ""
-                                ? new Set<string>()
-                                : new Set<string>([event.target.value]),
-                          }))
+                          setFilters((prev) => toggleStatus(prev, status, event.target.checked))
                         }
-                        value={firstOrEmpty(filters.projectIds)}
-                      >
-                        <option value="">All Projects</option>
-                        {props.projects.map((project) => (
-                          <option key={String(project.id)} value={String(project.id)}>
-                            {project.name}
-                          </option>
-                        ))}
-                      </OctantNativeSelect>
+                        type="checkbox"
+                      />
+                      <span>
+                        <span aria-hidden="true" className={`st st-${status}`} />
+                        {workBoardStatusLabel(status)}
+                      </span>
                     </label>
-                  )}
-
-                  <label>
-                    <span>Pending request</span>
-                    <OctantNativeSelect
-                      onChange={(event) =>
-                        setFilters((prev) => ({
-                          ...prev,
-                          pendingRequest: event.target.value as FilterState["pendingRequest"],
-                        }))
-                      }
-                      value={filters.pendingRequest}
-                    >
-                      <option value="any">Any</option>
-                      <option value="only">Only pending</option>
-                      <option value="excluded">Exclude pending</option>
-                    </OctantNativeSelect>
-                  </label>
-
-                  <label>
-                    <span>Follow-up</span>
-                    <OctantNativeSelect
-                      onChange={(event) =>
-                        setFilters((prev) => ({
-                          ...prev,
-                          followUp: event.target.value as FilterState["followUp"],
-                        }))
-                      }
-                      value={filters.followUp}
-                    >
-                      <option value="any">Any</option>
-                      <option value="only">Only follow-up</option>
-                      <option value="excluded">Exclude follow-up</option>
-                    </OctantNativeSelect>
-                  </label>
+                  ))}
                 </div>
+              </fieldset>
 
-                <div className="code-board__filters-footer">
-                  <OctantButton
-                    className="code-board__reset-filters"
-                    disabled={activeAdvancedFilterCount === 0 && filters.text.trim() === ""}
-                    onClick={() => setFilters(DEFAULT_FILTERS)}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
+              <div className="code-board__filter-fields">
+                {props.projects.length === 0 ? null : (
+                  <label>
+                    <span>Project</span>
+                    <OctantNativeSelect
+                      onChange={(event) =>
+                        setFilters((prev) => ({
+                          ...prev,
+                          projectIds:
+                            event.target.value === ""
+                              ? new Set<string>()
+                              : new Set<string>([event.target.value]),
+                        }))
+                      }
+                      value={firstOrEmpty(filters.projectIds)}
+                    >
+                      <option value="">All Projects</option>
+                      {props.projects.map((project) => (
+                        <option key={String(project.id)} value={String(project.id)}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </OctantNativeSelect>
+                  </label>
+                )}
+
+                <label>
+                  <span>Pending request</span>
+                  <OctantNativeSelect
+                    onChange={(event) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        pendingRequest: event.target.value as FilterState["pendingRequest"],
+                      }))
+                    }
+                    value={filters.pendingRequest}
                   >
-                    Reset filters
-                  </OctantButton>
-                </div>
+                    <option value="any">Any</option>
+                    <option value="only">Only pending</option>
+                    <option value="excluded">Exclude pending</option>
+                  </OctantNativeSelect>
+                </label>
+
+                <label>
+                  <span>Follow-up</span>
+                  <OctantNativeSelect
+                    onChange={(event) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        followUp: event.target.value as FilterState["followUp"],
+                      }))
+                    }
+                    value={filters.followUp}
+                  >
+                    <option value="any">Any</option>
+                    <option value="only">Only follow-up</option>
+                    <option value="excluded">Exclude follow-up</option>
+                  </OctantNativeSelect>
+                </label>
               </div>
-            ) : null}
+
+              <div className="code-board__filters-footer">
+                <OctantButton
+                  className="code-board__reset-filters"
+                  disabled={activeAdvancedFilterCount === 0 && filters.text.trim() === ""}
+                  onClick={() => setFilters(DEFAULT_FILTERS)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Reset filters
+                </OctantButton>
+              </div>
+            </OctantPopover>
           </div>
 
           <OctantButton

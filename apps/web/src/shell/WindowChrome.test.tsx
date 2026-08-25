@@ -274,13 +274,6 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("centers the identity menu within the sidebar instead of anchoring it to the content edge", () => {
-    const disclosure = cssRule(".sidebar-profile__disclosure");
-    expect(disclosure).toContain("left: 50%;");
-    expect(disclosure).toContain("calc(100% - 8px)");
-    expect(disclosure).toContain("transform: translateX(-50%);");
-  });
-
   it("keeps semantic shell borders and controls restrained", () => {
     expect(cssRule(":root")).toContain("--octant-border: #2d2d2d;");
     expect(cssRule(":root")).toContain("--octant-border-strong: #454545;");

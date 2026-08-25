@@ -1,5 +1,26 @@
 import type { ReactNode } from "react";
-import { ShadcnDropdownMenu } from "../shadcn/dropdown-menu";
+import {
+  DropdownMenu as OctantMenuRoot,
+  DropdownMenuGroup as OctantMenuGroup,
+  DropdownMenuGroupLabel as OctantMenuGroupLabel,
+  DropdownMenuItem as OctantMenuItem,
+  DropdownMenuPopup as OctantMenuPopup,
+  DropdownMenuPortal as OctantMenuPortal,
+  DropdownMenuPositioner as OctantMenuPositioner,
+  DropdownMenuTrigger as OctantMenuTrigger,
+  ShadcnDropdownMenu,
+} from "../shadcn/dropdown-menu";
+
+export {
+  OctantMenuRoot,
+  OctantMenuGroup,
+  OctantMenuGroupLabel,
+  OctantMenuItem,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuTrigger,
+};
 
 export interface OctantMenuItem {
   readonly description?: string;

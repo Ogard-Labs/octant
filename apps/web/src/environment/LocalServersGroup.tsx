@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantPopover } from "../ui/base/OctantPopover";
 import { groupLocalServerListeners, type LocalServerListenerGroup } from "./localServerGroups";
 import type { LocalServersController } from "./useLocalServersController";
 
@@ -248,19 +250,56 @@ function LocalServerRow(props: {
           </OctantButton>
         ) : null}
 
-        <OctantButton
-          aria-expanded={menuOpen}
-          aria-haspopup="menu"
-          aria-label={`More actions for ${name} on port ${String(listener.port)}`}
-          className="local-servers__more"
-          onClick={() => setMenuOpen((current) => !current)}
-          size="sm"
-          type="button"
-          variant="ghost"
+        <OctantPopover
+          className="local-servers__menu"
+          onOpenChange={setMenuOpen}
+          open={menuOpen}
+          title="More actions"
+          trigger={
+            <>
+              <Ellipsis aria-hidden="true" size={14} strokeWidth={1.8} />
+              <span>More</span>
+            </>
+          }
+          triggerClassName="local-servers__more"
+          triggerLabel={`More actions for ${name} on port ${String(listener.port)}`}
         >
-          <Ellipsis aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span>More</span>
-        </OctantButton>
+          {onCopyUrl === undefined
+            ? null
+            : urls.map((url) => (
+                <OctantButton
+                  aria-label={`Copy ${url}`}
+                  key={url}
+                  onClick={() =>
+                    void (async () => {
+                      setFeedback(undefined);
+                      try {
+                        await onCopyUrl(url);
+                        setFeedback({ kind: "confirmation", text: "Copied" });
+                        setMenuOpen(false);
+                      } catch {
+                        setFeedback({ kind: "failure", text: "Octant could not copy the URL." });
+                      }
+                    })()
+                  }
+                  type="button"
+                  variant="ghost"
+                >
+                  <Copy aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>{urls.length === 1 ? "Copy URL" : `Copy ${url}`}</span>
+                </OctantButton>
+              ))}
+          <p className="local-servers__details">
+            <Radio aria-hidden="true" size={14} strokeWidth={1.8} />
+            {bindScopeLabel(props.group.listeners)}
+          </p>
+          <p className="local-servers__details">{startSourceLabel(listener)}</p>
+          {listener.workingDirectory === undefined ? null : (
+            <p className="local-servers__details" title={listener.workingDirectory}>
+              {listener.workspaceLabel ?? listener.workingDirectory}
+            </p>
+          )}
+        </OctantPopover>
 
         {feedback === undefined ? null : (
           <span
@@ -291,71 +330,23 @@ function LocalServerRow(props: {
         )}
       </div>
 
-      {menuOpen ? (
-        <div
-          className="local-servers__menu"
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            event.stopPropagation();
-            setMenuOpen(false);
-          }}
-          role="menu"
-        >
-          {onCopyUrl === undefined
-            ? null
-            : urls.map((url) => (
-                <OctantButton
-                  aria-label={`Copy ${url}`}
-                  key={url}
-                  onClick={() =>
-                    void (async () => {
-                      setFeedback(undefined);
-                      try {
-                        await onCopyUrl(url);
-                        setFeedback({ kind: "confirmation", text: "Copied" });
-                        setMenuOpen(false);
-                      } catch {
-                        setFeedback({ kind: "failure", text: "Octant could not copy the URL." });
-                      }
-                    })()
-                  }
-                  role="menuitem"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Copy aria-hidden="true" size={14} strokeWidth={1.8} />
-                  <span>{urls.length === 1 ? "Copy URL" : `Copy ${url}`}</span>
-                </OctantButton>
-              ))}
-          <p className="local-servers__details">
-            <Radio aria-hidden="true" size={14} strokeWidth={1.8} />
-            {bindScopeLabel(props.group.listeners)}
-          </p>
-          <p className="local-servers__details">{startSourceLabel(listener)}</p>
-          {listener.workingDirectory === undefined ? null : (
-            <p className="local-servers__details" title={listener.workingDirectory}>
-              {listener.workspaceLabel ?? listener.workingDirectory}
-            </p>
-          )}
-        </div>
-      ) : null}
-
-      {props.confirming && needsConfirmation ? (
-        <div className="local-servers__confirm" role="alertdialog" aria-label="Confirm stop">
-          <p>
-            Stop {listener.processName} on port {listener.port}
-            {listener.workingDirectory === undefined ? "" : ` in ${listener.workingDirectory}`}?
-            Octant did not start this server.
-          </p>
-          <OctantButton onClick={() => void props.onStop()} type="button" variant="ghost">
-            <span>Stop this server</span>
-          </OctantButton>
-          <OctantButton onClick={props.onCancelConfirm} type="button" variant="ghost">
-            <span>Keep it running</span>
-          </OctantButton>
-        </div>
-      ) : null}
+      <OctantDialog
+        label="Confirm stop"
+        onClose={props.onCancelConfirm}
+        open={props.confirming && needsConfirmation}
+      >
+        <p>
+          Stop {listener.processName} on port {listener.port}
+          {listener.workingDirectory === undefined ? "" : ` in ${listener.workingDirectory}`}?
+          Octant did not start this server.
+        </p>
+        <OctantButton onClick={() => void props.onStop()} type="button" variant="ghost">
+          <span>Stop this server</span>
+        </OctantButton>
+        <OctantButton onClick={props.onCancelConfirm} type="button" variant="ghost">
+          <span>Keep it running</span>
+        </OctantButton>
+      </OctantDialog>
     </div>
   );
 }

@@ -43,6 +43,31 @@ describe("ContextClient", () => {
     }
   });
 
+  it("issues the request when the caller hands it the realm's own fetch", async () => {
+    // A bare `globalThis.fetch` reference carries no receiver, so invoking it as
+    // `options.fetch(...)` makes a browser refuse with "Illegal invocation"
+    // before anything leaves the page. Every reader then saw a Context service
+    // that looked unavailable while the server was healthy and never asked.
+    const realm = globalThis.fetch;
+    const issued: string[] = [];
+    globalThis.fetch = function (this: unknown, input: RequestInfo | URL) {
+      if (this !== globalThis) throw new TypeError("Illegal invocation");
+      issued.push(String(input));
+      return Promise.resolve(Response.json(snapshot()));
+    } as typeof globalThis.fetch;
+    try {
+      const client = createContextClient({
+        baseUrl: "http://127.0.0.1:13773",
+        fetch: globalThis.fetch,
+        windowCapability: capability,
+      });
+      await expect(client.inspect(request)).resolves.toMatchObject({ sequence: 8 });
+      expect(issued).toEqual(["http://127.0.0.1:13773/api/context/inspect"]);
+    } finally {
+      globalThis.fetch = realm;
+    }
+  });
+
   it("forwards cancellation to fetch and reports interruption without leaking transport details", async () => {
     const controller = new AbortController();
     const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => {

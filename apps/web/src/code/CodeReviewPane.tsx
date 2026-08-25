@@ -15,6 +15,7 @@ import type {
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useState } from "react";
+import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 
@@ -25,6 +26,18 @@ const REVIEW_STATE_LABELS: Record<CodePullRequestReviewOpinion["state"], string>
   dismissed: "Dismissed",
   pending: "Pending",
   unknown: "Unknown state",
+};
+
+const REVIEW_STATE_VARIANTS: Record<
+  CodePullRequestReviewOpinion["state"],
+  NonNullable<OctantBadgeProps["variant"]>
+> = {
+  approved: "success",
+  "changes-requested": "destructive",
+  commented: "secondary",
+  dismissed: "outline",
+  pending: "warning",
+  unknown: "secondary",
 };
 
 export interface PullRequestConversationProps {
@@ -58,7 +71,9 @@ export function PullRequestConversation(props: PullRequestConversationProps) {
             {props.reviews.map((review, index) => (
               <li key={`${review.author}-${index}`}>
                 <strong>{review.author.length === 0 ? "Unknown reviewer" : review.author}</strong>
-                <span className="code-pr-review__badge">{REVIEW_STATE_LABELS[review.state]}</span>
+                <OctantBadge variant={REVIEW_STATE_VARIANTS[review.state]}>
+                  {REVIEW_STATE_LABELS[review.state]}
+                </OctantBadge>
                 {review.body.length === 0 ? null : <p>{review.body}</p>}
               </li>
             ))}
