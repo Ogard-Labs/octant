@@ -71,9 +71,14 @@ export function installRendererNavigationGuards(
   };
   webContents.on("will-navigate", guard);
   webContents.on("will-redirect", guard);
-  webContents.setWindowOpenHandler((details) => ({
-    action: policy.allows(details.url) ? "allow" : "deny",
-  }));
+  // Allowing a popup hands Electron a child window this port cannot reach, so
+  // the child carries none of the guards above and can navigate itself
+  // anywhere afterwards. Nothing asks for one either: the app never calls
+  // `window.open`, its `target="_blank"` links are external and travel through
+  // the host's own validated open-external path, and secondary windows are
+  // created by the host with these guards installed. Every popup is refused
+  // rather than allowed and left unguarded.
+  webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 }
 
 function parseUrl(value: string): URL | undefined {

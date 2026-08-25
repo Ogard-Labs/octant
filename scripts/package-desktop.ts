@@ -459,8 +459,40 @@ async function packageDesktop(repositoryRoot: string): Promise<string> {
       throw new Error(`Packaged bundle contains duplicate helper path ${forbiddenPath}.`);
     }
   }
+  validatePackagedRendererPolicy(
+    await readFile(join(packagedPayload, "apps/web/dist/index.html"), "utf8"),
+  );
   await validateBundleIdentity(finalApp);
   return finalApp;
+}
+
+/**
+ * The renderer's own policy has to survive the build, not merely appear in the
+ * checked-in source. Vite rewrites `index.html` on its way into the bundle and
+ * a unit test reading the repository copy cannot see the result, so the
+ * document that actually ships is checked here.
+ *
+ * `frame-ancestors` is deliberately absent: user agents ignore it in a `meta`
+ * element, and the served document's refusal to be framed comes from the
+ * response header the remote route policy sets.
+ */
+export function validatePackagedRendererPolicy(indexHtml: string): void {
+  const csp = indexHtml.match(
+    /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"\s*\/?\s*>/i,
+  )?.[1];
+  if (csp === undefined) {
+    throw new Error("Packaged renderer document ships no Content-Security-Policy meta.");
+  }
+  for (const directive of [
+    "default-src 'self'",
+    "script-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+  ]) {
+    if (!csp.includes(directive)) {
+      throw new Error(`Packaged renderer Content-Security-Policy is missing ${directive}.`);
+    }
+  }
 }
 
 export type DesktopSigningOutcome =

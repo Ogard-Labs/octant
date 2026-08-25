@@ -67,6 +67,9 @@ describe("renderer navigation policy", () => {
     expect(preventNavigate).toHaveBeenCalledOnce();
     expect(preventRedirect).toHaveBeenCalledOnce();
     expect(openHandler?.({ url: "https://attacker.example/" })).toEqual({ action: "deny" });
-    expect(openHandler?.({ url: "http://localhost:5173/help" })).toEqual({ action: "allow" });
+    // Even the renderer's own address is refused a popup. Electron would build
+    // that child window itself, out of reach of the guards installed above, and
+    // it could then navigate anywhere.
+    expect(openHandler?.({ url: "http://localhost:5173/help" })).toEqual({ action: "deny" });
   });
 });

@@ -24,6 +24,7 @@ import {
   packagedBundlePath,
   pruneUnusedNativePayloads,
   selectFinalBundlePaths,
+  validatePackagedRendererPolicy,
   stripNativeDebugMetadata,
   validatePackagedPayload,
   validateBundledInternalRuntime,
@@ -471,6 +472,21 @@ describe("desktop packaging boundary", () => {
     );
     expect(createQuitAppleScript('/tmp/Octant "Preview".app')).toBe(
       'tell application "/tmp/Octant \\"Preview\\".app" to quit',
+    );
+  });
+  it("refuses to ship a renderer whose built policy lost a directive", () => {
+    const meta = (content: string) =>
+      `<meta http-equiv="Content-Security-Policy" content="${content}" />`;
+    const complete = "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'";
+
+    expect(() => validatePackagedRendererPolicy(meta(complete))).not.toThrow();
+    // The build is what can drop it: the source file keeps the directive while
+    // the document that ships is the one the renderer actually loads.
+    expect(() =>
+      validatePackagedRendererPolicy(meta(complete.replace("; script-src 'self'", ""))),
+    ).toThrow(/script-src/);
+    expect(() => validatePackagedRendererPolicy("<html></html>")).toThrow(
+      /no Content-Security-Policy/,
     );
   });
 });
