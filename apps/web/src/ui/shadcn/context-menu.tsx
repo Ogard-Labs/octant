@@ -11,14 +11,12 @@ export function ContextMenuTrigger({
   className,
   ...props
 }: ComponentProps<typeof ContextMenuPrimitive.Trigger>) {
-  return (
-    <ContextMenuPrimitive.Trigger
-      aria-expanded={false}
-      aria-haspopup="menu"
-      className={cn(className)}
-      {...props}
-    />
-  );
+  // `aria-haspopup` is a fact about the trigger, so it belongs here. The
+  // expanded state is not: a trigger that always reports `false` tells a screen
+  // reader the menu is closed while it is open, which reads worse than saying
+  // nothing at all. Each call site owns `aria-expanded` and passes its own
+  // menu state.
+  return <ContextMenuPrimitive.Trigger aria-haspopup="menu" className={cn(className)} {...props} />;
 }
 
 export function ContextMenuContent({

@@ -6,7 +6,7 @@ import type {
   WorkspaceTab,
 } from "@octant/contracts/shell";
 import { GripVertical } from "lucide-react";
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import {
   OctantContextMenuContent,
@@ -262,6 +262,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
   const focused = String(props.focusedPaneId) === String(pane.paneId);
   const canSplit = canSplitPane(props.layout, pane.paneId, props.totalWorkspacePaneCount);
   const dragKey = `pane:${String(pane.paneId)}`;
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <section
       aria-current={active ? "true" : undefined}
@@ -278,8 +279,12 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       {/* The header spans the window's title band, so the space the grip and
           the launcher do not claim has to stay a native drag region: with the
           grip stretched across it the window could not be moved at all. */}
-      <OctantContextMenuRoot>
-        <OctantContextMenuTrigger className="workspace-pane__header" render={<div />}>
+      <OctantContextMenuRoot onOpenChange={setMenuOpen}>
+        <OctantContextMenuTrigger
+          aria-expanded={menuOpen}
+          className="workspace-pane__header"
+          render={<div />}
+        >
           <span
             className="workspace-pane__grip window-no-drag"
             onPointerCancel={props.drag.onPointerCancel}
