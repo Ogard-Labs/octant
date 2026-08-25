@@ -220,7 +220,7 @@ evidence("gVisor execution capsule evidence", () => {
             argv: [
               "/bin/sh",
               "-c",
-              'test "$(git rev-parse --git-common-dir)" = .git && test ! -f .git/objects/info/alternates && test -z "$(find .git/objects -type f -links +1 -print -quit)"',
+              'test "$(git rev-parse --git-common-dir)" = .git && test ! -f .git/objects/info/alternates && test -z "$(find .git/objects -type f -exec stat -c %h {} \\; | grep -v "^1$" | head -n 1)"',
             ],
           }),
         ).resolves.toMatchObject({ status: "exited", exitCode: 0 });
