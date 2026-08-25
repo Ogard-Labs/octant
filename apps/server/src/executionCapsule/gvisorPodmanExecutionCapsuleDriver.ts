@@ -316,7 +316,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (create.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
       created = true;
-      if (!(await this.#provisionWorkspace(disk, runtimeId))) {
+      if (!(await this.#provisionMappedDirectory(disk, runtimeId, "/workspace"))) {
         return { status: "refused", reason: "creation-failed" };
       }
 
@@ -427,19 +427,20 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     }
   }
 
-  async #provisionWorkspace(
+  async #provisionMappedDirectory(
     disk: ExecutionCapsuleDiskLocation,
     runtimeId: string,
+    destination: "/verify" | "/workspace",
   ): Promise<boolean> {
     let seedDirectory: string | undefined;
     try {
-      seedDirectory = await mkdtemp(join(tmpdir(), "octant-capsule-workspace-"));
+      seedDirectory = await mkdtemp(join(tmpdir(), `octant-capsule-${destination.slice(1)}-`));
       const copied = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(disk),
         "cp",
         "--archive=true",
         seedDirectory,
-        `${runtimeId}:/workspace`,
+        `${runtimeId}:${destination}`,
       ]);
       return copied.exitCode === 0;
     } catch {
@@ -713,6 +714,9 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (create.exitCode !== 0) return false;
       created = true;
+      if (!(await this.#provisionMappedDirectory(input.disk, verifierId, "/verify"))) {
+        return false;
+      }
       const copied = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(input.disk),
         "cp",

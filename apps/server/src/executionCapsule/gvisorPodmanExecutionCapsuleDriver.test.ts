@@ -546,6 +546,20 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       artifactPath: "/var/lib/octant/capsules/exports/capsule.bundle",
       expectedSha256: "b".repeat(64),
     });
+    const verifierProvisionIndex = run.mock.calls.findIndex(
+      ([command, args]) =>
+        command === "/usr/bin/podman" &&
+        args.includes("cp") &&
+        args.includes("--archive=true") &&
+        args.some((arg) => arg.endsWith(":/verify")),
+    );
+    const verifierStartIndex = run.mock.calls.findIndex(
+      ([command, args]) =>
+        command === "/usr/bin/systemd-run" &&
+        args.at(-1)?.startsWith(`${fixtureRuntimeId}-verify-`) === true,
+    );
+    expect(verifierProvisionIndex).toBeGreaterThan(-1);
+    expect(verifierStartIndex).toBeGreaterThan(verifierProvisionIndex);
     expect(
       run.mock.calls.some(
         ([command, args]) =>
