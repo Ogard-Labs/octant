@@ -262,7 +262,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
           type="button"
           variant="ghost"
         >
-          <ChevronRight aria-hidden="true" size={13} />
+          <ChevronRight aria-hidden="true" size={14} />
         </OctantButton>
         <OctantButton
           aria-label="Undock research browser"
@@ -275,7 +275,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
           type="button"
           variant="ghost"
         >
-          <X aria-hidden="true" size={13} />
+          <X aria-hidden="true" size={14} />
         </OctantButton>
       </header>
       {!nativeSupported ? (
@@ -284,7 +284,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
         </p>
       ) : !active ? (
         <div className="zen-research__empty">
-          <ShieldCheck aria-hidden="true" size={18} />
+          <ShieldCheck aria-hidden="true" size={16} />
           <p>The page belongs to this thread and is shared with its agent.</p>
           <OctantInput
             aria-label="Research address"
@@ -330,7 +330,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
                     type="button"
                     variant="ghost"
                   >
-                    <X aria-hidden="true" size={11} />
+                    <X aria-hidden="true" size={12} />
                   </OctantButton>
                 ) : null}
               </span>
@@ -344,7 +344,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
                 type="button"
                 variant="ghost"
               >
-                <Plus aria-hidden="true" size={13} />
+                <Plus aria-hidden="true" size={14} />
               </OctantButton>
             ) : null}
           </div>
@@ -358,7 +358,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
               type="button"
               variant="ghost"
             >
-              <ArrowLeft aria-hidden="true" size={13} />
+              <ArrowLeft aria-hidden="true" size={14} />
             </OctantButton>
             <OctantButton
               aria-label="Forward"
@@ -369,7 +369,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
               type="button"
               variant="ghost"
             >
-              <ArrowRight aria-hidden="true" size={13} />
+              <ArrowRight aria-hidden="true" size={14} />
             </OctantButton>
             <OctantButton
               aria-label={state?.loading === true ? "Stop loading" : "Reload"}
@@ -380,9 +380,9 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
               variant="ghost"
             >
               {state?.loading === true ? (
-                <LoaderCircle aria-hidden="true" size={13} />
+                <LoaderCircle aria-hidden="true" size={14} />
               ) : (
-                <RotateCw aria-hidden="true" size={13} />
+                <RotateCw aria-hidden="true" size={14} />
               )}
             </OctantButton>
             <span className="zen-research__address" title={state?.url}>

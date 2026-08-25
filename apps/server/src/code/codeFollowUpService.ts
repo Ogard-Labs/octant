@@ -176,11 +176,11 @@ export class CodeFollowUpService {
           });
 
     if (this.#equivalent(current, next)) {
-      return { kind: "code-follow-up-updated", followUp: this.#requireFollowUp(command.threadId) };
+      return { kind: "follow-up-updated", followUp: this.#requireFollowUp(command.threadId) };
     }
 
     this.#append(command.threadId, command.expectedVersion, next);
-    return { kind: "code-follow-up-updated", followUp: this.#requireFollowUp(command.threadId) };
+    return { kind: "follow-up-updated", followUp: this.#requireFollowUp(command.threadId) };
   }
 
   #append(
@@ -206,7 +206,7 @@ export class CodeFollowUpService {
           },
           occurredAt: decodeTimestamp(this.#clock()),
           payload: {
-            kind: "code-follow-up-updated",
+            kind: "follow-up-updated",
             followUp: this.#serialize(followUp),
           },
         },

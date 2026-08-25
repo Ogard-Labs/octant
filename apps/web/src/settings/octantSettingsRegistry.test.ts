@@ -92,6 +92,13 @@ describe("octantSettingsRegistry", () => {
     expect(material?.nativeRequired).toBeUndefined();
   });
 
+  it("registers the translucent workspace toggle beside the sidebar toggle, ungated", () => {
+    const appearance = octantSettingsRegistry.sections.find((s) => s.id === "appearance");
+    const material = appearance?.settings.find((s) => s.id === "workspace-material");
+    expect(material?.label).toBe("Translucent workspace");
+    expect(material?.nativeRequired).toBeUndefined();
+  });
+
   it("keeps opaque sections without individual settings and registers the Code app launcher", () => {
     for (const id of ["chat", "providers", "skills", "usage"] as const) {
       const section = octantSettingsRegistry.sections.find((s) => s.id === id);

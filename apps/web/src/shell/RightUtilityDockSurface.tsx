@@ -69,9 +69,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           />
         )}
         <div className="right-utility-dock__actions">
-          {props.tabs.length === 0 ? null : (
-            <DockUtilityLauncher onOpen={props.onOpenTab} surfaces={remaining} />
-          )}
+          <DockUtilityLauncher onOpen={props.onOpenTab} surfaces={remaining} />
           {props.onClose === undefined ? null : (
             <IconButton
               icon={X}

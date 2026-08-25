@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight } from "lucide-react";
+import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } from "lucide-react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
@@ -20,18 +20,60 @@ export interface WindowChromeProps {
   readonly onToggleBottomPanel?: (opener: HTMLElement) => void;
   /** Present only while the sidebar is hidden: the chrome takes over the leading edge. */
   readonly onExpandSidebar?: () => void;
+  /** Keeps the primary creation action reachable while navigation is collapsed. */
+  readonly onNewThread?: () => void;
   readonly zenRecoveryNeeded?: boolean;
+}
+
+/**
+ * Publishes the trailing cluster's measured width so the pane header can end
+ * its box — and its drag region — before the window controls start. The
+ * cluster's width depends on which controls the active thread renders, so a
+ * constant here goes stale the moment a control is added or hidden.
+ */
+/**
+ * Publish a cluster's measured width so the pane header can reserve exactly the
+ * band the rendered controls occupy.
+ *
+ * The node arrives through a callback ref rather than an object ref: the
+ * leading cluster only mounts once the sidebar collapses, and an effect keyed
+ * on the property name alone never re-ran for it, so it silently fell back to
+ * the literal instead of measuring.
+ */
+function useMeasuredClusterWidth(property: string): (node: HTMLDivElement | null) => void {
+  const [cluster, setCluster] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (cluster === null) return;
+    const surface = (cluster.closest(".shell-frame") ?? document.documentElement) as HTMLElement;
+    const publish = () => {
+      const width = Math.ceil(cluster.getBoundingClientRect().width);
+      if (width > 0) surface.style.setProperty(property, `${width}px`);
+    };
+    publish();
+    const observer =
+      typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(publish);
+    observer?.observe(cluster);
+    // The reserve describes a cluster that is no longer there, so it goes with
+    // it — including when there was no observer to disconnect.
+    return () => {
+      observer?.disconnect();
+      surface.style.removeProperty(property);
+    };
+  }, [cluster, property]);
+  return setCluster;
 }
 
 export function WindowChrome(props: WindowChromeProps) {
   const recoverZen = props.onRecoverZen;
+  const trailing = useMeasuredClusterWidth("--octant-window-chrome-reserved-width");
+  const leading = useMeasuredClusterWidth("--octant-window-chrome-leading-width");
   return (
     <header
       aria-label={`Workspace actions for ${props.activeSurface}`}
       className={`window-chrome window-chrome--material-${props.material}`}
     >
       {props.onExpandSidebar === undefined ? null : (
-        <div className="window-chrome__leading window-no-drag">
+        <div className="window-chrome__leading window-no-drag" ref={leading}>
           <span aria-hidden="true" className="window-chrome__traffic-light-space" />
           <IconButton
             className="window-chrome__button"
@@ -39,9 +81,17 @@ export function WindowChrome(props: WindowChromeProps) {
             label="Show sidebar"
             onClick={props.onExpandSidebar}
           />
+          {props.onNewThread === undefined ? null : (
+            <IconButton
+              className="window-chrome__button window-chrome__new-thread"
+              icon={SquarePen}
+              label="New thread"
+              onClick={props.onNewThread}
+            />
+          )}
         </div>
       )}
-      <span aria-hidden="true" className="window-chrome__drag-space window-drag-region" />
+      <span aria-hidden="true" className="window-chrome__drag-space" />
       {props.developmentAuthentication ? (
         <span
           className="badge badge-warn window-chrome__development-auth window-no-drag"
@@ -65,7 +115,7 @@ export function WindowChrome(props: WindowChromeProps) {
           )}
         </div>
       ) : null}
-      <div className="window-chrome__trailing window-no-drag">
+      <div className="window-chrome__trailing window-no-drag" ref={trailing}>
         <span className="window-chrome__open-in-action" data-octant-open-in-action />
         <span className="window-chrome__environment-action" data-octant-environment-action />
         {props.isNarrow ? (

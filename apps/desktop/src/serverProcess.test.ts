@@ -296,13 +296,14 @@ describe("serverSpawnSpec", () => {
         instanceId: "managed-instance",
         packaged: false,
         execPath: "/Applications/Octant.app/Contents/MacOS/Octant",
-        env: { PATH: "/development/bin" },
+        env: { PATH: "/development/bin", OCTANT_DEV_WEB_BOOTSTRAP: "1" },
       }),
     ).toEqual({
       command: "bun",
       args: ["run", "--cwd", "/repo/apps/server", "start"],
       env: {
         PATH: "/development/bin",
+        OCTANT_DEV_WEB_BOOTSTRAP: "1",
         OCTANT_BROWSER_BROKER_TOKEN: "browser-token",
         OCTANT_BROWSER_BROKER_URL: "http://127.0.0.1:42000/",
         OCTANT_CODE_FILE_HELPER_PATH: "/repo/apps/desktop/dist/native/octant-code-file-helper",

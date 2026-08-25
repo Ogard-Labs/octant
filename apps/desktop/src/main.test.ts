@@ -35,6 +35,9 @@ import {
   shutdownManagedServerResources,
   startManagedServerResources,
   createMainBrowserWindowOptions,
+  createTrustedRendererRequestRegistry,
+  decorateTrustedRendererHeaders,
+  prepareDevelopmentRendererUrl,
   createDesktopWindowContextRegistry,
   createProjectWindowAuthorityLifecycle,
   createProjectWindowPreparationCleanup,
@@ -77,6 +80,69 @@ describe("packaged desktop host capabilities", () => {
       liveBrowserSupported: true,
       sidebarVibrancySupported: true,
     });
+  });
+});
+
+describe("development renderer startup", () => {
+  it("carries the window, server, and development authority parameters to Vite", () => {
+    const url = new URL(
+      prepareDevelopmentRendererUrl(
+        "http://localhost:5173/?existing=keep",
+        "window-a",
+        "http://127.0.0.1:13773",
+      ),
+    );
+    expect(url.searchParams.get("existing")).toBe("keep");
+    expect(url.searchParams.get("windowId")).toBe("window-a");
+    expect(url.searchParams.get("serverUrl")).toBe("http://127.0.0.1:13773");
+    expect(url.searchParams.get("developmentWebBootstrap")).toBe("1");
+  });
+
+  it("strips forged renderer identity and injects it only for the trusted shell frame", () => {
+    const context = {
+      serverOrigin: "http://127.0.0.1:13773",
+      rendererIdentity: "A".repeat(43),
+      developmentOrigin: "http://localhost:5173",
+    };
+    const trusted = decorateTrustedRendererHeaders({
+      requestHeaders: { "X-Octant-Renderer-Identity": "forged", accept: "application/json" },
+      requestUrl: "http://127.0.0.1:13773/api/shell/bootstrap",
+      frameUrl: "http://localhost:5173/?serverUrl=http%3A%2F%2F127.0.0.1%3A13773",
+      context,
+    });
+    expect(trusted).toMatchObject({
+      accept: "application/json",
+      "x-octant-renderer-identity": context.rendererIdentity,
+    });
+    expect(trusted["X-Octant-Renderer-Identity"]).toBeUndefined();
+
+    const untrustedFrame = decorateTrustedRendererHeaders({
+      requestHeaders: { "x-octant-renderer-identity": "forged" },
+      requestUrl: "http://127.0.0.1:13773/api/shell/bootstrap",
+      frameUrl: "file:///tmp/renderer.html",
+      context,
+    });
+    expect(untrustedFrame["x-octant-renderer-identity"]).toBeUndefined();
+
+    const otherServer = decorateTrustedRendererHeaders({
+      requestHeaders: { "x-octant-renderer-identity": "forged" },
+      requestUrl: "http://localhost:13773/api/shell/bootstrap",
+      frameUrl: "http://localhost:5173/",
+      context,
+    });
+    expect(otherServer["x-octant-renderer-identity"]).toBeUndefined();
+  });
+
+  it("removes a renderer request context when its window closes", () => {
+    const registry = createTrustedRendererRequestRegistry();
+    const context = {
+      serverOrigin: "http://127.0.0.1:13773",
+      rendererIdentity: "A".repeat(43),
+    };
+    registry.set(42, context);
+    expect(registry.get(42)).toBe(context);
+    registry.remove(42);
+    expect(registry.get(42)).toBeUndefined();
   });
 });
 

@@ -14,7 +14,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
 ) {
   return (
     <OctantIconButton {...buttonProps} className={className} label={label} ref={ref} title={title}>
-      <Icon aria-hidden="true" size={15} strokeWidth={1.7} />
+      <Icon aria-hidden="true" size={16} strokeWidth={1.7} />
     </OctantIconButton>
   );
 });
