@@ -524,7 +524,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               type="button"
               variant="ghost"
             >
-              <ExternalLink aria-hidden="true" size={13} />
+              <ExternalLink aria-hidden="true" size={14} />
             </OctantButton>
           )
         ) : null}
@@ -543,7 +543,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             type="button"
             variant="ghost"
           >
-            <PanelRight aria-hidden="true" size={13} />
+            <PanelRight aria-hidden="true" size={14} />
           </OctantButton>
         )}
         {activeContext ? (
