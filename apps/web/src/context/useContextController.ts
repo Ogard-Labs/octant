@@ -24,11 +24,18 @@ export interface ContextController {
 
 export interface UseContextControllerOptions {
   readonly client: ContextClient;
+  /**
+   * A value that changes whenever the subject's own turns have moved on. The
+   * snapshot measures a conversation that keeps growing, so a controller that
+   * only reloads when the subject changes reports the turn the thread was
+   * opened on for the rest of the session.
+   */
+  readonly revision?: number;
   readonly subject: ContextSubjectRef | undefined;
 }
 
 export function useContextController(options: UseContextControllerOptions): ContextController {
-  const { client } = options;
+  const { client, revision } = options;
   const aggregateType = options.subject?.aggregateType;
   const aggregateId = options.subject?.aggregateId;
   const subject = useMemo<ContextSubjectRef | undefined>(
@@ -120,6 +127,18 @@ export function useContextController(options: UseContextControllerOptions): Cont
     void reload();
     return () => requestRef.current?.abort();
   }, [reload, subject]);
+
+  const observedRevision = useRef(revision);
+  useEffect(() => {
+    if (observedRevision.current === revision) return;
+    observedRevision.current = revision;
+    // The subject effect above owns the first load and clears the snapshot on
+    // its way in. A newer turn is the same subject measured again, so the last
+    // reading stays on screen as `updating` rather than collapsing to a
+    // spinner every time the reader sends something.
+    if (subject === undefined || snapshotRef.current === undefined) return;
+    void reload(snapshotRef.current.sequence);
+  }, [reload, revision, subject]);
 
   const execute = useCallback(
     async (command: ContextCommand) => {

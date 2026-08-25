@@ -24,6 +24,37 @@ describe("useContextController", () => {
     expect(inspect).toHaveBeenCalledWith({ subject }, expect.any(AbortSignal));
   });
 
+  it("asks again when the subject's own turns have moved on", async () => {
+    // The snapshot is a measurement of a conversation that keeps growing. Loading
+    // it once per subject left the meter reporting the turn the thread was opened
+    // on, so the number a reader consulted before sending was stale by every turn
+    // they had sent since.
+    const inspect = vi.fn<ContextClient["inspect"]>(async () => contextFixture());
+    const client = fakeClient({ inspect });
+    const { rerender, result } = renderHook(
+      ({ revision }) => useContextController({ client, revision, subject }),
+      { initialProps: { revision: 1 } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(inspect).toHaveBeenCalledTimes(1);
+
+    rerender({ revision: 2 });
+    await waitFor(() => expect(inspect).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not ask again while the subject and its turns are unchanged", async () => {
+    const inspect = vi.fn<ContextClient["inspect"]>(async () => contextFixture());
+    const client = fakeClient({ inspect });
+    const { rerender, result } = renderHook(
+      ({ revision }) => useContextController({ client, revision, subject }),
+      { initialProps: { revision: 1 } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    rerender({ revision: 1 });
+    rerender({ revision: 1 });
+    expect(inspect).toHaveBeenCalledTimes(1);
+  });
+
   it("loads a replay-aware snapshot and aborts the request on disposal", async () => {
     let signal: AbortSignal | undefined;
     const client = fakeClient({

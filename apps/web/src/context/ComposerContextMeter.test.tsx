@@ -78,10 +78,12 @@ describe("ComposerContextMeter", () => {
 
     await user.click(button);
     const popover = screen.getByRole("dialog", { name: "Context usage" });
-    expect(popover).toHaveTextContent("Used104 · Provider reported");
-    expect(popover).toHaveTextContent("Maximum1,000");
-    expect(popover).toHaveTextContent("Percentage10%");
-    expect(popover).toHaveTextContent("Free space796");
+    // Used, maximum and percentage are the heading, and free space is one of the
+    // meter's own segments. Repeating all four as a separate list above the
+    // meter said the same numbers twice before the reader reached the picture.
+    expect(popover).toHaveTextContent("Context window104 / 1K (10%)");
+    expect(popover).toHaveTextContent("Last sent · model-a · Provider reported");
+    expect(popover).toHaveTextContent("Free space79680%");
     expect(popover).toHaveTextContent("Current request42");
     expect(popover).toHaveTextContent("Octant tools58 · Estimated");
     expect(popover).toHaveTextContent("Observed overhead4");

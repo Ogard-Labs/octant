@@ -1290,10 +1290,9 @@ describe("App", () => {
 
     await user.click(meter);
     const popover = screen.getByRole("dialog", { name: "Context usage" });
-    expect(popover).toHaveTextContent("Used104 · Provider reported");
-    expect(popover).toHaveTextContent("Maximum1,000");
-    expect(popover).toHaveTextContent("Percentage10%");
-    expect(popover).toHaveTextContent("Free space796");
+    expect(popover).toHaveTextContent("Context window104 / 1K (10%)");
+    expect(popover).toHaveTextContent("Last sent · model-a · Provider reported");
+    expect(popover).toHaveTextContent("Free space79680%");
     expect(popover).toHaveTextContent(/Tools2 loaded· 6 deferred/);
     expect(inspect.mock.calls.length).toBe(inspectCalls);
 
