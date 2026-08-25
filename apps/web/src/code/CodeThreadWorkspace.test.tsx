@@ -1381,6 +1381,56 @@ describe("CodeThreadWorkspace", () => {
     expect(composer).toHaveValue("retry after the provider recovers");
   });
 
+  it("keeps a staged image when its queued automatic send is refused", async () => {
+    // The queued send used to take the staged image for delivery before it
+    // knew the outcome, so a refusal left the composer's text restored but
+    // the image gone — the attachment the user still needed to retry with
+    // was silently lost.
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => false);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000010",
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "d".repeat(64),
+    };
+    const attachmentClient = {
+      putAttachment: vi.fn(async () => reference),
+      discardAttachment: vi.fn(async () => undefined),
+      attachment: vi.fn(),
+    } as never;
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "retry after the provider recovers");
+    pasteImage(composer);
+    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+
+    rerender(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controller({
+          pendingDraft: "retry after the provider recovers",
+          sendFollowUp,
+          turnStatus: "idle",
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
+    expect(composer).toHaveValue("retry after the provider recovers");
+    expect(screen.getByAltText("pasted.png")).toBeInTheDocument();
+  });
+
   it("discards staged images with a queued Code message", async () => {
     const user = userEvent.setup();
     const discardAttachment = vi.fn(async () => undefined);

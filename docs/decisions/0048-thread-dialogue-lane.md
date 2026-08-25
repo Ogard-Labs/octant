@@ -36,10 +36,6 @@ and return the result.
   existing read-only mention behavior, child AgentRun controls, approvals, and
   workspace authority remain unchanged.
 
-This record supersedes the single `0003` consequence that all thread
-references are read-only only for the explicit, mentioned Chat coordination
-path above. Ordinary mentions remain read-only.
-
 ## Consequences
 
 - The server remains the authority for target discovery, Open permission,
@@ -51,6 +47,11 @@ path above. Ordinary mentions remain read-only.
   source cannot coordinate and the existing mention remains read-only.
 - Durable cross-thread dialogue history is not copied into either thread. The
   target owns its turn; the source owns the request and the provider response.
+- 0003 remains Accepted. This record amends only its read-only
+  thread-reference decision, and only for the explicit, mentioned Chat
+  coordination path above; every other reference — every Work or Code
+  mention, and every unmentioned Chat thread — remains read-only exactly as
+  0003 states.
 
 ## Related
 

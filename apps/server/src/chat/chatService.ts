@@ -1482,15 +1482,15 @@ export class ChatService {
     const accepted = await this.#withThreadAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       if (command.submissionId !== undefined) {
+        // Match on submissionId alone. A turn whose only attempt ended
+        // failed, cancelled, or interrupted is still the turn this
+        // submission already created — excluding those outcomes let a
+        // retried send with the same submissionId fall through to turn
+        // creation and mint a second turn under the same submission
+        // identity.
         const existing = [...(this.#persistence.readChatThreadView(thread.id)?.turns ?? [])]
           .reverse()
-          .find(
-            (candidate) =>
-              String(candidate.submissionId) === String(command.submissionId) &&
-              candidate.attempts.some((attempt) =>
-                ["queued", "streaming", "waiting", "completed"].includes(attempt.outcome),
-              ),
-          );
+          .find((candidate) => String(candidate.submissionId) === String(command.submissionId));
         if (existing !== undefined) {
           const content = this.#persistence.readChatContent(
             String(existing.userMessageRef.contentId),

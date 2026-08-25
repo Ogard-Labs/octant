@@ -45,6 +45,65 @@ function documentIsVisible(): boolean {
   return typeof document === "undefined" || document.visibilityState !== "hidden";
 }
 
+/**
+ * A stable identifier for one extension/skill selection. `ExtensionSelection`
+ * has no single id field the way attachments and canvas/preview selections
+ * do, so the fields that distinguish one selection from another are encoded
+ * explicitly.
+ */
+function extensionSelectionKey(selection: ExtensionSelection): unknown {
+  const origin = [selection.origin.kind, String(selection.origin.reference)];
+  if (selection.kind === "skill") {
+    return [
+      "skill",
+      String(selection.skillId),
+      selection.packageVersion === undefined ? null : String(selection.packageVersion),
+      String(selection.packageDigest),
+      String(selection.catalogEpoch),
+      origin,
+    ];
+  }
+  return [
+    "plugin",
+    String(selection.extensionId),
+    String(selection.packageId),
+    selection.componentId === undefined ? null : String(selection.componentId),
+    String(selection.packageVersion),
+    String(selection.packageDigest),
+    String(selection.catalogEpoch),
+    origin,
+  ];
+}
+
+/**
+ * The identity a retry must match to be treated as "the same submission" by
+ * the server's submissionId reconciliation. Keying off thread + text alone
+ * let a retry that changed attachments, selections, extensions, or mentions
+ * reuse the prior submissionId; the server then matched by submissionId plus
+ * body text and handed back the original turn, silently discarding whatever
+ * about the resend had actually changed. JSON-encoding the whole tuple, rather
+ * than joining strings, keeps adjacent fields from bleeding into each other.
+ */
+function submissionIntentKey(
+  threadId: string,
+  prompt: string,
+  attachmentIds: ReadonlyArray<ChatAttachmentId>,
+  previewSelections: ReadonlyArray<PreviewContextSelection>,
+  canvasSelections: ReadonlyArray<CanvasContextSelection>,
+  extensionSelections: ReadonlyArray<ExtensionSelection>,
+  threadMentionIds: ReadonlyArray<MentionableThreadId>,
+): string {
+  return JSON.stringify([
+    threadId,
+    prompt,
+    attachmentIds.map((id) => String(id)),
+    previewSelections.map((selection) => String(selection.id)),
+    canvasSelections.map((selection) => String(selection.id)),
+    extensionSelections.map(extensionSelectionKey),
+    threadMentionIds.map((id) => String(id)),
+  ]);
+}
+
 export interface ChatControllerOptions {
   readonly activeThreadId?: ChatThreadId;
   readonly client?: ChatClient;
@@ -650,7 +709,15 @@ export function useChatController(options: ChatControllerOptions) {
       return false;
     }
     const sendingThreadId = String(activeView.thread.id);
-    const submissionKey = `${sendingThreadId}\u0000${prompt}`;
+    const submissionKey = submissionIntentKey(
+      sendingThreadId,
+      prompt,
+      attachmentIds,
+      previewSelections,
+      canvasSelections,
+      extensionSelections,
+      threadMentionIds,
+    );
     const submissionId =
       pendingSubmissionIds.current.get(submissionKey) ??
       decodeChatSubmissionId(globalThis.crypto.randomUUID());

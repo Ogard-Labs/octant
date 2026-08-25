@@ -71,6 +71,16 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
   attachment: () => Promise.reject(new Error("Code attachments are unavailable.")),
 };
 
+/**
+ * Whether two lists carry the same items, by a caller-supplied identity.
+ * Used to tell whether a queued send's attachments, paths, or mentions are
+ * still exactly what the composer holds now — order matters, since these
+ * lists are only ever appended to or removed from, never reordered.
+ */
+function sameByKey<T>(a: ReadonlyArray<T>, b: ReadonlyArray<T>, key: (item: T) => string): boolean {
+  return JSON.stringify(a.map(key)) === JSON.stringify(b.map(key));
+}
+
 export interface CodeThreadWorkspaceProps {
   readonly agentRunClient?: AgentRunClient;
   readonly onAddAgent?: () => void;
@@ -254,6 +264,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
+  // Read inside the queued send's async closure, after an await, to see
+  // whether the user has since changed what a queued send would carry.
+  // Plain closure captures of these hook-returned values would only ever see
+  // the render that started the send, never a later one.
+  const pathMentionsSelectedRef = useRef(pathMentions.selectedPaths);
+  pathMentionsSelectedRef.current = pathMentions.selectedPaths;
+  const threadMentionChipsRef = useRef(threadMentions.chips);
+  threadMentionChipsRef.current = threadMentions.chips;
+  const turnAccessOverrideRef = useRef(turnAccessOverride);
+  turnAccessOverrideRef.current = turnAccessOverride;
   const peekAbandoned = attachments.peekAbandoned;
   const markDraftStagedDropped = props.controller.markDraftStagedDropped;
   useEffect(() => {
@@ -396,18 +416,33 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const threadKey = String(props.threadId);
     const prompt = draft.trim();
     if (prompt.length === 0) return false;
-    const restorePrompt = () => {
+    // The full intent this queued send is carrying. A settlement that
+    // arrives after the user has changed any of it belongs to a draft this
+    // send never carried, so clearing state on success must compare against
+    // this whole snapshot rather than the draft text alone. Attachments are
+    // NOT taken here — `takeForSend` also revokes their preview URLs, and a
+    // refused or dropped send must leave the queued images retryable, not
+    // silently gone.
+    const attachmentSnapshot = attachments.peekForSend();
+    const fileMentionPaths = pathMentions.selectedPaths;
+    const threadMentionChips = threadMentions.chips;
+    const access = nextTurnAccess;
+    const queuedAccessOverride = turnAccessOverride;
+    const stillHoldsQueuedSnapshot = () =>
+      String(props.threadId) === threadKey &&
+      draftRef.current.trim() === prompt &&
+      turnAccessOverrideRef.current === queuedAccessOverride &&
+      sameByKey(attachments.peekForSend(), attachmentSnapshot, (ref) => String(ref.attachmentId)) &&
+      sameByKey(pathMentionsSelectedRef.current, fileMentionPaths, (path) => path) &&
+      sameByKey(threadMentionChipsRef.current, threadMentionChips, (chip) => String(chip.threadId));
+    const restoreQueuedSend = () => {
       if (String(props.threadId) !== threadKey) return;
-      // A queued send is still an ordinary, refusal-capable command. Keep the
-      // draft visible when the host declines it so the user can retry instead
-      // of interpreting an empty composer as a successful send.
+      // A queued send is still an ordinary, refusal-capable command. The
+      // staged images were never taken, so restoring the text alone is
+      // enough to leave the whole queued message retryable.
       setDraft(prompt);
       props.controller.setPendingDraft?.(prompt);
     };
-    const attachmentSnapshot = attachments.peekForSend();
-    const fileMentionPaths = pathMentions.selectedPaths;
-    const access = nextTurnAccess;
-    attachments.takeForSend();
     setDraft("");
     props.controller.setPendingDraft?.("");
     try {
@@ -421,20 +456,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         access,
       );
       if (sent) {
-        // Do not clear context the user added while this queued turn was in
-        // flight. The queued prompt owns its original chips; a newer draft
-        // owns anything typed after it was parked.
-        if (draftRef.current.trim() === prompt) {
+        // Do not clear or take context the user added while this queued turn
+        // was in flight. The queued prompt owns its original text,
+        // attachments, mentions, paths, and access choice; a newer draft
+        // owns anything changed after it was parked.
+        if (stillHoldsQueuedSnapshot()) {
+          attachments.takeForSend();
           threadMentions.clear();
           pathMentions.clear();
+          setTurnAccessOverride(undefined);
         }
-        setTurnAccessOverride(undefined);
       } else {
-        restorePrompt();
+        restoreQueuedSend();
       }
       return sent;
     } catch {
-      restorePrompt();
+      restoreQueuedSend();
       return false;
     }
   };
