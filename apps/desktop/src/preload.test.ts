@@ -40,6 +40,20 @@ describe("desktop preload bridge", () => {
     expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.hostCapabilities);
   });
 
+  it("reports the hidden-inset window chrome only on macOS", () => {
+    const ipc: IpcRendererPort = { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() };
+
+    expect(createHostBridge(ipc, projectWindowCapability, undefined, "darwin").windowChrome).toBe(
+      "hidden-inset",
+    );
+    expect(createHostBridge(ipc, projectWindowCapability, undefined, "win32").windowChrome).toBe(
+      "system-frame",
+    );
+    expect(createHostBridge(ipc, projectWindowCapability, undefined, "linux").windowChrome).toBe(
+      "system-frame",
+    );
+  });
+
   it("exposes only the accepted Octant host bridge", () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     const ipc: IpcRendererPort = { invoke, on: vi.fn(), removeListener: vi.fn() };
@@ -106,6 +120,7 @@ describe("desktop preload bridge", () => {
       "subscribeStartNewAgent",
       "tabBrowserSurface",
       "updateBrowserSurfaceBounds",
+      "windowChrome",
     ]);
     expect(bridge).not.toHaveProperty("invoke");
     expect(bridge).not.toHaveProperty("send");

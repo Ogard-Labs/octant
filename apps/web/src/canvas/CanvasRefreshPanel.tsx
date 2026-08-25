@@ -295,11 +295,11 @@ function RefreshStatus(props: { readonly run: RefreshRun }) {
       aria-live="polite"
     >
       {run.kind === "refreshed" ? (
-        <Check aria-hidden="true" size={13} strokeWidth={2} />
+        <Check aria-hidden="true" size={14} strokeWidth={2} />
       ) : isError ? (
-        <Ban aria-hidden="true" size={13} strokeWidth={1.8} />
+        <Ban aria-hidden="true" size={14} strokeWidth={1.8} />
       ) : run.kind === "partial" ? (
-        <TriangleAlert aria-hidden="true" size={13} strokeWidth={1.8} />
+        <TriangleAlert aria-hidden="true" size={14} strokeWidth={1.8} />
       ) : null}
       <span>{text}</span>
     </p>

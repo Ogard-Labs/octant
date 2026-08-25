@@ -85,6 +85,22 @@ export function closeUtilityTabState(
   return { tabs, ...(active === undefined ? {} : { active }) };
 }
 
+/**
+ * Removes tools presented in another shell region while preserving the
+ * remaining region's order and selected tool. A tool can only be rendered in
+ * one region at a time, so callers use this when the bottom panel is open.
+ */
+export function removeUtilityTabs(
+  state: ThreadUtilityDockState,
+  surfaces: ReadonlySet<RightUtilityDockSurfaceId>,
+): ThreadUtilityDockState {
+  const tabs = state.tabs.filter((surface) => !surfaces.has(surface));
+  if (tabs.length === state.tabs.length) return state;
+  const active =
+    state.active !== undefined && tabs.includes(state.active) ? state.active : tabs.at(-1);
+  return { tabs, ...(active === undefined ? {} : { active }) };
+}
+
 export function retainAvailableUtilityTabs(
   state: ThreadUtilityDockState,
   available: ReadonlySet<RightUtilityDockSurfaceId>,

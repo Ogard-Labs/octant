@@ -24,6 +24,7 @@ export interface ShellFrameProps {
   readonly sidebarVibrancyMode?: SidebarVibrancyMode;
   readonly sidebarWidth: number;
   readonly standaloneSurface?: ReactNode;
+  readonly workspaceMaterial?: ResolvedSidebarMaterial;
   readonly typography?: ThemeTypography;
   readonly theme?: ThemeSettings;
   readonly availableFonts?: ReadonlyArray<string>;
@@ -59,12 +60,18 @@ export function ShellThemeRoot(props: ShellThemeRootProps) {
 export function ShellFrame(props: ShellFrameProps) {
   if (props.standaloneSurface !== undefined) {
     return (
-      <div
-        className={`shell shell-frame--standalone shell--material-${props.material}`}
-        data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
+      <ShellThemeRoot
+        {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
+        {...(props.typography === undefined ? {} : { typography: props.typography })}
+        {...(props.theme === undefined ? {} : { theme: props.theme })}
       >
-        {props.standaloneSurface}
-      </div>
+        <div
+          className={`shell shell-frame--standalone shell--material-${props.material}`}
+          data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
+        >
+          {props.standaloneSurface}
+        </div>
+      </ShellThemeRoot>
     );
   }
 
@@ -76,8 +83,12 @@ export function ShellFrame(props: ShellFrameProps) {
       >
         <div
           className={`shell shell-frame shell--material-${props.material}${
-            props.wideContextOpen ? " shell--wide-context-open" : ""
-          }${props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""}`}
+            props.workspaceMaterial === "translucent"
+              ? " shell--workspace-material-translucent"
+              : ""
+          }${props.wideContextOpen ? " shell--wide-context-open" : ""}${
+            props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""
+          }`}
           data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
           data-thread-provider-icons={props.showThreadProviderIcons === false ? "false" : "true"}
           data-transcript-text-size={props.transcriptTextSize ?? "medium"}

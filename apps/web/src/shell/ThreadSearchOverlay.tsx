@@ -179,13 +179,13 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
       </div>
       {listing === "ready" ? null : (
         <p className="thread-search__listing" data-listing={listing} role="note">
-          <TriangleAlert aria-hidden="true" size={13} strokeWidth={1.8} />
+          <TriangleAlert aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>{LISTING_COPY[listing]}</span>
         </p>
       )}
       {hasQuery && archivedListing !== "ready" ? (
         <p className="thread-search__listing" data-listing={archivedListing} role="note">
-          <Archive aria-hidden="true" size={13} strokeWidth={1.8} />
+          <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>{ARCHIVED_LISTING_COPY[archivedListing]}</span>
         </p>
       ) : null}
@@ -229,9 +229,9 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                   role="option"
                 >
                   {hit.archived ? (
-                    <Archive aria-hidden="true" size={13} strokeWidth={1.8} />
+                    <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
                   ) : (
-                    <MessageSquare aria-hidden="true" size={13} strokeWidth={1.8} />
+                    <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
                   )}
                   <span className="thread-search__result-title">{hit.title}</span>
                   <span className="thread-search__result-label">{hit.folderLabel}</span>

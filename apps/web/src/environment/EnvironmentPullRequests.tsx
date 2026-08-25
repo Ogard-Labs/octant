@@ -116,7 +116,7 @@ export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
         type="button"
         variant="ghost"
       >
-        <RefreshCw aria-hidden="true" size={13} strokeWidth={1.8} />
+        <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
       </OctantButton>
     </div>
   );
@@ -134,9 +134,9 @@ function PullRequestList(props: { readonly rows: ReadonlyArray<GithubPullRequest
             target="_blank"
           >
             <span className="environment-pull-requests__title">
-              <GitPullRequest aria-hidden="true" size={13} strokeWidth={1.8} />
+              <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.8} />
               <span>{`#${row.number} ${row.title}`}</span>
-              <ExternalLink aria-hidden="true" size={11} strokeWidth={1.8} />
+              <ExternalLink aria-hidden="true" size={12} strokeWidth={1.8} />
             </span>
             <span className="environment-pull-requests__branches">
               {row.headBranch ?? "unknown branch"} → {row.baseBranch ?? "default branch"}
