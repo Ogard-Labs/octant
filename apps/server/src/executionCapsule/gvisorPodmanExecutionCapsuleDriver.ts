@@ -256,16 +256,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     try {
       const create = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(disk),
-        "--runtime",
-        this.#runscPath,
-        "--runtime-flag",
-        "platform=systrap",
-        "--runtime-flag",
-        // Podman owns and proves the outer systemd scope; runsc must not try
-        // to create a second privileged cgroup from inside the rootless userns.
-        "ignore-cgroups",
-        "--runtime-flag",
-        "network=none",
+        ...gvisorRuntimeArgs(this.#runscPath),
         "create",
         "--name",
         runtimeId,
@@ -313,6 +304,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       if (copied.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
       const started = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(disk),
+        ...gvisorRuntimeArgs(this.#runscPath),
         "start",
         runtimeId,
       ]);
@@ -590,14 +582,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     try {
       const create = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(input.disk),
-        "--runtime",
-        this.#runscPath,
-        "--runtime-flag",
-        "platform=systrap",
-        "--runtime-flag",
-        "ignore-cgroups",
-        "--runtime-flag",
-        "network=none",
+        ...gvisorRuntimeArgs(this.#runscPath),
         "create",
         "--name",
         verifierId,
@@ -631,6 +616,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       created = true;
       const started = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(input.disk),
+        ...gvisorRuntimeArgs(this.#runscPath),
         "start",
         verifierId,
       ]);
@@ -855,6 +841,21 @@ function podmanStoreArgs(disk: ExecutionCapsuleDiskLocation): ReadonlyArray<stri
     "vfs",
     "--cgroup-manager",
     "systemd",
+  ];
+}
+
+function gvisorRuntimeArgs(runscPath: string): ReadonlyArray<string> {
+  // Podman owns and proves the outer systemd scope; runsc must not try to
+  // create a second privileged cgroup from inside the rootless userns.
+  return [
+    "--runtime",
+    runscPath,
+    "--runtime-flag",
+    "platform=systrap",
+    "--runtime-flag",
+    "ignore-cgroups",
+    "--runtime-flag",
+    "network=none",
   ];
 }
 

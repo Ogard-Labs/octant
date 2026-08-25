@@ -333,7 +333,18 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     );
     expect(run).toHaveBeenCalledWith(
       "/usr/bin/podman",
-      fixturePodmanArgs(["start", "octant-capsule-11111111111141118111111111111111"]),
+      fixturePodmanArgs([
+        "--runtime",
+        "/usr/bin/runsc",
+        "--runtime-flag",
+        "platform=systrap",
+        "--runtime-flag",
+        "ignore-cgroups",
+        "--runtime-flag",
+        "network=none",
+        "start",
+        "octant-capsule-11111111111141118111111111111111",
+      ]),
     );
     expect(run).toHaveBeenCalledWith(
       "/usr/bin/podman",
