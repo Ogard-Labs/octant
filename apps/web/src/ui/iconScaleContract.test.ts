@@ -18,7 +18,7 @@ const ICON_SCALE = new Set([12, 14, 16, 20, 24]);
 const SIZED_BY_SOMETHING_ELSE = new Set(["UserAvatar", "ProviderMark"]);
 
 describe("icon scale contract", () => {
-  it("draws every interface icon at one of the scale's steps", () => {
+  it("asks for every interface icon at one of the scale's steps", () => {
     const offenders: Array<string> = [];
     for (const file of collectSourceFiles(sourceRoot)) {
       const relative = file.slice(sourceRoot.length + 1);
@@ -28,10 +28,17 @@ describe("icon scale contract", () => {
       }
     }
 
-    // Before this contract the app drew icons at twelve sizes between 10 and
-    // 24, with 13, 14 and 15 accounting for 215 of them — three sizes inside a
-    // 2px band, often inside one component, where no two of them could be told
-    // apart on purpose.
+    // Before this contract the app asked for icons at twelve sizes between 10
+    // and 24, with 13, 14 and 15 accounting for 215 of them — three sizes
+    // inside a 2px band, often inside one component, where no two of them
+    // could be told apart on purpose.
+    //
+    // This governs what the call site asks for, which decides 309 of the 326
+    // icons. The other 17 carry a `className="icon"`, and that rule sets a
+    // width in CSS, which beats an SVG's own size attribute — so those render
+    // at 19px whatever they ask for. That is a separate defect: `.icon`
+    // belongs to a sprite system this app never adopted, and resolving it is
+    // a design-system decision rather than a sweep.
     expect(offenders).toEqual([]);
   });
 });
