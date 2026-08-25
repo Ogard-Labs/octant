@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, lstat, mkdir, mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { ExecutionCapsuleAvailableCapacity } from "@octant/domain/execution-capsule-policy";
 import type {
   ExecutionCapsuleCommandResult,
@@ -34,6 +36,15 @@ export interface ExecutionCapsuleCommandRunner {
     command: string,
     args: ReadonlyArray<string>,
   ) => Promise<ExecutionCapsuleCommandResultPort>;
+}
+
+export interface ExecutionCapsuleArtifactWriter {
+  readonly write: (input: {
+    readonly command: string;
+    readonly args: ReadonlyArray<string>;
+    readonly artifactPath: string;
+    readonly maxBytes: number;
+  }) => Promise<{ readonly exitCode: number; readonly stderr: string }>;
 }
 
 export interface ExecutionCapsuleSourceBundleStore {
@@ -72,6 +83,7 @@ export interface GvisorPodmanExecutionCapsuleDriverOptions {
     readonly operation: string;
     readonly message: string;
   }) => void;
+  readonly artifactWriter?: ExecutionCapsuleArtifactWriter;
 }
 
 export interface ExecutionCapsuleRuntimeEnvironment {
@@ -120,6 +132,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
   readonly #recordDiagnostic:
     | ((diagnostic: { readonly operation: string; readonly message: string }) => void)
     | undefined;
+  readonly #artifactWriter: ExecutionCapsuleArtifactWriter;
   readonly #runtimes = new Map<string, GvisorPodmanRuntime>();
 
   constructor(options: GvisorPodmanExecutionCapsuleDriverOptions) {
@@ -162,6 +175,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         runner: this.#runner,
       });
     this.#recordDiagnostic = options.recordDiagnostic;
+    this.#artifactWriter = options.artifactWriter ?? createNodeArtifactWriter(runtimeEnvironment);
   }
 
   async probe(): Promise<ExecutionCapsuleDriverProbe> {
@@ -570,13 +584,21 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       operation = "reserve-host-artifact";
       artifactPath = await this.#bundleStore.reserve(input.runtimeId);
       operation = "copy-host-artifact";
-      const copied = await this.#runner.run(this.#podmanPath, [
-        ...podmanStoreArgs(runtime.disk),
-        "cp",
-        "--archive=false",
-        `${input.runtimeId}:/tmp/octant-export.bundle`,
+      const copied = await this.#artifactWriter.write({
+        command: this.#podmanPath,
+        args: [
+          ...podmanStoreArgs(runtime.disk),
+          "exec",
+          "--workdir",
+          "/workspace",
+          "--",
+          input.runtimeId,
+          "cat",
+          "/tmp/octant-export.bundle",
+        ],
         artifactPath,
-      ]);
+        maxBytes: 1_024 * 1_024 * 1_024,
+      });
       if (copied.exitCode !== 0) throw new Error("Execution capsule bundle copy failed.");
       operation = "verify-host-artifact";
       const verified = await this.#bundleStore.verify({
@@ -691,6 +713,13 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (create.exitCode !== 0) return false;
       created = true;
+      const copied = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(input.disk),
+        "cp",
+        input.artifactPath,
+        `${verifierId}:/tmp/capsule.bundle`,
+      ]);
+      if (copied.exitCode !== 0) return false;
       const started = await this.#startInBudgetScope({
         disk: input.disk,
         runtimeId: verifierId,
@@ -699,13 +728,6 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         pidLimit: 64,
       });
       if (started.exitCode !== 0) return false;
-      const copied = await this.#runner.run(this.#podmanPath, [
-        ...podmanStoreArgs(input.disk),
-        "cp",
-        input.artifactPath,
-        `${verifierId}:/tmp/capsule.bundle`,
-      ]);
-      if (copied.exitCode !== 0) return false;
       const initialized = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(input.disk),
         "exec",
@@ -1308,6 +1330,80 @@ function createNodeCommandRunner(
       }
     },
   };
+}
+
+function createNodeArtifactWriter(
+  runtimeEnvironment: ExecutionCapsuleRuntimeEnvironment,
+): ExecutionCapsuleArtifactWriter {
+  return {
+    write: async (input) => {
+      const artifact = await open(
+        input.artifactPath,
+        constants.O_WRONLY | constants.O_TRUNC | constants.O_NOFOLLOW,
+      );
+      const child = spawn(input.command, [...input.args], {
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          PATH: "/usr/bin:/bin",
+          LC_ALL: "C",
+          ...(runtimeEnvironment.homeDirectory === undefined
+            ? {}
+            : { HOME: runtimeEnvironment.homeDirectory }),
+          ...(runtimeEnvironment.runtimeDirectory === undefined
+            ? {}
+            : { XDG_RUNTIME_DIR: runtimeEnvironment.runtimeDirectory }),
+          ...(runtimeEnvironment.sessionBusAddress === undefined
+            ? {}
+            : { DBUS_SESSION_BUS_ADDRESS: runtimeEnvironment.sessionBusAddress }),
+        },
+      });
+      let byteLength = 0;
+      let stderr = "";
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        if (stderr.length < 65_536) stderr += chunk.slice(0, 65_536 - stderr.length);
+      });
+      const limiter = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          byteLength += chunk.byteLength;
+          if (byteLength > input.maxBytes) {
+            callback(new Error("Execution capsule artifact exceeds its byte limit."));
+            return;
+          }
+          callback(null, chunk);
+        },
+      });
+      const exited = new Promise<number>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (code) => resolve(code ?? 1));
+      });
+      const piped = pipeline(
+        child.stdout,
+        limiter,
+        artifact.createWriteStream({ autoClose: false }),
+      ).catch((error: unknown) => {
+        child.kill("SIGKILL");
+        throw error;
+      });
+      try {
+        const [pipeResult, exitResult] = await Promise.allSettled([piped, exited]);
+        if (pipeResult.status === "rejected") {
+          return { exitCode: 1, stderr: errorMessage(pipeResult.reason) };
+        }
+        if (exitResult.status === "rejected") {
+          return { exitCode: 1, stderr: errorMessage(exitResult.reason) };
+        }
+        return { exitCode: exitResult.value, stderr };
+      } finally {
+        await artifact.close();
+      }
+    },
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "unknown command failure";
 }
 
 function defaultRuntimeEnvironment(): ExecutionCapsuleRuntimeEnvironment {

@@ -10,6 +10,7 @@ import type {
 } from "./fuseExecutionCapsuleDiskStore";
 import {
   GvisorPodmanExecutionCapsuleDriver,
+  type ExecutionCapsuleArtifactWriter,
   type ExecutionCapsuleCommandRunner,
   type ExecutionCapsuleGitBundleStore,
   type ExecutionCapsuleSourceBundleStore,
@@ -58,6 +59,10 @@ const diskStore: ExecutionCapsuleDiskStore = {
   release: async () => undefined,
 };
 
+const artifactWriter: ExecutionCapsuleArtifactWriter = {
+  write: async () => ({ exitCode: 0, stderr: "" }),
+};
+
 const stationIdentity = {
   homeDirectory: "/var/lib/octant",
   expectedHomeDirectory: "/var/lib/octant",
@@ -67,6 +72,7 @@ const stationIdentity = {
     probe: async () => ({ passwordlessSudo: false, dockerSocketAccessible: false }),
   },
   diskStore,
+  artifactWriter,
 } as const;
 
 const capsuleRequest = decodeExecutionCapsuleAcquireRequest({
@@ -474,6 +480,10 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       sha256: "b".repeat(64),
       byteLength: 4_096,
     }));
+    const writeArtifact = vi.fn<ExecutionCapsuleArtifactWriter["write"]>(async () => ({
+      exitCode: 0,
+      stderr: "",
+    }));
     const driver = new GvisorPodmanExecutionCapsuleDriver({
       platform: "linux",
       username: "octant",
@@ -486,6 +496,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       runner: { run },
       sourceBundleStore: { verify: async () => undefined },
       bundleStore: { reserve, verify },
+      artifactWriter: { write: writeArtifact },
     });
     const created = await driver.create({
       request: capsuleRequest,
@@ -517,15 +528,20 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
         "--all",
       ]),
     );
-    expect(run).toHaveBeenCalledWith(
-      "/usr/bin/podman",
-      fixturePodmanArgs([
-        "cp",
-        "--archive=false",
-        `${created.runtimeId}:/tmp/octant-export.bundle`,
-        "/var/lib/octant/capsules/exports/capsule.bundle",
+    expect(writeArtifact).toHaveBeenCalledWith({
+      command: "/usr/bin/podman",
+      args: fixturePodmanArgs([
+        "exec",
+        "--workdir",
+        "/workspace",
+        "--",
+        created.runtimeId,
+        "cat",
+        "/tmp/octant-export.bundle",
       ]),
-    );
+      artifactPath: "/var/lib/octant/capsules/exports/capsule.bundle",
+      maxBytes: 1_024 * 1_024 * 1_024,
+    });
     expect(verify).toHaveBeenCalledWith({
       artifactPath: "/var/lib/octant/capsules/exports/capsule.bundle",
       expectedSha256: "b".repeat(64),
