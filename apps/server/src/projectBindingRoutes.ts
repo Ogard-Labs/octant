@@ -134,10 +134,21 @@ async function readJson(
   }
 }
 
-function decodeAuthorityRegistration(value: unknown): { windowId: WindowId; capability: string } {
-  requireKeys(value, ["windowId", "capability"]);
+function decodeAuthorityRegistration(value: unknown): {
+  windowId: WindowId;
+  capability: string;
+  rendererIdentity?: string;
+} {
+  requireKeysWithOptional(value, ["windowId", "capability"], ["rendererIdentity"]);
   if (!isCanonical256BitToken(value.capability)) throw new Error("invalid");
-  return { windowId: decodeWindowId(value.windowId), capability: value.capability };
+  if (value.rendererIdentity !== undefined && !isCanonical256BitToken(value.rendererIdentity)) {
+    throw new Error("invalid");
+  }
+  return {
+    windowId: decodeWindowId(value.windowId),
+    capability: value.capability,
+    ...(value.rendererIdentity === undefined ? {} : { rendererIdentity: value.rendererIdentity }),
+  };
 }
 
 function decodeAuthorityRevocation(value: unknown): { windowId: WindowId } {
@@ -168,6 +179,22 @@ function requireKeys(
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    throw new Error("invalid");
+  }
+}
+
+function requireKeysWithOptional(
+  value: unknown,
+  required: readonly string[],
+  optional: readonly string[],
+): asserts value is Record<string, unknown> {
+  if (!isRecord(value)) throw new Error("invalid");
+  const allowed = new Set([...required, ...optional]);
+  const actual = Object.keys(value);
+  if (
+    required.some((key) => !Object.prototype.hasOwnProperty.call(value, key)) ||
+    actual.some((key) => !allowed.has(key))
+  ) {
     throw new Error("invalid");
   }
 }

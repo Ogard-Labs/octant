@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createShellClient, ShellClientFailure } from "./shellClient";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000501");
+const capability = "A".repeat(43);
 const settings = {
   chatEnabled: true,
   workEnabled: true,
@@ -77,23 +78,34 @@ const commandResult = decodeShellCommandResult({
 describe("shell client", () => {
   it("constructs the bootstrap URL and decodes a successful response", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(bootstrap));
-    const client = createShellClient({ baseUrl: "http://127.0.0.1:13773/", fetch });
+    const client = createShellClient({
+      baseUrl: "http://127.0.0.1:13773/",
+      fetch,
+      windowCapability: capability,
+    });
 
-    await expect(client.bootstrap(windowId)).resolves.toEqual(bootstrap);
-    expect(fetch).toHaveBeenCalledWith(
-      `http://127.0.0.1:13773/api/shell/bootstrap?windowId=${windowId}`,
-      { method: "GET" },
-    );
+    await expect(client.bootstrap()).resolves.toEqual(bootstrap);
+    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:13773/api/shell/bootstrap", {
+      method: "POST",
+      headers: { "x-octant-window-capability": capability },
+    });
   });
 
   it("posts the encoded command body and decodes a successful response", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(commandResult));
-    const client = createShellClient({ baseUrl: "http://localhost:13773", fetch });
+    const client = createShellClient({
+      baseUrl: "http://localhost:13773",
+      fetch,
+      windowCapability: capability,
+    });
 
     await expect(client.execute(command)).resolves.toEqual(commandResult);
     expect(fetch).toHaveBeenCalledWith("http://localhost:13773/api/shell/commands", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": capability,
+      },
       body: JSON.stringify(command),
     });
   });
@@ -122,7 +134,11 @@ describe("shell client", () => {
       },
     });
     const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(commandResult));
-    const client = createShellClient({ baseUrl: "http://localhost:13773", fetch });
+    const client = createShellClient({
+      baseUrl: "http://localhost:13773",
+      fetch,
+      windowCapability: capability,
+    });
 
     await client.execute(dockCommand);
 
@@ -134,7 +150,11 @@ describe("shell client", () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () =>
       Response.json({ ...commandResult, privatePayload: "do not expose" }),
     );
-    const client = createShellClient({ baseUrl: "http://localhost:13773", fetch });
+    const client = createShellClient({
+      baseUrl: "http://localhost:13773",
+      fetch,
+      windowCapability: capability,
+    });
 
     const failure = await rejectedFailure(client.execute(command));
     expect(failure).toMatchObject({
@@ -156,7 +176,11 @@ describe("shell client", () => {
         { status: 409 },
       ),
     );
-    const client = createShellClient({ baseUrl: "http://localhost:13773", fetch });
+    const client = createShellClient({
+      baseUrl: "http://localhost:13773",
+      fetch,
+      windowCapability: capability,
+    });
 
     await expect(client.execute(command)).rejects.toMatchObject({
       category: "conflict",
@@ -173,9 +197,13 @@ describe("shell client", () => {
         { status: 503 },
       ),
     );
-    const client = createShellClient({ baseUrl: "http://localhost:13773", fetch });
+    const client = createShellClient({
+      baseUrl: "http://localhost:13773",
+      fetch,
+      windowCapability: capability,
+    });
 
-    const failure = await rejectedFailure(client.bootstrap(windowId));
+    const failure = await rejectedFailure(client.bootstrap());
     expect(failure).toMatchObject({
       category: "unavailable",
       message: "Shell service returned an invalid response.",
@@ -188,7 +216,11 @@ describe("shell client", () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () =>
       Response.json({ category: "invalid", message: "Command rejected." }, { status: 400 }),
     );
-    const client = createShellClient({ baseUrl: "http://localhost:13773", fetch });
+    const client = createShellClient({
+      baseUrl: "http://localhost:13773",
+      fetch,
+      windowCapability: capability,
+    });
 
     await expect(client.execute(command)).rejects.toMatchObject({
       category: "invalid",
@@ -200,9 +232,13 @@ describe("shell client", () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () => {
       throw new TypeError("connect ECONNREFUSED token=private");
     });
-    const client = createShellClient({ baseUrl: "http://localhost:13773", fetch });
+    const client = createShellClient({
+      baseUrl: "http://localhost:13773",
+      fetch,
+      windowCapability: capability,
+    });
 
-    const failure = await rejectedFailure(client.bootstrap(windowId));
+    const failure = await rejectedFailure(client.bootstrap());
     expect(failure).toMatchObject({
       category: "unavailable",
       message: "Octant shell service is unavailable.",
@@ -215,9 +251,13 @@ describe("shell client", () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () => {
       throw new DOMException("private abort reason", "AbortError");
     });
-    const client = createShellClient({ baseUrl: "http://localhost:13773", fetch });
+    const client = createShellClient({
+      baseUrl: "http://localhost:13773",
+      fetch,
+      windowCapability: capability,
+    });
 
-    const failure = await rejectedFailure(client.bootstrap(windowId));
+    const failure = await rejectedFailure(client.bootstrap());
     expect(failure).toMatchObject({
       category: "unavailable",
       message: "Shell request was aborted.",

@@ -220,9 +220,9 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
           {/* Status is carried by the words; the icon only speeds recognition,
               so colour is never the sole signal. */}
           {statusAssertive ? (
-            <AlertTriangle aria-hidden="true" size={13} strokeWidth={1.8} />
+            <AlertTriangle aria-hidden="true" size={14} strokeWidth={1.8} />
           ) : (
-            <CircleCheck aria-hidden="true" size={13} strokeWidth={1.8} />
+            <CircleCheck aria-hidden="true" size={14} strokeWidth={1.8} />
           )}
           <span>{status}</span>
         </p>

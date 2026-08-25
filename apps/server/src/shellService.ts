@@ -50,6 +50,8 @@ export const OCTANT_LOCAL_ACTOR_ID = decodeActorId("00000000-0000-4000-8000-0000
 
 export interface ShellServiceApi {
   readonly bootstrap: (windowId: WindowId) => ShellBootstrap;
+  readonly readBootstrap: (windowId: WindowId) => ShellBootstrap | undefined;
+  readonly revokeWindow: (windowId: WindowId) => void;
   readonly execute: (command: unknown) => ShellCommandResult;
 }
 
@@ -83,6 +85,21 @@ export class ShellService implements ShellServiceApi {
   }
 
   bootstrap(windowId: WindowId): ShellBootstrap {
+    const bootstrap = this.#readBootstrap(windowId);
+    this.#registeredWindowIds.add(windowId);
+    return bootstrap;
+  }
+
+  readBootstrap(windowId: WindowId): ShellBootstrap | undefined {
+    if (!this.#registeredWindowIds.has(windowId)) return undefined;
+    return this.#readBootstrap(windowId);
+  }
+
+  revokeWindow(windowId: WindowId): void {
+    this.#registeredWindowIds.delete(windowId);
+  }
+
+  #readBootstrap(windowId: WindowId): ShellBootstrap {
     this.#assertReady();
     try {
       const projectedSettings = this.#persistence.readShellSettings();
@@ -122,7 +139,6 @@ export class ShellService implements ShellServiceApi {
         environmentPresentation: presentation,
         presentationVersion: projectedPresentation?.aggregateVersion ?? decodeAggregateVersion(0),
       } as const;
-      this.#registeredWindowIds.add(windowId);
       return bootstrap;
     } catch (error) {
       throw this.#mapFailure(error);

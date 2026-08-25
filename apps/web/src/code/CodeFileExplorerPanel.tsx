@@ -49,7 +49,7 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
   if (!bound) {
     return (
       <p className="code-file-explorer__status" role="status">
-        <FolderTree aria-hidden="true" size={15} strokeWidth={1.8} />
+        <FolderTree aria-hidden="true" size={16} strokeWidth={1.8} />
         This Code thread is not bound to a checkout, so there are no repository files to list.
       </p>
     );

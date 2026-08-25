@@ -4,6 +4,7 @@ import type {
   MultiModelPoolCandidate,
   MultiModelRoutingVendorId,
 } from "@octant/contracts/multi-model-pool";
+import { decodeMultiModelRoutingVendorId } from "@octant/contracts/multi-model-pool";
 import type {
   ProviderInstanceId,
   ProviderModelId,
@@ -190,7 +191,7 @@ function candidateFacts(
   if (instance === undefined) {
     return {
       candidate,
-      routingVendorId: "unconfigured" as MultiModelRoutingVendorId,
+      routingVendorId: decodeMultiModelRoutingVendorId("unconfigured"),
       configured: false,
       readiness: "unavailable",
       modelAvailable: false,
@@ -206,7 +207,7 @@ function candidateFacts(
   );
   return {
     candidate,
-    routingVendorId: instance.driverKind as unknown as MultiModelRoutingVendorId,
+    routingVendorId: decodeMultiModelRoutingVendorId(instance.driverKind),
     configured: true,
     readiness: observed?.readiness ?? "unavailable",
     modelAvailable:
@@ -226,7 +227,7 @@ function vendorOf(
   const instance = snapshot.instances.find(
     (entry) => String(entry.id) === String(providerInstanceId),
   );
-  return (instance?.driverKind ?? "unconfigured") as unknown as MultiModelRoutingVendorId;
+  return decodeMultiModelRoutingVendorId(instance?.driverKind ?? "unconfigured");
 }
 
 function providerNameOf(

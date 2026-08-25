@@ -22,7 +22,11 @@ import {
   MAX_LIVE_ZEN_CARDS,
   resolveZenLiveCardActivity,
 } from "./zenPolicy";
-import { DEFAULT_ZEN_APPEARANCE, DEFAULT_ZEN_VIEWPORT } from "@octant/contracts/zen";
+import {
+  DEFAULT_ZEN_APPEARANCE,
+  DEFAULT_ZEN_VIEWPORT,
+  decodeZenSpace,
+} from "@octant/contracts/zen";
 import type {
   ZenSpace,
   ZenSpaceId,
@@ -146,6 +150,12 @@ describe("createZenSpace", () => {
     expect(space.appearance).toEqual(DEFAULT_ZEN_APPEARANCE);
     expect(space.active).toBe(true);
     expect(space.barCollapsed).toBe(false);
+  });
+
+  it("emits timestamps that satisfy the persisted UTC contract", () => {
+    const space = createZenSpace(makeId("33333333"), localHostId);
+    expect(decodeZenSpace(space).createdAt).toBe(space.createdAt);
+    expect(decodeZenSpace(space).updatedAt).toBe(space.updatedAt);
   });
 
   it("accepts custom appearance", () => {
