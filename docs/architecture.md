@@ -398,8 +398,12 @@ mechanisms are:
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch under `sandbox-exec` with deny-default Seatbelt profiles
   scoped to the bound root, allowlisted environments, and no broker
-  coordinates. Path checks alone are never the boundary. Confined reads open a
-  handle and verify identity against what containment resolved.
+  coordinates. Sensitive system roots (`/etc/ssh`, `/var/root`,
+  `/Library/Keychains`, `/private`, `/Volumes`, and `/Network`) remain denied
+  even where runtime compatibility requires a broad file-read rule; each
+  launch's exact roots are re-allowed after those denials. Path checks alone
+  are never the boundary. Confined reads open a handle and verify identity
+  against what containment resolved.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
 - **Remote clients.** Pairing issues a revocable device key; the private
