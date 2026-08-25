@@ -179,15 +179,15 @@ function CanvasActionItem(props: {
         </OctantButton>
         <span className="canvas-action__effect">
           {availability.capability.effect === "mutate" ? (
-            <Pencil aria-hidden="true" size={13} strokeWidth={1.8} />
+            <Pencil aria-hidden="true" size={14} strokeWidth={1.8} />
           ) : (
-            <Eye aria-hidden="true" size={13} strokeWidth={1.8} />
+            <Eye aria-hidden="true" size={14} strokeWidth={1.8} />
           )}
           <span>{effectLabel}</span>
         </span>
         {availability.requiresApproval ? (
           <span className="canvas-action__approval">
-            <ShieldAlert aria-hidden="true" size={13} strokeWidth={1.8} />
+            <ShieldAlert aria-hidden="true" size={14} strokeWidth={1.8} />
             <span>Needs approval</span>
           </span>
         ) : null}
@@ -207,9 +207,9 @@ function CanvasActionItem(props: {
       {disabled ? (
         <p className="canvas-action__reason" id={reasonId} role="note">
           {availability.state === "unauthorized" ? (
-            <LockKeyhole aria-hidden="true" size={13} strokeWidth={1.8} />
+            <LockKeyhole aria-hidden="true" size={14} strokeWidth={1.8} />
           ) : (
-            <Ban aria-hidden="true" size={13} strokeWidth={1.8} />
+            <Ban aria-hidden="true" size={14} strokeWidth={1.8} />
           )}
           <span>{availability.reason}</span>
         </p>
@@ -273,9 +273,9 @@ function ActionStatus(props: { readonly run: ActionRun; readonly statusId: strin
       data-run={run.kind}
     >
       {run.kind === "completed" ? (
-        <Check aria-hidden="true" size={13} strokeWidth={2} />
+        <Check aria-hidden="true" size={14} strokeWidth={2} />
       ) : isError ? (
-        <Ban aria-hidden="true" size={13} strokeWidth={1.8} />
+        <Ban aria-hidden="true" size={14} strokeWidth={1.8} />
       ) : null}
       <span>{text}</span>
     </p>

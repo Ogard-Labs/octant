@@ -133,6 +133,25 @@ export interface CodeThreadNavigationItem {
   readonly pinned?: boolean;
 }
 
+function refreshActiveThreadView(
+  current: CodeThreadView | undefined,
+  next: CodeBootstrap,
+): CodeThreadView | undefined {
+  if (current === undefined) return current;
+  const checkout = next.checkouts.find(
+    (candidate) => String(candidate.id) === String(current.checkout.id),
+  );
+  const refreshedThread = next.threads.find(
+    (candidate) => String(candidate.id) === String(current.thread.id),
+  );
+  if (checkout === undefined && refreshedThread === undefined) return current;
+  return {
+    ...current,
+    ...(checkout === undefined ? {} : { checkout }),
+    ...(refreshedThread === undefined ? {} : { thread: refreshedThread }),
+  };
+}
+
 /**
  * Per-thread record of the activity sequence the user has actually seen.
  *
@@ -329,6 +348,8 @@ export function useCodeController(options: CodeControllerOptions) {
   );
   const [status, setStatus] = useState<CodeControllerStatus>("loading");
   const [bootstrap, setBootstrap] = useState<CodeBootstrap>();
+  const bootstrapRef = useRef(bootstrap);
+  bootstrapRef.current = bootstrap;
   const [activeView, setActiveView] = useState<CodeThreadView>();
   const [errorCategory, setErrorCategory] = useState<CodeFailure["category"]>();
   const [errorMessage, setErrorMessage] = useState<string>();
@@ -456,6 +477,21 @@ export function useCodeController(options: CodeControllerOptions) {
   );
   const mounted = useRef(true);
   const bootstrapGeneration = useRef(0);
+  /**
+   * Apply a navigation read only when nothing newer has already landed.
+   *
+   * Several paths read the bootstrap concurrently — the timed refresh, the
+   * seen-activity read, and a full load — and the host does not answer them in
+   * the order they were asked. A read that observed a checkout still `waiting`
+   * could therefore complete after one that had already recovered it as
+   * `available` and put the stale state back, which left the thread's terminal
+   * attached to a checkout the UI believed was still coming up.
+   */
+  const navigationReadSequence = useRef(0);
+  const appliedNavigationRead = useRef(0);
+
+  const nextNavigationRead = useCallback(() => ++navigationReadSequence.current, []);
+
   /* Cancels a bootstrap that is still waiting to ask again when the hook goes. */
   const bootstrapAbort = useRef(new AbortController());
   const threadGeneration = useRef(0);
@@ -524,7 +560,10 @@ export function useCodeController(options: CodeControllerOptions) {
         try {
           const next = await client.bootstrap();
           if (!mounted.current || request !== bootstrapGeneration.current) return false;
+          bootstrapRef.current = next;
+          appliedNavigationRead.current = ++navigationReadSequence.current;
           setBootstrap(next);
+          setActiveView((current) => refreshActiveThreadView(current, next));
           reconcileDrafts(next.threads.map((thread) => String(thread.id)));
           clearFailure();
           setStatus("ready");
@@ -574,17 +613,27 @@ export function useCodeController(options: CodeControllerOptions) {
   );
 
   const applyNavigationRefresh = useCallback(
-    (next: CodeBootstrap) => {
+    (next: CodeBootstrap, read: number) => {
+      if (read <= appliedNavigationRead.current) return;
+      appliedNavigationRead.current = read;
+      bootstrapRef.current = next;
       setBootstrap((current) => {
         if (current === undefined) return next;
         if (
+          samePollingData(current.checkouts, next.checkouts) &&
           samePollingData(current.threads, next.threads) &&
           samePollingData(current.activity, next.activity)
         ) {
           return current;
         }
-        return { ...current, threads: next.threads, activity: next.activity };
+        return {
+          ...current,
+          checkouts: next.checkouts,
+          threads: next.threads,
+          activity: next.activity,
+        };
       });
+      setActiveView((current) => refreshActiveThreadView(current, next));
       reconcileDrafts(next.threads.map((thread) => String(thread.id)));
     },
     [reconcileDrafts],
@@ -604,9 +653,10 @@ export function useCodeController(options: CodeControllerOptions) {
   const recordSeenActivity = useCallback(
     async (threadId: CodeThreadId) => {
       try {
+        const read = nextNavigationRead();
         const next = await client.bootstrap();
         if (!mounted.current) return;
-        applyNavigationRefresh(next);
+        applyNavigationRefresh(next, read);
         const seen = next.activity.find(
           (entry) => String(entry.threadId) === String(threadId),
         )?.lastSequence;
@@ -616,7 +666,7 @@ export function useCodeController(options: CodeControllerOptions) {
         markRenderedActivity(threadId);
       }
     },
-    [applyNavigationRefresh, client, markRenderedActivity, readCursorStore],
+    [applyNavigationRefresh, client, markRenderedActivity, nextNavigationRead, readCursorStore],
   );
 
   /**
@@ -635,14 +685,18 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const installView = useCallback(
     (view: CodeThreadView) => {
-      setActiveView(view);
+      const resolvedView =
+        bootstrapRef.current === undefined
+          ? view
+          : (refreshActiveThreadView(view, bootstrapRef.current) ?? view);
+      setActiveView(resolvedView);
       setBootstrap((current) =>
         current === undefined
           ? current
           : {
               ...current,
-              checkouts: replaceById(current.checkouts, view.checkout),
-              threads: replaceById(current.threads, view.thread),
+              checkouts: replaceById(current.checkouts, resolvedView.checkout),
+              threads: replaceById(current.threads, resolvedView.thread),
             },
       );
       setStatus("ready");
@@ -1208,9 +1262,6 @@ export function useCodeController(options: CodeControllerOptions) {
 
   // The current thread list, read inside callbacks that must not re-create
   // themselves every time a thread's version changes.
-  const bootstrapRef = useRef(bootstrap);
-  bootstrapRef.current = bootstrap;
-
   // How far each thread's own journaled activity has reached. A provider turn
   // never touches the thread aggregate, so this — not `thread.version` — is the
   // only number that moves when one runs or finishes.
@@ -1272,9 +1323,10 @@ export function useCodeController(options: CodeControllerOptions) {
       if (!documentIsVisible() || inFlight) return;
       inFlight = true;
       try {
+        const read = nextNavigationRead();
         const next = await client.bootstrap();
         if (cancelled || !mounted.current) return;
-        applyNavigationRefresh(next);
+        applyNavigationRefresh(next, read);
       } catch {
         // A refresh that fails leaves the last list on screen; the stream and
         // the retry path are what report a host that has actually gone away.
@@ -1299,7 +1351,7 @@ export function useCodeController(options: CodeControllerOptions) {
       if (timer !== undefined) clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [applyNavigationRefresh, client, navigationRefreshMs]);
+  }, [applyNavigationRefresh, client, navigationRefreshMs, nextNavigationRead]);
 
   const execute = useCallback(
     async (command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult | undefined> => {

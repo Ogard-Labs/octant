@@ -18,6 +18,13 @@ import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import { joinCodeThreadBoardPullRequests } from "./threadBoardPullRequestJoin";
 import type { ThreadBoardPullRequestSnapshot } from "./threadBoardPullRequestJoin";
 import { CodeThreadMetadataService } from "./codeThreadMetadataService";
+import { mapConcurrentOrdered } from "./boundedReads";
+
+/**
+ * Ceiling on in-flight runtime observations while hydrating one board. Matches
+ * the GitHub read pool: both fan out over a list the user grows.
+ */
+const RUNTIME_OBSERVATION_CONCURRENCY = 4;
 
 const ALL_BOARD_STATUSES: readonly CodeBoardStatus[] = ["ready", "in-progress", "waiting", "done"];
 
@@ -151,27 +158,57 @@ export class CodeThreadBoardService {
   }
 
   async query(query: CodeBoardQuery): Promise<CodeBoardView> {
-    const boardThreads = await this.#threads.list();
-    const pullRequestSnapshot = await this.#pullRequests.snapshot();
-    const view = await this.#metadata.project(
-      boardThreads.map((entry) => ({
-        thread: entry.thread,
-        projectProjectionPresent: entry.projectProjectionPresent,
-      })),
+    const boardThreadsPromise = this.#threads.list();
+    const pullRequestSnapshotPromise = this.#pullRequests.snapshot();
+    const boardThreads = await boardThreadsPromise;
+
+    // A runtime observation needs only the thread id, so it does not have to
+    // wait on the pull-request snapshot or the metadata projection. Starting
+    // all three together keeps one slow GitHub read from holding back every
+    // card's activity. The pool is bounded because a board's thread count is
+    // the user's to grow — unbounded, a large Project opened one provider
+    // read per thread at once.
+    //
+    // An archived thread has no card, so observing its runtime buys nothing;
+    // a Project with a long archive would otherwise spend the whole pool on
+    // threads the board is about to drop.
+    const observable = boardThreads.filter((entry) => entry.thread.lifecycle !== "archived");
+    const runtimePromise = mapConcurrentOrdered(
+      observable,
+      RUNTIME_OBSERVATION_CONCURRENCY,
+      (entry) => this.#observeRuntime(entry.thread.id),
     );
+    const [pullRequestSnapshot, view, runtimeByIndex] = await Promise.all([
+      pullRequestSnapshotPromise,
+      this.#metadata.project(
+        boardThreads.map((entry) => ({
+          thread: entry.thread,
+          projectProjectionPresent: entry.projectProjectionPresent,
+        })),
+      ),
+      runtimePromise,
+    ]);
     const metadataByThread = new Map<string, CodeThreadOperationalMetadata>();
     for (const metadata of view.threads) {
       metadataByThread.set(String(metadata.threadId), metadata);
     }
 
-    const cards: CodeBoardCard[] = [];
-    for (const entry of boardThreads) {
-      const metadata = metadataByThread.get(String(entry.thread.id));
-      // Archived threads are dropped by the metadata projection; skip them here.
-      if (metadata === undefined) continue;
-      const activity = await this.#observeRuntime(entry.thread.id);
-      cards.push(buildCard(entry, metadata, activity, pullRequestSnapshot));
-    }
+    const runtimeByThread = new Map<string, (typeof runtimeByIndex)[number]>();
+    observable.forEach((entry, index) => {
+      const activity = runtimeByIndex[index];
+      if (activity !== undefined) runtimeByThread.set(String(entry.thread.id), activity);
+    });
+
+    const cards = boardThreads
+      .map((entry): CodeBoardCard | undefined => {
+        const metadata = metadataByThread.get(String(entry.thread.id));
+        // Archived threads are dropped by the metadata projection; skip them here.
+        if (metadata === undefined) return undefined;
+        const activity = runtimeByThread.get(String(entry.thread.id));
+        if (activity === undefined) return undefined;
+        return buildCard(entry, metadata, activity, pullRequestSnapshot);
+      })
+      .filter((card): card is CodeBoardCard => card !== undefined);
 
     const appliedStatuses = query.statuses ?? ALL_BOARD_STATUSES;
     const filtered = cards.filter((card) => matchesQuery(card, query, appliedStatuses));

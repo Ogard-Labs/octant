@@ -158,6 +158,7 @@ describe("shell settings policy", () => {
       contextSidebarWidth: 360,
       lastContextSurface: null,
       sidebarMaterial: "system",
+      workspaceMaterial: "opaque",
       modeSwitcherPresentation: "dropdown",
       projectViewSwitcherPresentation: "dropdown",
       transcriptTextSize: "medium",
@@ -198,6 +199,10 @@ describe("shell settings policy", () => {
       replaceShellSettings(current, { ...replacement, lastContextSurface: null })
         .lastContextSurface,
     ).toBeNull();
+    expect(
+      replaceShellSettings(current, { ...replacement, workspaceMaterial: "system" })
+        .workspaceMaterial,
+    ).toBe("system");
   });
 
   it("resolves first-run onboarding once and never reopens it", () => {

@@ -60,6 +60,7 @@ const IGNORED_DIRECTORIES = new Set([
   // whose package.json files would otherwise hijack the exports map and make
   // subpath-imported modules look unreferenced in the real tree.
   ".claude",
+  ".agent-worktrees",
   ".git",
   ".octant",
   ".turbo",
@@ -559,7 +560,10 @@ export function findWiringViolations(
   ];
 }
 
-async function collectFiles(root: string, directory = root): Promise<ReadonlyArray<ScannedFile>> {
+export async function collectFiles(
+  root: string,
+  directory = root,
+): Promise<ReadonlyArray<ScannedFile>> {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(
     entries.map(async (entry): Promise<ReadonlyArray<ScannedFile>> => {

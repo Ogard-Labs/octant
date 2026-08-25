@@ -201,7 +201,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                   <ProviderGlyph
                     displayName={group.instance.displayName}
                     driverKind={group.instance.driverKind}
-                    size={18}
+                    size={16}
                   />
                   {status === undefined ? null : (
                     <span
@@ -281,7 +281,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                             <ProviderGlyph
                               displayName={group.instance.displayName}
                               driverKind={group.instance.driverKind}
-                              size={11}
+                              size={12}
                             />
                             {detail}
                           </span>

@@ -116,14 +116,14 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
                   <span className="execution-context-picker__model">{entry.modelDisplayName}</span>
                   {entry.profileDisplayName !== undefined ? (
                     <span className="chip execution-context-picker__profile">
-                      <User aria-hidden="true" size={10} strokeWidth={1.8} />
+                      <User aria-hidden="true" size={12} strokeWidth={1.8} />
                       {entry.profileDisplayName}
                     </span>
                   ) : null}
                 </span>
                 <span className="execution-context-picker__option-meta">
                   <span className="chip execution-context-picker__host">
-                    <Monitor aria-hidden="true" size={10} strokeWidth={1.8} />
+                    <Monitor aria-hidden="true" size={12} strokeWidth={1.8} />
                     {entry.hostLabel}
                   </span>
                   <PolicyBadge policy={entry.executionPolicy} />
@@ -146,11 +146,11 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
 function PolicyBadge(props: { readonly policy: string }) {
   const icon =
     props.policy === "plan" ? (
-      <Shield aria-hidden="true" size={10} />
+      <Shield aria-hidden="true" size={12} />
     ) : props.policy === "approval-gated" || props.policy === "auto-accept-edits" ? (
-      <ShieldCheck aria-hidden="true" size={10} />
+      <ShieldCheck aria-hidden="true" size={12} />
     ) : (
-      <ShieldAlert aria-hidden="true" size={10} />
+      <ShieldAlert aria-hidden="true" size={12} />
     );
   const label =
     props.policy === "plan"

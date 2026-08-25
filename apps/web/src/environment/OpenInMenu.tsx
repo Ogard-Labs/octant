@@ -71,7 +71,7 @@ export function OpenInMenu(props: OpenInMenuProps) {
         items={visible.map((entry) => {
           const Icon = APPLICATION_ICONS[entry.id];
           return {
-            icon: <Icon aria-hidden="true" size={15} strokeWidth={1.7} />,
+            icon: <Icon aria-hidden="true" size={16} strokeWidth={1.7} />,
             label: entry.label,
             value: entry.id,
           };
@@ -87,8 +87,8 @@ export function OpenInMenu(props: OpenInMenuProps) {
         selectionMode="action"
         trigger={
           <>
-            <FirstIcon aria-hidden="true" size={15} strokeWidth={1.7} />
-            <ChevronDown aria-hidden="true" size={13} strokeWidth={1.7} />
+            <FirstIcon aria-hidden="true" size={16} strokeWidth={1.7} />
+            <ChevronDown aria-hidden="true" size={14} strokeWidth={1.7} />
           </>
         }
         triggerClassName="open-in-menu__trigger"
