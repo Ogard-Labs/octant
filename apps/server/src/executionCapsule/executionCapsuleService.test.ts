@@ -134,6 +134,33 @@ describe("ExecutionCapsuleService", () => {
     expect(JSON.stringify(service.list())).not.toContain("/source/octant.bundle");
   });
 
+  it("treats an existing capsuleId as idempotent only for the same capsule identity", async () => {
+    const driver = protectedDriver();
+    const service = new ExecutionCapsuleService({ driver });
+    const capsuleId = "11111111-1111-4111-8111-111111111111";
+    const first = request(capsuleId, "55555555-5555-4555-8555-555555555555");
+    const conflictingOwner = request(capsuleId, "66666666-6666-4666-8666-666666666666");
+    const source = {
+      bundlePath: "/source/octant.bundle",
+      sha256: "d".repeat(64),
+      byteLength: 4_096,
+      revision: "a".repeat(40),
+    };
+
+    await expect(service.acquire({ request: first, source })).resolves.toMatchObject({
+      status: "ready",
+    });
+    await expect(service.acquire({ request: first, source })).resolves.toMatchObject({
+      status: "ready",
+      receipt: { owner: first.owner },
+    });
+    await expect(service.acquire({ request: conflictingOwner, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-identity-conflict",
+    });
+    expect(driver.create).toHaveBeenCalledTimes(1);
+  });
+
   it("dispatches argv through the hidden runtime identity and refuses an unknown capsule", async () => {
     const driver = protectedDriver();
     const service = new ExecutionCapsuleService({ driver });

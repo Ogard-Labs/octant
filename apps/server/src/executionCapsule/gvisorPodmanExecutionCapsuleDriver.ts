@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access, lstat, mkdir, mkdtemp, open, rm } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, open, readFile, rm } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
@@ -51,6 +51,16 @@ export interface ExecutionCapsuleSourceBundleStore {
   readonly verify: (source: ExecutionCapsuleDriverCreateInput["source"]) => Promise<void>;
 }
 
+export interface ExecutionCapsuleResourceScopeInspector {
+  readonly accepts: (input: {
+    readonly runtimeId: string;
+    readonly disk: ExecutionCapsuleDiskLocation;
+    readonly cpuMillicores: number;
+    readonly memoryBytes: number;
+    readonly pidLimit: number;
+  }) => Promise<boolean>;
+}
+
 export interface ExecutionCapsuleGitBundleStore {
   readonly reserve: (runtimeId: string) => Promise<string>;
   readonly verify: (input: {
@@ -84,6 +94,7 @@ export interface GvisorPodmanExecutionCapsuleDriverOptions {
     readonly message: string;
   }) => void;
   readonly artifactWriter?: ExecutionCapsuleArtifactWriter;
+  readonly scopeInspector?: ExecutionCapsuleResourceScopeInspector;
 }
 
 export interface ExecutionCapsuleRuntimeEnvironment {
@@ -104,7 +115,7 @@ interface GvisorPodmanRuntime {
   readonly capsuleId: string;
   readonly image: string;
   readonly disk: ExecutionCapsuleDiskLocation;
-  readonly state: "ready" | "stopped";
+  readonly state: "container-removed" | "ready" | "stopped";
 }
 
 /**
@@ -133,6 +144,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     | ((diagnostic: { readonly operation: string; readonly message: string }) => void)
     | undefined;
   readonly #artifactWriter: ExecutionCapsuleArtifactWriter;
+  readonly #scopeInspector: ExecutionCapsuleResourceScopeInspector;
   readonly #runtimes = new Map<string, GvisorPodmanRuntime>();
 
   constructor(options: GvisorPodmanExecutionCapsuleDriverOptions) {
@@ -153,7 +165,10 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     this.#runner = options.runner ?? createNodeCommandRunner(runtimeEnvironment);
     this.#sourceBundleStore =
       options.sourceBundleStore ??
-      createExecutionCapsuleSourceBundleStore({ expectedUid: this.#uid });
+      createExecutionCapsuleSourceBundleStore({
+        expectedUid: this.#uid,
+        sourceRoot: join(this.#stateRoot, "sources"),
+      });
     this.#bundleStore =
       options.bundleStore ??
       createExecutionCapsuleGitBundleStore({
@@ -177,6 +192,12 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       });
     this.#recordDiagnostic = options.recordDiagnostic;
     this.#artifactWriter = options.artifactWriter ?? createNodeArtifactWriter(runtimeEnvironment);
+    this.#scopeInspector =
+      options.scopeInspector ??
+      createExecutionCapsuleResourceScopeInspector({
+        podmanPath: this.#podmanPath,
+        runner: this.#runner,
+      });
   }
 
   #reportDiagnostic(operation: string, message: string): void {
@@ -344,6 +365,19 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         pidLimit: input.request.budget.pidLimit,
       });
       if (started.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
+      const scopeAccepted = await this.#scopeInspector
+        .accepts({
+          runtimeId,
+          disk,
+          cpuMillicores: input.request.budget.cpuMillicores,
+          memoryBytes: input.request.budget.memoryBytes,
+          pidLimit: input.request.budget.pidLimit,
+        })
+        .catch(() => false);
+      if (!scopeAccepted) {
+        this.#reportDiagnostic("create-scope", "live capsule budget was not enforced");
+        return { status: "refused", reason: "creation-failed" };
+      }
       const cloned = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(disk),
         "exec",
@@ -741,6 +775,19 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         pidLimit: 64,
       });
       if (started.exitCode !== 0) return false;
+      const scopeAccepted = await this.#scopeInspector
+        .accepts({
+          runtimeId: verifierId,
+          disk: input.disk,
+          cpuMillicores: 100,
+          memoryBytes: 256 * 1_024 * 1_024,
+          pidLimit: 64,
+        })
+        .catch(() => false);
+      if (!scopeAccepted) {
+        this.#reportDiagnostic("verify-scope", "live verifier budget was not enforced");
+        return false;
+      }
       const initialized = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(input.disk),
         "exec",
@@ -805,19 +852,23 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     readonly capsuleId: ExecutionCapsuleDriverCreateInput["request"]["capsuleId"];
     readonly runtimeId: string;
   }): Promise<void> {
-    const runtime = this.#runtimes.get(input.runtimeId);
+    let runtime = this.#runtimes.get(input.runtimeId);
     if (runtime?.capsuleId !== String(input.capsuleId)) return;
-    const removed = await this.#runner
-      .run(this.#podmanPath, [
-        ...podmanStoreArgs(runtime.disk),
-        "rm",
-        "--force",
-        "--time",
-        "10",
-        input.runtimeId,
-      ])
-      .catch(() => undefined);
-    if (removed?.exitCode !== 0) return;
+    if (runtime.state !== "container-removed") {
+      const removed = await this.#runner
+        .run(this.#podmanPath, [
+          ...podmanStoreArgs(runtime.disk),
+          "rm",
+          "--force",
+          "--time",
+          "10",
+          input.runtimeId,
+        ])
+        .catch(() => undefined);
+      if (removed?.exitCode !== 0) return;
+      runtime = { ...runtime, state: "container-removed" };
+      this.#runtimes.set(input.runtimeId, runtime);
+    }
     try {
       await this.#diskStore.release(runtime.disk);
       this.#runtimes.delete(input.runtimeId);
@@ -889,6 +940,18 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       return { status: "refused", reason: "runtime-unavailable" };
     }
     if (recovered.running) {
+      const scopeAccepted = await this.#scopeInspector
+        .accepts({
+          runtimeId,
+          disk,
+          cpuMillicores: input.request.budget.cpuMillicores,
+          memoryBytes: input.request.budget.memoryBytes,
+          pidLimit: input.request.budget.pidLimit,
+        })
+        .catch(() => false);
+      if (!scopeAccepted) {
+        this.#reportDiagnostic("recover-scope", "live recovered runtime exceeded its budget");
+      }
       const stopped = await this.#runner
         .run(this.#podmanPath, [...podmanStoreArgs(disk), "stop", "--time", "10", runtimeId])
         .catch(() => undefined);
@@ -914,21 +977,25 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     | { readonly status: "released" }
     | { readonly status: "failed"; readonly reason: "release-failed" }
   > {
-    const runtime = this.#runtimes.get(input.runtimeId);
+    let runtime = this.#runtimes.get(input.runtimeId);
     if (runtime === undefined) {
       return { status: "failed", reason: "release-failed" };
     }
-    const removed = await this.#runner
-      .run(this.#podmanPath, [
-        ...podmanStoreArgs(runtime.disk),
-        "rm",
-        "--force",
-        "--time",
-        "10",
-        input.runtimeId,
-      ])
-      .catch(() => undefined);
-    if (removed?.exitCode !== 0) return { status: "failed", reason: "release-failed" };
+    if (runtime.state !== "container-removed") {
+      const removed = await this.#runner
+        .run(this.#podmanPath, [
+          ...podmanStoreArgs(runtime.disk),
+          "rm",
+          "--force",
+          "--time",
+          "10",
+          input.runtimeId,
+        ])
+        .catch(() => undefined);
+      if (removed?.exitCode !== 0) return { status: "failed", reason: "release-failed" };
+      runtime = { ...runtime, state: "container-removed" };
+      this.#runtimes.set(input.runtimeId, runtime);
+    }
     try {
       await this.#diskStore.release(runtime.disk);
     } catch {
@@ -997,17 +1064,115 @@ function formatCpuQuota(cpuMillicores: number): string {
   return `${String(cpuMillicores / 10)}%`;
 }
 
+function createExecutionCapsuleResourceScopeInspector(input: {
+  readonly podmanPath: string;
+  readonly runner: ExecutionCapsuleCommandRunner;
+}): ExecutionCapsuleResourceScopeInspector {
+  return {
+    accepts: async (scope) => {
+      const inspected = await input.runner.run(input.podmanPath, [
+        ...podmanStoreArgs(scope.disk),
+        "inspect",
+        "--format",
+        "{{.State.Pid}}",
+        scope.runtimeId,
+      ]);
+      const normalizedPid = inspected.stdout.trim();
+      if (inspected.exitCode !== 0 || !/^\d+$/.test(normalizedPid)) return false;
+      const pid = Number(normalizedPid);
+      if (!Number.isSafeInteger(pid) || pid < 2) return false;
+      const effective = await readExecutionCapsuleCgroupBudget(pid);
+      return (
+        effective !== undefined &&
+        effective.memoryBytes <= BigInt(scope.memoryBytes) &&
+        effective.pidLimit <= BigInt(scope.pidLimit) &&
+        effective.cpuRatio <= scope.cpuMillicores / 1_000 + Number.EPSILON
+      );
+    },
+  };
+}
+
+async function readExecutionCapsuleCgroupBudget(pid: number): Promise<
+  | {
+      readonly memoryBytes: bigint;
+      readonly pidLimit: bigint;
+      readonly cpuRatio: number;
+    }
+  | undefined
+> {
+  const membership = await readFile(`/proc/${String(pid)}/cgroup`, "utf8").catch(() => undefined);
+  const unified = membership?.split("\n").find((line) => line.startsWith("0::"));
+  if (unified === undefined) return undefined;
+  const hierarchyRoot = "/sys/fs/cgroup";
+  let current = join(hierarchyRoot, unified.slice(3).replace(/^\/+/, ""));
+  if (current !== hierarchyRoot && !current.startsWith(`${hierarchyRoot}/`)) return undefined;
+  const hierarchy: string[] = [];
+  while (true) {
+    hierarchy.push(current);
+    if (current === hierarchyRoot) break;
+    current = dirname(current);
+  }
+  const limits = await Promise.all(
+    hierarchy.map(async (directory) => {
+      const [memoryBytes, pidLimit, cpuMax] = await Promise.all([
+        readFile(join(directory, "memory.max"), "utf8").catch(() => undefined),
+        readFile(join(directory, "pids.max"), "utf8").catch(() => undefined),
+        readFile(join(directory, "cpu.max"), "utf8").catch(() => undefined),
+      ]);
+      return { memoryBytes, pidLimit, cpuMax };
+    }),
+  );
+  const memoryBytes = minimumFiniteCgroupInteger(limits.map((limit) => limit.memoryBytes));
+  const pidLimit = minimumFiniteCgroupInteger(limits.map((limit) => limit.pidLimit));
+  const cpuRatio = minimumFiniteCgroupCpuRatio(limits.map((limit) => limit.cpuMax));
+  return memoryBytes === undefined || pidLimit === undefined || cpuRatio === undefined
+    ? undefined
+    : { memoryBytes, pidLimit, cpuRatio };
+}
+
+function minimumFiniteCgroupInteger(values: ReadonlyArray<string | undefined>): bigint | undefined {
+  let minimum: bigint | undefined;
+  for (const value of values) {
+    const normalized = value?.trim();
+    if (normalized === undefined || normalized === "max" || !/^\d+$/.test(normalized)) continue;
+    const parsed = BigInt(normalized);
+    if (parsed < 1n) continue;
+    if (minimum === undefined || parsed < minimum) minimum = parsed;
+  }
+  return minimum;
+}
+
+function minimumFiniteCgroupCpuRatio(
+  values: ReadonlyArray<string | undefined>,
+): number | undefined {
+  let minimum: number | undefined;
+  for (const value of values) {
+    const [quota, period] = value?.trim().split(/\s+/) ?? [];
+    if (quota === undefined || period === undefined || quota === "max") continue;
+    const ratio = Number(quota) / Number(period);
+    if (!Number.isFinite(ratio) || ratio <= 0) continue;
+    if (minimum === undefined || ratio < minimum) minimum = ratio;
+  }
+  return minimum;
+}
+
 function createExecutionCapsuleSourceBundleStore(input: {
   readonly expectedUid: number;
+  readonly sourceRoot: string;
 }): ExecutionCapsuleSourceBundleStore {
   return {
-    verify: async (source) =>
-      void (await verifyOwnedFile(source.bundlePath, {
+    verify: async (source) => {
+      await ensurePrivateDirectory(input.sourceRoot, input.expectedUid);
+      if (dirname(source.bundlePath) !== input.sourceRoot) {
+        throw new Error("Execution capsule source bundle is outside its owned root.");
+      }
+      await verifyOwnedFile(source.bundlePath, {
         expectedUid: input.expectedUid,
         expectedSha256: source.sha256,
         expectedByteLength: source.byteLength,
         requirePrivateMode: true,
-      })),
+      });
+    },
   };
 }
 

@@ -426,11 +426,14 @@ mechanisms are:
   persistent Podman VFS graph store lives in an owner-only fixed-size ext4
   image mounted through `fuse2fs`, so its image, dependencies, and clone share
   one hard disk ceiling without privileged project-quota administration. Its
-  disposable Podman runroot is a short owned runtime directory recreated during
-  recovery. Intermediate Podman state paths may be owner-controlled and
-  traverse-only, while backing images remain owner-only. A transient systemd
-  user scope owns the outer CPU, memory, and PID limits; evidence derives their
-  effective values from the sandbox process cgroup ancestry. The tracer can
+  disposable Podman runroot is a short owned runtime directory preserved long
+  enough for recovery to inspect and stop a surviving runtime, then removed
+  through Podman's mapped user namespace on release. Intermediate Podman state
+  paths may be owner-controlled and traverse-only, while backing images remain
+  owner-only. A transient systemd
+  user scope owns the outer CPU, memory, and PID limits. The driver and
+  independent evidence derive their effective values from the live sandbox
+  process cgroup ancestry before accepting it. The tracer can
   execute argv, verify and
   export a Git bundle, stop without deleting the filesystem, recover only as
   stopped after live-authority revalidation, and release the exact runtime

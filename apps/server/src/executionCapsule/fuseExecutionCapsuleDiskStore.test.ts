@@ -104,7 +104,7 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     ]);
   });
 
-  it("recovers durable graph data while clearing only ephemeral Podman run state", async () => {
+  it("preserves Podman run state until recovery can inspect and stop the runtime", async () => {
     const stateRoot = await privateStateRoot();
     const runRootBase = await mkdtemp(join("/tmp", "ocr-"));
     roots.push(runRootBase);
@@ -123,27 +123,16 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     };
     const created = await store.create(input);
     await writeFile(join(created.graphRoot, "durable"), "kept");
-    await writeFile(join(created.runRoot, "stale"), "removed");
-    await store.close(created);
+    await writeFile(join(created.runRoot, "runtime-state"), "kept");
     run.mockClear();
 
     const recovered = await store.recover(input);
 
     expect(await readFile(join(recovered.graphRoot, "durable"), "utf8")).toBe("kept");
-    await expect(readFile(join(recovered.runRoot, "stale"), "utf8")).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    expect(await readFile(join(recovered.runRoot, "runtime-state"), "utf8")).toBe("kept");
     expect(run.mock.calls.some(([command]) => command === "/usr/sbin/mkfs.ext4")).toBe(false);
-    expect(run.mock.calls.some(([command]) => command === "/usr/bin/fuse2fs")).toBe(true);
-    expect(run).toHaveBeenCalledWith("/usr/bin/podman", [
-      "unshare",
-      "/usr/bin/rm",
-      "--recursive",
-      "--force",
-      "--one-file-system",
-      "--",
-      recovered.runRoot,
-    ]);
+    expect(run.mock.calls.some(([command]) => command === "/usr/bin/fuse2fs")).toBe(false);
+    expect(run.mock.calls.some(([command]) => command === "/usr/bin/podman")).toBe(false);
   });
 
   it("refuses a resized backing image before remounting it", async () => {

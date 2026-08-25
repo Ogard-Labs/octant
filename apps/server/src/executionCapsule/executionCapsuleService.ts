@@ -216,7 +216,9 @@ export class ExecutionCapsuleService {
     const ownerKey = executionCapsuleOwnerKey(input.request.owner);
     const existing = this.#capsules.get(input.request.capsuleId);
     if (existing?.receipt.status === "ready") {
-      return { status: "ready", receipt: existing.receipt };
+      return sameExecutionCapsuleIdentity(existing, input)
+        ? { status: "ready", receipt: existing.receipt }
+        : { status: "refused", reason: "runtime-identity-conflict" };
     }
     if (existing !== undefined) return { status: "refused", reason: "owner-already-bound" };
 
@@ -565,6 +567,41 @@ function executionCapsuleOwnerKey(owner: ExecutionCapsuleOwner): string {
   return owner.kind === "code-thread"
     ? `code-thread:${String(owner.threadId)}`
     : `agent-run:${String(owner.runId)}`;
+}
+
+function sameExecutionCapsuleIdentity(
+  existing: OwnedCapsule,
+  requested: {
+    readonly request: ExecutionCapsuleAcquireRequest;
+    readonly source: ExecutionCapsuleSource;
+  },
+): boolean {
+  const current = existing.request;
+  const leftSetup = current.recipe.setup;
+  const rightSetup = requested.request.recipe.setup;
+  return (
+    executionCapsuleOwnerKey(current.owner) === executionCapsuleOwnerKey(requested.request.owner) &&
+    String(current.projectId) === String(requested.request.projectId) &&
+    String(current.recipe.recipeId) === String(requested.request.recipe.recipeId) &&
+    current.recipe.revision === requested.request.recipe.revision &&
+    String(current.recipe.image) === String(requested.request.recipe.image) &&
+    leftSetup.length === rightSetup.length &&
+    leftSetup.every((argv, index) => {
+      const requestedArgv = rightSetup[index];
+      return (
+        requestedArgv !== undefined &&
+        argv.length === requestedArgv.length &&
+        argv.every((argument, argumentIndex) => argument === requestedArgv[argumentIndex])
+      );
+    }) &&
+    current.budget.cpuMillicores === requested.request.budget.cpuMillicores &&
+    current.budget.memoryBytes === requested.request.budget.memoryBytes &&
+    current.budget.diskBytes === requested.request.budget.diskBytes &&
+    current.budget.pidLimit === requested.request.budget.pidLimit &&
+    existing.source.sha256 === requested.source.sha256 &&
+    existing.source.byteLength === requested.source.byteLength &&
+    existing.source.revision === requested.source.revision
+  );
 }
 
 function subtractReservedCapacity(

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, link, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeExecutionCapsuleAcquireRequest } from "@octant/contracts/execution-capsule";
@@ -73,6 +73,7 @@ const stationIdentity = {
   },
   diskStore,
   artifactWriter,
+  scopeInspector: { accepts: async () => true },
 } as const;
 
 const capsuleRequest = decodeExecutionCapsuleAcquireRequest({
@@ -187,14 +188,20 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     });
   });
 
-  it("refuses a hardlinked or digest-mismatched source bundle before container creation", async () => {
+  it("accepts source bundles only from the dedicated owner-only source root", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-capsule-source-test-"));
     roots.push(root);
-    const bundlePath = join(root, "source.bundle");
-    const linkedPath = join(root, "source-hardlink.bundle");
+    const stateRoot = join(root, "state");
+    const sourceRoot = join(stateRoot, "sources");
+    await mkdir(sourceRoot, { recursive: true, mode: 0o700 });
+    const bundlePath = join(sourceRoot, "source.bundle");
+    const linkedPath = join(sourceRoot, "source-hardlink.bundle");
+    const outsideBundlePath = join(root, "outside.bundle");
     const bytes = Buffer.from("bundle-fixture");
     await writeFile(bundlePath, bytes);
+    await writeFile(outsideBundlePath, bytes);
     await chmod(bundlePath, 0o600);
+    await chmod(outsideBundlePath, 0o600);
     await link(bundlePath, linkedPath);
     const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
       if (command === "/usr/bin/podman" && args[0] === "info") {
@@ -213,7 +220,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       ...stationIdentity,
       podmanPath: "/usr/bin/podman",
       runscPath: "/usr/bin/runsc",
-      stateRoot: join(root, "state"),
+      stateRoot,
       capacity,
       runner: { run },
     });
@@ -234,7 +241,20 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
         source: { ...verifiedSource, sha256: "e".repeat(64) },
       }),
     ).resolves.toEqual({ status: "refused", reason: "source-unavailable" });
+    await expect(
+      driver.create({
+        request: capsuleRequest,
+        source: { ...verifiedSource, bundlePath: outsideBundlePath },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "source-unavailable" });
     expect(run.mock.calls.some(([, args]) => args.includes("create"))).toBe(false);
+
+    await expect(
+      driver.create({
+        request: capsuleRequest,
+        source: verifiedSource,
+      }),
+    ).resolves.toMatchObject({ status: "ready" });
   });
 
   it("creates a resource-bounded runsc capsule from a verified source bundle", async () => {
@@ -249,6 +269,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       return { exitCode: 0, stdout: "", stderr: "" };
     });
     const verifySource = vi.fn<ExecutionCapsuleSourceBundleStore["verify"]>(async () => undefined);
+    const acceptsScope = vi.fn(async () => true);
     const driver = new GvisorPodmanExecutionCapsuleDriver({
       platform: "linux",
       username: "octant",
@@ -260,6 +281,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       capacity,
       runner: { run },
       sourceBundleStore: { verify: verifySource },
+      scopeInspector: { accepts: acceptsScope },
     });
 
     await expect(
@@ -273,6 +295,13 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     });
 
     expect(verifySource).toHaveBeenCalledWith(source);
+    expect(acceptsScope).toHaveBeenCalledWith({
+      runtimeId: fixtureRuntimeId,
+      disk: diskLocation(fixtureRuntimeId, capsuleRequest.budget.diskBytes),
+      cpuMillicores: capsuleRequest.budget.cpuMillicores,
+      memoryBytes: capsuleRequest.budget.memoryBytes,
+      pidLimit: capsuleRequest.budget.pidLimit,
+    });
     const createCall = run.mock.calls.find(
       ([command, args]) => command === "/usr/bin/podman" && args.includes("create"),
     );
@@ -391,6 +420,44 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
         "/workspace",
       ]),
     );
+  });
+
+  it("refuses a started capsule before cloning when live cgroup limits are unproven", async () => {
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/podman" && args[0] === "info") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      scopeInspector: { accepts: async () => false },
+    });
+
+    await expect(driver.create({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "creation-failed",
+    });
+    expect(run.mock.calls.some(([, args]) => args.includes("clone"))).toBe(false);
+    expect(
+      run.mock.calls.some(
+        ([command, args]) =>
+          command === "/usr/bin/podman" && args.includes("rm") && args.at(-1) === fixtureRuntimeId,
+      ),
+    ).toBe(true);
   });
 
   it("executes argv only inside a runtime the driver created", async () => {
@@ -616,11 +683,61 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     });
   });
 
+  it("retries private store cleanup without removing the same container twice", async () => {
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/podman" && args[0] === "info") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    let releaseAttempts = 0;
+    const releaseDisk = vi.fn(async () => {
+      releaseAttempts += 1;
+      if (releaseAttempts === 1) throw new Error("transient unmount failure");
+    });
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      diskStore: { ...diskStore, release: releaseDisk },
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    const created = await driver.create({ request: capsuleRequest, source });
+    if (created.status !== "ready") throw new Error("Expected the fixture capsule to start.");
+
+    await expect(driver.release({ runtimeId: created.runtimeId })).resolves.toEqual({
+      status: "failed",
+      reason: "release-failed",
+    });
+    await expect(driver.release({ runtimeId: created.runtimeId })).resolves.toEqual({
+      status: "released",
+    });
+
+    expect(releaseDisk).toHaveBeenCalledTimes(2);
+    expect(
+      run.mock.calls.filter(
+        ([command, args]) =>
+          command === "/usr/bin/podman" && args.includes("rm") && args.at(-1) === created.runtimeId,
+      ),
+    ).toHaveLength(1);
+  });
+
   it("stops a capsule without removing it and recovers the exact stopped identity", async () => {
     const runtimeId = "octant-capsule-11111111111141118111111111111111";
     let recoveredOciRuntime = "/usr/bin/runsc";
     let recoveredEffectiveCaps: unknown = [];
     let recoveredMounts: unknown = [];
+    let recoveredRunning = false;
     const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
       if (command === "/usr/bin/podman" && args[0] === "info") {
         return {
@@ -639,7 +756,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
               OCIRuntime: recoveredOciRuntime,
               EffectiveCaps: recoveredEffectiveCaps,
               Mounts: recoveredMounts,
-              State: { Running: false },
+              State: { Running: recoveredRunning },
               Config: {
                 User: "0:0",
                 CreateCommand: [
@@ -836,6 +953,46 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       message: "runtime protection mismatch: host-mounts",
     });
 
+    recoveredMounts = [];
+    recoveredEffectiveCaps = [];
+    recoveredRunning = true;
+    const recoveryScope = vi.fn(async () => false);
+    const recoveryScopeDiagnostic = vi.fn();
+    const liveRecovery = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      scopeInspector: { accepts: recoveryScope },
+      recordDiagnostic: recoveryScopeDiagnostic,
+    });
+    await expect(liveRecovery.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "stopped",
+      runtimeId,
+    });
+    expect(recoveryScope).toHaveBeenCalledWith({
+      runtimeId,
+      disk: diskLocation(runtimeId, capsuleRequest.budget.diskBytes),
+      cpuMillicores: capsuleRequest.budget.cpuMillicores,
+      memoryBytes: capsuleRequest.budget.memoryBytes,
+      pidLimit: capsuleRequest.budget.pidLimit,
+    });
+    expect(recoveryScopeDiagnostic).toHaveBeenCalledWith({
+      operation: "recover-scope",
+      message: "live recovered runtime exceeded its budget",
+    });
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["stop", "--time", "10", runtimeId]),
+    );
+
+    recoveredRunning = false;
     recoveredMounts = [];
     recoveredEffectiveCaps = 7;
     const inspectShapeDiagnostic = vi.fn();

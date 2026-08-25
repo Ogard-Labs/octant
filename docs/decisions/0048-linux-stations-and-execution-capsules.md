@@ -37,9 +37,11 @@ host becomes a first-class destination.
 - A capsule has an independent clone and Git object store. It receives no host
   checkout bind mount, Git alternates, hardlinked object store, personal home,
   Docker socket, raw long-lived credential, or unrelated service authority.
-- The existing confined host Git boundary produces an owner-only source bundle.
-  The capsule driver verifies its identity and digest, then clones and verifies
-  exports inside gVisor. The driver never runs Git directly on the Station.
+- The existing confined host Git boundary produces an owner-only source bundle
+  inside the Station's dedicated capsule-source root. The capsule driver refuses
+  owner-readable paths outside that root, verifies identity and digest, then
+  clones and verifies exports inside gVisor. The driver never runs Git directly
+  on the Station.
 - Provider CLIs and every mutable subprocess run inside the capsule. The
   journal, authority engine, and direct HTTP inference stay on the Station.
   Mutable provider runtimes are never reused across capsule identities.
@@ -57,9 +59,10 @@ host becomes a first-class destination.
   dependencies, and the independent clone all count against the same hard disk
   ceiling. Podman's disposable runroot uses a short, owned directory below the
   Station identity's runtime directory, with the same no-read/no-write
-  traverse-only allowance, and is recreated during recovery;
-  it contains no capsule filesystem or source data. No capsule store is a
-  host-checkout bind mount.
+  traverse-only allowance. Server-process recovery preserves it long enough to
+  inspect and stop any surviving runtime, creates it only when absent, and
+  deletes it through Podman's user namespace on release. It contains no capsule
+  filesystem or source data. No capsule store is a host-checkout bind mount.
 - gVisor's additional self-backed root overlay is disabled. Each rootfs is
   already an independent private VFS layer inside that capsule's fixed-size
   image, and direct propagation lets the host export broker read only the
@@ -68,8 +71,10 @@ host becomes a first-class destination.
 - The Station starts each Podman `no-conmon` and `runsc` capsule inside a
   transient scope owned by the Station identity's systemd user manager. That
   outer scope applies the CPU, memory, and PID limits. Rootless `runsc` ignores
-  its unsupported duplicate cgroup setup; evidence reads the live sandbox
-  process cgroup ancestry before the backend is accepted.
+  its unsupported duplicate cgroup setup. The driver reads the live sandbox
+  process cgroup ancestry and refuses the capsule unless the effective finite
+  limits are equal or narrower; independent Linux evidence checks the same
+  boundary before the backend is accepted.
 - Capsule egress is deny-default and later passes through a host-owned broker
   with destination, DNS, expiry, and audit checks. Selected preview ports pass
   through an authenticated thread-scoped host proxy, never a direct bind.

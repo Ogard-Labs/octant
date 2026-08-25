@@ -119,7 +119,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
       await ensureProtectedPathDirectory(location.mountPath, this.#expectedUid, false);
       await this.#mount(location);
       await this.#prepareMountedStore(location);
-      await this.#prepareRunRoot(location, false);
+      await this.#prepareRunRoot(location);
       return location;
     } catch (error) {
       await this.close(location).catch(() => undefined);
@@ -142,7 +142,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     await ensureProtectedPathDirectory(location.mountPath, this.#expectedUid, false);
     if (!(await this.#mountProbe.isMounted(location.mountPath))) await this.#mount(location);
     await this.#prepareMountedStore(location);
-    await this.#prepareRunRoot(location, true);
+    await this.#prepareRunRoot(location);
     return location;
   }
 
@@ -245,13 +245,8 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     await ensurePrivateMountedDirectory(location.graphRoot, this.#expectedUid, true);
   }
 
-  async #prepareRunRoot(
-    location: ExecutionCapsuleDiskLocation,
-    replaceExisting: boolean,
-  ): Promise<void> {
-    if (replaceExisting) await this.#removeRunRoot(location);
-    await mkdir(location.runRoot, { mode: 0o700 });
-    await ensurePrivateDirectory(location.runRoot, this.#expectedUid, false);
+  async #prepareRunRoot(location: ExecutionCapsuleDiskLocation): Promise<void> {
+    await ensureProtectedPathDirectory(location.runRoot, this.#expectedUid, true);
   }
 
   async #removeRunRoot(location: ExecutionCapsuleDiskLocation): Promise<void> {

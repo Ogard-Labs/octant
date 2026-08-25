@@ -63,7 +63,10 @@ evidence("gVisor execution capsule evidence", () => {
     roots.push(root);
     const sourceRoot = join(root, "source");
     const stateRoot = join(root, "state");
+    const sourceBundleRoot = join(stateRoot, "sources");
     await mkdir(sourceRoot, { recursive: true });
+    await mkdir(stateRoot, { mode: 0o700 });
+    await mkdir(sourceBundleRoot, { mode: 0o700 });
     await writeFile(join(sourceRoot, "README.md"), "# capsule evidence\n");
     await git(sourceRoot, ["init", "--initial-branch=main"]);
     await git(sourceRoot, ["config", "user.name", "Octant Evidence"]);
@@ -71,7 +74,7 @@ evidence("gVisor execution capsule evidence", () => {
     await git(sourceRoot, ["add", "README.md"]);
     await git(sourceRoot, ["commit", "-m", "Initial evidence fixture"]);
     const revision = (await git(sourceRoot, ["rev-parse", "HEAD"])).trim();
-    const sourceBundle = join(root, "source.bundle");
+    const sourceBundle = join(sourceBundleRoot, "source.bundle");
     await git(sourceRoot, ["bundle", "create", sourceBundle, "--all"]);
     await chmod(sourceBundle, 0o600);
     const sourceBytes = await readFile(sourceBundle);
