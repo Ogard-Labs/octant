@@ -181,6 +181,7 @@ describe("Journal", () => {
         automaticUpdateChecks: true,
         lastContextSurface: "project-memory",
         sidebarMaterial: "system",
+        workspaceMaterial: "opaque",
         modeSwitcherPresentation: "dropdown",
         navigatorAssistant: {},
         projectViewSwitcherPresentation: "dropdown",

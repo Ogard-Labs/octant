@@ -52,7 +52,7 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
     const ModeIcon = modeIcons[mode];
     return {
       description: modeDescriptions[mode],
-      icon: <ModeIcon size={15} strokeWidth={1.7} />,
+      icon: <ModeIcon size={16} strokeWidth={1.7} />,
       label: modeLabels[mode],
       value: mode,
     };

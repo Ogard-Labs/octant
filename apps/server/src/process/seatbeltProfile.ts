@@ -44,7 +44,6 @@ export interface SeatbeltProfileInput {
   readonly allowProcessFork?: boolean;
   readonly allowFileReadStar?: boolean;
   readonly writeBoundRoot?: boolean;
-  readonly denyReadPaths?: ReadonlyArray<string>;
   /**
    * Extra read denials kept alongside the defaults instead of replacing them.
    *
@@ -124,7 +123,21 @@ export interface PrivateHomeDenyReadRulesInput {
 }
 
 const DEFAULT_SANDBOX_PATH = "/usr/bin/sandbox-exec";
-const DEFAULT_DENY_READ_PATHS = ["/Volumes", "/Network"] as const;
+/**
+ * Paths that must remain unreadable even for toolchain launches that need the
+ * broad `file-read*` rule. The latter is a compatibility escape hatch for
+ * runtimes such as Git and provider CLIs, not authority to inspect credentials
+ * or the host's private system state. Exact launch roots are re-allowed below
+ * these denials, so legitimate project/runtime reads remain available.
+ */
+const DEFAULT_DENY_READ_PATHS = [
+  "/Volumes",
+  "/Network",
+  "/etc/ssh",
+  "/var/root",
+  "/Library/Keychains",
+  "/private",
+] as const;
 const MAX_PRIVATE_DENY_RULES = 4_096;
 
 export function escapeSeatbeltPath(path: string): string {
@@ -181,14 +194,31 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
   for (const path of additionalWriteRoots) assertAbsolute(path, "additional write root");
   const readRoots = input.readRoots ?? [];
   for (const path of readRoots) assertAbsolute(path, "read root");
+  // Seatbelt is last-match-wins and the launch-root allow rules below are
+  // emitted after the DEFAULT_DENY_READ_PATHS deny rules. A root equal to or
+  // an ancestor of a denied path (e.g. /Library, /private, or /) would win
+  // and reopen the whole denied subtree, including /Library/Keychains, so
+  // every launch root must be refused before it reaches that allow list.
+  // Descendants (the temporary directory always resolves under
+  // /private/var) are unaffected and stay allowed.
+  for (const path of [
+    ...readRoots,
+    input.boundRoot,
+    input.temporaryDirectory,
+    ...additionalWriteRoots,
+  ]) {
+    assertNotAncestorOfDeniedPath(path, "launch root");
+  }
 
   const writeBoundRoot = input.writeBoundRoot !== false;
   const allowProcessExec = input.allowProcessExec !== false;
   const allowProcessFork = input.allowProcessFork !== false;
-  const denyReadPaths = [
-    ...(input.denyReadPaths ?? DEFAULT_DENY_READ_PATHS),
-    ...(input.additionalDenyReadPaths ?? []),
-  ];
+  // The sensitive boundary is not a default a caller can swap out. It was
+  // reachable as `denyReadPaths`, where an empty array replaced every entry and
+  // left `allowFileReadStar` granting the Keychain and the rest of the private
+  // system state. Callers extend the boundary through `additionalDenyReadPaths`
+  // and never narrow it.
+  const denyReadPaths = [...DEFAULT_DENY_READ_PATHS, ...(input.additionalDenyReadPaths ?? [])];
   for (const path of input.additionalDenyReadPaths ?? [])
     assertAbsolute(path, "additional deny read path");
   const additionalDenyWritePaths = input.additionalDenyWritePaths ?? [];
@@ -220,11 +250,16 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     ...(input.allowFileReadStar === true ? ["(allow file-read*)"] : []),
     ...denyReadPaths.map((path) => seatbeltDenyRule("file-read*", path)),
     ...privateRules,
+    // The launch roots are re-allowed under every denial above, `file-read*`
+    // included. Skipping them there left the `/private` denial covering the
+    // temporary directory, which macOS resolves beneath `/private/var`, so the
+    // broad-read escape hatch that exists for Git and provider CLIs took away
+    // the one directory those runtimes always need.
     ...uniqueAbsolutePaths([
       ...readRoots,
-      ...(input.allowFileReadStar === true
-        ? []
-        : [input.boundRoot, input.temporaryDirectory, ...additionalWriteRoots]),
+      input.boundRoot,
+      input.temporaryDirectory,
+      ...additionalWriteRoots,
     ]).map((path) => seatbeltAllowRule("file-read*", path)),
     ...(writeBoundRoot ? [seatbeltAllowRule("file-write*", input.boundRoot)] : []),
     seatbeltAllowRule("file-write*", input.temporaryDirectory),
@@ -337,6 +372,18 @@ function assertAbsolute(path: string, label: string): void {
       "invalid-configuration",
       `Seatbelt ${label} must be an absolute path.`,
     );
+  }
+}
+
+function assertNotAncestorOfDeniedPath(path: string, label: string): void {
+  const prefix = path.endsWith(sep) ? path : `${path}${sep}`;
+  for (const denied of DEFAULT_DENY_READ_PATHS) {
+    if (path === denied || denied.startsWith(prefix)) {
+      throw new SeatbeltConfinementError(
+        "invalid-configuration",
+        `Seatbelt ${label} "${path}" is equal to or an ancestor of the denied sensitive path "${denied}"; its read-allow rule would be emitted after that denial and reopen the whole subtree.`,
+      );
+    }
   }
 }
 

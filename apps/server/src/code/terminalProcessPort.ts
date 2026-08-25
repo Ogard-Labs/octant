@@ -249,13 +249,14 @@ export class TerminalProcessPort {
         // would otherwise reach every sibling through that ancestor. Deny the
         // base for writes too; the own-directory grant below re-allows it.
         additionalDenyWritePaths: [this.#dependencies.shellStateDirectory],
-        readRoots: [
-          input.cwd,
-          this.#dependencies.temporaryDirectory,
-          shellState,
-          shellDirectory,
-          dirname(shellDirectory),
-        ],
+        // shellDirectory alone (e.g. /bin, /usr/local/bin) is enough for the
+        // shell's own read needs; `allowFileReadStar` already grants the rest.
+        // A second level up used to be included too, but for shells installed
+        // directly under a top-level directory (/bin/zsh, /bin/sh) that
+        // resolves to "/", which Seatbelt's confinement builder now refuses
+        // as a launch root because it is an ancestor of every sensitive deny
+        // path (see seatbeltProfile.ts).
+        readRoots: [input.cwd, this.#dependencies.temporaryDirectory, shellState, shellDirectory],
       });
     } catch (error) {
       if (error instanceof SeatbeltConfinementError) throw error;

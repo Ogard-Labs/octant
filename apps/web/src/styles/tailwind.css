@@ -29,6 +29,18 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* Tailwind ships its own frozen type ramp, so every `text-sm` in a
+     component was a size the Appearance setting could not reach. Pointing
+     the ramp at Octant's tokens puts those utilities on the same projection
+     as the stylesheets. */
+  --font-sans: var(--oct-font-body);
+  --font-mono: var(--oct-font-mono);
+  --text-xs: var(--oct-text-xs);
+  --text-sm: var(--oct-text-sm);
+  --text-base: var(--oct-text-base);
+  --text-lg: var(--oct-text-lg);
+  --text-xl: var(--oct-text-xl);
+  --text-2xl: var(--oct-text-2xl);
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);

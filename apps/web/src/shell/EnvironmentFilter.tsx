@@ -91,7 +91,7 @@ export function EnvironmentFilter(props: EnvironmentFilterProps) {
                   {REACH_NOTE[row.reach]}
                 </span>
               )}
-              {row.isLocal ? <Check aria-hidden="true" size={10} strokeWidth={2} /> : null}
+              {row.isLocal ? <Check aria-hidden="true" size={12} strokeWidth={2} /> : null}
             </label>
           ))}
         </fieldset>

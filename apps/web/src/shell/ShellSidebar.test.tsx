@@ -306,9 +306,9 @@ describe("ShellSidebar", () => {
     expect(chrome).toContainElement(activity);
     expect(search).toHaveClass("shell-icon-button");
     expect(search).not.toHaveTextContent("Search");
-    expect(search.querySelector("svg")).toHaveAttribute("width", "15");
+    expect(search.querySelector("svg")).toHaveAttribute("width", "16");
     expect(activity).toHaveClass("shell-icon-button");
-    expect(activity.querySelector("svg")).toHaveAttribute("width", "15");
+    expect(activity.querySelector("svg")).toHaveAttribute("width", "16");
     expect(activity).not.toHaveTextContent("Turn on activity view");
     expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar-item");
   });

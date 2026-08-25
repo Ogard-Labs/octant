@@ -38,6 +38,23 @@ describe("ThemeAppearanceEditor", () => {
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
   });
 
+  it("heads every Appearance block the way the rest of Settings is headed", () => {
+    render(<ThemeAppearanceEditor controller={controller()} />);
+
+    // Appearance used to give each block its own card head — an h3 in a
+    // section, a summary in a disclosure, a legend in a fieldset — so the page
+    // did not read as the same surface as General. Every block now puts one
+    // section label above one flat group.
+    for (const name of ["Color scheme", "Typography", "Accessibility", "Import or export theme"]) {
+      const block = screen.getByText(name).closest(".settings-card-section");
+      expect(block, name).not.toBeNull();
+      // The label is the block's own first child, and everything it labels sits
+      // in the one group below it.
+      expect(block?.firstElementChild?.textContent, name).toContain(name);
+      expect(block?.querySelector(":scope > .setgroup"), name).not.toBeNull();
+    }
+  });
+
   it("does not wrap switch controls in a second implicit label", () => {
     render(<ThemeAppearanceEditor controller={controller()} />);
 

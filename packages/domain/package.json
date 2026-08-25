@@ -24,7 +24,6 @@
     "./canvas-policy": "./src/canvasPolicy.ts",
     "./canvas-action-policy": "./src/canvasActionPolicy.ts",
     "./canvas-action-availability-policy": "./src/canvasActionAvailabilityPolicy.ts",
-    "./canvas-tab-policy": "./src/canvasTabPolicy.ts",
     "./canvas-refresh-policy": "./src/canvasRefreshPolicy.ts",
     "./canvas-skill-policy": "./src/canvasSkillPolicy.ts",
     "./canvas-share-policy": "./src/canvasSharePolicy.ts",
@@ -62,7 +61,8 @@
     "./github-remote-identity": "./src/githubRemoteIdentity.ts",
     "./code-project-pull-request-policy": "./src/codeProjectPullRequestPolicy.ts",
     "./canvas-share-snapshot-policy": "./src/canvasShareSnapshotPolicy.ts",
-    "./canvas-share-access-log-policy": "./src/canvasShareAccessLogPolicy.ts"
+    "./canvas-share-access-log-policy": "./src/canvasShareAccessLogPolicy.ts",
+    "./audit-policy": "./src/auditPolicy.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

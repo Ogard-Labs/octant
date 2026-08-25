@@ -11,7 +11,6 @@ import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { LoaderCircle } from "lucide-react";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
-import { useTabActivatedThisSession } from "../shell/TabActivation";
 import { CodeGitPane } from "./CodeGitPane";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";
@@ -697,7 +696,7 @@ function GitObservationLoading() {
     <section className="code-git-loading" role="status">
       <div className="code-git-loading__heading">
         <span className="code-git-loading__icon">
-          <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={18} />
+          <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={16} />
         </span>
         <div>
           <span className="code-git-loading__eyebrow">Git workspace</span>
@@ -760,11 +759,9 @@ function TerminalWorkspaceSurface(
   );
   const [starting, setStarting] = useState(false);
   const startInFlight = useRef(false);
-  // A tab the person activated, opened, or created in this session opens a
-  // process on first view; they asked for a terminal. A tab that only came
-  // back with a restored layout, and a process that later exited, wait for an
-  // explicit Start instead of launching a shell nobody asked for.
-  const activatedThisSession = useTabActivatedThisSession(props.tab.id);
+  // A Terminal tab is already the user's explicit request for a thread-owned
+  // shell. Open or restore it by attaching the existing process, then start a
+  // fresh one when the old process is gone. Plan mode remains read-only.
   const autoStarted = useRef(false);
   const startRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
@@ -774,6 +771,10 @@ function TerminalWorkspaceSurface(
       return;
     }
     if (props.checkoutAvailability !== "available") {
+      setReattaching(false);
+      return;
+    }
+    if (props.threadPolicy === "plan") {
       setReattaching(false);
       return;
     }
@@ -787,18 +788,6 @@ function TerminalWorkspaceSurface(
       }
       let absent = false;
       try {
-        const inspection = await props.client.inspectTerminal({
-          terminalId: props.terminalId,
-          ...props.scope,
-        });
-        if (!active) return;
-        if (
-          inspection.terminalId !== props.terminalId ||
-          !["running", "exited", "interrupted"].includes(inspection.state)
-        ) {
-          setFailure("Terminal recovery returned an invalid process identity.");
-          return;
-        }
         const result = await props.client.executeOperation({
           kind: "attach-terminal",
           operationId: props.nextUuid() as never,
@@ -817,7 +806,7 @@ function TerminalWorkspaceSurface(
         }
         absent = result.kind === "operation-failed";
       } catch (error) {
-        if (active && terminalInspectionFailureCategory(error) !== "unavailable") {
+        if (active && terminalRecoveryFailureCategory(error) !== "unavailable") {
           setFailure(
             "Terminal recovery is temporarily unavailable. You can start a fresh terminal.",
           );
@@ -827,14 +816,7 @@ function TerminalWorkspaceSurface(
       } finally {
         if (active && initial) setReattaching(false);
       }
-      if (
-        active &&
-        initial &&
-        absent &&
-        !autoStarted.current &&
-        props.threadPolicy !== "plan" &&
-        activatedThisSession
-      ) {
+      if (active && initial && absent && !autoStarted.current && props.threadPolicy !== "plan") {
         autoStarted.current = true;
         void startRef.current();
       }
@@ -857,7 +839,6 @@ function TerminalWorkspaceSurface(
     props.terminal,
     props.terminalId,
     props.threadPolicy,
-    activatedThisSession,
   ]);
 
   const start = async () => {
@@ -983,7 +964,7 @@ function TerminalWorkspaceSurface(
   );
 }
 
-function terminalInspectionFailureCategory(error: unknown): string | undefined {
+function terminalRecoveryFailureCategory(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && "category" in error
     ? String(error.category)
     : undefined;

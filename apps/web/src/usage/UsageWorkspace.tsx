@@ -117,12 +117,12 @@ export function UsageWorkspace(props: UsageWorkspaceProps) {
             type="button"
             variant="ghost"
           >
-            <ArrowLeft aria-hidden="true" size={13} strokeWidth={1.8} />
+            <ArrowLeft aria-hidden="true" size={14} strokeWidth={1.8} />
             <span>Back to app</span>
           </OctantButton>
         )}
         <h2 className="usage-workspace__title">
-          <BarChart3 aria-hidden="true" size={18} /> Usage
+          <BarChart3 aria-hidden="true" size={16} /> Usage
         </h2>
         <p className="usage-workspace__subtitle">
           Operational token attribution for this host, in {VIEWING_TIME_ZONE}.

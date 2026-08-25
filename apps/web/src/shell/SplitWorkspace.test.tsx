@@ -1,4 +1,8 @@
-import { decodePaneId, type WorkspaceLayoutNode } from "@octant/contracts/shell";
+import {
+  decodePaneId,
+  decodeWorkspaceLayoutNode,
+  type WorkspaceLayoutNode,
+} from "@octant/contracts/shell";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -15,6 +19,41 @@ const secondPaneId = decodePaneId("00000000-0000-4000-8000-000000000622");
 const splitNodeId = "00000000-0000-4000-8000-000000000610";
 
 describe("SplitWorkspace", () => {
+  it("shows the resolved provider mark in a thread pane tab when enabled", () => {
+    const handlers = splitCallbacks();
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "chat-thread",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "chat",
+        threadId: "00000000-0000-4000-8000-000000000614",
+        title: "A thread",
+      },
+    });
+    render(
+      <SplitWorkspace
+        {...handlers}
+        layout={layout}
+        providerByThreadId={
+          new Map([
+            [
+              "00000000-0000-4000-8000-000000000614",
+              { displayName: "Claude", driverKind: "claude" },
+            ],
+          ])
+        }
+        renderSurface={(surface) => surface.title}
+        showProviderIcons
+      />,
+    );
+
+    expect(screen.getByTitle("Claude")).toBeVisible();
+    expect(screen.getByRole("region", { name: "Workspace pane: A thread" })).toBeVisible();
+  });
+
   it("marks the focused pane and puts pane operations in a keyboard disclosure", async () => {
     const user = userEvent.setup();
     const handlers = splitCallbacks();
@@ -42,6 +81,29 @@ describe("SplitWorkspace", () => {
     expect(screen.queryByRole("menuitem", { name: "Split right" })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("menuitem", { name: "Show all panes" }));
     expect(handlers.onClearFocus).toHaveBeenCalledOnce();
+  });
+
+  it("tells assistive technology when the pane header's own menu is open", async () => {
+    const user = userEvent.setup();
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    const header = screen
+      .getByRole("region", { name: "Workspace pane: First" })
+      .querySelector<HTMLElement>(".workspace-pane__header")!;
+    expect(header).toHaveAttribute("aria-haspopup", "menu");
+    expect(header).toHaveAttribute("aria-expanded", "false");
+
+    await openPaneMenu(user, "First");
+
+    // A header that keeps reporting `false` here says the menu is closed while
+    // it is open, which misleads a screen reader rather than informing it.
+    expect(header).toHaveAttribute("aria-expanded", "true");
   });
 
   it("offers focus, split, and close from a right-click over the pane's header", async () => {
