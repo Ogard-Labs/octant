@@ -2395,6 +2395,35 @@ describe("CodeService checkout rebind", () => {
     expect(result.outcome.thread.executionPolicy).toBe("approval-gated");
   });
 
+  it("drops a session grant of Full access held by a different window than the one that rebinds", async () => {
+    // A second window can independently hold its own Full-access grant on the
+    // same thread. Recovery discards every capability the thread held under
+    // the old checkout, not only the acting window's, or the other window's
+    // grant would survive and silently upgrade the rebound thread.
+    const otherWindow = decodeWindowId(testUuid(9001));
+    const sessionAuthority = new CodeSessionAuthorityStore();
+    sessionAuthority.grantFullAccess(otherWindow, ids.thread);
+    const fixture = serviceFixture({
+      threads: [thread({ executionPolicy: "approval-gated" })],
+      observedCheckout: superseding,
+      sessionAuthority,
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "rebind-code-thread-checkout",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+
+    if (result.kind !== "thread-checkout-rebind" || result.outcome.status !== "rebound") {
+      throw new Error("expected a rebound outcome");
+    }
+    expect(result.outcome.thread.executionPolicy).toBe("approval-gated");
+    expect(
+      sessionAuthority.effectiveThread(otherWindow, result.outcome.thread).executionPolicy,
+    ).toBe("approval-gated");
+  });
+
   it("refuses to rebind a thread that already sits on its Project's checkout", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
 

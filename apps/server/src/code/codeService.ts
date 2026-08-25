@@ -1263,8 +1263,10 @@ export class CodeService {
         // 0032: recovery discards, never revalidates. A session grant of Full
         // access was minted against the checkout the thread just left, so it
         // does not carry onto the new one; the thread returns to its persisted
-        // posture and the user re-grants if they still want it.
-        this.#sessionAuthority.revokeThread(authenticatedWindowId, current.id);
+        // posture and the user re-grants if they still want it. Discard the
+        // grant in every window that holds it, not only the acting window —
+        // recovery invalidates every capability minted under the old checkout.
+        this.#sessionAuthority.revokeThreadEverywhere(current.id);
         return {
           kind: "thread-checkout-rebind",
           threadId: current.id,

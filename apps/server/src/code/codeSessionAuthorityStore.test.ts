@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 
 const windowId = decodeWindowId("10000000-0000-4000-8000-000000000001");
+const otherWindowId = decodeWindowId("10000000-0000-4000-8000-000000000002");
 const thread = decodeCodeThread({
   id: "20000000-0000-4000-8000-000000000001",
   projectId: "30000000-0000-4000-8000-000000000001",
@@ -36,5 +37,16 @@ describe("CodeSessionAuthorityStore", () => {
 
     store.revokeWindow(windowId);
     expect(store.effectiveThread(windowId, thread).executionPolicy).toBe("approval-gated");
+  });
+
+  it("clears a Full access grant from every window that holds it, not just one", () => {
+    const store = new CodeSessionAuthorityStore();
+    store.grantFullAccess(windowId, thread.id);
+    store.grantFullAccess(otherWindowId, thread.id);
+
+    store.revokeThreadEverywhere(thread.id);
+
+    expect(store.effectiveThread(windowId, thread).executionPolicy).toBe("approval-gated");
+    expect(store.effectiveThread(otherWindowId, thread).executionPolicy).toBe("approval-gated");
   });
 });
