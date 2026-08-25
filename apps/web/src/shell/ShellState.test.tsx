@@ -14,10 +14,10 @@ describe("ShellState", () => {
       />,
     );
 
-    expect(screen.getByRole("status")).toHaveClass("shell-state", "shell-state--loading");
-    expect(screen.getByRole("heading", { name: "Loading Octant" })).toHaveClass(
-      "shell-state__title",
-    );
+    expect(screen.getByRole("status")).toHaveAttribute("data-state", "loading");
+    expect(
+      screen.getByRole("status").querySelector('[data-slot="empty-state-title"]'),
+    ).toHaveTextContent("Loading Octant");
     expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
 

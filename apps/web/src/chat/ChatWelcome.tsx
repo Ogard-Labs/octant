@@ -126,6 +126,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                   ariaLabel="Provider and model"
                   disabled={!ready || props.creating === true}
                   groups={props.providerGroups ?? []}
+                  menuSide="bottom"
                   onSelect={props.onSelectProvider ?? (() => undefined)}
                   {...(props.onOpenSettings === undefined
                     ? {}

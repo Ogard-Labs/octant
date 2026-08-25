@@ -16,6 +16,7 @@ import {
   type PreviewSourceVersion,
   type PreviewTarget,
 } from "@octant/contracts/previews";
+import { bindFetchPort } from "./bindFetchPort";
 
 export interface PreviewClientOptions {
   readonly baseUrl: string;
@@ -64,6 +65,7 @@ export class PreviewClientFailure extends Error {
 }
 
 export function createPreviewClient(options: PreviewClientOptions): PreviewClient {
+  const resolved = { ...options, fetch: bindFetchPort(options.fetch) };
   validateLoopbackBaseUrl(options.baseUrl);
   const maxChunksPerPage = options.maxChunksPerPage ?? 16;
   return {
@@ -71,11 +73,11 @@ export function createPreviewClient(options: PreviewClientOptions): PreviewClien
       const body = decodePreviewOpenRequest(
         knownVersion === undefined ? { target } : { target, knownVersion },
       );
-      return postJson(options, "/api/preview/open", body, decodePreviewOutcome);
+      return postJson(resolved, "/api/preview/open", body, decodePreviewOutcome);
     },
     async refresh(target, knownVersion) {
       const body = decodePreviewRefreshRequest({ target, knownVersion });
-      return postJson(options, "/api/preview/refresh", body, decodePreviewOutcome);
+      return postJson(resolved, "/api/preview/refresh", body, decodePreviewOutcome);
     },
     async readChunks(target, sourceVersion, afterSequence, signal) {
       const body = decodePreviewChunksRequest({
@@ -84,15 +86,15 @@ export function createPreviewClient(options: PreviewClientOptions): PreviewClien
         afterSequence,
         maxChunks: maxChunksPerPage,
       });
-      return postJson(options, "/api/preview/chunks", body, decodePreviewChunksReply, signal);
+      return postJson(resolved, "/api/preview/chunks", body, decodePreviewChunksReply, signal);
     },
     async cancel(target) {
       const body = decodePreviewCancelRequest({ target });
-      return postJson(options, "/api/preview/cancel", body, decodePreviewCancelReply);
+      return postJson(resolved, "/api/preview/cancel", body, decodePreviewCancelReply);
     },
     async handoff(target, kind, signal) {
       const body = decodePreviewHandoffRequest({ target, kind });
-      return postJson(options, "/api/preview/handoff", body, decodePreviewHandoffReply, signal);
+      return postJson(resolved, "/api/preview/handoff", body, decodePreviewHandoffReply, signal);
     },
   };
 }

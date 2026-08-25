@@ -1139,13 +1139,6 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--oct-fg-soft);
 }
 
-.work-composer-adapter__composer-bar .composer-model-picker__menu {
-  top: calc(100% + 8px);
-  right: auto;
-  bottom: auto;
-  left: 0;
-}
-
 .work-composer-adapter__visually-hidden {
   position: absolute;
   width: 1px;
@@ -1515,12 +1508,6 @@ form > .work-composer-adapter__attachments {
 
 /* ── Branch / worktree source selector ─────────────────────────────── */
 
-.code-branch-selector {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
 .code-branch-selector__trigger {
   display: inline-flex;
   align-items: center;
@@ -1565,10 +1552,6 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-branch-selector__menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 40;
   display: flex;
   flex-direction: column;
   width: min(320px, calc(100vw - 32px));
@@ -1628,12 +1611,6 @@ form > .work-composer-adapter__attachments {
   color: var(--octant-text-muted);
 }
 
-.code-branch-selector__badge {
-  color: var(--octant-text-muted);
-  font-size: calc(10 * var(--oct-text-step));
-  font-weight: 500;
-}
-
 .code-branch-selector__empty {
   margin: 0;
   padding: 8px;
@@ -1669,13 +1646,6 @@ form > .work-composer-adapter__attachments {
 .code-composer-adapter__composer-bar .composer-model-picker__trigger:hover:not(:disabled) {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
-}
-
-.code-composer-adapter__composer-bar .composer-model-picker__menu {
-  top: calc(100% + 8px);
-  right: auto;
-  bottom: auto;
-  left: 0;
 }
 
 /* The profile trigger is a peer of the model picker in this row, so it wears

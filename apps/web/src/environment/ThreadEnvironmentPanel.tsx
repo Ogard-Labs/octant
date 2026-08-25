@@ -3,7 +3,7 @@ import { SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { OctantPopover } from "../ui/base/OctantPopover";
 
 export interface ThreadEnvironmentSummaryFacts {
   readonly identity: EnvironmentCompactIdentity;
@@ -31,11 +31,8 @@ export interface ThreadEnvironmentPanelProps {
  * preference. Escape, an outside pointer, or losing the pane closes it.
  */
 export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
   const onOpenChangeRef = useRef(props.onOpenChange);
   onOpenChangeRef.current = props.onOpenChange;
-  const panelId = useId();
   const panelTitleId = useId();
   const summaryId = useId();
   const [toolbarHost, setToolbarHost] = useState<Element | null>(() =>
@@ -56,81 +53,43 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
     onOpenChangeRef.current(false);
   }, [active, props.open]);
 
-  useEffect(() => {
-    if (!props.open) return;
-    panelRef.current?.focus();
-    const onPointerDown = (event: PointerEvent) => {
-      if (!(event.target instanceof Node)) return;
-      if (triggerRef.current?.contains(event.target) || panelRef.current?.contains(event.target)) {
-        return;
-      }
-      if (event.target instanceof Element && event.target.closest('[role="menu"]')) return;
-      onOpenChangeRef.current(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      onOpenChangeRef.current(false);
-      queueMicrotask(() => triggerRef.current?.focus());
-    };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [props.open]);
-
   const environment = (
     <div className="thread-environment-summary">
       <span className="sr-only" id={summaryId}>
         {summary}
       </span>
-      <OctantTooltip label="Toggle environment">
-        <OctantButton
-          aria-controls={panelId}
-          aria-describedby={summaryId}
-          aria-expanded={props.open}
-          aria-haspopup="dialog"
-          aria-label="Toggle environment"
-          aria-pressed={props.open}
-          className="thread-environment-summary__button"
-          data-environment-status={props.summary.identity.status}
-          onClick={() => props.onOpenChange(!props.open)}
-          ref={triggerRef}
-          type="button"
-          variant="ghost"
-        >
-          <SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.7} />
-        </OctantButton>
-      </OctantTooltip>
-      {props.open ? (
-        <div
-          aria-labelledby={panelTitleId}
-          className="popover-panel thread-environment-disclosure window-no-drag"
-          id={panelId}
-          ref={panelRef}
-          role="dialog"
-          tabIndex={-1}
-        >
-          <header className="thread-environment-disclosure__header">
-            <div className="thread-environment-disclosure__heading">
-              <h2 id={panelTitleId}>Environment</h2>
-              <span>{props.summary.identity.label}</span>
-            </div>
-            <OctantButton
-              aria-label="Close environment"
-              className="thread-environment-disclosure__close"
-              onClick={() => props.onOpenChange(false)}
-              type="button"
-              variant="ghost"
-            >
-              <X aria-hidden="true" size={16} strokeWidth={1.7} />
-            </OctantButton>
-          </header>
-          <div className="thread-environment-disclosure__body">{props.children}</div>
-        </div>
-      ) : null}
+      <OctantPopover
+        align="end"
+        className="thread-environment-disclosure window-no-drag"
+        onOpenChange={props.onOpenChange}
+        open={props.open}
+        side="bottom"
+        titledBy={panelTitleId}
+        trigger={<SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.7} />}
+        triggerClassName="thread-environment-summary__button"
+        triggerDataAttributes={{ "data-environment-status": props.summary.identity.status }}
+        triggerDescribedBy={summaryId}
+        triggerLabel="Toggle environment"
+        triggerTooltip="Toggle environment"
+        triggerVariant="ghost"
+      >
+        <header className="thread-environment-disclosure__header">
+          <div className="thread-environment-disclosure__heading">
+            <h2 id={panelTitleId}>Environment</h2>
+            <span>{props.summary.identity.label}</span>
+          </div>
+          <OctantButton
+            aria-label="Close environment"
+            className="thread-environment-disclosure__close"
+            onClick={() => props.onOpenChange(false)}
+            type="button"
+            variant="ghost"
+          >
+            <X aria-hidden="true" size={16} strokeWidth={1.7} />
+          </OctantButton>
+        </header>
+        <div className="thread-environment-disclosure__body">{props.children}</div>
+      </OctantPopover>
     </div>
   );
   return toolbarHost === null ? environment : createPortal(environment, toolbarHost);

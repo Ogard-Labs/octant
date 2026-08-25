@@ -4,6 +4,7 @@ import {
   type AppleDiscoverySnapshot,
   type AppleSnapshotRequest,
 } from "@octant/contracts/apple-toolchain-rpc";
+import { bindFetchPort } from "./bindFetchPort";
 import type {
   AppleActionRequest,
   AppleBuildEvidence,
@@ -43,24 +44,25 @@ export class AppleToolchainClientFailure extends Error {
 export function createAppleToolchainClient(
   options: AppleToolchainClientOptions,
 ): AppleToolchainClient {
+  const resolved = { ...options, fetch: bindFetchPort(options.fetch) };
   return {
     discover: async (request, signal) => {
-      const reply = await post(options, { kind: "apple-discovery-request", request }, signal);
+      const reply = await post(resolved, { kind: "apple-discovery-request", request }, signal);
       if (reply.kind !== "apple-discovery-snapshot") throw protocol();
       return reply.snapshot;
     },
     execute: async (request, signal) => {
-      const reply = await post(options, { kind: "apple-action-request", request }, signal);
+      const reply = await post(resolved, { kind: "apple-action-request", request }, signal);
       if (reply.kind !== "apple-action-evidence") throw protocol();
       return reply.evidence;
     },
     cancel: async (request, signal) => {
-      const reply = await post(options, request, signal);
+      const reply = await post(resolved, request, signal);
       if (reply.kind !== "apple-cancelled") throw protocol();
       return reply.cancelled;
     },
     snapshot: async (request, signal) => {
-      const reply = await post(options, request, signal);
+      const reply = await post(resolved, request, signal);
       if (reply.kind !== "apple-runtime-snapshot") throw protocol();
       return reply.snapshot;
     },

@@ -262,8 +262,8 @@
 }
 
 /* ─── panels ───────────────────────────────────────────────────────────
-   Panels ride the system card (.card .card-tight .card-raised in the
-   markup); a panel scrolls itself rather than the surface behind it. */
+   Panels ride the OctantCard adapter (see docs/decisions/0046); a panel
+   scrolls itself rather than the surface behind it. */
 .zen-panel {
   min-width: 0;
   max-width: 100%;

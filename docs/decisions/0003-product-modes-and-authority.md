@@ -60,7 +60,7 @@ users start quickly without a setup modal.
   a thread never does.
 - Referencing another thread from a composer grants a bounded read-only
   transcript excerpt for that turn; it never appends to, steers, or approves
-  the referenced thread (amended by 0048: an explicitly mentioned Chat thread
+  the referenced thread (amended by 0049: an explicitly mentioned Chat thread
   may also be sent one bounded coordination message through the app-managed
   `octant_thread_message` tool; every other reference, and every Work or Code
   mention, remains read-only).
@@ -88,5 +88,5 @@ users start quickly without a setup modal.
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0012 Mixed-provider subagents
 - 0044 The dock hosts live thread-owned tools
-- 0048 Amends the read-only thread-reference decision for one explicit Chat
+- 0049 Amends the read-only thread-reference decision for one explicit Chat
   coordination path

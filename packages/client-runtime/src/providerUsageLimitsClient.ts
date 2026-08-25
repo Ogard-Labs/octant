@@ -2,6 +2,7 @@ import {
   decodeProviderUsageLimitsSnapshot,
   type ProviderUsageLimitsSnapshot,
 } from "@octant/contracts/provider-usage-limits";
+import { bindFetchPort } from "./bindFetchPort";
 
 export interface ProviderUsageLimitsClient {
   readonly list: () => Promise<ProviderUsageLimitsSnapshot>;
@@ -18,6 +19,7 @@ export function createProviderUsageLimitsClient(options: {
   readonly windowCapability: string;
   readonly requestTimeoutMs?: number;
 }): ProviderUsageLimitsClient {
+  const fetch = bindFetchPort(options.fetch);
   const base = new URL(options.baseUrl);
   if (
     base.protocol !== "http:" ||
@@ -31,7 +33,7 @@ export function createProviderUsageLimitsClient(options: {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       response = await Promise.race([
-        options.fetch(new URL(pathname, base).toString(), {
+        fetch(new URL(pathname, base).toString(), {
           method,
           headers: { "x-octant-window-capability": options.windowCapability },
           signal: controller.signal,

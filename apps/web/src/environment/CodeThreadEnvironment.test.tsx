@@ -80,6 +80,9 @@ async function openEnvironment(): Promise<void> {
     await Promise.resolve();
   });
   fireEvent.click(await screen.findByRole("button", { name: "Toggle environment" }));
+  // A fireEvent-driven open doesn't yield to the animation frame that settles
+  // the popup's enter transition, so wait for it before callers act inside.
+  await waitFor(() => expect(screen.getByRole("dialog", { name: "Environment" })).toBeVisible());
 }
 
 describe("CodeThreadEnvironment", () => {

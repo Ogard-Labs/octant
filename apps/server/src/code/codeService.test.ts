@@ -2283,6 +2283,241 @@ describe("CodeService managed thread creation", () => {
 });
 
 /**
+ * Recovery from a superseded checkout. A Project rebind moves the checkout id
+ * every earlier thread was pinned to, and the recovery loop can only call those
+ * threads unavailable from then on. 0032 refuses a refusal with no door: the way
+ * back is the user's own explicit act, journaled like any other authority change.
+ */
+describe("CodeService checkout rebind", () => {
+  const superseding = decodeCodeCheckoutIdentity({
+    ...checkout,
+    id: "00000000-0000-4000-8000-000000005001",
+    availability: "available",
+  });
+
+  it("moves a thread its Project rebind left fail-closed onto the checkout the Project binds now", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      checkout: decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" }),
+      observedCheckout: superseding,
+    });
+
+    // Before the user asks, the thread is exactly as stuck as the rebind left
+    // it: no restart, poll, or elapsed time clears this on its own.
+    const before = await fixture.service.bootstrap(ids.window);
+    expect(before.checkouts).toContainEqual(
+      expect.objectContaining({ id: ids.checkout, availability: "unavailable" }),
+    );
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "rebind-code-thread-checkout",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+
+    expect(result).toEqual({
+      kind: "thread-checkout-rebind",
+      threadId: ids.thread,
+      outcome: {
+        status: "rebound",
+        thread: expect.objectContaining({ checkoutId: superseding.id, version: 2 }),
+        checkout: superseding,
+      },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: { aggregateType: "code-thread", aggregateId: ids.thread },
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({
+            eventName: "code.thread-updated@1",
+            payload: expect.objectContaining({
+              kind: "thread-updated",
+              thread: expect.objectContaining({ checkoutId: superseding.id }),
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("carries the Project's current binding revision and repository onto the rebound thread", async () => {
+    // A thread left on the old binding revision would keep failing every check
+    // that re-derives authority from it, so recovery has to move all three.
+    const rebound = decodeBindingRevisionId("00000000-0000-4000-8000-000000005002");
+    const otherRepository = decodeCodeRepositoryId(`repo_${"e".repeat(64)}`);
+    const fixture = serviceFixture({
+      threads: [thread()],
+      observedCheckout: decodeCodeCheckoutIdentity({
+        ...superseding,
+        repositoryId: otherRepository,
+      }),
+    });
+    fixture.checkouts.observe.mockResolvedValue({
+      bindingRevisionId: rebound,
+      checkout: decodeCodeCheckoutIdentity({ ...superseding, repositoryId: otherRepository }),
+    } as never);
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "rebind-code-thread-checkout",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+
+    if (result.kind !== "thread-checkout-rebind" || result.outcome.status !== "rebound") {
+      throw new Error("expected a rebound outcome");
+    }
+    expect(result.outcome.thread.bindingRevisionId).toEqual(rebound);
+    expect(result.outcome.thread.repositoryId).toEqual(otherRepository);
+  });
+
+  it("drops a session grant of Full access when the thread moves to another checkout", async () => {
+    // The grant was minted against the checkout the thread just left. Recovery
+    // discards rather than revalidates, so the thread lands on its persisted
+    // posture and the user re-grants if they still want it.
+    const sessionAuthority = new CodeSessionAuthorityStore();
+    sessionAuthority.grantFullAccess(ids.window, ids.thread);
+    const fixture = serviceFixture({
+      threads: [thread({ executionPolicy: "approval-gated" })],
+      observedCheckout: superseding,
+      sessionAuthority,
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "rebind-code-thread-checkout",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+
+    if (result.kind !== "thread-checkout-rebind" || result.outcome.status !== "rebound") {
+      throw new Error("expected a rebound outcome");
+    }
+    expect(result.outcome.thread.executionPolicy).toBe("approval-gated");
+  });
+
+  it("drops a session grant of Full access held by a different window than the one that rebinds", async () => {
+    // A second window can independently hold its own Full-access grant on the
+    // same thread. Recovery discards every capability the thread held under
+    // the old checkout, not only the acting window's, or the other window's
+    // grant would survive and silently upgrade the rebound thread.
+    const otherWindow = decodeWindowId(testUuid(9001));
+    const sessionAuthority = new CodeSessionAuthorityStore();
+    sessionAuthority.grantFullAccess(otherWindow, ids.thread);
+    const fixture = serviceFixture({
+      threads: [thread({ executionPolicy: "approval-gated" })],
+      observedCheckout: superseding,
+      sessionAuthority,
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "rebind-code-thread-checkout",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+
+    if (result.kind !== "thread-checkout-rebind" || result.outcome.status !== "rebound") {
+      throw new Error("expected a rebound outcome");
+    }
+    expect(result.outcome.thread.executionPolicy).toBe("approval-gated");
+    expect(
+      sessionAuthority.effectiveThread(otherWindow, result.outcome.thread).executionPolicy,
+    ).toBe("approval-gated");
+  });
+
+  it("refuses to rebind a thread that already sits on its Project's checkout", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "rebind-code-thread-checkout",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+
+    expect(result).toEqual({
+      kind: "thread-checkout-rebind",
+      threadId: ids.thread,
+      outcome: { status: "refused", reason: "already-bound" },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to rebind a thread that owns a managed worktree", async () => {
+    // That checkout is the thread's own tree, not the Project's. Moving it
+    // would hand the thread a working copy nobody asked it to take up.
+    const managed = decodeCodeCheckoutIdentity({
+      ...checkout,
+      kind: "managed-worktree",
+      ownershipReceiptId: "00000000-0000-4000-8000-000000005003",
+    });
+    const fixture = serviceFixture({
+      threads: [thread()],
+      checkout: managed,
+      observedCheckout: superseding,
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "rebind-code-thread-checkout",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+
+    expect(result).toEqual({
+      kind: "thread-checkout-rebind",
+      threadId: ids.thread,
+      outcome: { status: "refused", reason: "managed-worktree" },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to rebind when the Project's own checkout cannot be observed", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    fixture.checkouts.observe.mockRejectedValue(new Error("repository unreadable"));
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "rebind-code-thread-checkout",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+
+    expect(result).toEqual({
+      kind: "thread-checkout-rebind",
+      threadId: ids.thread,
+      outcome: { status: "refused", reason: "checkout-unavailable" },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to rebind a thread in a Project this window may not reach", async () => {
+    const fixture = serviceFixture({
+      threads: [thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject })],
+      observedCheckout: superseding,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "rebind-code-thread-checkout",
+        threadId: ids.unauthorizedThread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to rebind against a version the caller no longer holds", async () => {
+    const fixture = serviceFixture({ threads: [thread()], observedCheckout: superseding });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "rebind-code-thread-checkout",
+        threadId: ids.thread,
+        expectedVersion: 0,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * Confined file listing (#code-file-explorer). Listing is a read, so Plan may
  * perform it; what gates it is the same root authority the save path uses.
  */

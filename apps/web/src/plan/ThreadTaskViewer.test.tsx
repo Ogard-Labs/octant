@@ -59,7 +59,7 @@ describe("ThreadTaskViewer", () => {
     const setStepStatus = vi.fn(async () => true);
     render(<ThreadTaskViewer controller={controller({ setStepStatus })} />);
 
-    const trigger = screen.getByRole("button", { name: "Show task progress" });
+    const trigger = screen.getByRole("button", { name: /^Show task progress/ });
     expect(trigger).toHaveTextContent("Step 2 / 3");
     await user.click(trigger);
 
@@ -87,10 +87,10 @@ describe("ThreadTaskViewer", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Show task progress" })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: /^Show task progress/ })).toHaveTextContent(
       "3 files changed · stale",
     );
-    await user.click(screen.getByRole("button", { name: "Show task progress" }));
+    await user.click(screen.getByRole("button", { name: /^Show task progress/ }));
     expect(screen.getByRole("dialog", { name: "Task progress" })).toHaveTextContent(
       "3 files changed · stale",
     );
@@ -108,10 +108,10 @@ describe("ThreadTaskViewer", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Show task progress" })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: /^Show task progress/ })).toHaveTextContent(
       "Review 3-step plan",
     );
-    await user.click(screen.getByRole("button", { name: "Show task progress" }));
+    await user.click(screen.getByRole("button", { name: /^Show task progress/ }));
     await user.click(screen.getByRole("button", { name: "Approve plan" }));
     expect(approve).toHaveBeenCalledOnce();
   });

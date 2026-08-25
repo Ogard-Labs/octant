@@ -37,6 +37,7 @@
     "./events": "./src/events.ts",
     "./audit-events": "./src/auditEvents.ts",
     "./extensions": "./src/extensions.ts",
+    "./execution-capsule": "./src/executionCapsule.ts",
     "./extension-events": "./src/extensionEvents.ts",
     "./extension-rpc": "./src/extensionRpc.ts",
     "./folder-browse": "./src/folderBrowse.ts",

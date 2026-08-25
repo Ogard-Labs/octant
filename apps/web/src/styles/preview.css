@@ -1,7 +1,8 @@
 /* File preview viewers: table, workbook, document, slides, PDF. Paint
    comes from the design system (octant.css `--oct-*` tokens and the
-   datatable/sheet-tab/viewer-notice/btn recipes); this sheet keeps the
-   full-pane frame, per-format layout, and the fidelity affordances. */
+   datatable/viewer-notice/btn recipes, plus OctantTabs for the workbook
+   sheet strip); this sheet keeps the full-pane frame, per-format layout,
+   and the fidelity affordances. */
 
 .preview-viewer {
   display: flex;
@@ -151,14 +152,13 @@
   outline-offset: -2px;
 }
 
-/* Workbook viewer: the tab strip sits above the grid, so it carries its
-   own bottom rule; .sheet-tab paints each tab. */
+/* Workbook viewer: OctantTabs/OctantTabsTab own the tab strip's color,
+   border, and selected-state paint (0046). This class only sizes the
+   strip so many worksheets scroll horizontally instead of overflowing
+   the pane. */
 .preview-workbook__tabs {
-  display: flex;
-  gap: 2px;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border);
-  background: var(--oct-surface-warm);
+  max-width: 100%;
+  justify-content: flex-start;
   overflow-x: auto;
   scrollbar-width: thin;
 }
@@ -233,7 +233,6 @@
 
 @media (prefers-contrast: more) {
   .preview-viewer__chrome,
-  .preview-workbook__tabs,
   .preview-table th,
   .preview-table td,
   .preview-pdf__page,

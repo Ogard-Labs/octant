@@ -182,6 +182,69 @@ describe("useCodeController", () => {
     );
   });
 
+  it("puts a rebound thread on its new checkout so the fail-closed banner clears", async () => {
+    const reboundCheckoutId = "40000000-0000-4000-8000-000000000011";
+    const reboundCheckout = {
+      id: reboundCheckoutId as never,
+      repositoryId: repositoryId as never,
+      kind: "existing-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "development" as never, oid: "b".repeat(40) as never },
+      observedAt: now as never,
+    };
+    const client = fakeClient({
+      execute: vi.fn(
+        async () =>
+          ({
+            kind: "thread-checkout-rebind",
+            threadId: thread(1).id,
+            outcome: {
+              status: "rebound",
+              thread: { ...thread(1), checkoutId: reboundCheckoutId as never, version: 2 },
+              checkout: reboundCheckout,
+            },
+          }) as never,
+      ),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.rebindThreadCheckout(thread(1).id);
+    });
+
+    expect(outcome).toMatchObject({ status: "rebound" });
+    expect(result.current.bootstrap?.checkouts.some((c) => c.id === reboundCheckoutId)).toBe(true);
+    expect(result.current.bootstrap?.threads.some((t) => t.checkoutId === reboundCheckoutId)).toBe(
+      true,
+    );
+  });
+
+  it("leaves the projection alone when the host refuses to rebind", async () => {
+    const client = fakeClient({
+      execute: vi.fn(
+        async () =>
+          ({
+            kind: "thread-checkout-rebind",
+            threadId: thread(1).id,
+            outcome: { status: "refused", reason: "already-bound" },
+          }) as never,
+      ),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const before = result.current.bootstrap;
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.rebindThreadCheckout(thread(1).id);
+    });
+
+    expect(outcome).toEqual({ status: "refused", reason: "already-bound" });
+    expect(result.current.bootstrap).toEqual(before);
+  });
+
   it("F4: exposes the typed actionable failure from a rejected managed creation", async () => {
     const client = fakeClient({
       execute: vi.fn(async () => {
@@ -398,6 +461,30 @@ describe("useCodeController", () => {
     await waitFor(() => expect(client.subscribe).toHaveBeenCalledOnce());
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(client.thread).toHaveBeenCalledOnce();
+    unmount();
+  });
+
+  it("keeps the active view's identity stable across unchanged navigation polls", async () => {
+    // Every navigation refresh hands back freshly decoded checkout and thread
+    // objects even when nothing on the host changed. Rebuilding the active
+    // view from those on every tick would rerender any surface watching it on
+    // a timer, for data that never moved.
+    const bootstrapRead = vi.fn(async () => bootstrap());
+    const client = fakeClient({ bootstrap: bootstrapRead });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 10,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    const firstView = result.current.activeView;
+
+    await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(2));
+    expect(result.current.activeView).toBe(firstView);
     unmount();
   });
 
@@ -2056,6 +2143,21 @@ describe("useCodeController", () => {
 
     slowRefresh.resolve(bootstrap(1, 9));
     await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(2));
+    unmount();
+  });
+
+  it("keeps the bootstrap reference when navigation refresh data is unchanged", async () => {
+    const bootstrapRead = vi.fn(async () => bootstrap(1, 4));
+    const client = fakeClient({ bootstrap: bootstrapRead });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ client, navigationRefreshMs: 10 }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const initial = result.current.bootstrap;
+    await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(2));
+
+    expect(result.current.bootstrap).toBe(initial);
     unmount();
   });
 

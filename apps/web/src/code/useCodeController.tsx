@@ -22,6 +22,7 @@ import {
   type CodeEvidenceContentId,
   type CodeOperationEvent,
   type CodeOperationId,
+  type CodeThreadCheckoutRebindOutcome,
   type CodeThreadFollowUpView,
   type CodeAttachmentId,
   type CodeAttachmentReference,
@@ -37,6 +38,7 @@ import {
   applyActivityEvent,
   type CodeTurnActivity,
 } from "./transcriptActivity";
+import { samePollingData } from "../polling/samePollingData";
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type CodeTurnStatus = "idle" | "sending" | "running" | "failed";
@@ -144,6 +146,12 @@ function refreshActiveThreadView(
     (candidate) => String(candidate.id) === String(current.thread.id),
   );
   if (checkout === undefined && refreshedThread === undefined) return current;
+  if (
+    (checkout === undefined || samePollingData(checkout, current.checkout)) &&
+    (refreshedThread === undefined || samePollingData(refreshedThread, current.thread))
+  ) {
+    return current;
+  }
   return {
     ...current,
     ...(checkout === undefined ? {} : { checkout }),
@@ -616,16 +624,22 @@ export function useCodeController(options: CodeControllerOptions) {
       if (read <= appliedNavigationRead.current) return;
       appliedNavigationRead.current = read;
       bootstrapRef.current = next;
-      setBootstrap((current) =>
-        current === undefined
-          ? next
-          : {
-              ...current,
-              checkouts: next.checkouts,
-              threads: next.threads,
-              activity: next.activity,
-            },
-      );
+      setBootstrap((current) => {
+        if (current === undefined) return next;
+        if (
+          samePollingData(current.checkouts, next.checkouts) &&
+          samePollingData(current.threads, next.threads) &&
+          samePollingData(current.activity, next.activity)
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          checkouts: next.checkouts,
+          threads: next.threads,
+          activity: next.activity,
+        };
+      });
       setActiveView((current) => refreshActiveThreadView(current, next));
       reconcileDrafts(next.threads.map((thread) => String(thread.id)));
     },
@@ -1606,6 +1620,32 @@ export function useCodeController(options: CodeControllerOptions) {
     [execute],
   );
 
+  /**
+   * Move a thread onto the checkout its Project binds now, because the user
+   * asked from the fail-closed banner.
+   *
+   * Never inferred: a thread whose Project was rebound keeps the authority it
+   * was created with until someone deliberately moves it, which is the whole
+   * point of binding a checkout in the first place. The host decides whether
+   * the move is admissible and answers with a refusal reason this renderer
+   * shows rather than a failure it swallows.
+   */
+  const rebindThreadCheckout = useCallback(
+    async (threadId: CodeThreadId): Promise<CodeThreadCheckoutRebindOutcome | undefined> => {
+      const thread = bootstrapRef.current?.threads.find(
+        (candidate) => String(candidate.id) === String(threadId),
+      );
+      if (thread === undefined) return undefined;
+      const result = await execute({
+        kind: "rebind-code-thread-checkout",
+        threadId,
+        expectedVersion: thread.version,
+      });
+      return result?.kind === "thread-checkout-rebind" ? result.outcome : undefined;
+    },
+    [execute],
+  );
+
   const pinThread = useCallback(
     async (threadId: CodeThreadId, pinned: boolean): Promise<boolean> => {
       const thread = bootstrapRef.current?.threads.find(
@@ -2032,6 +2072,7 @@ export function useCodeController(options: CodeControllerOptions) {
     markDraftStagedDropped: composerDraft.markStagedDropped,
     purgeThreadDraft: composerDraft.purge,
     pinThread,
+    rebindThreadCheckout,
     renameThread,
     providerRequests,
     refreshFollowUp,
@@ -2140,6 +2181,14 @@ function applyResult(current: CodeBootstrap | undefined, result: CodeCommandResu
     case "worktree-source-previewed":
     case "worktree-remote-facts-retrieved":
       return current;
+    case "thread-checkout-rebind":
+      return result.outcome.status === "refused"
+        ? current
+        : {
+            ...current,
+            threads: replaceById(current.threads, result.outcome.thread),
+            checkouts: replaceById(current.checkouts, result.outcome.checkout),
+          };
     case "managed-thread-created":
       return {
         ...current,

@@ -233,7 +233,7 @@ describe("WorkOverview", () => {
       "Model One",
     );
     await user.click(within(composer).getByRole("button", { name: "Provider and model" }));
-    await user.click(within(composer).getByRole("option", { name: "Model One" }));
+    await user.click(await screen.findByRole("option", { name: "Model One" }));
     expect(onSelectProvider).toHaveBeenCalledWith({ providerInstanceId: instanceId, modelId });
   });
 

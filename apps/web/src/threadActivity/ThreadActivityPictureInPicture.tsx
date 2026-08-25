@@ -7,6 +7,7 @@ import { ExternalLink, Eye, EyeOff, Globe2, MonitorUp, Square } from "lucide-rea
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IconButton } from "../shell/IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
 type ActivityKind = "browser" | "computer-use";
 
@@ -329,25 +330,18 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
             </div>
           </header>
 
-          {availableKinds.length < 2 ? null : (
-            <div aria-label="Active tools" className="thread-activity-pip__sources" role="group">
-              <OctantButton
-                aria-pressed={activeKind === "browser"}
-                onClick={() => setSelectedKind("browser")}
-                type="button"
-                variant="ghost"
-              >
-                Browser
-              </OctantButton>
-              <OctantButton
-                aria-pressed={activeKind === "computer-use"}
-                onClick={() => setSelectedKind("computer-use")}
-                type="button"
-                variant="ghost"
-              >
-                Computer Use
-              </OctantButton>
-            </div>
+          {availableKinds.length < 2 || activeKind === undefined ? null : (
+            <OctantToggleGroup<ActivityKind>
+              aria-label="Active tools"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) setSelectedKind(selected);
+              }}
+              value={[activeKind]}
+            >
+              <OctantToggleGroupItem value="browser">Browser</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="computer-use">Computer Use</OctantToggleGroupItem>
+            </OctantToggleGroup>
           )}
 
           {activeKind === "browser" && currentBrowserSnapshot !== undefined ? (
