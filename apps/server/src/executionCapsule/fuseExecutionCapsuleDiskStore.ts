@@ -276,7 +276,9 @@ async function ensurePrivateDirectory(
     metadata.uid !== expectedUid ||
     (metadata.mode & 0o077) !== 0
   ) {
-    throw new Error("Execution capsule disk directory is not owner-only.");
+    throw new Error(
+      `Execution capsule disk directory is not owner-only: ${path} uid=${String(metadata.uid)} mode=${(metadata.mode & 0o777).toString(8)}.`,
+    );
   }
 }
 
