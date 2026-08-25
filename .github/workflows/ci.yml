@@ -63,3 +63,127 @@ jobs:
       # credentials, so it is not exercised here — no secret is read on a pull
       # request, and this job deliberately does not package a release.
       - run: bun run --cwd scripts test
+
+  linux-capsule:
+    name: Linux execution capsule (gVisor)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # This job never pushes. The checkout is rsynced to the octant
+          # account below (`Prepare the dedicated Station identity`), and a
+          # persisted job token in .git/config would become readable by that
+          # second local account.
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Install the protected runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ca-certificates curl dbus-user-session e2fsprogs fuse2fs fuse3 gnupg podman rsync uidmap
+          curl --fail --silent --show-error --location https://gvisor.dev/archive.key --output /tmp/gvisor.key
+          gpg --dearmor --output /tmp/gvisor-archive-keyring.gpg /tmp/gvisor.key
+          sudo install --mode 0644 /tmp/gvisor-archive-keyring.gpg /usr/share/keyrings/gvisor-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes runsc
+      - name: Prepare the dedicated Station identity and rootless store
+        run: |
+          bun_path=$(command -v bun)
+          sudo install --mode 0755 "$bun_path" /usr/local/bin/bun
+          echo user_allow_other | sudo tee --append /etc/fuse.conf >/dev/null
+          sudo useradd --create-home --home-dir /var/lib/octant --shell /bin/bash octant
+          test -c /dev/fuse
+          octant_uid=$(id --user octant)
+          sudo install --directory --mode 0700 --owner octant --group octant "/run/user/${octant_uid}"
+          sudo loginctl enable-linger octant
+          sudo systemctl start "user@${octant_uid}.service"
+          sudo --user octant mkdir --parents /var/lib/octant/.config/containers
+          printf '%s\n' \
+            '[storage]' \
+            'driver = "overlay"' \
+            'graphroot = "/var/lib/octant/podman/storage"' \
+            "runroot = \"/run/user/${octant_uid}/containers\"" \
+            | sudo --user octant tee /var/lib/octant/.config/containers/storage.conf >/dev/null
+          sudo install --directory --mode 0700 --owner octant --group octant /var/lib/octant/ci
+          sudo rsync --archive --chown=octant:octant --exclude=.git/ "$GITHUB_WORKSPACE/" /var/lib/octant/ci/
+      - name: Prove the rootless Podman and systrap prerequisites
+        run: |
+          octant_uid=$(id --user octant)
+          sudo --user octant env -i \
+            HOME=/var/lib/octant \
+            XDG_RUNTIME_DIR="/run/user/${octant_uid}" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/podman info --format json'
+          sudo --user octant env -i \
+            HOME=/var/lib/octant \
+            XDG_RUNTIME_DIR="/run/user/${octant_uid}" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/podman unshare /usr/bin/runsc --ignore-cgroups --platform=systrap --network=none "do" true'
+      - name: Prove a bounded runsc capsule can start
+        env:
+          OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
+        run: |
+          octant_uid=$(id --user octant)
+          sudo --user octant env -i \
+            HOME=/var/lib/octant \
+            XDG_RUNTIME_DIR="/run/user/${octant_uid}" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            OCTANT_GVISOR_CAPSULE_IMAGE="$OCTANT_GVISOR_CAPSULE_IMAGE" \
+            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/systemd-run --user --scope --quiet --collect --unit octant-runsc-preflight.scope --property CPUQuota=10% --property MemoryMax=268435456 --property TasksMax=64 /usr/bin/podman --cgroup-manager cgroupfs --runtime /usr/bin/runsc --runtime-flag platform=systrap --runtime-flag ignore-cgroups --runtime-flag network=none --runtime-flag overlay2=none --runtime-flag file-access=shared run --rm --log-driver none --network none --cgroups no-conmon --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true'
+      - name: Prove a fixed-size private VFS store
+        env:
+          OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
+        run: |
+          octant_uid=$(id --user octant)
+          sudo --user octant env -i \
+            HOME=/var/lib/octant \
+            XDG_RUNTIME_DIR="/run/user/${octant_uid}" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
+            PATH=/usr/local/bin:/usr/sbin:/usr/bin:/bin \
+            OCTANT_GVISOR_CAPSULE_IMAGE="$OCTANT_GVISOR_CAPSULE_IMAGE" \
+            /bin/sh -c '
+              set -eu
+              cd /var/lib/octant
+              root=/var/lib/octant/vfs-preflight
+              cleanup() {
+                /usr/bin/fusermount3 -u "$root/mount" >/dev/null 2>&1 || true
+                rm -rf "$root"
+              }
+              trap cleanup EXIT
+              mkdir -m 0700 "$root"
+              truncate --size 536870912 "$root/capsule.ext4"
+              chmod 0600 "$root/capsule.ext4"
+              /usr/sbin/mkfs.ext4 -q -t ext4 -F -E "root_owner=$(id -u):$(id -g)" "$root/capsule.ext4"
+              mkdir -m 0700 "$root/mount"
+              /usr/bin/fuse2fs -o rw,allow_other,fakeroot,nodev,nosuid "$root/capsule.ext4" "$root/mount"
+              chmod 0700 "$root/mount"
+              mkdir -m 0700 "$root/mount/graph" "$root/mount/run"
+              mkdir -m 0700 "$root/debug"
+              if ! /usr/bin/systemd-run --user --scope --quiet --collect --unit octant-vfs-preflight.scope --property CPUQuota=10% --property MemoryMax=268435456 --property TasksMax=64 /usr/bin/podman --root "$root/mount/graph" --runroot "$root/mount/run" --storage-driver vfs --cgroup-manager cgroupfs --runtime /usr/bin/runsc --runtime-flag debug --runtime-flag "debug-log=$root/debug/" --runtime-flag platform=systrap --runtime-flag ignore-cgroups --runtime-flag network=none --runtime-flag overlay2=none --runtime-flag file-access=shared run --rm --log-driver none --network none --cgroups no-conmon --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true; then
+                find "$root/debug" -maxdepth 1 -type f -exec /usr/bin/tail -n 160 {} \;
+                exit 1
+              fi
+            '
+      - name: Prove two protected capsules and a reviewed bundle export
+        env:
+          OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
+        run: |
+          octant_uid=$(id --user octant)
+          sudo --user octant env -i \
+            HOME=/var/lib/octant \
+            XDG_RUNTIME_DIR="/run/user/${octant_uid}" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            OCTANT_RUN_GVISOR_CAPSULE_EVIDENCE=1 \
+            OCTANT_GVISOR_CAPSULE_IMAGE="$OCTANT_GVISOR_CAPSULE_IMAGE" \
+            OCTANT_DESKTOP_BRIDGE_SECRET=octant-secret-canary \
+            GH_TOKEN=octant-secret-canary \
+            SSH_AUTH_SOCK=/tmp/octant-secret-canary.sock \
+            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/local/bin/bun run --cwd /var/lib/octant/ci/apps/server test:evidence -- src/executionCapsule/gvisorExecutionCapsuleSmoke.integration.test.ts'

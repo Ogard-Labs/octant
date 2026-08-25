@@ -430,6 +430,30 @@ mechanisms are:
   launch's exact roots are re-allowed after those denials. Path checks alone
   are never the boundary. Confined reads open a handle and verify identity
   against what containment resolved.
+- **Linux Station isolation tracer, not product-wired.** The server now has a
+  provider-neutral execution-capsule service plus a rootless Podman and gVisor
+  `systrap` driver. The tracer accepts only digest-pinned images, independent
+  clones created inside gVisor from owner-only source bundles, explicit
+  resource budgets, no network, and no host bind mounts. Each capsule's full
+  persistent Podman VFS graph store lives in an owner-only fixed-size ext4
+  image mounted through `fuse2fs`, so its image, dependencies, and clone share
+  one hard disk ceiling without privileged project-quota administration. Its
+  disposable Podman runroot is a short owned runtime directory preserved long
+  enough for recovery to inspect and stop a surviving runtime, then removed
+  through Podman's mapped user namespace on release. Intermediate Podman state
+  paths may be owner-controlled and traverse-only, while backing images remain
+  owner-only. A transient systemd
+  user scope owns the outer CPU, memory, and PID limits. The driver and
+  independent evidence derive their effective values from the live sandbox
+  process cgroup ancestry before accepting it. The tracer can
+  execute argv, verify and
+  export a Git bundle, stop without deleting the filesystem, recover only as
+  stopped after live-authority revalidation, briefly restart a stopped capsule
+  inside its verified budget to export it, and release the exact runtime after
+  an explicit export. A dedicated Linux CI job proves two real capsules
+  cannot see or signal one another. Ordinary Code threads do not use this
+  service yet, so Linux remains an incompatible destination until the AgentRun
+  and Station launch paths are wired and revalidated.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
 - **Remote clients.** Pairing issues a revocable device key; the private
