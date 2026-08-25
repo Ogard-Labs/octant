@@ -1123,9 +1123,6 @@ function decodeRecoveredRuntime(input: string):
       readonly securityOptions: ReadonlyArray<string>;
       readonly privileged: boolean;
       readonly usernsMode: string;
-      readonly memoryBytes: number;
-      readonly nanoCpus: number;
-      readonly pidLimit: number;
     }
   | undefined {
   let parsed: unknown;
@@ -1180,16 +1177,10 @@ function decodeRecoveredRuntime(input: string):
     !("SecurityOpt" in hostConfig) ||
     !("Privileged" in hostConfig) ||
     !("UsernsMode" in hostConfig) ||
-    !("Memory" in hostConfig) ||
-    !("NanoCpus" in hostConfig) ||
-    !("PidsLimit" in hostConfig) ||
     typeof hostConfig.NetworkMode !== "string" ||
     !isStringArray(hostConfig.SecurityOpt) ||
     typeof hostConfig.Privileged !== "boolean" ||
-    typeof hostConfig.UsernsMode !== "string" ||
-    typeof hostConfig.Memory !== "number" ||
-    typeof hostConfig.NanoCpus !== "number" ||
-    typeof hostConfig.PidsLimit !== "number"
+    typeof hostConfig.UsernsMode !== "string"
   ) {
     return undefined;
   }
@@ -1207,9 +1198,6 @@ function decodeRecoveredRuntime(input: string):
     securityOptions: hostConfig.SecurityOpt,
     privileged: hostConfig.Privileged,
     usernsMode: hostConfig.UsernsMode,
-    memoryBytes: hostConfig.Memory,
-    nanoCpus: hostConfig.NanoCpus,
-    pidLimit: hostConfig.PidsLimit,
   };
 }
 
