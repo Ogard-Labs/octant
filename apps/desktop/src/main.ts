@@ -936,15 +936,29 @@ function registerTrustedRendererRequestContext(
   installTrustedRendererRequestHeaders();
   const developmentOrigin =
     input.developmentUrl === undefined ? undefined : safeOrigin(input.developmentUrl);
-  trustedRendererRequests.set(window.webContents.id, {
+  const webContentsId = window.webContents.id;
+  trustedRendererWebContentsIds.set(window, webContentsId);
+  trustedRendererRequests.set(webContentsId, {
     serverOrigin: new URL(input.serverUrl).origin,
     rendererIdentity: input.rendererIdentity,
     ...(developmentOrigin === undefined ? {} : { developmentOrigin }),
   });
 }
 
+/**
+ * Electron marks the window wrapper destroyed before it emits `closed`, so
+ * reading `window.webContents.id` from inside a `closed` handler can throw and
+ * take the rest of that handler's cleanup with it — the window registry entry,
+ * the attention badge, and the authority close all sit after this call. The id
+ * is captured while the window is alive and read from here instead.
+ */
+const trustedRendererWebContentsIds = new WeakMap<BrowserWindow, number>();
+
 function unregisterTrustedRendererRequestContext(window: BrowserWindow): void {
-  trustedRendererRequests.remove(window.webContents.id);
+  const webContentsId = trustedRendererWebContentsIds.get(window);
+  if (webContentsId === undefined) return;
+  trustedRendererWebContentsIds.delete(window);
+  trustedRendererRequests.remove(webContentsId);
 }
 
 function isTrustedRendererShellRequest(

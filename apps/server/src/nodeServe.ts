@@ -228,7 +228,15 @@ function resolveRequestUrl(
 
   const target = incoming.url ?? "/";
   if (!target.startsWith("/") || target.startsWith("//")) throw new InvalidRequestHost();
-  return new URL(target, `${listenerUrl.protocol}//${hostHeader}/`).toString();
+  const resolved = new URL(target, `${listenerUrl.protocol}//${hostHeader}/`);
+  // The host header is validated above, but resolution can still carry the
+  // request off it: URL treats a backslash like a slash for these schemes, so
+  // `/\attacker.example/path` resolves exactly as `//attacker.example/path`
+  // does and reaches the handler wearing somebody else's origin. Rather than
+  // enumerate every separator a parser might accept, the resolved URL has to
+  // land on the host that was checked.
+  if (resolved.origin !== hostUrl.origin) throw new InvalidRequestHost();
+  return resolved.toString();
 }
 
 function hostMatchesListener(

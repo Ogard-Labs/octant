@@ -24,12 +24,19 @@ function rawRequest(
     readonly headers?: Readonly<Record<string, string>>;
     readonly chunks?: readonly string[];
     readonly method?: "GET" | "HEAD" | "POST";
+    // A request target the URL type cannot carry: `new URL()` would resolve it
+    // before it ever reached the wire, which is the whole thing under test.
+    readonly rawTarget?: string;
   },
 ): Promise<RawResponse> {
   return new Promise((resolve, reject) => {
     const outgoing = request(
       url,
-      { method: options.method ?? "POST", headers: options.headers },
+      {
+        method: options.method ?? "POST",
+        headers: options.headers,
+        ...(options.rawTarget === undefined ? {} : { path: options.rawTarget }),
+      },
       (response) => {
         const chunks: Buffer[] = [];
         response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
@@ -81,6 +88,32 @@ describe("nodeServe", () => {
     }
 
     await expect(fetch(server.url)).rejects.toThrow();
+  });
+
+  it("rejects a request target that resolves off the host it just checked", async () => {
+    const handler = vi.fn(() => new Response("ok"));
+    const server = await nodeServe({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: handler,
+    });
+    const port = new URL(server.url).port;
+
+    try {
+      // URL treats a backslash like a slash for http, so this target resolves
+      // exactly as `//attacker.example/path` does. The Host header check passes
+      // and the handler would still receive a request wearing another origin.
+      const smuggled = await rawRequest(new URL("/", server.url), {
+        method: "GET",
+        headers: { host: `localhost:${port}` },
+        rawTarget: "/\\attacker.example/path",
+      });
+      expect(smuggled.status).toBe(400);
+    } finally {
+      await server.stop(true);
+    }
+
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it("uses the caller Host header and rejects mismatched or malformed hosts before dispatch", async () => {
