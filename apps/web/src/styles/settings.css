@@ -319,7 +319,7 @@
   padding: 8px 10px;
   cursor: pointer;
   border-bottom: 1px solid var(--octant-border);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .settings-search-results__option:last-child {
@@ -341,12 +341,12 @@
 
 .settings-search-results__section {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .settings-search-results__scope {
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -355,7 +355,7 @@
 .settings-search-results__empty {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .settings-view__content {
@@ -395,7 +395,7 @@
 .settings-view__content-inner > section > h2 {
   margin: 0 0 6px;
   color: var(--octant-text-primary);
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
   font-weight: 600;
 }
 
@@ -622,14 +622,14 @@
   display: grid;
   gap: 3px;
   color: var(--oct-fg);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 500;
 }
 
 .settings-view__setting-copy p {
   margin: 0;
   color: var(--oct-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 400;
   line-height: 1.4;
 }
@@ -1070,7 +1070,7 @@
 .settings-view__empty {
   margin: 0;
   color: var(--oct-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 @supports ((not (backdrop-filter: blur(1px))) and (not (-webkit-backdrop-filter: blur(1px)))) {
@@ -1149,13 +1149,13 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-fg);
 }
 
 .host-settings__heading {
   margin: 14px 0 2px;
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
   font-weight: var(--oct-weight-strong);
   color: var(--oct-fg);
 }
@@ -1188,7 +1188,7 @@
   margin: 0;
   max-width: 560px;
   color: var(--oct-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   line-height: 1.4;
 }
 
@@ -1205,7 +1205,7 @@
 
 .host-settings__field label {
   color: var(--oct-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 @media (max-width: 680px) {
@@ -1226,13 +1226,13 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-fg);
 }
 
 .github-settings__heading {
   margin: 14px 0 2px;
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
   font-weight: var(--oct-weight-strong);
   color: var(--oct-fg);
 }
@@ -1265,7 +1265,7 @@
   margin: 0;
   max-width: 560px;
   color: var(--oct-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   line-height: 1.4;
 }
 
@@ -1355,7 +1355,7 @@
 
 .app-update__notice {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-muted);
 }
 
@@ -1369,14 +1369,14 @@
 
 .app-update__disclosure {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-muted);
 }
 
 .app-update__disclosure-list {
   margin: 0;
   padding-left: 18px;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-muted);
 }
 .settings-code-stack {

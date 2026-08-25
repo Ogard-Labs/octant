@@ -540,10 +540,13 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   min-width: 0;
   align-items: center;
   justify-content: flex-start;
-  gap: var(--oct-space-2);
-  min-height: 28px;
+  /* The marker, the provider mark, and the title are one identifying phrase,
+     not three controls, so they sit at glyph spacing. At list spacing the row
+     spent 46px before the first letter of the title. */
+  gap: var(--oct-space-1);
+  min-height: 26px;
   padding-block: 0;
-  padding-inline: var(--oct-space-2);
+  padding-inline: 6px;
   color: var(--oct-muted);
   background: transparent;
   border: 0;
@@ -659,7 +662,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .sidebar-navigation__thread-follow-up {
   padding: 1px 5px;
   color: var(--oct-meta);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   line-height: 1.4;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-pill);
@@ -932,7 +935,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   max-width: 58ch;
   margin: 9px auto 0;
   color: var(--octant-text-secondary);
-  font-size: 14px;
+  font-size: calc(14 * var(--oct-text-step));
   line-height: 1.65;
 }
 
@@ -1086,7 +1089,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .composer-folder-selector__empty {
   margin: 6px 8px;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .draft-thread__context-item,
@@ -1194,7 +1197,7 @@ form > .work-composer-adapter__attachments {
 .work-composer-adapter__error {
   margin: 0;
   color: var(--octant-destructive);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .draft-thread__hint,
@@ -1202,7 +1205,7 @@ form > .work-composer-adapter__attachments {
   margin: 0;
   padding: 0 2px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   opacity: 0.7;
 }
 
@@ -1276,7 +1279,7 @@ form > .work-composer-adapter__attachments {
   background: transparent;
   color: var(--octant-text-primary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   text-decoration: underline;
 }
 
@@ -1287,7 +1290,7 @@ form > .work-composer-adapter__attachments {
   justify-content: space-between;
   gap: 8px 12px;
   color: var(--octant-text-secondary);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .work-thread-workspace__header {
@@ -1306,7 +1309,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .work-thread-workspace__header h1 {
-  font-size: 14px;
+  font-size: calc(14 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -1314,12 +1317,12 @@ form > .work-composer-adapter__attachments {
 .work-thread-workspace__header > div > p:last-child {
   margin-top: 3px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .work-thread-workspace__eyebrow {
   color: var(--octant-text-muted);
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1354,7 +1357,7 @@ form > .work-composer-adapter__attachments {
 
 .work-thread-workspace__message strong {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .work-thread-workspace__message p {
@@ -1599,7 +1602,7 @@ form > .work-composer-adapter__attachments {
   border-radius: 7px;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   text-align: left;
 }
 
@@ -1627,7 +1630,7 @@ form > .work-composer-adapter__attachments {
 
 .code-branch-selector__badge {
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 500;
 }
 
@@ -1635,7 +1638,7 @@ form > .work-composer-adapter__attachments {
   margin: 0;
   padding: 8px;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .code-branch-selector__footer {
@@ -1753,13 +1756,13 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-worktree-source__title {
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 500;
   color: var(--octant-text-primary);
 }
 
 .code-worktree-source__copy {
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   color: var(--octant-text-muted);
 }
 
@@ -1769,7 +1772,7 @@ form > .work-composer-adapter__attachments {
   align-items: baseline;
   gap: 6px;
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .code-worktree-source__disclosure-label {
@@ -1779,13 +1782,13 @@ form > .work-composer-adapter__attachments {
 
 .code-worktree-source__disclosure-detail {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .code-worktree-source__field {
   display: grid;
   gap: 4px;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   color: var(--octant-text-secondary);
 }
 
@@ -1798,7 +1801,7 @@ form > .work-composer-adapter__attachments {
 
 .code-worktree-source__cached-detail {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .browser-workspace {
