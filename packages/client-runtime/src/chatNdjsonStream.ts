@@ -35,6 +35,7 @@ export async function* iterateChatEventNdjson(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let bufferByteLength = 0;
   let lastSequence = afterSequence;
   const releaseReader = async () => {
     try {
@@ -53,11 +54,14 @@ export async function* iterateChatEventNdjson(
       if (signal.aborted) return;
       const next = await readStreamChunk(reader, signal);
       if (next.done) break;
-      buffer += decoder.decode(next.value, { stream: true });
+      const decodedChunk = decoder.decode(next.value, { stream: true });
+      buffer += decodedChunk;
+      bufferByteLength += utf8ByteLength(decodedChunk);
       let newlineIndex = buffer.indexOf("\n");
       while (newlineIndex !== -1) {
         const line = buffer.slice(0, newlineIndex);
         buffer = buffer.slice(newlineIndex + 1);
+        bufferByteLength -= utf8ByteLength(line) + 1;
         if (line.length > 0) {
           const decoded = decodeReplayLine(
             line,
@@ -71,7 +75,7 @@ export async function* iterateChatEventNdjson(
         }
         newlineIndex = buffer.indexOf("\n");
       }
-      if (utf8ByteLength(buffer) > MAX_CHAT_NDJSON_LINE_BYTES) {
+      if (bufferByteLength > MAX_CHAT_NDJSON_LINE_BYTES) {
         throw malformedNdjson();
       }
     }
