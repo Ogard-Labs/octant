@@ -20,6 +20,7 @@ export class WindowAuthorityError extends Error {
 interface AuthorityRecord {
   readonly windowId: WindowId;
   readonly expiresAt: number;
+  readonly rendererIdentity?: string;
 }
 
 export interface WindowAuthorityStoreOptions {
@@ -67,6 +68,7 @@ export class WindowAuthorityStore {
   register(input: {
     readonly windowId: WindowId;
     readonly capability: string;
+    readonly rendererIdentity?: string;
     readonly now: number;
   }) {
     const now = this.#clampNow(input.now);
@@ -75,12 +77,14 @@ export class WindowAuthorityStore {
     if (!isCanonical256BitToken(input.capability)) {
       throw new WindowAuthorityError("invalid", "Window authority registration is invalid.");
     }
+    validateRendererIdentity(input.rendererIdentity);
     if (this.#byCapability.has(input.capability) || this.#capabilityByWindow.has(input.windowId)) {
       throw new WindowAuthorityError("conflict", "Window authority is already registered.");
     }
     this.#byCapability.set(input.capability, {
       windowId: input.windowId,
       expiresAt: now + WINDOW_AUTHORITY_TTL_MS,
+      ...(input.rendererIdentity === undefined ? {} : { rendererIdentity: input.rendererIdentity }),
     });
     this.#capabilityByWindow.set(input.windowId, input.capability);
   }
@@ -88,6 +92,7 @@ export class WindowAuthorityStore {
   registerOrRefresh(input: {
     readonly windowId: WindowId;
     readonly capability: string;
+    readonly rendererIdentity?: string;
     readonly now: number;
   }) {
     const now = this.#clampNow(input.now);
@@ -96,6 +101,7 @@ export class WindowAuthorityStore {
     if (!isCanonical256BitToken(input.capability)) {
       throw new WindowAuthorityError("invalid", "Window authority registration is invalid.");
     }
+    validateRendererIdentity(input.rendererIdentity);
     const existingByCapability = this.#byCapability.get(input.capability);
     const existingByWindow = this.#capabilityByWindow.get(input.windowId);
     if (existingByCapability !== undefined && existingByCapability.windowId !== input.windowId) {
@@ -104,9 +110,11 @@ export class WindowAuthorityStore {
     if (existingByWindow !== undefined && existingByWindow !== input.capability) {
       throw new WindowAuthorityError("conflict", "Window authority is already registered.");
     }
+    const rendererIdentity = input.rendererIdentity ?? existingByCapability?.rendererIdentity;
     this.#byCapability.set(input.capability, {
       windowId: input.windowId,
       expiresAt: now + WINDOW_AUTHORITY_TTL_MS,
+      ...(rendererIdentity === undefined ? {} : { rendererIdentity }),
     });
     this.#capabilityByWindow.set(input.windowId, input.capability);
   }
@@ -122,6 +130,18 @@ export class WindowAuthorityStore {
       throw new WindowAuthorityError("unauthorized", "Window authority is invalid.");
     }
     return record.windowId;
+  }
+
+  authenticateRenderer(capability: string, rendererIdentity: string, rawNow: number): WindowId {
+    if (!isCanonical256BitToken(rendererIdentity)) {
+      throw new WindowAuthorityError("unauthorized", "Renderer identity is invalid.");
+    }
+    const windowId = this.authenticate(capability, rawNow);
+    const record = this.#byCapability.get(capability);
+    if (record?.rendererIdentity !== rendererIdentity) {
+      throw new WindowAuthorityError("unauthorized", "Renderer identity is invalid.");
+    }
+    return windowId;
   }
 
   revoke(windowId: WindowId): void {
@@ -166,5 +186,11 @@ export class WindowAuthorityStore {
     this.#byCapability.delete(capability);
     this.#capabilityByWindow.delete(windowId);
     this.onRevoked?.(windowId);
+  }
+}
+
+function validateRendererIdentity(rendererIdentity: string | undefined): void {
+  if (rendererIdentity !== undefined && !isCanonical256BitToken(rendererIdentity)) {
+    throw new WindowAuthorityError("invalid", "Window renderer identity is invalid.");
   }
 }

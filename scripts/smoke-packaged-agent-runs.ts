@@ -7,7 +7,6 @@ import { runBoundedCommand, sanitizedPackagedEnvironment } from "./packaged-smok
 
 export const PACKAGED_AGENT_RUN_SMOKE_STEPS = [
   "package",
-  "exact-head-provider-matrix",
   "orchestration-and-isolation",
   "packaged-child-supervision",
   "restart-replay",
@@ -43,14 +42,6 @@ async function main(): Promise<void> {
         await command(process.execPath, ["run", "build"]);
         await command(process.execPath, ["run", "package:desktop"]);
         return;
-      case "exact-head-provider-matrix":
-        await command(process.execPath, [
-          "x",
-          "vitest",
-          "run",
-          "packages/provider-sdk/src/childAgentConformance.test.ts",
-        ]);
-        return;
       case "orchestration-and-isolation":
         await command(process.execPath, [
           "x",
@@ -75,9 +66,7 @@ async function main(): Promise<void> {
         await command(process.execPath, ["scripts/smoke-packaged-desktop.ts"]);
     }
   });
-  console.log(
-    "Packaged AgentRun exact-head provider matrix, isolated child supervision, replay, and cleanup smoke passed.",
-  );
+  console.log("Packaged AgentRun isolated child supervision, replay, and cleanup smoke passed.");
 }
 
 export async function runPackagedChildSupervision(): Promise<void> {

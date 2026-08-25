@@ -381,7 +381,7 @@ describe("code client", () => {
       acknowledgedThroughSequence: 7,
     } as const;
     const updated = {
-      kind: "code-follow-up-updated",
+      kind: "follow-up-updated",
       followUp: {
         threadId: ids.thread,
         state: "completed",

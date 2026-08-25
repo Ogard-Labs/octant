@@ -107,7 +107,8 @@ Projects without a github.com origin stay visible as unconnected.
 The list is a cached read of a temporary in-memory snapshot. Opening the
 workspace, switching Projects, and ordinary board queries do not call GitHub.
 Refresh all and per-Project refresh are explicit; repositories are read
-sequentially through the installed authenticated `gh` CLI. The preview bounds
+concurrently through the installed authenticated `gh` CLI, then reconciled in
+stable Project order. The preview bounds
 the refresh to 25 repositories and 100 pull requests. The workspace continues
 to show only active open and draft rows, while Code board cards may use the same
 explicit refresh to show exact linked PRs as Open, Draft, Merged, or Closed.

@@ -76,6 +76,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "translucent sidebar material vibrancy system opaque",
         },
         {
+          id: settingId("workspace-material"),
+          label: "Translucent workspace",
+          scope: "app",
+          keywords: "translucent workspace window material vibrancy glass system opaque",
+        },
+        {
           id: settingId("mode-switcher"),
           label: "Mode switcher",
           scope: "app",

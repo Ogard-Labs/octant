@@ -715,11 +715,6 @@ async function protocolStatusError(response: Response): Promise<RemoteProtocolSt
   return new RemoteProtocolStatusError(response.status, reasonCode);
 }
 
-function readSessionIdFromSetCookie(header: string | null): string | undefined {
-  if (header === null) return undefined;
-  const match = new RegExp(`${SESSION_COOKIE_NAME}=([^;]+)`).exec(header);
-  return match?.[1];
-}
 function toBase64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -734,5 +729,5 @@ function toHex(buffer: ArrayBuffer): string {
 }
 
 function cryptoSubtleDigest(data: Uint8Array): Promise<ArrayBuffer> {
-  return globalThis.crypto.subtle.digest("SHA-256", data.buffer as ArrayBuffer);
+  return globalThis.crypto.subtle.digest("SHA-256", data.slice().buffer);
 }

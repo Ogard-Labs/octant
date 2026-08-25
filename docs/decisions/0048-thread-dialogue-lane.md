@@ -1,4 +1,4 @@
-# 0047. Explicit Chat thread dialogue
+# 0048. Explicit Chat thread dialogue
 
 **Status:** Accepted
 

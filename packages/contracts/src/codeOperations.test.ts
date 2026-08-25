@@ -20,6 +20,7 @@ import {
   decodeCodeFollowUpCommand,
   decodeCodeThreadFollowUp,
   decodeCodeThreadFollowUpUpdated,
+  decodePersistedCodeThreadFollowUpUpdated,
   decodeCodeThreadFollowUpView,
   decodeCodeTerminalInspection,
   decodeCodeTerminalInspectionRequest,
@@ -1049,7 +1050,13 @@ describe("Code thread follow-up contracts", () => {
 
   it("decodes the follow-up updated event and per-thread view", () => {
     expect(
-      decodeCodeThreadFollowUpUpdated({ kind: "code-follow-up-updated", followUp: openFollowUp }),
+      decodeCodeThreadFollowUpUpdated({ kind: "follow-up-updated", followUp: openFollowUp }),
+    ).toEqual({ kind: "follow-up-updated", followUp: openFollowUp });
+    expect(
+      decodePersistedCodeThreadFollowUpUpdated({
+        kind: "code-follow-up-updated",
+        followUp: openFollowUp,
+      }),
     ).toEqual({ kind: "code-follow-up-updated", followUp: openFollowUp });
 
     const view = { threadId: ids.thread, followUpVersion: 2, followUp: openFollowUp } as const;

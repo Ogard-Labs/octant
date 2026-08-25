@@ -231,7 +231,7 @@
   border: 1px solid var(--octant-border);
   border-radius: 8px;
   background: var(--octant-surface-raised, transparent);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .child-run-status__bar {

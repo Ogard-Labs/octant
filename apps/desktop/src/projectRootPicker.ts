@@ -117,6 +117,7 @@ interface ProjectWindowAuthorityOptions {
   readonly desktopBridgeSecret: string;
   readonly fetch?: FetchPort;
   readonly randomBytes?: (size: number) => Uint8Array;
+  readonly rendererIdentity?: string;
   readonly serverUrl: string;
   readonly windowId: string;
 }
@@ -131,16 +132,19 @@ export async function createProjectWindowAuthority(
   options: ProjectWindowAuthorityOptions,
 ): Promise<{
   readonly capability: string;
+  readonly rendererIdentity: string;
   readonly revoke: () => Promise<void>;
 }> {
   const fetch = options.fetch ?? globalThis.fetch;
   const capability = generateProjectBridgeToken(options.randomBytes);
+  const rendererIdentity =
+    options.rendererIdentity ?? generateProjectBridgeToken(options.randomBytes);
   const url = authorityUrl(options.serverUrl);
   const headers = desktopHeaders(options.desktopBridgeSecret);
   const response = await safeFetch(fetch, url, {
     method: "POST",
     headers,
-    body: JSON.stringify({ windowId: options.windowId, capability }),
+    body: JSON.stringify({ windowId: options.windowId, capability, rendererIdentity }),
   });
   if (response.status === 503) {
     throw new ProjectWindowAuthorityUnavailableError();
@@ -150,6 +154,7 @@ export async function createProjectWindowAuthority(
   }
   return Object.freeze({
     capability,
+    rendererIdentity,
     revoke: async () => {
       const revokeResponse = await safeFetch(fetch, url, {
         method: "DELETE",
