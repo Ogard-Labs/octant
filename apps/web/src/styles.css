@@ -1804,10 +1804,16 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   left: 0;
 }
 
+/* A menu row reads down a single left edge: one icon column, then the labels
+   all starting at the same x. The button recipe centres its contents, and
+   `text-align: left` does not undo that for a flex box — every row was
+   centring its own icon-and-label pair, so no two labels lined up and the
+   width of the label decided where its icon sat. */
 .workspace-disclosure__action {
   display: flex;
   min-height: 29px;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   padding: 0 8px;
   color: var(--octant-text-secondary);
@@ -1815,6 +1821,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   cursor: pointer;
   font-size: 11px;
   text-align: left;
+}
+
+/* The icons differ in drawn width even at one nominal size, so the column is
+   declared rather than left to the glyph. */
+.workspace-disclosure__action > svg {
+  flex: 0 0 16px;
+  width: 16px;
 }
 
 .workspace-disclosure__action:hover,

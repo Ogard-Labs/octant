@@ -160,6 +160,14 @@ export interface OctantHostBridge {
   readonly clearProviderCredential: (providerInstanceId: string) => Promise<void>;
   readonly close: () => Promise<void> | void;
   readonly getHostCapabilities?: () => HostCapabilities | Promise<HostCapabilities>;
+  /**
+   * The chrome the host actually gave this window. Only the macOS hiddenInset
+   * presentation leaves the titlebar area to the renderer; a system-framed
+   * window already draws its own titlebar, so reserving the inset there wastes
+   * a strip of the window and lays a drag region over the real title bar.
+   * Absent on a host that does not report it, which is read as system frame.
+   */
+  readonly windowChrome?: "hidden-inset" | "system-frame";
   readonly initialProjectTarget?: ProjectWindowTarget;
   readonly maximizeOrRestore: () => Promise<void> | void;
   readonly minimize: () => Promise<void> | void;
