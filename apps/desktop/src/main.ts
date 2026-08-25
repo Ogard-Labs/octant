@@ -57,6 +57,11 @@ import {
 } from "./openInApplications";
 import { createNativePreviewHandoffExecutor, openPreviewHandoffFromServer } from "./previewHandoff";
 import {
+  createRendererNavigationPolicy,
+  installRendererNavigationGuards,
+  type RendererNavigationWebContentsPort,
+} from "./rendererNavigationPolicy";
+import {
   requestCodeOperationApprovalFromServer,
   type NativeCodeOperationApprovalRequest,
 } from "./codeOperationApproval";
@@ -1235,6 +1240,10 @@ async function createWindow(): Promise<void> {
         localPluginFolderPicker,
         presentationController: controller,
       });
+      installRendererNavigationGuards(
+        rendererNavigationWebContents(window),
+        rendererNavigationPolicyOptions(),
+      );
       const stopThermalPerformance = observeThermalPerformance({
         platform: process.platform,
         powerMonitor,
@@ -1420,6 +1429,10 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           localPluginFolderPicker,
           presentationController: controller,
         });
+        installRendererNavigationGuards(
+          rendererNavigationWebContents(window),
+          rendererNavigationPolicyOptions(),
+        );
         window.webContents.on("did-finish-load", () => {
           window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
           window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
@@ -2233,7 +2246,15 @@ function ownedWindowContext(
   event: IpcMainInvokeEvent,
 ): Readonly<DesktopWindowContext & { readonly window: BrowserWindow }> {
   const window = BrowserWindow.fromWebContents(event.sender);
-  return desktopWindows.resolve(window);
+  const context = desktopWindows.resolve(window);
+  if (
+    !createRendererNavigationPolicy(rendererNavigationPolicyOptions()).allows(
+      event.senderFrame?.url ?? "",
+    )
+  ) {
+    throw new Error("Octant rejected an IPC request from an untrusted renderer origin.");
+  }
+  return context;
 }
 
 function ownedTopLevelWindowContext(
@@ -2254,16 +2275,33 @@ function ownedTopLevelWindowContext(
 }
 
 function isPackagedRendererUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === "file:" &&
-      url.hostname === "" &&
-      fileURLToPath(url) === resolve(repositoryRoot(), "apps/web/dist/index.html")
-    );
-  } catch {
-    return false;
-  }
+  return createRendererNavigationPolicy({
+    packagedRendererPath: resolve(repositoryRoot(), "apps/web/dist/index.html"),
+  }).allows(value);
+}
+
+function rendererNavigationPolicyOptions() {
+  return {
+    developmentUrl: process.env.OCTANT_WEB_URL,
+    packagedRendererPath: resolve(repositoryRoot(), "apps/web/dist/index.html"),
+  } as const;
+}
+
+function rendererNavigationWebContents(window: BrowserWindow): RendererNavigationWebContentsPort {
+  return {
+    on: (event, listener) => {
+      if (event === "will-navigate") {
+        window.webContents.on("will-navigate", (nativeEvent) => {
+          listener(nativeEvent, { url: nativeEvent.url });
+        });
+      } else {
+        window.webContents.on("will-redirect", (nativeEvent) => {
+          listener(nativeEvent, { url: nativeEvent.url });
+        });
+      }
+    },
+    setWindowOpenHandler: (handler) => window.webContents.setWindowOpenHandler(handler),
+  };
 }
 
 function safeOrigin(value: string): string | undefined {

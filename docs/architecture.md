@@ -73,6 +73,11 @@ broker URLs and tokens, desktop bridge secret), and probes storage readiness
 before showing a window. It also runs two loopback-only brokers the server
 talks back to: the credential broker (Keychain access by opaque reference) and
 the browser runtime broker.
+Every app window confines top-level navigation, redirects, and opened windows to
+the exact packaged renderer asset or configured Vite development origin. Native
+IPC also requires that trusted renderer URL, and the packaged renderer ships a
+strict Content Security Policy; external pages are opened through explicit
+server- or host-authorized flows instead of replacing the app window.
 
 **Server (`apps/server`).** A Bun HTTP server bound to `127.0.0.1` on the port
 the desktop reserved. It registers route modules per feature (`chatRoutes`,
