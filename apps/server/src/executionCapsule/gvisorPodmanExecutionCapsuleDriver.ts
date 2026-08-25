@@ -871,7 +871,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         : inspected.exitCode !== 0
           ? [`inspect-command-exit-${String(inspected.exitCode)}`]
           : recovered === undefined
-            ? ["invalid-inspect-payload"]
+            ? [describeRecoveredRuntimePayload(inspected.stdout)]
             : [
                 ...(recovered.name.replace(/^\//, "") === runtimeId ? [] : ["runtime-name"]),
                 ...(recovered.image === String(input.request.recipe.image) ? [] : ["image"]),
@@ -1199,6 +1199,60 @@ function decodeRecoveredRuntime(input: string):
     privileged: hostConfig.Privileged,
     usernsMode: hostConfig.UsernsMode,
   };
+}
+
+function describeRecoveredRuntimePayload(input: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    return "invalid-inspect-payload:root=invalid-json";
+  }
+  const record = Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : undefined;
+  const state = readUnknownField(record, "State");
+  const config = readUnknownField(record, "Config");
+  const hostConfig = readUnknownField(record, "HostConfig");
+  return `invalid-inspect-payload:${[
+    `root=${unknownShape(parsed)}`,
+    `Name=${unknownFieldShape(record, "Name")}`,
+    `ImageName=${unknownFieldShape(record, "ImageName")}`,
+    `State=${unknownFieldShape(record, "State")}`,
+    `State.Running=${unknownFieldShape(state, "Running")}`,
+    `Config=${unknownFieldShape(record, "Config")}`,
+    `Config.Labels=${unknownFieldShape(config, "Labels")}`,
+    `Config.User=${unknownFieldShape(config, "User")}`,
+    `Config.CreateCommand=${unknownFieldShape(config, "CreateCommand")}`,
+    `HostConfig=${unknownFieldShape(record, "HostConfig")}`,
+    `HostConfig.NetworkMode=${unknownFieldShape(hostConfig, "NetworkMode")}`,
+    `HostConfig.SecurityOpt=${unknownFieldShape(hostConfig, "SecurityOpt")}`,
+    `HostConfig.Privileged=${unknownFieldShape(hostConfig, "Privileged")}`,
+    `HostConfig.UsernsMode=${unknownFieldShape(hostConfig, "UsernsMode")}`,
+    `OCIRuntime=${unknownFieldShape(record, "OCIRuntime")}`,
+    `EffectiveCaps=${unknownFieldShape(record, "EffectiveCaps")}`,
+    `Mounts=${unknownFieldShape(record, "Mounts")}`,
+  ].join(",")}`;
+}
+
+function readUnknownField(input: unknown, field: string): unknown {
+  return typeof input === "object" && input !== null && Reflect.has(input, field)
+    ? Reflect.get(input, field)
+    : undefined;
+}
+
+function unknownFieldShape(input: unknown, field: string): string {
+  return typeof input === "object" && input !== null && Reflect.has(input, field)
+    ? unknownShape(Reflect.get(input, field))
+    : "missing";
+}
+
+function unknownShape(input: unknown): string {
+  if (input === null) return "null";
+  if (Array.isArray(input)) {
+    return input.every((item) => typeof item === "string")
+      ? `string-array(${String(input.length)})`
+      : `array(${String(input.length)})`;
+  }
+  return typeof input;
 }
 
 function isStringArray(input: unknown): input is ReadonlyArray<string> {

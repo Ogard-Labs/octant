@@ -619,6 +619,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
   it("stops a capsule without removing it and recovers the exact stopped identity", async () => {
     const runtimeId = "octant-capsule-11111111111141118111111111111111";
     let recoveredOciRuntime = "/usr/bin/runsc";
+    let recoveredEffectiveCaps: ReadonlyArray<string> | null = [];
     const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
       if (command === "/usr/bin/podman" && args[0] === "info") {
         return {
@@ -635,7 +636,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
               Name: runtimeId,
               ImageName: String(capsuleRequest.recipe.image),
               OCIRuntime: recoveredOciRuntime,
-              EffectiveCaps: [],
+              EffectiveCaps: recoveredEffectiveCaps,
               Mounts: [],
               State: { Running: false },
               Config: {
@@ -761,6 +762,31 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     expect(recordDiagnostic).toHaveBeenCalledWith({
       operation: "recover-inspected-runtime",
       message: "runtime protection mismatch: oci-runtime",
+    });
+
+    recoveredOciRuntime = "/usr/bin/runsc";
+    recoveredEffectiveCaps = null;
+    const inspectShapeDiagnostic = vi.fn();
+    const malformedInspect = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      recordDiagnostic: inspectShapeDiagnostic,
+    });
+    await expect(malformedInspect.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    expect(inspectShapeDiagnostic).toHaveBeenCalledWith({
+      operation: "recover-inspected-runtime",
+      message: expect.stringContaining("EffectiveCaps=null"),
     });
 
     const diskRecoveryDiagnostic = vi.fn();
