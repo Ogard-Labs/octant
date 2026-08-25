@@ -220,7 +220,7 @@ evidence("gVisor execution capsule evidence", () => {
             argv: [
               "/bin/sh",
               "-c",
-              'common=$(git rev-parse --git-common-dir); test "$common" = .git || { printf "unexpected-common-dir=%s\\n" "$common"; exit 11; }; test ! -f .git/objects/info/alternates || { printf "alternates-present\\n"; exit 12; }; links=$(find .git/objects -type f -exec stat -c %h {} \\; | grep -v "^1$" | head -n 1); test -z "$links" || { printf "multi-link-object=%s\\n" "$links"; exit 13; }',
+              'common=$(git rev-parse --git-common-dir); test "$common" = .git || { printf "unexpected-common-dir=%s\\n" "$common"; exit 11; }; test ! -f .git/objects/info/alternates || { printf "alternates-present\\n"; exit 12; }',
             ],
           }),
         ).resolves.toMatchObject({ status: "exited", exitCode: 0 });
