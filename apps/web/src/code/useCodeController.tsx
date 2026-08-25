@@ -38,6 +38,7 @@ import {
   applyActivityEvent,
   type CodeTurnActivity,
 } from "./transcriptActivity";
+import { samePollingData } from "../polling/samePollingData";
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type CodeTurnStatus = "idle" | "sending" | "running" | "failed";
@@ -145,6 +146,12 @@ function refreshActiveThreadView(
     (candidate) => String(candidate.id) === String(current.thread.id),
   );
   if (checkout === undefined && refreshedThread === undefined) return current;
+  if (
+    (checkout === undefined || samePollingData(checkout, current.checkout)) &&
+    (refreshedThread === undefined || samePollingData(refreshedThread, current.thread))
+  ) {
+    return current;
+  }
   return {
     ...current,
     ...(checkout === undefined ? {} : { checkout }),
@@ -617,16 +624,22 @@ export function useCodeController(options: CodeControllerOptions) {
       if (read <= appliedNavigationRead.current) return;
       appliedNavigationRead.current = read;
       bootstrapRef.current = next;
-      setBootstrap((current) =>
-        current === undefined
-          ? next
-          : {
-              ...current,
-              checkouts: next.checkouts,
-              threads: next.threads,
-              activity: next.activity,
-            },
-      );
+      setBootstrap((current) => {
+        if (current === undefined) return next;
+        if (
+          samePollingData(current.checkouts, next.checkouts) &&
+          samePollingData(current.threads, next.threads) &&
+          samePollingData(current.activity, next.activity)
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          checkouts: next.checkouts,
+          threads: next.threads,
+          activity: next.activity,
+        };
+      });
       setActiveView((current) => refreshActiveThreadView(current, next));
       reconcileDrafts(next.threads.map((thread) => String(thread.id)));
     },
