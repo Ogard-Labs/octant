@@ -743,6 +743,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     });
 
     recoveredOciRuntime = "/usr/bin/runc";
+    const recordDiagnostic = vi.fn();
     const forgedRuntime = new GvisorPodmanExecutionCapsuleDriver({
       platform: "linux",
       username: "octant",
@@ -754,10 +755,15 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       capacity,
       runner: { run },
       sourceBundleStore: { verify: async () => undefined },
+      recordDiagnostic,
     });
     await expect(forgedRuntime.recover({ request: capsuleRequest, source })).resolves.toEqual({
       status: "refused",
       reason: "runtime-unavailable",
+    });
+    expect(recordDiagnostic).toHaveBeenCalledWith({
+      operation: "recover-inspected-runtime",
+      message: "runtime protection mismatch: oci-runtime",
     });
   });
 });

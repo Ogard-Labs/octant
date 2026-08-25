@@ -292,6 +292,10 @@ evidence("gVisor execution capsule evidence", () => {
         },
         podmanPath: process.env.OCTANT_PODMAN_PATH ?? "/usr/bin/podman",
         runscPath: process.env.OCTANT_RUNSC_PATH ?? "/usr/bin/runsc",
+        recordDiagnostic: (diagnostic) =>
+          console.error(
+            JSON.stringify({ kind: "execution-capsule-evidence-driver-failed", ...diagnostic }),
+          ),
       });
       const afterRestart = new ExecutionCapsuleService({
         driver: recoveredDriver,

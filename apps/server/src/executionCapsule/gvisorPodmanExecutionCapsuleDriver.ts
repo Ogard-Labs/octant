@@ -853,13 +853,24 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       .catch(() => undefined);
     const recovered =
       inspected?.exitCode === 0 ? decodeRecoveredRuntime(inspected.stdout) : undefined;
-    if (
-      recovered === undefined ||
-      recovered.name.replace(/^\//, "") !== runtimeId ||
-      recovered.image !== String(input.request.recipe.image) ||
-      recovered.capsuleId !== String(input.request.capsuleId) ||
-      !matchesProtectedRuntime(recovered, this.#runscPath, disk)
-    ) {
+    const mismatches =
+      recovered === undefined
+        ? ["invalid-inspect-payload"]
+        : [
+            ...(recovered.name.replace(/^\//, "") === runtimeId ? [] : ["runtime-name"]),
+            ...(recovered.image === String(input.request.recipe.image) ? [] : ["image"]),
+            ...(recovered.capsuleId === String(input.request.capsuleId) ? [] : ["capsule-label"]),
+            ...protectedRuntimeMismatches(recovered, this.#runscPath, disk),
+          ];
+    if (recovered === undefined || mismatches.length > 0) {
+      try {
+        this.#recordDiagnostic?.({
+          operation: "recover-inspected-runtime",
+          message: `runtime protection mismatch: ${mismatches.join(",")}`,
+        });
+      } catch {
+        // Diagnostics never change the recovery outcome.
+      }
       await this.#diskStore.close(disk).catch(() => undefined);
       return { status: "refused", reason: "runtime-unavailable" };
     }
@@ -1191,40 +1202,52 @@ function isStringArray(input: unknown): input is ReadonlyArray<string> {
   return Array.isArray(input) && input.every((item) => typeof item === "string");
 }
 
-function matchesProtectedRuntime(
+function protectedRuntimeMismatches(
   recovered: NonNullable<ReturnType<typeof decodeRecoveredRuntime>>,
   runscPath: string,
   disk: ExecutionCapsuleDiskLocation,
-): boolean {
+): ReadonlyArray<string> {
+  const mismatches: string[] = [];
   const command = recovered.createCommand;
   // Podman reports an auto-allocated user namespace as effective mode
   // `private`; the preserved create command separately proves `--userns auto`.
-  return (
-    basename(recovered.ociRuntime) === basename(runscPath) &&
-    recovered.effectiveCaps.length === 0 &&
-    recovered.mountCount === 0 &&
-    recovered.user === "0:0" &&
-    recovered.networkMode === "none" &&
-    recovered.securityOptions.some((option) => option.startsWith("no-new-privileges")) &&
-    !recovered.privileged &&
-    recovered.usernsMode === "private" &&
-    hasFlagValue(command, "--root", disk.graphRoot) &&
-    hasFlagValue(command, "--runroot", disk.runRoot) &&
-    hasFlagValue(command, "--storage-driver", "vfs") &&
-    hasFlagValue(command, "--cgroup-manager", "cgroupfs") &&
-    hasFlagValue(command, "--runtime", runscPath) &&
-    hasFlagValue(command, "--runtime-flag", "platform=systrap") &&
-    hasFlagValue(command, "--runtime-flag", "ignore-cgroups") &&
-    hasFlagValue(command, "--runtime-flag", "network=none") &&
-    hasFlagValue(command, "--runtime-flag", "overlay2=none") &&
-    hasFlagValue(command, "--runtime-flag", "file-access=shared") &&
-    hasFlagValue(command, "--log-driver", "none") &&
-    hasFlagValue(command, "--network", "none") &&
-    hasFlagValue(command, "--cgroups", "no-conmon") &&
-    hasFlagValue(command, "--userns", "auto") &&
-    hasFlagValue(command, "--cap-drop", "all") &&
-    hasFlagValue(command, "--security-opt", "no-new-privileges")
-  );
+  if (basename(recovered.ociRuntime) !== basename(runscPath)) mismatches.push("oci-runtime");
+  if (recovered.effectiveCaps.length !== 0) mismatches.push("effective-capabilities");
+  if (recovered.mountCount !== 0) mismatches.push("host-mounts");
+  if (recovered.user !== "0:0") mismatches.push("container-user");
+  if (recovered.networkMode !== "none") mismatches.push("network-mode");
+  if (!recovered.securityOptions.some((option) => option.startsWith("no-new-privileges"))) {
+    mismatches.push("no-new-privileges");
+  }
+  if (recovered.privileged) mismatches.push("privileged");
+  if (recovered.usernsMode !== "private") mismatches.push("private-userns");
+  if (!hasFlagValue(command, "--root", disk.graphRoot)) mismatches.push("graph-root");
+  if (!hasFlagValue(command, "--runroot", disk.runRoot)) mismatches.push("run-root");
+  if (!hasFlagValue(command, "--storage-driver", "vfs")) mismatches.push("storage-driver");
+  if (!hasFlagValue(command, "--cgroup-manager", "cgroupfs")) mismatches.push("cgroup-manager");
+  if (!hasFlagValue(command, "--runtime", runscPath)) mismatches.push("runtime-command");
+  if (!hasFlagValue(command, "--runtime-flag", "platform=systrap")) mismatches.push("systrap");
+  if (!hasFlagValue(command, "--runtime-flag", "ignore-cgroups")) {
+    mismatches.push("runsc-cgroups");
+  }
+  if (!hasFlagValue(command, "--runtime-flag", "network=none")) {
+    mismatches.push("runsc-network");
+  }
+  if (!hasFlagValue(command, "--runtime-flag", "overlay2=none")) {
+    mismatches.push("runsc-overlay");
+  }
+  if (!hasFlagValue(command, "--runtime-flag", "file-access=shared")) {
+    mismatches.push("runsc-file-access");
+  }
+  if (!hasFlagValue(command, "--log-driver", "none")) mismatches.push("log-driver");
+  if (!hasFlagValue(command, "--network", "none")) mismatches.push("network-command");
+  if (!hasFlagValue(command, "--cgroups", "no-conmon")) mismatches.push("podman-cgroups");
+  if (!hasFlagValue(command, "--userns", "auto")) mismatches.push("auto-userns");
+  if (!hasFlagValue(command, "--cap-drop", "all")) mismatches.push("cap-drop");
+  if (!hasFlagValue(command, "--security-opt", "no-new-privileges")) {
+    mismatches.push("security-command");
+  }
+  return mismatches;
 }
 
 function hasFlagValue(
