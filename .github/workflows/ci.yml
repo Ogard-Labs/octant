@@ -122,6 +122,18 @@ jobs:
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
             PATH=/usr/local/bin:/usr/bin:/bin \
             /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/podman unshare /usr/bin/runsc --ignore-cgroups --platform=systrap --network=none "do" true'
+      - name: Prove a bounded runsc capsule can start
+        env:
+          OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
+        run: |
+          octant_uid=$(id --user octant)
+          sudo --user octant env -i \
+            HOME=/var/lib/octant \
+            XDG_RUNTIME_DIR="/run/user/${octant_uid}" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            OCTANT_GVISOR_CAPSULE_IMAGE="$OCTANT_GVISOR_CAPSULE_IMAGE" \
+            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/podman --runtime /usr/bin/runsc --runtime-flag platform=systrap --runtime-flag systemd-cgroup run --rm --network none --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --cpus 0.1 --memory 268435456 --pids-limit 64 --storage-opt size=536870912 --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true'
       - name: Prove two protected capsules and a reviewed bundle export
         env:
           OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
