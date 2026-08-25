@@ -3,7 +3,8 @@ import type {
   LocalServerListenerId,
   LocalServerSnapshot,
 } from "@octant/contracts";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { LocalServersGroup } from "./LocalServersGroup";
 
@@ -56,7 +57,8 @@ function controller(overrides: Record<string, unknown> = {}) {
 }
 
 describe("LocalServersGroup", () => {
-  it("groups this checkout's servers above other leftovers", () => {
+  it("groups this checkout's servers above other leftovers", async () => {
+    const user = userEvent.setup();
     const leftover = listener({
       listenerId: "lsn_ffffffffffffffffffffffffffffffff" as LocalServerListenerId,
       attribution: "other",
@@ -76,12 +78,8 @@ describe("LocalServersGroup", () => {
     const leftoverMore = screen.getByRole("button", {
       name: "More actions for node on port 3000",
     });
-    fireEvent.click(leftoverMore);
-    expect(
-      within(screen.getByRole("region", { name: "Other leftovers" })).getByText(
-        "Started by VS Code",
-      ),
-    ).toBeVisible();
+    await user.click(leftoverMore);
+    expect(await screen.findByText("Started by VS Code")).toBeVisible();
   });
 
   it("groups duplicate loopback listeners for one process and port", () => {
@@ -124,14 +122,15 @@ describe("LocalServersGroup", () => {
     expect(screen.queryByRole("button", { name: /Open/ })).toBeNull();
   });
 
-  it("distinguishes loopback from LAN bind scope", () => {
+  it("distinguishes loopback from LAN bind scope", async () => {
+    const user = userEvent.setup();
     render(
       <LocalServersGroup
         controller={controller({ snapshot: snapshot([listener({ bindScope: "lan" })]) })}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /More actions for/ }));
-    expect(screen.getByText("Reachable on your network")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /More actions for/ }));
+    expect(await screen.findByText("Reachable on your network")).toBeVisible();
   });
 
   it("opens exactly one origin in a new Browser tab", async () => {
@@ -150,21 +149,23 @@ describe("LocalServersGroup", () => {
   });
 
   it("copies the normalized local URL from the accessible menu and confirms the copy in words", async () => {
+    const user = userEvent.setup();
     const onCopyUrl = vi.fn(async () => undefined);
     render(<LocalServersGroup controller={controller()} onCopyUrl={onCopyUrl} />);
-    fireEvent.click(screen.getByRole("button", { name: /More actions for/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Copy http/ }));
+    await user.click(screen.getByRole("button", { name: /More actions for/ }));
+    await user.click(await screen.findByRole("button", { name: /Copy http/ }));
     expect(onCopyUrl).toHaveBeenCalledWith("http://127.0.0.1:5173/");
     expect(await screen.findByText("Copied")).toBeVisible();
   });
 
   it("states a copy failure instead of failing silently", async () => {
+    const user = userEvent.setup();
     const onCopyUrl = vi.fn(async () => {
       throw new Error("clipboard unavailable");
     });
     render(<LocalServersGroup controller={controller()} onCopyUrl={onCopyUrl} />);
-    fireEvent.click(screen.getByRole("button", { name: /More actions for/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Copy http/ }));
+    await user.click(screen.getByRole("button", { name: /More actions for/ }));
+    await user.click(await screen.findByRole("button", { name: /Copy http/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Octant could not copy the URL.");
   });
 
@@ -189,22 +190,24 @@ describe("LocalServersGroup", () => {
     );
   });
 
-  it("keeps Open visible for a usable listener and hides Copy until the menu opens", () => {
+  it("keeps Open visible for a usable listener and hides Copy until the menu opens", async () => {
+    const user = userEvent.setup();
     render(
       <LocalServersGroup controller={controller()} onCopyUrl={vi.fn()} onOpenTarget={vi.fn()} />,
     );
     expect(screen.getByRole("button", { name: /Open http/ })).toBeVisible();
-    expect(screen.queryByRole("menuitem", { name: /Copy http/ })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /More actions for/ }));
-    expect(screen.getByRole("menuitem", { name: /Copy http/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Copy http/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /More actions for/ }));
+    expect(await screen.findByRole("button", { name: /Copy http/ })).toBeVisible();
   });
 
-  it("hides Open and Copy entirely when the host supplies no way to perform them", () => {
+  it("hides Open and Copy entirely when the host supplies no way to perform them", async () => {
+    const user = userEvent.setup();
     render(<LocalServersGroup controller={controller()} />);
     expect(screen.getByText("node · vite")).toBeVisible();
     expect(screen.queryByRole("button", { name: /Open http/ })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /More actions for/ }));
-    expect(screen.queryByRole("menuitem", { name: /Copy http/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /More actions for/ }));
+    expect(screen.queryByRole("button", { name: /Copy http/ })).toBeNull();
   });
 
   it("stops an Octant-owned server without a confirmation step", async () => {
@@ -212,10 +215,11 @@ describe("LocalServersGroup", () => {
     render(<LocalServersGroup controller={controller({ stop })} />);
     screen.getByRole("button", { name: "Stop" }).click();
     await waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("confirms a leftover stop by naming process, cwd, and port", async () => {
+    const user = userEvent.setup();
     const stop = vi.fn(async () => true);
     const row = listener({
       startSource: "vscode",
@@ -224,14 +228,14 @@ describe("LocalServersGroup", () => {
     });
     render(<LocalServersGroup controller={controller({ snapshot: snapshot([row]), stop })} />);
 
-    screen.getByRole("button", { name: "Stop" }).click();
-    const dialog = await screen.findByRole("alertdialog", { name: "Confirm stop" });
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    const dialog = await screen.findByRole("dialog", { name: "Confirm stop" });
     expect(dialog).toHaveTextContent("node");
     expect(dialog).toHaveTextContent("5173");
     expect(dialog).toHaveTextContent("/Users/example/code/other-app");
     expect(stop).not.toHaveBeenCalled();
 
-    within(dialog).getByRole("button", { name: "Stop this server" }).click();
+    await user.click(within(dialog).getByRole("button", { name: "Stop this server" }));
     await waitFor(() =>
       expect(stop).toHaveBeenCalledWith(row.listenerId, {
         acknowledgedProcessName: "node",

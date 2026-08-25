@@ -3,6 +3,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ShellState } from "../shell/ShellState";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -244,7 +245,9 @@ function AgentsCenterListBody(props: {
             </span>
             {summary.resultAcknowledgement.required &&
             !summary.resultAcknowledgement.acknowledged ? (
-              <span className="agents-center-row__ack badge">Needs acknowledgement</span>
+              <OctantBadge className="agents-center-row__ack" variant="secondary">
+                Needs acknowledgement
+              </OctantBadge>
             ) : null}
           </div>
           <div className="agents-center-row__actions">

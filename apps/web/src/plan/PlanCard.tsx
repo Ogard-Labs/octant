@@ -1,6 +1,7 @@
 import type { ThreadPlan, ThreadPlanStepId, ThreadPlanStepStatus } from "@octant/contracts";
 import { CheckCircle2, Circle, CircleDot, CircleSlash } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCard } from "../ui/base/OctantCard";
 
 export interface PlanCardProps {
   readonly plan: ThreadPlan;
@@ -41,7 +42,7 @@ export function PlanCard(props: PlanCardProps) {
   const done = plan.steps.filter((step) => step.status === "done").length;
   const counted = plan.steps.filter((step) => step.status !== "dropped").length;
   return (
-    <section aria-label={`Plan: ${plan.title}`} className="plan-card" data-status={plan.status}>
+    <OctantCard aria-label={`Plan: ${plan.title}`} className="gap-2 p-3" data-status={plan.status}>
       <header className="plan-card__header">
         <strong>{plan.title}</strong>
         <span className="plan-card__status">{STATUS_WORDS[plan.status]}</span>
@@ -96,7 +97,7 @@ export function PlanCard(props: PlanCardProps) {
           )}
         </footer>
       )}
-    </section>
+    </OctantCard>
   );
 }
 

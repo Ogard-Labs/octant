@@ -1,7 +1,14 @@
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
-import type { ModelPickerSelection, PickerGroup, PickerModel, PickerSection } from "@octant/domain";
+import type {
+  ModelBadge,
+  ModelPickerSelection,
+  PickerGroup,
+  PickerModel,
+  PickerSection,
+} from "@octant/domain";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { filterModelPickerGroups } from "@octant/domain";
+import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
@@ -204,12 +211,9 @@ function SectionView(props: {
                 {picker.badges.length > 0 ? (
                   <span className="model-picker__badges">
                     {picker.badges.map((badge) => (
-                      <span
-                        className={`model-picker__badge model-picker__badge--${badge.kind}`}
-                        key={badge.kind}
-                      >
+                      <OctantBadge key={badge.kind} variant={modelBadgeVariant(badge.kind)}>
                         {badge.label}
-                      </span>
+                      </OctantBadge>
                     ))}
                   </span>
                 ) : null}
@@ -251,6 +255,21 @@ function readinessLabel(readiness: PickerGroup["readiness"]): string {
       return "Incompatible";
     case "checking":
       return "Checking";
+  }
+}
+
+/** Tools keeps its success-green emphasis; every other capability badge reads
+ * as a neutral, bordered chip in the shadcn palette, matching the legacy
+ * `.model-picker__badge--*` rules that only recolored the "tools" kind. */
+function modelBadgeVariant(kind: ModelBadge["kind"]): OctantBadgeProps["variant"] {
+  switch (kind) {
+    case "tools":
+      return "success";
+    case "vision":
+    case "reasoning":
+    case "local":
+    case "context-limit":
+      return "outline";
   }
 }
 

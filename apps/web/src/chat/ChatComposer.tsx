@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -31,6 +30,7 @@ import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/prov
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -233,9 +233,7 @@ export function ChatComposer(props: ChatComposerProps) {
   // Settings belong to the running turn; the draft, attachments, and mentions
   // belong to the next message and stay editable so they can be queued.
   const settingsLocked = props.isSending;
-  const modelOptionsPanelId = useId();
   const [modelOptionsOpen, setModelOptionsOpen] = useState(false);
-  const modelOptionsRef = useRef<HTMLDivElement>(null);
   const declaredModelOptions = props.modelOptions ?? [];
   const hasModelOptionControls = declaredModelOptions.length > 0 || props.poolControl !== undefined;
   // "Set" mirrors the select's own fallback: a stored value the model no
@@ -244,37 +242,6 @@ export function ChatComposer(props: ChatComposerProps) {
   const anyModelOptionSet = declaredModelOptions.some(
     (option) => option.value !== undefined && option.values.includes(option.value),
   );
-
-  useEffect(() => {
-    if (!modelOptionsOpen) return;
-    function onPointerDown(event: PointerEvent) {
-      if (modelOptionsRef.current === null) return;
-      if (event.target instanceof Node && modelOptionsRef.current.contains(event.target)) return;
-      // The option selects portal their popups to the body, so a click on an
-      // option is "outside" this panel's subtree; closing on it would dismiss
-      // the panel mid-choice. A listbox is only ever an open select's popup.
-      if (
-        event.target instanceof Node &&
-        Array.from(document.querySelectorAll('[role="listbox"]')).some((popup) =>
-          popup.contains(event.target as Node),
-        )
-      ) {
-        return;
-      }
-      setModelOptionsOpen(false);
-    }
-    // `globalThis.` because this file imports React's KeyboardEvent type,
-    // and a document listener receives the DOM event.
-    function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setModelOptionsOpen(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [modelOptionsOpen]);
   const status = composeStatus({
     attachment,
     imageAttachment,
@@ -701,60 +668,55 @@ export function ChatComposer(props: ChatComposerProps) {
           </>
         )}
         {hasModelOptionControls ? (
-          <div className="chat-composer__model-options" ref={modelOptionsRef}>
-            <OctantButton
-              aria-controls={modelOptionsPanelId}
-              aria-expanded={modelOptionsOpen}
-              aria-haspopup="dialog"
-              aria-label="Model options"
-              data-customized={anyModelOptionSet || undefined}
-              disabled={settingsLocked}
-              onClick={() => setModelOptionsOpen((current) => !current)}
-              size="icon"
-              type="button"
-              variant="ghost"
+          <div className="chat-composer__model-options">
+            <OctantPopover
+              align="start"
+              className="chat-composer__model-options-panel"
+              onOpenChange={setModelOptionsOpen}
+              open={modelOptionsOpen}
+              side="top"
+              title="Model options"
+              trigger={
+                <>
+                  <SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />
+                  {anyModelOptionSet ? (
+                    <span aria-hidden="true" className="chat-composer__model-options-dot" />
+                  ) : null}
+                </>
+              }
+              {...(anyModelOptionSet ? { triggerDataAttributes: { "data-customized": true } } : {})}
+              triggerDisabled={settingsLocked}
+              triggerLabel="Model options"
+              triggerVariant="ghost-icon"
             >
-              <SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />
-              {anyModelOptionSet ? (
-                <span aria-hidden="true" className="chat-composer__model-options-dot" />
-              ) : null}
-            </OctantButton>
-            {modelOptionsOpen ? (
-              <div
-                aria-label="Model options"
-                className="popover-panel chat-composer__model-options-panel"
-                id={modelOptionsPanelId}
-                role="dialog"
-              >
-                {declaredModelOptions.map((option) => (
-                  <label key={option.id}>
-                    <span className="chat-composer__visually-hidden">{option.displayName}</span>
-                    <OctantSelectField
-                      disabled={settingsLocked}
-                      onValueChange={(value) =>
-                        props.onModelOptionChange?.(
-                          option.id,
-                          value === MODEL_OPTION_DEFAULT_ID ? undefined : value,
-                        )
-                      }
-                      options={[
-                        { id: MODEL_OPTION_DEFAULT_ID, label: `${option.displayName}: Default` },
-                        ...option.values.map((value) => ({
-                          id: value,
-                          label: `${option.displayName}: ${value}`,
-                        })),
-                      ]}
-                      value={
-                        option.value !== undefined && option.values.includes(option.value)
-                          ? option.value
-                          : MODEL_OPTION_DEFAULT_ID
-                      }
-                    />
-                  </label>
-                ))}
-                {props.poolControl}
-              </div>
-            ) : null}
+              {declaredModelOptions.map((option) => (
+                <label key={option.id}>
+                  <span className="chat-composer__visually-hidden">{option.displayName}</span>
+                  <OctantSelectField
+                    disabled={settingsLocked}
+                    onValueChange={(value) =>
+                      props.onModelOptionChange?.(
+                        option.id,
+                        value === MODEL_OPTION_DEFAULT_ID ? undefined : value,
+                      )
+                    }
+                    options={[
+                      { id: MODEL_OPTION_DEFAULT_ID, label: `${option.displayName}: Default` },
+                      ...option.values.map((value) => ({
+                        id: value,
+                        label: `${option.displayName}: ${value}`,
+                      })),
+                    ]}
+                    value={
+                      option.value !== undefined && option.values.includes(option.value)
+                        ? option.value
+                        : MODEL_OPTION_DEFAULT_ID
+                    }
+                  />
+                </label>
+              ))}
+              {props.poolControl}
+            </OctantPopover>
           </div>
         ) : null}
       </div>

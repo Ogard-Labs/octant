@@ -8,6 +8,7 @@ import type { HostId } from "@octant/contracts/host";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import { ChevronRight, FolderOpen, GitBranch, Home, Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
@@ -248,7 +249,7 @@ export function FolderPicker(props: FolderPickerProps) {
                 )}
                 <span className="folder-picker__item-name">{candidate.displayName}</span>
                 {props.mode === "code" && !candidate.isGitRepository ? (
-                  <span className="folder-picker__item-badge">Not a git repo</span>
+                  <OctantBadge variant="secondary">Not a git repo</OctantBadge>
                 ) : null}
               </OctantButton>
               {candidate.isSelectable ? (

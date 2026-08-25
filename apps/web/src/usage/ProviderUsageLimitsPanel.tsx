@@ -9,6 +9,7 @@ import type {
   ServiceLimitBucket,
 } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCard } from "../ui/base/OctantCard";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 
 export function ProviderUsageLimitsPanel(props: {
@@ -47,7 +48,7 @@ export function ProviderUsageLimitsPanel(props: {
   }
 
   return (
-    <section aria-label="Provider usage limits" className="provider-limits settings-card">
+    <OctantCard aria-label="Provider usage limits" className="settings-card grid gap-4 p-4">
       <header className="provider-limits__header">
         <div>
           <h2>Provider limits</h2>
@@ -96,7 +97,7 @@ export function ProviderUsageLimitsPanel(props: {
           );
         })}
       </div>
-    </section>
+    </OctantCard>
   );
 }
 
