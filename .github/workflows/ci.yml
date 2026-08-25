@@ -77,7 +77,7 @@ jobs:
       - name: Install the protected runtime
         run: |
           sudo apt-get update
-          sudo apt-get install --yes ca-certificates curl dbus-user-session gnupg podman uidmap xfsprogs
+          sudo apt-get install --yes ca-certificates curl dbus-user-session gnupg podman rsync uidmap xfsprogs
           curl --fail --silent --show-error --location https://gvisor.dev/archive.key --output /tmp/gvisor.key
           gpg --dearmor --output /tmp/gvisor-archive-keyring.gpg /tmp/gvisor.key
           sudo install --mode 0644 /tmp/gvisor-archive-keyring.gpg /usr/share/keyrings/gvisor-archive-keyring.gpg
@@ -106,8 +106,8 @@ jobs:
             'graphroot = "/var/lib/octant-capsule-ci/storage"' \
             "runroot = \"/run/user/${octant_uid}/containers\"" \
             | sudo --user octant tee /var/lib/octant/.config/containers/storage.conf >/dev/null
-          sudo chown --recursive octant:octant "$GITHUB_WORKSPACE"
-          sudo chown --recursive "$(id --user):$(id --group)" "$GITHUB_WORKSPACE/.git"
+          sudo install --directory --mode 0700 --owner octant --group octant /var/lib/octant/ci
+          sudo rsync --archive --chown=octant:octant --exclude=.git/ "$GITHUB_WORKSPACE/" /var/lib/octant/ci/
       - name: Prove two protected capsules and a reviewed bundle export
         env:
           OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
@@ -123,5 +123,5 @@ jobs:
             OCTANT_DESKTOP_BRIDGE_SECRET=octant-secret-canary \
             GH_TOKEN=octant-secret-canary \
             SSH_AUTH_SOCK=/tmp/octant-secret-canary.sock \
-            /usr/local/bin/bun run --cwd apps/server test:evidence -- \
+            /usr/local/bin/bun run --cwd /var/lib/octant/ci/apps/server test:evidence -- \
               src/executionCapsule/gvisorExecutionCapsuleSmoke.integration.test.ts
