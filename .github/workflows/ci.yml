@@ -89,7 +89,7 @@ jobs:
           sudo useradd --create-home --home-dir /var/lib/octant --shell /bin/bash octant
           sudo usermod --add-subuids 200000-265535 --add-subgids 200000-265535 octant
           sudo truncate --size 12G /var/tmp/octant-capsule-ci.xfs
-          sudo mkfs.xfs --force /var/tmp/octant-capsule-ci.xfs
+          sudo mkfs.xfs -f /var/tmp/octant-capsule-ci.xfs
           sudo mkdir --parents /var/lib/octant-capsule-ci
           sudo mount --options loop,pquota,nodev,nosuid /var/tmp/octant-capsule-ci.xfs /var/lib/octant-capsule-ci
           sudo chown octant:octant /var/lib/octant-capsule-ci
