@@ -3,7 +3,7 @@ import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, lstat, mkdir, mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -1116,7 +1116,10 @@ function decodeRecoveredRuntime(input: string):
       readonly running: boolean;
       readonly ociRuntime: string;
       readonly effectiveCaps: ReadonlyArray<string> | null;
-      readonly mountCount: number;
+      readonly mounts: ReadonlyArray<{
+        readonly type: string;
+        readonly source: string;
+      }>;
       readonly user: string;
       readonly createCommand: ReadonlyArray<string>;
       readonly networkMode: string;
@@ -1152,6 +1155,8 @@ function decodeRecoveredRuntime(input: string):
   ) {
     return undefined;
   }
+  const mounts = decodeRecoveredMounts(record.Mounts);
+  if (mounts === undefined) return undefined;
   const state = record.State;
   const config = record.Config;
   const hostConfig = record.HostConfig;
@@ -1191,7 +1196,7 @@ function decodeRecoveredRuntime(input: string):
     running: state.Running,
     ociRuntime: record.OCIRuntime,
     effectiveCaps: record.EffectiveCaps,
-    mountCount: record.Mounts.length,
+    mounts,
     user: config.User,
     createCommand: config.CreateCommand,
     networkMode: hostConfig.NetworkMode,
@@ -1199,6 +1204,29 @@ function decodeRecoveredRuntime(input: string):
     privileged: hostConfig.Privileged,
     usernsMode: hostConfig.UsernsMode,
   };
+}
+
+function decodeRecoveredMounts(input: ReadonlyArray<unknown>):
+  | ReadonlyArray<{
+      readonly type: string;
+      readonly source: string;
+    }>
+  | undefined {
+  const mounts: Array<{ readonly type: string; readonly source: string }> = [];
+  for (const mount of input) {
+    if (
+      typeof mount !== "object" ||
+      mount === null ||
+      !("Type" in mount) ||
+      !("Source" in mount) ||
+      typeof mount.Type !== "string" ||
+      typeof mount.Source !== "string"
+    ) {
+      return undefined;
+    }
+    mounts.push({ type: mount.Type, source: mount.Source });
+  }
+  return mounts;
 }
 
 function describeRecoveredRuntimePayload(input: string): string {
@@ -1275,7 +1303,13 @@ function protectedRuntimeMismatches(
   ) {
     mismatches.push("effective-capabilities");
   }
-  if (recovered.mountCount !== 0) mismatches.push("host-mounts");
+  if (
+    recovered.mounts.some(
+      (mount) => mount.type !== "volume" || !pathLivesUnder(disk.graphRoot, mount.source),
+    )
+  ) {
+    mismatches.push("host-mounts");
+  }
   if (recovered.user !== "0:0") mismatches.push("container-user");
   if (recovered.networkMode !== "none") mismatches.push("network-mode");
   if (!recovered.securityOptions.some((option) => option.startsWith("no-new-privileges"))) {
@@ -1319,6 +1353,17 @@ function hasFlagValue(
 ): boolean {
   return command.some(
     (argument, index) => argument === flag && command[index + 1] === expectedValue,
+  );
+}
+
+function pathLivesUnder(root: string, candidate: string): boolean {
+  if (!isAbsolute(root) || !isAbsolute(candidate)) return false;
+  const pathFromRoot = relative(root, candidate);
+  return (
+    pathFromRoot.length > 0 &&
+    pathFromRoot !== ".." &&
+    !pathFromRoot.startsWith(`..${sep}`) &&
+    !isAbsolute(pathFromRoot)
   );
 }
 

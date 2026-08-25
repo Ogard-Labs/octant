@@ -620,6 +620,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     const runtimeId = "octant-capsule-11111111111141118111111111111111";
     let recoveredOciRuntime = "/usr/bin/runsc";
     let recoveredEffectiveCaps: unknown = [];
+    let recoveredMounts: unknown = [];
     const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
       if (command === "/usr/bin/podman" && args[0] === "info") {
         return {
@@ -637,7 +638,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
               ImageName: String(capsuleRequest.recipe.image),
               OCIRuntime: recoveredOciRuntime,
               EffectiveCaps: recoveredEffectiveCaps,
-              Mounts: [],
+              Mounts: recoveredMounts,
               State: { Running: false },
               Config: {
                 User: "0:0",
@@ -783,6 +784,59 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       runtimeId,
     });
 
+    recoveredMounts = [
+      {
+        Type: "volume",
+        Source: `${diskLocation(runtimeId, capsuleRequest.budget.diskBytes).graphRoot}/volumes/image-data/_data`,
+      },
+    ];
+    const imageVolumeInspect = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    await expect(imageVolumeInspect.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "stopped",
+      runtimeId,
+    });
+
+    recoveredMounts = [
+      {
+        Type: "bind",
+        Source: `${diskLocation(runtimeId, capsuleRequest.budget.diskBytes).graphRoot}/forged-bind`,
+      },
+    ];
+    const bindMountDiagnostic = vi.fn();
+    const bindMountInspect = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      recordDiagnostic: bindMountDiagnostic,
+    });
+    await expect(bindMountInspect.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    expect(bindMountDiagnostic).toHaveBeenCalledWith({
+      operation: "recover-inspected-runtime",
+      message: "runtime protection mismatch: host-mounts",
+    });
+
+    recoveredMounts = [];
     recoveredEffectiveCaps = 7;
     const inspectShapeDiagnostic = vi.fn();
     const malformedInspect = new GvisorPodmanExecutionCapsuleDriver({
