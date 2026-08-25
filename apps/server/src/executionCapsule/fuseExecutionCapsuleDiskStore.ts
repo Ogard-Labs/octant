@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, rm } from "node:fs/promises";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 
 export interface ExecutionCapsuleDiskCommandRunner {
   readonly run: (
@@ -79,12 +79,13 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     readonly diskBytes: number;
   }): Promise<ExecutionCapsuleDiskLocation> {
     const location = this.#location(input);
-    await ensurePrivateDirectory(this.#stateRoot, this.#expectedUid, true);
+    await ensurePrivateDirectory(dirname(this.#stateRoot), this.#expectedUid, false);
+    await ensureProtectedPathDirectory(this.#stateRoot, this.#expectedUid, true);
     await ensurePrivateDirectory(this.#runRootBase, this.#expectedUid, true);
     const storesRoot = join(this.#stateRoot, "stores");
-    await ensurePrivateDirectory(storesRoot, this.#expectedUid, true);
+    await ensureProtectedPathDirectory(storesRoot, this.#expectedUid, true);
     await mkdir(location.directory, { mode: 0o700 });
-    await ensurePrivateDirectory(location.directory, this.#expectedUid, false);
+    await ensureProtectedPathDirectory(location.directory, this.#expectedUid, false);
 
     try {
       const image = await open(
@@ -109,7 +110,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
       ]);
       if (formatted.exitCode !== 0) throw new Error("Execution capsule disk format failed.");
       await mkdir(location.mountPath, { mode: 0o700 });
-      await ensurePrivateDirectory(location.mountPath, this.#expectedUid, false);
+      await ensureProtectedPathDirectory(location.mountPath, this.#expectedUid, false);
       await this.#mount(location);
       await this.#prepareMountedStore(location);
       await this.#prepareRunRoot(location, false);
@@ -126,12 +127,13 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     readonly diskBytes: number;
   }): Promise<ExecutionCapsuleDiskLocation> {
     const location = this.#location(input);
-    await ensurePrivateDirectory(this.#stateRoot, this.#expectedUid, false);
+    await ensurePrivateDirectory(dirname(this.#stateRoot), this.#expectedUid, false);
+    await ensureProtectedPathDirectory(this.#stateRoot, this.#expectedUid, false);
     await ensurePrivateDirectory(this.#runRootBase, this.#expectedUid, true);
-    await ensurePrivateDirectory(join(this.#stateRoot, "stores"), this.#expectedUid, false);
-    await ensurePrivateDirectory(location.directory, this.#expectedUid, false);
+    await ensureProtectedPathDirectory(join(this.#stateRoot, "stores"), this.#expectedUid, false);
+    await ensureProtectedPathDirectory(location.directory, this.#expectedUid, false);
     await this.#verifyImage(location);
-    await ensurePrivateDirectory(location.mountPath, this.#expectedUid, false);
+    await ensureProtectedPathDirectory(location.mountPath, this.#expectedUid, false);
     if (!(await this.#mountProbe.isMounted(location.mountPath))) await this.#mount(location);
     await this.#prepareMountedStore(location);
     await this.#prepareRunRoot(location, true);
@@ -278,6 +280,26 @@ async function ensurePrivateDirectory(
   ) {
     throw new Error(
       `Execution capsule disk directory is not owner-only: ${path} uid=${String(metadata.uid)} mode=${(metadata.mode & 0o777).toString(8)}.`,
+    );
+  }
+}
+
+async function ensureProtectedPathDirectory(
+  path: string,
+  expectedUid: number,
+  create: boolean,
+): Promise<void> {
+  if (create) await mkdir(path, { recursive: true, mode: 0o700 });
+  const metadata = await lstat(path);
+  const permissions = metadata.mode & 0o777;
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    metadata.uid !== expectedUid ||
+    (permissions !== 0o700 && permissions !== 0o711)
+  ) {
+    throw new Error(
+      `Execution capsule disk path is not protected: ${path} uid=${String(metadata.uid)} mode=${permissions.toString(8)}.`,
     );
   }
 }

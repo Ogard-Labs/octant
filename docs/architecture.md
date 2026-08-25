@@ -427,7 +427,8 @@ mechanisms are:
   image mounted through `fuse2fs`, so its image, dependencies, and clone share
   one hard disk ceiling without privileged project-quota administration. Its
   disposable Podman runroot is a short owner-only runtime directory recreated
-  during recovery. Podman owns the outer systemd cgroup; the evidence reads its
+  during recovery. Traverse-only Podman state paths are accepted only beneath a
+  verified owner-only Station anchor. Podman owns the outer systemd cgroup; the evidence reads its
   live CPU, memory, and PID limits from the sandbox process. The tracer can execute argv, verify and
   export a Git bundle, stop without deleting the filesystem, recover only as
   stopped after live-authority revalidation, and release the exact runtime

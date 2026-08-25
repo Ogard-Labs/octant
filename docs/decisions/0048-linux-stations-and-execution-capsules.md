@@ -50,7 +50,10 @@ host becomes a first-class destination.
   fixed-size ext4 image, mounted by the unprivileged Station identity through
   `fuse2fs` at an owner-only mount point with `nodev` and `nosuid`.
   `allow_other` lets the rootless gVisor gofer enter that private tree; the
-  mount-point permissions still exclude unrelated host accounts. Image layers,
+  mount-point permissions still exclude unrelated host accounts. Podman may
+  make intermediate state directories traverse-only (`0711`) for the remapped
+  gofer, but only below a verified owner-only (`0700`) Station anchor; those
+  paths never grant group or other read or write access. Image layers,
   dependencies, and the independent clone all count against the same hard disk
   ceiling. Podman's disposable runroot uses a short, owner-only directory below
   the Station identity's runtime directory and is recreated during recovery;
