@@ -26,6 +26,7 @@ export * from "./goalLoop";
 export * from "./shipTarget";
 export * from "./threadPlan";
 export * from "./extensions";
+export * from "./executionCapsule";
 export * from "./extensionEvents";
 export * from "./extensionRpc";
 export * from "./folderBrowse";

@@ -418,6 +418,17 @@ mechanisms are:
   launch's exact roots are re-allowed after those denials. Path checks alone
   are never the boundary. Confined reads open a handle and verify identity
   against what containment resolved.
+- **Linux Station isolation tracer, not product-wired.** The server now has a
+  provider-neutral execution-capsule service plus a rootless Podman and gVisor
+  `systrap` driver. The tracer accepts only digest-pinned images, independent
+  clones created inside gVisor from owner-only source bundles, explicit
+  resource budgets, no network, and no host bind mounts. It can execute argv,
+  verify and export a Git bundle, stop without deleting the filesystem,
+  recover only as stopped after live-authority revalidation, and release the
+  exact runtime after an explicit export. A dedicated Linux CI job proves two
+  real capsules cannot see or signal one another. Ordinary Code threads do not
+  use this service yet, so Linux remains an incompatible destination until the
+  AgentRun and Station launch paths are wired and revalidated.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
 - **Remote clients.** Pairing issues a revocable device key; the private

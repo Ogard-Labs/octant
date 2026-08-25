@@ -85,6 +85,14 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/security/escapeSuite/evaluateEscapeSuite.ts",
     "Evaluator for the security escape suite, driven by escapeSuite.server.test.ts as its runner. Remove once a product runner imports it or the suite is retired.",
   ],
+  [
+    "apps/server/src/executionCapsule/executionCapsuleService.ts",
+    "Execution-capsule isolation-tracer service driven by the real gVisor Linux evidence suite before ordinary Code threads are admitted to capsules. Remove once AgentRunSessionRuntime imports the service or the tracer is retired.",
+  ],
+  [
+    "apps/server/src/executionCapsule/gvisorPodmanExecutionCapsuleDriver.ts",
+    "Execution-capsule Linux adapter driven by the real gVisor isolation and bundle-export evidence suite before Station product wiring lands. Remove once the Station launch path constructs the driver or the tracer is retired.",
+  ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
     "packages/provider-sdk/src/childAgentConformance.ts",
