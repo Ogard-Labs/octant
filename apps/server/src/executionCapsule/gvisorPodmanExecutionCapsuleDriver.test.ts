@@ -97,9 +97,10 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       available: capacity,
     });
     expect(run).toHaveBeenNthCalledWith(1, "/usr/bin/podman", ["info", "--format", "json"]);
-    expect(run).toHaveBeenNthCalledWith(2, "/usr/bin/runsc", [
+    expect(run).toHaveBeenNthCalledWith(2, "/usr/bin/podman", [
+      "unshare",
+      "/usr/bin/runsc",
       "--platform=systrap",
-      "--rootless",
       "--network=none",
       "do",
       "true",

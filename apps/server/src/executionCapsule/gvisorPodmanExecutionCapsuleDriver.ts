@@ -164,7 +164,14 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     const rootlessPodman = facts?.rootless === true;
     const cgroupsV2 = facts?.cgroupVersion === "v2";
     const systrapProbe = await this.#runner
-      .run(this.#runscPath, ["--platform=systrap", "--rootless", "--network=none", "do", "true"])
+      .run(this.#podmanPath, [
+        "unshare",
+        this.#runscPath,
+        "--platform=systrap",
+        "--network=none",
+        "do",
+        "true",
+      ])
       .catch(() => undefined);
     const systrap = systrapProbe?.exitCode === 0;
 

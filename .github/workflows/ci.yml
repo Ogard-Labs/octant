@@ -118,8 +118,10 @@ jobs:
             /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/podman info --format json'
           sudo --user octant env -i \
             HOME=/var/lib/octant \
+            XDG_RUNTIME_DIR="/run/user/${octant_uid}" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
             PATH=/usr/local/bin:/usr/bin:/bin \
-            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/runsc --platform=systrap --rootless --network=none "do" true'
+            /bin/sh -c 'cd /var/lib/octant/ci && exec /usr/bin/podman unshare /usr/bin/runsc --platform=systrap --network=none "do" true'
       - name: Prove two protected capsules and a reviewed bundle export
         env:
           OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
