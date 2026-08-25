@@ -175,6 +175,7 @@ import {
   CodeThreadBoardService,
   type CodeBoardThread,
 } from "./code/codeThreadBoardService";
+import { createCodeBoardPlanProgressSource } from "./code/codeBoardPlanProgress";
 import { CodeFollowUpService } from "./code/codeFollowUpService";
 import {
   CodeProjectPullRequestService,
@@ -2030,10 +2031,14 @@ export function startOctantServer(
     // A plan belongs to a Code thread, so the window must currently be in Code
     // on the Project that owns it. Same shape as the Goal check above: read the
     // window's own workspace, never a scope the caller supplied.
+    // Hoisted so the Code board can read the same durable state (0048) instead
+    // of standing up a second plan store.
+    const planService = new PlanService({
+      store: new JournalPlanStore({ journal: persistence.journal, uuid: randomUUID }),
+    });
+    const codeBoardPlanProgressSource = createCodeBoardPlanProgressSource(planService);
     const planRoutes = createPlanRouteHandler({
-      service: new PlanService({
-        store: new JournalPlanStore({ journal: persistence.journal, uuid: randomUUID }),
-      }),
+      service: planService,
       windowAuthorityStore,
       authorizeThread: ({ threadId, windowId }) => {
         const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
@@ -3119,6 +3124,7 @@ export function startOctantServer(
           pullRequests: {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
           },
+          planProgress: codeBoardPlanProgressSource,
           clock: () => new Date().toISOString(),
         });
         return board.query(query);

@@ -253,6 +253,13 @@ describe("WorkThreadBoard", () => {
           citations: { count: 3, staleCount: 1 },
           goal: { kind: "present", status: "active", objective: "Finish the brief" },
           staleEvidence: true,
+          childRuns: {
+            active: 1,
+            completed: 0,
+            failed: 0,
+            unacknowledgedResults: 0,
+            latestSummary: "Drafting the export outline",
+          },
         } as WorkBoardCard,
       ]),
     );
@@ -267,6 +274,7 @@ describe("WorkThreadBoard", () => {
 
     await screen.findByRole("button", { name: "Full card" });
     const article = cardFor("Full card");
+    expect(article).toHaveTextContent("Drafting the export outline");
     const facts = article.querySelector(".board-card-facts");
     if (facts === null) throw new Error("Expected card facts");
     expect(facts).toHaveTextContent("Project A");

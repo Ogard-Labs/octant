@@ -21,6 +21,8 @@ function card(overrides: {
   readonly followUp?: boolean;
   readonly checks?: CodeBoardCard["checks"];
   readonly activeAgents?: number;
+  readonly activitySummary?: string;
+  readonly planProgress?: CodeBoardCard["planProgress"];
   readonly blockingReason?: string;
   readonly worktree?: CodeBoardCard["worktree"];
   readonly changedFiles?: CodeBoardCard["changedFiles"];
@@ -64,7 +66,11 @@ function card(overrides: {
       completed: 0,
       failed: 0,
       unacknowledgedResults: 0,
+      ...(overrides.activitySummary === undefined
+        ? {}
+        : { latestSummary: overrides.activitySummary }),
     },
+    planProgress: overrides.planProgress ?? { kind: "none" },
     recovery: overrides.recovering
       ? { kind: "recovering", reasons: ["project-projection-missing"] }
       : { kind: "ok" },
@@ -504,6 +510,8 @@ describe("CodeThreadBoard", () => {
           checks: { freshness: "fresh", state: "failing" },
           reviewState: { freshness: "stale", state: "changes-requested" },
           activeAgents: 1,
+          activitySummary: "Fixing the failing lint rule",
+          planProgress: { kind: "present", done: 3, total: 7 },
           worktree: {
             kind: "available",
             checkoutId: "00000000-0000-4000-8000-0000000050ff",
@@ -545,6 +553,7 @@ describe("CodeThreadBoard", () => {
 
     await screen.findByRole("button", { name: "Full card" });
     const article = cardFor("Full card");
+    expect(article).toHaveTextContent("Fixing the failing lint rule");
     const facts = article.querySelector(".board-card-facts");
     if (facts === null) throw new Error("Expected card facts");
     expect(facts).toHaveTextContent("Project A");
@@ -553,6 +562,7 @@ describe("CodeThreadBoard", () => {
     expect(facts).toHaveTextContent("3 files");
     expect(facts).toHaveTextContent("Studio · model-a");
     expect(facts).toHaveTextContent("1 active run");
+    expect(facts).toHaveTextContent("3 of 7 tasks");
     expect(facts).toHaveTextContent("#18 · stale");
     expect(facts).toHaveTextContent("Checks failing");
     expect(facts).toHaveTextContent("Review changes requested");

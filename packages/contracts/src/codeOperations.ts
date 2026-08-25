@@ -1397,6 +1397,23 @@ export const CodeThreadMetadataRecoveryReason = Schema.Literal(
 export type CodeThreadMetadataRecoveryReason = typeof CodeThreadMetadataRecoveryReason.Type;
 
 /**
+ * A board card's plan-completion count (0048): how many of the thread's live
+ * plan's steps are done, out of how many the plan carries. `none` covers a
+ * thread with no live plan (0027 keeps at most one). Only the count crosses
+ * onto the board; step titles, rationale, and per-step status stay in the
+ * thread's own Plan dock (0044).
+ */
+export const CodeBoardPlanProgress = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("present"),
+    done: Schema.Int.pipe(Schema.nonNegative()),
+    total: Schema.Int.pipe(Schema.nonNegative()),
+  }).annotations(strict),
+);
+export type CodeBoardPlanProgress = typeof CodeBoardPlanProgress.Type;
+
+/**
  * Recovery status for a thread's metadata card. `ok` means the projection is
  * whole. `recovering` keeps the thread visible with one or more actionable
  * reasons (e.g. a temporarily missing Project projection) instead of dropping
@@ -1653,6 +1670,7 @@ export const CodeBoardCard = Schema.Struct({
   checks: CodeThreadCheckState,
   reviewState: CodeThreadReviewState,
   childAgents: CodeThreadChildAgentSummary,
+  planProgress: CodeBoardPlanProgress,
   recovery: CodeThreadMetadataRecovery,
   githubFreshness: CodeMetadataFreshness,
   blockingReason: Schema.optional(boundedNonEmptyText(MAX_CODE_BOARD_CARD_BLOCKING_REASON_BYTES)),

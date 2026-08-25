@@ -711,6 +711,9 @@ function CodeBoardCardView(props: {
           {statusLabel}
         </span>
       </span>
+      {props.layout === "card" && card.childAgents.latestSummary !== undefined ? (
+        <span className="board-card-activity">{card.childAgents.latestSummary}</span>
+      ) : null}
       <span className={props.layout === "list" ? "issuerow-meta" : "board-card-facts"}>
         {cardFacts(card, props.projectName, props.providerLabel).map((fact) => (
           <span className={fact.className ?? "fact"} key={fact.key}>
@@ -861,6 +864,12 @@ function cardFacts(
       );
     }
     facts.push({ key: "child-runs", text: parts.join(" · ") });
+  }
+  if (card.planProgress.kind === "present") {
+    facts.push({
+      key: "plan-progress",
+      text: `${card.planProgress.done} of ${card.planProgress.total} tasks`,
+    });
   }
   if (!hasPullRequestSummaries && card.linkedPullRequest.kind === "linked") {
     facts.push({

@@ -34,7 +34,7 @@ distilled successor of the earlier long-form design specifications.
 | [0024](0024-curated-project-scaffolds.md)                     | Curated project scaffolds                                         | Accepted           |
 | [0025](0025-long-running-goal-loops.md)                       | Long-running goal loops                                           | Accepted           |
 | [0026](0026-shipping-to-a-user-owned-target.md)               | Shipping to a user-owned target                                   | Accepted           |
-| [0027](0027-plans-as-journaled-artifacts.md)                  | Plans as journaled artifacts                                      | Accepted           |
+| [0027](0027-plans-as-journaled-artifacts.md)                  | Plans as journaled artifacts                                      | Superseded by 0048 |
 | [0028](0028-the-artifact-library.md)                          | The artifact library                                              | Accepted           |
 | [0029](0029-artifact-storage-mirror.md)                       | The artifact storage mirror                                       | Accepted           |
 | [0030](0030-routines-that-run-themselves.md)                  | Routines that run themselves                                      | Accepted           |
@@ -55,6 +55,7 @@ distilled successor of the earlier long-form design specifications.
 | [0045](0045-environment-summarizes-the-active-thread.md)      | Environment summarizes the active thread                          | Accepted           |
 | [0046](0046-shadcn-recipes-own-product-controls.md)           | shadcn recipes own product controls                               | Accepted           |
 | [0047](0047-workspace-translucency-opt-in.md)                 | Workspace translucency opt-in                                     | Accepted           |
+| [0048](0048-board-cards-summarize-plan-progress.md)           | Board cards summarize plan progress                               | Accepted           |
 
 ## Adding an ADR
 
