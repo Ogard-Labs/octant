@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DockUtilityLauncher } from "./DockUtilityLauncher";
 
 describe("right sidebar tool launcher", () => {
-  it("reads down one icon column and one label edge", () => {
+  it("starts every menu row's icon and label at the same two edges", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
     const rule = styles.match(/\.workspace-disclosure__action \{([^}]*)\}/)?.[1];
 
