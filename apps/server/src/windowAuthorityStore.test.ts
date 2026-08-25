@@ -10,6 +10,7 @@ import {
 const firstWindow = decodeWindowId("00000000-0000-4000-8000-000000000501");
 const secondWindow = decodeWindowId("00000000-0000-4000-8000-000000000502");
 const capability = () => randomBytes(32).toString("base64url");
+const rendererIdentity = () => randomBytes(32).toString("base64url");
 
 describe("WindowAuthorityStore", () => {
   it("authenticates a canonical 256-bit capability until its exact expiry boundary", () => {
@@ -33,6 +34,26 @@ describe("WindowAuthorityStore", () => {
 
     expect(() => store.authenticate(token, 1)).toThrow(WindowAuthorityError);
     expect(revoked).toEqual([firstWindow]);
+  });
+
+  it("requires the renderer identity bound at window registration", () => {
+    const store = new WindowAuthorityStore();
+    const token = capability();
+    const identity = rendererIdentity();
+    store.register({
+      windowId: firstWindow,
+      capability: token,
+      rendererIdentity: identity,
+      now: 0,
+    });
+
+    expect(store.authenticateRenderer(token, identity, 0)).toBe(firstWindow);
+    expect(() => store.authenticateRenderer(token, rendererIdentity(), 0)).toThrow(
+      WindowAuthorityError,
+    );
+    expect(() => store.authenticateRenderer(token, "not-an-identity", 0)).toThrow(
+      WindowAuthorityError,
+    );
   });
 
   it("invalidates the previous authority generation at expiry", () => {

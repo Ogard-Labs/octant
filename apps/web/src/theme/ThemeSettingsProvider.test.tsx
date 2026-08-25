@@ -23,10 +23,14 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toBe(
       "color-mix(in srgb, #f0f0f0 78%, transparent)",
     );
+    expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe(
+      "color-mix(in srgb, #ffffff 78%, transparent)",
+    );
 
     result.unmount();
     expect(root.style.getPropertyValue("--octant-surface")).toBe("");
     expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toBe("");
+    expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe("");
   });
 
   it("publishes accessibility state on the data-octant-* attributes the stylesheets read", () => {

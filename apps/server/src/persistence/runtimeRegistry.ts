@@ -75,6 +75,7 @@ import {
   ValidationPlanCreated,
   ValidationReportCompleted,
   ZenSpaceSnapshotRecorded,
+  ZenSpaceSnapshotRecordedV1,
   ZenWidgetMutationRecorded,
   AgentProfileCreated,
   AgentProfileUpdated,
@@ -301,7 +302,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.research-recorded@1", 1, WorkResearchFrame)
     .register("work.workflow-recorded@1", 1, WorkflowFrame)
     .register("work.request-recorded@1", 1, WorkRequestFrame)
-    .register("zen.space-snapshot-recorded@1", 1, Schema.Unknown)
+    .register("zen.space-snapshot-recorded@1", 1, ZenSpaceSnapshotRecordedV1)
     .register("zen.space-snapshot-recorded@2", 1, ZenSpaceSnapshotRecorded)
     .register("zen.widget-mutation-recorded@1", 1, ZenWidgetMutationRecorded)
     .register("agent.profile-created@1", 1, AgentProfileCreated)

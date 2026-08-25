@@ -257,7 +257,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
               <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
             )}
             <span>{collapsedLabel} active</span>
-            <Eye aria-hidden="true" size={13} strokeWidth={1.7} />
+            <Eye aria-hidden="true" size={14} strokeWidth={1.7} />
           </OctantButton>
           {activeKind === "computer-use" && currentComputerSession !== undefined ? (
             <div className="thread-activity-pip__collapsed-controls">
