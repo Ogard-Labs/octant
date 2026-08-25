@@ -488,7 +488,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 
 .thread-task-viewer__evidence {
   color: var(--octant-text-secondary);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-variant-numeric: tabular-nums;
 }
 
@@ -585,7 +585,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .thread-task-viewer__rationale,
 .thread-task-viewer__state {
   color: var(--octant-text-secondary);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .thread-task-viewer__actions {
@@ -597,7 +597,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .thread-task-viewer__actions button {
   min-height: 24px;
   padding-inline: 6px;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 @media (max-width: 560px) {

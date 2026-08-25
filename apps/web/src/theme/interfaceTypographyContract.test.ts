@@ -34,6 +34,37 @@ describe("interface typography contract", () => {
     }
   });
 
+  it("moves the whole interface type scale with the size the user chose", () => {
+    // Appearance's interface font size used to reach only the handful of
+    // rules that named `--octant-ui-font-size` directly. The `--oct-text-*`
+    // ladder carried the great majority of the app's text, so the setting
+    // looked ignored. Every step must derive from the setting.
+    const octant = readFileSync(resolve(cssRoot, "octant.css"), "utf8");
+    for (const step of ["xs", "sm", "base", "lg", "xl", "2xl", "3xl", "4xl"]) {
+      const declaration = octant.match(new RegExp(`--oct-text-${step}:\\s*([^;]+)`))?.[1]?.trim();
+      expect(declaration, `--oct-text-${step} must be declared`).toBeDefined();
+      expect(
+        declaration,
+        `--oct-text-${step} must derive from the interface size, not freeze a literal`,
+      ).toMatch(/var\(--oct-text-step\)/);
+    }
+    expect(octant.match(/--oct-text-step:\s*([^;]+)/)?.[1]).toContain("--octant-ui-font-size");
+  });
+
+  it("puts Tailwind's type and family utilities on the same projection", () => {
+    // A component reaching for `text-sm` must land on the same size a
+    // stylesheet does; Tailwind's own ramp is frozen and cannot hear the
+    // setting.
+    const tailwind = readFileSync(resolve(cssRoot, "tailwind.css"), "utf8");
+    for (const step of ["xs", "sm", "base", "lg", "xl", "2xl"]) {
+      expect(tailwind, `Tailwind --text-${step} must point at the Octant token`).toMatch(
+        new RegExp(`--text-${step}:\\s*var\\(--oct-text-${step}\\)`),
+      );
+    }
+    expect(tailwind).toMatch(/--font-sans:\s*var\(--oct-font-body\)/);
+    expect(tailwind).toMatch(/--font-mono:\s*var\(--oct-font-mono\)/);
+  });
+
   it("keeps ordinary shell, settings, and dock rules on the interface projection", () => {
     for (const file of ordinarySurfaceFiles) {
       const source = readFileSync(resolve(cssRoot, file), "utf8");
@@ -56,6 +87,52 @@ describe("interface typography contract", () => {
             /--oct-font-(display|body|transcript)|--octant-ui-font-family/,
           );
         }
+      }
+    }
+  });
+
+  it("leaves no interface text frozen at a pixel size the setting cannot reach", () => {
+    // The `--oct-text-*` ladder moving with the setting only helps the rules
+    // that use it. Hundreds of rules named a pixel size directly, which is
+    // most of what a user actually reads, so Appearance's interface font size
+    // still looked ignored. Each remaining literal below is a size that must
+    // NOT follow that setting, and says why.
+    const allowed = new Map<string, ReadonlyArray<string>>([
+      // These declare the settings themselves.
+      [
+        "styles.css",
+        ["--octant-ui-font-size", "--octant-editor-font-size", "--octant-terminal-font-size"],
+      ],
+      [
+        "styles/octant.css",
+        [
+          // The transcript carries its own size setting.
+          "--oct-transcript-font-size",
+          // A decorative glyph, sized to the panel it sits in.
+          ".quote-mark",
+          // Monospace surfaces follow the code and terminal typography settings.
+          ".codeblock",
+          ".runpanel-body",
+          ".runline .k",
+          ".diff",
+          ".term",
+        ],
+      ],
+    ]);
+
+    for (const file of collectCssFiles(shippedCssRoot)) {
+      const relative = file.slice(shippedCssRoot.length + 1);
+      const source = readFileSync(file, "utf8");
+      for (const block of cssBlocks(source)) {
+        if (!/font-size:\s*\d+px/.test(block.declarations)) continue;
+        const selector = block.selector.trim();
+        const reasons = allowed.get(relative) ?? [];
+        expect(
+          reasons.some(
+            (reason) => selector.startsWith(reason) || block.declarations.includes(reason),
+          ),
+          `${relative} ${selector} freezes a font size the interface setting cannot reach`,
+        ).toBe(true);
       }
     }
   });

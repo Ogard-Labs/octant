@@ -221,7 +221,7 @@
 .usage-dashboard__table th {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 500;
   letter-spacing: var(--oct-tracking-wordmark);
   text-transform: uppercase;
@@ -232,7 +232,7 @@
 }
 
 .usage-dashboard__table--narrow {
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .usage-dashboard__table--narrow th,
