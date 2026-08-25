@@ -220,9 +220,27 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
   async #prepareMountedStore(location: ExecutionCapsuleDiskLocation): Promise<void> {
     await chmod(location.mountPath, 0o700);
     await ensurePrivateDirectory(location.mountPath, this.#expectedUid, false);
-    await ensurePrivateDirectory(location.graphRoot, this.#expectedUid, true);
+    await ensurePrivateMountedDirectory(location.graphRoot, this.#expectedUid, true);
     await rm(location.runRoot, { force: true, recursive: true });
-    await ensurePrivateDirectory(location.runRoot, this.#expectedUid, true);
+    await ensurePrivateMountedDirectory(location.runRoot, this.#expectedUid, true);
+  }
+}
+
+async function ensurePrivateMountedDirectory(
+  path: string,
+  expectedUid: number,
+  create: boolean,
+): Promise<void> {
+  if (create) await mkdir(path, { recursive: true, mode: 0o700 });
+  await chmod(path, 0o700);
+  const metadata = await lstat(path);
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    (metadata.uid !== expectedUid && metadata.uid !== 0) ||
+    (metadata.mode & 0o077) !== 0
+  ) {
+    throw new Error("Execution capsule mounted directory is not private.");
   }
 }
 
