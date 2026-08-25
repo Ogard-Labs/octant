@@ -10,7 +10,10 @@ import {
 } from "@octant/contracts/execution-capsule";
 import { afterEach, describe, expect, it } from "vitest";
 import { ExecutionCapsuleService } from "./executionCapsuleService";
-import { GvisorPodmanExecutionCapsuleDriver } from "./gvisorPodmanExecutionCapsuleDriver";
+import {
+  GvisorPodmanExecutionCapsuleDriver,
+  type ExecutionCapsuleCommandRunner,
+} from "./gvisorPodmanExecutionCapsuleDriver";
 
 const execFileAsync = promisify(execFile);
 const runEvidence = process.env.OCTANT_RUN_GVISOR_CAPSULE_EVIDENCE === "1";
@@ -88,6 +91,7 @@ evidence("gVisor execution capsule evidence", () => {
       },
       podmanPath: process.env.OCTANT_PODMAN_PATH ?? "/usr/bin/podman",
       runscPath: process.env.OCTANT_RUNSC_PATH ?? "/usr/bin/runsc",
+      runner: evidenceCommandRunner(),
     });
     const exportIds = [
       "77777777-7777-4777-8777-777777777777",
@@ -320,6 +324,84 @@ evidence("gVisor execution capsule evidence", () => {
     }
   });
 });
+
+function evidenceCommandRunner(): ExecutionCapsuleCommandRunner {
+  return {
+    run: async (command, args) => {
+      const longRunning =
+        (command.endsWith("/podman") &&
+          args.some(
+            (argument) => argument === "create" || argument === "cp" || argument === "bundle",
+          )) ||
+        command.endsWith("/mkfs.ext4") ||
+        command.endsWith("/fuse2fs");
+      try {
+        const result = await execFileAsync(command, [...args], {
+          shell: false,
+          timeout: longRunning ? 5 * 60_000 : 30_000,
+          maxBuffer: 4 * 1_024 * 1_024,
+          encoding: "utf8",
+          env: {
+            PATH: "/usr/bin:/bin",
+            LC_ALL: "C",
+            ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
+            ...(process.env.XDG_RUNTIME_DIR === undefined
+              ? {}
+              : { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR }),
+            ...(process.env.DBUS_SESSION_BUS_ADDRESS === undefined
+              ? {}
+              : { DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS }),
+          },
+        });
+        return { exitCode: 0, stdout: result.stdout, stderr: result.stderr };
+      } catch (error) {
+        const failure = {
+          exitCode: commandExitCode(error),
+          stdout: commandOutput(error, "stdout"),
+          stderr: commandOutput(error, "stderr"),
+        };
+        console.error(
+          JSON.stringify({
+            kind: "execution-capsule-evidence-command-failed",
+            operation: commandOperation(command, args),
+            ...failure,
+          }),
+        );
+        return failure;
+      }
+    },
+  };
+}
+
+function commandOperation(command: string, args: ReadonlyArray<string>): string {
+  if (!command.endsWith("/podman")) return command.split("/").at(-1) ?? "unknown";
+  return (
+    args.find((argument) =>
+      ["info", "unshare", "create", "cp", "start", "exec", "inspect", "stop", "rm"].includes(
+        argument,
+      ),
+    ) ?? "podman"
+  );
+}
+
+function commandExitCode(error: unknown): number {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = error.code;
+    if (typeof code === "number" && Number.isInteger(code)) return code;
+  }
+  return 1;
+}
+
+function commandOutput(error: unknown, key: "stdout" | "stderr"): string {
+  if (typeof error !== "object" || error === null) return "";
+  if (key === "stdout" && "stdout" in error && typeof error.stdout === "string") {
+    return error.stdout;
+  }
+  if (key === "stderr" && "stderr" in error && typeof error.stderr === "string") {
+    return error.stderr;
+  }
+  return "";
+}
 
 async function git(repositoryRoot: string, args: ReadonlyArray<string>): Promise<string> {
   const result = await execFileAsync("/usr/bin/git", args, {
