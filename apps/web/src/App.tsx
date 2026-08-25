@@ -1339,8 +1339,19 @@ function LaunchedShell(
     }
     return undefined;
   }, [activeChatThreadId, activeCodeThreadId, activeMode, activeWorkThreadId]);
+  // The context snapshot measures a conversation that keeps growing, so it has
+  // to be asked again when the subject's own turns move on. Work threads run
+  // their controller inside their workspace rather than here, so their meter
+  // still only refreshes on thread change.
+  const contextRevision =
+    activeMode === "chat"
+      ? chatController.activeView?.lastSequence
+      : activeMode === "code"
+        ? activeCodeThreadView?.lastSequence
+        : undefined;
   const contextController = useContextController({
     client: contextClient,
+    ...(contextRevision === undefined ? {} : { revision: Number(contextRevision) }),
     subject: contextSubject,
   });
   const projectController = useProjectController({

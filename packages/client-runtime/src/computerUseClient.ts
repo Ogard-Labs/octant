@@ -13,6 +13,7 @@ import {
   type ComputerUseStopRequest,
 } from "@octant/contracts/computer-use";
 import { sameToolActionAuthority } from "@octant/contracts/tool-actions";
+import { bindFetchPort } from "./bindFetchPort";
 
 export interface ComputerUseClientOptions {
   readonly baseUrl: string;
@@ -48,13 +49,14 @@ export class ComputerUseClientFailure extends Error {
 }
 
 export function createComputerUseClient(options: ComputerUseClientOptions): ComputerUseClient {
+  const resolved = { ...options, fetch: bindFetchPort(options.fetch) };
   const headers = {
     "content-type": "application/json",
     "x-octant-window-capability": options.windowCapability,
   };
   return {
     list: async (signal) => {
-      const payload = await postJson(options, "/api/computer-use/sessions", {}, headers, signal);
+      const payload = await postJson(resolved, "/api/computer-use/sessions", {}, headers, signal);
       try {
         return decodeComputerUseSessionList(payload);
       } catch {
@@ -70,7 +72,7 @@ export function createComputerUseClient(options: ComputerUseClientOptions): Comp
         decodeComputerUseSessionScope,
         "Computer-use inspection request is invalid.",
       );
-      return await post(options, "/api/computer-use/inspect", request, request, headers, signal);
+      return await post(resolved, "/api/computer-use/inspect", request, request, headers, signal);
     },
     decide: async (input, signal) => {
       const request = decodeInput(
@@ -78,7 +80,7 @@ export function createComputerUseClient(options: ComputerUseClientOptions): Comp
         decodeComputerUseApprovalDecisionRequest,
         "Computer-use approval decision is invalid.",
       );
-      return await post(options, "/api/computer-use/approvals", request, request, headers, signal);
+      return await post(resolved, "/api/computer-use/approvals", request, request, headers, signal);
     },
     stop: async (input, signal) => {
       const request = decodeInput(
@@ -86,7 +88,7 @@ export function createComputerUseClient(options: ComputerUseClientOptions): Comp
         decodeComputerUseStopRequest,
         "Computer-use stop request is invalid.",
       );
-      return await post(options, "/api/computer-use/stop", request, request, headers, signal);
+      return await post(resolved, "/api/computer-use/stop", request, request, headers, signal);
     },
   };
 }
