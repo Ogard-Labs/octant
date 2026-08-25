@@ -12,28 +12,16 @@
 
 /*
  * In the composer the profile control is one chip in the control row beside
- * model and access, so it takes only the width of its own trigger and hangs its
- * panel above itself. It used to be a 760px block floating over the draft,
- * which read as an unexplained dropdown with no relationship to anything.
+ * model and access, so it takes only the width of its own trigger. It used to
+ * be a 760px block floating over the draft, which read as an unexplained
+ * dropdown with no relationship to anything.
  */
 .execution-profile-workflow--composer {
-  position: relative;
   display: inline-flex;
 }
 
 .execution-profile-workflow__trigger {
   max-width: 100%;
-}
-
-/* The dialogs keep the popover family's chrome so the panels that share the
-   composer's control row read as one family; the anchored composer body
-   itself wears the system's `.popover-panel` instead. */
-.execution-profile-workflow__form,
-.execution-profile-workflow__confirm {
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--oct-elev-raised);
 }
 
 .execution-profile-workflow__body {
@@ -42,15 +30,12 @@
 }
 
 /*
- * Opens upward because the trigger sits in the bottom composer row, and stays
- * clamped near the trigger's width: the previous 460px×460px panel hung far
- * up-and-left of the tiny chip and read as a detached broken dropdown. Chrome
- * and the short-window height clamp are the system's `.popover-panel`; only
+ * Clamped near the trigger's width: the previous 460px×460px panel hung far
+ * up-and-left of the tiny chip and read as a detached broken dropdown.
+ * OctantPopover opens the panel upward and anchors it to the trigger; only
  * the option list scrolls in the ordinary case.
  */
 .execution-profile-workflow--composer .execution-profile-workflow__body {
-  inset-block-end: calc(100% + var(--oct-space-2));
-  inset-inline-end: 0;
   width: min(400px, calc(100vw - 2 * var(--oct-space-4)));
 }
 
@@ -258,20 +243,21 @@
   justify-self: start;
 }
 
+/*
+ * Said as the shared dialog's own variable, not as a competing width: these
+ * panels also carry `.octant-dialog__popup`, whose rule is imported later at
+ * the same specificity, so a flat width here would simply lose and the
+ * dialog would open at the shared 420px default. Position, scrim, surface,
+ * border, radius, and shadow come from the shared dialog chrome.
+ */
 .execution-profile-workflow__form,
 .execution-profile-workflow__confirm {
-  position: fixed;
-  z-index: var(--oct-z-modal);
-  inset: 50% auto auto 50%;
-  width: min(520px, calc(100vw - 2 * var(--oct-space-4)));
-  max-height: calc(100vh - 2 * var(--oct-space-6));
-  overflow: auto;
-  transform: translate(-50%, -50%);
-  border-radius: var(--oct-radius-lg);
+  --octant-dialog-width: 520px;
+
   padding: var(--oct-space-5);
 }
 
-.execution-profile-workflow__form {
+.execution-profile-workflow__form form {
   display: grid;
   gap: var(--oct-space-3);
 }

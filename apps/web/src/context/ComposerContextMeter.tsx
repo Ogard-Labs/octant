@@ -1,7 +1,7 @@
 import type { ServiceLimitBucket } from "@octant/contracts/context";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { matchKeybinding } from "@octant/domain";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { ContextInspector } from "./ContextInspector";
@@ -17,6 +17,7 @@ import {
 } from "./composerContextMeterScope";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantPopover } from "../ui/base/OctantPopover";
 import "./context.css";
 
 const METER_RADIUS = 7;
@@ -44,9 +45,6 @@ export function ComposerContextMeter() {
   const fallback = snapshot === undefined ? scope.fallback : undefined;
   const [open, setOpen] = useState(false);
   const [inspecting, setInspecting] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
-  const panelId = useId();
   const seenOpenNonce = useRef(scope.openNonce);
 
   useEffect(() => {
@@ -65,29 +63,7 @@ export function ComposerContextMeter() {
     seenOpenNonce.current = scope.openNonce;
     if (!scope.visible || scope.openNonce === 0) return;
     setOpen(true);
-    queueMicrotask(() => trigger.current?.focus());
   }, [scope.openNonce, scope.visible]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!(event.target instanceof Node)) return;
-      if (trigger.current?.contains(event.target) || panel.current?.contains(event.target)) return;
-      setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setOpen(false);
-      queueMicrotask(() => trigger.current?.focus());
-    };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
 
   if (!scope.visible) return null;
 
@@ -116,43 +92,60 @@ export function ComposerContextMeter() {
 
   return (
     <div className="composer-context-meter" data-health={health}>
-      <OctantButton
-        aria-controls={panelId}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-label={label}
-        className="composer-context-meter__button"
-        onClick={() => setOpen((current) => !current)}
-        ref={trigger}
-        size="icon"
-        type="button"
-        variant="ghost"
-      >
-        <svg
-          aria-hidden="true"
-          className="composer-context-meter__ring"
-          viewBox={`0 0 ${String(METER_SIZE)} ${String(METER_SIZE)}`}
-        >
-          <circle
-            className="composer-context-meter__track"
-            cx={METER_SIZE / 2}
-            cy={METER_SIZE / 2}
-            fill="none"
-            r={METER_RADIUS}
-          />
-          {usedArc > 0 ? (
+      <OctantPopover
+        align="end"
+        className="context-window-popover composer-context-meter__popover window-no-drag"
+        onOpenChange={setOpen}
+        open={open}
+        side="top"
+        title={panelTitle}
+        trigger={
+          <svg
+            aria-hidden="true"
+            className="composer-context-meter__ring"
+            viewBox={`0 0 ${String(METER_SIZE)} ${String(METER_SIZE)}`}
+          >
             <circle
-              className="composer-context-meter__used"
+              className="composer-context-meter__track"
               cx={METER_SIZE / 2}
               cy={METER_SIZE / 2}
               fill="none"
               r={METER_RADIUS}
-              strokeDasharray={`${String(usedArc)} ${String(METER_CIRCUMFERENCE)}`}
-              transform={`rotate(-90 ${String(METER_SIZE / 2)} ${String(METER_SIZE / 2)})`}
             />
-          ) : null}
-        </svg>
-      </OctantButton>
+            {usedArc > 0 ? (
+              <circle
+                className="composer-context-meter__used"
+                cx={METER_SIZE / 2}
+                cy={METER_SIZE / 2}
+                fill="none"
+                r={METER_RADIUS}
+                strokeDasharray={`${String(usedArc)} ${String(METER_CIRCUMFERENCE)}`}
+                transform={`rotate(-90 ${String(METER_SIZE / 2)} ${String(METER_SIZE / 2)})`}
+              />
+            ) : null}
+          </svg>
+        }
+        triggerClassName="composer-context-meter__button"
+        triggerLabel={label}
+        triggerVariant="ghost-icon"
+      >
+        {windowModel === undefined || snapshot === undefined ? (
+          fallback === undefined ? (
+            <p>{emptyMessage(scope.status)}</p>
+          ) : (
+            <ContextUsageFallback fallback={fallback} />
+          )
+        ) : (
+          <ContextUsagePopover
+            onInspect={() => {
+              setOpen(false);
+              setInspecting(true);
+            }}
+            snapshot={snapshot}
+            windowModel={windowModel}
+          />
+        )}
+      </OctantPopover>
       <span aria-live="polite" className="sr-only">
         {liveLabel({
           status: scope.status,
@@ -162,39 +155,12 @@ export function ComposerContextMeter() {
           ...(health === undefined ? {} : { healthLabel: contextHealthLabel(health) }),
         })}
       </span>
-      {open ? (
-        <div
-          aria-label={panelTitle}
-          className="popover-panel context-window-popover composer-context-meter__popover window-no-drag"
-          id={panelId}
-          ref={panel}
-          role="dialog"
-        >
-          {windowModel === undefined || snapshot === undefined ? (
-            fallback === undefined ? (
-              <p>{emptyMessage(scope.status)}</p>
-            ) : (
-              <ContextUsageFallback fallback={fallback} />
-            )
-          ) : (
-            <ContextUsagePopover
-              onInspect={() => {
-                setOpen(false);
-                setInspecting(true);
-              }}
-              snapshot={snapshot}
-              windowModel={windowModel}
-            />
-          )}
-        </div>
-      ) : null}
       {inspecting && snapshot !== undefined ? (
         <OctantDialog
           className="context-inspector-dialog"
           label="Context inspector"
           onClose={() => setInspecting(false)}
           open
-          restoreFocus={trigger}
         >
           <ContextInspector
             busy={scope.busy}

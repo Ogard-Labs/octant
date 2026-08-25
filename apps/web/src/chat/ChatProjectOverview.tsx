@@ -158,6 +158,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
                   ariaLabel="Provider and model"
                   disabled={!createAvailable || submitting}
                   groups={props.providerGroups ?? []}
+                  menuSide="bottom"
                   onSelect={props.onSelectProvider ?? (() => undefined)}
                   {...(props.onOpenSettings === undefined
                     ? {}

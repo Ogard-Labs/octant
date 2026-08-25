@@ -40,6 +40,57 @@ export function DropdownMenuPopup({
   );
 }
 
+const dropdownMenuItemClassName =
+  "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag";
+
+export function DropdownMenuPortal(props: ComponentProps<typeof MenuPrimitive.Portal>) {
+  return <MenuPrimitive.Portal {...props} />;
+}
+
+export function DropdownMenuPositioner({
+  className,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.Positioner>) {
+  return (
+    <MenuPrimitive.Positioner
+      align="start"
+      className={cn("z-50 outline-none window-no-drag", className)}
+      side="bottom"
+      sideOffset={4}
+      {...props}
+    />
+  );
+}
+
+export function DropdownMenuGroup(props: ComponentProps<typeof MenuPrimitive.Group>) {
+  return <MenuPrimitive.Group data-slot="dropdown-menu-group" {...props} />;
+}
+
+export function DropdownMenuGroupLabel({
+  className,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.GroupLabel>) {
+  return (
+    <MenuPrimitive.GroupLabel
+      className={cn("px-2 py-1.5 text-xs font-medium text-muted-foreground", className)}
+      {...props}
+    />
+  );
+}
+
+export function DropdownMenuItem({
+  className,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.Item>) {
+  return (
+    <MenuPrimitive.Item
+      className={cn(dropdownMenuItemClassName, className)}
+      closeOnClick
+      {...props}
+    />
+  );
+}
+
 export interface ShadcnMenuItem {
   readonly description?: string;
   readonly disabled?: boolean;

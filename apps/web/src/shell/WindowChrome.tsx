@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } from "lucide-react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
 
@@ -93,12 +94,13 @@ export function WindowChrome(props: WindowChromeProps) {
       )}
       <span aria-hidden="true" className="window-chrome__drag-space" />
       {props.developmentAuthentication ? (
-        <span
-          className="badge badge-warn window-chrome__development-auth window-no-drag"
+        <OctantBadge
+          className="window-chrome__development-auth window-no-drag"
           role="status"
+          variant="warning"
         >
           Development authentication
-        </span>
+        </OctantBadge>
       ) : null}
       {props.zenRecoveryNeeded ? (
         <div className="window-chrome__zen-recovery window-no-drag" role="status">

@@ -74,13 +74,11 @@
   gap: 10px;
 }
 
+/* Border, background, radius, and shadow now come from the OctantCard
+   recipe; this rule only keeps the grid layout the card content relies on. */
 .remote-shell__surface-card {
   display: grid;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-3);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
 }
 
 .remote-shell__surface-card--local-only {

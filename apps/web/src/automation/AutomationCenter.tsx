@@ -28,6 +28,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { ListArrangementMenu } from "../shell/ListArrangementMenu";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -543,19 +544,20 @@ function AutomationListBody(props: {
                       props.format,
                     )}
                   </span>
-                  <span
-                    className="automation-row__cadence badge"
+                  <OctantBadge
+                    className="automation-row__cadence"
                     data-cadence={routineCadence(summary.trigger)}
+                    variant="secondary"
                   >
                     {routineCadenceLabel(routineCadence(summary.trigger))}
-                  </span>
+                  </OctantBadge>
                   {String(summary.hostId) === props.localHostId ? null : (
                     // Only a routine that belongs somewhere else is badged. Badging
                     // every row would make the machine you are sitting at look like
                     // one more remote environment.
-                    <span className="automation-row__environment badge">
+                    <OctantBadge className="automation-row__environment" variant="secondary">
                       {props.environmentLabel(String(summary.hostId))}
-                    </span>
+                    </OctantBadge>
                   )}
                   <span className="automation-row__state" data-lifecycle={summary.lifecycle}>
                     {automationLifecycleLabel(summary.lifecycle)}

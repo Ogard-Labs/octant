@@ -19,6 +19,7 @@ import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { parseUnifiedDiff, type ParsedDiffFile } from "./unifiedDiff";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 type RunReviewed = Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>;
@@ -228,24 +229,17 @@ function AvailableDiff(
           <h1>{props.snapshot.title}</h1>
         </div>
         <p>{props.snapshot.changedPaths.length.toLocaleString()} changed paths</p>
-        <div className="segmented" role="group" aria-label="Diff layout">
-          <OctantButton
-            aria-pressed={sideBySide}
-            className="segment"
-            onClick={() => setSideBySide(true)}
-            type="button"
-          >
-            Side by side
-          </OctantButton>
-          <OctantButton
-            aria-pressed={!sideBySide}
-            className="segment"
-            onClick={() => setSideBySide(false)}
-            type="button"
-          >
-            Inline
-          </OctantButton>
-        </div>
+        <OctantToggleGroup<"side-by-side" | "inline">
+          aria-label="Diff layout"
+          onValueChange={(value) => {
+            const selected = value[0];
+            if (selected !== undefined) setSideBySide(selected === "side-by-side");
+          }}
+          value={[sideBySide ? "side-by-side" : "inline"]}
+        >
+          <OctantToggleGroupItem value="side-by-side">Side by side</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="inline">Inline</OctantToggleGroupItem>
+        </OctantToggleGroup>
       </header>
 
       {props.staleNotice === undefined ? null : (

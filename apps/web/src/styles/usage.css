@@ -78,16 +78,6 @@
   gap: 10px;
 }
 
-.usage-dashboard__total-card {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-  padding: var(--oct-space-3);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-}
-
 .usage-dashboard__total-value {
   overflow-wrap: anywhere;
   color: var(--oct-fg);
@@ -195,12 +185,6 @@
   text-transform: uppercase;
 }
 
-.usage-dashboard__view-toggle {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
 .usage-dashboard__table {
   width: 100%;
   min-width: 0;
@@ -304,15 +288,6 @@
     transition: none !important;
   }
 }
-.provider-limits {
-  display: grid;
-  gap: var(--oct-space-4);
-  padding: var(--oct-space-4);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-}
-
 .provider-limits__header,
 .provider-limits__identity,
 .provider-limits__row {
