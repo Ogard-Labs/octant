@@ -13,9 +13,18 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ComponentType } from "react";
+import type { ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
-import { OctantButton } from "../ui/base/OctantButton";
+import {
+  OctantMenuGroup,
+  OctantMenuGroupLabel,
+  OctantMenuItem,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRoot,
+  OctantMenuTrigger,
+} from "../ui/base/OctantMenu";
 import type { SidebarAppMenuDescriptorId } from "./navigationModel";
 
 export interface SidebarSecondaryAction {
@@ -50,129 +59,66 @@ const secondaryIcons: Record<SidebarAppMenuDescriptorId, LucideIcon> = {
  * refusing to open until a name exists would hide the very place a name is set.
  */
 export function SidebarProfile(props: SidebarProfileProps) {
-  const [open, setOpen] = useState(false);
-  const disclosureId = useId();
-  const trigger = useRef<HTMLButtonElement>(null);
-  const disclosure = useRef<HTMLDivElement>(null);
   const openZen = props.onOpenZen;
   const name = props.profile.displayName ?? "";
 
-  useEffect(() => {
-    if (open) disclosure.current?.querySelector("button")?.focus();
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const dismiss = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (disclosure.current?.contains(target) || trigger.current?.contains(target)) return;
-      setOpen(false);
-    };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, [open]);
-
-  function close(): void {
-    setOpen(false);
-    trigger.current?.focus();
-  }
-
-  function select(action: () => void): void {
-    close();
-    action();
-  }
-
   return (
     <div className="sidebar-foot sidebar-profile">
-      <OctantButton
-        aria-controls={disclosureId}
-        aria-expanded={open}
-        className="sidebar-item window-no-drag justify-start"
-        onClick={() => setOpen((current) => !current)}
-        ref={trigger}
-        type="button"
-        variant="ghost"
-      >
-        <UserAvatar profile={props.profile} size={22} />
-        <span className="sidebar-label">{name === "" ? "Set your name" : name}</span>
-        <ChevronUp aria-hidden="true" className="sidebar-profile__chevron" size={14} />
-      </OctantButton>
-      {open ? (
-        <div
-          aria-label="Octant menu"
-          className="sidebar-profile__disclosure"
-          id={disclosureId}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
-              close();
-              return;
-            }
-            if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-            const items = Array.from(
-              disclosure.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
-            );
-            if (items.length === 0) return;
-            event.preventDefault();
-            const current = items.indexOf(document.activeElement as HTMLButtonElement);
-            const next =
-              event.key === "Home"
-                ? 0
-                : event.key === "End"
-                  ? items.length - 1
-                  : event.key === "ArrowUp"
-                    ? (current - 1 + items.length) % items.length
-                    : (current + 1) % items.length;
-            items[next]?.focus();
-          }}
-          ref={disclosure}
-          role="menu"
-        >
-          {props.secondaryActions === undefined || props.secondaryActions.length === 0 ? null : (
-            <div aria-label="Workspace" className="sidebar-profile__group" role="group">
-              <span className="sidebar-profile__group-label">Workspace</span>
-              {props.secondaryActions.map((action) => (
+      <OctantMenuRoot>
+        <OctantMenuTrigger className="sidebar-item window-no-drag justify-start">
+          <UserAvatar profile={props.profile} size={22} />
+          <span className="sidebar-label">{name === "" ? "Set your name" : name}</span>
+          <ChevronUp aria-hidden="true" className="sidebar-profile__chevron" size={14} />
+        </OctantMenuTrigger>
+        <OctantMenuPortal>
+          <OctantMenuPositioner align="center" side="top">
+            <OctantMenuPopup aria-label="Octant menu" className="w-[min(248px,calc(100vw-24px))]">
+              {props.secondaryActions === undefined ||
+              props.secondaryActions.length === 0 ? null : (
+                <OctantMenuGroup aria-label="Workspace">
+                  <OctantMenuGroupLabel>Workspace</OctantMenuGroupLabel>
+                  {props.secondaryActions.map((action) => (
+                    <ProfileAction
+                      icon={secondaryIcons[action.id]}
+                      key={action.id}
+                      label={action.label}
+                      onClick={action.onSelect}
+                    />
+                  ))}
+                </OctantMenuGroup>
+              )}
+              <OctantMenuGroup aria-label="Octant">
+                <OctantMenuGroupLabel>Octant</OctantMenuGroupLabel>
+                {props.navigatorAvailable === true ? (
+                  <ProfileAction
+                    icon={Compass}
+                    label="Navigator"
+                    onClick={() => props.onOpenNavigator()}
+                  />
+                ) : null}
                 <ProfileAction
-                  icon={secondaryIcons[action.id]}
-                  key={action.id}
-                  label={action.label}
-                  onClick={() => select(action.onSelect)}
+                  icon={Settings}
+                  label="Settings"
+                  onClick={() => props.onOpenSettings()}
                 />
-              ))}
-            </div>
-          )}
-          <div aria-label="Octant" className="sidebar-profile__group" role="group">
-            <span className="sidebar-profile__group-label">Octant</span>
-            {props.navigatorAvailable === true ? (
-              <ProfileAction
-                icon={Compass}
-                label="Navigator"
-                onClick={() => select(() => props.onOpenNavigator())}
-              />
-            ) : null}
-            <ProfileAction
-              icon={Settings}
-              label="Settings"
-              onClick={() => select(() => props.onOpenSettings())}
-            />
-            <ProfileAction
-              icon={Gauge}
-              label="Usage"
-              onClick={() => select(() => props.onOpenSettings({ section: "usage" }))}
-            />
-            <ProfileAction
-              icon={Plug}
-              label="Providers"
-              onClick={() => select(() => props.onOpenSettings({ section: "providers" }))}
-            />
-            {openZen === undefined ? null : (
-              <ProfileAction icon={Sparkles} label="Zen mode" onClick={() => select(openZen)} />
-            )}
-          </div>
-        </div>
-      ) : null}
+                <ProfileAction
+                  icon={Gauge}
+                  label="Usage"
+                  onClick={() => props.onOpenSettings({ section: "usage" })}
+                />
+                <ProfileAction
+                  icon={Plug}
+                  label="Providers"
+                  onClick={() => props.onOpenSettings({ section: "providers" })}
+                />
+                {openZen === undefined ? null : (
+                  <ProfileAction icon={Sparkles} label="Zen mode" onClick={openZen} />
+                )}
+              </OctantMenuGroup>
+            </OctantMenuPopup>
+          </OctantMenuPositioner>
+        </OctantMenuPortal>
+      </OctantMenuRoot>
     </div>
   );
 }
@@ -189,17 +135,9 @@ function ProfileAction(props: {
 }) {
   const Icon = props.icon;
   return (
-    // A plain button whose visible text is its accessible name — nothing but
-    // the aria-hidden icon sits beside it, so no wrapper can swallow the label.
-    <OctantButton
-      className="sidebar-profile__action window-no-drag justify-start"
-      onClick={props.onClick}
-      role="menuitem"
-      type="button"
-      variant="ghost"
-    >
+    <OctantMenuItem onClick={props.onClick}>
       <Icon aria-hidden={true} className="icon" size={16} strokeWidth={1.5} />
       <span>{props.label}</span>
-    </OctantButton>
+    </OctantMenuItem>
   );
 }

@@ -395,8 +395,9 @@ describe("CodeComposerAdapter interactions", () => {
     expect(trigger).not.toBeNull();
     await act(async () => {
       trigger!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
     });
-    const option = Array.from(container.querySelectorAll('[role="option"]')).find((node) =>
+    const option = Array.from(document.querySelectorAll('[role="option"]')).find((node) =>
       node.textContent?.includes("origin/feature-only"),
     );
     expect(option).not.toBeUndefined();
@@ -458,7 +459,7 @@ describe("CodeComposerAdapter interactions", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(container.textContent).toContain("project-a-only");
+    expect(document.body.textContent).toContain("project-a-only");
 
     await act(async () => {
       root.render(
@@ -470,7 +471,7 @@ describe("CodeComposerAdapter interactions", () => {
         />,
       );
     });
-    expect(container.textContent).not.toContain("project-a-only");
+    expect(document.body.textContent).not.toContain("project-a-only");
     await act(async () => {
       trigger()!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -478,8 +479,8 @@ describe("CodeComposerAdapter interactions", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(container.textContent).not.toContain("project-a-only");
-    expect(container.textContent).toContain("project-b-only");
+    expect(document.body.textContent).not.toContain("project-a-only");
+    expect(document.body.textContent).toContain("project-b-only");
     root.unmount();
     container.remove();
   });

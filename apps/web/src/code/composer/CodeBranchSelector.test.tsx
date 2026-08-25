@@ -35,7 +35,7 @@ describe("CodeBranchSelector", () => {
     await user.click(screen.getByRole("button", { name: "Base branch" }));
     expect(onOpen).toHaveBeenCalled();
 
-    const menu = screen.getByRole("dialog", { name: "Choose base branch" });
+    const menu = await screen.findByRole("dialog", { name: "Choose base branch" });
     expect(within(menu).getByRole("option", { name: "developmentcurrent" })).toBeVisible();
     expect(
       within(menu).getByRole("option", { name: "feature/model-pickerworktree" }),
@@ -76,8 +76,8 @@ describe("CodeBranchSelector", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Base branch" }));
-    expect(screen.getByRole("switch", { name: "Start from origin in selector" })).toHaveAttribute(
-      "data-disabled",
-    );
+    expect(
+      await screen.findByRole("switch", { name: "Start from origin in selector" }),
+    ).toHaveAttribute("data-disabled");
   });
 });

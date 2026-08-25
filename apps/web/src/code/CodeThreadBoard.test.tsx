@@ -283,7 +283,7 @@ describe("CodeThreadBoard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
 
     // Unchecking Ready leaves an explicit, summarized status filter.
-    fireEvent.click(screen.getByRole("checkbox", { name: "Ready" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Ready" }));
     await waitFor(() =>
       expect(loadBoard).toHaveBeenLastCalledWith({
         version: 1,
@@ -306,7 +306,7 @@ describe("CodeThreadBoard", () => {
     expect(screen.queryByRole("combobox", { name: "Pull request" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    const panel = screen.getByRole("dialog", { name: "Filters" });
+    const panel = await screen.findByRole("dialog", { name: "Filters" });
     expect(within(panel).getByRole("checkbox", { name: "Ready" })).toBeChecked();
     fireEvent.change(within(panel).getByRole("combobox", { name: "Project" }), {
       target: { value: String(projectB) },
@@ -334,8 +334,9 @@ describe("CodeThreadBoard", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
     // Escape unmounts the dialog the person was in, so focus goes back to the
-    // control that opened it rather than falling to the document body.
-    expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
+    // control that opened it rather than falling to the document body. Base UI
+    // restores focus inside a microtask, so this settles a tick after close.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus());
   });
 
   it("shows a typed search term as typed in the active filters, not as an uppercase label", async () => {
@@ -358,7 +359,7 @@ describe("CodeThreadBoard", () => {
 
     // Fixed-vocabulary filter labels stay plain tags and keep the label look.
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Pull request" }), {
+    fireEvent.change(await screen.findByRole("combobox", { name: "Pull request" }), {
       target: { value: "open" },
     });
     expect(await within(activeFilters).findByText("Open PR")).not.toHaveClass("tag-value");

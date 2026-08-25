@@ -4,10 +4,11 @@ import type {
   ComposerPoolModel,
 } from "@octant/domain/composer-pool-policy";
 import { Layers } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantPopover } from "../ui/base/OctantPopover";
 
 export interface ComposerPoolControlProps {
   /** Settings-derived pool projection; the control can only narrow it. */
@@ -46,22 +47,16 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
   const [mixedVendorAllowed, setMixedVendorAllowed] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const rootRef = useRef<HTMLDivElement>(null);
   const statusId = useId();
   const applyHintId = useId();
 
   const active = props.pool !== undefined;
 
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open]);
-
-  function openEditor() {
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) return;
+    // Reopening always starts from the persisted pool (or the current route),
+    // so a prior draft never leaks into a fresh editing session.
     setSelectedKeys(initialSelection(props.model, props.pool));
     setMixedVendorAllowed(
       props.pool !== undefined &&
@@ -76,7 +71,6 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
     );
     setQuery("");
     setError(undefined);
-    setOpen(true);
   }
 
   const disabledReason =
@@ -163,22 +157,134 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
   }
 
   return (
-    <div className="composer-pool-control" ref={rootRef}>
-      <OctantButton
-        aria-describedby={statusId}
-        aria-expanded={open}
-        aria-label="Use multiple models"
-        aria-pressed={active}
-        className="composer-pool-control__trigger window-no-drag"
-        disabled={props.disabled === true || disabledReason !== undefined}
-        onClick={() => (open ? setOpen(false) : openEditor())}
-        title={disabledReason}
-        type="button"
-        variant="ghost"
+    <div className="composer-pool-control">
+      <OctantPopover
+        className="composer-pool-control__editor"
+        onOpenChange={handleOpenChange}
+        open={open}
+        side="top"
+        sideOffset={6}
+        title="Multi-model pool editor"
+        trigger={
+          <>
+            <Layers aria-hidden="true" size={14} strokeWidth={1.7} />
+            <span>
+              {active ? `Pool · ${props.pool!.candidates.length}` : "Use multiple models"}
+            </span>
+          </>
+        }
+        triggerAriaPressed={active}
+        triggerClassName="composer-pool-control__trigger"
+        triggerDescribedBy={statusId}
+        triggerDisabled={props.disabled === true || disabledReason !== undefined}
+        triggerLabel="Use multiple models"
+        {...(disabledReason === undefined ? {} : { triggerTooltip: disabledReason })}
       >
-        <Layers aria-hidden="true" size={14} strokeWidth={1.7} />
-        <span>{active ? `Pool · ${props.pool!.candidates.length}` : "Use multiple models"}</span>
-      </OctantButton>
+        {ready === undefined ? null : (
+          <>
+            <label className="composer-pool-control__search">
+              <span className="composer-pool-control__visually-hidden">Search models</span>
+              <OctantInput
+                aria-label="Search models"
+                onChange={(event) => setQuery(event.currentTarget.value)}
+                placeholder="Search models"
+                type="search"
+                value={query}
+              />
+            </label>
+            <ul className="composer-pool-control__options">
+              {visible.map((view) => {
+                const key = candidateKey(view.candidate);
+                const gatedByMixedVendor = view.requiresMixedVendor && !mixedVendorAllowed;
+                const checkboxDisabled = !view.selectable || gatedByMixedVendor || applying;
+                return (
+                  <li className="composer-pool-control__option" key={key}>
+                    <label
+                      className={`composer-pool-control__option-label${
+                        checkboxDisabled ? " composer-pool-control__option-label--disabled" : ""
+                      }`}
+                    >
+                      <OctantCheckbox
+                        aria-label={`${view.providerName} — ${view.modelName}`}
+                        checked={selectedKeys.has(key)}
+                        className="window-no-drag"
+                        disabled={checkboxDisabled}
+                        onChange={(event) => toggleCandidate(view, event.currentTarget.checked)}
+                      />
+                      <span>
+                        {view.providerName} — {view.modelName}
+                        {view.isCurrent ? " (current)" : ""}
+                      </span>
+                    </label>
+                    {view.unavailableReason === undefined ? null : (
+                      <span className="composer-pool-control__option-reason">
+                        {view.unavailableReason}
+                      </span>
+                    )}
+                    {view.selectable && gatedByMixedVendor ? (
+                      <span className="composer-pool-control__option-reason">
+                        Requires the mixed-vendor opt-in.
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+            {ready.mixedVendorRequired ? (
+              <div className="composer-pool-control__mixed-vendor">
+                <label className="composer-pool-control__option-label">
+                  <OctantCheckbox
+                    aria-label="Allow mixed-vendor routing"
+                    checked={mixedVendorAllowed}
+                    className="window-no-drag"
+                    disabled={applying}
+                    onChange={(event) =>
+                      event.currentTarget.checked
+                        ? setMixedVendorAllowed(true)
+                        : withdrawMixedVendor()
+                    }
+                  />
+                  <span>Allow mixed-vendor routing</span>
+                </label>
+                <p className="composer-pool-control__disclosure">
+                  Models from other vendors can receive this thread&apos;s context when routing
+                  selects them. This never configures credentials or widens authority.
+                </p>
+              </div>
+            ) : null}
+            {error === undefined ? null : (
+              <p className="composer-pool-control__error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="composer-pool-control__actions">
+              <OctantButton
+                aria-describedby={applyHintId}
+                disabled={selectedCount < 2 || applying}
+                onClick={applySelection}
+                size="sm"
+                type="button"
+              >
+                Apply pool
+              </OctantButton>
+              <span className="composer-pool-control__hint" id={applyHintId}>
+                Select at least two eligible models to route across a pool.
+              </span>
+              {active ? (
+                <OctantButton
+                  disabled={applying}
+                  onClick={() => void apply(undefined)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Use single model
+                </OctantButton>
+              ) : null}
+            </div>
+          </>
+        )}
+      </OctantPopover>
       <span
         className="composer-pool-control__status composer-pool-control__visually-hidden"
         id={statusId}
@@ -186,114 +292,6 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
       >
         {status ?? ""}
       </span>
-      {open && ready !== undefined ? (
-        <div
-          aria-label="Multi-model pool editor"
-          className="composer-pool-control__editor"
-          role="dialog"
-        >
-          <label className="composer-pool-control__search">
-            <span className="composer-pool-control__visually-hidden">Search models</span>
-            <OctantInput
-              aria-label="Search models"
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              placeholder="Search models"
-              type="search"
-              value={query}
-            />
-          </label>
-          <ul className="composer-pool-control__options">
-            {visible.map((view) => {
-              const key = candidateKey(view.candidate);
-              const gatedByMixedVendor = view.requiresMixedVendor && !mixedVendorAllowed;
-              const checkboxDisabled = !view.selectable || gatedByMixedVendor || applying;
-              return (
-                <li className="composer-pool-control__option" key={key}>
-                  <label
-                    className={`composer-pool-control__option-label${
-                      checkboxDisabled ? " composer-pool-control__option-label--disabled" : ""
-                    }`}
-                  >
-                    <OctantCheckbox
-                      aria-label={`${view.providerName} — ${view.modelName}`}
-                      checked={selectedKeys.has(key)}
-                      className="window-no-drag"
-                      disabled={checkboxDisabled}
-                      onChange={(event) => toggleCandidate(view, event.currentTarget.checked)}
-                    />
-                    <span>
-                      {view.providerName} — {view.modelName}
-                      {view.isCurrent ? " (current)" : ""}
-                    </span>
-                  </label>
-                  {view.unavailableReason === undefined ? null : (
-                    <span className="composer-pool-control__option-reason">
-                      {view.unavailableReason}
-                    </span>
-                  )}
-                  {view.selectable && gatedByMixedVendor ? (
-                    <span className="composer-pool-control__option-reason">
-                      Requires the mixed-vendor opt-in.
-                    </span>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-          {ready.mixedVendorRequired ? (
-            <div className="composer-pool-control__mixed-vendor">
-              <label className="composer-pool-control__option-label">
-                <OctantCheckbox
-                  aria-label="Allow mixed-vendor routing"
-                  checked={mixedVendorAllowed}
-                  className="window-no-drag"
-                  disabled={applying}
-                  onChange={(event) =>
-                    event.currentTarget.checked
-                      ? setMixedVendorAllowed(true)
-                      : withdrawMixedVendor()
-                  }
-                />
-                <span>Allow mixed-vendor routing</span>
-              </label>
-              <p className="composer-pool-control__disclosure">
-                Models from other vendors can receive this thread&apos;s context when routing
-                selects them. This never configures credentials or widens authority.
-              </p>
-            </div>
-          ) : null}
-          {error === undefined ? null : (
-            <p className="composer-pool-control__error" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="composer-pool-control__actions">
-            <OctantButton
-              aria-describedby={applyHintId}
-              disabled={selectedCount < 2 || applying}
-              onClick={applySelection}
-              size="sm"
-              type="button"
-            >
-              Apply pool
-            </OctantButton>
-            <span className="composer-pool-control__hint" id={applyHintId}>
-              Select at least two eligible models to route across a pool.
-            </span>
-            {active ? (
-              <OctantButton
-                disabled={applying}
-                onClick={() => void apply(undefined)}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                Use single model
-              </OctantButton>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

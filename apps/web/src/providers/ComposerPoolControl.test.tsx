@@ -96,7 +96,7 @@ describe("ComposerPoolControl", () => {
     await user.keyboard("{Enter}");
 
     // Current route is pre-selected; the sibling is toggled by keyboard.
-    const sibling = screen.getByRole("checkbox", { name: "OpenAI gateway — GPT 5.2 Mini" });
+    const sibling = await screen.findByRole("checkbox", { name: "OpenAI gateway — GPT 5.2 Mini" });
     expect(screen.getByRole("checkbox", { name: "OpenAI gateway — GPT 5.2" })).toBeChecked();
     expect(sibling).not.toBeChecked();
     sibling.focus();
@@ -115,7 +115,7 @@ describe("ComposerPoolControl", () => {
     const user = userEvent.setup();
     render(<ComposerPoolControl model={readyModel()} onApply={vi.fn(async () => true)} />);
     await user.click(screen.getByRole("button", { name: "Use multiple models" }));
-    const apply = screen.getByRole("button", { name: "Apply pool" });
+    const apply = await screen.findByRole("button", { name: "Apply pool" });
     expect(apply).toBeDisabled();
     expect(apply).toHaveAccessibleDescription(/at least two/i);
   });
@@ -124,7 +124,7 @@ describe("ComposerPoolControl", () => {
     const user = userEvent.setup();
     render(<ComposerPoolControl model={readyModel()} onApply={vi.fn(async () => true)} />);
     await user.click(screen.getByRole("button", { name: "Use multiple models" }));
-    await user.type(screen.getByRole("searchbox", { name: "Search models" }), "mini");
+    await user.type(await screen.findByRole("searchbox", { name: "Search models" }), "mini");
     expect(screen.queryByRole("checkbox", { name: "OpenAI gateway — GPT 5.2" })).toBeNull();
     expect(screen.getByRole("checkbox", { name: "OpenAI gateway — GPT 5.2 Mini" })).toBeVisible();
   });
@@ -147,7 +147,7 @@ describe("ComposerPoolControl", () => {
     });
     render(<ComposerPoolControl model={model} onApply={vi.fn(async () => true)} />);
     await user.click(screen.getByRole("button", { name: "Use multiple models" }));
-    const gone = screen.getByRole("checkbox", { name: "OpenAI gateway — model-gone" });
+    const gone = await screen.findByRole("checkbox", { name: "OpenAI gateway — model-gone" });
     expect(gone).toBeDisabled();
     expect(screen.getByText("Model is no longer listed by the provider.")).toBeVisible();
   });
@@ -172,7 +172,9 @@ describe("ComposerPoolControl", () => {
     render(<ComposerPoolControl model={model} onApply={onApply} />);
     await user.click(screen.getByRole("button", { name: "Use multiple models" }));
 
-    const crossVendor = screen.getByRole("checkbox", { name: "Anthropic gateway — Claude X" });
+    const crossVendor = await screen.findByRole("checkbox", {
+      name: "Anthropic gateway — Claude X",
+    });
     expect(crossVendor).toBeDisabled();
     const optIn = screen.getByRole("checkbox", { name: "Allow mixed-vendor routing" });
     expect(optIn).not.toBeChecked();
@@ -215,7 +217,7 @@ describe("ComposerPoolControl", () => {
     });
     render(<ComposerPoolControl model={model} onApply={vi.fn(async () => true)} />);
     await user.click(screen.getByRole("button", { name: "Use multiple models" }));
-    const optIn = screen.getByRole("checkbox", { name: "Allow mixed-vendor routing" });
+    const optIn = await screen.findByRole("checkbox", { name: "Allow mixed-vendor routing" });
     await user.click(optIn);
     const crossVendor = screen.getByRole("checkbox", { name: "Anthropic gateway — Claude X" });
     await user.click(crossVendor);
@@ -243,7 +245,7 @@ describe("ComposerPoolControl", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/pool of 2 models/i);
 
     await user.click(trigger);
-    await user.click(screen.getByRole("button", { name: "Use single model" }));
+    await user.click(await screen.findByRole("button", { name: "Use single model" }));
     expect(onApply).toHaveBeenCalledWith(undefined);
   });
 
@@ -255,7 +257,9 @@ describe("ComposerPoolControl", () => {
       .mockResolvedValueOnce(true);
     render(<ComposerPoolControl model={readyModel()} onApply={onApply} />);
     await user.click(screen.getByRole("button", { name: "Use multiple models" }));
-    await user.click(screen.getByRole("checkbox", { name: "OpenAI gateway — GPT 5.2 Mini" }));
+    await user.click(
+      await screen.findByRole("checkbox", { name: "OpenAI gateway — GPT 5.2 Mini" }),
+    );
     await user.click(screen.getByRole("button", { name: "Apply pool" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent(/could not be applied/i);
@@ -271,7 +275,7 @@ describe("ComposerPoolControl", () => {
     const onApply = vi.fn(async () => true);
     render(<ComposerPoolControl model={readyModel()} onApply={onApply} />);
     await user.click(screen.getByRole("button", { name: "Use multiple models" }));
-    expect(screen.getByRole("searchbox", { name: "Search models" })).toBeVisible();
+    expect(await screen.findByRole("searchbox", { name: "Search models" })).toBeVisible();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("searchbox", { name: "Search models" })).toBeNull();
     expect(onApply).not.toHaveBeenCalled();

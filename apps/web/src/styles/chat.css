@@ -63,13 +63,6 @@
   min-height: 96px;
 }
 
-/* Placement only: this composer sits mid-screen, so the picker menu opens
-   downward. The trigger's look is the system's (ADR 0038). */
-.chat-welcome .composer-row .composer-model-picker__menu {
-  top: calc(100% + 8px);
-  bottom: auto;
-}
-
 /* The hint sits below the card, like secondary context under the composer. */
 .chat-welcome .draft-thread__hint {
   order: 2;
@@ -515,23 +508,6 @@
   white-space: nowrap;
 }
 
-.chat-transcript__handoff {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  line-height: 1.3;
-}
-
-.chat-transcript__handoff::before,
-.chat-transcript__handoff::after {
-  height: 1px;
-  flex: 1 1 auto;
-  background: var(--oct-border);
-  content: "";
-}
-
 /* The attempt status line rides the system's .runstatus; only the streaming
    and completed states below are residual. */
 .chat-transcript__attempt-status--completed {
@@ -814,7 +790,6 @@
 /* Declared model options and the pool control live behind one trigger, so the
    composer row shows a single control instead of one select per option. */
 .chat-composer__model-options {
-  position: relative;
   display: inline-flex;
   flex: 0 0 auto;
 }
@@ -837,12 +812,10 @@
 }
 
 /* Opens upward: the composer sits at the window's bottom edge, so a panel
-   growing downward would clip. Mirrors the model picker's anchoring. The
-   chrome is the system's `.popover-panel`; only anchoring and width are
-   this surface's own. */
+   growing downward would clip. Mirrors the model picker's anchoring, now via
+   OctantPopover's side="top" align="start"; only the inner layout and width
+   are this surface's own. */
 .chat-composer__model-options-panel {
-  bottom: calc(100% + 8px);
-  left: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;

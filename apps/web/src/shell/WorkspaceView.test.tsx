@@ -428,7 +428,7 @@ describe("WorkspaceView Local servers wiring", () => {
       fireEvent.click(
         await screen.findByRole("button", { name: /More actions for/ }, { timeout: 5_000 }),
       );
-      fireEvent.click(screen.getByRole("menuitem", { name: "Copy http://127.0.0.1:5173/" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Copy http://127.0.0.1:5173/" }));
 
       expect(await screen.findByText("Copied")).toBeVisible();
       expect(writeText).toHaveBeenCalledWith("http://127.0.0.1:5173/");

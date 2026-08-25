@@ -17,7 +17,9 @@ import {
   listRemoteShellSurfacesByAvailability,
   type RemoteShellSurfaceDescriptor,
 } from "@octant/client-runtime";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
 import { HostSelector } from "../shell/HostSelector";
 import { ModeSwitcher } from "../shell/ModeSwitcher";
@@ -325,13 +327,13 @@ export function RemoteShellView(props: RemoteShellViewProps) {
               ? undefined
               : { label: entry.buttonLabel, run: entry.run };
           return (
-            <article className="remote-shell__surface-card" key={entry.surface.id}>
+            <OctantCard className="remote-shell__surface-card p-3" key={entry.surface.id}>
               <h3 className="remote-shell__surface-title">{entry.surface.label}</h3>
               <p className="remote-shell__surface-description">{entry.surface.description}</p>
               {exercise === undefined ? (
-                <span className="remote-shell__surface-badge badge">
+                <OctantBadge className="remote-shell__surface-badge" variant="secondary">
                   Available in Project context
-                </span>
+                </OctantBadge>
               ) : (
                 <OctantButton
                   disabled={!ready}
@@ -342,7 +344,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
                   {exercise.label}
                 </OctantButton>
               )}
-            </article>
+            </OctantCard>
           );
         })}
       </section>
@@ -358,15 +360,17 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           browsers.
         </p>
         {localHostSurfaces.map((surface) => (
-          <article
+          <OctantCard
             aria-disabled="true"
-            className="remote-shell__surface-card remote-shell__surface-card--local-only"
+            className="remote-shell__surface-card remote-shell__surface-card--local-only p-3"
             key={surface.id}
           >
-            <span className="remote-shell__surface-badge badge">Unavailable remotely</span>
+            <OctantBadge className="remote-shell__surface-badge" variant="secondary">
+              Unavailable remotely
+            </OctantBadge>
             <h3 className="remote-shell__surface-title">{surface.label}</h3>
             <p className="remote-shell__surface-description">{surface.description}</p>
-          </article>
+          </OctantCard>
         ))}
       </section>
 

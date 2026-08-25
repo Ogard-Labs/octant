@@ -11,6 +11,7 @@ import type { CodeApprovalId } from "@octant/contracts/code";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
+import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -25,6 +26,16 @@ const PR_STATE_LABELS: Record<CodePullRequestReviewObserved["pullRequestState"],
   closed: "Closed",
 };
 
+const PR_STATE_VARIANTS: Record<
+  CodePullRequestReviewObserved["pullRequestState"],
+  NonNullable<OctantBadgeProps["variant"]>
+> = {
+  open: "secondary",
+  draft: "outline",
+  merged: "success",
+  closed: "destructive",
+};
+
 const CHECK_STATE_LABELS: Record<CodePullRequestReviewObserved["checks"][number]["state"], string> =
   {
     success: "Passing",
@@ -33,6 +44,17 @@ const CHECK_STATE_LABELS: Record<CodePullRequestReviewObserved["checks"][number]
     neutral: "Neutral",
     unknown: "Unknown",
   };
+
+const CHECK_STATE_VARIANTS: Record<
+  CodePullRequestReviewObserved["checks"][number]["state"],
+  NonNullable<OctantBadgeProps["variant"]>
+> = {
+  success: "success",
+  failure: "destructive",
+  pending: "warning",
+  neutral: "secondary",
+  unknown: "secondary",
+};
 
 export interface CodePullRequestPaneProps {
   readonly client: Pick<CodeClient, "executeOperation" | "operationContent">;
@@ -109,9 +131,9 @@ function ReviewWindow(
           <span>Pull request #{review.number}</span>
           <h1>{review.title.length === 0 ? `Pull request #${review.number}` : review.title}</h1>
           <p className="code-pr-review__meta">
-            <span className="code-pr-review__badge">
+            <OctantBadge variant={PR_STATE_VARIANTS[review.pullRequestState]}>
               {PR_STATE_LABELS[review.pullRequestState]}
-            </span>
+            </OctantBadge>
             <span>
               {review.headBranch} → {review.baseRepository}:{review.baseBranch}
             </span>
@@ -246,7 +268,9 @@ function ReviewWindow(
             {review.checks.map((check, index) => (
               <li key={`${check.name}-${index}`}>
                 <span>{check.name}</span>
-                <span className="code-pr-review__badge">{CHECK_STATE_LABELS[check.state]}</span>
+                <OctantBadge variant={CHECK_STATE_VARIANTS[check.state]}>
+                  {CHECK_STATE_LABELS[check.state]}
+                </OctantBadge>
               </li>
             ))}
           </ul>

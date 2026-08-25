@@ -107,14 +107,19 @@ describe("ExecutionProfileWorkflow", () => {
     expect(trigger).toHaveFocus();
   });
 
-  it("closes the composer popover when the pointer goes down outside it", async () => {
+  it("closes the composer popover on an outside pointer press", async () => {
     const user = userEvent.setup();
-    render(<ExecutionProfileWorkflow controller={controller()} variant="composer" />);
+    render(
+      <div>
+        <button type="button">Outside</button>
+        <ExecutionProfileWorkflow controller={controller()} variant="composer" />
+      </div>,
+    );
 
     await user.click(screen.getByRole("button", { name: "Execution profile: Code reviewer" }));
     expect(screen.getByRole("dialog", { name: "Execution profile options" })).toBeVisible();
 
-    fireEvent.pointerDown(document.body);
+    await user.click(screen.getByRole("button", { name: "Outside" }));
     expect(screen.queryByRole("dialog", { name: "Execution profile options" })).toBeNull();
   });
 
@@ -152,7 +157,7 @@ describe("ExecutionProfileWorkflow", () => {
     render(<ExecutionProfileWorkflow controller={value} variant="settings" />);
 
     await user.click(screen.getByRole("button", { name: "Create profile" }));
-    expect(screen.getByRole("dialog", { name: "Create execution profile" })).toBeVisible();
+    expect(await screen.findByRole("dialog", { name: "Create execution profile" })).toBeVisible();
     await user.type(screen.getByRole("textbox", { name: "Profile name" }), "Researcher");
     await user.click(screen.getByRole("button", { name: "Save new profile" }));
     expect(value.createProfile).toHaveBeenCalledWith(
@@ -160,7 +165,7 @@ describe("ExecutionProfileWorkflow", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Edit Code reviewer" }));
-    const name = screen.getByRole("textbox", { name: "Profile name" });
+    const name = await screen.findByRole("textbox", { name: "Profile name" });
     await user.clear(name);
     await user.type(name, "Focused reviewer");
     await user.click(screen.getByRole("button", { name: "Save profile changes" }));
@@ -169,7 +174,7 @@ describe("ExecutionProfileWorkflow", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Delete Code reviewer" }));
-    expect(screen.getByText("Delete this profile? This cannot be undone.")).toBeVisible();
+    expect(await screen.findByText("Delete this profile? This cannot be undone.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Confirm delete Code reviewer" }));
     expect(value.deleteProfile).toHaveBeenCalledWith(profile);
   });

@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { PreviewChunk, PreviewManifest, WorkbookCellValue } from "@octant/contracts/previews";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTabs, OctantTabsList, OctantTabsPanel, OctantTabsTab } from "../ui/base/OctantTabs";
 import { PreviewFidelityNotice } from "./PreviewFidelityNotice";
 import { buildWorkbookViewModel } from "./previewChunkModel";
 
@@ -23,7 +23,6 @@ export function WorkbookViewer(props: {
 }) {
   const model = useMemo(() => buildWorkbookViewModel(props.chunks), [props.chunks]);
   const [active, setActive] = useState(0);
-  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   if (model.worksheets.length === 0) {
     return (
@@ -41,8 +40,6 @@ export function WorkbookViewer(props: {
   const rows = sheet?.rows ?? [];
   const columnCount = rows.reduce((max, row) => Math.max(max, row.length), 0);
   const header = rows[0] ?? [];
-  const tabId = (index: number) => `preview-workbook-tab-${index}`;
-  const panelId = (index: number) => `preview-workbook-panel-${index}`;
 
   return (
     <section className="preview-viewer" aria-label="Workbook preview">
@@ -56,78 +53,53 @@ export function WorkbookViewer(props: {
           <span>{rows.length} rows</span>
         </div>
       </div>
-      <div
-        className="preview-workbook__tabs"
-        role="tablist"
-        aria-label="Worksheets"
-        aria-orientation="horizontal"
+      <OctantTabs
+        onValueChange={(value) => {
+          const next = Number(value);
+          if (Number.isInteger(next) && next >= 0 && next < model.worksheets.length) {
+            setActive(next);
+          }
+        }}
+        value={safeActive}
       >
-        {model.worksheets.map((entry, index) => (
-          <OctantButton
-            aria-controls={panelId(index)}
-            aria-selected={index === safeActive}
-            className="sheet-tab"
-            id={tabId(index)}
-            key={index}
-            onClick={() => setActive(index)}
-            onKeyDown={(event) => {
-              let next: number | undefined;
-              if (event.key === "ArrowRight") next = (index + 1) % model.worksheets.length;
-              if (event.key === "ArrowLeft") {
-                next = (index - 1 + model.worksheets.length) % model.worksheets.length;
-              }
-              if (event.key === "Home") next = 0;
-              if (event.key === "End") next = model.worksheets.length - 1;
-              if (next === undefined) return;
-              event.preventDefault();
-              setActive(next);
-              tabRefs.current[next]?.focus();
-            }}
-            ref={(element) => {
-              tabRefs.current[index] = element;
-            }}
-            role="tab"
-            tabIndex={index === safeActive ? 0 : -1}
-            type="button"
-            variant="ghost"
-          >
-            {entry.name}
-          </OctantButton>
-        ))}
-      </div>
-      <div
-        className="preview-viewer__body preview-viewer__body--flush"
-        role="tabpanel"
-        id={panelId(safeActive)}
-        aria-labelledby={tabId(safeActive)}
-        tabIndex={0}
-      >
-        <table className="preview-table datatable" aria-label={`${sheet?.name ?? "Worksheet"}`}>
-          <caption>
-            Worksheet {sheet?.name ?? ""}: {rows.length} rows, {columnCount} columns.
-          </caption>
-          <thead>
-            <tr>
-              {Array.from({ length: columnCount }, (_, c) => (
-                <th key={c} scope="col" tabIndex={0}>
-                  {formatCell(header[c] ?? "")}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(1).map((row, r) => (
-              <tr key={r}>
+        <OctantTabsList activateOnFocus aria-label="Worksheets" className="preview-workbook__tabs">
+          {model.worksheets.map((entry, index) => (
+            <OctantTabsTab key={index} value={index}>
+              {entry.name}
+            </OctantTabsTab>
+          ))}
+        </OctantTabsList>
+        <OctantTabsPanel
+          className="preview-viewer__body preview-viewer__body--flush mt-0"
+          value={safeActive}
+        >
+          <table className="preview-table datatable" aria-label={`${sheet?.name ?? "Worksheet"}`}>
+            <caption>
+              Worksheet {sheet?.name ?? ""}: {rows.length} rows, {columnCount} columns.
+            </caption>
+            <thead>
+              <tr>
                 {Array.from({ length: columnCount }, (_, c) => (
-                  <td key={c} tabIndex={0}>
-                    {formatCell(row[c] ?? "")}
-                  </td>
+                  <th key={c} scope="col" tabIndex={0}>
+                    {formatCell(header[c] ?? "")}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.slice(1).map((row, r) => (
+                <tr key={r}>
+                  {Array.from({ length: columnCount }, (_, c) => (
+                    <td key={c} tabIndex={0}>
+                      {formatCell(row[c] ?? "")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </OctantTabsPanel>
+      </OctantTabs>
     </section>
   );
 }

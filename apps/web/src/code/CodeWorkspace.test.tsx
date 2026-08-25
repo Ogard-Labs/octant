@@ -20,7 +20,8 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("status")).toHaveClass("code-git-loading");
+    expect(screen.getByRole("status")).toBeVisible();
+    expect(screen.getByText("Git workspace")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Loading Git state" })).toBeVisible();
     expect(screen.getByText("Loading exact checkout status and diff evidence.")).toBeVisible();
   });
