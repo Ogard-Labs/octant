@@ -219,7 +219,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
 
   async #prepareMountedStore(location: ExecutionCapsuleDiskLocation): Promise<void> {
     await chmod(location.mountPath, 0o700);
-    await ensurePrivateDirectory(location.mountPath, this.#expectedUid, false);
+    await ensurePrivateMountedDirectory(location.mountPath, this.#expectedUid, false);
     await ensurePrivateMountedDirectory(location.graphRoot, this.#expectedUid, true);
     await rm(location.runRoot, { force: true, recursive: true });
     await ensurePrivateMountedDirectory(location.runRoot, this.#expectedUid, true);
