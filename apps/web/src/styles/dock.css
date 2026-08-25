@@ -55,7 +55,7 @@
   padding-inline: 8px var(--octant-window-chrome-reserved-width, 96px);
   background: transparent;
   border-bottom: 0;
-  font-family: var(--oct-font-ui);
+  font-family: var(--oct-font-display);
   letter-spacing: normal;
   text-transform: none;
 }
@@ -279,6 +279,8 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
 .bottom-utility-panel__tabs {
   display: flex;
   min-width: 0;
+  align-items: center;
+  gap: 4px;
 }
 
 .bottom-utility-panel__tab {

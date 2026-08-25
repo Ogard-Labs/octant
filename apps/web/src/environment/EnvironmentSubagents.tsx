@@ -104,7 +104,7 @@ function AgentGroup(props: {
                 type="button"
                 variant="ghost"
               >
-                <Bot aria-hidden="true" size={15} strokeWidth={1.7} />
+                <Bot aria-hidden="true" size={16} strokeWidth={1.7} />
                 <span>
                   <strong>{entry.task}</strong>
                   <small>

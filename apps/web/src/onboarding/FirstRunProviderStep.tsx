@@ -106,7 +106,7 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
                     data-state={provider.state}
                     key={String(provider.instanceId)}
                   >
-                    <Icon size={15} />
+                    <Icon size={16} />
                     <span className="first-run__provider-name">{provider.displayName}</span>
                     <span className="first-run__provider-label">{provider.label}</span>
                     <span className="first-run__provider-detail">{provider.detail}</span>

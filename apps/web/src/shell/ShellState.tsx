@@ -37,7 +37,7 @@ export function ShellState(props: ShellStateProps) {
         <StateIcon
           aria-hidden="true"
           className={props.state === "loading" ? "shell-state__spinner" : undefined}
-          size={17}
+          size={16}
           strokeWidth={1.7}
         />
       </span>

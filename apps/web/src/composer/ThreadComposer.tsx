@@ -205,7 +205,7 @@ function ThreadComposerTrailing(props: { readonly actions: ThreadComposerActions
           onClick={stop.onStop}
           type="button"
         >
-          <Square aria-hidden="true" fill="currentColor" size={10} strokeWidth={1.5} />
+          <Square aria-hidden="true" fill="currentColor" size={12} strokeWidth={1.5} />
         </OctantButton>
       ) : null}
       {sendHidden === true ? null : (

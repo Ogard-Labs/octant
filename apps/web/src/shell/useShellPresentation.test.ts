@@ -2,9 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   readBottomPanelPresentation,
   readSidebarCollapsed,
+  resolveWorkspaceMaterial,
   writeBottomPanelPresentation,
   writeSidebarCollapsed,
 } from "./useShellPresentation";
+
+describe("workspace translucency", () => {
+  it("only turns translucent when the preference is on and the sidebar is already translucent", () => {
+    expect(resolveWorkspaceMaterial("system", "translucent")).toBe("translucent");
+    expect(resolveWorkspaceMaterial("opaque", "translucent")).toBe("opaque");
+    expect(resolveWorkspaceMaterial("system", "opaque")).toBe("opaque");
+    expect(resolveWorkspaceMaterial("opaque", "opaque")).toBe("opaque");
+  });
+});
 
 describe("sidebar collapsed persistence", () => {
   it("reads and writes the presentation preference without throwing when storage is missing", () => {

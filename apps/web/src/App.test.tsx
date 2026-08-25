@@ -2410,6 +2410,42 @@ describe("App", () => {
     );
   });
 
+  it("reserves the native titlebar inset only for a host that hides its own title bar", async () => {
+    const shellClient = client();
+    const framedHost: OctantHostBridge = {
+      ...credentialHostOperations(),
+      close: vi.fn(),
+      maximizeOrRestore: vi.fn(),
+      minimize: vi.fn(),
+      projectWindowCapability,
+      resetBounds: vi.fn(),
+      selectProjectRoot: vi.fn(),
+      setSidebarMaterialPreference: vi.fn(),
+      subscribeResolvedMaterial: vi.fn(() => () => undefined),
+      windowChrome: "system-frame",
+    };
+    const { rerender } = render(
+      <App
+        hostBridge={framedHost}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        shellClient={shellClient}
+      />,
+    );
+
+    await screen.findByRole("banner");
+    expect(document.documentElement.dataset.octantNativeHost).toBeUndefined();
+
+    rerender(
+      <App
+        hostBridge={{ ...framedHost, windowChrome: "hidden-inset" }}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        shellClient={shellClient}
+      />,
+    );
+
+    await waitFor(() => expect(document.documentElement.dataset.octantNativeHost).toBe("true"));
+  });
+
   it("applies reduced transparency to the native sidebar material", async () => {
     const setSidebarVibrancyMode = vi.fn();
     const hostBridge: OctantHostBridge = {
@@ -3318,9 +3354,49 @@ describe("App", () => {
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(within(dock).queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
 
+    await user.click(within(panel).getByRole("button", { name: "Add tool" }));
+    await user.click(within(panel).getByRole("button", { name: "Review" }));
+    expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
+    expect(within(panel).getByRole("tab", { name: "Review" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
     await user.click(within(panel).getByRole("button", { name: "Hide bottom panel" }));
     expect(screen.queryByRole("region", { name: "Bottom panel" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
+  });
+
+  it("retains the restored Terminal tab when another bottom tool opens", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      `octant.shell.bottom-panel.${String(windowId)}.v1`,
+      JSON.stringify({ open: true, height: 260 }),
+    );
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    const panel = await screen.findByRole("region", { name: "Bottom panel" });
+    expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
+    await user.click(within(panel).getByRole("button", { name: "Add tool" }));
+    await user.click(within(panel).getByRole("button", { name: "Review" }));
+
+    expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
+    expect(within(panel).getByRole("tab", { name: "Review" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   it("clears the previous thread's dock tool before a pane with no thread loads", async () => {

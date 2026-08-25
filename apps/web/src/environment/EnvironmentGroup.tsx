@@ -37,7 +37,7 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
         <ChevronRight
           aria-hidden="true"
           className="environment-group__chevron"
-          size={13}
+          size={14}
           strokeWidth={2}
         />
         <span className="environment-group__title">{props.title}</span>

@@ -220,7 +220,7 @@ export function SettingsView(props: SettingsViewProps) {
           )}
           <label className="settings-view__field settings-view__field--search">
             <span className="settings-view__search-label">Search settings</span>
-            <Search aria-hidden="true" className="settings-view__search-icon" size={13} />
+            <Search aria-hidden="true" className="settings-view__search-icon" size={14} />
             <OctantInput
               aria-label="Search settings"
               className="settings-view__text-input"
@@ -553,6 +553,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             description="How you are shown inside Octant. There is no account behind this, and none of it is required."
             focused={focusedSetting === settingId("user-profile")}
             label="Your profile"
+            labelledBySection
             scope="app"
             settingId="user-profile"
           >
@@ -601,6 +602,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             description="The chords that reach Octant's global surfaces on this machine."
             focused={focusedSetting === settingId("keybindings")}
             label="Shortcuts"
+            labelledBySection
             scope="app"
             settingId="keybindings"
           >
@@ -615,6 +617,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             description="Octant updates itself only when you ask it to, and never while work is running."
             focused={focusedSetting === settingId("app-updates")}
             label="Application updates"
+            labelledBySection
             scope="app"
             settingId="app-updates"
           >
@@ -707,6 +710,45 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                   id="translucent-sidebar-effective-note"
                 >
                   Translucency is unavailable, so Octant is using an opaque sidebar.
+                </p>
+              ) : null}
+            </SettingRow>
+          ) : null}
+          {isAvailable("workspace-material") ? (
+            <SettingRow
+              description="Extend translucency from the sidebar across the whole workspace."
+              focused={focusedSetting === settingId("workspace-material")}
+              label="Translucent workspace"
+              scope="app"
+              settingId="workspace-material"
+            >
+              <OctantSwitch
+                checked={
+                  props.settings.workspaceMaterial === "system" &&
+                  props.settings.sidebarMaterial === "system" &&
+                  (
+                    props.themeController?.draft?.sidebarBackground ??
+                    props.settings.sidebarBackground
+                  ).vibrancyMode !== "off"
+                }
+                describedBy="workspace-material-description"
+                disabled={
+                  props.settings.sidebarMaterial !== "system" ||
+                  (
+                    props.themeController?.draft?.sidebarBackground ??
+                    props.settings.sidebarBackground
+                  ).vibrancyMode === "off"
+                }
+                label="Translucent workspace"
+                onCheckedChange={(checked) => {
+                  props.onSettingsChange({ workspaceMaterial: checked ? "system" : "opaque" });
+                }}
+              />
+              {props.settings.sidebarMaterial !== "system" ||
+              (props.themeController?.draft?.sidebarBackground ?? props.settings.sidebarBackground)
+                .vibrancyMode === "off" ? (
+                <p className="settings-view__effective-note" id="workspace-material-effective-note">
+                  Turn on Translucent sidebar first.
                 </p>
               ) : null}
             </SettingRow>

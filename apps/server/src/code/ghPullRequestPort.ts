@@ -386,9 +386,10 @@ export class GhPullRequestPort {
   }
 
   /**
-   * List a bounded pull-request history for one server-resolved github.com
-   * repository. The Project workspace filters this to active rows; the board
-   * also uses merged and closed rows. This never mutates GitHub.
+   * List bounded active pull requests (including drafts) for one server-
+   * resolved github.com repository. Closed and merged identities are recovered
+   * separately from the operation journal and observed by identity. This never
+   * mutates GitHub.
    */
   async listActive(
     request: {
@@ -416,7 +417,7 @@ export class GhPullRequestPort {
           "--repo",
           repository,
           "--state",
-          "all",
+          "open",
           "--limit",
           String(request.limit),
           "--json",
