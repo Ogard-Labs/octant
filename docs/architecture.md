@@ -130,6 +130,18 @@ thread, the server records a **promotion proposal**; only explicit user approval
 creates a linked Code thread, and the new thread inherits no authority from the
 Work thread.
 
+Rebinding a Code Project supersedes the checkout its existing threads were
+created against, and no later observation can produce those threads' checkout
+ids again, so the server reports them as unavailable rather than waiting on a
+reconnection nobody is attempting. Per `docs/decisions/0032`, that refusal names
+a way out: the thread's fail-closed surface offers an explicit rebind that moves
+it onto the checkout the Project binds now. The server authorizes and journals
+the move, and it never happens on its own — a matching filesystem root is not
+consent to change what authority a thread holds. A session grant of Full access
+does not survive the move; the thread lands on its persisted posture. A thread
+that owns a managed worktree is refused, because that checkout is the thread's
+own tree rather than the Project's.
+
 A child AgentRun receives a server-prepared workspace: Chat a research-only
 virtual workspace, Work the current confined Project root and binding revision,
 and Code an isolated managed worktree that is confirmed before admission.
