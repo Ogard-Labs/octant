@@ -97,6 +97,15 @@ evidence("gVisor execution capsule evidence", () => {
       driver,
       createExportId: () => exportIds.shift() ?? "99999999-9999-4999-8999-999999999999",
     });
+    const protectedProbe = await driver.probe();
+    expect(protectedProbe.host).toEqual({
+      platform: "linux",
+      rootlessPodman: true,
+      runsc: true,
+      systrap: true,
+      cgroupsV2: true,
+      dedicatedIdentity: true,
+    });
     const first = capsuleRequest({
       capsuleId: "11111111-1111-4111-8111-111111111111",
       threadId: "55555555-5555-4555-8555-555555555555",
@@ -111,12 +120,14 @@ evidence("gVisor execution capsule evidence", () => {
     let recoveredDriver: GvisorPodmanExecutionCapsuleDriver | undefined;
 
     try {
-      await expect(service.acquire({ request: first, source })).resolves.toMatchObject({
-        status: "ready",
-      });
-      await expect(service.acquire({ request: second, source })).resolves.toMatchObject({
-        status: "ready",
-      });
+      const firstAcquisition = await service.acquire({ request: first, source });
+      if (firstAcquisition.status !== "ready") {
+        throw new Error(`First capsule acquisition ${JSON.stringify(firstAcquisition)}.`);
+      }
+      const secondAcquisition = await service.acquire({ request: second, source });
+      if (secondAcquisition.status !== "ready") {
+        throw new Error(`Second capsule acquisition ${JSON.stringify(secondAcquisition)}.`);
+      }
 
       await expect(
         service.execute({
