@@ -55,7 +55,3 @@ function hostDisplayNameFromState(state: RemoteSessionBridgeState): string | und
 export function canExecuteRemoteProductMutation(state: RemoteSessionBridgeState): boolean {
   return state.kind === "ready";
 }
-
-export function shouldFailClosedRemoteMutation(state: RemoteSessionBridgeState): boolean {
-  return state.kind === "stale" || state.kind === "unavailable" || state.kind === "unauthorized";
-}
