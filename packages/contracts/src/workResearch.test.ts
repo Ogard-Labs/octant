@@ -13,6 +13,10 @@ import {
   decodeWorkSourceRef,
 } from "./workResearch";
 
+function expectRoundTrip(decode: (value: unknown) => unknown, value: unknown): void {
+  expect(decode(value)).toEqual(value);
+}
+
 const ids = {
   brief: "11111111-1111-4111-8111-111111111111",
   source: "22222222-2222-4222-8222-222222222222",
@@ -149,7 +153,7 @@ describe("WorkCitationAnchor", () => {
 
 describe("WorkResearchBrief", () => {
   it("round-trips a valid draft brief", () => {
-    expect(decodeWorkResearchBrief(brief)).toEqual(brief);
+    expectRoundTrip(decodeWorkResearchBrief, brief);
   });
 
   it("rejects a brief with no questions", () => {
@@ -200,7 +204,7 @@ describe("WorkResearchCommand", () => {
       sourcePolicy,
       deliverables: brief.deliverables,
     };
-    expect(decodeWorkResearchCommand(command)).toEqual(command);
+    expectRoundTrip(decodeWorkResearchCommand, command);
   });
 
   it("round-trips an add-source command", () => {
@@ -218,7 +222,7 @@ describe("WorkResearchCommand", () => {
       citationAnchor: "anchor-1",
       sourceVersion,
     };
-    expect(decodeWorkResearchCommand(command)).toEqual(command);
+    expectRoundTrip(decodeWorkResearchCommand, command);
   });
 
   it("round-trips a finalize-report command", () => {
@@ -231,7 +235,7 @@ describe("WorkResearchCommand", () => {
       reportId: ids.report,
       producedArtifactRef: "opaque-report-artifact-1",
     };
-    expect(decodeWorkResearchCommand(command)).toEqual(command);
+    expectRoundTrip(decodeWorkResearchCommand, command);
   });
 
   it("rejects an add-source command carrying a path-separator sourceRef", () => {
@@ -261,7 +265,7 @@ describe("WorkResearchCommandResult", () => {
       requestId: ids.request,
       brief,
     };
-    expect(decodeWorkResearchCommandResult(result)).toEqual(result);
+    expectRoundTrip(decodeWorkResearchCommandResult, result);
   });
 
   it("round-trips a source-added result", () => {
@@ -271,7 +275,7 @@ describe("WorkResearchCommandResult", () => {
       brief,
       source,
     };
-    expect(decodeWorkResearchCommandResult(result)).toEqual(result);
+    expectRoundTrip(decodeWorkResearchCommandResult, result);
   });
 
   it("round-trips a report-finalized result", () => {
@@ -281,7 +285,7 @@ describe("WorkResearchCommandResult", () => {
       brief: { ...brief, status: "finalized", version: 5 },
       report,
     };
-    expect(decodeWorkResearchCommandResult(result)).toEqual(result);
+    expectRoundTrip(decodeWorkResearchCommandResult, result);
   });
 
   it("round-trips an unauthorized result exposing only opaque ids", () => {
@@ -291,7 +295,7 @@ describe("WorkResearchCommandResult", () => {
       briefId: ids.brief,
       sourceId: ids.source,
     };
-    expect(decodeWorkResearchCommandResult(result)).toEqual(result);
+    expectRoundTrip(decodeWorkResearchCommandResult, result);
   });
 
   it("round-trips an interrupted result", () => {
@@ -302,7 +306,7 @@ describe("WorkResearchCommandResult", () => {
       sourceId: ids.source,
       canRetry: true,
     };
-    expect(decodeWorkResearchCommandResult(result)).toEqual(result);
+    expectRoundTrip(decodeWorkResearchCommandResult, result);
   });
 
   it("rejects a source-added result whose source belongs to a different brief", () => {
@@ -358,7 +362,7 @@ describe("WorkResearchFrame", () => {
       occurredAt: createdAt,
       transition: { kind: "brief-created", brief },
     };
-    expect(decodeWorkResearchFrame(frame)).toEqual(frame);
+    expectRoundTrip(decodeWorkResearchFrame, frame);
   });
 
   it("round-trips a source-added frame", () => {
@@ -373,7 +377,7 @@ describe("WorkResearchFrame", () => {
         source,
       },
     };
-    expect(decodeWorkResearchFrame(frame)).toEqual(frame);
+    expectRoundTrip(decodeWorkResearchFrame, frame);
   });
 
   it("round-trips a report-finalized frame", () => {
@@ -388,7 +392,7 @@ describe("WorkResearchFrame", () => {
         report,
       },
     };
-    expect(decodeWorkResearchFrame(frame)).toEqual(frame);
+    expectRoundTrip(decodeWorkResearchFrame, frame);
   });
 
   it("rejects a frame carrying an unauthorized transition (success-only journal)", () => {

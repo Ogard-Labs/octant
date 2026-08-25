@@ -636,6 +636,7 @@ describe("createPhase1RuntimeRegistries", () => {
           automaticUpdateChecks: true,
           lastContextSurface,
           modeSwitcherPresentation,
+          workspaceMaterial: "opaque",
           navigatorAssistant: {},
           projectViewSwitcherPresentation: "dropdown",
           transcriptTextSize: "medium",
@@ -839,6 +840,7 @@ function validSettingsPayload() {
       automaticUpdateChecks: true,
       lastContextSurface: null,
       sidebarMaterial: "system",
+      workspaceMaterial: "opaque",
       modeSwitcherPresentation: "dropdown",
       // Unconfigured Navigator: the section decodes to its empty honest state.
       navigatorAssistant: {},

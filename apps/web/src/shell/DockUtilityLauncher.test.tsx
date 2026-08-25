@@ -1,8 +1,22 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DockUtilityLauncher } from "./DockUtilityLauncher";
 
 describe("right sidebar tool launcher", () => {
+  it("starts every menu row's icon and label at the same two edges", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const rule = styles.match(/\.workspace-disclosure__action \{([^}]*)\}/)?.[1];
+
+    // Each row is an OctantButton, and the button recipe centres its contents.
+    // `text-align: left` does not undo that for a flex box, so every row
+    // centred its own icon-and-label pair and the width of the label decided
+    // where its icon sat.
+    expect(rule).toContain("justify-content: flex-start");
+    expect(styles).toMatch(/\.workspace-disclosure__action > svg \{[^}]*flex: 0 0 16px;/);
+  });
+
   it("opens available tools and restores focus to the trigger", () => {
     const onOpen = vi.fn();
     render(

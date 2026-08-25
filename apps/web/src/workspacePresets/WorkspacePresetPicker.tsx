@@ -26,7 +26,7 @@ export function WorkspacePresetPicker(props: WorkspacePresetPickerProps) {
   return (
     <section aria-label="Set up this workspace" className="workspace-presets">
       <header className="workspace-presets__header">
-        <LayoutTemplate aria-hidden="true" size={13} strokeWidth={1.8} />
+        <LayoutTemplate aria-hidden="true" size={14} strokeWidth={1.8} />
         <span>Set up this workspace</span>
       </header>
       <ul className="workspace-presets__list">
