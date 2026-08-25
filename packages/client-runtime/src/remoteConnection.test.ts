@@ -366,7 +366,6 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
       const proof = decodeRemoteRequestProofV1(
         JSON.parse(Buffer.from(proofHeader, "base64url").toString("utf8")),
       );
-      lastBodyDigest = proof.bodyDigest;
       const sessionId = issuedSessionId;
       if (sessionId === undefined || device === undefined) {
         return Response.json({ category: "unauthorized" }, { status: 401 });
@@ -384,6 +383,7 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
         return Response.json({ category: "unauthorized" }, { status: 401 });
       }
       productProofVerified = true;
+      lastBodyDigest = proof.bodyDigest;
       return Response.json({ ok: true });
     }
 
@@ -721,6 +721,7 @@ describe("RemoteConnection device-key possession", () => {
       body,
     });
 
+    expect(server.productProofVerified()).toBe(true);
     expect(server.bodyDigest()).toBe(createHash("sha256").update(Buffer.from(body)).digest("hex"));
   });
 
