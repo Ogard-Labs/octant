@@ -235,7 +235,7 @@ export function ThreadMentionChips(props: {
             onClick={() => props.onRemove(chip.threadId)}
             type="button"
           >
-            <X aria-hidden="true" size={10} strokeWidth={1.8} />
+            <X aria-hidden="true" size={12} strokeWidth={1.8} />
           </OctantButton>
         </li>
       ))}

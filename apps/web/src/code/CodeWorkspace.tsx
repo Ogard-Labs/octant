@@ -696,7 +696,7 @@ function GitObservationLoading() {
     <section className="code-git-loading" role="status">
       <div className="code-git-loading__heading">
         <span className="code-git-loading__icon">
-          <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={18} />
+          <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={16} />
         </span>
         <div>
           <span className="code-git-loading__eyebrow">Git workspace</span>

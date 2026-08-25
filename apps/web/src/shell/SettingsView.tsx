@@ -220,7 +220,7 @@ export function SettingsView(props: SettingsViewProps) {
           )}
           <label className="settings-view__field settings-view__field--search">
             <span className="settings-view__search-label">Search settings</span>
-            <Search aria-hidden="true" className="settings-view__search-icon" size={13} />
+            <Search aria-hidden="true" className="settings-view__search-icon" size={14} />
             <OctantInput
               aria-label="Search settings"
               className="settings-view__text-input"

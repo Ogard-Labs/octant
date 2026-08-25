@@ -258,7 +258,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
             items={actions}
             onValueChange={selectAction}
             selectionMode="action"
-            trigger={<MoreHorizontal aria-hidden="true" size={15} strokeWidth={1.7} />}
+            trigger={<MoreHorizontal aria-hidden="true" size={16} strokeWidth={1.7} />}
             triggerClassName="code-terminal-pane__actions-trigger"
             triggerLabel="More terminal actions"
             value={actions[0]?.value ?? ""}

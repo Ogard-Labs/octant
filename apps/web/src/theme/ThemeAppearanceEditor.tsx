@@ -157,7 +157,7 @@ export function ThemeAppearanceEditor(props: {
           <ChevronDown
             aria-hidden="true"
             className="settings-theme-editor__disclosure-icon"
-            size={15}
+            size={16}
           />
         </summary>
         <div className="settings-theme-editor__disclosure-body">
@@ -223,7 +223,7 @@ export function ThemeAppearanceEditor(props: {
           <ChevronDown
             aria-hidden="true"
             className="settings-theme-editor__disclosure-icon"
-            size={15}
+            size={16}
           />
         </summary>
         <div className="settings-theme-editor__disclosure-body">

@@ -305,7 +305,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
             onPointerUp={props.drag.onPointerUp}
             title="Drag to move or split"
           >
-            <GripVertical aria-hidden="true" size={13} strokeWidth={1.8} />
+            <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
             {provider === undefined ? null : (
               <span
                 aria-hidden="true"
