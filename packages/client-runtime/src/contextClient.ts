@@ -10,6 +10,7 @@ import {
   type ContextInspectorRequest,
   type ContextInspectorSnapshot,
 } from "@octant/contracts/context-rpc";
+import { bindFetchPort } from "./bindFetchPort";
 
 export interface ContextClientOptions {
   readonly baseUrl: string;
@@ -38,6 +39,7 @@ export class ContextClientFailure extends Error {
 }
 
 export function createContextClient(options: ContextClientOptions): ContextClient {
+  const resolved = { ...options, fetch: bindFetchPort(options.fetch) };
   const headers = {
     "content-type": "application/json",
     "x-octant-window-capability": options.windowCapability,
@@ -60,7 +62,7 @@ export function createContextClient(options: ContextClientOptions): ContextClien
         throw protocol("Context request is invalid.");
       }
       const snapshot = await post(
-        options,
+        resolved,
         "/api/context/inspect",
         request,
         signal,
@@ -84,7 +86,7 @@ export function createContextClient(options: ContextClientOptions): ContextClien
         throw protocol("Context command is invalid.");
       }
       const result = await post(
-        options,
+        resolved,
         "/api/context/commands",
         command,
         signal,

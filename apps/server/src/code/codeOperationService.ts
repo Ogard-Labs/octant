@@ -159,7 +159,7 @@ export interface CodeOperationTerminalPort {
   readonly observe?: (
     terminalId: string,
     listener: (emission: TerminalOutputEmission) => void,
-    options?: { readonly afterTranscript: string },
+    options?: { readonly afterCharacters: number },
   ) => () => void;
   readonly write: (terminalId: string, data: string) => void;
   readonly resize: (terminalId: string, columns: number, rows: number) => void;
@@ -170,7 +170,11 @@ export interface CodeOperationTerminalSnapshot {
   readonly terminalId: string;
   readonly status: "running" | "exited" | "interrupted";
   readonly exitCode?: number;
-  readonly transcript: { readonly chunks: readonly string[]; readonly truncated: boolean };
+  readonly transcript: {
+    readonly chunks: readonly string[];
+    readonly truncated: boolean;
+    readonly characters: number;
+  };
 }
 
 interface TerminalOutputEmission {
@@ -215,7 +219,8 @@ interface TerminalOwner {
   /** Every surface currently following this terminal, keyed by its operation. */
   readonly readers: Map<string, TerminalOutputReader>;
   removeOutputListener?: () => void;
-  outputBaseline?: string;
+  /** How far the surface has already been caught up by the snapshot it was sent. */
+  outputBaseline?: number;
 }
 
 export interface CodeOperationRepositoryTestPort {
@@ -1218,7 +1223,7 @@ export class CodeOperationService {
           threadId: thread.id,
           checkoutId: checkout.id,
           readers: new Map(),
-          outputBaseline: snapshot.transcript.chunks.join(""),
+          outputBaseline: snapshot.transcript.characters,
         });
         return this.#terminal(command.operationId, snapshot);
       }
@@ -1227,7 +1232,7 @@ export class CodeOperationService {
         if (ownerFailure !== undefined) return ownerFailure;
         const snapshot = this.#options.terminals.attach(command.terminalId);
         const owner = this.#terminalOwners.get(command.terminalId)!;
-        owner.outputBaseline = snapshot.transcript.chunks.join("");
+        owner.outputBaseline = snapshot.transcript.characters;
         return this.#terminal(command.operationId, snapshot);
       }
       case "write-terminal": {
@@ -1576,7 +1581,7 @@ export class CodeOperationService {
           this.#deactivateTerminalOutput(terminalId);
         }
       },
-      outputBaseline === undefined ? undefined : { afterTranscript: outputBaseline },
+      outputBaseline === undefined ? undefined : { afterCharacters: outputBaseline },
     );
   }
 
