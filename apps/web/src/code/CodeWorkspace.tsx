@@ -12,6 +12,14 @@ import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { LoaderCircle } from "lucide-react";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
+import {
+  OctantEmptyStateCopy,
+  OctantEmptyStateDescription,
+  OctantEmptyStateEyebrow,
+  OctantEmptyStateMedia,
+  OctantEmptyStateRoot,
+  OctantEmptyStateTitle,
+} from "../ui/base/OctantEmptyState";
 import { CodeGitPane } from "./CodeGitPane";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";
@@ -694,24 +702,18 @@ function PullRequestWorkspaceSurface(
 
 function GitObservationLoading() {
   return (
-    <section className="code-git-loading" role="status">
-      <div className="code-git-loading__heading">
-        <span className="code-git-loading__icon">
-          <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={16} />
-        </span>
-        <div>
-          <span className="code-git-loading__eyebrow">Git workspace</span>
-          <h1>Loading Git state</h1>
-          <p>Loading exact checkout status and diff evidence.</p>
-        </div>
-      </div>
-      <div aria-hidden="true" className="code-git-loading__rows">
-        <span />
-        <span />
-        <span />
-        <span />
-      </div>
-    </section>
+    <OctantEmptyStateRoot role="status">
+      <OctantEmptyStateMedia tone="neutral">
+        <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={16} />
+      </OctantEmptyStateMedia>
+      <OctantEmptyStateCopy>
+        <OctantEmptyStateEyebrow>Git workspace</OctantEmptyStateEyebrow>
+        <OctantEmptyStateTitle>Loading Git state</OctantEmptyStateTitle>
+        <OctantEmptyStateDescription>
+          Loading exact checkout status and diff evidence.
+        </OctantEmptyStateDescription>
+      </OctantEmptyStateCopy>
+    </OctantEmptyStateRoot>
   );
 }
 

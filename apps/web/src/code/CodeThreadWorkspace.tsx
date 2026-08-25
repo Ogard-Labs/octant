@@ -24,6 +24,7 @@ import {
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController, CodeTurnStatus } from "./useCodeController";
@@ -749,17 +750,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             return (
               <div className="code-thread-workspace__row">
                 {handoff ? (
-                  <div
+                  <OctantSeparatorWithLabel
                     aria-label="Provider handoff"
-                    className="code-thread-workspace__handoff"
-                    role="separator"
+                    className="uppercase tracking-wide"
                   >
                     Provider handoff ·{" "}
                     {boundProviderModelLabel(providerGroups, {
                       providerInstanceId: message.providerInstanceId,
                       modelId: message.modelId,
                     })}
-                  </div>
+                  </OctantSeparatorWithLabel>
                 ) : null}
                 <article
                   className={`code-thread-workspace__message code-thread-workspace__message--${message.role === "user" ? "user" : "agent"}`}

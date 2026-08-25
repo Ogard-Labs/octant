@@ -1,8 +1,6 @@
 import { decodeEnvironmentCompactIdentity } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
@@ -13,8 +11,6 @@ const identity = decodeEnvironmentCompactIdentity({
   detail: "feature/name",
   status: "available",
 });
-
-const appStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
 describe("the thread environment summary", () => {
   it("shows a compact truthful summary without opening a persistent panel", () => {
@@ -33,7 +29,7 @@ describe("the thread environment summary", () => {
     );
     const summary = screen.getByRole("button", { name: "Toggle environment" });
     expect(summary).toBeVisible();
-    expect(summary).toHaveAttribute("aria-pressed", "false");
+    expect(summary).toHaveAttribute("aria-expanded", "false");
     expect(
       screen.getByText("Octant · feature/name · Dirty · packages/app · 2 servers"),
     ).toHaveClass("sr-only");
@@ -59,10 +55,13 @@ describe("the thread environment summary", () => {
         <p>Checkout facts</p>
       </ThreadEnvironmentPanel>,
     );
-    expect(screen.getByRole("dialog", { name: "Environment" })).toBeVisible();
+    // A prop-driven open (unlike a click-driven one) doesn't yield to the
+    // animation frame that settles the popup's enter transition, so wait for
+    // it before asserting on the now-open panel.
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Environment" })).toBeVisible());
     expect(screen.getByRole("heading", { name: "Environment" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Toggle environment" })).toHaveAttribute(
-      "aria-pressed",
+      "aria-expanded",
       "true",
     );
     expect(screen.getByText("Checkout facts")).toBeVisible();
@@ -70,11 +69,12 @@ describe("the thread environment summary", () => {
     await user.click(screen.getByRole("button", { name: "Close environment" }));
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
 
-    fireEvent.keyDown(window, { key: "Escape" });
+    await user.keyboard("{Escape}");
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
   });
 
-  it("closes on an outside pointer and when the pane is no longer active", () => {
+  it("closes on an outside pointer and when the pane is no longer active", async () => {
+    const user = userEvent.setup();
     const onOpenChange = vi.fn();
     const { rerender } = render(
       <div>
@@ -84,7 +84,7 @@ describe("the thread environment summary", () => {
         </ThreadEnvironmentPanel>
       </div>,
     );
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
+    await user.click(screen.getByRole("button", { name: "Outside" }));
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
 
     rerender(
@@ -128,11 +128,5 @@ describe("the thread environment summary", () => {
     await user.click(screen.getByRole("button", { name: "Toggle environment" }));
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(true);
-  });
-
-  it("keeps the disclosure inside the central pane while the right dock is open", () => {
-    expect(appStyles).toContain(
-      ".shell--wide-context-open .thread-environment-disclosure {\n  right: var(--octant-context-sidebar-width);",
-    );
   });
 });

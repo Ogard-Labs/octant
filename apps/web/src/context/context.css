@@ -44,9 +44,10 @@
   color: var(--octant-text-primary);
 }
 
+/* Position/anchoring now comes from OctantPopover's floating positioner
+   (side="top" align="end"); only width, padding, and color remain this
+   surface's own. */
 .context-window-popover {
-  right: 0;
-  bottom: calc(100% + 8px);
   width: min(360px, calc(100vw - 24px));
   padding: 12px;
   color: var(--octant-text-primary);
@@ -429,12 +430,6 @@
   border-radius: 6px;
 }
 
-.context-entry-card {
-  padding: 9px;
-  border: 1px solid var(--octant-border);
-  border-radius: 7px;
-}
-
 .context-entry-card h4 {
   margin-top: 2px;
   font-size: calc(11 * var(--oct-text-step));
@@ -447,7 +442,6 @@
 
 @media (max-width: 720px) {
   .context-window-popover {
-    right: 0;
     width: min(360px, calc(100vw - 12px));
   }
 

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
@@ -23,9 +23,19 @@ describe("SidebarProfile", () => {
     expect(container.querySelector(".sidebar-foot")).toContainElement(row);
 
     await user.click(row);
-    await user.click(screen.getByRole("menuitem", { name: "Settings" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(onOpenSettings.mock.calls[0]?.[0]).toBeUndefined();
+  });
+
+  it("centers the menu above the row instead of anchoring it to the content edge", async () => {
+    const user = userEvent.setup();
+    render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
+
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    const menu = await screen.findByRole("menu");
+    expect(menu).toHaveAttribute("data-side", "top");
+    expect(menu).toHaveAttribute("data-align", "center");
   });
 
   it("shows the name the person gave and leads to the settings that are theirs", async () => {
@@ -44,16 +54,16 @@ describe("SidebarProfile", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Henrik" }));
-    await user.click(screen.getByRole("menuitem", { name: "Usage" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Usage" }));
     expect(onOpenSettings).toHaveBeenCalledWith({ section: "usage" });
 
     await user.click(screen.getByRole("button", { name: "Henrik" }));
-    await user.click(screen.getByRole("menuitem", { name: "Navigator" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Navigator" }));
     expect(onOpenNavigator).toHaveBeenCalledOnce();
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "Henrik" }));
-    await user.click(screen.getByRole("menuitem", { name: "Zen mode" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Zen mode" }));
     expect(onOpenZen).toHaveBeenCalledOnce();
   });
 
@@ -79,7 +89,7 @@ describe("SidebarProfile", () => {
 
     expect(screen.queryByRole("menuitem", { name: "Agents" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Henrik" }));
-    expect(screen.getByRole("group", { name: "Workspace" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Workspace" })).toBeVisible();
     for (const label of ["Agents", "Automations", "Artifacts", "Plugins"]) {
       expect(screen.getByRole("menuitem", { name: label })).toBeVisible();
     }
@@ -92,6 +102,7 @@ describe("SidebarProfile", () => {
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
     await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await screen.findByRole("menuitem", { name: "Settings" });
     expect(screen.queryByRole("menuitem", { name: "Navigator" })).not.toBeInTheDocument();
   });
 
@@ -100,6 +111,7 @@ describe("SidebarProfile", () => {
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
     await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await screen.findByRole("menuitem", { name: "Settings" });
     expect(screen.queryByRole("menuitem", { name: "Zen mode" })).not.toBeInTheDocument();
   });
 
@@ -108,8 +120,10 @@ describe("SidebarProfile", () => {
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
     const row = screen.getByRole("button", { name: "Set your name" });
-    await user.click(row);
-    expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus();
+    row.focus();
+    await user.keyboard("{Enter}");
+    await screen.findByRole("menuitem", { name: "Settings" });
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus());
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menuitem", { name: "Settings" })).not.toBeInTheDocument();

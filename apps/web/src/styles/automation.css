@@ -188,13 +188,8 @@
   font-size: 0.6875rem;
 }
 
-/* .badge paints the cadence and environment pills; the transparent
-   border keeps their box identical to the dashed one-time variant. */
-.automation-row__cadence,
-.automation-row__environment {
-  border: 1px solid transparent;
-}
-
+/* The shadcn badge recipe already gives the secondary variant a
+   transparent 1px border, matching the dashed one-time variant's box. */
 .automation-row__cadence[data-cadence="one-time"] {
   border-color: var(--oct-border);
   border-style: dashed;

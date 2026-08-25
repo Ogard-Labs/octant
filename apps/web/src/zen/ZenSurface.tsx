@@ -36,6 +36,7 @@ import {
   type NavigatorAssistantController,
 } from "../navigator/useNavigatorAssistant";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ZenAppearancePanel } from "./ZenAppearancePanel";
 import { ZenBar } from "./ZenBar";
@@ -796,9 +797,9 @@ export function ZenSurface(props: ZenSurfaceProps) {
       ) : null}
 
       {manualPanel === null ? null : (
-        <section
+        <OctantCard
           aria-label={manualPanel === "appearance" ? "Zen appearance" : "Zen additions"}
-          className="zen-panel card card-tight card-raised zen-surface__manual-panel window-no-drag"
+          className="zen-panel zen-surface__manual-panel window-no-drag px-6"
           role="dialog"
         >
           <header className="card-head">
@@ -986,7 +987,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
               ) : null}
             </>
           )}
-        </section>
+        </OctantCard>
       )}
 
       <div className="zen-surface__bar-anchor window-no-drag">

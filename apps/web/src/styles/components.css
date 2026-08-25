@@ -396,15 +396,6 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   font-size: var(--oct-text-xs);
 }
 
-.plan-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-3);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-}
-
 .plan-card__header {
   display: flex;
   align-items: baseline;
@@ -466,7 +457,6 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 }
 
 .thread-task-viewer {
-  position: relative;
   display: flex;
   justify-content: center;
 }
@@ -499,13 +489,13 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   font-variant-numeric: tabular-nums;
 }
 
+/* Position/anchoring now comes from OctantPopover's floating positioner
+   (side="top" align="center"); only width, padding, and color remain this
+   surface's own. */
 .thread-task-viewer__popover {
-  bottom: calc(100% + 8px);
-  left: 50%;
   width: min(400px, calc(100vw - 32px));
   padding: 10px;
   color: var(--octant-text-primary);
-  transform: translateX(-50%);
 }
 
 .thread-task-viewer__header {
