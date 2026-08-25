@@ -1,6 +1,6 @@
 # Octant domain language
 
-Octant separates the device a person controls from, the machine that owns
+Octant separates the device a person controls from the machine that owns
 their work, and the isolated places where that work executes.
 
 ## Control and ownership
