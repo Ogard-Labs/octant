@@ -445,7 +445,8 @@ class TranscriptBuffer {
       this.#chunks.length > 0 &&
       this.#byteLength + markerBytes > MAX_TERMINAL_TRANSCRIPT_BYTES
     ) {
-      const dropped = this.#chunks.shift()!;
+      const dropped = this.#chunks.shift();
+      if (dropped === undefined) break;
       this.#byteLength -= Buffer.byteLength(dropped, "utf8");
       this.#characters -= dropped.length;
       this.#retainedFrom += dropped.length;
