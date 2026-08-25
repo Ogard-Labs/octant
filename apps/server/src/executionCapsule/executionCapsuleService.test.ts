@@ -249,6 +249,48 @@ describe("ExecutionCapsuleService", () => {
     expect(service.list()).toEqual([]);
   });
 
+  it("refuses to release a reacquired capsuleId using an export from the released generation", async () => {
+    const driver = protectedDriver();
+    const exportIds = [
+      "88888888-8888-4888-8888-888888888888",
+      "77777777-7777-4777-8777-777777777777",
+    ];
+    const service = new ExecutionCapsuleService({
+      driver,
+      createExportId: () => exportIds.shift() ?? "unused",
+    });
+    const source = {
+      bundlePath: "/source/octant.bundle",
+      sha256: "d".repeat(64),
+      byteLength: 4_096,
+      revision: "a".repeat(40),
+    };
+    const capsuleId = "11111111-1111-4111-8111-111111111111";
+    const firstOwner = request(capsuleId, "55555555-5555-4555-8555-555555555555");
+
+    await service.acquire({ request: firstOwner, source });
+    const firstExport = await service.exportGitBundle(firstOwner.capsuleId);
+    if (firstExport.status !== "exported") {
+      throw new Error("Expected the fixture export to succeed.");
+    }
+    await expect(
+      service.release({ capsuleId: firstOwner.capsuleId, exportId: firstExport.receipt.exportId }),
+    ).resolves.toMatchObject({ status: "released" });
+
+    // The capsuleId is client-supplied and can be reused for an unrelated
+    // owner once the first generation is released.
+    const secondOwner = request(capsuleId, "66666666-6666-4666-8666-666666666666");
+    await expect(service.acquire({ request: secondOwner, source })).resolves.toMatchObject({
+      status: "ready",
+    });
+
+    // The stale export from the released generation must not satisfy the
+    // export-required gate for the new capsule occupying the same id.
+    await expect(
+      service.release({ capsuleId: secondOwner.capsuleId, exportId: firstExport.receipt.exportId }),
+    ).resolves.toEqual({ status: "refused", reason: "export-required" });
+  });
+
   it("stops without destroying files and recovers as stopped after a Station restart", async () => {
     const driver = protectedDriver();
     const capsule = request(

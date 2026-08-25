@@ -415,6 +415,14 @@ export class ExecutionCapsuleService {
     this.#capsules.delete(input.capsuleId);
     this.#ownerCapsules.delete(executionCapsuleOwnerKey(capsule.receipt.owner));
     this.#runtimeIds.delete(capsule.runtimeId);
+    // A released capsuleId can be re-acquired for an unrelated capsule. Drop
+    // its exports here so a stale exportId from this generation can never
+    // satisfy the export-required check for the next one.
+    for (const [exportId, owned] of this.#exports) {
+      if (String(owned.receipt.capsuleId) === String(input.capsuleId)) {
+        this.#exports.delete(exportId);
+      }
+    }
     return {
       status: "released",
       receipt: decodeExecutionCapsuleReceipt({ ...capsule.receipt, status: "released" }),
