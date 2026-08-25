@@ -85,6 +85,40 @@ describe("useContextController", () => {
     expect(result.current.status).toBe("ready");
   });
 
+  it("does not ask a newly opened subject for the previous subject's sequence", async () => {
+    // Subject and turn move together when the reader switches threads. The
+    // subject effect clears the reading first, but this render still holds the
+    // one it cleared, and a thread opened behind the one left behind would have
+    // its answer refused as stale.
+    const other = {
+      aggregateType: subject.aggregateType,
+      aggregateId: "10000000-0000-4000-8000-000000000002",
+    } as typeof subject;
+    const inspect = vi.fn<ContextClient["inspect"]>(async (request) =>
+      contextFixture({
+        sequence: String(request.subject.aggregateId) === String(subject.aggregateId) ? 40 : 8,
+      }),
+    );
+    const client = fakeClient({ inspect });
+    const { rerender, result } = renderHook(
+      ({ activeSubject, revision }) =>
+        useContextController({ client, revision, subject: activeSubject }),
+      { initialProps: { activeSubject: subject, revision: 1 } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    rerender({ activeSubject: other, revision: 2 });
+    await waitFor(() => expect(result.current.snapshot?.sequence).toBe(8));
+
+    const askedOther = inspect.mock.calls.filter(
+      ([request]) => String(request.subject.aggregateId) === String(other.aggregateId),
+    );
+    expect(askedOther.length).toBeGreaterThan(0);
+    for (const [request] of askedOther) {
+      expect(request.afterSequence ?? 0).toBeLessThanOrEqual(8);
+    }
+  });
+
   it("loads a replay-aware snapshot and aborts the request on disposal", async () => {
     let signal: AbortSignal | undefined;
     const client = fakeClient({

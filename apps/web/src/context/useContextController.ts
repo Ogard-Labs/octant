@@ -141,9 +141,14 @@ export function useContextController(options: UseContextControllerOptions): Cont
     // taken before it existed stand for the rest of the session. Leaving it
     // unobserved runs this effect again the moment a snapshot arrives, so the
     // newer turn is asked for instead of swallowed.
-    if (subject === undefined || snapshot === undefined) return;
+    // `snapshot` is the trigger, not the value: when the subject changes in the
+    // same commit, the effect above has already cleared the ref while this
+    // render still holds the previous subject's reading. Asking the new subject
+    // for the old one's sequence is how the meter ends up refused as stale.
+    const measured = snapshotRef.current;
+    if (subject === undefined || measured === undefined) return;
     observedRevision.current = revision;
-    void reload(snapshot.sequence);
+    void reload(measured.sequence);
   }, [reload, revision, snapshot, subject]);
 
   const execute = useCallback(
