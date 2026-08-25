@@ -1115,7 +1115,7 @@ function decodeRecoveredRuntime(input: string):
       readonly capsuleId: string;
       readonly running: boolean;
       readonly ociRuntime: string;
-      readonly effectiveCaps: ReadonlyArray<string>;
+      readonly effectiveCaps: ReadonlyArray<string> | null;
       readonly mountCount: number;
       readonly user: string;
       readonly createCommand: ReadonlyArray<string>;
@@ -1147,7 +1147,7 @@ function decodeRecoveredRuntime(input: string):
     typeof record.Name !== "string" ||
     typeof record.ImageName !== "string" ||
     typeof record.OCIRuntime !== "string" ||
-    !isStringArray(record.EffectiveCaps) ||
+    (record.EffectiveCaps !== null && !isStringArray(record.EffectiveCaps)) ||
     !Array.isArray(record.Mounts)
   ) {
     return undefined;
@@ -1269,7 +1269,12 @@ function protectedRuntimeMismatches(
   // Podman reports an auto-allocated user namespace as effective mode
   // `private`; the preserved create command separately proves `--userns auto`.
   if (basename(recovered.ociRuntime) !== basename(runscPath)) mismatches.push("oci-runtime");
-  if (recovered.effectiveCaps.length !== 0) mismatches.push("effective-capabilities");
+  if (
+    (recovered.effectiveCaps === null && recovered.running) ||
+    (recovered.effectiveCaps !== null && recovered.effectiveCaps.length !== 0)
+  ) {
+    mismatches.push("effective-capabilities");
+  }
   if (recovered.mountCount !== 0) mismatches.push("host-mounts");
   if (recovered.user !== "0:0") mismatches.push("container-user");
   if (recovered.networkMode !== "none") mismatches.push("network-mode");

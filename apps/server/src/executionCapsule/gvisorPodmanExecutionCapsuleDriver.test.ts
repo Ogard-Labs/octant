@@ -619,7 +619,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
   it("stops a capsule without removing it and recovers the exact stopped identity", async () => {
     const runtimeId = "octant-capsule-11111111111141118111111111111111";
     let recoveredOciRuntime = "/usr/bin/runsc";
-    let recoveredEffectiveCaps: ReadonlyArray<string> | null = [];
+    let recoveredEffectiveCaps: unknown = [];
     const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
       if (command === "/usr/bin/podman" && args[0] === "info") {
         return {
@@ -766,6 +766,24 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
 
     recoveredOciRuntime = "/usr/bin/runsc";
     recoveredEffectiveCaps = null;
+    const stoppedInspect = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    await expect(stoppedInspect.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "stopped",
+      runtimeId,
+    });
+
+    recoveredEffectiveCaps = 7;
     const inspectShapeDiagnostic = vi.fn();
     const malformedInspect = new GvisorPodmanExecutionCapsuleDriver({
       platform: "linux",
@@ -786,7 +804,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     });
     expect(inspectShapeDiagnostic).toHaveBeenCalledWith({
       operation: "recover-inspected-runtime",
-      message: expect.stringContaining("EffectiveCaps=null"),
+      message: expect.stringContaining("EffectiveCaps=number"),
     });
 
     const diskRecoveryDiagnostic = vi.fn();
