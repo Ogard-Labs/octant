@@ -86,6 +86,8 @@ jobs:
           sudo apt-get install --yes runsc
       - name: Prepare the dedicated Station identity and quota-backed rootless store
         run: |
+          bun_path=$(command -v bun)
+          sudo install --mode 0755 "$bun_path" /usr/local/bin/bun
           sudo useradd --create-home --home-dir /var/lib/octant --shell /bin/bash octant
           sudo usermod --add-subuids 200000-265535 --add-subgids 200000-265535 octant
           sudo truncate --size 12G /var/tmp/octant-capsule-ci.xfs
@@ -105,22 +107,21 @@ jobs:
             "runroot = \"/run/user/${octant_uid}/containers\"" \
             | sudo --user octant tee /var/lib/octant/.config/containers/storage.conf >/dev/null
           sudo chown --recursive octant:octant "$GITHUB_WORKSPACE"
+          sudo chown --recursive "$(id --user):$(id --group)" "$GITHUB_WORKSPACE/.git"
       - name: Prove two protected capsules and a reviewed bundle export
         env:
           OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
         run: |
           octant_uid=$(id --user octant)
-          bun_path=$(command -v bun)
-          octant_path="$(dirname "$bun_path"):/usr/bin:/bin"
           sudo --user octant env \
             HOME=/var/lib/octant \
             XDG_RUNTIME_DIR="/run/user/${octant_uid}" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
-            PATH="$octant_path" \
+            PATH=/usr/local/bin:/usr/bin:/bin \
             OCTANT_RUN_GVISOR_CAPSULE_EVIDENCE=1 \
             OCTANT_GVISOR_CAPSULE_IMAGE="$OCTANT_GVISOR_CAPSULE_IMAGE" \
             OCTANT_DESKTOP_BRIDGE_SECRET=octant-secret-canary \
             GH_TOKEN=octant-secret-canary \
             SSH_AUTH_SOCK=/tmp/octant-secret-canary.sock \
-            "$bun_path" run --cwd apps/server test:evidence -- \
+            /usr/local/bin/bun run --cwd apps/server test:evidence -- \
               src/executionCapsule/gvisorExecutionCapsuleSmoke.integration.test.ts
