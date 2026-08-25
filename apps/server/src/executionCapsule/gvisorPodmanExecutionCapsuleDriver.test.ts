@@ -513,6 +513,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       "/usr/bin/podman",
       fixturePodmanArgs([
         "cp",
+        "--archive=false",
         `${created.runtimeId}:/tmp/octant-export.bundle`,
         "/var/lib/octant/capsules/exports/capsule.bundle",
       ]),

@@ -559,6 +559,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       const copied = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(runtime.disk),
         "cp",
+        "--archive=false",
         `${input.runtimeId}:/tmp/octant-export.bundle`,
         artifactPath,
       ]);
