@@ -194,6 +194,21 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
   for (const path of additionalWriteRoots) assertAbsolute(path, "additional write root");
   const readRoots = input.readRoots ?? [];
   for (const path of readRoots) assertAbsolute(path, "read root");
+  // Seatbelt is last-match-wins and the launch-root allow rules below are
+  // emitted after the DEFAULT_DENY_READ_PATHS deny rules. A root equal to or
+  // an ancestor of a denied path (e.g. /Library, /private, or /) would win
+  // and reopen the whole denied subtree, including /Library/Keychains, so
+  // every launch root must be refused before it reaches that allow list.
+  // Descendants (the temporary directory always resolves under
+  // /private/var) are unaffected and stay allowed.
+  for (const path of [
+    ...readRoots,
+    input.boundRoot,
+    input.temporaryDirectory,
+    ...additionalWriteRoots,
+  ]) {
+    assertNotAncestorOfDeniedPath(path, "launch root");
+  }
 
   const writeBoundRoot = input.writeBoundRoot !== false;
   const allowProcessExec = input.allowProcessExec !== false;
@@ -357,6 +372,18 @@ function assertAbsolute(path: string, label: string): void {
       "invalid-configuration",
       `Seatbelt ${label} must be an absolute path.`,
     );
+  }
+}
+
+function assertNotAncestorOfDeniedPath(path: string, label: string): void {
+  const prefix = path.endsWith(sep) ? path : `${path}${sep}`;
+  for (const denied of DEFAULT_DENY_READ_PATHS) {
+    if (path === denied || denied.startsWith(prefix)) {
+      throw new SeatbeltConfinementError(
+        "invalid-configuration",
+        `Seatbelt ${label} "${path}" is equal to or an ancestor of the denied sensitive path "${denied}"; its read-allow rule would be emitted after that denial and reopen the whole subtree.`,
+      );
+    }
   }
 }
 

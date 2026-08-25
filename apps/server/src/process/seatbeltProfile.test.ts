@@ -135,6 +135,12 @@ describe("shared Seatbelt profile builder", () => {
       privateHomeAllowPaths: [],
     });
 
+    // Assert the deny rule is actually present before comparing indexOf
+    // positions below: indexOf returns -1 for a missing rule, which is
+    // smaller than any real match position, so the ordering check would
+    // pass vacuously if this deny rule were ever dropped from the profile.
+    expect(profile).toContain(seatbeltDenyRule("file-read*", "/private"));
+
     for (const path of [
       "/private/tmp/octant-project",
       "/private/tmp/octant-temporary",
@@ -164,6 +170,45 @@ describe("shared Seatbelt profile builder", () => {
       expect(profile).toContain(seatbeltDenyRule("file-read*", path));
     }
     expect(profile).toContain(seatbeltDenyRule("file-read*", "/private/tmp/octant-sibling"));
+  });
+
+  it("refuses a launch root that is an ancestor of a denied sensitive path", () => {
+    // Seatbelt is last-match-wins: the launch-root allow rules are emitted
+    // after the DEFAULT_DENY_READ_PATHS deny rules (see the comment above
+    // that block), so an allow subpath at or above a denied path would win
+    // and reopen the whole denied subtree, including /Library/Keychains.
+    expect(() =>
+      buildDenyDefaultSeatbeltProfile({
+        boundRoot: "/Library",
+        temporaryDirectory: "/private/tmp/octant-temporary",
+        networkEgress: "none",
+        privateHomeAllowPaths: [],
+      }),
+    ).toThrow(SeatbeltConfinementError);
+  });
+
+  it("refuses a launch root equal to a denied sensitive path", () => {
+    expect(() =>
+      buildDenyDefaultSeatbeltProfile({
+        boundRoot: "/private/tmp/octant-project",
+        temporaryDirectory: "/private",
+        networkEgress: "none",
+        privateHomeAllowPaths: [],
+      }),
+    ).toThrow(SeatbeltConfinementError);
+  });
+
+  it("still allows a launch root that is a descendant of a denied sensitive path", () => {
+    // The temporary directory always resolves under /private/var, so a
+    // descendant of a denied path must remain reachable even though the
+    // ancestor itself is refused.
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: "/private/tmp/octant-project",
+      temporaryDirectory: "/private/tmp/octant-temporary",
+      networkEgress: "none",
+      privateHomeAllowPaths: [],
+    });
+    expect(profile).toContain(seatbeltAllowRule("file-read*", "/private/tmp/octant-project"));
   });
 
   it("escapes Seatbelt path literals", () => {
