@@ -167,6 +167,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       .run(this.#podmanPath, [
         "unshare",
         this.#runscPath,
+        "--systemd-cgroup",
         "--platform=systrap",
         "--network=none",
         "do",
@@ -228,6 +229,8 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         this.#runscPath,
         "--runtime-flag",
         "platform=systrap",
+        "--runtime-flag",
+        "systemd-cgroup",
         "create",
         "--name",
         runtimeId,
@@ -521,6 +524,8 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         this.#runscPath,
         "--runtime-flag",
         "platform=systrap",
+        "--runtime-flag",
+        "systemd-cgroup",
         "create",
         "--name",
         verifierId,
@@ -939,6 +944,7 @@ function matchesProtectedRuntime(
     recovered.pidLimit === input.request.budget.pidLimit &&
     hasFlagValue(command, "--runtime", runscPath) &&
     hasFlagValue(command, "--runtime-flag", "platform=systrap") &&
+    hasFlagValue(command, "--runtime-flag", "systemd-cgroup") &&
     hasFlagValue(command, "--network", "none") &&
     hasFlagValue(command, "--userns", "auto") &&
     hasFlagValue(command, "--cap-drop", "all") &&
