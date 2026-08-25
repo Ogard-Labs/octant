@@ -81,7 +81,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     const location = this.#location(input);
     await ensureProtectedPathDirectory(dirname(this.#stateRoot), this.#expectedUid, false);
     await ensureProtectedPathDirectory(this.#stateRoot, this.#expectedUid, true);
-    await ensurePrivateDirectory(this.#runRootBase, this.#expectedUid, true);
+    await ensureProtectedPathDirectory(this.#runRootBase, this.#expectedUid, true);
     const storesRoot = join(this.#stateRoot, "stores");
     await ensureProtectedPathDirectory(storesRoot, this.#expectedUid, true);
     await mkdir(location.directory, { mode: 0o700 });
@@ -129,7 +129,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     const location = this.#location(input);
     await ensureProtectedPathDirectory(dirname(this.#stateRoot), this.#expectedUid, false);
     await ensureProtectedPathDirectory(this.#stateRoot, this.#expectedUid, false);
-    await ensurePrivateDirectory(this.#runRootBase, this.#expectedUid, true);
+    await ensureProtectedPathDirectory(this.#runRootBase, this.#expectedUid, true);
     await ensureProtectedPathDirectory(join(this.#stateRoot, "stores"), this.#expectedUid, false);
     await ensureProtectedPathDirectory(location.directory, this.#expectedUid, false);
     await this.#verifyImage(location);

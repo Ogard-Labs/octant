@@ -240,6 +240,7 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     await mkdir(stateRoot, { mode: 0o711 });
     const runRootBase = await mkdtemp(join("/tmp", "ocr-"));
     roots.push(runRootBase);
+    await chmod(runRootBase, 0o711);
     const { run, mountProbe } = fixture();
     const store = new FuseExecutionCapsuleDiskStore({
       stateRoot,

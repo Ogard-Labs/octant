@@ -55,8 +55,9 @@ host becomes a first-class destination.
   gofer; those paths remain owned by the Station identity and never grant group
   or other read or write access. Backing images remain owner-only (`0600`). Image layers,
   dependencies, and the independent clone all count against the same hard disk
-  ceiling. Podman's disposable runroot uses a short, owner-only directory below
-  the Station identity's runtime directory and is recreated during recovery;
+  ceiling. Podman's disposable runroot uses a short, owned directory below the
+  Station identity's runtime directory, with the same no-read/no-write
+  traverse-only allowance, and is recreated during recovery;
   it contains no capsule filesystem or source data. No capsule store is a
   host-checkout bind mount.
 - Podman owns the capsule's outer systemd cgroup and applies its CPU, memory,
