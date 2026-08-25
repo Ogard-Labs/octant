@@ -51,6 +51,10 @@ host becomes a first-class destination.
   `fuse2fs` with `nodev` and `nosuid`. Image layers, runtime metadata,
   dependencies, and the independent clone all count against the same hard disk
   ceiling. No capsule store is a host-checkout bind mount.
+- Podman owns the capsule's outer systemd cgroup and applies its CPU, memory,
+  and PID limits. Rootless `runsc` ignores duplicate cgroup setup inside its
+  user namespace; evidence reads the live sandbox process cgroup before the
+  backend is accepted.
 - Capsule egress is deny-default and later passes through a host-owned broker
   with destination, DNS, expiry, and audit checks. Selected preview ports pass
   through an authenticated thread-scoped host proxy, never a direct bind.

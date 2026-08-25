@@ -258,7 +258,9 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         "--runtime-flag",
         "platform=systrap",
         "--runtime-flag",
-        "systemd-cgroup",
+        // Podman owns and proves the outer systemd scope; runsc must not try
+        // to create a second privileged cgroup from inside the rootless userns.
+        "ignore-cgroups",
         "--runtime-flag",
         "network=none",
         "create",
@@ -590,7 +592,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         "--runtime-flag",
         "platform=systrap",
         "--runtime-flag",
-        "systemd-cgroup",
+        "ignore-cgroups",
         "--runtime-flag",
         "network=none",
         "create",
@@ -1082,7 +1084,7 @@ function matchesProtectedRuntime(
     hasFlagValue(command, "--cgroup-manager", "systemd") &&
     hasFlagValue(command, "--runtime", runscPath) &&
     hasFlagValue(command, "--runtime-flag", "platform=systrap") &&
-    hasFlagValue(command, "--runtime-flag", "systemd-cgroup") &&
+    hasFlagValue(command, "--runtime-flag", "ignore-cgroups") &&
     hasFlagValue(command, "--runtime-flag", "network=none") &&
     hasFlagValue(command, "--log-driver", "none") &&
     hasFlagValue(command, "--network", "none") &&
