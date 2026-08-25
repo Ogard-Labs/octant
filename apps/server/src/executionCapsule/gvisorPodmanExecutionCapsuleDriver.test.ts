@@ -100,6 +100,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     expect(run).toHaveBeenNthCalledWith(2, "/usr/bin/runsc", [
       "--platform=systrap",
       "--rootless",
+      "--network=none",
       "do",
       "true",
     ]);

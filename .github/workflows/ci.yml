@@ -108,6 +108,19 @@ jobs:
             | sudo --user octant tee /var/lib/octant/.config/containers/storage.conf >/dev/null
           sudo install --directory --mode 0700 --owner octant --group octant /var/lib/octant/ci
           sudo rsync --archive --chown=octant:octant --exclude=.git/ "$GITHUB_WORKSPACE/" /var/lib/octant/ci/
+      - name: Prove the rootless Podman and systrap prerequisites
+        run: |
+          octant_uid=$(id --user octant)
+          sudo --user octant env \
+            HOME=/var/lib/octant \
+            XDG_RUNTIME_DIR="/run/user/${octant_uid}" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${octant_uid}/bus" \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            /usr/bin/podman info --format json
+          sudo --user octant env \
+            HOME=/var/lib/octant \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            /usr/bin/runsc --platform=systrap --rootless --network=none "do" true
       - name: Prove two protected capsules and a reviewed bundle export
         env:
           OCTANT_GVISOR_CAPSULE_IMAGE: docker.io/alpine/git@sha256:6f8eae2205a85c51106a9650e574a37fb1d5e4f645e5f6ea57cb57b9462cd4cf
