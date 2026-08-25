@@ -854,14 +854,20 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     const recovered =
       inspected?.exitCode === 0 ? decodeRecoveredRuntime(inspected.stdout) : undefined;
     const mismatches =
-      recovered === undefined
-        ? ["invalid-inspect-payload"]
-        : [
-            ...(recovered.name.replace(/^\//, "") === runtimeId ? [] : ["runtime-name"]),
-            ...(recovered.image === String(input.request.recipe.image) ? [] : ["image"]),
-            ...(recovered.capsuleId === String(input.request.capsuleId) ? [] : ["capsule-label"]),
-            ...protectedRuntimeMismatches(recovered, this.#runscPath, disk),
-          ];
+      inspected === undefined
+        ? ["inspect-command-unavailable"]
+        : inspected.exitCode !== 0
+          ? [`inspect-command-exit-${String(inspected.exitCode)}`]
+          : recovered === undefined
+            ? ["invalid-inspect-payload"]
+            : [
+                ...(recovered.name.replace(/^\//, "") === runtimeId ? [] : ["runtime-name"]),
+                ...(recovered.image === String(input.request.recipe.image) ? [] : ["image"]),
+                ...(recovered.capsuleId === String(input.request.capsuleId)
+                  ? []
+                  : ["capsule-label"]),
+                ...protectedRuntimeMismatches(recovered, this.#runscPath, disk),
+              ];
     if (recovered === undefined || mismatches.length > 0) {
       try {
         this.#recordDiagnostic?.({
