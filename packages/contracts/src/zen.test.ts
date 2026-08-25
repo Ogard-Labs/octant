@@ -999,6 +999,38 @@ describe("ZenSpace", () => {
     });
     expect(snapshot.space.elements[0]).toMatchObject({ kind: "timer", running: true });
   });
+
+  it("rejects a legacy timer snapshot whose remaining time exceeds its duration", () => {
+    expect(() =>
+      decodeLegacySnapshot({
+        spaceId: spaceId(),
+        space: {
+          spaceId: spaceId(),
+          windowId: windowId(),
+          version: 1,
+          elements: [
+            {
+              elementId: elementId(),
+              kind: "timer",
+              durationMs: 25 * 60 * 1000,
+              remainingMs: 30 * 60 * 1000,
+              running: true,
+              geometry: { x: 0, y: 0, width: 300, height: 200 },
+              zIndex: 1,
+              minimized: false,
+              locked: false,
+            },
+          ],
+          viewport: DEFAULT_ZEN_VIEWPORT,
+          appearance: DEFAULT_ZEN_APPEARANCE,
+          assistant: null,
+          research: null,
+          createdAt: "2026-07-24T10:00:00.000Z",
+          updatedAt: "2026-07-24T10:00:00.000Z",
+        },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("ZenCommand", () => {

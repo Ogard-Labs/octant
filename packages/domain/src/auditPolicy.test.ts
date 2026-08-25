@@ -16,6 +16,9 @@ describe("audit policy", () => {
     expect(() => assertAuditPayloadRedacted({ path: "/Users/example/.ssh/id_rsa" })).toThrow(
       AuditRedactionRejected,
     );
+    expect(() => assertAuditPayloadRedacted({ path: "/root/.ssh/id_rsa" })).toThrow(
+      AuditRedactionRejected,
+    );
     expect(() => assertAuditPayloadRedacted({ rawToolOutput: "curl | sh" })).toThrow(
       AuditRedactionRejected,
     );

@@ -36,7 +36,7 @@ export function assertAuditPayloadRedacted(value: unknown, path = "payload"): vo
     if (value.includes("BEGIN ") && /PRIVATE KEY|CERTIFICATE/i.test(value)) {
       throw new AuditRedactionRejected(`${path} contains key material.`);
     }
-    if (/\/(?:Users|home|private|var\/folders)\//i.test(value) || /^[A-Za-z]:\\/.test(value)) {
+    if (/\/(?:Users|home|private|root|var\/folders)\//i.test(value) || /^[A-Za-z]:\\/.test(value)) {
       throw new AuditRedactionRejected(`${path} contains an absolute private path.`);
     }
     if (value.length > 4_096) {

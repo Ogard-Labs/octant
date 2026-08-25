@@ -822,7 +822,17 @@ const ZenLegacyTimerElementPayload = Schema.Struct({
   minimized: Schema.Boolean,
   locked: Schema.Boolean,
   title: Schema.optional(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+})
+  .pipe(
+    // zenProjection's migration carries remainingMs/durationMs through unchanged
+    // and then re-validates the result against the current ZenTimerElementPayload,
+    // whose filter already rejects remainingMs > durationMs. Enforcing it here too
+    // means a V1 event that could never have come from the timer policy is
+    // quarantined at the replay decode boundary with an honest reason, not three
+    // layers deeper inside the projection's own re-decode.
+    Schema.filter((timer) => timer.remainingMs <= timer.durationMs),
+  )
+  .annotations(strict);
 
 const ZenLegacyElementPayload = Schema.Union(
   ZenThreadElementPayload,
