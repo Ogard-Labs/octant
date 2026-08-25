@@ -975,7 +975,7 @@ function createExecutionCapsuleGitBundleStore(input: {
   const exportRoot = join(input.stateRoot, "exports");
   return {
     reserve: async (runtimeId) => {
-      await ensurePrivateDirectory(input.stateRoot, input.expectedUid);
+      await ensureProtectedStateDirectory(input.stateRoot, input.expectedUid);
       await ensurePrivateDirectory(exportRoot, input.expectedUid);
       const directory = await mkdtemp(join(exportRoot, `${runtimeId}-`));
       await ensurePrivateDirectory(directory, input.expectedUid);
@@ -996,6 +996,19 @@ function createExecutionCapsuleGitBundleStore(input: {
       }),
     discard: (artifactPath) => rm(dirname(artifactPath), { force: true, recursive: true }),
   };
+}
+
+async function ensureProtectedStateDirectory(path: string, expectedUid: number): Promise<void> {
+  const metadata = await lstat(path);
+  const permissions = metadata.mode & 0o777;
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    metadata.uid !== expectedUid ||
+    (permissions !== 0o700 && permissions !== 0o711)
+  ) {
+    throw new Error("Execution capsule state directory is not protected.");
+  }
 }
 
 async function verifyOwnedFile(
