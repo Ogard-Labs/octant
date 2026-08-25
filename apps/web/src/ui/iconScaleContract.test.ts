@@ -41,12 +41,33 @@ describe("icon scale contract", () => {
     // a design-system decision rather than a sweep.
     expect(offenders).toEqual([]);
   });
+
+  it("sees a size asked for through a namespaced component", () => {
+    const found = sizedElements(
+      "<Icons.ChevronDown size={13} />\n<Check size={14} />\n<Ui.Icons.Dot size={12} />",
+    );
+
+    expect(found).toEqual([
+      { element: "Icons.ChevronDown", size: 13 },
+      { element: "Check", size: 14 },
+      { element: "Ui.Icons.Dot", size: 12 },
+    ]);
+    expect(found.filter((one) => !ICON_SCALE.has(one.size))).toEqual([
+      { element: "Icons.ChevronDown", size: 13 },
+    ]);
+  });
 });
 
 /** Every `size={N}` in the source, paired with the JSX element carrying it. */
 function sizedElements(source: string): ReadonlyArray<{ element: string; size: number }> {
   const found: Array<{ element: string; size: number }> = [];
-  for (const match of source.matchAll(/<([A-Z][A-Za-z0-9]*)\b[^<>]*?\bsize=\{(\d+)\}/g)) {
+  // A component can be reached through a namespace (`<Icons.ChevronDown />`),
+  // and a matcher that stopped at the first dot would skip those silently —
+  // the contract would keep passing while the drift it exists to catch walked
+  // straight through it.
+  for (const match of source.matchAll(
+    /<([A-Z][A-Za-z0-9]*(?:\.[A-Z][A-Za-z0-9]*)*)\b[^<>]*?\bsize=\{(\d+)\}/g,
+  )) {
     const [, element, size] = match;
     if (element === undefined || size === undefined) continue;
     found.push({ element, size: Number(size) });
