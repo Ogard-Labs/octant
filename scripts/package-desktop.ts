@@ -483,14 +483,54 @@ export function validatePackagedRendererPolicy(indexHtml: string): void {
   if (csp === undefined) {
     throw new Error("Packaged renderer document ships no Content-Security-Policy meta.");
   }
-  for (const directive of [
-    "default-src 'self'",
-    "script-src 'self'",
-    "object-src 'none'",
-    "base-uri 'none'",
-  ]) {
-    if (!csp.includes(directive)) {
-      throw new Error(`Packaged renderer Content-Security-Policy is missing ${directive}.`);
+
+  // A substring check (`csp.includes("script-src 'self'")`) accepts an extra
+  // source appended to a required directive and cannot see a directive that
+  // is present but not the required text at all, so parse into directives and
+  // compare each source list exactly.
+  const directives = new Map<string, string>();
+  for (const rawDirective of csp.split(";")) {
+    const trimmed = rawDirective.trim();
+    if (trimmed === "") continue;
+    const [rawName, ...sources] = trimmed.split(/\s+/);
+    if (rawName === undefined) continue;
+    const name = rawName.toLowerCase();
+    if (directives.has(name)) {
+      // A browser applies only the first occurrence of a directive and
+      // silently ignores every later one, so a weak first copy followed by a
+      // strict-looking duplicate would read safe to a reviewer while shipping
+      // the weak policy.
+      throw new Error(`Packaged renderer Content-Security-Policy declares ${name} more than once.`);
+    }
+    directives.set(name, sources.join(" "));
+  }
+
+  const required: ReadonlyArray<readonly [string, string]> = [
+    ["default-src", "'self'"],
+    ["script-src", "'self'"],
+    ["object-src", "'none'"],
+    ["base-uri", "'none'"],
+  ];
+  for (const [name, expectedSources] of required) {
+    const actualSources = directives.get(name);
+    if (actualSources !== expectedSources) {
+      throw new Error(
+        `Packaged renderer Content-Security-Policy requires ${name} ${expectedSources}, found ${
+          actualSources === undefined ? "no such directive" : actualSources
+        }.`,
+      );
+    }
+  }
+
+  // script-src-elem and script-src-attr each take priority over script-src
+  // for their narrower category when present, so either one can reopen what
+  // an exact script-src just closed.
+  for (const fallbackDirective of ["script-src-elem", "script-src-attr"] as const) {
+    const fallbackSources = directives.get(fallbackDirective);
+    if (fallbackSources !== undefined && fallbackSources !== "'self'") {
+      throw new Error(
+        `Packaged renderer Content-Security-Policy's ${fallbackDirective} (${fallbackSources}) is weaker than script-src.`,
+      );
     }
   }
 }
