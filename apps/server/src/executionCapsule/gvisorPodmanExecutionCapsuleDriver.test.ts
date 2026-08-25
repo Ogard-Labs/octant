@@ -33,7 +33,7 @@ function fixturePodmanArgs(args: ReadonlyArray<string>): ReadonlyArray<string> {
     "--storage-driver",
     "vfs",
     "--cgroup-manager",
-    "systemd",
+    "cgroupfs",
     ...args,
   ];
 }
@@ -278,7 +278,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       "--storage-driver",
       "vfs",
       "--cgroup-manager",
-      "systemd",
+      "cgroupfs",
       "--runtime",
       "/usr/bin/runsc",
       "--runtime-flag",
@@ -294,6 +294,8 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       "none",
       "--network",
       "none",
+      "--cgroups",
+      "disabled",
       "--userns",
       "auto",
       "--user",
@@ -302,12 +304,6 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       "all",
       "--security-opt",
       "no-new-privileges",
-      "--cpus",
-      "1",
-      "--memory",
-      String(capsuleRequest.budget.memoryBytes),
-      "--pids-limit",
-      String(capsuleRequest.budget.pidLimit),
       "--workdir",
       "/",
       "--env",
@@ -340,9 +336,21 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
         "octant-capsule-11111111111141118111111111111111:/tmp/octant-source.bundle",
       ]),
     );
-    expect(run).toHaveBeenCalledWith(
+    expect(run).toHaveBeenCalledWith("/usr/bin/systemd-run", [
+      "--user",
+      "--scope",
+      "--quiet",
+      "--collect",
+      "--unit",
+      "octant-capsule-11111111111141118111111111111111.scope",
+      "--property",
+      "CPUQuota=100%",
+      "--property",
+      `MemoryMax=${String(capsuleRequest.budget.memoryBytes)}`,
+      "--property",
+      `TasksMax=${String(capsuleRequest.budget.pidLimit)}`,
       "/usr/bin/podman",
-      fixturePodmanArgs([
+      ...fixturePodmanArgs([
         "--runtime",
         "/usr/bin/runsc",
         "--runtime-flag",
@@ -354,7 +362,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
         "start",
         "octant-capsule-11111111111141118111111111111111",
       ]),
-    );
+    ]);
     expect(run).toHaveBeenCalledWith(
       "/usr/bin/podman",
       fixturePodmanArgs([
@@ -602,7 +610,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
                   "--storage-driver",
                   "vfs",
                   "--cgroup-manager",
-                  "systemd",
+                  "cgroupfs",
                   "--runtime",
                   "/usr/bin/runsc",
                   "--runtime-flag",
@@ -616,6 +624,8 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
                   "none",
                   "--network",
                   "none",
+                  "--cgroups",
+                  "disabled",
                   "--userns",
                   "auto",
                   "--cap-drop",

@@ -487,7 +487,17 @@ async function podman(
   );
   const result = await execFileAsync(
     process.env.OCTANT_PODMAN_PATH ?? "/usr/bin/podman",
-    ["--root", join(mountPath, "graph"), "--runroot", runRoot, "--storage-driver", "vfs", ...args],
+    [
+      "--root",
+      join(mountPath, "graph"),
+      "--runroot",
+      runRoot,
+      "--storage-driver",
+      "vfs",
+      "--cgroup-manager",
+      "cgroupfs",
+      ...args,
+    ],
     {
       shell: false,
       timeout: 30_000,

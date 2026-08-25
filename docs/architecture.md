@@ -428,9 +428,10 @@ mechanisms are:
   one hard disk ceiling without privileged project-quota administration. Its
   disposable Podman runroot is a short owned runtime directory recreated during
   recovery. Intermediate Podman state paths may be owner-controlled and
-  traverse-only, while backing images remain owner-only. Podman owns the outer
-  systemd cgroup; the evidence reads its
-  live CPU, memory, and PID limits from the sandbox process. The tracer can execute argv, verify and
+  traverse-only, while backing images remain owner-only. A transient systemd
+  user scope owns the outer CPU, memory, and PID limits; evidence derives their
+  effective values from the sandbox process cgroup ancestry. The tracer can
+  execute argv, verify and
   export a Git bundle, stop without deleting the filesystem, recover only as
   stopped after live-authority revalidation, and release the exact runtime
   after an explicit export. A dedicated Linux CI job proves two real capsules

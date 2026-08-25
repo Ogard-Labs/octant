@@ -57,6 +57,7 @@ export interface GvisorPodmanExecutionCapsuleDriverOptions {
   readonly uid?: number;
   readonly podmanPath?: string;
   readonly runscPath?: string;
+  readonly systemdRunPath?: string;
   readonly runner?: ExecutionCapsuleCommandRunner;
   readonly sourceBundleStore?: ExecutionCapsuleSourceBundleStore;
   readonly bundleStore?: ExecutionCapsuleGitBundleStore;
@@ -106,6 +107,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
   readonly #expectedHomeDirectory: string;
   readonly #podmanPath: string;
   readonly #runscPath: string;
+  readonly #systemdRunPath: string;
   readonly #runner: ExecutionCapsuleCommandRunner;
   readonly #sourceBundleStore: ExecutionCapsuleSourceBundleStore;
   readonly #bundleStore: ExecutionCapsuleGitBundleStore;
@@ -127,6 +129,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     this.#expectedHomeDirectory = options.expectedHomeDirectory ?? "/var/lib/octant";
     this.#podmanPath = options.podmanPath ?? "/usr/bin/podman";
     this.#runscPath = options.runscPath ?? "/usr/bin/runsc";
+    this.#systemdRunPath = options.systemdRunPath ?? "/usr/bin/systemd-run";
     this.#runner = options.runner ?? createNodeCommandRunner(runtimeEnvironment);
     this.#sourceBundleStore =
       options.sourceBundleStore ??
@@ -170,6 +173,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       this.#platform !== "linux" ||
       !isAbsolute(this.#podmanPath) ||
       !isAbsolute(this.#runscPath) ||
+      !isAbsolute(this.#systemdRunPath) ||
       !isAbsolute(this.#stateRoot)
     ) {
       return unavailableProbe(this.#platform, dedicatedIdentity, this.#capacity);
@@ -264,6 +268,8 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         "none",
         "--network",
         "none",
+        "--cgroups",
+        "disabled",
         "--userns",
         "auto",
         "--user",
@@ -272,12 +278,6 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         "all",
         "--security-opt",
         "no-new-privileges",
-        "--cpus",
-        formatCpus(input.request.budget.cpuMillicores),
-        "--memory",
-        String(input.request.budget.memoryBytes),
-        "--pids-limit",
-        String(input.request.budget.pidLimit),
         "--workdir",
         "/",
         "--env",
@@ -305,12 +305,13 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         `${runtimeId}:/tmp/octant-source.bundle`,
       ]);
       if (copied.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
-      const started = await this.#runner.run(this.#podmanPath, [
-        ...podmanStoreArgs(disk),
-        ...gvisorRuntimeArgs(this.#runscPath),
-        "start",
+      const started = await this.#startInBudgetScope({
+        disk,
         runtimeId,
-      ]);
+        cpuMillicores: input.request.budget.cpuMillicores,
+        memoryBytes: input.request.budget.memoryBytes,
+        pidLimit: input.request.budget.pidLimit,
+      });
       if (started.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
       const cloned = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(disk),
@@ -426,6 +427,34 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         await rm(seedDirectory, { force: true, recursive: true }).catch(() => undefined);
       }
     }
+  }
+
+  #startInBudgetScope(input: {
+    readonly disk: ExecutionCapsuleDiskLocation;
+    readonly runtimeId: string;
+    readonly cpuMillicores: number;
+    readonly memoryBytes: number;
+    readonly pidLimit: number;
+  }): Promise<ExecutionCapsuleCommandResultPort> {
+    return this.#runner.run(this.#systemdRunPath, [
+      "--user",
+      "--scope",
+      "--quiet",
+      "--collect",
+      "--unit",
+      `${input.runtimeId}.scope`,
+      "--property",
+      `CPUQuota=${formatCpuQuota(input.cpuMillicores)}`,
+      "--property",
+      `MemoryMax=${String(input.memoryBytes)}`,
+      "--property",
+      `TasksMax=${String(input.pidLimit)}`,
+      this.#podmanPath,
+      ...podmanStoreArgs(input.disk),
+      ...gvisorRuntimeArgs(this.#runscPath),
+      "start",
+      input.runtimeId,
+    ]);
   }
 
   async execute(
@@ -617,6 +646,8 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         "none",
         "--network",
         "none",
+        "--cgroups",
+        "disabled",
         "--userns",
         "auto",
         "--user",
@@ -625,12 +656,6 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         "all",
         "--security-opt",
         "no-new-privileges",
-        "--cpus",
-        "0.1",
-        "--memory",
-        String(256 * 1_024 * 1_024),
-        "--pids-limit",
-        "64",
         "--workdir",
         "/",
         "--entrypoint",
@@ -641,12 +666,13 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (create.exitCode !== 0) return false;
       created = true;
-      const started = await this.#runner.run(this.#podmanPath, [
-        ...podmanStoreArgs(input.disk),
-        ...gvisorRuntimeArgs(this.#runscPath),
-        "start",
-        verifierId,
-      ]);
+      const started = await this.#startInBudgetScope({
+        disk: input.disk,
+        runtimeId: verifierId,
+        cpuMillicores: 100,
+        memoryBytes: 256 * 1_024 * 1_024,
+        pidLimit: 64,
+      });
       if (started.exitCode !== 0) return false;
       const copied = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(input.disk),
@@ -781,7 +807,7 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       recovered.name.replace(/^\//, "") !== runtimeId ||
       recovered.image !== String(input.request.recipe.image) ||
       recovered.capsuleId !== String(input.request.capsuleId) ||
-      !matchesProtectedRuntime(recovered, input, this.#runscPath, disk)
+      !matchesProtectedRuntime(recovered, this.#runscPath, disk)
     ) {
       await this.#diskStore.close(disk).catch(() => undefined);
       return { status: "refused", reason: "runtime-unavailable" };
@@ -867,7 +893,7 @@ function podmanStoreArgs(disk: ExecutionCapsuleDiskLocation): ReadonlyArray<stri
     "--storage-driver",
     "vfs",
     "--cgroup-manager",
-    "systemd",
+    "cgroupfs",
   ];
 }
 
@@ -886,8 +912,8 @@ function gvisorRuntimeArgs(runscPath: string): ReadonlyArray<string> {
   ];
 }
 
-function formatCpus(cpuMillicores: number): string {
-  return String(cpuMillicores / 1_000);
+function formatCpuQuota(cpuMillicores: number): string {
+  return `${String(cpuMillicores / 10)}%`;
 }
 
 function createExecutionCapsuleSourceBundleStore(input: {
@@ -1092,7 +1118,6 @@ function isStringArray(input: unknown): input is ReadonlyArray<string> {
 
 function matchesProtectedRuntime(
   recovered: NonNullable<ReturnType<typeof decodeRecoveredRuntime>>,
-  input: ExecutionCapsuleDriverCreateInput,
   runscPath: string,
   disk: ExecutionCapsuleDiskLocation,
 ): boolean {
@@ -1106,19 +1131,17 @@ function matchesProtectedRuntime(
     recovered.securityOptions.some((option) => option.startsWith("no-new-privileges")) &&
     !recovered.privileged &&
     recovered.usernsMode.startsWith("auto") &&
-    recovered.memoryBytes === input.request.budget.memoryBytes &&
-    recovered.nanoCpus === input.request.budget.cpuMillicores * 1_000_000 &&
-    recovered.pidLimit === input.request.budget.pidLimit &&
     hasFlagValue(command, "--root", disk.graphRoot) &&
     hasFlagValue(command, "--runroot", disk.runRoot) &&
     hasFlagValue(command, "--storage-driver", "vfs") &&
-    hasFlagValue(command, "--cgroup-manager", "systemd") &&
+    hasFlagValue(command, "--cgroup-manager", "cgroupfs") &&
     hasFlagValue(command, "--runtime", runscPath) &&
     hasFlagValue(command, "--runtime-flag", "platform=systrap") &&
     hasFlagValue(command, "--runtime-flag", "ignore-cgroups") &&
     hasFlagValue(command, "--runtime-flag", "network=none") &&
     hasFlagValue(command, "--log-driver", "none") &&
     hasFlagValue(command, "--network", "none") &&
+    hasFlagValue(command, "--cgroups", "disabled") &&
     hasFlagValue(command, "--userns", "auto") &&
     hasFlagValue(command, "--cap-drop", "all") &&
     hasFlagValue(command, "--security-opt", "no-new-privileges")
