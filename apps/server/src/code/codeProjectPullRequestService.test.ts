@@ -60,6 +60,11 @@ function serviceFixture(options: {
       readonly pushUrl: string;
     }>
   >;
+  readonly remoteLookup?: (
+    root: string,
+  ) => Promise<
+    ReadonlyArray<{ readonly name: string; readonly fetchUrl: string; readonly pushUrl: string }>
+  >;
   readonly list?: (
     request: { readonly owner: string; readonly name: string; readonly limit: number },
     signal: AbortSignal,
@@ -102,6 +107,7 @@ function serviceFixture(options: {
     },
     remotes: {
       remotes: async (root) => {
+        if (options.remoteLookup !== undefined) return options.remoteLookup(root);
         return (
           options.remotes?.[root] ??
           (root === "/repos/octant"
@@ -236,7 +242,40 @@ describe("CodeProjectPullRequestService", () => {
     ]);
   });
 
-  it("refreshes repositories sequentially and keeps an unconnected project visible", async () => {
+  it("resolves legacy repository remotes concurrently while preserving project order", async () => {
+    const projects = [
+      codeProject({ id: projectA, name: "First", root: "/repos/first" }),
+      codeProject({ id: projectC, name: "Second", root: "/repos/second" }),
+    ];
+    const releases = new Map<string, () => void>();
+    const started: string[] = [];
+    const remoteLookup = vi.fn(
+      async (
+        root: string,
+      ): Promise<ReadonlyArray<{ name: string; fetchUrl: string; pushUrl: string }>> => {
+        started.push(root);
+        await new Promise<void>((resolve) => releases.set(root, resolve));
+        return [
+          {
+            name: "origin",
+            fetchUrl: `https://github.com/octant/${root.split("/").at(-1)}.git`,
+            pushUrl: `https://github.com/octant/${root.split("/").at(-1)}.git`,
+          },
+        ];
+      },
+    );
+    const { service } = serviceFixture({ projects, remoteLookup });
+    const pending = service.query(windowId, { version: 1 });
+
+    await vi.waitFor(() => expect(started).toHaveLength(2));
+    for (const release of releases.values()) release();
+
+    const view = await pending;
+    expect(view.projects.map((project) => project.projectName)).toEqual(["First", "Second"]);
+    expect(remoteLookup).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes repositories concurrently in stable project order", async () => {
     const order: string[] = [];
     const { service, listActive, journal } = serviceFixture({
       projects: [
@@ -277,8 +316,8 @@ describe("CodeProjectPullRequestService", () => {
 
     expect(order).toEqual([
       "start:octant/octant",
-      "end:octant/octant",
       "start:octant/docs",
+      "end:octant/octant",
       "end:octant/docs",
     ]);
     expect(listActive).toHaveBeenCalledTimes(2);
@@ -287,6 +326,49 @@ describe("CodeProjectPullRequestService", () => {
     expect(view.rows[0]?.linkedThreads).toEqual([{ threadId, title: "Manual refresh" }]);
     expect(view.freshness).toEqual({ status: "fresh", lastSuccessfulRefreshAt: now });
     expect(journal.append).not.toHaveBeenCalled();
+  });
+
+  it("bounds concurrent repository reads while keeping refresh parallel", async () => {
+    const projects = Array.from({ length: 6 }, (_, index) =>
+      codeProject({
+        id: decodeProjectId(`10000000-0000-4000-8000-${String(index + 10).padStart(12, "0")}`),
+        name: `Project ${String(index + 1)}`,
+        root: `/repos/project-${String(index + 1)}`,
+      }),
+    );
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let maximumActive = 0;
+    const { service, listActive } = serviceFixture({
+      projects,
+      remoteLookup: async (root) => [
+        {
+          name: "origin",
+          fetchUrl: `https://github.com/octant/${root.split("/").at(-1)}.git`,
+          pushUrl: `https://github.com/octant/${root.split("/").at(-1)}.git`,
+        },
+      ],
+      list: async () => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise<void>((resolve) => releases.push(resolve));
+        active -= 1;
+        return { status: "ok", rows: [] };
+      },
+    });
+
+    const refresh = service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+    await vi.waitFor(() => expect(listActive).toHaveBeenCalledTimes(4));
+    releases.splice(0).forEach((release) => release());
+    await vi.waitFor(() => expect(listActive).toHaveBeenCalledTimes(6));
+    releases.splice(0).forEach((release) => release());
+    await refresh;
+
+    expect(maximumActive).toBe(4);
   });
 
   it("keeps the Project workspace active-only while the board snapshot includes merged history", async () => {
@@ -565,6 +647,55 @@ describe("CodeProjectPullRequestService", () => {
     );
     expect(truncatedPrs.rows).toHaveLength(100);
     expect(truncatedPrs.pullRequestsTruncated).toBe(true);
+  });
+
+  it("spends one pull-request read budget across every repository, not one budget each", async () => {
+    const projects = Array.from({ length: 25 }, (_, index) =>
+      codeProject({
+        id: decodeProjectId(`10000000-0000-4000-8000-0000000000${String(index).padStart(2, "0")}`),
+        name: `Repo ${index}`,
+        root: `/repos/r${index}`,
+      }),
+    );
+    const remotes = Object.fromEntries(
+      projects.map((project, index) => [
+        `/repos/r${index}`,
+        [
+          {
+            name: "origin",
+            fetchUrl: `https://github.com/octant/r${index}.git`,
+            pushUrl: `https://github.com/octant/r${index}.git`,
+          },
+        ],
+      ]),
+    );
+    let requestedRows = 0;
+    const busy = serviceFixture({
+      projects,
+      remotes,
+      list: async (request) => {
+        requestedRows += request.limit;
+        return {
+          status: "ok",
+          rows: Array.from({ length: request.limit }, (_, index) =>
+            ghRow({ number: index + 1, title: `PR ${index + 1}` }),
+          ),
+        };
+      },
+    });
+
+    const view = await busy.service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+
+    expect(view.rows).toHaveLength(100);
+    // Every repository is still contacted, so an unauthorized or rate-limited
+    // one cannot hide behind the budget.
+    expect(busy.listActive).toHaveBeenCalledTimes(25);
+    // A per-repository budget asked for 25 * 101 rows to keep 100.
+    expect(requestedRows).toBeLessThan(1000);
   });
 
   it("keeps the last authorized snapshot when GitHub rate-limits, times out, or returns malformed output", async () => {

@@ -100,7 +100,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
           role="dialog"
         >
           <label className="code-branch-selector__search">
-            <Search aria-hidden="true" size={13} />
+            <Search aria-hidden="true" size={14} />
             <OctantInput
               aria-label="Search refs"
               onChange={(event) => setQuery(event.currentTarget.value)}

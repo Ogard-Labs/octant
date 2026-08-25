@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertNativeTitlebarActionResult,
-  assertNativeTitlebarTargetsBelowInset,
+  assertNativeTitlebarTargetsInRail,
   assertNativeWindowMoved,
 } from "./smoke-packaged-titlebar";
 
@@ -94,35 +94,35 @@ describe("packaged native titlebar smoke geometry", () => {
     ).not.toThrow();
   });
 
-  it("rejects controls whose centers are inside hiddenInset's native strip", () => {
+  it("accepts controls layered into the compact native title rail", () => {
     expect(() =>
-      assertNativeTitlebarTargetsBelowInset(
+      assertNativeTitlebarTargetsInRail(
         {
           window_bounds: bounds,
           elements: [button("Open bottom panel", 200 + 10)],
         },
-        24,
-        ["Open bottom panel"],
-      ),
-    ).toThrow("inside the native movement strip");
-  });
-
-  it("accepts controls whose centers are below the native strip", () => {
-    expect(() =>
-      assertNativeTitlebarTargetsBelowInset(
-        {
-          window_bounds: bounds,
-          elements: [button("Open bottom panel", 200 + 24)],
-        },
-        24,
+        30,
         ["Open bottom panel"],
       ),
     ).not.toThrow();
   });
 
-  it("rejects controls centered exactly on the native strip boundary", () => {
+  it("rejects controls whose centers drift below the compact title rail", () => {
     expect(() =>
-      assertNativeTitlebarTargetsBelowInset(
+      assertNativeTitlebarTargetsInRail(
+        {
+          window_bounds: bounds,
+          elements: [button("Open bottom panel", 200 + 24)],
+        },
+        30,
+        ["Open bottom panel"],
+      ),
+    ).toThrow("outside the compact title rail");
+  });
+
+  it("accepts controls centered exactly on the compact rail boundary", () => {
+    expect(() =>
+      assertNativeTitlebarTargetsInRail(
         {
           window_bounds: bounds,
           elements: [button("Open bottom panel", 200 + 11)],
@@ -130,19 +130,19 @@ describe("packaged native titlebar smoke geometry", () => {
         24,
         ["Open bottom panel"],
       ),
-    ).toThrow("inside the native movement strip");
+    ).not.toThrow();
   });
 
   it("matches the dynamic default application suffix on Open in", () => {
     expect(() =>
-      assertNativeTitlebarTargetsBelowInset(
+      assertNativeTitlebarTargetsInRail(
         {
           window_bounds: bounds,
           elements: [
             button("Open checkout in an application. Default Visual Studio Code", 200 + 24),
           ],
         },
-        24,
+        40,
         ["Open checkout in an application."],
       ),
     ).not.toThrow();

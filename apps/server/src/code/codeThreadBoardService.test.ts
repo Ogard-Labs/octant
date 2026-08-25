@@ -13,6 +13,7 @@ import {
   type CodeDeliveryOutcomeKind,
   type CodeRuntimeWork,
   type CodeThread,
+  type CodeThreadId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -218,6 +219,97 @@ function cardFor(cards: readonly CodeBoardCard[], threadId: unknown): CodeBoardC
 }
 
 describe("CodeThreadBoardService derivation", () => {
+  it("starts the independent pull-request snapshot while thread metadata is loading", async () => {
+    let releaseThreads: (() => void) | undefined;
+    const threadGate = new Promise<void>((resolve) => {
+      releaseThreads = resolve;
+    });
+    const started: string[] = [];
+    const board = new CodeThreadBoardService({
+      threads: {
+        list: async () => {
+          started.push("threads");
+          await threadGate;
+          return allThreads.slice(0, 1);
+        },
+      },
+      metadata: metadataService(),
+      runtime: runtimeSource(),
+      pullRequests: {
+        snapshot: async () => {
+          started.push("pull-requests");
+          return emptyPullRequestSnapshot();
+        },
+      },
+      clock: () => now,
+    });
+
+    const query = board.query(decodeCodeBoardQuery({ version: 1 }));
+    await vi.waitFor(() => expect(started).toEqual(["threads", "pull-requests"]));
+    releaseThreads?.();
+    await query;
+  });
+
+  it("observes every visible thread before any runtime observation resolves", async () => {
+    const visibleThreads = allThreads.slice(0, 3);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const observed: CodeThreadId[] = [];
+    const board = new CodeThreadBoardService({
+      threads: { list: () => visibleThreads },
+      metadata: metadataService(),
+      runtime: {
+        observe: vi.fn(async (threadId: CodeThreadId) => {
+          observed.push(threadId);
+          await gate;
+          return { executing: false, awaitingInput: false, interrupted: false };
+        }),
+      },
+      pullRequests: { snapshot: () => emptyPullRequestSnapshot() },
+      clock: () => now,
+    });
+
+    const query = board.query(decodeCodeBoardQuery({ version: 1 }));
+    await vi.waitFor(() => {
+      expect(observed.length).toBeGreaterThan(0);
+    });
+    const observedBeforeRelease = [...observed];
+    release?.();
+    await query;
+
+    expect(observedBeforeRelease).toEqual(visibleThreads.map((entry) => entry.thread.id));
+  });
+
+  it("spends no runtime observation on a thread the board will not show", async () => {
+    const observed: CodeThreadId[] = [];
+    const board = new CodeThreadBoardService({
+      threads: {
+        list: () => [
+          ...allThreads,
+          boardThread({ thread: thread({ id: ids.archived, lifecycle: "archived" }) }),
+        ],
+      },
+      metadata: metadataService(),
+      runtime: {
+        observe: vi.fn(async (threadId: CodeThreadId) => {
+          observed.push(threadId);
+          return { executing: false, awaitingInput: false, interrupted: false };
+        }),
+      },
+      pullRequests: { snapshot: () => emptyPullRequestSnapshot() },
+      clock: () => now,
+    });
+
+    await board.query(decodeCodeBoardQuery({ version: 1 }));
+
+    // An archived thread has no card, so a Project with a long archive would
+    // otherwise spend the whole read pool on threads about to be dropped.
+    expect(observed.map(String)).not.toContain(String(ids.archived));
+    expect(observed).toHaveLength(allThreads.length);
+  });
+
   it("resolves one card per non-archived thread with a runtime-derived status", async () => {
     const board = service({
       threads: [
@@ -398,6 +490,48 @@ describe("CodeThreadBoardService derivation", () => {
       path: "Managed worktree",
       head: { kind: "branch", name: "feature/x" },
     });
+  });
+
+  it("bounds runtime observations and does not hold them behind the pull-request read", async () => {
+    const threads = Array.from({ length: 12 }, () =>
+      boardThread({ thread: thread({ id: crypto.randomUUID() as typeof ids.ready }) }),
+    );
+    let inFlight = 0;
+    let peakInFlight = 0;
+    let pullRequestSettled = false;
+    let observedBeforePullRequest = 0;
+
+    const board = new CodeThreadBoardService({
+      threads: { list: () => threads },
+      metadata: metadataService(),
+      runtime: {
+        observe: async () => {
+          inFlight += 1;
+          peakInFlight = Math.max(peakInFlight, inFlight);
+          if (!pullRequestSettled) observedBeforePullRequest += 1;
+          await Promise.resolve();
+          inFlight -= 1;
+          return { executing: false, awaitingInput: false, interrupted: false };
+        },
+      },
+      pullRequests: {
+        snapshot: async () => {
+          // Stand in for a slow GitHub read.
+          for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+          pullRequestSettled = true;
+          return emptyPullRequestSnapshot();
+        },
+      },
+      clock: () => now,
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+
+    expect(view.cards).toHaveLength(threads.length);
+    // A large board must not open one provider read per thread at once.
+    expect(peakInFlight).toBeLessThanOrEqual(4);
+    // And a slow pull-request read must not gate them.
+    expect(observedBeforePullRequest).toBeGreaterThan(0);
   });
 
   it("does not include a thread the window-filtered source omitted", async () => {

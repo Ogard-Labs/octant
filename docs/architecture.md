@@ -191,7 +191,8 @@ lists active open and draft pull requests from authorized connected Code
 Projects. The list is a cached read of an in-memory snapshot: opening it,
 navigating, and ordinary board queries do not call GitHub. Only an explicit
 Refresh all or per-Project refresh talks to the installed authenticated `gh`
-CLI, sequentially and within preview bounds. The journal never stores that
+CLI. Independent repository reads run concurrently, results reconcile in stable
+Project order, and the refresh remains within preview bounds. The journal never stores that
 cache. It stores only exact PR identities already produced by Code operations,
 so a restart can show an identity as stale and unknown until the next explicit
 refresh. Context usage is a circular used-versus-available meter on
@@ -402,8 +403,12 @@ mechanisms are:
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch under `sandbox-exec` with deny-default Seatbelt profiles
   scoped to the bound root, allowlisted environments, and no broker
-  coordinates. Path checks alone are never the boundary. Confined reads open a
-  handle and verify identity against what containment resolved.
+  coordinates. Sensitive system roots (`/etc/ssh`, `/var/root`,
+  `/Library/Keychains`, `/private`, `/Volumes`, and `/Network`) remain denied
+  even where runtime compatibility requires a broad file-read rule; each
+  launch's exact roots are re-allowed after those denials. Path checks alone
+  are never the boundary. Confined reads open a handle and verify identity
+  against what containment resolved.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
 - **Remote clients.** Pairing issues a revocable device key; the private

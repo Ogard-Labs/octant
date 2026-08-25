@@ -344,7 +344,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   variant="ghost"
                 >
                   <span className="first-run__rail-marker" aria-hidden>
-                    {descriptor.configured ? <Check size={13} /> : null}
+                    {descriptor.configured ? <Check size={14} /> : null}
                   </span>
                   <span className="first-run__rail-title">{descriptor.title}</span>
                   <span className="first-run__rail-summary">{descriptor.summary}</span>

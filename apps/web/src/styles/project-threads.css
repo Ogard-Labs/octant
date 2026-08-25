@@ -17,14 +17,14 @@
 
 .project-overview__threads-header h2 {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
   font-weight: 500;
 }
 
 .project-overview__threads-header p {
   margin: 4px 0 0;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   line-height: 1.45;
 }
 
@@ -45,6 +45,6 @@
 .project-threads__empty {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.45;
 }

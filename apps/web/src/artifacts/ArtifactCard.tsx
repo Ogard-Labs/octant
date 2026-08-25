@@ -57,12 +57,12 @@ export function ArtifactCard(props: ArtifactCardProps) {
             <span className="artifact-card__share">
               {entry.shared ? (
                 <>
-                  <Link2 aria-hidden="true" size={11} strokeWidth={1.8} />
+                  <Link2 aria-hidden="true" size={12} strokeWidth={1.8} />
                   Shared
                 </>
               ) : (
                 <>
-                  <Lock aria-hidden="true" size={11} strokeWidth={1.8} />
+                  <Lock aria-hidden="true" size={12} strokeWidth={1.8} />
                   Private
                 </>
               )}

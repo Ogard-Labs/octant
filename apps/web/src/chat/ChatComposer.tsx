@@ -450,7 +450,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
                   type="button"
                 >
-                  <X aria-hidden="true" size={10} strokeWidth={1.8} />
+                  <X aria-hidden="true" size={12} strokeWidth={1.8} />
                 </OctantButton>
               )}
             </li>
@@ -654,7 +654,7 @@ export function ChatComposer(props: ChatComposerProps) {
           type="button"
           variant="ghost"
         >
-          <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+          <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
         </OctantButton>
       </div>
       <div className="chat-composer__selectors">
@@ -714,7 +714,7 @@ export function ChatComposer(props: ChatComposerProps) {
               type="button"
               variant="ghost"
             >
-              <SlidersHorizontal aria-hidden="true" size={15} strokeWidth={1.8} />
+              <SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />
               {anyModelOptionSet ? (
                 <span aria-hidden="true" className="chat-composer__model-options-dot" />
               ) : null}
