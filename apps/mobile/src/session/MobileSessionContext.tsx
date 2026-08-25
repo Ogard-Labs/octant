@@ -16,7 +16,10 @@ import {
   type RemoteSessionBridgeState,
 } from "@octant/client-runtime";
 import { MOBILE_PRODUCT_NAME } from "../copy";
-import { createExpoSecureStringStorage } from "../hosts/expoSecureStorage";
+import {
+  createExpoSecureStringStorage,
+  removeLegacyWebDeviceKeyCatalog,
+} from "../hosts/expoSecureStorage";
 import {
   createInMemoryMobileHostRegistryStorage,
   createMobileHostRegistry,
@@ -77,7 +80,13 @@ function transportFromSlot(input: {
 }
 
 function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
-  const secureStorage = useMemo(() => createExpoSecureStringStorage(), []);
+  // Earlier web builds persisted device signing keys in localStorage; run the
+  // one-time cleanup before switching this session's device-key store to
+  // memory storage so upgrading users don't leave that key material behind.
+  const secureStorage = useMemo(() => {
+    removeLegacyWebDeviceKeyCatalog();
+    return createExpoSecureStringStorage();
+  }, []);
   const registryStorage = useMemo(() => createExpoSecureStringStorage({ persistWeb: true }), []);
   const deviceKeyStore = useMemo(
     () => createExpoSecureDeviceKeyStore({ storage: secureStorage }),
