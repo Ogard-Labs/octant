@@ -119,6 +119,40 @@ describe("useContextController", () => {
     }
   });
 
+  it("asks once for a subject that reports no turns of its own", async () => {
+    // Work threads own their controller elsewhere and pass no revision. The
+    // mark left by the thread before them still held a number, which read as a
+    // turn they had never taken and bought them a second reading.
+    const work = {
+      aggregateType: subject.aggregateType,
+      aggregateId: "10000000-0000-4000-8000-000000000003",
+    } as typeof subject;
+    const inspect = vi.fn<ContextClient["inspect"]>(async () => contextFixture());
+    const client = fakeClient({ inspect });
+    const { rerender, result } = renderHook(
+      ({
+        activeSubject,
+        revision,
+      }: {
+        activeSubject: typeof subject;
+        revision: number | undefined;
+      }) =>
+        useContextController({
+          client,
+          subject: activeSubject,
+          ...(revision === undefined ? {} : { revision }),
+        }),
+      { initialProps: { activeSubject: subject, revision: 1 as number | undefined } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(inspect).toHaveBeenCalledTimes(1);
+
+    rerender({ activeSubject: work, revision: undefined });
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    expect(inspect).toHaveBeenCalledTimes(2);
+  });
+
   it("loads a replay-aware snapshot and aborts the request on disposal", async () => {
     let signal: AbortSignal | undefined;
     const client = fakeClient({
