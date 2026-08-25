@@ -1524,10 +1524,21 @@ export const CodeFollowUpCommand = Schema.Union(
 export type CodeFollowUpCommand = typeof CodeFollowUpCommand.Type;
 
 export const CodeThreadFollowUpUpdated = Schema.Struct({
-  kind: Schema.Literal("code-follow-up-updated"),
+  kind: Schema.Literal("follow-up-updated"),
   followUp: CodeThreadFollowUp,
 }).annotations(strict);
 export type CodeThreadFollowUpUpdated = typeof CodeThreadFollowUpUpdated.Type;
+
+/** Replay-only compatibility for events emitted before the payload kind was
+ * aligned with the other mode-specific follow-up event contracts. */
+export const PersistedCodeThreadFollowUpUpdated = Schema.Union(
+  CodeThreadFollowUpUpdated,
+  Schema.Struct({
+    kind: Schema.Literal("code-follow-up-updated"),
+    followUp: CodeThreadFollowUp,
+  }).annotations(strict),
+);
+export type PersistedCodeThreadFollowUpUpdated = typeof PersistedCodeThreadFollowUpUpdated.Type;
 
 /**
  * The follow-up projection for one Code thread. `followUpVersion` is the
@@ -1805,4 +1816,7 @@ export const decodeCodeReviewFindingUpdated = Schema.decodeUnknownSync(CodeRevie
 export const decodeCodeThreadFollowUp = Schema.decodeUnknownSync(CodeThreadFollowUp);
 export const decodeCodeFollowUpCommand = Schema.decodeUnknownSync(CodeFollowUpCommand);
 export const decodeCodeThreadFollowUpUpdated = Schema.decodeUnknownSync(CodeThreadFollowUpUpdated);
+export const decodePersistedCodeThreadFollowUpUpdated = Schema.decodeUnknownSync(
+  PersistedCodeThreadFollowUpUpdated,
+);
 export const decodeCodeThreadFollowUpView = Schema.decodeUnknownSync(CodeThreadFollowUpView);

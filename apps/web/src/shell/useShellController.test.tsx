@@ -2054,7 +2054,11 @@ describe("useShellController", () => {
         }
         return Response.json({ committed: true });
       });
-      const client = createShellClient({ baseUrl: "http://127.0.0.1:13773", fetch });
+      const client = createShellClient({
+        baseUrl: "http://127.0.0.1:13773",
+        fetch,
+        windowCapability: "A".repeat(43),
+      });
       const { result } = renderHook(() =>
         useShellController({ client, serverUrl: "http://127.0.0.1:13773", windowId }),
       );

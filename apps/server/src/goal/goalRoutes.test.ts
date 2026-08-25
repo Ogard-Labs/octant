@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createGoalRouteHandler } from "./goalRoutes";
-import { GoalService, InMemoryGoalStore } from "./goalService";
+import { GoalService } from "./goalService";
+import { InMemoryGoalStore } from "./goalService.test-support";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
 
 const ids = {

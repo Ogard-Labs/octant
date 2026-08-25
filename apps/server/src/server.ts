@@ -1343,8 +1343,10 @@ export function startOctantServer(
     let productFeedbackService: ProductFeedbackService;
     let activeComputerUseRuntime: ComputerUseRuntime | undefined;
     let workRequestRuntime: WorkRequestRuntime | undefined;
+    let revokeShellWindow: ((windowId: WindowId) => void) | undefined;
     const windowAuthorityStore = new WindowAuthorityStore(
       (windowId) => {
+        revokeShellWindow?.(windowId);
         codeApprovalStore.revokeWindow(windowId);
         extensionToolApprovalService.revokeWindow(windowId);
         codeSessionAuthority.revokeWindow(windowId);
@@ -1899,7 +1901,11 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-    const shellRoutes = createShellRouteHandler(shellService);
+    revokeShellWindow = (windowId) => shellService.revokeWindow(windowId);
+    const shellRoutes = createShellRouteHandler(shellService, {
+      windowAuthorityStore,
+      now: Date.now,
+    });
     const themeService = new ThemeService({
       persistence,
       uuid: randomUUID,

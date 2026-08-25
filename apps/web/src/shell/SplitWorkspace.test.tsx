@@ -83,6 +83,29 @@ describe("SplitWorkspace", () => {
     expect(handlers.onClearFocus).toHaveBeenCalledOnce();
   });
 
+  it("tells assistive technology when the pane header's own menu is open", async () => {
+    const user = userEvent.setup();
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    const header = screen
+      .getByRole("region", { name: "Workspace pane: First" })
+      .querySelector<HTMLElement>(".workspace-pane__header")!;
+    expect(header).toHaveAttribute("aria-haspopup", "menu");
+    expect(header).toHaveAttribute("aria-expanded", "false");
+
+    await openPaneMenu(user, "First");
+
+    // A header that keeps reporting `false` here says the menu is closed while
+    // it is open, which misleads a screen reader rather than informing it.
+    expect(header).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("offers focus, split, and close from a right-click over the pane's header", async () => {
     const user = userEvent.setup();
     const handlers = splitCallbacks();

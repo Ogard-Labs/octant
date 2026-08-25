@@ -102,6 +102,7 @@ export class LinkedThreadService {
   }
 
   previewPrompt(command: LinkedThreadPromptPreviewCommand) {
+    this.#pruneExpiredPreviews(this.#now());
     const parsed = parseLinkedThreadPrompt({ prompt: command.prompt });
     if (parsed.kind === "unsupported") {
       return {
@@ -141,7 +142,9 @@ export class LinkedThreadService {
       return { code: "unauthorized" as const };
     }
 
-    const stored = this.#previews.get(String(command.previewId));
+    const previewId = String(command.previewId);
+    this.#pruneExpiredPreviews(this.#now(), previewId);
+    const stored = this.#previews.get(previewId);
     if (stored === undefined)
       return { code: "not-found" as const, message: "Linked-thread preview was not found." };
     const transition = command.kind === "confirm-linked-thread-preview" ? "confirm" : "deny";
@@ -155,6 +158,7 @@ export class LinkedThreadService {
         expiresAt: stored.preview.expiresAt,
       }) === "deny"
     ) {
+      this.#previews.delete(previewId);
       return { code: "stale" as const, message: "Linked-thread preview is no longer confirmable." };
     }
 
@@ -292,5 +296,13 @@ export class LinkedThreadService {
       receipt,
       aggregate,
     };
+  }
+
+  #pruneExpiredPreviews(now: UtcTimestamp, preservePreviewId?: string): void {
+    const nowMs = Date.parse(now);
+    for (const [previewId, stored] of this.#previews) {
+      if (previewId === preservePreviewId) continue;
+      if (Date.parse(stored.preview.expiresAt) <= nowMs) this.#previews.delete(previewId);
+    }
   }
 }
