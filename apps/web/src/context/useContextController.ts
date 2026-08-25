@@ -24,11 +24,18 @@ export interface ContextController {
 
 export interface UseContextControllerOptions {
   readonly client: ContextClient;
+  /**
+   * A value that changes whenever the subject's own turns have moved on. The
+   * snapshot measures a conversation that keeps growing, so a controller that
+   * only reloads when the subject changes reports the turn the thread was
+   * opened on for the rest of the session.
+   */
+  readonly revision?: number;
   readonly subject: ContextSubjectRef | undefined;
 }
 
 export function useContextController(options: UseContextControllerOptions): ContextController {
-  const { client } = options;
+  const { client, revision } = options;
   const aggregateType = options.subject?.aggregateType;
   const aggregateId = options.subject?.aggregateId;
   const subject = useMemo<ContextSubjectRef | undefined>(
@@ -120,6 +127,32 @@ export function useContextController(options: UseContextControllerOptions): Cont
     void reload();
     return () => requestRef.current?.abort();
   }, [reload, subject]);
+
+  const observedRevision = useRef(revision);
+  useEffect(() => {
+    // A subject that reports no turns of its own has nothing to re-ask for:
+    // Work threads run their controller elsewhere and never pass a revision, so
+    // a mark left behind by the thread before them must not speak for them.
+    if (revision === undefined || observedRevision.current === revision) return;
+    // The subject effect above owns the first load and clears the snapshot on
+    // its way in. A newer turn is the same subject measured again, so the last
+    // reading stays on screen as `updating` rather than collapsing to a
+    // spinner every time the reader sends something.
+    //
+    // A turn that lands while that first request is still in flight has nothing
+    // to measure from yet, and marking it observed here would let the reading
+    // taken before it existed stand for the rest of the session. Leaving it
+    // unobserved runs this effect again the moment a snapshot arrives, so the
+    // newer turn is asked for instead of swallowed.
+    // `snapshot` is the trigger, not the value: when the subject changes in the
+    // same commit, the effect above has already cleared the ref while this
+    // render still holds the previous subject's reading. Asking the new subject
+    // for the old one's sequence is how the meter ends up refused as stale.
+    const measured = snapshotRef.current;
+    if (subject === undefined || measured === undefined) return;
+    observedRevision.current = revision;
+    void reload(measured.sequence);
+  }, [reload, revision, snapshot, subject]);
 
   const execute = useCallback(
     async (command: ContextCommand) => {

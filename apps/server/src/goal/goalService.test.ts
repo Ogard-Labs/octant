@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GoalService, GoalServiceError, InMemoryGoalStore } from "./goalService";
+import { GoalService, GoalServiceError } from "./goalService";
+import { InMemoryGoalStore } from "./goalService.test-support";
 
 const ids = {
   goal: "00000000-0000-4000-8000-000000000206",

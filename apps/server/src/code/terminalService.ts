@@ -5,6 +5,7 @@ export const MAX_TERMINAL_OUTPUT_CHUNK_BYTES = 64 * 1024;
 
 const TRUNCATION_MARKER = "[Octant terminal output truncated]\n";
 const MAX_LIVE_TERMINAL_TRANSCRIPT_CHARACTERS = 64 * 1024;
+const OUTPUT_PUBLISH_DELAY_MS = 50;
 const INHERITED_ENVIRONMENT_ALLOWLIST = new Set([
   "HOME",
   "LANG",
@@ -48,6 +49,13 @@ export interface TerminalSnapshot {
     readonly chunks: readonly string[];
     readonly byteLength: number;
     readonly truncated: boolean;
+    /**
+     * Absolute offset one past the last character this snapshot carries. A
+     * caller that hands the snapshot to a surface resumes that surface's output
+     * from here, so nothing printed between taking the snapshot and observing
+     * is either lost or sent twice.
+     */
+    readonly characters: number;
   };
 }
 
@@ -78,7 +86,14 @@ interface TerminalRecord {
   readonly process?: TerminalProcessHandle;
   readonly secrets: readonly string[];
   readonly outputListeners: Set<(emission: TerminalOutputEmission) => void>;
-  publishedTranscript: string;
+  /**
+   * How far into this terminal's output the observer has been caught up, as an
+   * absolute character offset in the stream the PTY has produced. A string
+   * cursor was compared against the whole retained transcript on every publish,
+   * and stopped matching the moment the ceiling began sliding that window — so
+   * every line after the ceiling published as a full replace.
+   */
+  publishedCharacters: number;
   publishedStatus: TerminalSnapshot["status"];
   publishedExitCode: number | undefined;
   status: TerminalSnapshot["status"];
@@ -102,7 +117,7 @@ export class TerminalService {
         transcript,
         secrets: [],
         outputListeners: new Set(),
-        publishedTranscript: "",
+        publishedCharacters: 0,
         publishedStatus: "interrupted",
         publishedExitCode: restored.exitCode,
         status: "interrupted",
@@ -146,7 +161,7 @@ export class TerminalService {
       process,
       secrets,
       outputListeners: new Set(),
-      publishedTranscript: "",
+      publishedCharacters: 0,
       publishedStatus: "running",
       publishedExitCode: undefined,
       status: "running",
@@ -180,7 +195,7 @@ export class TerminalService {
       throw error;
     }
     const snapshot = this.#snapshot(record);
-    record.publishedTranscript = publishableTranscript(record);
+    record.publishedCharacters = publishableEnd(record);
     record.publishedStatus = record.status;
     record.publishedExitCode = record.exitCode;
     return snapshot;
@@ -193,10 +208,10 @@ export class TerminalService {
   observe(
     terminalId: string,
     listener: (emission: TerminalOutputEmission) => void,
-    options?: { readonly afterTranscript: string },
+    options?: { readonly afterCharacters: number },
   ): () => void {
     const record = this.#require(terminalId);
-    if (options !== undefined) record.publishedTranscript = options.afterTranscript;
+    if (options !== undefined) record.publishedCharacters = options.afterCharacters;
     record.outputListeners.add(listener);
     this.#publishOutput(record);
     return () => record.outputListeners.delete(listener);
@@ -274,11 +289,10 @@ export class TerminalService {
 
   #scheduleOutput(record: TerminalRecord): void {
     if (record.outputTimer !== undefined) return;
-    const delayMs = record.transcript.snapshot().truncated ? 1_000 : 50;
     record.outputTimer = setTimeout(() => {
       record.outputTimer = undefined;
       this.#publishOutput(record);
-    }, delayMs);
+    }, OUTPUT_PUBLISH_DELAY_MS);
   }
 
   #publishOutput(record: TerminalRecord): void {
@@ -288,12 +302,20 @@ export class TerminalService {
     }
     if (record.outputListeners.size === 0) return;
     const snapshot = this.#snapshot(record);
-    const publishable = publishableTranscript(record);
-    const replace = !publishable.startsWith(record.publishedTranscript);
-    const text = replace ? publishable : publishable.slice(record.publishedTranscript.length);
+    const end = publishableEnd(record);
+    // A reader is only sent the whole window when its position is no longer in
+    // the transcript: either the ceiling discarded it, or redaction rewrote the
+    // stream behind it. Otherwise the delta costs what the terminal printed,
+    // not what it has ever printed.
+    const replace =
+      record.publishedCharacters < record.transcript.retainedFrom() ||
+      record.publishedCharacters > end;
+    const text = replace
+      ? liveWindow(record, end)
+      : record.transcript.textBetween(record.publishedCharacters, end);
     const stateChanged =
       record.publishedStatus !== snapshot.status || record.publishedExitCode !== snapshot.exitCode;
-    record.publishedTranscript = publishable;
+    record.publishedCharacters = end;
     record.publishedStatus = snapshot.status;
     record.publishedExitCode = snapshot.exitCode;
     if (text.length === 0 && !stateChanged) return;
@@ -302,41 +324,108 @@ export class TerminalService {
   }
 }
 
-function publishableTranscript(record: TerminalRecord): string {
-  const snapshot = record.transcript.snapshot();
-  let transcript = snapshot.chunks.join("");
-  if (snapshot.truncated && transcript.length > MAX_LIVE_TERMINAL_TRANSCRIPT_CHARACTERS) {
-    transcript = `${TRUNCATION_MARKER}${transcript.slice(
-      -(MAX_LIVE_TERMINAL_TRANSCRIPT_CHARACTERS - TRUNCATION_MARKER.length),
-    )}`;
-  }
+/**
+ * The offset up to which this terminal's output may be published.
+ *
+ * It stops short of a tail that is still a prefix of a credential, so a secret
+ * arriving across two PTY callbacks is never published half-written and then
+ * rewritten behind a reader's position.
+ */
+function publishableEnd(record: TerminalRecord): number {
+  const end = record.transcript.characters();
+  if (record.secrets.length === 0) return end;
+  const longest = record.secrets.reduce((widest, secret) => Math.max(widest, secret.length - 1), 0);
+  const tail = record.transcript.textBetween(
+    Math.max(record.transcript.retainedFrom(), end - longest),
+    end,
+  );
   let withheld = 0;
   for (const secret of record.secrets) {
-    for (let length = Math.min(secret.length - 1, transcript.length); length > withheld; length--) {
-      if (transcript.endsWith(secret.slice(0, length))) {
+    for (let length = Math.min(secret.length - 1, tail.length); length > withheld; length--) {
+      if (tail.endsWith(secret.slice(0, length))) {
         withheld = length;
         break;
       }
     }
   }
-  return withheld === 0 ? transcript : transcript.slice(0, -withheld);
+  return end - withheld;
 }
 
+/** The bounded tail sent to a reader whose position the transcript no longer holds. */
+function liveWindow(record: TerminalRecord, end: number): string {
+  const from = Math.max(
+    record.transcript.retainedFrom(),
+    end - (MAX_LIVE_TERMINAL_TRANSCRIPT_CHARACTERS - TRUNCATION_MARKER.length),
+  );
+  const text = record.transcript.textBetween(from, end);
+  return from > 0 && !text.startsWith(TRUNCATION_MARKER) ? `${TRUNCATION_MARKER}${text}` : text;
+}
+
+/**
+ * The terminal's output, bounded, addressed by absolute character offset.
+ *
+ * Readers hold an offset rather than a copy of the text, so catching one up
+ * costs what the terminal printed since it last looked. `#retainedFrom` is the
+ * offset of the first character still held: it only moves when the ceiling
+ * discards output, and it is what tells a reader its position is gone.
+ */
 class TranscriptBuffer {
   #chunks: string[] = [];
   #byteLength = 0;
   #truncated = false;
+  #characters = 0;
+  #retainedFrom = 0;
 
   append(value: string): void {
     for (const chunk of splitUtf8(value, MAX_TERMINAL_OUTPUT_CHUNK_BYTES)) {
       this.#chunks.push(chunk);
       this.#byteLength += Buffer.byteLength(chunk, "utf8");
+      this.#characters += chunk.length;
     }
     this.#enforceLimit();
   }
 
   snapshot(): TerminalSnapshot["transcript"] {
-    return { chunks: [...this.#chunks], byteLength: this.#byteLength, truncated: this.#truncated };
+    return {
+      chunks: [...this.#chunks],
+      byteLength: this.#byteLength,
+      truncated: this.#truncated,
+      characters: this.characters(),
+    };
+  }
+
+  /** Absolute offset one past the last character held. */
+  characters(): number {
+    return this.#retainedFrom + this.#characters;
+  }
+
+  /** Absolute offset of the first character still held. */
+  retainedFrom(): number {
+    return this.#retainedFrom;
+  }
+
+  /**
+   * The text between two absolute offsets, read from the end of the chunk list
+   * backwards so the work is the size of the answer rather than the size of the
+   * transcript. Offsets outside what is held are clamped.
+   */
+  textBetween(from: number, to: number): string {
+    const start = Math.max(from, this.#retainedFrom);
+    const end = Math.min(to, this.characters());
+    if (end <= start) return "";
+    const pieces: string[] = [];
+    let position = this.characters();
+    for (let index = this.#chunks.length - 1; index >= 0 && position > start; index--) {
+      const chunk = this.#chunks[index]!;
+      const chunkStart = position - chunk.length;
+      if (chunkStart < end) {
+        pieces.push(
+          chunk.slice(Math.max(start - chunkStart, 0), Math.min(end - chunkStart, chunk.length)),
+        );
+      }
+      position = chunkStart;
+    }
+    return pieces.reverse().join("");
   }
 
   redact(secrets: readonly string[]): void {
@@ -344,6 +433,7 @@ class TranscriptBuffer {
     const redacted = redact(this.#chunks.join(""), secrets);
     this.#chunks = splitUtf8(redacted, MAX_TERMINAL_OUTPUT_CHUNK_BYTES);
     this.#byteLength = Buffer.byteLength(redacted, "utf8");
+    this.#characters = redacted.length;
     this.#enforceLimit();
   }
 
@@ -355,11 +445,20 @@ class TranscriptBuffer {
       this.#chunks.length > 0 &&
       this.#byteLength + markerBytes > MAX_TERMINAL_TRANSCRIPT_BYTES
     ) {
-      this.#byteLength -= Buffer.byteLength(this.#chunks.shift()!, "utf8");
+      const dropped = this.#chunks.shift();
+      if (dropped === undefined) break;
+      this.#byteLength -= Buffer.byteLength(dropped, "utf8");
+      this.#characters -= dropped.length;
+      this.#retainedFrom += dropped.length;
     }
     if (this.#chunks[0] !== TRUNCATION_MARKER) {
       this.#chunks.unshift(TRUNCATION_MARKER);
       this.#byteLength += markerBytes;
+      this.#characters += TRUNCATION_MARKER.length;
+      // The marker is not something the PTY printed. Backing the retained
+      // offset up by its length keeps every real character at the offset it has
+      // always had, so a reader's position stays meaningful across truncation.
+      this.#retainedFrom -= TRUNCATION_MARKER.length;
     }
   }
 }

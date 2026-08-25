@@ -73,6 +73,11 @@ broker URLs and tokens, desktop bridge secret), and probes storage readiness
 before showing a window. It also runs two loopback-only brokers the server
 talks back to: the credential broker (Keychain access by opaque reference) and
 the browser runtime broker.
+Every app window confines top-level navigation, redirects, and opened windows to
+the exact packaged renderer asset or configured Vite development origin. Native
+IPC also requires that trusted renderer URL, and the packaged renderer ships a
+strict Content Security Policy; external pages are opened through explicit
+server- or host-authorized flows instead of replacing the app window.
 
 **Server (`apps/server`).** A Bun HTTP server bound to `127.0.0.1` on the port
 the desktop reserved. It registers route modules per feature (`chatRoutes`,
@@ -97,7 +102,16 @@ material. It uses the same contracts and client runtime as the browser.
 **Window authority.** Each desktop window receives a 256-bit opaque token with a
 bounded lifetime. Routes bind reads and writes to the Projects that window is
 bound to, so two windows on the same host cannot see across each other's
-Project scope by accident.
+Project scope by accident. The packaged renderer sends that capability on its
+shell requests. `POST /api/shell/bootstrap` registers the capability-bound
+window, while `GET` only reads an existing registration and never accepts a
+caller-selected `windowId`. An opaque `file://` origin or a missing Origin is
+accepted only with the renderer identity bound at desktop window registration
+and that exact window capability; the scheme alone is never authority. The
+desktop injects that renderer proof only for the exact packaged frame (or the
+configured development origin), not from renderer-controlled state. The
+loopback transport validates the actual Host header before dispatch, and
+closing or revoking the window removes its shell registration as well.
 
 ## Modes: Chat, Work, and Code
 
@@ -398,8 +412,12 @@ mechanisms are:
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch under `sandbox-exec` with deny-default Seatbelt profiles
   scoped to the bound root, allowlisted environments, and no broker
-  coordinates. Path checks alone are never the boundary. Confined reads open a
-  handle and verify identity against what containment resolved.
+  coordinates. Sensitive system roots (`/etc/ssh`, `/var/root`,
+  `/Library/Keychains`, `/private`, `/Volumes`, and `/Network`) remain denied
+  even where runtime compatibility requires a broad file-read rule; each
+  launch's exact roots are re-allowed after those denials. Path checks alone
+  are never the boundary. Confined reads open a handle and verify identity
+  against what containment resolved.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
 - **Remote clients.** Pairing issues a revocable device key; the private

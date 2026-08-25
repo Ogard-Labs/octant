@@ -22,7 +22,6 @@ import {
   evaluateBrowserAction,
   evaluateProfileMode,
 } from "@octant/domain";
-import { emptyThreadContentTaint } from "@octant/domain/untrusted-content-policy";
 import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
@@ -817,8 +816,11 @@ export function createBrowserToolCallAuthorityService(
       executionPolicy: "approval-gated",
       approvalSatisfied:
         request.approval.kind === "not-required" || request.approval.kind === "approved",
-      externalContentIngested: (readThreadTaint?.(threadId) ?? emptyThreadContentTaint())
-        .externalContentIngested,
+      // A caller that cannot supply the persisted taint projection is not
+      // allowed to turn unknown provenance into authority. The production
+      // server passes the projection reader explicitly; this fallback keeps
+      // direct service construction fail-closed.
+      externalContentIngested: readThreadTaint?.(threadId)?.externalContentIngested ?? true,
     }),
     ...(clock === undefined ? {} : { clock }),
   });

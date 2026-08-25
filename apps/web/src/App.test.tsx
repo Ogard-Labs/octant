@@ -1289,11 +1289,10 @@ describe("App", () => {
     ).toBeNull();
 
     await user.click(meter);
-    const popover = screen.getByRole("dialog", { name: "Context usage" });
-    expect(popover).toHaveTextContent("Used104 · Provider reported");
-    expect(popover).toHaveTextContent("Maximum1,000");
-    expect(popover).toHaveTextContent("Percentage10%");
-    expect(popover).toHaveTextContent("Free space796");
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    expect(popover).toHaveTextContent("Context window104 / 1K (10%)");
+    expect(popover).toHaveTextContent("Last sent · model-a · Provider reported");
+    expect(popover).toHaveTextContent("Free space79680%");
     expect(popover).toHaveTextContent(/Tools2 loaded· 6 deferred/);
     expect(inspect.mock.calls.length).toBe(inspectCalls);
 
@@ -1309,7 +1308,7 @@ describe("App", () => {
 
     await user.keyboard("{Escape}");
     await user.keyboard("{Control>}{Shift>}u{/Shift}{/Control}");
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     expect(inspect.mock.calls.length).toBe(inspectCalls);
 
     await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
@@ -1367,10 +1366,10 @@ describe("App", () => {
         name: /Show context usage for Exact created chat/i,
       }),
     );
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
 
     await user.click(screen.getByRole("region", { name: "Workspace pane: Older chat" }));
-    expect(screen.queryByRole("dialog", { name: "Context usage" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Context window" })).not.toBeInTheDocument();
     await waitFor(() =>
       expect(contextApi.inspect).toHaveBeenCalledWith(
         {

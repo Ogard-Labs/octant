@@ -64,6 +64,7 @@ describe("Code app-managed tools", () => {
               ],
               byteLength: 20,
               truncated: false,
+              characters: 0,
             },
           };
         },
@@ -133,6 +134,7 @@ describe("Code app-managed tools", () => {
                   : `working…done\n\u001b]777;octant=${marker};exit=7\u0007`,
               ],
               truncated: false,
+              characters: 0,
             },
           };
         },
@@ -176,6 +178,7 @@ describe("Code app-managed tools", () => {
       transcript: {
         chunks: [`interrupted\n\u001b]777;octant=${marker};exit=130\u0007`],
         truncated: false,
+        characters: 0,
       },
     }));
     const tools = createCodeAppManagedTools({
@@ -189,7 +192,7 @@ describe("Code app-managed tools", () => {
         read: async () => ({
           terminalId: threadId,
           status: "running",
-          transcript: { chunks: ["still running"], truncated: false },
+          transcript: { chunks: ["still running"], truncated: false, characters: 0 },
         }),
         terminate: vi.fn(),
       },
@@ -221,6 +224,7 @@ describe("Code app-managed tools", () => {
       transcript: {
         chunks: [`stopped\n\u001b]777;octant=${marker};exit=130\u0007`],
         truncated: false,
+        characters: 0,
       },
     }));
     const executeOperation = vi.fn(async (_windowId: WindowId, command: CodeOperationCommand) => {
@@ -245,7 +249,7 @@ describe("Code app-managed tools", () => {
         read: async () => ({
           terminalId: threadId,
           status: "running",
-          transcript: { chunks: ["still running"], truncated: false },
+          transcript: { chunks: ["still running"], truncated: false, characters: 0 },
         }),
         terminate: vi.fn(),
       },
@@ -274,6 +278,7 @@ describe("Code app-managed tools", () => {
       transcript: {
         chunks: [`timed out\n\u001b]777;octant=${marker};exit=130\u0007`],
         truncated: false,
+        characters: 0,
       },
     }));
     const tools = createCodeAppManagedTools({
@@ -297,7 +302,7 @@ describe("Code app-managed tools", () => {
         read: async () => ({
           terminalId: threadId,
           status: "running",
-          transcript: { chunks: ["still running"], truncated: false },
+          transcript: { chunks: ["still running"], truncated: false, characters: 0 },
         }),
         terminate: vi.fn(),
       },
@@ -334,7 +339,12 @@ describe("Code app-managed tools", () => {
           terminalId: threadId,
           status: "running",
           canRerun: false,
-          transcript: { chunks: ["shared transcript"], byteLength: 17, truncated: false },
+          transcript: {
+            chunks: ["shared transcript"],
+            byteLength: 17,
+            truncated: false,
+            characters: 0,
+          },
         }),
       },
     });
@@ -360,7 +370,7 @@ describe("Code app-managed tools", () => {
           terminalId: threadId,
           status: "running",
           canRerun: false,
-          transcript: { chunks: ["界".repeat(40_000)], truncated: false },
+          transcript: { chunks: ["界".repeat(40_000)], truncated: false, characters: 0 },
         }),
       },
     });

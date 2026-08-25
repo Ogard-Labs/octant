@@ -38,6 +38,7 @@ import { selectMobilePlacementTransport } from "./placementTransport";
 import { createProjectRequestGuard } from "./projectRequestGuard";
 import { StatusCard } from "../ui/StatusCard";
 import type { AgentListView } from "./AgentsListScreen";
+import { summarizeMobileInboxFailures } from "./mobileInboxAvailability";
 
 export interface InboxHomeScreenProps {
   readonly homeMode: MobileHomeView;
@@ -67,6 +68,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const { colors } = useTheme();
   const { transports, hosts, placementHostId, transportForHost, health } = useMobileSession();
   const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
+  const [transportError, setTransportError] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -176,18 +178,29 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const refresh = useCallback(async () => {
     if (transports.length === 0) {
       setRows([]);
+      setTransportError(undefined);
       return;
     }
     setLoading(true);
     try {
       const result = await listAllHostsMobileInbox(transports);
       setRows(result.rows);
-    } catch {
-      setRows([]);
+      setTransportError(
+        summarizeMobileInboxFailures({
+          failures: result.failures,
+          hostLabels,
+        }),
+      );
+    } catch (cause) {
+      setTransportError(
+        cause instanceof MobileInboxFailure
+          ? cause.message
+          : "Could not load threads from your hosts.",
+      );
     } finally {
       setLoading(false);
     }
-  }, [transports]);
+  }, [hostLabels, transports]);
 
   useEffect(() => {
     void refresh();
@@ -469,6 +482,12 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           paddingBottom: space.xs,
           fontSize: typography.caption.fontSize,
         },
+        transportError: {
+          color: colors.danger,
+          fontSize: typography.caption.fontSize,
+          lineHeight: 20,
+          marginBottom: space.md,
+        },
       }),
     [colors],
   );
@@ -553,6 +572,12 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         {props.homeMode === "inbox" ? null : (
           <Text style={styles.subhero}>{modePresentation?.description}</Text>
         )}
+
+        {transportError !== undefined ? (
+          <Text style={styles.transportError} testID="mobile-home-transport-error">
+            {transportError}
+          </Text>
+        ) : null}
 
         {props.homeMode === "work" || props.homeMode === "code" ? (
           <View>
@@ -681,11 +706,11 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         ) : (
           <View style={styles.threadList} testID="mobile-home-thread-list">
             {loading ? <ActivityIndicator color={colors.accent} style={styles.loader} /> : null}
-            {!loading && modeRows.length === 0 ? (
+            {!loading && modeRows.length === 0 && transportError === undefined ? (
               <Text style={styles.empty}>{MOBILE_COPY.inboxNoThreads}</Text>
-            ) : (
+            ) : modeRows.length > 0 ? (
               modeRows.map((row) => threadRow(row, false))
-            )}
+            ) : null}
           </View>
         )}
       </ScrollView>

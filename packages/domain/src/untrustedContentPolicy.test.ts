@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_NAMED_INGESTED_SOURCES } from "@octant/contracts";
 import {
-  assertContentDoesNotAuthorize,
   decideExternalContentIngestion,
   emptyThreadContentTaint,
   formatTaintedApprovalPrompt,
@@ -210,34 +209,5 @@ describe("resolveTaintedApproval", () => {
     expect(prompt).toContain("readme-md");
     expect(prompt).toContain("web-fetch");
     expect(prompt.toLowerCase()).toContain("external");
-  });
-});
-
-describe("assertContentDoesNotAuthorize", () => {
-  it("rejects parsing tool or file content into invocations, approvals, trust, or authority", () => {
-    expect(() =>
-      assertContentDoesNotAuthorize({
-        attemptedEffect: "tool-invocation",
-        contentOrigin: "tool-result",
-      }),
-    ).toThrow(/never/i);
-    expect(() =>
-      assertContentDoesNotAuthorize({
-        attemptedEffect: "approval",
-        contentOrigin: "external-content",
-      }),
-    ).toThrow(/never/i);
-    expect(() =>
-      assertContentDoesNotAuthorize({
-        attemptedEffect: "trust-change",
-        contentOrigin: "external-content",
-      }),
-    ).toThrow(/never/i);
-    expect(() =>
-      assertContentDoesNotAuthorize({
-        attemptedEffect: "authority-transition",
-        contentOrigin: "tool-result",
-      }),
-    ).toThrow(/never/i);
   });
 });

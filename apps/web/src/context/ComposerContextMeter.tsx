@@ -80,6 +80,16 @@ export function ComposerContextMeter() {
     ...(health === undefined ? {} : { healthLabel: contextHealthLabel(health) }),
   });
 
+  // The panel shows one of three things, and a screen reader that is told the
+  // dialog is named for a heading it does not contain has been told the wrong
+  // thing. Name it for whichever title the reader is actually looking at.
+  const panelTitle =
+    windowModel === undefined || snapshot === undefined
+      ? fallback === undefined
+        ? "Context usage"
+        : "Provider usage"
+      : "Context window";
+
   return (
     <div className="composer-context-meter" data-health={health}>
       <OctantPopover
@@ -88,7 +98,7 @@ export function ComposerContextMeter() {
         onOpenChange={setOpen}
         open={open}
         side="top"
-        title="Context usage"
+        title={panelTitle}
         trigger={
           <svg
             aria-hidden="true"
@@ -221,7 +231,6 @@ function ContextUsagePopover(props: {
   readonly windowModel: ReturnType<typeof contextWindowModel>;
 }) {
   const { windowModel } = props;
-  const free = windowModel.segments.find((segment) => segment.kind === "free");
   const limitRows = [
     { label: "Requests", limit: props.snapshot.serviceLimits.requests },
     { label: "Tokens", limit: props.snapshot.serviceLimits.tokens },
@@ -231,30 +240,16 @@ function ContextUsagePopover(props: {
   return (
     <>
       <header className="context-window-popover__header">
-        <span>Context usage</span>
+        <span>Context window</span>
         <strong>
           {windowModel.usageLabel} ({String(Math.round(windowModel.percent))}%)
         </strong>
       </header>
+      <ContextMeter segments={windowModel.segments} totalTokens={windowModel.totalTokens} />
       <p className="context-window-popover__source">
         {windowModel.sourceLabel} · {props.snapshot.modelLimits.modelId} ·{" "}
         {contextWindowUsedSourceLabel(windowModel.usedSource)}
       </p>
-      <dl className="context-window-popover__facts">
-        <Fact
-          label="Used"
-          value={`${formatTokens(windowModel.usedTokens)} · ${contextWindowUsedSourceLabel(windowModel.usedSource)}`}
-        />
-        <Fact label="Maximum" value={formatTokens(windowModel.totalTokens)} />
-        <Fact label="Percentage" value={formatPercent(windowModel.percent)} />
-        <Fact
-          label="Free space"
-          value={
-            free === undefined || free.tokens === undefined ? "Unknown" : formatTokens(free.tokens)
-          }
-        />
-      </dl>
-      <ContextMeter segments={windowModel.segments} totalTokens={windowModel.totalTokens} />
       <dl className="context-window-popover__breakdown">
         {windowModel.segments.map((segment) => (
           <div key={segment.key}>
