@@ -1931,6 +1931,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .settings-view__text-input[type="color"] {
   min-width: 46px;
   width: 46px;
+  height: 32px;
   padding: 2px;
 }
 

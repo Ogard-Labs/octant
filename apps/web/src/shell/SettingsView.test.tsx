@@ -544,6 +544,28 @@ describe("SettingsView", () => {
     expect(styles).not.toContain("--octant-ui-font-family");
   });
 
+  it("sizes every value control in Settings from one declared column", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    // Sized from their own content, the controls in one column measured 134,
+    // 150, 158 and 180 — seven staggered left edges under a right edge they
+    // already shared. A stepper's width in particular moved by 16px depending
+    // on whether it happened to spell out a unit.
+    expect(styles).toMatch(/--oct-settings-control:\s*180px;/);
+    for (const selector of [
+      "\\.settings-view__select",
+      "\\.settings-font-picker",
+      "\\.octant-number-stepper",
+    ]) {
+      expect(styles).toMatch(
+        new RegExp(`${selector}[^{}]*\\{[^}]*width:\\s*var\\(--oct-settings-control`),
+      );
+    }
+    expect(styles).toMatch(
+      /\.octant-number-stepper \{[^}]*grid-template-columns:\s*30px minmax\(0, 1fr\) auto 30px;/,
+    );
+  });
+
   it("lets a scheme card be as tall as the picture it shows", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 

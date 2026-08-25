@@ -365,6 +365,17 @@
   scrollbar-gutter: stable;
 }
 
+/* Settings reads down a single control edge. Left to size itself, every
+   control took its own natural width — a select at 150, a stepper at 134 or 150
+   depending on whether it happened to carry a unit suffix, a font picker at 158,
+   a slider at 180 — so seven different left edges staggered down one column
+   whose right edge was already common to all of them. The column is declared
+   once here and every value control in the surface takes it. */
+.settings-view {
+  --oct-settings-control: 180px;
+  --oct-settings-control-height: 32px;
+}
+
 .settings-view__content-inner {
   width: min(calc(100% - 48px), 760px);
   padding: 36px 0 80px;
@@ -520,6 +531,17 @@
   line-height: 1.4;
 }
 
+/* The app's own primitives reach the same column. A switch is not a value
+   control — it keeps its natural size and lands on the column's right edge like
+   every other control does. */
+.setrow-control > .settings-view__range,
+.setrow-control > [data-slot="toggle-group"],
+.setrow-control > .octant-number-stepper,
+.setrow-control > .settings-view__select,
+.setrow-control > .settings-font-picker {
+  width: var(--oct-settings-control);
+}
+
 .setrow-control,
 .setrow-control > *,
 .settings-view__select,
@@ -531,10 +553,14 @@
   font-family: var(--oct-font-display);
 }
 
+/* One row height. The controls are all 32px now, so the rows that hold them
+   differed only by whatever their control's recipe happened to measure — 38 for
+   a switch, 48 for a stepper, 53 for a select — and the group read as three
+   rhythms stacked on top of each other. */
 .settings-view__field {
-  min-height: 36px;
+  min-height: 44px;
   gap: 12px;
-  padding: 8px 0;
+  padding: 6px 0;
   color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -552,9 +578,18 @@
   font-size: var(--oct-text-xs);
 }
 
+/* A picker chooses from a known list, so it takes the column. Free text does
+   not: an API key or a base URL has to stay as wide as the row allows, and only
+   its height joins the rhythm. */
+.settings-view__select {
+  width: var(--oct-settings-control);
+  min-width: 0;
+}
+
 .settings-view__select,
 .settings-view__text-input:not([type="color"]) {
-  min-height: 32px;
+  height: var(--oct-settings-control-height);
+  min-height: var(--oct-settings-control-height);
 }
 
 .settings-view__textarea {
@@ -765,7 +800,7 @@
    group's row metrics rather than the looser spacing it used when each block
    was its own card. */
 .settings-theme-editor .setgroup > .settings-view__field {
-  padding: 10px 16px;
+  padding: 6px 16px;
   border-top: 1px solid var(--oct-border-soft);
 }
 
@@ -833,7 +868,11 @@
   border-top: 0;
 }
 
+/* Placed back into the grid: a legend floats out of the fieldset's flow by
+   default and cuts a notch through the group's own top rule. */
 .settings-view__theme-group legend {
+  float: none;
+  width: 100%;
   padding: 0 0 2px;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
@@ -841,7 +880,9 @@
 }
 
 .settings-font-picker {
-  width: min(248px, 100%);
+  width: var(--oct-settings-control);
+  height: var(--oct-settings-control-height);
+  min-height: var(--oct-settings-control-height);
 }
 
 .settings-font-picker__preview {
@@ -863,11 +904,36 @@
   padding: 0 0 var(--oct-space-2);
 }
 
+/* The rest of Settings discloses with the app's own chevron; only this one
+   still drew the browser's `list-item` triangle, which also pushed its text a
+   marker's width past the label edge every other row starts at. */
 .settings-font-picker__custom summary {
+  display: flex;
   width: fit-content;
+  align-items: center;
+  gap: 6px;
   color: var(--muted-foreground);
   font-size: var(--oct-text-xs);
   cursor: pointer;
+  list-style: none;
+}
+
+.settings-font-picker__custom summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-font-picker__custom summary::before {
+  width: 0;
+  height: 0;
+  content: "";
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  border-left: 5px solid currentcolor;
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.settings-font-picker__custom[open] summary::before {
+  transform: rotate(90deg);
 }
 
 .settings-font-picker__custom > input {
@@ -875,9 +941,13 @@
   margin-top: var(--oct-space-2);
 }
 
+/* The value and its unit share one flexible column so a stepper that spells out
+   `px` is exactly as wide as one that does not. Sized from the two of them, the
+   font-size and line-height steppers in the same group differed by 16px. */
 .octant-number-stepper {
   display: inline-grid;
-  grid-template-columns: 30px minmax(44px, 58px) auto 30px;
+  width: var(--oct-settings-control, auto);
+  grid-template-columns: 30px minmax(0, 1fr) auto 30px;
   align-items: center;
   overflow: hidden;
   background: var(--background);
