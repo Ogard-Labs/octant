@@ -70,6 +70,12 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          # This job never pushes. The checkout is rsynced to the octant
+          # account below (`Prepare the dedicated Station identity`), and a
+          # persisted job token in .git/config would become readable by that
+          # second local account.
+          persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
