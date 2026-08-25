@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, lstat, mkdir, mkdtemp, open, rm } from "node:fs/promises";
-import { userInfo } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import type { ExecutionCapsuleAvailableCapacity } from "@octant/domain/execution-capsule-policy";
@@ -294,6 +294,9 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       ]);
       if (create.exitCode !== 0) return { status: "refused", reason: "creation-failed" };
       created = true;
+      if (!(await this.#provisionWorkspace(disk, runtimeId))) {
+        return { status: "refused", reason: "creation-failed" };
+      }
 
       const copied = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(disk),
@@ -397,6 +400,30 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       }
       if (!this.#runtimes.has(runtimeId)) {
         await this.#diskStore.release(disk).catch(() => undefined);
+      }
+    }
+  }
+
+  async #provisionWorkspace(
+    disk: ExecutionCapsuleDiskLocation,
+    runtimeId: string,
+  ): Promise<boolean> {
+    let seedDirectory: string | undefined;
+    try {
+      seedDirectory = await mkdtemp(join(tmpdir(), "octant-capsule-workspace-"));
+      const copied = await this.#runner.run(this.#podmanPath, [
+        ...podmanStoreArgs(disk),
+        "cp",
+        "--archive=true",
+        seedDirectory,
+        `${runtimeId}:/workspace`,
+      ]);
+      return copied.exitCode === 0;
+    } catch {
+      return false;
+    } finally {
+      if (seedDirectory !== undefined) {
+        await rm(seedDirectory, { force: true, recursive: true }).catch(() => undefined);
       }
     }
   }

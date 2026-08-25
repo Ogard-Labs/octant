@@ -323,6 +323,15 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       "while :; do sleep 3600; done",
     ]);
     expect(createCall?.[1].join(" ")).not.toContain(source.bundlePath);
+    expect(
+      run.mock.calls.some(
+        ([command, args]) =>
+          command === "/usr/bin/podman" &&
+          args.includes("cp") &&
+          args.includes("--archive=true") &&
+          args.includes("octant-capsule-11111111111141118111111111111111:/workspace"),
+      ),
+    ).toBe(true);
     expect(run).toHaveBeenCalledWith(
       "/usr/bin/podman",
       fixturePodmanArgs([
