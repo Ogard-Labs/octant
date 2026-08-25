@@ -158,7 +158,7 @@ jobs:
               /usr/bin/fuse2fs -o rw,fakeroot,nodev,nosuid "$root/capsule.ext4" "$root/mount"
               chmod 0700 "$root/mount"
               mkdir -m 0700 "$root/mount/graph" "$root/mount/run"
-              /usr/bin/podman --root "$root/mount/graph" --runroot "$root/mount/run" --storage-driver vfs --cgroup-manager systemd --runtime /usr/bin/runsc --runtime-flag platform=systrap --runtime-flag ignore-cgroups --runtime-flag network=none run --rm --log-driver none --network none --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --cpus 0.1 --memory 268435456 --pids-limit 64 --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true
+              /usr/bin/podman --root "$root/mount/graph" --runroot "$root/mount/run" --storage-driver vfs --cgroup-manager systemd --runtime /usr/bin/runsc --runtime-flag debug --runtime-flag alsologtostderr --runtime-flag platform=systrap --runtime-flag ignore-cgroups --runtime-flag network=none run --rm --log-driver none --network none --userns auto --user 0:0 --cap-drop all --security-opt no-new-privileges --cpus 0.1 --memory 268435456 --pids-limit 64 --entrypoint /bin/sh "$OCTANT_GVISOR_CAPSULE_IMAGE" -c true
             '
       - name: Prove two protected capsules and a reviewed bundle export
         env:
