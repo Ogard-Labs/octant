@@ -82,11 +82,14 @@ host becomes a first-class destination.
   not. Restart revalidates the owner, Project, recipe, provider, authority, and
   network grant before new work starts. Recovery tries a bounded graceful stop,
   then a force signal that preserves the container filesystem; if both fail,
-  the driver refuses recovery and keeps the runtime tracked for explicit
-  cleanup.
+  the driver refuses recovery and keeps the deterministic runtime tracked so a
+  subsequent recovery attempt retries control without binding it as stopped or
+  ready.
 - Code returns through an explicit commit, Git bundle, patch, or named artifact
   with provenance and diff. Import and destruction require user confirmation;
-  no capsule pushes, merges, or deletes itself as a side effect.
+  no capsule pushes, merges, or deletes itself as a side effect. A stopped
+  capsule may start only inside its verified budget scope to produce an export,
+  and the driver stops it again before returning the receipt.
 - The Station runs as a dedicated unprivileged `octant` OS user with no sudo,
   Docker group, personal home, or another service's credentials. Host secrets
   stay in a dedicated Secret Service collection unlocked with a host-bound

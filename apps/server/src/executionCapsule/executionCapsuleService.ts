@@ -364,7 +364,10 @@ export class ExecutionCapsuleService {
 
   async exportGitBundle(capsuleId: ExecutionCapsuleId): Promise<ExecutionCapsuleExportResult> {
     const capsule = this.#capsules.get(capsuleId);
-    if (capsule === undefined || capsule.receipt.status !== "ready") {
+    if (
+      capsule === undefined ||
+      (capsule.receipt.status !== "ready" && capsule.receipt.status !== "stopped")
+    ) {
       return { status: "refused", reason: "capsule-unavailable" };
     }
     let exported: ExecutionCapsuleDriverExportResult;
@@ -433,7 +436,10 @@ export class ExecutionCapsuleService {
 
   async stop(capsuleId: ExecutionCapsuleId): Promise<ExecutionCapsuleStopResult> {
     const capsule = this.#capsules.get(capsuleId);
-    if (capsule === undefined || capsule.receipt.status !== "ready") {
+    if (
+      capsule === undefined ||
+      (capsule.receipt.status !== "ready" && capsule.receipt.status !== "stopped")
+    ) {
       return { status: "refused", reason: "capsule-unavailable" };
     }
     let stopped: Awaited<ReturnType<ExecutionCapsuleDriver["stop"]>>;

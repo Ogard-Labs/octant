@@ -272,9 +272,6 @@ evidence("gVisor execution capsule evidence", () => {
       const firstExport = await service.exportGitBundle(first.capsuleId);
       expect(firstExport).toMatchObject({ status: "exported", receipt: { verified: true } });
       if (firstExport.status !== "exported") throw new Error("First bundle export failed.");
-      const secondExport = await service.exportGitBundle(second.capsuleId);
-      expect(secondExport).toMatchObject({ status: "exported", receipt: { verified: true } });
-      if (secondExport.status !== "exported") throw new Error("Second bundle export failed.");
       expect((await git(sourceRoot, ["rev-parse", "HEAD"])).trim()).toBe(revision);
       expect((await git(sourceRoot, ["branch", "--show-current"])).trim()).toBe(sourceBranchBefore);
       expect(await git(sourceRoot, ["status", "--short"])).toBe(sourceStatusBefore);
@@ -328,6 +325,9 @@ evidence("gVisor execution capsule evidence", () => {
       await expect(
         afterRestart.execute({ capsuleId: second.capsuleId, argv: ["git", "status"] }),
       ).resolves.toEqual({ status: "refused", reason: "capsule-unavailable" });
+      const secondExport = await afterRestart.exportGitBundle(second.capsuleId);
+      expect(secondExport).toMatchObject({ status: "exported", receipt: { verified: true } });
+      if (secondExport.status !== "exported") throw new Error("Stopped bundle export failed.");
 
       await expect(
         service.release({ capsuleId: first.capsuleId, exportId: firstExport.receipt.exportId }),

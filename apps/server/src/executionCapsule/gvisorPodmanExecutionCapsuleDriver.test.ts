@@ -519,7 +519,7 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
     ).resolves.toEqual({ status: "failed", reason: "runtime-unavailable" });
   });
 
-  it("copies and verifies a Git bundle before reporting an export", async () => {
+  it("starts, exports, verifies, and stops a persisted capsule", async () => {
     const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
       if (command === "/usr/bin/podman" && args[0] === "info") {
         return {
@@ -570,6 +570,9 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       source,
     });
     if (created.status !== "ready") throw new Error("Expected the fixture capsule to start.");
+    await expect(driver.stop({ runtimeId: created.runtimeId })).resolves.toEqual({
+      status: "stopped",
+    });
 
     await expect(driver.exportGitBundle({ runtimeId: created.runtimeId })).resolves.toEqual({
       status: "exported",
@@ -1040,11 +1043,14 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       status: "refused",
       reason: "runtime-unavailable",
     });
-    await expect(failedStop.release({ runtimeId })).resolves.toEqual({ status: "released" });
-
-    recoveredRunning = false;
     recoveredStopExitCode = 0;
     recoveredKillExitCode = 0;
+    await expect(failedStop.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "stopped",
+      runtimeId,
+    });
+
+    recoveredRunning = false;
     recoveredMounts = [];
     recoveredEffectiveCaps = 7;
     const inspectShapeDiagnostic = vi.fn();

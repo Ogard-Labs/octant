@@ -448,8 +448,9 @@ mechanisms are:
   process cgroup ancestry before accepting it. The tracer can
   execute argv, verify and
   export a Git bundle, stop without deleting the filesystem, recover only as
-  stopped after live-authority revalidation, and release the exact runtime
-  after an explicit export. A dedicated Linux CI job proves two real capsules
+  stopped after live-authority revalidation, briefly restart a stopped capsule
+  inside its verified budget to export it, and release the exact runtime after
+  an explicit export. A dedicated Linux CI job proves two real capsules
   cannot see or signal one another. Ordinary Code threads do not use this
   service yet, so Linux remains an incompatible destination until the AgentRun
   and Station launch paths are wired and revalidated.

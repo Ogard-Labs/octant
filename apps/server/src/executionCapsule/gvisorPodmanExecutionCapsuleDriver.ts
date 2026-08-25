@@ -115,6 +115,11 @@ interface GvisorPodmanRuntime {
   readonly capsuleId: string;
   readonly image: string;
   readonly disk: ExecutionCapsuleDiskLocation;
+  readonly budget: {
+    readonly cpuMillicores: number;
+    readonly memoryBytes: number;
+    readonly pidLimit: number;
+  };
   readonly state: "container-removed" | "ready" | "stop-failed" | "stopped";
 }
 
@@ -448,6 +453,11 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         capsuleId: String(input.request.capsuleId),
         image: String(input.request.recipe.image),
         disk,
+        budget: {
+          cpuMillicores: input.request.budget.cpuMillicores,
+          memoryBytes: input.request.budget.memoryBytes,
+          pidLimit: input.request.budget.pidLimit,
+        },
         state: "ready",
       });
       return { status: "ready", runtimeId };
@@ -523,6 +533,20 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     ]);
   }
 
+  async #stopRuntime(
+    disk: ExecutionCapsuleDiskLocation,
+    runtimeId: string,
+  ): Promise<"failed" | "forced" | "stopped"> {
+    const stopped = await this.#runner
+      .run(this.#podmanPath, [...podmanStoreArgs(disk), "stop", "--time", "10", runtimeId])
+      .catch(() => undefined);
+    if (stopped?.exitCode === 0) return "stopped";
+    const killed = await this.#runner
+      .run(this.#podmanPath, [...podmanStoreArgs(disk), "kill", "--signal", "KILL", runtimeId])
+      .catch(() => undefined);
+    return killed?.exitCode === 0 ? "forced" : "failed";
+  }
+
   async execute(
     input: ExecutionCapsuleDriverExecuteInput,
   ): Promise<Exclude<ExecutionCapsuleCommandResult, { readonly status: "refused" }>> {
@@ -554,12 +578,36 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     readonly runtimeId: string;
   }): Promise<ExecutionCapsuleDriverExportResult> {
     const runtime = this.#runtimes.get(input.runtimeId);
-    if (runtime?.state !== "ready") return { status: "failed", reason: "export-failed" };
+    if (runtime === undefined || (runtime.state !== "ready" && runtime.state !== "stopped")) {
+      return { status: "failed", reason: "export-failed" };
+    }
 
     let artifactPath: string | undefined;
     let capsuleBundleCreated = false;
+    let startedForExport = false;
     let operation = "read-head";
     try {
+      if (runtime.state === "stopped") {
+        operation = "start-stopped-export";
+        const started = await this.#startInBudgetScope({
+          disk: runtime.disk,
+          runtimeId: input.runtimeId,
+          cpuMillicores: runtime.budget.cpuMillicores,
+          memoryBytes: runtime.budget.memoryBytes,
+          pidLimit: runtime.budget.pidLimit,
+        });
+        if (started.exitCode !== 0) throw new Error("Stopped capsule did not start for export.");
+        startedForExport = true;
+        operation = "verify-stopped-export-scope";
+        const scopeAccepted = await this.#scopeInspector.accepts({
+          runtimeId: input.runtimeId,
+          disk: runtime.disk,
+          cpuMillicores: runtime.budget.cpuMillicores,
+          memoryBytes: runtime.budget.memoryBytes,
+          pidLimit: runtime.budget.pidLimit,
+        });
+        if (!scopeAccepted) throw new Error("Stopped capsule export budget was not enforced.");
+      }
       const head = await this.#runner.run(this.#podmanPath, [
         ...podmanStoreArgs(runtime.disk),
         "exec",
@@ -657,6 +705,16 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         disk: runtime.disk,
       });
       if (!verifiedOutsideProducer) throw new Error("Execution capsule bundle verifier refused.");
+      if (startedForExport) {
+        operation = "stop-stopped-export";
+        const stopped = await this.#stopRuntime(runtime.disk, input.runtimeId);
+        startedForExport = false;
+        if (stopped === "failed") {
+          this.#runtimes.set(input.runtimeId, { ...runtime, state: "stop-failed" });
+          throw new Error("Stopped capsule could not stop after export.");
+        }
+        this.#runtimes.set(input.runtimeId, { ...runtime, state: "stopped" });
+      }
       return {
         status: "exported",
         artifactPath,
@@ -693,6 +751,13 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
           ])
           .catch(() => undefined);
       }
+      if (startedForExport) {
+        const stopped = await this.#stopRuntime(runtime.disk, input.runtimeId);
+        this.#runtimes.set(input.runtimeId, {
+          ...runtime,
+          state: stopped === "failed" ? "stop-failed" : "stopped",
+        });
+      }
     }
   }
 
@@ -704,16 +769,15 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
     const runtime = this.#runtimes.get(input.runtimeId);
     if (runtime === undefined) return { status: "failed", reason: "stop-failed" };
     if (runtime.state === "stopped") return { status: "stopped" };
-    const stopped = await this.#runner
-      .run(this.#podmanPath, [
-        ...podmanStoreArgs(runtime.disk),
-        "stop",
-        "--time",
-        "10",
-        input.runtimeId,
-      ])
-      .catch(() => undefined);
-    if (stopped?.exitCode !== 0) return { status: "failed", reason: "stop-failed" };
+    if (runtime.state === "container-removed") return { status: "failed", reason: "stop-failed" };
+    const stopped = await this.#stopRuntime(runtime.disk, input.runtimeId);
+    if (stopped === "failed") {
+      this.#runtimes.set(input.runtimeId, { ...runtime, state: "stop-failed" });
+      return { status: "failed", reason: "stop-failed" };
+    }
+    if (stopped === "forced") {
+      this.#reportDiagnostic("stop-runtime", "capsule required a forced stop");
+    }
     this.#runtimes.set(input.runtimeId, { ...runtime, state: "stopped" });
     return { status: "stopped" };
   }
@@ -952,24 +1016,24 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       if (!scopeAccepted) {
         this.#reportDiagnostic("recover-scope", "live recovered runtime exceeded its budget");
       }
-      const stopped = await this.#runner
-        .run(this.#podmanPath, [...podmanStoreArgs(disk), "stop", "--time", "10", runtimeId])
-        .catch(() => undefined);
-      if (stopped?.exitCode !== 0) {
-        const killed = await this.#runner
-          .run(this.#podmanPath, [...podmanStoreArgs(disk), "kill", "--signal", "KILL", runtimeId])
-          .catch(() => undefined);
-        if (killed?.exitCode !== 0) {
-          this.#reportDiagnostic("recover-stop", "live recovered runtime could not be stopped");
-          this.#runtimes.set(runtimeId, {
-            runtimeId,
-            capsuleId: String(input.request.capsuleId),
-            image: String(input.request.recipe.image),
-            disk,
-            state: "stop-failed",
-          });
-          return { status: "refused", reason: "runtime-unavailable" };
-        }
+      const stopped = await this.#stopRuntime(disk, runtimeId);
+      if (stopped === "failed") {
+        this.#reportDiagnostic("recover-stop", "live recovered runtime could not be stopped");
+        this.#runtimes.set(runtimeId, {
+          runtimeId,
+          capsuleId: String(input.request.capsuleId),
+          image: String(input.request.recipe.image),
+          disk,
+          budget: {
+            cpuMillicores: input.request.budget.cpuMillicores,
+            memoryBytes: input.request.budget.memoryBytes,
+            pidLimit: input.request.budget.pidLimit,
+          },
+          state: "stop-failed",
+        });
+        return { status: "refused", reason: "runtime-unavailable" };
+      }
+      if (stopped === "forced") {
         this.#reportDiagnostic("recover-stop", "live recovered runtime required a forced stop");
         await this.#diskStore.close(disk).catch(() => undefined);
         return { status: "refused", reason: "runtime-unavailable" };
@@ -984,6 +1048,11 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
       capsuleId: String(input.request.capsuleId),
       image: String(input.request.recipe.image),
       disk,
+      budget: {
+        cpuMillicores: input.request.budget.cpuMillicores,
+        memoryBytes: input.request.budget.memoryBytes,
+        pidLimit: input.request.budget.pidLimit,
+      },
       state: "stopped",
     });
     return { status: "stopped", runtimeId };

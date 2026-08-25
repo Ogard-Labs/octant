@@ -276,6 +276,40 @@ describe("ExecutionCapsuleService", () => {
     expect(service.list()).toEqual([]);
   });
 
+  it("exports a stopped capsule so explicit release cannot deadlock", async () => {
+    const driver = protectedDriver();
+    const service = new ExecutionCapsuleService({
+      driver,
+      createExportId: () => "88888888-8888-4888-8888-888888888888",
+    });
+    const capsule = request(
+      "11111111-1111-4111-8111-111111111111",
+      "55555555-5555-4555-8555-555555555555",
+    );
+    await service.acquire({
+      request: capsule,
+      source: {
+        bundlePath: "/source/octant.bundle",
+        sha256: "d".repeat(64),
+        byteLength: 4_096,
+        revision: "a".repeat(40),
+      },
+    });
+    await service.stop(capsule.capsuleId);
+    await expect(service.stop(capsule.capsuleId)).resolves.toMatchObject({ status: "stopped" });
+
+    const exported = await service.exportGitBundle(capsule.capsuleId);
+
+    expect(exported).toMatchObject({
+      status: "exported",
+      receipt: { capsuleId: capsule.capsuleId },
+    });
+    if (exported.status !== "exported") throw new Error("Expected stopped export to succeed.");
+    await expect(
+      service.release({ capsuleId: capsule.capsuleId, exportId: exported.receipt.exportId }),
+    ).resolves.toMatchObject({ status: "released" });
+  });
+
   it("refuses to release a reacquired capsuleId using an export from the released generation", async () => {
     const driver = protectedDriver();
     const exportIds = [
