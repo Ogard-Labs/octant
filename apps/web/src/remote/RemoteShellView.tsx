@@ -327,7 +327,11 @@ export function RemoteShellView(props: RemoteShellViewProps) {
               ? undefined
               : { label: entry.buttonLabel, run: entry.run };
           return (
-            <OctantCard className="remote-shell__surface-card p-3" key={entry.surface.id}>
+            <OctantCard
+              className="remote-shell__surface-card p-3"
+              key={entry.surface.id}
+              role="article"
+            >
               <h3 className="remote-shell__surface-title">{entry.surface.label}</h3>
               <p className="remote-shell__surface-description">{entry.surface.description}</p>
               {exercise === undefined ? (
@@ -364,6 +368,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
             aria-disabled="true"
             className="remote-shell__surface-card remote-shell__surface-card--local-only p-3"
             key={surface.id}
+            role="article"
           >
             <OctantBadge className="remote-shell__surface-badge" variant="secondary">
               Unavailable remotely

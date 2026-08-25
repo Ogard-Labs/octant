@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CodeWorktreeRef } from "@octant/contracts/code";
@@ -47,6 +47,29 @@ describe("CodeBranchSelector", () => {
 
     expect(onSelectRef).toHaveBeenCalledWith(refs[3]);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("puts the caret in the search field when the ref list opens", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeBranchSelector
+        branch="development"
+        onSelectRef={() => undefined}
+        onStartFromOriginChange={() => undefined}
+        refs={refs}
+        remoteName="origin"
+        startFromOrigin
+        startFromOriginAvailable
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Base branch" }));
+    const menu = await screen.findByRole("dialog", { name: "Choose base branch" });
+    // The popup itself takes focus first; the field the reader came to type in
+    // has to claim it back, or the list opens onto a dead keyboard.
+    await waitFor(() =>
+      expect(within(menu).getByRole("searchbox", { name: "Search refs" })).toHaveFocus(),
+    );
   });
 
   it("labels the trigger with the local branch when not starting from origin", () => {

@@ -62,7 +62,10 @@ export function EmptyStateEyebrow({ className, ...props }: ComponentProps<"span"
 export function EmptyStateTitle({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      aria-level={1}
+      // An empty state fills a region of a page that already owns the level-1
+      // heading, so claiming that level again would give the page two roots.
+      // A caller that really is the page can still say so through `aria-level`.
+      aria-level={2}
       className={cn("m-0 text-base leading-none font-semibold tracking-[-0.015em]", className)}
       data-slot="empty-state-title"
       role="heading"

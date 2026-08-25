@@ -50,7 +50,11 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
   const statusId = useId();
   const applyHintId = useId();
 
-  const active = props.pool !== undefined;
+  // A local binding narrows where the property does not, and a narrowed value
+  // is the answer here: asserting past `undefined` claims knowledge the
+  // compiler was never given.
+  const pool = props.pool;
+  const active = pool !== undefined;
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
@@ -59,12 +63,12 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
     // so a prior draft never leaks into a fresh editing session.
     setSelectedKeys(initialSelection(props.model, props.pool));
     setMixedVendorAllowed(
-      props.pool !== undefined &&
+      pool !== undefined &&
         props.model.kind === "ready" &&
         props.model.candidates.some(
           (view) =>
             view.requiresMixedVendor &&
-            props.pool!.candidates.some(
+            pool.candidates.some(
               (candidate) => candidateKey(candidate) === candidateKey(view.candidate),
             ),
         ),
@@ -80,9 +84,10 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
         ? props.model.reason
         : undefined;
 
-  const status = active
-    ? `Multi-model pool of ${props.pool!.candidates.length} models is active.`
-    : disabledReason;
+  const status =
+    pool === undefined
+      ? disabledReason
+      : `Multi-model pool of ${pool.candidates.length} models is active.`;
 
   const ready = props.model.kind === "ready" ? props.model : undefined;
   const visible =
@@ -169,7 +174,7 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
           <>
             <Layers aria-hidden="true" size={14} strokeWidth={1.7} />
             <span>
-              {active ? `Pool · ${props.pool!.candidates.length}` : "Use multiple models"}
+              {pool === undefined ? "Use multiple models" : `Pool · ${pool.candidates.length}`}
             </span>
           </>
         }

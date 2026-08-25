@@ -87,7 +87,12 @@ export function ThreadTaskViewer(props: ThreadTaskViewerProps) {
           </>
         }
         triggerClassName="octant-chip thread-task-viewer__trigger"
-        triggerLabel={`${open ? "Hide" : "Show"} task progress`}
+        // The label replaces the visible content rather than adding to it, so a
+        // reader who cannot see the chip only hears that progress exists unless
+        // the progress itself is spelled out here.
+        triggerLabel={`${open ? "Hide" : "Show"} task progress · ${progressLabel}${
+          changedFilesLabel === undefined ? "" : ` · ${changedFilesLabel}`
+        }`}
         triggerVariant="ghost"
       >
         <header className="thread-task-viewer__header">

@@ -136,6 +136,23 @@ describe("ExecutionProfileWorkflow", () => {
     expect(popover).toBeVisible();
   });
 
+  it("brings the composer popover back when a profile dialog it opened is dismissed", async () => {
+    const user = userEvent.setup();
+    render(<ExecutionProfileWorkflow controller={controller()} variant="composer" />);
+
+    await user.click(screen.getByRole("button", { name: "Execution profile: Code reviewer" }));
+    expect(screen.getByRole("dialog", { name: "Execution profile options" })).toBeVisible();
+
+    // The form is a sibling that portals out of the popup, so the press that
+    // opens it reads as a press outside — and closing on that would leave the
+    // reader with nothing behind the form they opened from the list.
+    await user.click(screen.getByRole("button", { name: "Create profile" }));
+    await screen.findByRole("dialog", { name: /profile/i });
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByRole("dialog", { name: "Execution profile options" })).toBeVisible();
+  });
+
   it("shows actionable unsupported resolution reasons", () => {
     render(
       <ExecutionProfileWorkflow
