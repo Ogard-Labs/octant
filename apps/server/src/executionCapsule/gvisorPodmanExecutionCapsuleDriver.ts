@@ -960,6 +960,10 @@ export class GvisorPodmanExecutionCapsuleDriver implements ExecutionCapsuleDrive
         await this.#diskStore.close(disk).catch(() => undefined);
         return { status: "refused", reason: "runtime-unavailable" };
       }
+      if (!scopeAccepted) {
+        await this.#diskStore.close(disk).catch(() => undefined);
+        return { status: "refused", reason: "runtime-unavailable" };
+      }
     }
     this.#runtimes.set(runtimeId, {
       runtimeId,

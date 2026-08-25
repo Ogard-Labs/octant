@@ -973,8 +973,8 @@ describe("GvisorPodmanExecutionCapsuleDriver", () => {
       recordDiagnostic: recoveryScopeDiagnostic,
     });
     await expect(liveRecovery.recover({ request: capsuleRequest, source })).resolves.toEqual({
-      status: "stopped",
-      runtimeId,
+      status: "refused",
+      reason: "runtime-unavailable",
     });
     expect(recoveryScope).toHaveBeenCalledWith({
       runtimeId,
