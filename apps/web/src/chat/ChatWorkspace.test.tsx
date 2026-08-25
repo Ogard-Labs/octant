@@ -9,7 +9,7 @@ import type { ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { Profiler, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatController } from "./useChatController";
 import { ChatWorkspace } from "./ChatWorkspace";
@@ -613,6 +613,42 @@ describe("ChatWorkspace", () => {
       approvalId: "44000000-0000-4000-8000-000000000010",
       decision: "approved",
     });
+  });
+
+  it("does not commit again when tool-approval polling returns the same data", async () => {
+    const client = extensionClient();
+    const approval = {
+      approvalId: "44000000-0000-4000-8000-000000000010" as never,
+      threadId: threadId as never,
+      packageId: "44000000-0000-4000-8000-000000000012" as never,
+      componentId: "server" as never,
+      providerToolName: "plugin__server__read",
+      mcpToolName: "read",
+      inputJson: '{"path":"README.md"}',
+      requestedAt: now as never,
+    };
+    vi.mocked(client.listToolApprovals).mockResolvedValue([approval]);
+    const listToolApprovals = vi.mocked(client.listToolApprovals);
+    const commits: Array<string> = [];
+
+    render(
+      <Profiler id="chat-workspace" onRender={(_, phase) => commits.push(phase)}>
+        <ChatWorkspace
+          controller={controllerFixture()}
+          extensionClient={client}
+          providerSnapshot={providerSnapshot()}
+        />
+      </Profiler>,
+    );
+
+    await screen.findByRole("group", { name: "Extension tool approval" });
+    await waitFor(() => expect(listToolApprovals.mock.calls.length).toBeGreaterThan(2), {
+      timeout: 2_500,
+    });
+    const commitsAfterPolling = commits.length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(commits.length).toBe(commitsAfterPolling);
   });
 
   it("windows the conversation so a long thread mounts a bounded number of turns", () => {
