@@ -17,7 +17,7 @@ import {
   decodeCodeReviewFinding,
   decodeCodeReviewFindingUpdated,
   decodeCodeThreadFollowUp,
-  decodeCodeThreadFollowUpUpdated,
+  decodePersistedCodeThreadFollowUpUpdated,
   decodeCodeOperationEventFrame,
   decodeCodeThreadActivity,
   type CodeThreadActivity,
@@ -189,7 +189,7 @@ export class CodeProjection implements Projection {
       case "code.follow-up-updated@1": {
         assertEnvelope(event.aggregateType === CODE_FOLLOW_UP_AGGREGATE_TYPE);
         const followUp = decodeProjection(
-          () => decodeCodeThreadFollowUpUpdated(event.payload).followUp,
+          () => decodePersistedCodeThreadFollowUpUpdated(event.payload).followUp,
         );
         assertEnvelope(String(followUp.threadId) === String(event.aggregateId));
         upsertFollowUp(connection, followUp, event);

@@ -39,6 +39,22 @@ export function useResolvedMaterial(
 }
 
 /**
+ * Extends translucency from the sidebar to the workspace background
+ * (docs/decisions/0047). Reuses the sidebar's already-resolved material
+ * rather than its own gate chain, so accessibility, performance, and
+ * host-support checks apply identically to both surfaces: the workspace
+ * never turns translucent when the sidebar itself did not.
+ */
+export function resolveWorkspaceMaterial(
+  preference: "opaque" | "system",
+  sidebarResolvedMaterial: ResolvedSidebarMaterial,
+): ResolvedSidebarMaterial {
+  return preference === "system" && sidebarResolvedMaterial === "translucent"
+    ? "translucent"
+    : "opaque";
+}
+
+/**
  * Tell the host whether it may check for updates on its own.
  *
  * The preference is persisted with the rest of the shell settings, and the host

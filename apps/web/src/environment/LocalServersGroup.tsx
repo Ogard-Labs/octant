@@ -88,7 +88,7 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
     <div aria-label="Local servers" className="local-servers">
       {props.controller.failure === undefined ? null : (
         <p className="local-servers__error" role="alert">
-          <ShieldAlert aria-hidden="true" size={15} strokeWidth={1.8} />
+          <ShieldAlert aria-hidden="true" size={16} strokeWidth={1.8} />
           {props.controller.failure.message}
         </p>
       )}

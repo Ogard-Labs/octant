@@ -1,5 +1,7 @@
 import { decodeEnvironmentCompactIdentity } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -11,6 +13,8 @@ const identity = decodeEnvironmentCompactIdentity({
   detail: "feature/name",
   status: "available",
 });
+
+const appStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
 describe("the thread environment summary", () => {
   it("shows a compact truthful summary without opening a persistent panel", () => {
@@ -124,5 +128,11 @@ describe("the thread environment summary", () => {
     await user.click(screen.getByRole("button", { name: "Toggle environment" }));
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps the disclosure inside the central pane while the right dock is open", () => {
+    expect(appStyles).toContain(
+      ".shell--wide-context-open .thread-environment-disclosure {\n  right: var(--octant-context-sidebar-width);",
+    );
   });
 });

@@ -1,6 +1,11 @@
 .shell.shell-frame {
   --octant-rendered-sidebar-width: var(--octant-sidebar-width, 232px);
-  --octant-window-chrome-reserved-width: 96px;
+  /* Published by WindowChrome from each cluster's measured width. The literals
+     are only the pre-measurement fallback: both clusters' real widths swing
+     with which controls a thread renders, so no constant is right for every
+     thread. The leading one exists only while the sidebar is collapsed. */
+  --octant-window-chrome-reserved-width: 148px;
+  --octant-window-chrome-leading-width: 148px;
   display: grid;
   width: 100%;
   max-width: 100vw;
@@ -46,7 +51,7 @@ html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
   position: fixed;
   z-index: 5;
   top: 0;
-  right: 0;
+  right: var(--octant-window-chrome-reserved-width, 148px);
   left: 112px;
   display: block;
   height: var(--octant-native-hidden-inset-titlebar-height);
@@ -75,12 +80,14 @@ html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
   pointer-events: none;
 }
 
-/* `hiddenInset` reserves the top strip for native window movement. Keep the
-   interactive chrome below that strip so macOS delivers pointer events to the
-   controls instead of treating them as window-drag gestures. Remote/web
-   clients do not have the native inset and keep the zero-offset row above. */
+/* Native controls share the visual title row with the top drag strip and the
+   pane header. They sit above both and explicitly opt out of dragging; the
+   unused rail remains draggable underneath. The chrome must outrank the pane
+   header outright — while the two merely tied, the header won on document
+   order and covered every control in this row. */
 html[data-octant-native-host="true"] .shell-frame > .window-chrome {
-  top: var(--octant-native-hidden-inset-titlebar-height);
+  top: calc(var(--oct-space-2) + 4px);
+  z-index: 7;
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {
@@ -98,7 +105,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   flex: 0 0 auto;
   height: 100%;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
   padding-right: 4px;
   pointer-events: auto;
 }
@@ -116,7 +123,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 /* Same reserve the sidebar keeps for the macOS traffic lights (see
    .sidebar__traffic-light-space); it moves here while the sidebar is hidden. */
 .window-chrome__traffic-light-space {
-  flex: 0 0 82px;
+  flex: 0 0 88px;
   height: 100%;
 }
 
@@ -124,7 +131,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   align-self: stretch;
   flex: 1 1 auto;
   min-width: 12px;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 /* The badge recipe carries the warning palette and type; the chrome only
@@ -223,6 +230,19 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   cursor: pointer;
 }
 
+.window-chrome__new-thread {
+  color: var(--oct-fg-2);
+  background: var(--oct-surface-muted);
+  border-color: var(--oct-border);
+}
+
+.window-chrome__new-thread:hover,
+.window-chrome__new-thread:focus-visible {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+  border-color: var(--oct-border-strong);
+}
+
 .window-chrome__button:hover,
 .window-chrome__button[aria-expanded="true"] {
   color: var(--oct-fg);
@@ -288,17 +308,18 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   height: 34px;
   flex: 0 0 34px;
   align-items: center;
+  gap: 6px;
   padding: 0 10px;
 }
 
 .sidebar__traffic-light-space {
-  flex: 0 0 66px;
+  flex: 0 0 74px;
   height: 100%;
 }
 
 .sidebar__native-collapse {
   position: relative;
-  top: 8px;
+  top: 0;
   width: 22px;
   height: 22px;
   min-width: 22px;
@@ -413,6 +434,37 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
 }
 
+/* Workspace translucency (docs/decisions/0047): an opt-in extension of the
+   sidebar glass to the workspace background. It only ever renders when the
+   sidebar is already translucent (the "Translucent workspace" setting is
+   disabled otherwise), so it reuses the sidebar's own intensity tier
+   (data-octant-sidebar-vibrancy) and native-vibrancy-active gate
+   (data-octant-host-vibrancy) rather than tracking a second set of gates. */
+.shell--workspace-material-translucent.shell-frame > .workspace-layer {
+  background: var(--octant-workspace-translucent);
+  backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
+}
+
+.shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
+  > .workspace-layer {
+  --octant-glass-blur: 16px;
+  --octant-glass-saturate: 120%;
+  background: var(--octant-workspace-translucent-subtle);
+}
+
+.shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
+  > .workspace-layer {
+  --octant-glass-blur: 34px;
+  --octant-glass-saturate: 165%;
+  background: var(--octant-workspace-translucent-strong);
+}
+
+html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"]))
+  .shell-frame.shell--workspace-material-translucent
+  > .workspace-layer {
+  background: color-mix(in srgb, var(--oct-bg) 97%, transparent);
+}
+
 .sidebar-navigation {
   display: flex;
   flex: 1 1 auto;
@@ -472,7 +524,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .sidebar-navigation__threads {
   display: grid;
   gap: 2px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .sidebar-navigation__thread {
@@ -488,14 +540,18 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   min-width: 0;
   align-items: center;
   justify-content: flex-start;
-  gap: var(--oct-space-2);
-  min-height: var(--oct-control-height-sm);
+  /* The marker, the provider mark, and the title are one identifying phrase,
+     not three controls, so they sit at glyph spacing. At list spacing the row
+     spent 46px before the first letter of the title. */
+  gap: var(--oct-space-1);
+  min-height: 26px;
   padding-block: 0;
-  padding-inline: var(--oct-space-2);
+  padding-inline: 6px;
   color: var(--oct-muted);
   background: transparent;
   border: 0;
   border-radius: 6px;
+  font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
   cursor: pointer;
   text-align: left;
@@ -606,7 +662,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .sidebar-navigation__thread-follow-up {
   padding: 1px 5px;
   color: var(--oct-meta);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   line-height: 1.4;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-pill);
@@ -765,6 +821,18 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   .shell--material-translucent.shell-frame > .sidebar [data-octant-sidebar-background]::after {
     content: none;
   }
+
+  .shell--workspace-material-translucent.shell-frame > .workspace-layer,
+  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
+    > .workspace-layer,
+  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
+    > .workspace-layer,
+  html[data-octant-native-host="true"]
+    .shell-frame.shell--workspace-material-translucent
+    > .workspace-layer {
+    background: var(--oct-bg);
+    backdrop-filter: none;
+  }
 }
 
 @media (prefers-contrast: more) {
@@ -867,7 +935,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   max-width: 58ch;
   margin: 9px auto 0;
   color: var(--octant-text-secondary);
-  font-size: 14px;
+  font-size: calc(14 * var(--oct-text-step));
   line-height: 1.65;
 }
 
@@ -1021,7 +1089,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .composer-folder-selector__empty {
   margin: 6px 8px;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .draft-thread__context-item,
@@ -1129,7 +1197,7 @@ form > .work-composer-adapter__attachments {
 .work-composer-adapter__error {
   margin: 0;
   color: var(--octant-destructive);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .draft-thread__hint,
@@ -1137,7 +1205,7 @@ form > .work-composer-adapter__attachments {
   margin: 0;
   padding: 0 2px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   opacity: 0.7;
 }
 
@@ -1211,7 +1279,7 @@ form > .work-composer-adapter__attachments {
   background: transparent;
   color: var(--octant-text-primary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   text-decoration: underline;
 }
 
@@ -1222,7 +1290,7 @@ form > .work-composer-adapter__attachments {
   justify-content: space-between;
   gap: 8px 12px;
   color: var(--octant-text-secondary);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .work-thread-workspace__header {
@@ -1241,7 +1309,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .work-thread-workspace__header h1 {
-  font-size: 14px;
+  font-size: calc(14 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -1249,12 +1317,12 @@ form > .work-composer-adapter__attachments {
 .work-thread-workspace__header > div > p:last-child {
   margin-top: 3px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .work-thread-workspace__eyebrow {
   color: var(--octant-text-muted);
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1289,7 +1357,7 @@ form > .work-composer-adapter__attachments {
 
 .work-thread-workspace__message strong {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .work-thread-workspace__message p {
@@ -1534,7 +1602,7 @@ form > .work-composer-adapter__attachments {
   border-radius: 7px;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   text-align: left;
 }
 
@@ -1562,7 +1630,7 @@ form > .work-composer-adapter__attachments {
 
 .code-branch-selector__badge {
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 500;
 }
 
@@ -1570,7 +1638,7 @@ form > .work-composer-adapter__attachments {
   margin: 0;
   padding: 8px;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .code-branch-selector__footer {
@@ -1688,13 +1756,13 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-worktree-source__title {
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 500;
   color: var(--octant-text-primary);
 }
 
 .code-worktree-source__copy {
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   color: var(--octant-text-muted);
 }
 
@@ -1704,23 +1772,23 @@ form > .work-composer-adapter__attachments {
   align-items: baseline;
   gap: 6px;
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .code-worktree-source__disclosure-label {
   color: var(--octant-text-secondary);
-  font-family: var(--octant-font-mono, ui-monospace, monospace);
+  font-family: var(--oct-font-mono);
 }
 
 .code-worktree-source__disclosure-detail {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .code-worktree-source__field {
   display: grid;
   gap: 4px;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   color: var(--octant-text-secondary);
 }
 
@@ -1733,7 +1801,7 @@ form > .work-composer-adapter__attachments {
 
 .code-worktree-source__cached-detail {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .browser-workspace {

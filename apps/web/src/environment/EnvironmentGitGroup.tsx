@@ -76,7 +76,7 @@ function GitRow(props: {
   return (
     <div className="environment-git-group__row">
       <dt>
-        <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
+        <Icon aria-hidden="true" size={16} strokeWidth={1.8} />
         {props.label}
       </dt>
       <dd>{props.value}</dd>

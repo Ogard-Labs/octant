@@ -23,6 +23,7 @@ import {
   CodeRuntimeWorkUpdated,
   CodeReviewFindingUpdated,
   CodeThreadFollowUpUpdated,
+  PersistedCodeThreadFollowUpUpdated,
   CodeOperationEventFrame,
   CodeSettingsUpdated,
   CodeThreadCreated,
@@ -74,6 +75,7 @@ import {
   ValidationPlanCreated,
   ValidationReportCompleted,
   ZenSpaceSnapshotRecorded,
+  ZenSpaceSnapshotRecordedV1,
   ZenWidgetMutationRecorded,
   AgentProfileCreated,
   AgentProfileUpdated,
@@ -269,7 +271,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("code.file-reference-updated@1", 1, CodeFileReferenceUpdated)
     .register("code.runtime-work-updated@1", 1, CodeRuntimeWorkUpdated)
     .register("code.review-finding-updated@1", 1, CodeReviewFindingUpdated)
-    .register("code.follow-up-updated@1", 1, CodeThreadFollowUpUpdated)
+    .register("code.follow-up-updated@1", 1, CodeThreadFollowUpUpdated, {
+      persistedSchema: PersistedCodeThreadFollowUpUpdated,
+    })
     .register("code.operation-event-recorded@1", 1, CodeOperationEventFrame)
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
@@ -298,7 +302,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.research-recorded@1", 1, WorkResearchFrame)
     .register("work.workflow-recorded@1", 1, WorkflowFrame)
     .register("work.request-recorded@1", 1, WorkRequestFrame)
-    .register("zen.space-snapshot-recorded@1", 1, Schema.Unknown)
+    .register("zen.space-snapshot-recorded@1", 1, ZenSpaceSnapshotRecordedV1)
     .register("zen.space-snapshot-recorded@2", 1, ZenSpaceSnapshotRecorded)
     .register("zen.widget-mutation-recorded@1", 1, ZenWidgetMutationRecorded)
     .register("agent.profile-created@1", 1, AgentProfileCreated)

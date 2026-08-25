@@ -36,6 +36,21 @@ const now = "2026-07-13T12:00:00.000Z";
 const projectId = decodeProjectId("00000000-0000-4000-8000-000000000205");
 
 describe("ShellService", () => {
+  it("keeps read-only bootstrap from registering a window and revokes registered access", () => {
+    const { persistence } = persistenceStub();
+    const service = new ShellService({
+      persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+
+    expect(service.readBootstrap(ids.window)).toBeUndefined();
+    service.bootstrap(ids.window);
+    expect(service.readBootstrap(ids.window)).toMatchObject({ connectionStatus: "connected" });
+    service.revokeWindow(ids.window);
+    expect(service.readBootstrap(ids.window)).toBeUndefined();
+  });
+
   it("requires an active matching Project before appending a Project surface", () => {
     const workspace = defaultWindowWorkspace(ids.window);
     const codeLayout = workspace.layouts.code;

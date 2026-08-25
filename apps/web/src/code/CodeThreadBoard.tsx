@@ -401,7 +401,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
           <details className="code-board__view-options">
             <summary>
               <span>View</span>
-              <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
+              <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
             </summary>
             <div className="code-board__view-popover">
               <label>

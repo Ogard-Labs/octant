@@ -1,4 +1,5 @@
 import { useContext, useState } from "react";
+import type { ReactElement } from "react";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
@@ -190,14 +191,23 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
           </OctantButton>
         );
         if (!hasMenu) return <div key={rowId}>{row}</div>;
-        return (
-          <OctantContextMenuRoot key={rowId}>
-            <OctantContextMenuTrigger render={row} />
-            <ThreadRowMenu actions={actions} thread={thread} />
-          </OctantContextMenuRoot>
-        );
+        return <ThreadRowContextMenu actions={actions} key={rowId} row={row} thread={thread} />;
       })}
     </>
+  );
+}
+
+function ThreadRowContextMenu(props: {
+  readonly actions: ThreadRowActions;
+  readonly row: ReactElement;
+  readonly thread: ChatThreadNavigationItem;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <OctantContextMenuRoot onOpenChange={setOpen}>
+      <OctantContextMenuTrigger aria-expanded={open} aria-haspopup="menu" render={props.row} />
+      <ThreadRowMenu actions={props.actions} thread={props.thread} />
+    </OctantContextMenuRoot>
   );
 }
 

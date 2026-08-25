@@ -116,7 +116,7 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
             <ChevronRight
               aria-hidden="true"
               className="code-transcript-row__chevron"
-              size={13}
+              size={14}
               strokeWidth={2}
             />
             <span className="code-transcript-row__name">Thinking</span>
@@ -174,7 +174,7 @@ function ActivityDisclosure(props: {
         <ChevronRight
           aria-hidden="true"
           className="code-transcript-row__chevron"
-          size={13}
+          size={14}
           strokeWidth={2}
         />
         <span className="code-transcript-row__name">{collapsedName(row)}</span>

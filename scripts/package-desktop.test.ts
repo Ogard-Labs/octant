@@ -24,6 +24,7 @@ import {
   packagedBundlePath,
   pruneUnusedNativePayloads,
   selectFinalBundlePaths,
+  validatePackagedRendererPolicy,
   stripNativeDebugMetadata,
   validatePackagedPayload,
   validateBundledInternalRuntime,
@@ -472,5 +473,84 @@ describe("desktop packaging boundary", () => {
     expect(createQuitAppleScript('/tmp/Octant "Preview".app')).toBe(
       'tell application "/tmp/Octant \\"Preview\\".app" to quit',
     );
+  });
+  it("refuses to ship a renderer whose built policy lost a directive", () => {
+    const meta = (content: string) =>
+      `<meta http-equiv="Content-Security-Policy" content="${content}" />`;
+    const complete = "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'";
+
+    expect(() => validatePackagedRendererPolicy(meta(complete))).not.toThrow();
+    // The build is what can drop it: the source file keeps the directive while
+    // the document that ships is the one the renderer actually loads.
+    expect(() =>
+      validatePackagedRendererPolicy(meta(complete.replace("; script-src 'self'", ""))),
+    ).toThrow(/script-src/);
+    expect(() => validatePackagedRendererPolicy("<html></html>")).toThrow(
+      /no Content-Security-Policy/,
+    );
+  });
+
+  it("refuses a script-src that keeps 'self' but also allows another source", () => {
+    const meta = (content: string) =>
+      `<meta http-equiv="Content-Security-Policy" content="${content}" />`;
+    // A substring check on "script-src 'self'" is fooled by this: the required
+    // text is present, but the extra source defeats the policy it is meant to
+    // enforce.
+    const weakened =
+      "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' 'unsafe-inline'";
+
+    expect(() => validatePackagedRendererPolicy(meta(weakened))).toThrow(/script-src/);
+  });
+
+  it("refuses an object-src that keeps 'none' but also allows a remote host", () => {
+    const meta = (content: string) =>
+      `<meta http-equiv="Content-Security-Policy" content="${content}" />`;
+    const weakened =
+      "default-src 'self'; base-uri 'none'; object-src 'none' https://example.invalid; script-src 'self'";
+
+    expect(() => validatePackagedRendererPolicy(meta(weakened))).toThrow(/object-src/);
+  });
+
+  it("refuses a policy that declares the same directive twice, since a browser only honours the first", () => {
+    const meta = (content: string) =>
+      `<meta http-equiv="Content-Security-Policy" content="${content}" />`;
+    // A reviewer scanning the end of the string sees the strict copy, but the
+    // browser applies the weak one that came first and silently drops this
+    // duplicate.
+    const duplicated =
+      "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' 'unsafe-inline'; script-src 'self'";
+
+    expect(() => validatePackagedRendererPolicy(meta(duplicated))).toThrow(/script-src/);
+  });
+
+  it("refuses a script-src-elem that is weaker than script-src", () => {
+    const meta = (content: string) =>
+      `<meta http-equiv="Content-Security-Policy" content="${content}" />`;
+    // script-src-elem overrides script-src for element-sourced scripts when
+    // present, so a strict script-src does not protect against a weaker
+    // script-src-elem shipping alongside it.
+    const weakened =
+      "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'; script-src-elem 'self' 'unsafe-inline'";
+
+    expect(() => validatePackagedRendererPolicy(meta(weakened))).toThrow(/script-src-elem/);
+  });
+
+  it("refuses a script-src-attr that is weaker than script-src", () => {
+    const meta = (content: string) =>
+      `<meta http-equiv="Content-Security-Policy" content="${content}" />`;
+    const weakened =
+      "default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self'; script-src-attr 'unsafe-inline'";
+
+    expect(() => validatePackagedRendererPolicy(meta(weakened))).toThrow(/script-src-attr/);
+  });
+
+  it("accepts the real shipped renderer policy, including directives it does not require", async () => {
+    // This is the policy apps/web actually ships (apps/web/index.html), not a
+    // synthetic fixture: it proves the exact-match rule does not start
+    // refusing a correct build just because it carries directives, like
+    // frame-ancestors or connect-src, that this function does not require.
+    const source = await readFile(resolve(repositoryRoot, "apps/web/index.html"), "utf8");
+
+    expect(() => validatePackagedRendererPolicy(source)).not.toThrow();
   });
 });

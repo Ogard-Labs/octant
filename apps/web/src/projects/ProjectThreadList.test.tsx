@@ -26,6 +26,22 @@ describe("ProjectThreadRows", () => {
     expect(provider?.nextElementSibling).toBe(title);
   });
 
+  it("keeps activity at the left edge of the thread title", () => {
+    render(
+      <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, activity: "working" }]} />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    const activity = row.querySelector(".sidebar-navigation__thread-status");
+    const provider = row.querySelector(".sidebar-navigation__thread-provider");
+    const title = row.querySelector(".sidebar-navigation__thread-copy");
+    expect(activity).toHaveAttribute("data-activity", "working");
+    expect(activity?.compareDocumentPosition(provider ?? row)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(provider?.compareDocumentPosition(title ?? row)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("says a thread needs attention through a labelled dot rather than a badge", () => {
     render(
       <ProjectThreadRows
@@ -36,6 +52,23 @@ describe("ProjectThreadRows", () => {
 
     expect(screen.getByRole("img", { name: "Needs attention" })).toBeVisible();
     expect(screen.queryByText("active")).toBeNull();
+  });
+
+  it("exposes context-menu semantics on the thread row trigger", async () => {
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    expect(row).toHaveAttribute("aria-haspopup", "menu");
+    expect(row).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.pointer({ target: row, keys: "[MouseRight]" });
+    expect(row).toHaveAttribute("aria-expanded", "true");
   });
 
   it("pins a thread from its own right-click menu", async () => {

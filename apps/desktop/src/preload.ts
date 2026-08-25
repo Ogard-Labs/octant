@@ -330,6 +330,11 @@ export interface OctantHostBridge {
   readonly clearProviderCredential: (providerInstanceId: string) => Promise<void>;
   readonly close: () => Promise<void>;
   readonly getHostCapabilities: () => Promise<HostCapabilities>;
+  /**
+   * Which window chrome this host gave the renderer, so it reserves the macOS
+   * hiddenInset titlebar strip only where that strip exists.
+   */
+  readonly windowChrome: "hidden-inset" | "system-frame";
   readonly initialProjectTarget: ProjectWindowTarget | undefined;
   readonly maximizeOrRestore: () => Promise<void>;
   readonly minimize: () => Promise<void>;
@@ -391,6 +396,7 @@ export function createHostBridge(
   ipc: IpcRendererPort,
   projectWindowCapability: string,
   initialProjectTarget?: ProjectWindowTarget,
+  platform: NodeJS.Platform = process.platform,
 ): OctantHostBridge {
   const invoke = async (channel: string, ...args: readonly unknown[]): Promise<void> =>
     void (await ipc.invoke(channel, ...args));
@@ -524,6 +530,10 @@ export function createHostBridge(
         liveBrowserSupported: value.liveBrowserSupported,
       });
     },
+    // Mirrors the window this host actually creates: `resolveWindowPresentation`
+    // gives macOS the hiddenInset titlebar and every other platform a framed
+    // window. The renderer reserves the titlebar inset only on the former.
+    windowChrome: platform === "darwin" ? "hidden-inset" : "system-frame",
     initialProjectTarget: frozenInitialProjectTarget,
     maximizeOrRestore: () => invoke(IPC_CHANNELS.maximizeOrRestore),
     minimize: () => invoke(IPC_CHANNELS.minimize),
@@ -1524,10 +1534,11 @@ export function installHostBridge(
   ipc: IpcRendererPort,
   projectWindowCapability = decodeProjectWindowCapability(process.argv),
   initialProjectTarget = decodeInitialProjectTarget(process.argv),
+  platform: NodeJS.Platform = process.platform,
 ): void {
   context.exposeInMainWorld(
     HOST_BRIDGE_KEY,
-    createHostBridge(ipc, projectWindowCapability, initialProjectTarget),
+    createHostBridge(ipc, projectWindowCapability, initialProjectTarget, platform),
   );
 }
 

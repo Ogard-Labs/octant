@@ -17,6 +17,7 @@ import {
   Notification,
   powerMonitor,
   screen,
+  session,
   shell,
   systemPreferences,
   Tray,
@@ -56,6 +57,11 @@ import {
   openCodeCheckoutInApplicationFromServer,
 } from "./openInApplications";
 import { createNativePreviewHandoffExecutor, openPreviewHandoffFromServer } from "./previewHandoff";
+import {
+  createRendererNavigationPolicy,
+  installRendererNavigationGuards,
+  type RendererNavigationWebContentsPort,
+} from "./rendererNavigationPolicy";
 import {
   requestCodeOperationApprovalFromServer,
   type NativeCodeOperationApprovalRequest,
@@ -208,6 +214,47 @@ type ProjectWindowTarget =
 interface DesktopWindowIdentity {
   readonly windowId: string;
   readonly capability: string;
+}
+
+const RENDERER_IDENTITY_HEADER = "x-octant-renderer-identity";
+
+export interface TrustedRendererRequestContext {
+  readonly serverOrigin: string;
+  readonly rendererIdentity: string;
+  readonly developmentOrigin?: string;
+}
+
+export function decorateTrustedRendererHeaders(input: {
+  readonly requestHeaders: Readonly<Record<string, string>>;
+  readonly requestUrl: string;
+  readonly frameUrl?: string;
+  readonly context?: TrustedRendererRequestContext;
+}): Record<string, string> {
+  const requestHeaders = { ...input.requestHeaders };
+  for (const name of Object.keys(requestHeaders)) {
+    if (name.toLowerCase() === RENDERER_IDENTITY_HEADER) delete requestHeaders[name];
+  }
+  if (
+    input.context !== undefined &&
+    isTrustedRendererShellRequest(input.requestUrl, input.frameUrl, input.context)
+  ) {
+    requestHeaders[RENDERER_IDENTITY_HEADER] = input.context.rendererIdentity;
+  }
+  return requestHeaders;
+}
+
+export function createTrustedRendererRequestRegistry() {
+  const contexts = new Map<number, TrustedRendererRequestContext>();
+  return Object.freeze({
+    get: (webContentsId: number): TrustedRendererRequestContext | undefined =>
+      contexts.get(webContentsId),
+    set: (webContentsId: number, context: TrustedRendererRequestContext): void => {
+      contexts.set(webContentsId, context);
+    },
+    remove: (webContentsId: number): void => {
+      contexts.delete(webContentsId);
+    },
+  });
 }
 
 export function createDesktopWindowContextRegistry<
@@ -574,6 +621,7 @@ function validateProviderCredentialRequest(
 
 interface ProjectWindowAuthority {
   readonly capability: string;
+  readonly rendererIdentity?: string;
   readonly revoke: () => Promise<void>;
 }
 
@@ -856,6 +904,91 @@ const desktopWindows = createDesktopWindowContextRegistry<BrowserWindow, Desktop
 const secondaryWindowLifecycles = new Set<
   ReturnType<typeof createProjectWindowAuthorityLifecycle>
 >();
+const trustedRendererRequests = createTrustedRendererRequestRegistry();
+let trustedRendererRequestHeadersInstalled = false;
+
+function installTrustedRendererRequestHeaders(): void {
+  if (trustedRendererRequestHeadersInstalled) return;
+  trustedRendererRequestHeadersInstalled = true;
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ["http://*/*", "https://*/*"] },
+    (details, callback) => {
+      const context =
+        details.webContentsId === undefined
+          ? undefined
+          : trustedRendererRequests.get(details.webContentsId);
+      const frameUrl = details.frame?.url ?? details.webContents?.getURL();
+      callback({
+        requestHeaders: decorateTrustedRendererHeaders({
+          requestHeaders: details.requestHeaders,
+          requestUrl: details.url,
+          ...(frameUrl === undefined ? {} : { frameUrl }),
+          ...(context === undefined ? {} : { context }),
+        }),
+      });
+    },
+  );
+}
+
+function registerTrustedRendererRequestContext(
+  window: BrowserWindow,
+  input: {
+    readonly serverUrl: string;
+    readonly rendererIdentity: string;
+    readonly developmentUrl?: string;
+  },
+): void {
+  installTrustedRendererRequestHeaders();
+  const developmentOrigin =
+    input.developmentUrl === undefined ? undefined : safeOrigin(input.developmentUrl);
+  const webContentsId = window.webContents.id;
+  trustedRendererWebContentsIds.set(window, webContentsId);
+  trustedRendererRequests.set(webContentsId, {
+    serverOrigin: new URL(input.serverUrl).origin,
+    rendererIdentity: input.rendererIdentity,
+    ...(developmentOrigin === undefined ? {} : { developmentOrigin }),
+  });
+}
+
+/**
+ * Electron marks the window wrapper destroyed before it emits `closed`, so
+ * reading `window.webContents.id` from inside a `closed` handler can throw and
+ * take the rest of that handler's cleanup with it — the window registry entry,
+ * the attention badge, and the authority close all sit after this call. The id
+ * is captured while the window is alive and read from here instead.
+ */
+const trustedRendererWebContentsIds = new WeakMap<BrowserWindow, number>();
+
+function unregisterTrustedRendererRequestContext(window: BrowserWindow): void {
+  const webContentsId = trustedRendererWebContentsIds.get(window);
+  if (webContentsId === undefined) return;
+  trustedRendererWebContentsIds.delete(window);
+  trustedRendererRequests.remove(webContentsId);
+}
+
+function isTrustedRendererShellRequest(
+  requestUrl: string,
+  frameUrl: string | undefined,
+  context: TrustedRendererRequestContext,
+): boolean {
+  let parsedRequest: URL;
+  try {
+    parsedRequest = new URL(requestUrl);
+  } catch {
+    return false;
+  }
+  if (
+    parsedRequest.origin !== context.serverOrigin ||
+    (!parsedRequest.pathname.startsWith("/api/shell/") && parsedRequest.pathname !== "/api/shell")
+  ) {
+    return false;
+  }
+  if (frameUrl === undefined) return false;
+  if (context.developmentOrigin !== undefined) {
+    return safeOrigin(frameUrl) === context.developmentOrigin;
+  }
+  return isPackagedRendererUrl(frameUrl);
+}
 
 function repositoryRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -911,6 +1044,18 @@ export function createMainBrowserWindowOptions(options: {
       sandbox: true,
     },
   };
+}
+
+export function prepareDevelopmentRendererUrl(
+  developmentUrl: string,
+  windowId: string,
+  serverUrl: string,
+): string {
+  const launchUrl = new URL(developmentUrl);
+  launchUrl.searchParams.set("windowId", windowId);
+  launchUrl.searchParams.set("serverUrl", serverUrl);
+  launchUrl.searchParams.set("developmentWebBootstrap", "1");
+  return launchUrl.toString();
 }
 
 function getCredentialStore(): CredentialStore {
@@ -1152,12 +1297,20 @@ async function createWindow(): Promise<void> {
     preparationCleanup.dispose();
     if (presentationController === preparedController) presentationController = undefined;
   };
+  let rendererIdentity: string | undefined;
   await projectWindowLifecycle.open({
-    register: () =>
-      createProjectWindowAuthority({ desktopBridgeSecret, serverUrl, windowId: state.windowId }),
+    register: async () => {
+      const authority = await createProjectWindowAuthority({
+        desktopBridgeSecret,
+        serverUrl,
+        windowId: state.windowId,
+      });
+      rendererIdentity = authority.rendererIdentity;
+      return authority;
+    },
     construct: (capability) => {
       stableWindowCapability = capability;
-      return new BrowserWindow(
+      const window = new BrowserWindow(
         createMainBrowserWindowOptions({
           bounds: state.bounds,
           capability,
@@ -1165,6 +1318,16 @@ async function createWindow(): Promise<void> {
           browserWindow: presentation.browserWindow,
         }),
       );
+      if (rendererIdentity !== undefined) {
+        registerTrustedRendererRequestContext(window, {
+          serverUrl,
+          rendererIdentity,
+          ...(process.env.OCTANT_WEB_URL === undefined
+            ? {}
+            : { developmentUrl: process.env.OCTANT_WEB_URL }),
+        });
+      }
+      return window;
     },
     prepare: (window, closeAuthority) => {
       mainWindow = window;
@@ -1235,6 +1398,10 @@ async function createWindow(): Promise<void> {
         localPluginFolderPicker,
         presentationController: controller,
       });
+      installRendererNavigationGuards(
+        rendererNavigationWebContents(window),
+        rendererNavigationPolicyOptions(),
+      );
       const stopThermalPerformance = observeThermalPerformance({
         platform: process.platform,
         powerMonitor,
@@ -1273,6 +1440,7 @@ async function createWindow(): Promise<void> {
       });
       window.once("closed", () => {
         void browserSurfaceHost?.closeOwnerContexts(state.windowId).catch(() => undefined);
+        unregisterTrustedRendererRequestContext(window);
         desktopWindows.remove(window);
         forgetAttentionBadge(window.id);
         projectRootPicker = undefined;
@@ -1286,10 +1454,9 @@ async function createWindow(): Promise<void> {
     load: async (window) => {
       const developmentUrl = process.env.OCTANT_WEB_URL;
       if (developmentUrl) {
-        const launchUrl = new URL(developmentUrl);
-        launchUrl.searchParams.set("windowId", state.windowId);
-        launchUrl.searchParams.set("serverUrl", serverUrl);
-        await window.loadURL(launchUrl.toString());
+        await window.loadURL(
+          prepareDevelopmentRendererUrl(developmentUrl, state.windowId, serverUrl),
+        );
       } else {
         await window.loadFile(resolve(root, "apps/web/dist/index.html"), {
           query: { windowId: state.windowId, serverUrl },
@@ -1297,6 +1464,7 @@ async function createWindow(): Promise<void> {
       }
     },
     dispose: (window) => {
+      unregisterTrustedRendererRequestContext(window);
       desktopWindows.remove(window);
       stableWindowCapability = undefined;
       projectRootPicker = undefined;
@@ -1330,12 +1498,21 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
   secondaryWindowLifecycles.add(lifecycle);
   const preparationCleanup = createProjectWindowPreparationCleanup();
   let windowCapability: string | undefined;
+  let rendererIdentity: string | undefined;
   try {
     await lifecycle.open({
-      register: () => createProjectWindowAuthority({ desktopBridgeSecret, serverUrl, windowId }),
+      register: async () => {
+        const authority = await createProjectWindowAuthority({
+          desktopBridgeSecret,
+          serverUrl,
+          windowId,
+        });
+        rendererIdentity = authority.rendererIdentity;
+        return authority;
+      },
       construct: (capability) => {
         windowCapability = capability;
-        return new BrowserWindow(
+        const window = new BrowserWindow(
           createMainBrowserWindowOptions({
             bounds: state.bounds,
             capability,
@@ -1347,6 +1524,16 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
             browserWindow: presentation.browserWindow,
           }),
         );
+        if (rendererIdentity !== undefined) {
+          registerTrustedRendererRequestContext(window, {
+            serverUrl,
+            rendererIdentity,
+            ...(process.env.OCTANT_WEB_URL === undefined
+              ? {}
+              : { developmentUrl: process.env.OCTANT_WEB_URL }),
+          });
+        }
+        return window;
       },
       prepare: (window, closeAuthority) => {
         if (windowCapability === undefined) {
@@ -1420,6 +1607,10 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           localPluginFolderPicker,
           presentationController: controller,
         });
+        installRendererNavigationGuards(
+          rendererNavigationWebContents(window),
+          rendererNavigationPolicyOptions(),
+        );
         window.webContents.on("did-finish-load", () => {
           window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
           window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
@@ -1435,6 +1626,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         window.once("ready-to-show", () => window.show());
         window.once("closed", () => {
           void browserSurfaceHost?.closeOwnerContexts(windowId).catch(() => undefined);
+          unregisterTrustedRendererRequestContext(window);
           desktopWindows.remove(window);
           forgetAttentionBadge(window.id);
           preparationCleanup.dispose();
@@ -1445,10 +1637,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
       load: async (window) => {
         const developmentUrl = process.env.OCTANT_WEB_URL;
         if (developmentUrl) {
-          const launchUrl = new URL(developmentUrl);
-          launchUrl.searchParams.set("windowId", windowId);
-          launchUrl.searchParams.set("serverUrl", serverUrl);
-          await window.loadURL(launchUrl.toString());
+          await window.loadURL(prepareDevelopmentRendererUrl(developmentUrl, windowId, serverUrl));
         } else {
           await window.loadFile(resolve(repositoryRoot(), "apps/web/dist/index.html"), {
             query: { windowId, serverUrl },
@@ -1456,6 +1645,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         }
       },
       dispose: (window) => {
+        unregisterTrustedRendererRequestContext(window);
         desktopWindows.remove(window);
         preparationCleanup.dispose();
         if (!window.isDestroyed()) window.destroy();
@@ -2233,7 +2423,15 @@ function ownedWindowContext(
   event: IpcMainInvokeEvent,
 ): Readonly<DesktopWindowContext & { readonly window: BrowserWindow }> {
   const window = BrowserWindow.fromWebContents(event.sender);
-  return desktopWindows.resolve(window);
+  const context = desktopWindows.resolve(window);
+  if (
+    !createRendererNavigationPolicy(rendererNavigationPolicyOptions()).allows(
+      event.senderFrame?.url ?? "",
+    )
+  ) {
+    throw new Error("Octant rejected an IPC request from an untrusted renderer origin.");
+  }
+  return context;
 }
 
 function ownedTopLevelWindowContext(
@@ -2254,16 +2452,33 @@ function ownedTopLevelWindowContext(
 }
 
 function isPackagedRendererUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === "file:" &&
-      url.hostname === "" &&
-      fileURLToPath(url) === resolve(repositoryRoot(), "apps/web/dist/index.html")
-    );
-  } catch {
-    return false;
-  }
+  return createRendererNavigationPolicy({
+    packagedRendererPath: resolve(repositoryRoot(), "apps/web/dist/index.html"),
+  }).allows(value);
+}
+
+function rendererNavigationPolicyOptions() {
+  return {
+    developmentUrl: process.env.OCTANT_WEB_URL,
+    packagedRendererPath: resolve(repositoryRoot(), "apps/web/dist/index.html"),
+  } as const;
+}
+
+function rendererNavigationWebContents(window: BrowserWindow): RendererNavigationWebContentsPort {
+  return {
+    on: (event, listener) => {
+      if (event === "will-navigate") {
+        window.webContents.on("will-navigate", (nativeEvent) => {
+          listener(nativeEvent, { url: nativeEvent.url });
+        });
+      } else {
+        window.webContents.on("will-redirect", (nativeEvent) => {
+          listener(nativeEvent, { url: nativeEvent.url });
+        });
+      }
+    },
+    setWindowOpenHandler: (handler) => window.webContents.setWindowOpenHandler(handler),
+  };
 }
 
 function safeOrigin(value: string): string | undefined {

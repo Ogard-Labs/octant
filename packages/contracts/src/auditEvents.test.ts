@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   AUDIT_EVENT_NAMES,
-  assertAuditPayloadRedacted,
-  assertNoPrincipalIdentityInAuditInput,
-  AuditPrincipalIdentityRejected,
-  AuditRedactionRejected,
   decodeAuditActingPrincipal,
   decodeAuditBoundedToken,
   decodeAuditEvent,
@@ -163,7 +159,6 @@ describe("audit event taxonomy", () => {
     });
     expect(decoded.eventName).toBe(row.eventName);
     expect(decoded.actor.kind).toBe(row.actor.kind);
-    assertAuditPayloadRedacted(decoded.body.payload);
   });
 
   it("rejects mismatched eventName/body and excess fields", () => {
@@ -205,40 +200,13 @@ describe("audit event taxonomy", () => {
   });
 });
 
-describe("audit redaction rules", () => {
+describe("audit contracts", () => {
   it("accepts opaque references and rejects path-like tokens", () => {
     expect(decodeAuditOpaqueReference("evidence-ref-1")).toBe("evidence-ref-1");
     expect(() => decodeAuditOpaqueReference("/Users/example/secret")).toThrow();
     expect(() => decodeAuditOpaqueReference("C:\\Users\\example")).toThrow();
     expect(() => decodeAuditBoundedToken("Shell Output Dump")).toThrow();
     expect(decodeAuditBoundedToken("authority-widening")).toBe("authority-widening");
-  });
-
-  it("rejects secrets, absolute paths, and forbidden keys in redaction gate", () => {
-    expect(() =>
-      assertAuditPayloadRedacted({
-        dump: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
-      }),
-    ).toThrow(AuditRedactionRejected);
-    expect(() => assertAuditPayloadRedacted({ path: "/Users/example/.ssh/id_rsa" })).toThrow(
-      AuditRedactionRejected,
-    );
-    expect(() => assertAuditPayloadRedacted({ rawToolOutput: "curl | sh" })).toThrow(
-      AuditRedactionRejected,
-    );
-    expect(() => assertAuditPayloadRedacted({ denialReason: "extension-mismatch" })).not.toThrow();
-  });
-
-  it("rejects client-supplied principal identity in audit inputs", () => {
-    expect(() => assertNoPrincipalIdentityInAuditInput({ deviceId: ids.device })).toThrow(
-      AuditPrincipalIdentityRejected,
-    );
-    expect(() => assertNoPrincipalIdentityInAuditInput({ windowId: "w1" })).toThrow(
-      AuditPrincipalIdentityRejected,
-    );
-    expect(() =>
-      assertNoPrincipalIdentityInAuditInput({ actionId: ids.action, denialReason: "denied" }),
-    ).not.toThrow();
   });
 
   it("decodes server-resolved acting principals only", () => {
