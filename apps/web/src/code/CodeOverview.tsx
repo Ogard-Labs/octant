@@ -165,7 +165,7 @@ export function CodeOverview(props: CodeOverviewProps) {
           <div>
             <span className="code-overview__eyebrow">Delivery target</span>
             <h2>
-              <GitBranch aria-hidden="true" size={17} strokeWidth={1.8} />
+              <GitBranch aria-hidden="true" size={16} strokeWidth={1.8} />
               {thread.deliveryTarget.branchIntent}
             </h2>
             <p>
@@ -188,7 +188,7 @@ export function CodeOverview(props: CodeOverviewProps) {
 
         <div className="code-overview__signals">
           <article className="code-overview__signal">
-            <GitCompare aria-hidden="true" size={17} strokeWidth={1.7} />
+            <GitCompare aria-hidden="true" size={16} strokeWidth={1.7} />
             <div>
               <span>Changes</span>
               <strong>Review checkout changes</strong>
@@ -196,7 +196,7 @@ export function CodeOverview(props: CodeOverviewProps) {
             </div>
           </article>
           <article className="code-overview__signal">
-            <ListChecks aria-hidden="true" size={17} strokeWidth={1.7} />
+            <ListChecks aria-hidden="true" size={16} strokeWidth={1.7} />
             <div>
               <span>Tests</span>
               <strong>Keep verification close</strong>
@@ -204,7 +204,7 @@ export function CodeOverview(props: CodeOverviewProps) {
             </div>
           </article>
           <article className="code-overview__signal">
-            <GitPullRequest aria-hidden="true" size={17} strokeWidth={1.7} />
+            <GitPullRequest aria-hidden="true" size={16} strokeWidth={1.7} />
             <div>
               <span>Approvals</span>
               <strong>Review before delivery</strong>
@@ -585,9 +585,9 @@ function CodeProjectThreadRow(props: {
               variant="ghost"
             >
               {pinned ? (
-                <PinOff aria-hidden="true" size={13} strokeWidth={1.8} />
+                <PinOff aria-hidden="true" size={14} strokeWidth={1.8} />
               ) : (
-                <Pin aria-hidden="true" size={13} strokeWidth={1.8} />
+                <Pin aria-hidden="true" size={14} strokeWidth={1.8} />
               )}
             </OctantButton>
           )}

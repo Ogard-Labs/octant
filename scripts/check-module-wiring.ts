@@ -60,6 +60,7 @@ const IGNORED_DIRECTORIES = new Set([
   // whose package.json files would otherwise hijack the exports map and make
   // subpath-imported modules look unreferenced in the real tree.
   ".claude",
+  ".agent-worktrees",
   ".git",
   ".octant",
   ".turbo",
@@ -85,10 +86,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Evaluator for the security escape suite, driven by escapeSuite.server.test.ts as its runner. Remove once a product runner imports it or the suite is retired.",
   ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
-  [
-    "packages/provider-sdk/src/childAgentConformance.ts",
-    "Conformance kit for child-agent adapters, driven only by childAgentConformance.test.ts as its runner (like the other provider-sdk conformance kits). Remove once a product adapter runner imports it or the last driver test that uses the kit is retired.",
-  ],
   [
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
@@ -559,7 +556,10 @@ export function findWiringViolations(
   ];
 }
 
-async function collectFiles(root: string, directory = root): Promise<ReadonlyArray<ScannedFile>> {
+export async function collectFiles(
+  root: string,
+  directory = root,
+): Promise<ReadonlyArray<ScannedFile>> {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(
     entries.map(async (entry): Promise<ReadonlyArray<ScannedFile>> => {

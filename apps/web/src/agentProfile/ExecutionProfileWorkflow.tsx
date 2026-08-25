@@ -87,7 +87,7 @@ export function ExecutionProfileWorkflow(props: {
             </p>
           </div>
           <OctantButton onClick={() => setEditing("create")} type="button" variant="outline">
-            <Plus aria-hidden="true" size={13} />
+            <Plus aria-hidden="true" size={14} />
             Create profile
           </OctantButton>
         </header>

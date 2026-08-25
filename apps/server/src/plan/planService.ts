@@ -33,21 +33,6 @@ export class PlanStoreError extends Error {
   }
 }
 
-export class InMemoryPlanStore implements PlanStore {
-  readonly #byThread = new Map<string, ThreadPlanAggregate>();
-
-  read(threadId: string): ThreadPlanAggregate {
-    return this.#byThread.get(threadId) ?? { plan: null, history: [] };
-  }
-
-  write(threadId: string, aggregate: ThreadPlanAggregate): void {
-    this.#byThread.set(threadId, {
-      plan: aggregate.plan,
-      history: [...aggregate.history],
-    });
-  }
-}
-
 export class PlanServiceError extends Error {
   override readonly name = "PlanServiceError";
   constructor(

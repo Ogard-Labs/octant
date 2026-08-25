@@ -93,6 +93,7 @@ import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
+import type { ThreadProviderIdentity } from "./navigationModel";
 
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
 type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
@@ -275,6 +276,10 @@ export interface WorkspaceViewProps {
   readonly draftProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly codeProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly workProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
+  /** Resolved provider marks for thread-owned pane tabs. */
+  readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
+  /** Mirrors the sidebar preference for the compact pane tab mark. */
+  readonly showProviderIcons?: boolean;
   readonly draftProjectName?: string;
   readonly draftProjectRoot?: string;
   readonly draftBranchName?: string;
@@ -446,6 +451,12 @@ export function WorkspaceView(props: WorkspaceViewProps) {
               {renderTab(surface, props, paneId, canvasContext)}
             </ComposerContextMeterGate>
           )}
+          {...(props.providerByThreadId === undefined
+            ? {}
+            : { providerByThreadId: props.providerByThreadId })}
+          {...(props.showProviderIcons === undefined
+            ? {}
+            : { showProviderIcons: props.showProviderIcons })}
           totalWorkspacePaneCount={Object.values(props.workspace.layouts).reduce(
             (count, layout) => count + countPanes(layout),
             0,

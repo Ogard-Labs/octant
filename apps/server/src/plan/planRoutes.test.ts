@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createPlanRouteHandler } from "./planRoutes";
-import { InMemoryPlanStore, PlanService } from "./planService";
+import { PlanService } from "./planService";
+import { InMemoryPlanStore } from "./planService.test-support";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
 
 const ids = {

@@ -6,7 +6,7 @@ import type {
   WorkspaceTab,
 } from "@octant/contracts/shell";
 import { GripVertical } from "lucide-react";
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import {
   OctantContextMenuContent,
@@ -19,6 +19,8 @@ import {
 } from "../ui/base/OctantContextMenu";
 import { WorkspaceDragStatus, WorkspaceDropOverlay } from "./WorkspaceDropOverlay";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
+import { ProviderGlyph } from "../providers/ProviderGlyph";
+import type { ThreadProviderIdentity } from "./navigationModel";
 
 const splitContainerStyle = { height: "100%", minHeight: 0, minWidth: 0, width: "100%" };
 
@@ -52,6 +54,10 @@ export interface SplitWorkspaceProps {
     placement: "before" | "after",
   ) => void;
   readonly renderSurface: (surface: WorkspaceTab, paneId: PaneId) => React.ReactNode;
+  /** Provider identity for thread-owned surfaces, used by the compact pane tab. */
+  readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
+  /** The same preference controls provider marks in navigation and pane tabs. */
+  readonly showProviderIcons?: boolean;
   readonly totalWorkspacePaneCount: number;
 }
 
@@ -262,6 +268,11 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
   const focused = String(props.focusedPaneId) === String(pane.paneId);
   const canSplit = canSplitPane(props.layout, pane.paneId, props.totalWorkspacePaneCount);
   const dragKey = `pane:${String(pane.paneId)}`;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const provider =
+    props.showProviderIcons === false || !("threadId" in surface)
+      ? undefined
+      : props.providerByThreadId?.get(String(surface.threadId));
   return (
     <section
       aria-current={active ? "true" : undefined}
@@ -278,8 +289,12 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       {/* The header spans the window's title band, so the space the grip and
           the launcher do not claim has to stay a native drag region: with the
           grip stretched across it the window could not be moved at all. */}
-      <OctantContextMenuRoot>
-        <OctantContextMenuTrigger className="workspace-pane__header" render={<div />}>
+      <OctantContextMenuRoot onOpenChange={setMenuOpen}>
+        <OctantContextMenuTrigger
+          aria-expanded={menuOpen}
+          className="workspace-pane__header"
+          render={<div />}
+        >
           <span
             className="workspace-pane__grip window-no-drag"
             onPointerCancel={props.drag.onPointerCancel}
@@ -295,7 +310,20 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
             onPointerUp={props.drag.onPointerUp}
             title="Drag to move or split"
           >
-            <GripVertical aria-hidden="true" size={13} strokeWidth={1.8} />
+            <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
+            {provider === undefined ? null : (
+              <span
+                aria-hidden="true"
+                className="workspace-pane__provider"
+                title={provider.displayName}
+              >
+                <ProviderGlyph
+                  displayName={provider.displayName}
+                  driverKind={provider.driverKind}
+                  size={14}
+                />
+              </span>
+            )}
             <span className="workspace-pane__title">{surface.title}</span>
           </span>
           <span

@@ -38,21 +38,21 @@ export function ThemeSettingsProvider(props: {
       for (const alias of VARIABLE_ALIASES[role] ?? []) {
         root.style.setProperty(`--octant-${alias}`, color);
       }
-      if (role === "sidebar") {
+      if (role === "sidebar" || role === "workspace") {
         const opacity =
           resolved.mode === "light"
             ? { regular: 86, subtle: 78, strong: 62 }
             : { regular: 80, subtle: 58, strong: 32 };
         root.style.setProperty(
-          "--octant-sidebar-translucent",
+          `--octant-${role}-translucent`,
           `color-mix(in srgb, ${color} ${opacity.regular}%, transparent)`,
         );
         root.style.setProperty(
-          "--octant-sidebar-translucent-subtle",
+          `--octant-${role}-translucent-subtle`,
           `color-mix(in srgb, ${color} ${opacity.subtle}%, transparent)`,
         );
         root.style.setProperty(
-          "--octant-sidebar-translucent-strong",
+          `--octant-${role}-translucent-strong`,
           `color-mix(in srgb, ${color} ${opacity.strong}%, transparent)`,
         );
       }
@@ -72,6 +72,9 @@ export function ThemeSettingsProvider(props: {
       root.style.removeProperty("--octant-sidebar-translucent");
       root.style.removeProperty("--octant-sidebar-translucent-subtle");
       root.style.removeProperty("--octant-sidebar-translucent-strong");
+      root.style.removeProperty("--octant-workspace-translucent");
+      root.style.removeProperty("--octant-workspace-translucent-subtle");
+      root.style.removeProperty("--octant-workspace-translucent-strong");
       delete root.dataset.octantThemeMode;
       delete root.dataset.octantIncreasedContrast;
       delete root.dataset.octantReducedMotion;

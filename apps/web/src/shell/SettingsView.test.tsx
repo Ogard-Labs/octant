@@ -74,6 +74,7 @@ function renderSettings(overrides: Partial<SettingsViewProps> = {}) {
       "enable-work",
       "sidebar-width",
       "sidebar-material",
+      "workspace-material",
       "sidebar-background",
       "mode-switcher",
       "project-view-switcher",
@@ -127,6 +128,7 @@ function defaultProps(): SettingsViewProps {
       "enable-work",
       "sidebar-width",
       "sidebar-material",
+      "workspace-material",
       "sidebar-background",
       "mode-switcher",
       "project-view-switcher",
@@ -463,6 +465,40 @@ describe("SettingsView", () => {
     void container;
   });
 
+  it("only enables the workspace translucency switch once the sidebar itself is translucent", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+    renderSettings({
+      onSettingsChange,
+      settings: { ...defaultShellSettings(), workspaceMaterial: "opaque" },
+      visibleSettings: ["sidebar-material", "workspace-material"],
+    });
+    navigateTo("Appearance");
+
+    const control = screen.getByRole("switch", { name: "Translucent workspace" });
+    expect(control).toHaveAttribute("aria-checked", "false");
+    expect(control).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(control);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ workspaceMaterial: "system" });
+  });
+
+  it("disables the workspace translucency switch and explains why when the sidebar is opaque", () => {
+    renderSettings({
+      settings: {
+        ...defaultShellSettings(),
+        sidebarMaterial: "opaque",
+        workspaceMaterial: "system",
+      },
+      visibleSettings: ["sidebar-material", "workspace-material"],
+    });
+    navigateTo("Appearance");
+
+    const control = screen.getByRole("switch", { name: "Translucent workspace" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Turn on Translucent sidebar first.")).toBeInTheDocument();
+  });
+
   it("shows the effective fallback note for reduced transparency and unsupported backdrop", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
@@ -496,6 +532,55 @@ describe("SettingsView", () => {
     expect(styles).toContain(".settings-view__preset-swatch");
     expect(styles).toContain("min-width: 28px");
     expect(styles).toContain("min-height: 28px");
+  });
+
+  it("keeps Settings on the shared interface type scale with a centered reading column", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    expect(styles).toMatch(/\.settings-view\s*\{[\s\S]*font-family:\s*var\(--oct-font-display\);/);
+    expect(styles).toContain("width: min(calc(100% - 48px), 760px)");
+    expect(styles).toContain("font-family: var(--oct-font-display)");
+    expect(styles).toContain("font-size: var(--octant-ui-font-size)");
+    expect(styles).not.toContain("--octant-ui-font-family");
+  });
+
+  it("sizes every value control in Settings from one declared column", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    // Sized from their own content, the controls in one column measured 134,
+    // 150, 158 and 180 — seven staggered left edges under a right edge they
+    // already shared. A stepper's width in particular moved by 16px depending
+    // on whether it happened to spell out a unit.
+    expect(styles).toMatch(/--oct-settings-control:\s*180px;/);
+    for (const selector of [
+      "\\.settings-view__select",
+      "\\.settings-font-picker",
+      "\\.octant-number-stepper",
+    ]) {
+      expect(styles).toMatch(
+        new RegExp(`${selector}[^{}]*\\{[^}]*width:\\s*var\\(--oct-settings-control`),
+      );
+    }
+    expect(styles).toMatch(
+      /\.octant-number-stepper \{[^}]*grid-template-columns:\s*30px minmax\(0, 1fr\) auto 30px;/,
+    );
+  });
+
+  it("lets a scheme card be as tall as the picture it shows", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    // The card is an OctantButton, and the button recipe fixes a single-line
+    // control height. Against the card's own `overflow: hidden` that clipped
+    // the preview and cut the System/Light/Dark labels off entirely.
+    expect(styles).toMatch(/\.settings-scheme__card\s*\{[^}]*height:\s*auto;/);
+  });
+
+  it("uses flat, dense setting groups instead of nested dashboard cards", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    expect(styles).toContain("background: var(--octant-surface-muted)");
+    expect(styles).toContain("border-radius: var(--oct-radius-lg)");
+    expect(styles).toContain("gap: var(--oct-space-1)");
   });
 
   it("keeps search and the existing mode-switcher mutation wired", () => {

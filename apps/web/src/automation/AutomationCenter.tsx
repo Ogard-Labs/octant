@@ -584,7 +584,7 @@ function AutomationListBody(props: {
                     variant="ghost"
                   >
                     <span>Actions</span>
-                    <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
+                    <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
                   </OctantButton>
                   {props.openMenuId !== String(summary.id) ? null : (
                     <div className="automation-row__menu menu">
@@ -980,7 +980,7 @@ function AutomationDetail(props: {
       <details className="automation-detail__advanced">
         <summary>
           <span>Advanced</span>
-          <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
+          <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
         </summary>
         <dl className="automation-detail__facts">
           <div>
@@ -1011,7 +1011,7 @@ function AutomationDetail(props: {
       >
         <summary>
           <span>Run history</span>
-          <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
+          <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
         </summary>
         <AutomationHistoryBody
           automation={automation}

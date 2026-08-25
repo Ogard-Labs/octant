@@ -41,7 +41,7 @@ export function RoutineComposer(props: RoutineComposerProps) {
   return (
     <section aria-label="Describe a routine" className="routine-composer">
       <label className="routine-composer__label" htmlFor="routine-composer-request">
-        <Sparkles aria-hidden="true" size={13} strokeWidth={1.8} />
+        <Sparkles aria-hidden="true" size={14} strokeWidth={1.8} />
         What do you want automated?
       </label>
       <OctantTextarea

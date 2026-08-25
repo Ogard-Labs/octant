@@ -125,14 +125,6 @@ export function resolveStructuredPluginReference(
     : resolvePlugin(plugin, reference.componentId, catalog, originReference);
 }
 
-export function resolveStructuredSkillReference(
-  skillId: SourceQualifiedSkillId,
-  catalog: ExtensionAddressingCatalog,
-  originReference: string,
-): ExtensionDraftResolution {
-  return resolveSkill(skillId, catalog, originReference);
-}
-
 export function revalidateExtensionSelection(
   selection: ExtensionSelection,
   catalog: ExtensionAddressingCatalog,

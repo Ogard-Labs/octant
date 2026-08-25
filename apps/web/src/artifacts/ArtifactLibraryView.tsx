@@ -87,7 +87,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
 
       <div className="artifact-library__controls">
         <div className="artifact-library__search">
-          <Search aria-hidden="true" size={13} strokeWidth={1.8} />
+          <Search aria-hidden="true" size={14} strokeWidth={1.8} />
           <label className="sr-only" htmlFor="artifact-library-search">
             Search artifacts
           </label>

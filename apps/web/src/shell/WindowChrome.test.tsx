@@ -90,6 +90,20 @@ function atRuleBlock(atRule: string): string {
 }
 
 describe("WindowChrome", () => {
+  it("keeps creating a thread reachable beside the sidebar recovery control", async () => {
+    const user = userEvent.setup();
+    const onNewThread = vi.fn();
+    renderChrome({
+      onExpandSidebar: vi.fn(),
+      onNewThread,
+    });
+
+    const button = screen.getByRole("button", { name: "New thread" });
+    expect(button).toHaveClass("window-chrome__new-thread");
+    await user.click(button);
+    expect(onNewThread).toHaveBeenCalledOnce();
+  });
+
   it("makes development authentication visibly distinct", () => {
     render(
       <WindowChrome
@@ -184,7 +198,10 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 0;");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: var(--octant-native-hidden-inset-titlebar-height);",
+      "top: calc(var(--oct-space-2) + 4px);",
+    );
+    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
+      "z-index: 7;",
     );
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
@@ -225,9 +242,18 @@ describe("WindowChrome", () => {
     expect(styles).not.toMatch(/\.project-row__mark\[data-type=/);
   });
 
+  it("keeps sidebar recovery and pane-tab controls aligned to compact hit targets", () => {
+    expect(cssRule(".sidebar__traffic-light-space")).toContain("flex: 0 0 74px;");
+    expect(cssRule(".sidebar__native-collapse")).toContain("top: 0;");
+    expect(cssRule(".window-chrome__new-thread")).toContain(
+      "background: var(--oct-surface-muted);",
+    );
+    expect(cssRule(".workspace-pane__provider")).toContain("width: 14px;");
+  });
+
   it("keeps the Project tree readable and reserves status ink for active work", () => {
     const projectName = cssRule(".project-row__copy > span");
-    expect(projectName).toContain("font-family: var(--oct-font-ui);");
+    expect(projectName).toContain("font-family: var(--oct-font-display);");
     expect(projectName).toContain("font-weight: 400;");
     expect(projectName).not.toMatch(/text-transform|letter-spacing|mono/);
     expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
@@ -239,7 +265,7 @@ describe("WindowChrome", () => {
       "var(--oct-accent)",
     );
     const sectionLabel = cssRule(".project-section > .sidebar-section");
-    expect(sectionLabel).toContain("font-family: var(--oct-font-ui);");
+    expect(sectionLabel).toContain("font-family: var(--oct-font-display);");
     expect(sectionLabel).toContain("letter-spacing: normal;");
     expect(sectionLabel).toContain("text-transform: none;");
     expect(sectionLabel).not.toContain("mono");
@@ -360,7 +386,7 @@ describe("WindowChrome", () => {
       "border-top: 1px solid var(--octant-border);",
     );
     expect(cssRule(".environment-git-group__identity-secondary", 1)).toContain(
-      'font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;',
+      "font-family: var(--oct-font-mono);",
     );
 
     expect(styles).toContain("@media (min-width: 681px) and (max-width: 960px)");
@@ -395,7 +421,7 @@ describe("WindowChrome", () => {
       cssRule(
         'html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header',
       ),
-    ).toContain("padding-left: 110px;");
+    ).toContain("padding-left: var(--octant-window-chrome-leading-width");
     expect(cssRule('.workspace-pane[data-active="true"]')).toContain(
       "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
     );
@@ -403,6 +429,22 @@ describe("WindowChrome", () => {
     expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".workspace-pane__header");
     expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(
       '.workspace-pane[data-active="true"]',
+    );
+  });
+
+  it("keeps the environment disclosure compact, neutral, and interface-typed", () => {
+    expect(cssRule(".thread-environment-disclosure")).toContain(
+      "width: min(320px, calc(100vw - 24px));",
+    );
+    expect(cssRule(".thread-environment-disclosure__header")).toContain("min-height: 44px;");
+    expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");
+    expect(cssRule(".environment-git-group__error")).toContain("background: transparent;");
+    expect(cssRule(".environment-git-group__error")).not.toMatch(/warn|yellow/i);
+    expect(
+      cssRule('.thread-environment-summary__button[data-environment-status="unavailable"]'),
+    ).toContain("color: var(--oct-muted);");
+    expect(cssRule(".thread-environment-disclosure .environment-group__summary")).toContain(
+      "font-family: var(--oct-font-display);",
     );
   });
 
@@ -575,12 +617,250 @@ describe("WindowChrome", () => {
     expect(cssRule(".window-chrome__leading .window-chrome__button")).toContain(
       "color: var(--oct-fg-2);",
     );
-    expect(cssRule(".window-chrome__traffic-light-space")).toContain("flex: 0 0 82px;");
+    expect(cssRule(".window-chrome__traffic-light-space")).toContain("flex: 0 0 88px;");
     await user.click(opener);
     expect(onExpandSidebar).toHaveBeenCalledOnce();
   });
 
-  it("keeps only the blank title-bar space draggable so pointer controls remain clickable", () => {
+  it("reserves the title band for whichever window controls the thread actually renders", () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    // Stand in for layout: the cluster is as wide as the controls it holds.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const width = this.classList.contains("window-chrome__trailing")
+          ? this.querySelectorAll("button").length * 40
+          : 0;
+        return {
+          width,
+          height: 0,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: 0,
+          x: 0,
+          y: 0,
+        } as DOMRect;
+      },
+    );
+
+    const reserveFor = (dockAvailable: boolean): string => {
+      const surface = document.createElement("div");
+      surface.className = "shell-frame";
+      document.body.appendChild(surface);
+      const { unmount } = render(
+        <WindowChrome
+          activeSurface="Welcome to Code"
+          bottomPanelAvailable
+          bottomPanelExpanded={false}
+          dockAvailable={dockAvailable}
+          dockExpanded={false}
+          dockLabel="Right sidebar"
+          isNarrow={false}
+          material="opaque"
+          onToggleBottomPanel={vi.fn()}
+          onToggleDock={vi.fn()}
+        />,
+        { container: surface.appendChild(document.createElement("div")) },
+      );
+      const reserve = surface.style.getPropertyValue("--octant-window-chrome-reserved-width");
+      unmount();
+      surface.remove();
+      return reserve;
+    };
+
+    // A thread that renders the dock toggle needs a wider band than one that
+    // does not; a constant reserve is wrong for one of them by construction.
+    expect(reserveFor(false)).toBe("40px");
+    expect(reserveFor(true)).toBe("80px");
+
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("reserves the leading band for the controls that replace a collapsed sidebar", () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const width = this.classList.contains("window-chrome__leading") ? 148 : 0;
+        return {
+          width,
+          height: 0,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: 0,
+          x: 0,
+          y: 0,
+        } as DOMRect;
+      },
+    );
+
+    const surface = document.createElement("div");
+    surface.className = "shell-frame";
+    document.body.appendChild(surface);
+    const { unmount } = render(
+      <WindowChrome
+        activeSurface="Welcome to Code"
+        dockAvailable={false}
+        dockExpanded={false}
+        dockLabel="Right sidebar"
+        isNarrow={false}
+        material="opaque"
+        onExpandSidebar={vi.fn()}
+        onToggleDock={vi.fn()}
+      />,
+      { container: surface.appendChild(document.createElement("div")) },
+    );
+
+    // Measured, not assumed: a constant narrower than the traffic lights plus
+    // Show sidebar plus New thread drew the pane tab over them.
+    expect(surface.style.getPropertyValue("--octant-window-chrome-leading-width")).toBe("148px");
+
+    unmount();
+    surface.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("measures the leading band when a collapsing sidebar first renders it", () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const width = this.classList.contains("window-chrome__leading") ? 148 : 0;
+        return {
+          width,
+          height: 0,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: 0,
+          x: 0,
+          y: 0,
+        } as DOMRect;
+      },
+    );
+
+    const surface = document.createElement("div");
+    surface.className = "shell-frame";
+    document.body.appendChild(surface);
+    const container = surface.appendChild(document.createElement("div"));
+    const chrome = (onExpandSidebar?: () => void) => (
+      <WindowChrome
+        activeSurface="Welcome to Code"
+        dockAvailable={false}
+        dockExpanded={false}
+        dockLabel="Right sidebar"
+        isNarrow={false}
+        material="opaque"
+        {...(onExpandSidebar === undefined ? {} : { onExpandSidebar })}
+        onToggleDock={vi.fn()}
+      />
+    );
+
+    // The cluster does not exist until the sidebar collapses, so the measurement
+    // has to start when it mounts rather than when the chrome first renders.
+    const { rerender, unmount } = render(chrome(), { container });
+    expect(surface.style.getPropertyValue("--octant-window-chrome-leading-width")).toBe("");
+
+    rerender(chrome(vi.fn()));
+    expect(surface.style.getPropertyValue("--octant-window-chrome-leading-width")).toBe("148px");
+
+    // Expanding the sidebar takes the cluster away; the reserve goes with it.
+    rerender(chrome());
+    expect(surface.style.getPropertyValue("--octant-window-chrome-leading-width")).toBe("");
+
+    unmount();
+    surface.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("drops the reserve on unmount even where ResizeObserver is unavailable", () => {
+    vi.stubGlobal("ResizeObserver", undefined);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const width = this.classList.contains("window-chrome__trailing") ? 96 : 0;
+        return {
+          width,
+          height: 0,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: 0,
+          x: 0,
+          y: 0,
+        } as DOMRect;
+      },
+    );
+
+    const surface = document.createElement("div");
+    surface.className = "shell-frame";
+    document.body.appendChild(surface);
+    const { unmount } = render(
+      <WindowChrome
+        activeSurface="Welcome to Code"
+        dockAvailable
+        dockExpanded={false}
+        dockLabel="Right sidebar"
+        isNarrow={false}
+        material="opaque"
+        onToggleDock={vi.fn()}
+      />,
+      { container: surface.appendChild(document.createElement("div")) },
+    );
+    expect(surface.style.getPropertyValue("--octant-window-chrome-reserved-width")).toBe("96px");
+
+    // Without an observer there is nothing to disconnect, but the reserve still
+    // describes a cluster that is gone.
+    unmount();
+    expect(surface.style.getPropertyValue("--octant-window-chrome-reserved-width")).toBe("");
+
+    surface.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("ends the pane header's box before the window controls instead of padding it", () => {
+    const header = cssRule(".workspace-pane__header");
+    // Padding stays inside the header's border box, so a padded reserve still
+    // won the hit test over every control in this row and swallowed the click.
+    expect(header).toContain("margin-right: var(--octant-window-chrome-reserved-width");
+    expect(header).not.toMatch(/padding:[^;]*--octant-window-chrome-reserved-width/);
+  });
+
+  it("keeps the window controls above the pane header rather than tied with it", () => {
+    const nativeChrome = atRuleBlock(
+      'html[data-octant-native-host="true"] .shell-frame > .window-chrome',
+    );
+    const nativeHeader = atRuleBlock(
+      'html[data-octant-native-host="true"] .workspace-pane__header',
+    );
+    const chromeLayer = Number(/z-index:\s*(\d+)/.exec(nativeChrome)?.[1] ?? "0");
+    const headerLayer = Number(/z-index:\s*(\d+)/.exec(nativeHeader)?.[1] ?? "0");
+    // Equal layers left the winner to document order, and the header — rendered
+    // after the chrome — covered every control in the title band.
+    expect(chromeLayer).toBeGreaterThan(headerLayer);
+  });
+
+  it("leaves native dragging to the shell strip so pointer controls have no nested drag region", () => {
     const { container } = render(
       <WindowChrome
         activeSurface="Welcome to Code"
@@ -599,11 +879,13 @@ describe("WindowChrome", () => {
     expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
     expect(container.firstChild).not.toHaveClass("window-drag-region");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: var(--octant-native-hidden-inset-titlebar-height);",
+      "top: calc(var(--oct-space-2) + 4px);",
     );
-    expect(container.querySelector(".window-chrome__drag-space")).toHaveClass("window-drag-region");
-    expect(cssRule(".window-chrome__drag-space")).toContain("pointer-events: auto;");
-    expect(container.querySelectorAll(".window-drag-region")).toHaveLength(1);
+    expect(container.querySelector(".window-chrome__drag-space")).not.toHaveClass(
+      "window-drag-region",
+    );
+    expect(cssRule(".window-chrome__drag-space")).toContain("pointer-events: none;");
+    expect(container.querySelectorAll(".window-drag-region")).toHaveLength(0);
     for (const control of screen.getAllByRole("button")) {
       expect(control).toHaveClass("window-no-drag");
     }

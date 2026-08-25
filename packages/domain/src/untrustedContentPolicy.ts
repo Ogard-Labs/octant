@@ -50,12 +50,6 @@ export type TaintedApprovalDecision =
       readonly ignoredStandingGrant: StandingApprovalGrant;
     };
 
-export type ContentAuthorityEffect =
-  | "tool-invocation"
-  | "approval"
-  | "trust-change"
-  | "authority-transition";
-
 export type ExternalContentIngestionDecision =
   | { readonly kind: "record" }
   | { readonly kind: "already-recorded" }
@@ -163,17 +157,4 @@ export function resolveTaintedApproval(input: {
     prompt: formatTaintedApprovalPrompt(input.taint.ingestedSources),
     ignoredStandingGrant: input.standingGrant,
   };
-}
-
-/**
- * Fail closed: tool/file content must never be parsed into invocations,
- * approvals, trust changes, or authority transitions.
- */
-export function assertContentDoesNotAuthorize(input: {
-  readonly attemptedEffect: ContentAuthorityEffect;
-  readonly contentOrigin: ContentOrigin;
-}): never {
-  throw new Error(
-    `Untrusted ${input.contentOrigin} content must never authorize a ${input.attemptedEffect}; only model-proposed tool calls resolved through the policy engine may act.`,
-  );
 }

@@ -1,5 +1,6 @@
+import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,6 +118,7 @@ async function smokePackagedApplication(
   try {
     await waitForStorageReady(serverUrl, 20_000);
     await waitForRenderer(dataDirectory, 20_000);
+    await smokePackagedShellBootstrap(serverUrl, dataDirectory);
     await activateApplication(appBundle, env);
     if (forceFailureCleanup) {
       throw new Error("Intentional packaged smoke failure after readiness.");
@@ -147,6 +149,90 @@ async function smokePackagedApplication(
 
   if (smokeFailure !== undefined) throw smokeFailure;
   console.log("Packaged Octant no-Bun smoke passed: window/server ready and processes cleaned up.");
+}
+
+async function smokePackagedShellBootstrap(
+  serverUrl: string,
+  dataDirectory: string,
+): Promise<void> {
+  const desktopBridgeSecret = await waitForDesktopBridgeSecret(dataDirectory, 10_000);
+  const windowId = randomUUID();
+  const capability = randomBytes(32).toString("base64url");
+  const rendererIdentity = randomBytes(32).toString("base64url");
+  const desktopHeaders = {
+    "content-type": "application/json",
+    "x-octant-desktop-secret": desktopBridgeSecret,
+  };
+  const authority = await fetch(`${serverUrl}/api/desktop/window-authorities`, {
+    method: "POST",
+    headers: desktopHeaders,
+    body: JSON.stringify({ windowId, capability, rendererIdentity }),
+  });
+  if (authority.status !== 204) {
+    throw new Error("Packaged shell smoke could not register a window authority.");
+  }
+
+  let bootstrapFailure: unknown;
+  try {
+    const bootstrap = await fetch(`${serverUrl}/api/shell/bootstrap`, {
+      method: "POST",
+      headers: {
+        origin: "file://",
+        "x-octant-window-capability": capability,
+        "x-octant-renderer-identity": rendererIdentity,
+      },
+    });
+    if (!bootstrap.ok) {
+      throw new Error(`Packaged shell bootstrap returned HTTP ${bootstrap.status}.`);
+    }
+    const body: unknown = await bootstrap.json();
+    if (!isRecord(body) || body.connectionStatus !== "connected") {
+      throw new Error("Packaged shell bootstrap did not report a connected host.");
+    }
+
+    const read = await fetch(`${serverUrl}/api/shell/bootstrap`, {
+      headers: {
+        origin: "file://",
+        "x-octant-window-capability": capability,
+        "x-octant-renderer-identity": rendererIdentity,
+      },
+    });
+    if (!read.ok) throw new Error(`Packaged shell read returned HTTP ${read.status}.`);
+  } catch (error) {
+    bootstrapFailure = error;
+  }
+  const revoked = await fetch(`${serverUrl}/api/desktop/window-authorities`, {
+    method: "DELETE",
+    headers: desktopHeaders,
+    body: JSON.stringify({ windowId }),
+  });
+  if (revoked.status !== 204) {
+    throw new Error("Packaged shell smoke could not revoke its window authority.");
+  }
+  if (bootstrapFailure !== undefined) throw bootstrapFailure;
+  console.log("Packaged shell bootstrap and renderer-bound authority smoke passed.");
+}
+
+async function waitForDesktopBridgeSecret(
+  dataDirectory: string,
+  timeoutMs: number,
+): Promise<string> {
+  const path = resolve(dataDirectory, "octant-bridge-secret");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const secret = (await readFile(path, "utf8")).trim();
+      if (/^[A-Za-z0-9_-]{43}$/.test(secret)) return secret;
+    } catch {
+      // The desktop writes the bridge projection after its host becomes ready.
+    }
+    await sleep(100);
+  }
+  throw new Error(`Packaged desktop bridge secret was not projected within ${timeoutMs}ms.`);
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function waitForStorageReady(url: string, timeoutMs: number): Promise<void> {
