@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
-import type {
-  RemoteDeviceKeyStore,
-  RemoteSessionBridge,
-  RemoteSessionBridgeState,
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createRemoteSessionBridge,
+  type RemoteDeviceKeyStore,
+  type RemoteSessionBridge,
+  type RemoteSessionBridgeState,
 } from "@octant/client-runtime";
 import { createMobileHostSessionHub } from "./MobileHostSessionHub";
 import type { MobileHostRegistration } from "../hosts/HostRegistry";
@@ -66,6 +67,10 @@ const laptop: MobileHostRegistration = {
 };
 
 describe("MobileHostSessionHub", () => {
+  beforeEach(() => {
+    vi.mocked(createRemoteSessionBridge).mockClear();
+  });
+
   it("resumes each registered host and reports health independently", () => {
     const hub = createMobileHostSessionHub({
       deviceKeyStore: {} as RemoteDeviceKeyStore,
@@ -94,5 +99,46 @@ describe("MobileHostSessionHub", () => {
     expect(hub.slots()[0]?.registration.hostId).toBe("host-studio");
     expect(laptopBridge.disconnect).toHaveBeenCalled();
     expect(hub.bridgeForOrigin(studio.origin)?.disconnect).not.toHaveBeenCalled();
+  });
+
+  it("recreates a host bridge when its credential generation advances", () => {
+    const hub = createMobileHostSessionHub({
+      deviceKeyStore: {} as RemoteDeviceKeyStore,
+      webBuildVersion: "Octant-mobile/0.1.0",
+    });
+    hub.syncRegistrations([studio]);
+    const originalBridge = hub.bridgeForOrigin(studio.origin);
+
+    hub.syncRegistrations([
+      {
+        ...studio,
+        credentialGeneration: 2,
+        keyId: "key-a-rotated",
+        hostKeyFingerprint: "fp-a-rotated",
+      },
+    ]);
+
+    const refreshedBridge = hub.bridgeForOrigin(studio.origin);
+    expect(refreshedBridge).toBeDefined();
+    expect(refreshedBridge).not.toBe(originalBridge);
+    expect(originalBridge?.disconnect).toHaveBeenCalledOnce();
+    expect(refreshedBridge?.resume).toHaveBeenCalledWith(studio.origin);
+    expect(hub.slots()[0]?.registration.credentialGeneration).toBe(2);
+    expect(vi.mocked(createRemoteSessionBridge)).toHaveBeenCalledTimes(2);
+  });
+
+  it("reuses a host bridge while its credential generation is unchanged", () => {
+    const hub = createMobileHostSessionHub({
+      deviceKeyStore: {} as RemoteDeviceKeyStore,
+      webBuildVersion: "Octant-mobile/0.1.0",
+    });
+    hub.syncRegistrations([studio]);
+    const originalBridge = hub.bridgeForOrigin(studio.origin);
+
+    hub.syncRegistrations([{ ...studio, label: "Studio renamed" }]);
+
+    expect(hub.bridgeForOrigin(studio.origin)).toBe(originalBridge);
+    expect(originalBridge?.disconnect).not.toHaveBeenCalled();
+    expect(vi.mocked(createRemoteSessionBridge)).toHaveBeenCalledOnce();
   });
 });

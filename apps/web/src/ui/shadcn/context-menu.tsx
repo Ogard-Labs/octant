@@ -1,5 +1,5 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
-import type { ComponentProps, ReactNode } from "react";
+import { useState, type ComponentProps, type ReactNode } from "react";
 import { cn } from "./utils";
 import type { ShadcnMenuItem } from "./dropdown-menu";
 
@@ -11,7 +11,12 @@ export function ContextMenuTrigger({
   className,
   ...props
 }: ComponentProps<typeof ContextMenuPrimitive.Trigger>) {
-  return <ContextMenuPrimitive.Trigger className={cn(className)} {...props} />;
+  // `aria-haspopup` is a fact about the trigger, so it belongs here. The
+  // expanded state is not: a trigger that always reports `false` tells a screen
+  // reader the menu is closed while it is open, which reads worse than saying
+  // nothing at all. Each call site owns `aria-expanded` and passes its own
+  // menu state.
+  return <ContextMenuPrimitive.Trigger aria-haspopup="menu" className={cn(className)} {...props} />;
 }
 
 export function ContextMenuContent({
@@ -87,9 +92,16 @@ export interface ShadcnContextMenuProps {
  * opened from the pointer's context-menu gesture rather than a trigger button.
  */
 export function ShadcnContextMenu(props: ShadcnContextMenuProps) {
+  // The recipe owns its own root, so it is the only place that can see this
+  // menu open and say so. Base UI does not set `aria-expanded` for a context
+  // menu, and the trigger the recipe renders reaches every caller of it.
+  const [open, setOpen] = useState(false);
   return (
-    <ContextMenu>
-      <ContextMenuTrigger className={cn(props.triggerClassName, "window-no-drag")}>
+    <ContextMenu onOpenChange={setOpen}>
+      <ContextMenuTrigger
+        aria-expanded={open}
+        className={cn(props.triggerClassName, "window-no-drag")}
+      >
         {props.children}
       </ContextMenuTrigger>
       <ContextMenuContent>

@@ -661,7 +661,7 @@ function ProjectGroup(props: {
                     props.onSortChange?.(value);
                   }
                 }}
-                trigger={<MoreHorizontal aria-hidden="true" size={15} strokeWidth={1.8} />}
+                trigger={<MoreHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />}
                 triggerLabel="Project organization"
                 value={props.sort}
               />
@@ -753,7 +753,7 @@ function ProjectGroup(props: {
                   type="button"
                   variant="ghost"
                 >
-                  <SquarePen aria-hidden="true" size={13} strokeWidth={1.7} />
+                  <SquarePen aria-hidden="true" size={14} strokeWidth={1.7} />
                 </OctantButton>
               )}
             </div>

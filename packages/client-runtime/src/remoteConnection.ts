@@ -729,5 +729,5 @@ function toHex(buffer: ArrayBuffer): string {
 }
 
 function cryptoSubtleDigest(data: Uint8Array): Promise<ArrayBuffer> {
-  return globalThis.crypto.subtle.digest("SHA-256", data.buffer as ArrayBuffer);
+  return globalThis.crypto.subtle.digest("SHA-256", data.slice().buffer);
 }

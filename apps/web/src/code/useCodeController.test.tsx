@@ -1897,6 +1897,146 @@ describe("useCodeController", () => {
     }
   });
 
+  it("refreshes a restored active checkout when reconnect polling recovers it", async () => {
+    const waitingCheckout = { ...checkout(), availability: "waiting" as const };
+    const recoveredBootstrap = deferred<CodeBootstrap>();
+    let bootstrapReads = 0;
+    const bootstrapRead = vi.fn(async () => {
+      bootstrapReads += 1;
+      if (bootstrapReads > 1) return recoveredBootstrap.promise;
+      return {
+        ...bootstrap(),
+        checkouts: [bootstrapReads === 1 ? waitingCheckout : checkout()],
+      };
+    });
+    const client = fakeClient({
+      bootstrap: bootstrapRead,
+      thread: vi.fn(async () => ({ ...view(1), checkout: waitingCheckout })),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 10,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("waiting"));
+    await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(1));
+    recoveredBootstrap.resolve(bootstrap());
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("available"));
+    unmount();
+  });
+
+  it("refreshes a restored active checkout when initial bootstrap recovers it", async () => {
+    const waitingCheckout = { ...checkout(), availability: "waiting" as const };
+    const recoveredBootstrap = deferred<CodeBootstrap>();
+    const laterBootstrap = deferred<CodeBootstrap>();
+    let bootstrapReads = 0;
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => {
+        bootstrapReads += 1;
+        return bootstrapReads === 1 ? recoveredBootstrap.promise : laterBootstrap.promise;
+      }),
+      thread: vi.fn(async () => ({ ...view(1), checkout: waitingCheckout })),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 0,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("waiting"));
+    recoveredBootstrap.resolve(bootstrap());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("available"));
+    unmount();
+  });
+
+  it("does not let a stale thread read replace the checkout recovered by bootstrap", async () => {
+    const waitingCheckout = { ...checkout(), availability: "waiting" as const };
+    const recoveredBootstrap = deferred<CodeBootstrap>();
+    const staleThreadView = deferred<CodeThreadView>();
+    const laterBootstrap = deferred<CodeBootstrap>();
+    let bootstrapReads = 0;
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => {
+        bootstrapReads += 1;
+        return bootstrapReads === 1 ? recoveredBootstrap.promise : laterBootstrap.promise;
+      }),
+      thread: vi.fn(async () => staleThreadView.promise),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 0,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await act(async () => {
+      recoveredBootstrap.resolve(bootstrap());
+      staleThreadView.resolve({ ...view(1), checkout: waitingCheckout });
+    });
+    await waitFor(() => expect(result.current.activeView).toBeDefined());
+    expect(result.current.activeView?.checkout.availability).toBe("available");
+    unmount();
+  });
+
+  it("does not let a slower navigation read undo a checkout another read recovered", async () => {
+    // The host answers concurrent bootstrap reads out of order. A read that saw
+    // the checkout still coming up could land after one that already reported it
+    // available, and putting that back left the thread's terminal waiting on a
+    // checkout the host had finished.
+    const waitingCheckout = { ...checkout(), availability: "waiting" as const };
+    const waiting = (): CodeBootstrap => ({ ...bootstrap(), checkouts: [waitingCheckout] });
+    const reads: ReturnType<typeof deferred<CodeBootstrap>>[] = [];
+    const client = fakeClient({
+      bootstrap: vi.fn(() => {
+        const read = deferred<CodeBootstrap>();
+        reads.push(read);
+        return read.promise;
+      }),
+      thread: vi.fn(async () => ({ ...view(1), checkout: waitingCheckout })),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 0,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await act(async () => {
+      reads[0]?.resolve(waiting());
+    });
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("waiting"));
+
+    // Ask for more reads while the first of them is still outstanding, so the
+    // controller has two answers in flight that it cannot order by arrival.
+    act(() => result.current.markThreadRead(ids.thread));
+    act(() => result.current.markThreadRead(ids.thread));
+    await waitFor(() => expect(reads.length).toBeGreaterThan(2));
+
+    const stale = reads[1];
+    await act(async () => {
+      for (const read of reads.slice(2)) read.resolve(bootstrap());
+    });
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("available"));
+
+    await act(async () => {
+      stale?.resolve(waiting());
+    });
+    expect(result.current.activeView?.checkout.availability).toBe("available");
+    unmount();
+  });
+
   it("does not overlap slow navigation refreshes", async () => {
     const slowRefresh = deferred<ReturnType<typeof bootstrap>>();
     let calls = 0;
@@ -2065,7 +2205,7 @@ describe("useCodeController", () => {
   });
 
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
-    const executeFollowUp = vi.fn(async () => ({ kind: "code-follow-up-updated" }) as never);
+    const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({
       readFollowUp: vi.fn(async () => followUpView(false) as never),
       executeFollowUp,
@@ -2088,7 +2228,7 @@ describe("useCodeController", () => {
   });
 
   it("completes an open follow-up explicitly against its current trigger", async () => {
-    const executeFollowUp = vi.fn(async () => ({ kind: "code-follow-up-updated" }) as never);
+    const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({
       readFollowUp: vi.fn(async () => followUpView(true) as never),
       executeFollowUp,
@@ -2109,7 +2249,7 @@ describe("useCodeController", () => {
   });
 
   it("does not complete a follow-up that is not open", async () => {
-    const executeFollowUp = vi.fn(async () => ({ kind: "code-follow-up-updated" }) as never);
+    const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({
       readFollowUp: vi.fn(async () => followUpView(false) as never),
       executeFollowUp,
@@ -2163,7 +2303,7 @@ function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
     executeFollowUp: vi.fn(
       async () =>
         ({
-          kind: "code-follow-up-updated",
+          kind: "follow-up-updated",
           followUp: openFollowUp(),
         }) as never,
     ),

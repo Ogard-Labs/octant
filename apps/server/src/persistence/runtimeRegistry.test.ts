@@ -472,6 +472,27 @@ describe("createPhase1RuntimeRegistries", () => {
     }
   });
 
+  it("writes the canonical follow-up payload kind while replaying the legacy kind", () => {
+    const registry = createPhase1RuntimeRegistries().events;
+    const followUp = {
+      threadId: "82000000-0000-4000-8000-000000000011",
+      state: "open",
+      origin: "automatic",
+      reason: "Approval requested",
+      triggerSequence: 4,
+      acknowledgedThroughSequence: 0,
+      createdAt: "2026-07-20T22:00:00.000Z",
+    } as const;
+    const canonical = { kind: "follow-up-updated", followUp } as const;
+    const legacy = { kind: "code-follow-up-updated", followUp } as const;
+
+    expect(registry.decode("code.follow-up-updated@1", 1, canonical)).toEqual(canonical);
+    expect(() => registry.decode("code.follow-up-updated@1", 1, legacy)).toThrow(
+      EventPayloadInvalid,
+    );
+    expect(registry.decodePersisted("code.follow-up-updated@1", 1, legacy)).toEqual(legacy);
+  });
+
   it("registers strict Work thread event schemas", () => {
     const registry = createPhase1RuntimeRegistries().events;
     const now = "2026-07-26T22:00:00.000Z";
@@ -636,6 +657,7 @@ describe("createPhase1RuntimeRegistries", () => {
           automaticUpdateChecks: true,
           lastContextSurface,
           modeSwitcherPresentation,
+          workspaceMaterial: "opaque",
           navigatorAssistant: {},
           projectViewSwitcherPresentation: "dropdown",
           transcriptTextSize: "medium",
@@ -839,6 +861,7 @@ function validSettingsPayload() {
       automaticUpdateChecks: true,
       lastContextSurface: null,
       sidebarMaterial: "system",
+      workspaceMaterial: "opaque",
       modeSwitcherPresentation: "dropdown",
       // Unconfigured Navigator: the section decodes to its empty honest state.
       navigatorAssistant: {},

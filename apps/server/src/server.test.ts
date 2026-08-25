@@ -372,6 +372,15 @@ describe("startOctantServer", () => {
   it("returns Octant storage readiness and keeps unknown routes at 404", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-"));
     directories.push(directory);
+    const windowId = "00000000-0000-4000-8000-000000000401";
+    const capability = "A".repeat(43);
+    const rendererIdentity = `${"C".repeat(42)}A`;
+    const desktopSecret = `${"B".repeat(42)}A`;
+    const shellHeaders = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+      "x-octant-renderer-identity": rendererIdentity,
+    };
     let stoppedWithActiveConnections = false;
     let maxRequestBodySize: number | undefined;
     let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
@@ -383,6 +392,7 @@ describe("startOctantServer", () => {
             hostname: "127.0.0.1",
             port: 0,
             instanceId: "managed-instance",
+            desktopBridgeSecret: desktopSecret,
             serve: (options) => {
               routeHandler = options.fetch;
               maxRequestBodySize = options.maxRequestBodySize;
@@ -424,15 +434,29 @@ describe("startOctantServer", () => {
           expect(hosts.headers.get("access-control-allow-origin")).toBe(rendererOrigin);
           expect(hosts.headers.get("vary")).toBe("Origin");
 
+          const authority = yield* Effect.promise(() =>
+            Promise.resolve(
+              routeHandler?.(
+                new Request(new URL("/api/desktop/window-authorities", server.url), {
+                  method: "POST",
+                  headers: { "x-octant-desktop-secret": desktopSecret },
+                  body: JSON.stringify({ windowId, capability, rendererIdentity }),
+                }),
+              ),
+            ).then(assertResponse),
+          );
+          expect(authority.status).toBe(204);
+
           const bootstrap = yield* Effect.promise(() =>
             Promise.resolve(
               routeHandler?.(
-                new Request(
-                  new URL(
-                    "/api/shell/bootstrap?windowId=00000000-0000-4000-8000-000000000401",
-                    server.url,
-                  ),
-                ),
+                new Request(new URL("/api/shell/bootstrap", server.url), {
+                  method: "POST",
+                  headers: {
+                    "x-octant-window-capability": capability,
+                    "x-octant-renderer-identity": rendererIdentity,
+                  },
+                }),
               ),
             ).then(assertResponse),
           );
@@ -448,10 +472,10 @@ describe("startOctantServer", () => {
               routeHandler?.(
                 new Request(new URL("/api/shell/commands", server.url), {
                   method: "POST",
-                  headers: { "content-type": "application/json" },
+                  headers: shellHeaders,
                   body: JSON.stringify({
                     kind: "apply-workspace-operation",
-                    windowId: "00000000-0000-4000-8000-000000000401",
+                    windowId,
                     expectedVersion: 0,
                     operation: { kind: "set-active-mode", mode: "code" },
                   }),
@@ -466,10 +490,10 @@ describe("startOctantServer", () => {
               routeHandler?.(
                 new Request(new URL("/api/shell/commands", server.url), {
                   method: "POST",
-                  headers: { "content-type": "application/json" },
+                  headers: shellHeaders,
                   body: JSON.stringify({
                     kind: "replace-settings",
-                    windowId: "00000000-0000-4000-8000-000000000401",
+                    windowId,
                     expectedVersion: 0,
                     settings: {
                       chatEnabled: false,
@@ -494,12 +518,12 @@ describe("startOctantServer", () => {
           const committedBootstrap = yield* Effect.promise(() =>
             Promise.resolve(
               routeHandler?.(
-                new Request(
-                  new URL(
-                    "/api/shell/bootstrap?windowId=00000000-0000-4000-8000-000000000401",
-                    server.url,
-                  ),
-                ),
+                new Request(new URL("/api/shell/bootstrap", server.url), {
+                  headers: {
+                    "x-octant-window-capability": capability,
+                    "x-octant-renderer-identity": rendererIdentity,
+                  },
+                }),
               ),
             ).then(assertResponse),
           );
@@ -525,10 +549,10 @@ describe("startOctantServer", () => {
                 routeHandler?.(
                   new Request(new URL("/api/shell/commands", server.url), {
                     method: "POST",
-                    headers: { "content-type": "application/json" },
+                    headers: shellHeaders,
                     body: JSON.stringify({
                       kind: "apply-workspace-operation",
-                      windowId: "00000000-0000-4000-8000-000000000401",
+                      windowId,
                       expectedVersion: 1,
                       operation,
                     }),
@@ -545,12 +569,12 @@ describe("startOctantServer", () => {
           const afterRejection = yield* Effect.promise(() =>
             Promise.resolve(
               routeHandler?.(
-                new Request(
-                  new URL(
-                    "/api/shell/bootstrap?windowId=00000000-0000-4000-8000-000000000401",
-                    server.url,
-                  ),
-                ),
+                new Request(new URL("/api/shell/bootstrap", server.url), {
+                  headers: {
+                    "x-octant-window-capability": capability,
+                    "x-octant-renderer-identity": rendererIdentity,
+                  },
+                }),
               ),
             ).then(assertResponse),
           );
@@ -564,10 +588,10 @@ describe("startOctantServer", () => {
               routeHandler?.(
                 new Request(new URL("/api/shell/commands", server.url), {
                   method: "POST",
-                  headers: { "content-type": "application/json" },
+                  headers: shellHeaders,
                   body: JSON.stringify({
                     kind: "apply-workspace-operation",
-                    windowId: "00000000-0000-4000-8000-000000000401",
+                    windowId,
                     expectedVersion: 1,
                     operation: { kind: "reset-mode", mode: "code" },
                   }),

@@ -287,7 +287,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             type="button"
             variant="ghost"
           >
-            <FolderOpen aria-hidden="true" size={18} strokeWidth={1.6} />
+            <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
             <span className="project-dialog__folder-name">
               {folder?.displayName ??
                 (choosing ? "Waiting for the folder chooser…" : "Choose a folder")}
