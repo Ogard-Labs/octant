@@ -143,6 +143,7 @@ jobs:
             OCTANT_GVISOR_CAPSULE_IMAGE="$OCTANT_GVISOR_CAPSULE_IMAGE" \
             /bin/sh -c '
               set -eu
+              cd /var/lib/octant
               root=/var/lib/octant/vfs-preflight
               cleanup() {
                 /usr/bin/fusermount3 -u "$root/mount" >/dev/null 2>&1 || true
