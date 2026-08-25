@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
   decodeExecutionCapsuleAcquireRequest,
@@ -332,6 +332,16 @@ evidence("gVisor execution capsule evidence", () => {
   });
 });
 
+describe("effective cgroup limit evidence", () => {
+  it("uses the strongest finite integer limit inherited by the sandbox", () => {
+    expect(minimumFiniteInteger(["max\n", "1073741824\n", "536870912\n"])).toBe(536870912n);
+  });
+
+  it("uses the strongest finite CPU ratio inherited by the sandbox", () => {
+    expect(minimumFiniteCpuRatio(["max 100000\n", "100000 100000\n", "50000 100000\n"])).toBe(0.5);
+  });
+});
+
 function evidenceCommandRunner(): ExecutionCapsuleCommandRunner {
   return {
     run: async (command, args) => {
@@ -503,21 +513,66 @@ async function cgroupBudget(pid: number): Promise<{
   const membership = await readFile(`/proc/${String(pid)}/cgroup`, "utf8");
   const unified = membership.split("\n").find((line) => line.startsWith("0::"));
   if (unified === undefined) throw new Error("Sandbox PID has no unified cgroup membership.");
-  const cgroupRoot = join("/sys/fs/cgroup", unified.slice(3).replace(/^\/+/, ""));
-  const [memoryBytes, pidLimit, cpuMax] = await Promise.all([
-    readFile(join(cgroupRoot, "memory.max"), "utf8"),
-    readFile(join(cgroupRoot, "pids.max"), "utf8"),
-    readFile(join(cgroupRoot, "cpu.max"), "utf8"),
-  ]);
-  const [quota, period] = cpuMax.trim().split(" ");
-  if (quota === undefined || period === undefined || quota === "max") {
-    throw new Error("Sandbox cgroup has no finite CPU limit.");
+  const hierarchyRoot = "/sys/fs/cgroup";
+  let current = join(hierarchyRoot, unified.slice(3).replace(/^\/+/, ""));
+  if (current !== hierarchyRoot && !current.startsWith(`${hierarchyRoot}/`)) {
+    throw new Error("Sandbox cgroup membership escapes the unified hierarchy.");
+  }
+  const hierarchy: string[] = [];
+  while (true) {
+    hierarchy.push(current);
+    if (current === hierarchyRoot) break;
+    current = dirname(current);
+  }
+  const limits = await Promise.all(
+    hierarchy.map(async (directory) => {
+      const [memoryBytes, pidLimit, cpuMax] = await Promise.all([
+        readCgroupLimit(join(directory, "memory.max")),
+        readCgroupLimit(join(directory, "pids.max")),
+        readCgroupLimit(join(directory, "cpu.max")),
+      ]);
+      return { memoryBytes, pidLimit, cpuMax };
+    }),
+  );
+  const memoryBytes = minimumFiniteInteger(limits.map((limit) => limit.memoryBytes));
+  const pidLimit = minimumFiniteInteger(limits.map((limit) => limit.pidLimit));
+  const cpuRatio = minimumFiniteCpuRatio(limits.map((limit) => limit.cpuMax));
+  if (memoryBytes === undefined || pidLimit === undefined || cpuRatio === undefined) {
+    throw new Error("Sandbox cgroup ancestry has no finite resource limit.");
   }
   return {
-    memoryBytes: memoryBytes.trim(),
-    pidLimit: pidLimit.trim(),
-    cpuRatio: Number(quota) / Number(period),
+    memoryBytes: memoryBytes.toString(),
+    pidLimit: pidLimit.toString(),
+    cpuRatio,
   };
+}
+
+async function readCgroupLimit(path: string): Promise<string | undefined> {
+  return readFile(path, "utf8").catch(() => undefined);
+}
+
+function minimumFiniteInteger(values: ReadonlyArray<string | undefined>): bigint | undefined {
+  let minimum: bigint | undefined;
+  for (const value of values) {
+    const normalized = value?.trim();
+    if (normalized === undefined || normalized === "max" || !/^\d+$/.test(normalized)) continue;
+    const parsed = BigInt(normalized);
+    if (parsed < 1n) continue;
+    if (minimum === undefined || parsed < minimum) minimum = parsed;
+  }
+  return minimum;
+}
+
+function minimumFiniteCpuRatio(values: ReadonlyArray<string | undefined>): number | undefined {
+  let minimum: number | undefined;
+  for (const value of values) {
+    const [quota, period] = value?.trim().split(/\s+/) ?? [];
+    if (quota === undefined || period === undefined || quota === "max") continue;
+    const ratio = Number(quota) / Number(period);
+    if (!Number.isFinite(ratio) || ratio <= 0) continue;
+    if (minimum === undefined || ratio < minimum) minimum = ratio;
+  }
+  return minimum;
 }
 
 function runtimeId(request: ExecutionCapsuleAcquireRequest): string {
