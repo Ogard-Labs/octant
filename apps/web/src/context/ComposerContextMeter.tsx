@@ -104,6 +104,16 @@ export function ComposerContextMeter() {
     ...(health === undefined ? {} : { healthLabel: contextHealthLabel(health) }),
   });
 
+  // The panel shows one of three things, and a screen reader that is told the
+  // dialog is named for a heading it does not contain has been told the wrong
+  // thing. Name it for whichever title the reader is actually looking at.
+  const panelTitle =
+    windowModel === undefined || snapshot === undefined
+      ? fallback === undefined
+        ? "Context usage"
+        : "Provider usage"
+      : "Context window";
+
   return (
     <div className="composer-context-meter" data-health={health}>
       <OctantButton
@@ -154,7 +164,7 @@ export function ComposerContextMeter() {
       </span>
       {open ? (
         <div
-          aria-label="Context usage"
+          aria-label={panelTitle}
           className="popover-panel context-window-popover composer-context-meter__popover window-no-drag"
           id={panelId}
           ref={panel}

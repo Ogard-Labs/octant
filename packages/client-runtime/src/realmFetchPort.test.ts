@@ -1,9 +1,6 @@
-import { decodeProjectId } from "@octant/contracts/projects";
-import {
-  decodePreviewHostId,
-  decodePreviewTargetId,
-  type PreviewTarget,
-} from "@octant/contracts/previews";
+import { decodeAppleSnapshotRequest } from "@octant/contracts/apple-toolchain-rpc";
+import { decodeContextInspectorRequest } from "@octant/contracts/context-rpc";
+import { decodePreviewTarget } from "@octant/contracts/previews";
 import { describe, expect, it } from "vitest";
 import { createAppleToolchainClient } from "./appleToolchainClient";
 import { createComputerUseClient } from "./computerUseClient";
@@ -35,33 +32,46 @@ function brandCheckedRealmFetch(issued: string[]): typeof globalThis.fetch {
   } as typeof globalThis.fetch;
 }
 
-function previewTarget(): PreviewTarget {
-  return {
-    targetId: decodePreviewTargetId("11111111-1111-4111-8111-111111111111"),
-    projectId: decodeProjectId("22222222-2222-4222-8222-222222222222"),
-    hostId: decodePreviewHostId("33333333-3333-4333-8333-333333333333"),
-    kind: "file",
-    opaqueRef: "opaque-token-1" as never,
-    displayName: "notes.md",
-  } as PreviewTarget;
-}
+const previewTarget = decodePreviewTarget({
+  targetId: "11111111-1111-4111-8111-111111111111",
+  projectId: "22222222-2222-4222-8222-222222222222",
+  hostId: "33333333-3333-4333-8333-333333333333",
+  kind: "file",
+  opaqueRef: "opaque-token-1",
+  displayName: "notes.md",
+});
+
+const inspectRequest = decodeContextInspectorRequest({
+  subject: {
+    aggregateType: "context-subject",
+    aggregateId: "10000000-0000-4000-8000-000000000001",
+  },
+});
+
+const snapshotRequest = decodeAppleSnapshotRequest({
+  kind: "apple-snapshot-request",
+  authority: {
+    hostId: "4f70656e-4f72-4269-9474-4c6f63616c31",
+    mode: "code",
+    projectId: "90000000-0000-4000-8000-000000000001",
+    providerInstanceId: "90000000-0000-4000-8000-000000000002",
+    extension: { kind: "core" },
+  },
+  threadId: "90000000-0000-4000-8000-000000000003",
+  checkoutId: "90000000-0000-4000-8000-000000000004",
+});
 
 const clients = [
   {
     name: "context",
     ask: (fetch: typeof globalThis.fetch) =>
-      createContextClient({ baseUrl, fetch, windowCapability: capability }).inspect({
-        subject: {
-          aggregateType: "context-subject",
-          aggregateId: "10000000-0000-4000-8000-000000000001",
-        },
-      } as Parameters<ReturnType<typeof createContextClient>["inspect"]>[0]),
+      createContextClient({ baseUrl, fetch, windowCapability: capability }).inspect(inspectRequest),
   },
   {
     name: "apple toolchain",
     ask: (fetch: typeof globalThis.fetch) =>
       createAppleToolchainClient({ baseUrl, fetch, windowCapability: capability }).snapshot(
-        {} as Parameters<ReturnType<typeof createAppleToolchainClient>["snapshot"]>[0],
+        snapshotRequest,
       ),
   },
   {
@@ -72,7 +82,7 @@ const clients = [
   {
     name: "preview",
     ask: (fetch: typeof globalThis.fetch) =>
-      createPreviewClient({ baseUrl, fetch, windowCapability: capability }).open(previewTarget()),
+      createPreviewClient({ baseUrl, fetch, windowCapability: capability }).open(previewTarget),
   },
   {
     name: "provider usage limits",

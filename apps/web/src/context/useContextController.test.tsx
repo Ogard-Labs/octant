@@ -55,6 +55,36 @@ describe("useContextController", () => {
     expect(inspect).toHaveBeenCalledTimes(1);
   });
 
+  it("asks for a turn that arrived while the first reading was still in flight", async () => {
+    // The opening request carries no `afterSequence`, so it can answer with a
+    // reading taken before that turn existed. Treating the turn as observed
+    // while nothing was on screen yet dropped it: no later change would ask
+    // again, and the meter stayed a turn behind for the rest of the session.
+    let release: (() => void) | undefined;
+    const opening = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inspect = vi.fn<ContextClient["inspect"]>(async (request) => {
+      if (request.afterSequence === undefined) await opening;
+      return contextFixture();
+    });
+    const client = fakeClient({ inspect });
+    const { rerender, result } = renderHook(
+      ({ revision }) => useContextController({ client, revision, subject }),
+      { initialProps: { revision: 1 } },
+    );
+    await waitFor(() => expect(inspect).toHaveBeenCalledTimes(1));
+
+    rerender({ revision: 2 });
+    await act(async () => {
+      release?.();
+      await opening;
+    });
+
+    await waitFor(() => expect(inspect).toHaveBeenCalledTimes(2));
+    expect(result.current.status).toBe("ready");
+  });
+
   it("loads a replay-aware snapshot and aborts the request on disposal", async () => {
     let signal: AbortSignal | undefined;
     const client = fakeClient({

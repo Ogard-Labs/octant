@@ -131,14 +131,20 @@ export function useContextController(options: UseContextControllerOptions): Cont
   const observedRevision = useRef(revision);
   useEffect(() => {
     if (observedRevision.current === revision) return;
-    observedRevision.current = revision;
     // The subject effect above owns the first load and clears the snapshot on
     // its way in. A newer turn is the same subject measured again, so the last
     // reading stays on screen as `updating` rather than collapsing to a
     // spinner every time the reader sends something.
-    if (subject === undefined || snapshotRef.current === undefined) return;
-    void reload(snapshotRef.current.sequence);
-  }, [reload, revision, subject]);
+    //
+    // A turn that lands while that first request is still in flight has nothing
+    // to measure from yet, and marking it observed here would let the reading
+    // taken before it existed stand for the rest of the session. Leaving it
+    // unobserved runs this effect again the moment a snapshot arrives, so the
+    // newer turn is asked for instead of swallowed.
+    if (subject === undefined || snapshot === undefined) return;
+    observedRevision.current = revision;
+    void reload(snapshot.sequence);
+  }, [reload, revision, snapshot, subject]);
 
   const execute = useCallback(
     async (command: ContextCommand) => {

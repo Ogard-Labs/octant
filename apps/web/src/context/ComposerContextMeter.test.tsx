@@ -77,7 +77,7 @@ describe("ComposerContextMeter", () => {
     const button = screen.getByRole("button", { name: /Show context usage/i });
 
     await user.click(button);
-    const popover = screen.getByRole("dialog", { name: "Context usage" });
+    const popover = screen.getByRole("dialog", { name: "Context window" });
     // Used, maximum and percentage are the heading, and free space is one of the
     // meter's own segments. Repeating all four as a separate list above the
     // meter said the same numbers twice before the reader reached the picture.
@@ -100,19 +100,19 @@ describe("ComposerContextMeter", () => {
     expect(inspect).not.toHaveBeenCalled();
 
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "Context usage" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Context window" })).not.toBeInTheDocument();
     expect(button).toHaveFocus();
 
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     await user.keyboard("{Escape}");
 
     await user.keyboard(" ");
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     await user.keyboard("{Escape}");
 
     await user.click(screen.getByRole("button", { name: "Shortcut" }));
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     expect(inspect).not.toHaveBeenCalled();
   });
 
@@ -121,10 +121,10 @@ describe("ComposerContextMeter", () => {
     render(<Harness snapshot={contextFixture({ unknownTokens: true })} />);
     const button = screen.getByRole("button", { name: /plus unknown/i });
     await user.click(button);
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toHaveTextContent(
+    expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
       "Octant toolsUnknown",
     );
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toHaveTextContent(
+    expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
       "Free spaceUnknown",
     );
     await user.keyboard("{Escape}");
@@ -135,7 +135,7 @@ describe("ComposerContextMeter", () => {
     const user = userEvent.setup();
     render(<Harness snapshot={contextFixture({ health: "rate-limited" })} />);
     await user.click(screen.getByRole("button", { name: /Show context usage/i }));
-    const popover = screen.getByRole("dialog", { name: "Context usage" });
+    const popover = screen.getByRole("dialog", { name: "Context window" });
     expect(popover).toHaveTextContent("Quota");
     expect(popover).toHaveTextContent("Unknown");
     expect(popover).toHaveTextContent("Retry");
@@ -147,9 +147,9 @@ describe("ComposerContextMeter", () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(screen.getByRole("button", { name: /Show context usage/i }));
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Unrelated" }));
-    expect(screen.queryByRole("dialog", { name: "Context usage" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Context window" })).not.toBeInTheDocument();
   });
 
   it("closes a popover that belonged to the previous pane when the subject changes", async () => {
@@ -166,9 +166,9 @@ describe("ComposerContextMeter", () => {
     }
     render(<Switching />);
     await user.click(screen.getByRole("button", { name: /Show context usage/i }));
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Switch pane" }));
-    expect(screen.queryByRole("dialog", { name: "Context usage" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Context window" })).not.toBeInTheDocument();
   });
 
   it("does not render on a composer the active pane does not own", () => {
@@ -186,7 +186,7 @@ describe("ComposerContextMeter", () => {
     );
     await user.click(screen.getByRole("button", { name: /Show context usage/i }));
     await user.click(screen.getByRole("button", { name: "Inspect context" }));
-    expect(screen.queryByRole("dialog", { name: "Context usage" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Context window" })).not.toBeInTheDocument();
     const inspector = await screen.findByRole("dialog", { name: "Context inspector" });
     expect(inspector).toBeVisible();
     await user.click(
@@ -256,7 +256,7 @@ describe("ComposerContextMeter", () => {
       name: /Provider reported 25\.5K input and 38 output/i,
     });
     await user.click(button);
-    const popover = screen.getByRole("dialog", { name: "Context usage" });
+    const popover = screen.getByRole("dialog", { name: "Provider usage" });
     expect(popover).toHaveTextContent("Provider usage");
     expect(popover).toHaveTextContent("Input25,500");
     expect(popover).toHaveTextContent("Output38");
