@@ -553,6 +553,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             description="How you are shown inside Octant. There is no account behind this, and none of it is required."
             focused={focusedSetting === settingId("user-profile")}
             label="Your profile"
+            labelledBySection
             scope="app"
             settingId="user-profile"
           >
@@ -601,6 +602,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             description="The chords that reach Octant's global surfaces on this machine."
             focused={focusedSetting === settingId("keybindings")}
             label="Shortcuts"
+            labelledBySection
             scope="app"
             settingId="keybindings"
           >
@@ -615,6 +617,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             description="Octant updates itself only when you ask it to, and never while work is running."
             focused={focusedSetting === settingId("app-updates")}
             label="Application updates"
+            labelledBySection
             scope="app"
             settingId="app-updates"
           >
