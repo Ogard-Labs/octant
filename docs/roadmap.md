@@ -8,8 +8,10 @@ tracker; this document records direction.
 
 ## Now — technical preview
 
-The first release is an unsigned Apple Silicon technical preview. Everything
-here is merged or being hardened for it.
+The first release is an Apple Silicon technical preview. Declared releases
+are signed with a Developer ID, notarized, and update themselves. A local
+package is unsigned because signing needs maintainer credentials.
+Everything here is merged or being hardened for it.
 
 - **Chat, Work, and Code as server-enforced modes** — virtual Chat Projects, one
   confined root per Work Project, one confined directory per Code Project,
@@ -107,8 +109,6 @@ Hardening in progress for the preview:
 Explicitly deferred by the current release boundary. Each needs its own design
 before work starts.
 
-- **Signing, notarization, and automatic updates** — after reproducible manual
-  installation of the unsigned preview is proven.
 - **Intel macOS, Windows, and Linux desktop packaging** — Apple Silicon is the
   deliberate first surface; other platforms need their own confinement design.
 - **Mobile maturity** — device builds, live push notifications, native capture,

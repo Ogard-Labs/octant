@@ -47,6 +47,8 @@ pages in this guide describe the surfaces that are actually on screen.
 
 ## Current boundary
 
-This documentation covers the unsigned Apple Silicon technical preview. It reflects
-accurate current product behavior and does not claim that every workflow is finalized.
-Capabilities that remain in progress are noted where relevant.
+This documentation covers the Apple Silicon technical preview. Declared
+releases are signed, notarized, and update themselves; a local package is
+unsigned because signing needs maintainer credentials. It reflects
+accurate current product behavior and does not claim that every workflow is
+finalized. Capabilities that remain in progress are noted where relevant.
