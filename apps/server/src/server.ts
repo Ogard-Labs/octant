@@ -1468,7 +1468,7 @@ export function startOctantServer(
         }),
         onSessionStarted: ({ runId }) => agentRunLiveConversations.begin(runId),
         onTextDelta: ({ runId, text, occurredAt }) =>
-          agentRunLiveConversations.appendText(runId, text, occurredAt as UtcTimestamp),
+          agentRunLiveConversations.appendText(runId, text, occurredAt),
         onSessionSettled: ({ runId, outcome }) => {
           if (outcome.kind === "completed") {
             agentRunLiveConversations.complete(runId);
@@ -5857,6 +5857,14 @@ export function startOctantServer(
             githubRepositoryObservationPort.close();
           } catch (error) {
             shutdownFailure = error;
+          }
+          try {
+            // Drop process-local live transcripts before HTTP drain. Open
+            // NDJSON subscribers would otherwise keep connections alive, and
+            // Git observations must still abort without waiting for that drain.
+            agentRunLiveConversations.close();
+          } catch (error) {
+            shutdownFailure ??= error;
           }
           try {
             httpStop = server.stop(true);

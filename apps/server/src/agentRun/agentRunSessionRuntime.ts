@@ -2,6 +2,7 @@ import {
   decodeCapacityReservationId,
   decodeContextSubjectRef,
   decodeProviderSessionId,
+  decodeUtcTimestamp,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunContextSnapshotId,
@@ -14,6 +15,7 @@ import {
   type ProviderModelId,
   type ProviderServiceLimits,
   type ProviderSessionId,
+  type UtcTimestamp,
 } from "@octant/contracts";
 import { defaultAgentRunAuthorityCeilingForMode } from "@octant/domain";
 import {
@@ -136,7 +138,7 @@ export interface AgentRunSessionRuntimeOptions {
   readonly onTextDelta?: (input: {
     readonly runId: AgentRunId;
     readonly text: string;
-    readonly occurredAt: string;
+    readonly occurredAt: UtcTimestamp;
   }) => void;
   readonly onSessionSettled?: (input: {
     readonly runId: AgentRunId;
@@ -859,12 +861,18 @@ function publishableTextDelta(event: {
   readonly kind: string;
   readonly text?: unknown;
   readonly occurredAt?: unknown;
-}): { readonly text: string; readonly occurredAt: string } | undefined {
+}): { readonly text: string; readonly occurredAt: UtcTimestamp } | undefined {
   if (event.kind !== "text-delta") return undefined;
   if (typeof event.text !== "string" || event.text.trim().length === 0) return undefined;
+  let occurredAt: UtcTimestamp;
+  try {
+    occurredAt = decodeUtcTimestamp(event.occurredAt);
+  } catch {
+    occurredAt = decodeUtcTimestamp(new Date().toISOString());
+  }
   return {
     text: event.text,
-    occurredAt: typeof event.occurredAt === "string" ? event.occurredAt : "",
+    occurredAt,
   };
 }
 

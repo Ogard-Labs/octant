@@ -426,12 +426,12 @@ describe("createAgentRunSessionRuntime", () => {
   it("publishes managed response deltas without changing the terminal outcome", async () => {
     const provider = fakeProvider();
     const started: string[] = [];
-    const deltas: string[] = [];
+    const deltas: Array<{ readonly text: string; readonly occurredAt: string }> = [];
     const settledOutcomes: AgentRunSessionOutcome[] = [];
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(provider, {
         onSessionStarted: ({ runId: startedRunId }) => started.push(String(startedRunId)),
-        onTextDelta: ({ text }) => deltas.push(text),
+        onTextDelta: ({ text, occurredAt }) => deltas.push({ text, occurredAt }),
         onSessionSettled: ({ outcome }) => settledOutcomes.push(outcome),
       }),
     );
@@ -440,7 +440,12 @@ describe("createAgentRunSessionRuntime", () => {
     await provider.emit({ kind: "completed", sessionId });
     await expect(outcome).resolves.toMatchObject({ kind: "completed" });
     expect(started).toHaveLength(1);
-    expect(deltas).toEqual(["partial"]);
+    expect(deltas).toEqual([
+      {
+        text: "partial",
+        occurredAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+      },
+    ]);
     expect(settledOutcomes).toHaveLength(1);
   });
 

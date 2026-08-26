@@ -632,7 +632,7 @@ async function handleConversation(
   });
   return json(
     {
-      ...conversationIdentity(dependencies, run),
+      ...conversationIdentity(run),
       ...agentRunConversationDisclosure(dependencies, run, {
         surface: "snapshot",
         ...(afterSequence === undefined ? {} : { afterSequence }),
@@ -706,10 +706,11 @@ async function* conversationStreamFrames(
         afterSequence,
         signal,
       })) {
+        const latestRun = dependencies.persistence.getById(run.id) ?? run;
         const lastSequence = snapshot.entries.at(-1)?.sequence;
         yield {
           kind: first ? "snapshot" : "delta",
-          ...conversationIdentity(dependencies, run),
+          ...conversationIdentity(latestRun),
           ...snapshot,
           ...(lastSequence === undefined ? {} : { nextCursor: String(lastSequence) }),
         };
@@ -719,33 +720,32 @@ async function* conversationStreamFrames(
     }
   }
 
-  const disclosure = agentRunConversationDisclosure(dependencies, run, {
+  const latestRun = dependencies.persistence.getById(run.id) ?? run;
+  const disclosure = agentRunConversationDisclosure(dependencies, latestRun, {
     surface: "stream",
     afterSequence,
   });
   const lastSequence = disclosure.entries.at(-1)?.sequence;
   yield {
     kind: "snapshot",
-    ...conversationIdentity(dependencies, run),
+    ...conversationIdentity(latestRun),
     ...disclosure,
     ...(lastSequence === undefined ? {} : { nextCursor: String(lastSequence) }),
   };
 }
 
 function conversationIdentity(
-  dependencies: AgentRunRouteDependencies,
   run: AgentRun,
 ): Omit<
   AgentRunConversationResponse,
   "status" | "entries" | "truncated" | "nextCursor" | "staleReason"
 > {
-  const latestRun = dependencies.persistence.getById(run.id) ?? run;
   return {
-    runId: latestRun.id,
-    parentThreadId: latestRun.parentThreadId,
-    executionKind: latestRun.executionKind,
-    modelId: effectiveAgentRunExecutionTarget(latestRun.routingReceipt).modelId,
-    lifecycleStatus: latestRun.lifecycleStatus,
+    runId: run.id,
+    parentThreadId: run.parentThreadId,
+    executionKind: run.executionKind,
+    modelId: effectiveAgentRunExecutionTarget(run.routingReceipt).modelId,
+    lifecycleStatus: run.lifecycleStatus,
   };
 }
 
@@ -758,16 +758,14 @@ function agentRunConversationDisclosure(
     readonly live?: ReturnType<AgentRunLiveConversationStore["read"]>;
   },
 ) {
-  const latestRun = dependencies.persistence.getById(run.id) ?? run;
-  const result = latestRun.result;
-  const resultText =
-    result === undefined ? undefined : dependencies.persistence.resultText(latestRun.id);
+  const result = run.result;
+  const resultText = result === undefined ? undefined : dependencies.persistence.resultText(run.id);
   return resolveAgentRunConversationDisclosure({
-    executionKind: latestRun.executionKind,
-    lifecycleStatus: latestRun.lifecycleStatus,
+    executionKind: run.executionKind,
+    lifecycleStatus: run.lifecycleStatus,
     surface: options.surface,
-    ...(latestRun.recoveryReason === undefined ? {} : { recoveryReason: latestRun.recoveryReason }),
-    ...(latestRun.executionKind === "provider-native"
+    ...(run.recoveryReason === undefined ? {} : { recoveryReason: run.recoveryReason }),
+    ...(run.executionKind === "provider-native"
       ? { nativeLiveTranscriptSupport: "unavailable" as const }
       : {}),
     ...(options.afterSequence === undefined ? {} : { afterSequence: options.afterSequence }),
@@ -778,7 +776,7 @@ function agentRunConversationDisclosure(
           retained: {
             text: resultText,
             truncated: result.truncated,
-            occurredAt: latestRun.updatedAt,
+            occurredAt: run.updatedAt,
           },
         }),
   });
@@ -791,6 +789,11 @@ function conversationStreamResponse(
 ): Response {
   const encoder = new TextEncoder();
   const iterator = frames[Symbol.asyncIterator]();
+  const abort = (): void => {
+    void iterator.return?.(undefined);
+  };
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
@@ -815,6 +818,7 @@ function conversationStreamResponse(
       }
     },
     async cancel() {
+      signal.removeEventListener("abort", abort);
       await iterator.return?.(undefined);
     },
   });

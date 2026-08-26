@@ -1,11 +1,37 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import {
+  decodeAgentRunId,
+  decodeAgentRunParentThreadId,
+  decodeProviderModelId,
+  decodeUtcTimestamp,
+  type AgentRunConversationResponse,
+} from "@octant/contracts";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
+
+const liveRunId = "11111111-1111-4111-8111-111111111111";
+const liveConversation: AgentRunConversationResponse = {
+  runId: decodeAgentRunId(liveRunId),
+  parentThreadId: decodeAgentRunParentThreadId("22222222-2222-4222-8222-222222222222"),
+  executionKind: "octant-managed",
+  modelId: decodeProviderModelId("gpt-5.6-luna"),
+  lifecycleStatus: "running",
+  status: "live",
+  entries: [
+    {
+      sequence: 1,
+      kind: "assistant",
+      text: "Live child reply",
+      occurredAt: decodeUtcTimestamp("2026-08-23T00:00:00.000Z"),
+    },
+  ],
+  truncated: false,
+};
 
 const entries = [
   {
-    runId: "run-1",
+    runId: liveRunId,
     role: "research",
     task: "Active research",
     lifecycleStatus: "running",
@@ -108,7 +134,7 @@ describe("AgentHierarchyPanel", () => {
       "secondary",
     );
     await user.click(screen.getByRole("button", { name: "Cancel Active research" }));
-    expect(onCancel).toHaveBeenCalledWith({ runId: "run-1" });
+    expect(onCancel).toHaveBeenCalledWith({ runId: liveRunId });
 
     await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
     await waitFor(() =>
@@ -129,25 +155,7 @@ describe("AgentHierarchyPanel", () => {
     const onInspectConversation = vi.fn();
     render(
       <AgentHierarchyPanel
-        conversation={
-          {
-            runId: "run-1",
-            parentThreadId: "11111111-1111-4111-8111-111111111111",
-            executionKind: "octant-managed",
-            modelId: "gpt-5.6-luna",
-            lifecycleStatus: "running",
-            status: "live",
-            entries: [
-              {
-                sequence: 1,
-                kind: "assistant",
-                text: "Live child reply",
-                occurredAt: "2026-08-23T00:00:00.000Z",
-              },
-            ],
-            truncated: false,
-          } as never
-        }
+        conversation={liveConversation}
         creationPosture="automatic"
         entries={entries}
         onCancel={onCancel}
@@ -156,8 +164,8 @@ describe("AgentHierarchyPanel", () => {
     );
     expect(screen.getByText("Live child reply")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Cancel Active research" }));
-    expect(onCancel).toHaveBeenCalledWith({ runId: "run-1" });
+    expect(onCancel).toHaveBeenCalledWith({ runId: liveRunId });
     await user.click(screen.getByRole("button", { name: "View conversation for Active research" }));
-    expect(onInspectConversation).toHaveBeenCalledWith("run-1");
+    expect(onInspectConversation).toHaveBeenCalledWith(liveRunId);
   });
 });
