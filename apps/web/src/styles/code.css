@@ -681,6 +681,16 @@
 
 .github-onboarding__trigger {
   max-width: 220px;
+  min-height: 26px;
+  gap: 5px;
+  padding: 0 5px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.github-onboarding__dialog {
+  width: min(420px, calc(100vw - 24px));
+  padding: 10px;
 }
 
 .github-onboarding__trigger span {

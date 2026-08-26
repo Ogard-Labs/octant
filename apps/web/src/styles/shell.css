@@ -933,26 +933,30 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   gap: 10px;
 }
 
-/* Ready new-thread surfaces are composer-first. Their heading remains in the
-   document outline for assistive technology without occupying the visual
-   center; the prerequisite-only Agent welcome keeps its visible guidance. */
-.draft-thread:not(.agent-mode-welcome) .draft-thread__welcome,
+.draft-thread__welcome,
 .work-composer-adapter__welcome,
 .code-composer-adapter__welcome {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.new-thread-welcome__mark {
+  margin-bottom: 4px;
+  color: var(--oct-accent-fg);
 }
 
 .draft-thread__eyebrow,
-.work-composer-adapter__eyebrow {
-  display: none;
+.work-composer-adapter__eyebrow,
+.code-composer-adapter__eyebrow {
+  display: block;
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .draft-thread__heading,
@@ -968,7 +972,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .draft-thread__description,
 .work-composer-adapter__description {
   max-width: 58ch;
-  margin: 9px auto 0;
+  margin: 2px 0 0;
   color: var(--octant-text-secondary);
   font-size: calc(14 * var(--oct-text-step));
   line-height: 1.65;
@@ -1434,7 +1438,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-adapter__eyebrow {
-  display: none;
+  display: block;
 }
 
 .code-composer-adapter__heading {
@@ -1449,7 +1453,7 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__description {
   max-width: 58ch;
-  margin: 9px auto 0;
+  margin: 2px 0 0;
   color: var(--octant-text-secondary);
   font-size: 13.5px;
   line-height: 1.55;
@@ -1762,15 +1766,35 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__delivery {
   display: grid;
-  gap: 10px;
-  padding: 10px 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 10px;
+  padding: 12px;
 }
 
 .code-composer-adapter__field {
   display: grid;
-  gap: 4px;
-  font-size: var(--oct-text-sm);
+  gap: 3px;
   color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-composer-adapter__field:first-child,
+.code-composer-adapter__field:last-child {
+  grid-column: 1 / -1;
+}
+
+.code-composer-adapter__field :is(input, select) {
+  min-height: 30px;
+}
+
+@media (max-width: 620px) {
+  .code-composer-adapter__delivery {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .code-composer-adapter__field {
+    grid-column: 1;
+  }
 }
 
 .code-composer-adapter__error {

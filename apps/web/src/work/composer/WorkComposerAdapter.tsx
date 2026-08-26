@@ -2,7 +2,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
-import { FolderOpen, AlertTriangle, Paperclip } from "lucide-react";
+import { Aperture, FolderOpen, AlertTriangle, Paperclip } from "lucide-react";
 import {
   useCallback,
   useRef,
@@ -144,6 +144,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     <section aria-label="New Work thread" className="work-composer-adapter">
       <div className="work-composer-adapter__canvas">
         <div className="work-composer-adapter__welcome">
+          <Aperture
+            aria-hidden="true"
+            className="new-thread-welcome__mark"
+            size={24}
+            strokeWidth={1.4}
+          />
           <p className="work-composer-adapter__eyebrow">Octant Work</p>
           <h1 className="work-composer-adapter__heading">What are we working on?</h1>
           <p className="work-composer-adapter__description">

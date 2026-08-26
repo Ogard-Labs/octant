@@ -1,5 +1,5 @@
 import { draftThreadModePresentation } from "@octant/contracts/thread-draft";
-import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
+import { Aperture, Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
@@ -86,19 +86,13 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     <section aria-label="Chat welcome" className="draft-thread chat-welcome">
       <div className="draft-thread__canvas">
         <div className="draft-thread__welcome">
-          <HostSelector
-            {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-            {...(props.selectedHostId === undefined
-              ? {}
-              : { selectedHostId: props.selectedHostId })}
-            {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-            {...(props.lastSelectedHealthyHostId === undefined
-              ? {}
-              : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-            {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-            {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
-            requiredCapability="chat"
+          <Aperture
+            aria-hidden="true"
+            className="new-thread-welcome__mark"
+            size={24}
+            strokeWidth={1.4}
           />
+          <p className="draft-thread__eyebrow">Octant Chat</p>
           <h1 className="draft-thread__heading">{presentation.heading}</h1>
           <p className="draft-thread__description">{presentation.description}</p>
         </div>
@@ -122,22 +116,39 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             row={{
               ariaLabel: "Thread context",
               leading: (
-                <ComposerModelPicker
-                  ariaLabel="Provider and model"
-                  disabled={!ready || props.creating === true}
-                  groups={props.providerGroups ?? []}
-                  menuSide="bottom"
-                  onSelect={props.onSelectProvider ?? (() => undefined)}
-                  {...(props.onOpenSettings === undefined
-                    ? {}
-                    : { onOpenSettings: props.onOpenSettings })}
-                  {...(props.selectedModelId === undefined
-                    ? {}
-                    : { selectedModelId: props.selectedModelId })}
-                  {...(props.selectedProviderInstanceId === undefined
-                    ? {}
-                    : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                />
+                <>
+                  <HostSelector
+                    {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                    {...(props.selectedHostId === undefined
+                      ? {}
+                      : { selectedHostId: props.selectedHostId })}
+                    {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+                    {...(props.lastSelectedHealthyHostId === undefined
+                      ? {}
+                      : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                    {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+                    {...(props.onSelectHost === undefined
+                      ? {}
+                      : { onSelectHost: props.onSelectHost })}
+                    requiredCapability="chat"
+                  />
+                  <ComposerModelPicker
+                    ariaLabel="Provider and model"
+                    disabled={!ready || props.creating === true}
+                    groups={props.providerGroups ?? []}
+                    menuSide="bottom"
+                    onSelect={props.onSelectProvider ?? (() => undefined)}
+                    {...(props.onOpenSettings === undefined
+                      ? {}
+                      : { onOpenSettings: props.onOpenSettings })}
+                    {...(props.selectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.selectedModelId })}
+                    {...(props.selectedProviderInstanceId === undefined
+                      ? {}
+                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                  />
+                </>
               ),
               actions: {
                 kind: "send",
