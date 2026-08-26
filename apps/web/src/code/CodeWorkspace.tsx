@@ -814,6 +814,7 @@ function TerminalWorkspaceSurface(
         if (result.kind === "terminal-state") {
           setTerminal(result);
           setFailure(undefined);
+          setStarting(false);
           return;
         }
         if (result.kind === "operation-failed" && result.failure.category !== "unavailable") {
@@ -872,17 +873,23 @@ function TerminalWorkspaceSurface(
       ...props.scope,
     } as const;
     setFailure(undefined);
+    let attachingAcceptedStart = false;
     try {
       // Opening a terminal is the user's own act; the host authorizes it as
       // user-initiated without a prompt (Plan mode still refuses).
       const result = await props.client.executeOperation(command);
       if (result.kind === "terminal-state") setTerminal(result);
+      else if (result.kind === "operation-accepted") attachingAcceptedStart = true;
       else if (result.kind === "operation-failed") setFailure(result.failure.message);
+      else
+        setFailure(
+          "The host returned no terminal process. Octant will retry when it is available.",
+        );
     } catch {
       setFailure("Terminal start or approval failed. Reconnect, verify the checkout, and retry.");
     } finally {
       startInFlight.current = false;
-      setStarting(false);
+      if (!attachingAcceptedStart) setStarting(false);
     }
   };
   startRef.current = start;

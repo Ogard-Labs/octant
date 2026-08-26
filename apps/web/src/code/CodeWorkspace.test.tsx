@@ -82,6 +82,38 @@ describe("CodeWorkspace", () => {
     expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
   });
 
+  it("stays in the native connecting state while an accepted terminal start attaches", async () => {
+    const client = codeClient();
+    (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
+    (client.executeOperation as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(terminalUnavailableResult())
+      .mockResolvedValueOnce({
+        kind: "operation-accepted",
+        operationId: "30000000-0000-4000-8000-000000000003",
+      })
+      .mockResolvedValueOnce(terminalResult);
+
+    render(
+      activated(
+        <CodeWorkspace
+          client={client}
+          controller={controller("approval-gated")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
+    );
+
+    await waitFor(() =>
+      expect(client.executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "start-terminal" }),
+      ),
+    );
+    expect(screen.getByRole("heading", { name: "Starting repository terminal" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "No terminal attached" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
+  });
+
   it("opens a restored Terminal tab without asking the user to start it", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
