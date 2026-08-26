@@ -1,24 +1,38 @@
 import type { ReactNode } from "react";
 import {
   DropdownMenu as OctantMenuRoot,
+  DropdownMenuCheckboxItem as OctantMenuCheckboxItem,
   DropdownMenuGroup as OctantMenuGroup,
   DropdownMenuGroupLabel as OctantMenuGroupLabel,
   DropdownMenuItem as OctantMenuItem,
   DropdownMenuPopup as OctantMenuPopup,
   DropdownMenuPortal as OctantMenuPortal,
   DropdownMenuPositioner as OctantMenuPositioner,
+  DropdownMenuRadioGroup as OctantMenuRadioGroup,
+  DropdownMenuRadioItem as OctantMenuRadioItem,
+  DropdownMenuSeparator as OctantMenuSeparator,
+  DropdownMenuSub as OctantMenuSub,
+  DropdownMenuSubPopup as OctantMenuSubPopup,
+  DropdownMenuSubTrigger as OctantMenuSubTrigger,
   DropdownMenuTrigger as OctantMenuTrigger,
   ShadcnDropdownMenu,
 } from "../shadcn/dropdown-menu";
 
 export {
   OctantMenuRoot,
+  OctantMenuCheckboxItem,
   OctantMenuGroup,
   OctantMenuGroupLabel,
   OctantMenuItem,
   OctantMenuPopup,
   OctantMenuPortal,
   OctantMenuPositioner,
+  OctantMenuRadioGroup,
+  OctantMenuRadioItem,
+  OctantMenuSeparator,
+  OctantMenuSub,
+  OctantMenuSubPopup,
+  OctantMenuSubTrigger,
   OctantMenuTrigger,
 };
 

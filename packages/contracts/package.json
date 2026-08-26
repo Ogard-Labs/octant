@@ -69,6 +69,7 @@
     "./navigator-assistant": "./src/navigatorAssistant.ts",
     "./previews": "./src/previews.ts",
     "./product-feedback": "./src/productFeedback.ts",
+    "./project-view": "./src/projectView.ts",
     "./projects": "./src/projects.ts",
     "./providers": "./src/providers.ts",
     "./provider-discovery": "./src/providerDiscovery.ts",

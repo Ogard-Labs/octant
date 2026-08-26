@@ -6,17 +6,17 @@ them inside feature stylesheets.
 
 ## Interactive primitives (`ui/base`)
 
-| Primitive                                        | Use for                                             |
-| ------------------------------------------------ | --------------------------------------------------- |
-| `OctantButton`                                   | All buttons (primary/secondary/ghost/icon variants) |
-| `OctantInput`, `OctantTextarea`                  | Text entry                                          |
-| `OctantSelect`                                   | Dropdown selection (opaque semantic popover)        |
-| `OctantCheckbox`, `OctantSwitch`, `OctantSlider` | Toggles and ranges                                  |
-| `OctantTabs`                                     | Tab strips                                          |
-| `OctantMenu`, `OctantPopover`                    | Menus and disclosure popovers (opaque)              |
-| `OctantContextMenu`                              | Right-click menus mirroring the same items          |
-| `OctantDialog`                                   | Modal dialogs (opaque)                              |
-| `OctantTooltip`                                  | Tooltips (opaque for legibility)                    |
+| Primitive                                        | Use for                                                           |
+| ------------------------------------------------ | ----------------------------------------------------------------- |
+| `OctantButton`                                   | All buttons (primary/secondary/ghost/icon variants)               |
+| `OctantInput`, `OctantTextarea`                  | Text entry                                                        |
+| `OctantSelect`                                   | Dropdown selection (opaque semantic popover)                      |
+| `OctantCheckbox`, `OctantSwitch`, `OctantSlider` | Toggles and ranges                                                |
+| `OctantTabs`                                     | Tab strips                                                        |
+| `OctantMenu`, `OctantPopover`                    | Menus, submenus, checkbox items, and disclosure popovers (opaque) |
+| `OctantContextMenu`                              | Right-click menus mirroring the same items                        |
+| `OctantDialog`                                   | Modal dialogs (opaque)                                            |
+| `OctantTooltip`                                  | Tooltips (opaque for legibility)                                  |
 
 `ui/shadcn` contains the owned shadcn recipe implementations; import product
 primitives from `ui/base`, not from `ui/shadcn`, inside features. The recipes

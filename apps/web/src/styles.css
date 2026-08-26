@@ -733,109 +733,17 @@ button:focus-visible {
   margin: 0 4px 4px;
 }
 
-.code-project-views > [data-slot="popover-trigger"] {
+.code-project-views__filter {
   width: 28px;
   min-height: 28px;
   color: var(--octant-text-muted);
   border-radius: 8px;
 }
 
-.code-project-views > [data-slot="popover-trigger"]:hover,
-.code-project-views > [data-slot="popover-trigger"][aria-expanded="true"] {
+.code-project-views__filter:hover,
+.code-project-views__filter[aria-expanded="true"] {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
-}
-
-.project-view-filter-popover {
-  max-height: min(80vh, 640px);
-  overflow: auto;
-}
-
-.project-view-filter-popover__content {
-  display: grid;
-  gap: 8px;
-}
-
-.project-view-filter-popover__header {
-  display: flex;
-  min-height: 20px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--octant-text-primary);
-  font-size: calc(12 * var(--oct-text-step));
-  font-weight: 600;
-}
-
-.project-view-filter-popover__active-count {
-  color: var(--octant-text-muted);
-  font-size: 10.5px;
-  font-weight: 400;
-}
-
-.project-view-filter-popover__field-grid,
-.project-view-filter-popover__date-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.project-view-filter-popover__field {
-  min-width: 0;
-  gap: 4px;
-}
-
-.project-view-filter-popover__field > [data-slot="field-label"],
-.project-view-filter-popover__checks > legend {
-  color: var(--octant-text-muted);
-  font-size: 10.5px;
-  font-weight: 500;
-  line-height: 1.2;
-}
-
-.project-view-filter-popover__checks {
-  min-width: 0;
-  margin: 0;
-  padding: 7px 0 5px;
-  border: 0;
-  border-top: 1px solid var(--octant-border);
-}
-
-.project-view-filter-popover__environment-options {
-  display: grid;
-  max-height: 112px;
-  gap: 1px;
-  margin-top: 3px;
-  overflow-y: auto;
-}
-
-.project-view-filter-popover__check {
-  display: flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 7px;
-  color: var(--octant-text-secondary);
-  font-size: calc(12 * var(--oct-text-step));
-}
-
-.project-view-filter-popover [data-slot="select-trigger"] {
-  min-height: 30px;
-  height: 30px;
-  padding-inline: 8px;
-  font-size: calc(12 * var(--oct-text-step));
-}
-
-.project-view-filter-popover input[type="date"] {
-  min-height: 30px;
-  height: 30px;
-  padding-inline: 8px;
-  font-size: calc(11 * var(--oct-text-step));
-}
-
-.project-view-filter-popover__date-error {
-  grid-column: 1 / -1;
-  margin: -2px 0 0;
-  font-size: 10.5px;
 }
 
 .code-project-views__row {
