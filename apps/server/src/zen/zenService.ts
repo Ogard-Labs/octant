@@ -929,6 +929,33 @@ export class ZenService {
     ) as ZenMutationResult;
   }
 
+  updateBoundElementPresentation(
+    command: Extract<ZenCommand, { readonly command: "update-element" }>,
+    windowId: WindowId,
+  ): ZenResult {
+    const space = this.loadSpaceOrFail(command.spaceId, windowId);
+    const existing = space.elements.find(
+      (element) => String(element.elementId) === String(command.element.elementId),
+    );
+    if (existing === undefined || (existing.kind !== "thread" && existing.kind !== "terminal")) {
+      throw new ZenError({ reason: "unknown-element", spaceId: command.spaceId });
+    }
+    const requested = command.element;
+    const element = {
+      ...existing,
+      geometry: requested.geometry,
+      zIndex: requested.zIndex,
+      minimized: requested.minimized,
+      locked: requested.locked,
+      ...(existing.kind === "terminal" &&
+      requested.kind === "terminal" &&
+      requested.title !== undefined
+        ? { title: requested.title }
+        : {}),
+    };
+    return this.handleCommand({ ...command, element }, windowId);
+  }
+
   handleCommand(command: ZenCommand, windowId: WindowId, signal?: AbortSignal): ZenResult {
     if (isWidgetCommand(command) && signal?.aborted) {
       throw new ZenError({ reason: "interrupted", spaceId: command.spaceId });

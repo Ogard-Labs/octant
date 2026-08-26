@@ -193,21 +193,16 @@ async function handleZenCommand(
     return failureResponse("Zen command body is invalid.", 400, origin);
   }
 
-  // Reject caller-supplied source context in thread elements
-  if (
-    (command.command === "add-element" || command.command === "update-element") &&
-    command.element.kind === "thread"
-  ) {
+  // Bound elements are created through their typed pin routes. Updates are
+  // sanitized against the existing server-owned binding below.
+  if (command.command === "add-element" && command.element.kind === "thread") {
     return failureResponse(
       "Zen does not accept caller-supplied source context for thread elements.",
       400,
       origin,
     );
   }
-  if (
-    (command.command === "add-element" || command.command === "update-element") &&
-    command.element.kind === "terminal"
-  ) {
+  if (command.command === "add-element" && command.element.kind === "terminal") {
     return failureResponse(
       "Zen does not accept caller-supplied terminal cards; a terminal is pinned by naming it.",
       400,
@@ -242,7 +237,11 @@ async function handleZenCommand(
   }
 
   try {
-    const result = deps.zenService.handleCommand(command, authenticatedWindowId, request.signal);
+    const result =
+      command.command === "update-element" &&
+      (command.element.kind === "thread" || command.element.kind === "terminal")
+        ? deps.zenService.updateBoundElementPresentation(command, authenticatedWindowId)
+        : deps.zenService.handleCommand(command, authenticatedWindowId, request.signal);
     return new Response(JSON.stringify(result), {
       status: 200,
       headers: { "content-type": "application/json", ...corsHeaders(origin) },

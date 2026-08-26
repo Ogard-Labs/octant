@@ -3815,7 +3815,7 @@ function LaunchedShell(
             onRefreshTimers={() => void zen.refreshTimers()}
             onSetChecklistItemCompleted={zen.setChecklistItemCompleted}
             onUpdateAppearance={(appearance) => void zen.updateAppearance(appearance)}
-            onUpdateElement={(element) => void zen.updateElement(element)}
+            onUpdateElement={(element) => zen.updateElement(element)}
             onUpdateViewport={(viewport) => void zen.updateViewport(viewport)}
             space={zen.space}
           />
