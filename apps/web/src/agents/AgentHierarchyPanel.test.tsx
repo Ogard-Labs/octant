@@ -100,6 +100,13 @@ describe("AgentHierarchyPanel", () => {
     render(
       <AgentHierarchyPanel entries={entries} creationPosture="automatic" onCancel={onCancel} />,
     );
+    expect(
+      screen.getByRole("button", { name: "View conversation for Active research" }),
+    ).toHaveAttribute("data-variant", "ghost");
+    expect(screen.getByRole("button", { name: "Cancel Active research" })).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
     await user.click(screen.getByRole("button", { name: "Cancel Active research" }));
     expect(onCancel).toHaveBeenCalledWith({ runId: "run-1" });
 

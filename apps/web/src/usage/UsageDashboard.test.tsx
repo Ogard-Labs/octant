@@ -346,6 +346,29 @@ describe("UsageDashboard", () => {
     expect(client.retain).toHaveBeenCalled();
   });
 
+  it("keeps usage export secondary and usage erasure destructive", async () => {
+    const client = createMockClient(seededResponse());
+    render(<UsageDashboard client={client} />);
+    await screen.findByText("Total requests");
+
+    expect(screen.getByRole("button", { name: /Export CSV/ })).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
+    expect(screen.getByRole("button", { name: /Export JSON/ })).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
+    expect(screen.getByRole("button", { name: /Purge older than 30 days/ })).toHaveAttribute(
+      "data-variant",
+      "destructive",
+    );
+    expect(screen.getByRole("button", { name: /Reset all usage/ })).toHaveAttribute(
+      "data-variant",
+      "destructive",
+    );
+  });
+
   it("exposes filter controls for provider, model, host, mode, project, thread, request shape, category, and quality", async () => {
     const client = createMockClient(seededResponse());
     render(<UsageDashboard client={client} />);

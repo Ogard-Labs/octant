@@ -165,6 +165,60 @@ describe("AppleWorkbenchPane", () => {
     expect(onCancel).toHaveBeenCalledWith(runtime.active[0]!.actionId);
   });
 
+  it("keeps peer scheme and Simulator actions from all reading as the primary button", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    const runtime: AppleRuntimeSnapshot = {
+      sequence: 1,
+      snapshotAt: "2026-07-27T20:00:03.000Z" as never,
+      toolchain: toolchain as never,
+      simulators: discovery.simulators,
+      active: [
+        {
+          actionId: "90000000-0000-4000-8000-000000000007" as never,
+          correlationId: "90000000-0000-4000-8000-000000000008" as never,
+          authority: authority as never,
+          kind: "test",
+          state: "running",
+          step: "testing",
+          sequence: 2,
+          updatedAt: "2026-07-27T20:00:02.000Z" as never,
+        },
+      ],
+      recentEvidence: [],
+    };
+    render(
+      <AppleWorkbenchPane
+        discovery={discovery}
+        onCancel={vi.fn()}
+        onRun={vi.fn()}
+        runtime={runtime}
+        status="ready"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Build Fixture" })).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
+    expect(screen.getByRole("button", { name: "Test Fixture" })).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
+    expect(screen.getByRole("button", { name: "Run Fixture on iPhone 16" })).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
+    expect(screen.getByRole("button", { name: "Shut down iPhone 16" })).toHaveAttribute(
+      "data-variant",
+      "destructive",
+    );
+    expect(screen.getByRole("button", { name: "Cancel Test" })).toHaveAttribute(
+      "data-variant",
+      "ghost",
+    );
+  });
+
   it("offers only what a Simulator in that state can actually do", async () => {
     const { render, screen } = await import("@testing-library/react");
     const { vi } = await import("vitest");
