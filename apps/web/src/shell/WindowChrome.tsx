@@ -16,6 +16,7 @@ export interface WindowChromeProps {
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
   readonly material: ResolvedSidebarMaterial;
+  readonly nativeTitlebarInset?: boolean;
   readonly onRecoverZen?: () => void;
   readonly onToggleDock: (opener: HTMLElement) => void;
   readonly onToggleBottomPanel?: (opener: HTMLElement) => void;
@@ -74,8 +75,15 @@ export function WindowChrome(props: WindowChromeProps) {
       className={`window-chrome window-chrome--material-${props.material}`}
     >
       {props.onExpandSidebar === undefined ? null : (
-        <div className="window-chrome__leading window-no-drag" ref={leading}>
-          <span aria-hidden="true" className="window-chrome__traffic-light-space" />
+        <div
+          className={`window-chrome__leading window-no-drag${
+            props.nativeTitlebarInset === true ? "" : " window-chrome__leading--browser"
+          }`}
+          ref={leading}
+        >
+          {props.nativeTitlebarInset === true ? (
+            <span aria-hidden="true" className="window-chrome__traffic-light-space" />
+          ) : null}
           <IconButton
             className="window-chrome__button"
             icon={PanelLeftOpen}
