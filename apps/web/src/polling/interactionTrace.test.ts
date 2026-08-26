@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { clearInteractionMarks, markInteraction, readInteractionMarks } from "./interactionTrace";
+import {
+  clearInteractionMarks,
+  markInteraction,
+  markInteractionAfterPaint,
+  readInteractionMarks,
+} from "./interactionTrace";
 
 describe("interactionTrace", () => {
   afterEach(() => {
@@ -21,5 +26,12 @@ describe("interactionTrace", () => {
       "renderer:thread-switch",
       "server:code-navigation",
     ]);
+  });
+
+  it("records when an interaction reaches the next painted frame", async () => {
+    (globalThis as { __OCTANT_PERF_TRACE?: boolean }).__OCTANT_PERF_TRACE = true;
+    markInteractionAfterPaint("mode-switch");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(readInteractionMarks().map((mark) => mark.name)).toEqual(["mode-switch-painted"]);
   });
 });

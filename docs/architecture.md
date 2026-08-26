@@ -183,12 +183,13 @@ integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,
 never the navigation grammar. See [decisions/0015-workspace-shell-model.md](decisions/0015-workspace-shell-model.md).
 
-Chat and Code keep their sidebars current with projection-only navigation
-reads (`GET /api/chat/navigation`, `GET /api/code/navigation`). Code bootstrap
-still observes waiting checkouts on the filesystem so a restart can recover
-them; available and unavailable checkouts are not re-probed, and the sidebar
-timer never walks the checkout tree. Hidden windows pause those refreshes so
-background ticks do not contend with the next interaction.
+Chat and Code keep the active mode's sidebar current with projection-only
+navigation reads (`GET /api/chat/navigation`, `GET /api/code/navigation`). Code
+bootstrap still observes waiting checkouts on the filesystem so a restart can
+recover them; available and unavailable checkouts are not re-probed, and the
+sidebar timer never walks the checkout tree. Inactive modes and hidden windows
+pause those refreshes so background ticks do not contend with the next
+interaction.
 
 **Current shipped behavior.** The central workspace is one persistent recursive
 split tree. A leaf holds exactly one surface — a thread, a draft, a Project

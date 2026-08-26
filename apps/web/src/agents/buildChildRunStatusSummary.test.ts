@@ -45,6 +45,8 @@ describe("buildChildRunStatusSummary", () => {
     expect(summary.working).toBe(3);
     expect(summary.label).toBe("3 child runs · Working");
     expect(summary.detail).toBe("3 working on this thread.");
+    expect(summary.currentTask).toBe("task a");
+    expect(summary.currentRole).toBe("worker");
   });
 
   it("promotes waiting over working", () => {
@@ -53,6 +55,7 @@ describe("buildChildRunStatusSummary", () => {
     expect(summary.state).toBe("waiting");
     expect(summary.label).toBe("2 child runs · Waiting");
     expect(summary.detail).toBe("1 working, 1 waiting on this thread.");
+    expect(summary.currentTask).toBe("task b");
   });
 
   it("promotes blocked over everything else", () => {

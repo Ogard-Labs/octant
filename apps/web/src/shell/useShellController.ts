@@ -49,6 +49,7 @@ import {
 import { enabledModes } from "@octant/domain/mode-policy";
 import { sideChatTitle } from "@octant/domain";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { markInteraction, markInteractionAfterPaint } from "../polling/interactionTrace";
 import type { ProjectWindowTarget } from "./hostBridge";
 import { createTabActivationRegistry, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDropDestination } from "./workspaceTabDragGeometry";
@@ -851,7 +852,9 @@ export function useShellController(options: ShellControllerOptions) {
     const pane = findPane(shell.workspace.layouts[mode], paneId);
     if (pane === undefined || pane.surface.kind === "welcome") return;
     if (String(shell.workspace.activePaneIds[mode]) === String(paneId)) return;
+    markInteraction("renderer", "pane-activation-requested");
     await enqueueMutation({ kind: "workspace", intent: { kind: "activate-pane", paneId } });
+    markInteractionAfterPaint("pane-activation");
   }
 
   /**

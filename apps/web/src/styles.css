@@ -1260,7 +1260,9 @@ button:focus-visible {
 }
 
 .workspace-layer--bottom-panel-open {
-  grid-template-rows: minmax(0, 1fr) var(--octant-bottom-panel-height, 260px);
+  grid-template-rows:
+    minmax(320px, 1fr)
+    min(var(--octant-bottom-panel-height, 260px), 38vh);
 }
 
 .workspace-layer > .primary-workspace-layer {
@@ -1278,7 +1280,11 @@ button:focus-visible {
     minmax(var(--octant-wide-primary-min), 1fr)
     minmax(
       var(--octant-context-sidebar-min),
-      min(var(--octant-context-sidebar-width, 360px), calc(100% - var(--octant-wide-primary-min)))
+      min(
+        var(--octant-context-sidebar-width, 360px),
+        38vw,
+        calc(100% - var(--octant-wide-primary-min))
+      )
     );
 }
 

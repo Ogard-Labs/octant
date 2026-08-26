@@ -223,7 +223,10 @@ Scope metadata remains available to assistive technology but does not compete
 with the setting label.
 
 The right dock follows the active pane and never leaks another pane's content.
-It can host Review, Files, Browser, Terminal, Canvas, Plan (only for a real
+On wide windows it may use at most 38 percent of the viewport, preserving a
+560px primary workspace; the bottom panel may use at most 38 percent of the
+viewport height while preserving 320px for the primary workspace. It can host
+Review, Files, Browser, Terminal, Canvas, Plan (only for a real
 plan artifact), Delivery (only for a configured target), Agents (when children
 exist or explicitly invoked), Simulator, and Side chat. The dock launcher is
 not a second thread switcher. With no open tab, it shows only capability-valid

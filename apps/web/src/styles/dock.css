@@ -228,7 +228,7 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
 .bottom-utility-panel {
   position: relative;
   display: grid;
-  height: var(--octant-bottom-panel-height, 260px);
+  height: 100%;
   min-width: 0;
   min-height: 0;
   grid-column: 1 / -1;

@@ -29,6 +29,7 @@ import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
+import { markInteraction, markInteractionAfterPaint } from "../polling/interactionTrace";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -290,6 +291,7 @@ export function ChatComposer(props: ChatComposerProps) {
   function send() {
     if (sendDisabledReason !== undefined) return;
     if (queueStatus === "queued") return;
+    markInteraction("renderer", "send-requested");
     setSendPending(true);
     setSendError(undefined);
     void (async () => {
@@ -297,6 +299,9 @@ export function ChatComposer(props: ChatComposerProps) {
         const sent = await props.onSend(props.draft);
         if (!sent) {
           setSendError("Message could not be sent. Your draft is still here; try again.");
+        } else {
+          markInteraction("renderer", "send-acknowledged");
+          markInteractionAfterPaint("send");
         }
       } catch {
         setSendError("Message could not be sent. Your draft is still here; try again.");

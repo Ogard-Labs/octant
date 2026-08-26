@@ -83,6 +83,7 @@ import {
   type WorkThreadId,
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
+import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
 import type { CodeOperationId } from "@octant/contracts";
 import type {
   CodeProjectPullRequestDetailQuery,
@@ -877,6 +878,7 @@ function LaunchedShell(
   });
   const chatController = useChatController({
     client: chatClient,
+    ...(activeMode === "chat" ? {} : { navigationRefreshMs: 0 }),
     readCursorStore: chatReadCursorStore,
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
@@ -1207,6 +1209,7 @@ function LaunchedShell(
   // transcript or stream depends on which tab happens to be in front.
   const codeController = useCodeController({
     client: codeClient,
+    ...(activeMode === "code" ? {} : { navigationRefreshMs: 0 }),
     readCursorStore: codeReadCursorStore,
   });
   // Bringing a Code thread's tab in front is the user opening it: the thread's
@@ -2133,6 +2136,8 @@ function LaunchedShell(
   function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    markInteraction("renderer", "dock-open-requested");
+    markInteractionAfterPaint("dock-open");
     if (bottomPanelPresentation.open) {
       persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
     }
@@ -2657,6 +2662,8 @@ function LaunchedShell(
     if (chatController.status !== "ready") return;
     const thread = chatController.navigation.find((candidate) => candidate.threadId === threadId);
     if (thread === undefined) return;
+    markInteraction("renderer", "thread-open-requested");
+    markInteractionAfterPaint("thread-open");
     void controller.openChatThread(
       decodeChatThreadId(threadId),
       thread.title,
@@ -2669,6 +2676,8 @@ function LaunchedShell(
       (candidate) => String(candidate.threadId) === navigationId,
     );
     if (thread === undefined) return;
+    markInteraction("renderer", "thread-open-requested");
+    markInteractionAfterPaint("thread-open");
     void controller.openCodeThread(
       decodeCodeThreadId(navigationId),
       thread.title,
@@ -2682,6 +2691,8 @@ function LaunchedShell(
       (candidate) => String(candidate.threadId) === navigationId,
     );
     if (thread === undefined) return;
+    markInteraction("renderer", "thread-open-requested");
+    markInteractionAfterPaint("thread-open");
     void controller.openWorkThread(
       decodeWorkThreadId(navigationId),
       thread.title,
@@ -2810,6 +2821,8 @@ function LaunchedShell(
   }
 
   function handleSelectMode(mode: OctantMode) {
+    markInteraction("renderer", "mode-switch-requested");
+    markInteractionAfterPaint("mode-switch");
     setRailPlaceholder(undefined);
     controller.setMode(mode);
     if (mode !== "code") setCodeBoardOpen(false);
