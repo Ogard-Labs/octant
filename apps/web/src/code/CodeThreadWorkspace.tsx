@@ -12,7 +12,7 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { UserRoundCog } from "lucide-react";
+import { CirclePause, UserRoundCog } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { useQueuedSend } from "../composer/useQueuedSend";
@@ -701,7 +701,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         </div>
       )}
 
-      {props.controller.turnError === undefined ? null : (
+      {props.controller.turnStatus === "waiting" ? (
+        <div className="code-thread-workspace__waiting thread-column" role="status">
+          <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+          <span>{waitingTurnLabel(props.controller.providerRequests)}</span>
+        </div>
+      ) : props.controller.turnError === undefined ? null : (
         <div
           className="callout callout-warn thread-column code-thread-workspace__callout"
           role="alert"
@@ -1400,8 +1405,16 @@ function formatUsd(cost: number): string {
   return cost < 0.01 && cost > 0 ? "<$0.01" : `$${cost.toFixed(2)}`;
 }
 
+function waitingTurnLabel(requests: CodeController["providerRequests"]): string {
+  const latest = requests.at(-1);
+  if (latest?.kind === "approval") return "Waiting for approval";
+  if (latest?.kind === "input") return "Waiting for your input";
+  return "Waiting for approval or input";
+}
+
 function codeTurnSettlement(status: CodeTurnStatus): TurnSettlement | "idle" {
   if (status === "sending" || status === "running") return "running";
+  if (status === "waiting") return "waiting";
   if (status === "failed") return "failed";
   return "completed";
 }

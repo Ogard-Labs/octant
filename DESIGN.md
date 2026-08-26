@@ -170,9 +170,10 @@ chains. The desktop radius scale is 8px compact control, 10px panel, 12px
 large panel, and 9999px only for a compact chip or meter. Composer radius is
 14px. Phone-only surfaces use the larger 22/26/30px mobile radii.
 
-Controls are 44px by default and 34px compact. Icon sizes are 16/19/22px for
-small/medium/large actions; the pointer target is at least 24px on desktop and
-44px on touch surfaces. The workspace sidebar defaults to 232px, supports
+Controls are 44px by default and 34px compact. Dense operating rails use a
+28px navigation row and a 30px terminal toolbar while retaining at least 24px
+pointer targets. Icon sizes are 16/19/22px for small/medium/large actions; touch
+surfaces keep 44px targets. The workspace sidebar defaults to 232px, supports
 resizing, and may collapse completely while leaving Show sidebar and New thread
 in the native title rail. Settings uses a separate compact 248px navigation
 rail. The right dock defaults to 320px. The pane/title control rail is 34px in
@@ -223,7 +224,10 @@ Scope metadata remains available to assistive technology but does not compete
 with the setting label.
 
 The right dock follows the active pane and never leaks another pane's content.
-It can host Review, Files, Browser, Terminal, Canvas, Plan (only for a real
+On wide windows it may use at most 38 percent of the viewport, preserving a
+560px primary workspace; the bottom panel may use at most 38 percent of the
+viewport height while preserving 320px for the primary workspace. It can host
+Review, Files, Browser, Terminal, Canvas, Plan (only for a real
 plan artifact), Delivery (only for a configured target), Agents (when children
 exist or explicitly invoked), Simulator, and Side chat. The dock launcher is
 not a second thread switcher. With no open tab, it shows only capability-valid
@@ -233,8 +237,11 @@ where supported. Selecting a tool removes that presentation from the other
 region; Terminal immediately attaches or starts and preserves one server
 session when moved.
 
-Environment is a transient active-thread disclosure, at most 320px wide. It summarizes Project,
-branch, clean/dirty state, working folder, changes, local servers, pull-request
+Environment is a transient active-thread disclosure, at most 320px wide. Its
+44px header, label/value repository rows, direct View changes action, and
+collapsed 44px detail rows form one compact operating list on an opaque floating
+surface. It summarizes Project, branch, clean/dirty state, working folder,
+changes, local servers, pull-request
 identity, sources, and compact active/completed subagent rows with lifecycle,
 model, and retained final response when authoritative. It is not a permanent
 stack of cards and does not duplicate the Agents dock. Missing checkout context

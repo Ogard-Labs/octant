@@ -387,6 +387,29 @@ describe("useChatController", () => {
     }
   });
 
+  it("does not refresh Chat navigation while its mode is inactive", async () => {
+    const navigation = vi.fn(async () => decodeChatNavigation({ threads: [] }));
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      navigation,
+      thread: vi.fn(async () => threadView(0)),
+      subscribe: vi.fn(async function* () {}),
+    });
+    const { unmount } = renderHook(() =>
+      useChatController({
+        client,
+        navigationRefreshMs: 0,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+
+    await waitFor(() => expect(client.bootstrap).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(navigation).not.toHaveBeenCalled();
+    unmount();
+  });
+
   it("keeps the last authoritative navigation facts when a refresh fails", async () => {
     const navigation = vi
       .fn()

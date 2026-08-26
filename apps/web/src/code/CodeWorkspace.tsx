@@ -842,6 +842,7 @@ function TerminalWorkspaceSurface(
 ) {
   const terminalRefreshIntervalMs = 500;
   const [terminal, setTerminal] = useState(props.terminal);
+  const [terminalId, setTerminalId] = useState(props.terminalId);
   const [failure, setFailure] = useState<string>();
   const [rebindRefusal, setRebindRefusal] = useState<string>();
   const [reattaching, setReattaching] = useState(
@@ -853,7 +854,11 @@ function TerminalWorkspaceSurface(
   // shell. Open or restore it by attaching the existing process, then start a
   // fresh one when the old process is gone. Plan mode remains read-only.
   const autoStarted = useRef(false);
-  const startRef = useRef<() => Promise<void>>(async () => {});
+  const startRef = useRef<(terminalId?: CodeTerminalId) => Promise<void>>(async () => {});
+  useEffect(() => {
+    setTerminalId(props.terminalId);
+    autoStarted.current = false;
+  }, [props.scope.threadId, props.terminalId]);
   useEffect(() => {
     if (props.terminal !== undefined) {
       setTerminal(props.terminal);
@@ -881,13 +886,27 @@ function TerminalWorkspaceSurface(
         const result = await props.client.executeOperation({
           kind: "attach-terminal",
           operationId: props.nextUuid() as never,
-          terminalId: props.terminalId,
+          terminalId,
           ...props.scope,
         });
         if (!active) return;
         if (result.kind === "terminal-state") {
           setTerminal(result);
           setFailure(undefined);
+          setStarting(false);
+          return;
+        }
+        if (
+          result.kind === "operation-failed" &&
+          result.failure.category === "unauthorized" &&
+          result.failure.message === "Terminal belongs to another code thread."
+        ) {
+          const replacementTerminalId = props.nextUuid() as unknown as CodeTerminalId;
+          setTerminalId(replacementTerminalId);
+          autoStarted.current = true;
+          setFailure(undefined);
+          setReattaching(false);
+          void startRef.current(replacementTerminalId);
           return;
         }
         if (result.kind === "operation-failed" && result.failure.category !== "unavailable") {
@@ -927,11 +946,11 @@ function TerminalWorkspaceSurface(
     props.scope.threadId,
     props.tab.id,
     props.terminal,
-    props.terminalId,
+    terminalId,
     props.threadPolicy,
   ]);
 
-  const start = async () => {
+  const start = async (requestedTerminalId: CodeTerminalId = terminalId) => {
     if (startInFlight.current) return;
     startInFlight.current = true;
     setStarting(true);
@@ -939,24 +958,30 @@ function TerminalWorkspaceSurface(
     const command = {
       kind: "start-terminal",
       operationId,
-      terminalId: props.terminalId,
+      terminalId: requestedTerminalId,
       columns: 100,
       rows: 30,
       credentialRefs: [],
       ...props.scope,
     } as const;
     setFailure(undefined);
+    let attachingAcceptedStart = false;
     try {
       // Opening a terminal is the user's own act; the host authorizes it as
       // user-initiated without a prompt (Plan mode still refuses).
       const result = await props.client.executeOperation(command);
       if (result.kind === "terminal-state") setTerminal(result);
+      else if (result.kind === "operation-accepted") attachingAcceptedStart = true;
       else if (result.kind === "operation-failed") setFailure(result.failure.message);
+      else
+        setFailure(
+          "The host returned no terminal process. Octant will retry when it is available.",
+        );
     } catch {
       setFailure("Terminal start or approval failed. Reconnect, verify the checkout, and retry.");
     } finally {
       startInFlight.current = false;
-      setStarting(false);
+      if (!attachingAcceptedStart) setStarting(false);
     }
   };
   startRef.current = start;
@@ -1037,12 +1062,12 @@ function TerminalWorkspaceSurface(
                 props.onPinTerminal?.({
                   threadId: props.scope.threadId,
                   checkoutId: props.scope.checkoutId,
-                  terminalId: props.terminalId,
+                  terminalId,
                 }),
             })}
         restart={{
           columns: 100,
-          createTerminalId: () => props.terminalId,
+          createTerminalId: () => terminalId,
           credentialRefs: [],
           rows: 30,
         }}

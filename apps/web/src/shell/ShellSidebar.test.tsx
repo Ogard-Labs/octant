@@ -12,6 +12,7 @@ describe("ShellSidebar", () => {
   it("keeps the native leading row unbranded while preserving window affordances", () => {
     const { container } = render(
       <ShellSidebar
+        nativeHost
         onAddFolder={vi.fn()}
         onCollapseSidebar={vi.fn()}
         onOpenNavigator={vi.fn()}
@@ -28,6 +29,27 @@ describe("ShellSidebar", () => {
     expect(container.querySelector("[data-traffic-light-safe-space]")).toBeInTheDocument();
     expect(container.querySelector(".sidebar__drag-surface")).toBeInTheDocument();
     expect(container.querySelector(".sidebar__native-leading")).toContainElement(
+      screen.getByRole("button", { name: "Hide sidebar" }),
+    );
+  });
+
+  it("places browser collapse beside sidebar search instead of reserving traffic-light space", () => {
+    const { container } = render(
+      <ShellSidebar
+        onAddFolder={vi.fn()}
+        onCollapseSidebar={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={defaultShellSettings()}
+        workspace={defaultWindowWorkspace(windowId)}
+      />,
+    );
+
+    expect(container.querySelector(".sidebar__native-leading")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-traffic-light-safe-space]")).not.toBeInTheDocument();
+    expect(container.querySelector(".sidebar__chrome-actions")).toContainElement(
       screen.getByRole("button", { name: "Hide sidebar" }),
     );
   });

@@ -2140,7 +2140,7 @@ describe("App", () => {
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByText("Open a tool beside the active pane.")).toBeVisible();
+    expect(within(dock).getByText("Current work")).toBeVisible();
     expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
   });
@@ -2433,6 +2433,7 @@ describe("App", () => {
 
     await screen.findByRole("banner");
     expect(document.documentElement.dataset.octantNativeHost).toBeUndefined();
+    expect(document.querySelector(".sidebar__native-leading")).not.toBeInTheDocument();
 
     rerender(
       <App
@@ -2443,6 +2444,9 @@ describe("App", () => {
     );
 
     await waitFor(() => expect(document.documentElement.dataset.octantNativeHost).toBe("true"));
+    expect(document.querySelector(".sidebar__native-leading")).toContainElement(
+      screen.getByRole("button", { name: "Hide sidebar" }),
+    );
   });
 
   it("applies reduced transparency to the native sidebar material", async () => {
@@ -2768,7 +2772,10 @@ describe("App", () => {
     );
     expect(document.querySelector(".shell-frame")?.children[3]).toHaveClass("workspace-layer");
     expect(sidebar).not.toHaveClass("window-drag-region");
-    expect(sidebar.querySelector(".sidebar__drag-surface")).toHaveClass("window-drag-region");
+    expect(sidebar.querySelector(".sidebar__drag-surface")).not.toBeInTheDocument();
+    expect(sidebar.querySelector(".sidebar__chrome-actions")).toContainElement(
+      within(sidebar).getByRole("button", { name: "Hide sidebar" }),
+    );
     expect(sidebar.querySelector(".sidebar__content")).toHaveClass("window-no-drag");
     expect(within(sidebar).getByRole("button", { name: "Workspace mode, Code" })).toHaveClass(
       "window-no-drag",
@@ -3290,9 +3297,7 @@ describe("App", () => {
     expect(
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).not.toHaveAttribute("aria-current");
-    await waitFor(() =>
-      expect(within(dock).getByText("Open a tool beside the active pane.")).toBeVisible(),
-    );
+    await waitFor(() => expect(within(dock).getByText("Current work")).toBeVisible());
     expect(within(dock).queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
     await user.click(within(dock).getByRole("button", { name: "Terminal" }));
     dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
@@ -3465,7 +3470,7 @@ describe("App", () => {
 
     fireEvent.pointerDown(screen.getByRole("region", { name: "Workspace pane: Octant" }));
 
-    expect(await within(dock).findByText("Open a tool beside the active pane.")).toBeVisible();
+    expect(await within(dock).findByText("Current work")).toBeVisible();
     expect(within(dock).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Workspace pane: Octant" })).toHaveAttribute(
       "aria-current",
