@@ -1,8 +1,10 @@
 import { X } from "lucide-react";
 import type { ReactNode, Ref } from "react";
-import { DockToolLaunchList, DockUtilityLauncher } from "./DockUtilityLauncher";
+import { DockUtilityLauncher } from "./DockUtilityLauncher";
+import { DockToolIcon } from "./dockToolIcons";
 import { DockToolStrip } from "./DockToolStrip";
 import { IconButton } from "./IconButton";
+import { OctantButton } from "../ui/base/OctantButton";
 import { ShellState } from "./ShellState";
 import type {
   RightUtilityDockResolution,
@@ -82,14 +84,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       </header>
       <div className="dock-body right-utility-dock__content">
         {props.resolution.kind === "closed" ? (
-          <div className="dock-tool-launcher">
-            <p className="dock-tool-launcher__hint">Open a tool beside the active pane.</p>
-            {props.launchableSurfaces.length === 0 ? null : (
-              <div className="dock-tool-launcher__list">
-                <DockToolLaunchList onOpen={props.onOpenTab} surfaces={props.launchableSurfaces} />
-              </div>
-            )}
-          </div>
+          <DockWorkMap onOpen={props.onOpenTab} surfaces={props.launchableSurfaces} />
         ) : props.resolution.kind === "unavailable" ? (
           <ShellState
             message={unavailableMessage()}
@@ -110,4 +105,54 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       </div>
     </div>
   );
+}
+
+function DockWorkMap(props: {
+  readonly onOpen: (surface: RightUtilityDockSurfaceId) => void;
+  readonly surfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+}) {
+  return (
+    <section aria-labelledby="dock-work-map-title" className="dock-work-map">
+      <header className="dock-work-map__header">
+        <h2 id="dock-work-map-title">Current work</h2>
+        <p>Tools available for the active thread.</p>
+      </header>
+      {props.surfaces.length === 0 ? (
+        <p className="dock-work-map__empty">This thread has no additional tools available.</p>
+      ) : (
+        <div className="dock-work-map__list">
+          {props.surfaces.map((surface) => (
+            <OctantButton
+              aria-label={surface.label}
+              className="dock-work-map__item"
+              key={surface.id}
+              onClick={() => props.onOpen(surface.id)}
+              type="button"
+              variant="ghost"
+            >
+              <DockToolIcon surface={surface.id} />
+              <span className="dock-work-map__copy">
+                <strong>{surface.label}</strong>
+                <small>{workMapDetail(surface.id)}</small>
+              </span>
+            </OctantButton>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function workMapDetail(surface: RightUtilityDockSurfaceId): string {
+  if (surface === "agents") return "Inspect and control child runs";
+  if (surface === "browser") return "Inspect live web activity";
+  if (surface === "canvas") return "Open the thread Canvas";
+  if (surface === "review") return "Review checkout changes";
+  if (surface === "delivery") return "Inspect the delivery target";
+  if (surface === "files") return "Browse the active checkout";
+  if (surface === "ios-simulator") return "Open the active Simulator";
+  if (surface === "plan") return "Inspect the current plan";
+  if (surface === "side-chat") return "Ask about this thread";
+  if (surface === "terminal") return "Open the repository shell";
+  return "Run discovered repository tests";
 }

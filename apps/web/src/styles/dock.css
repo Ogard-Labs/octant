@@ -169,6 +169,79 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   gap: 2px;
 }
 
+.dock-work-map {
+  display: grid;
+  align-content: start;
+  gap: var(--oct-space-3);
+}
+
+.dock-work-map__header {
+  display: grid;
+  gap: 3px;
+  padding: 2px 4px var(--oct-space-2);
+}
+
+.dock-work-map__header h2,
+.dock-work-map__header p,
+.dock-work-map__empty {
+  margin: 0;
+}
+
+.dock-work-map__header h2 {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.dock-work-map__header p,
+.dock-work-map__empty {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
+.dock-work-map__list {
+  display: grid;
+  gap: 1px;
+}
+
+.dock-work-map__item {
+  display: grid;
+  min-height: 44px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  justify-content: stretch;
+  gap: var(--oct-space-2);
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.dock-work-map__copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.dock-work-map__copy strong,
+.dock-work-map__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-work-map__copy strong {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.dock-work-map__copy small {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: 400;
+}
+
 .right-utility-dock__tool[hidden] {
   display: none;
 }
