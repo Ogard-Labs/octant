@@ -432,16 +432,23 @@ function AppleWorkbenchSurface(props: {
           },
         }),
   });
-  const screenshotRequest =
+  const screenshotReference =
     liveFrame.status === "live" && liveFrame.screen.kind === "screenshot"
-      ? {
-          kind: "apple-artifact-request" as const,
-          authority,
-          threadId: props.thread.id,
-          checkoutId: props.checkoutId,
-          reference: liveFrame.screen.reference,
-        }
+      ? liveFrame.screen.reference
       : undefined;
+  const screenshotRequest = useMemo(
+    () =>
+      screenshotReference === undefined
+        ? undefined
+        : {
+            kind: "apple-artifact-request" as const,
+            authority,
+            threadId: props.thread.id,
+            checkoutId: props.checkoutId,
+            reference: screenshotReference,
+          },
+    [authority, props.checkoutId, props.thread.id, screenshotReference],
+  );
   const screenUrl = useAppleSimulatorScreen({
     client: props.client,
     enabled: liveFrame.status === "live",

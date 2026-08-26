@@ -23,6 +23,8 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
       <figcaption>{frame.title}</figcaption>
       {frame.status === "live" && props.screenUrl !== undefined ? (
         <img alt={`${frame.name} screen`} src={props.screenUrl} />
+      ) : frame.status === "live" && frame.screen.kind === "screenshot" ? (
+        <p>The destination is live. The captured screen is not available in this frame.</p>
       ) : (
         <p>{frame.message}</p>
       )}

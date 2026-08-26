@@ -191,17 +191,23 @@ export function presentAppleSimulatorLiveFrame(
     };
   }
   if (destination?.state === "booted") {
+    const screenFromDestination =
+      input.latestScreenshot !== undefined &&
+      (input.latestScreenshot.simulatorId === undefined ||
+        String(input.latestScreenshot.simulatorId) === String(destination.simulatorId))
+        ? input.latestScreenshot
+        : undefined;
     return {
       status: "live",
       simulatorId: destination.simulatorId,
       name: destination.name,
       screen:
-        input.latestScreenshot === undefined
+        screenFromDestination === undefined
           ? { kind: "pending" }
-          : { kind: "screenshot", reference: input.latestScreenshot.reference },
+          : { kind: "screenshot", reference: screenFromDestination.reference },
       title: `Live · ${destination.name}`,
       message:
-        input.latestScreenshot === undefined
+        screenFromDestination === undefined
           ? "The destination is live. Capture the screen to show host-held evidence in this frame."
           : "Showing the latest host-held screen capture for this thread. This is not a video stream.",
     };

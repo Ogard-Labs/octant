@@ -162,6 +162,46 @@ describe("Apple toolchain routes", () => {
     expect(service.snapshot).not.toHaveBeenCalled();
   });
 
+  it("refuses screenshot bytes outside the window's authorized thread scope", async () => {
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
+    };
+    const resolveContext = vi.fn(async () => undefined);
+    const handler = createAppleToolchainRouteHandler({
+      windowAuthorityStore: authorityStore(),
+      resolveContext,
+      service,
+      now: () => 2,
+    });
+    const response = await handler(
+      new Request("http://127.0.0.1:13773/api/apple/artifacts", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+          origin: "http://127.0.0.1:5173",
+        },
+        body: JSON.stringify({
+          kind: "apple-artifact-request",
+          authority,
+          ...scope,
+          reference: "apple-screenshot-other-thread",
+        }),
+      }),
+    );
+    expect(response?.status).toBe(403);
+    expect(resolveContext).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining(scope),
+      expect.any(Object),
+    );
+    expect(service.readScreenshotArtifact).not.toHaveBeenCalled();
+  });
+
   it("returns host-held screenshot bytes without putting them in the JSON envelope", async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     const service = {

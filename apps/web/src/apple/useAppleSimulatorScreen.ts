@@ -18,16 +18,15 @@ export function useAppleSimulatorScreen(options: {
     }
     const controller = new AbortController();
     let objectUrl: string | undefined;
-    void client
-      .readScreenshot(request, controller.signal)
-      .then((blob) => {
-        if (controller.signal.aborted) return;
-        objectUrl = URL.createObjectURL(blob);
-        setScreenUrl(objectUrl);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setScreenUrl(undefined);
-      });
+    void client.readScreenshot(request, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      if (result.status === "failed") {
+        setScreenUrl(undefined);
+        return;
+      }
+      objectUrl = URL.createObjectURL(result.blob);
+      setScreenUrl(objectUrl);
+    });
     return () => {
       controller.abort();
       if (objectUrl !== undefined) URL.revokeObjectURL(objectUrl);

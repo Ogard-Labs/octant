@@ -1,5 +1,8 @@
 import type { AppleDiscoverySnapshot } from "@octant/contracts/apple-toolchain-rpc";
-import type { AppleRuntimeSnapshot } from "@octant/contracts/apple-toolchain";
+import {
+  decodeAppleRuntimeSnapshot,
+  type AppleRuntimeSnapshot,
+} from "@octant/contracts/apple-toolchain";
 import { beforeAll, describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -60,6 +63,17 @@ const discovery: AppleDiscoverySnapshot = {
     },
   ],
 };
+
+function runtimeSnapshot(): AppleRuntimeSnapshot {
+  return decodeAppleRuntimeSnapshot({
+    sequence: 1,
+    snapshotAt: "2026-07-27T20:00:03.000Z",
+    toolchain,
+    simulators: discovery.simulators,
+    active: [],
+    recentEvidence: [],
+  });
+}
 
 describe("AppleWorkbenchPane", () => {
   it("renders normalized toolchain, Simulator, progress, and evidence state", () => {
@@ -296,16 +310,7 @@ describe("AppleWorkbenchPane", () => {
           message: "The destination is live.",
         }}
         onRun={onRun}
-        runtime={
-          {
-            sequence: 1,
-            snapshotAt: "2026-07-27T20:00:03.000Z",
-            toolchain,
-            simulators: discovery.simulators,
-            active: [],
-            recentEvidence: [],
-          } as never
-        }
+        runtime={runtimeSnapshot()}
         status="ready"
       />,
     );
@@ -326,16 +331,7 @@ describe("AppleWorkbenchPane", () => {
         }}
         status="ready"
         discovery={discovery}
-        runtime={
-          {
-            sequence: 1,
-            snapshotAt: "2026-07-27T20:00:03.000Z",
-            toolchain,
-            simulators: discovery.simulators,
-            active: [],
-            recentEvidence: [],
-          } as never
-        }
+        runtime={runtimeSnapshot()}
       />,
     );
     expect(html).toContain("stale after restart");

@@ -109,6 +109,24 @@ describe("presentAppleSimulatorLiveFrame", () => {
     });
   });
 
+  it("does not label another destination with stale screenshot evidence", () => {
+    const otherSimulatorId =
+      "00000000-0000-4000-8000-000000000022" as AppleSimulatorRecord["simulatorId"];
+    const frame = presentAppleSimulatorLiveFrame(
+      input({
+        latestScreenshot: {
+          simulatorId: otherSimulatorId,
+          reference: "apple-screenshot-other-simulator",
+        },
+      }),
+    );
+    expect(frame).toMatchObject({
+      status: "live",
+      simulatorId,
+      screen: { kind: "pending" },
+    });
+  });
+
   it("keeps remote and headless clients from attaching a fake live frame", () => {
     expect(
       presentAppleSimulatorLiveFrame(

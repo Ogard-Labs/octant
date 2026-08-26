@@ -20,12 +20,23 @@ export interface AppleToolchainClientOptions {
   readonly windowCapability: string;
 }
 
+export type AppleScreenshotReadResult =
+  | { readonly status: "succeeded"; readonly blob: Blob }
+  | {
+      readonly status: "failed";
+      readonly kind: AppleToolchainClientFailureCategory;
+      readonly message: string;
+    };
+
 export interface AppleToolchainClient {
   discover(request: AppleDiscoveryRequest, signal?: AbortSignal): Promise<AppleDiscoverySnapshot>;
   execute(request: AppleActionRequest, signal?: AbortSignal): Promise<AppleBuildEvidence>;
   cancel(request: AppleCancelRequest, signal?: AbortSignal): Promise<boolean>;
   snapshot(request: AppleSnapshotRequest, signal?: AbortSignal): Promise<AppleRuntimeSnapshot>;
-  readScreenshot(request: AppleArtifactRequest, signal?: AbortSignal): Promise<Blob>;
+  readScreenshot(
+    request: AppleArtifactRequest,
+    signal?: AbortSignal,
+  ): Promise<AppleScreenshotReadResult>;
 }
 
 export type AppleToolchainClientFailureCategory =
@@ -76,7 +87,7 @@ async function readPng(
   options: AppleToolchainClientOptions,
   body: AppleArtifactRequest,
   signal?: AbortSignal,
-): Promise<Blob> {
+): Promise<AppleScreenshotReadResult> {
   let response: Response;
   try {
     response = await options.fetch(new URL("/api/apple/artifacts", options.baseUrl), {
@@ -89,27 +100,40 @@ async function readPng(
       ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
-    if (signal?.aborted || isAbortError(error)) {
-      throw new AppleToolchainClientFailure(
-        "interrupted",
-        "Apple toolchain request was interrupted.",
-      );
-    }
-    throw new AppleToolchainClientFailure("unavailable", "Apple toolchain service is unavailable.");
+    const interrupted = signal?.aborted || isAbortError(error);
+    return {
+      status: "failed",
+      kind: interrupted ? "interrupted" : "unavailable",
+      message: interrupted
+        ? "Apple toolchain request was interrupted."
+        : "Apple toolchain service is unavailable.",
+    };
   }
   if (response.ok && response.headers.get("content-type") === "image/png") {
-    return await response.blob();
+    return { status: "succeeded", blob: await response.blob() };
   }
   let reply;
   try {
     reply = decodeAppleRpcEnvelope(await response.json());
   } catch {
-    throw protocol();
+    return {
+      status: "failed",
+      kind: "protocol",
+      message: "Apple toolchain service returned an invalid response.",
+    };
   }
   if (reply.kind === "apple-failure") {
-    throw new AppleToolchainClientFailure(reply.failure.category, reply.failure.message);
+    return {
+      status: "failed",
+      kind: reply.failure.category,
+      message: reply.failure.message,
+    };
   }
-  throw protocol();
+  return {
+    status: "failed",
+    kind: "protocol",
+    message: "Apple toolchain service returned an invalid response.",
+  };
 }
 
 async function post(options: AppleToolchainClientOptions, body: unknown, signal?: AbortSignal) {

@@ -4,7 +4,13 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 let createAppleToolchainClient: (options: Record<string, unknown>) => {
   discover(request: AppleDiscoveryRequest, signal?: AbortSignal): Promise<any>;
   snapshot(request: unknown): Promise<any>;
-  readScreenshot(request: unknown, signal?: AbortSignal): Promise<Blob>;
+  readScreenshot(
+    request: unknown,
+    signal?: AbortSignal,
+  ): Promise<
+    | { readonly status: "succeeded"; readonly blob: Blob }
+    | { readonly status: "failed"; readonly kind: string; readonly message: string }
+  >;
 };
 
 beforeAll(async () => {
@@ -92,6 +98,35 @@ describe("appleToolchainClient", () => {
     });
   });
 
+  it("returns an explicit screenshot failure when host evidence is unavailable", async () => {
+    const client = createAppleToolchainClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch: vi.fn(async () =>
+        Response.json(
+          {
+            kind: "apple-failure",
+            failure: { category: "unavailable", message: "Screenshot evidence is unavailable." },
+          },
+          { status: 404 },
+        ),
+      ),
+      windowCapability: "A".repeat(43),
+    });
+    await expect(
+      client.readScreenshot({
+        kind: "apple-artifact-request",
+        authority: request.authority,
+        threadId: request.threadId,
+        checkoutId: request.checkoutId,
+        reference: "apple-screenshot-missing",
+      }),
+    ).resolves.toEqual({
+      status: "failed",
+      kind: "unavailable",
+      message: "Screenshot evidence is unavailable.",
+    });
+  });
+
   it("reads a host-held screenshot as image bytes instead of a JSON envelope", async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     const fetch = vi.fn(
@@ -102,14 +137,16 @@ describe("appleToolchainClient", () => {
       fetch,
       windowCapability: "A".repeat(43),
     });
-    const blob = await client.readScreenshot({
+    const result = await client.readScreenshot({
       kind: "apple-artifact-request",
       authority: request.authority,
       threadId: request.threadId,
       checkoutId: request.checkoutId,
       reference: "apple-screenshot-1",
     });
-    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(png);
+    expect(result.status).toBe("succeeded");
+    if (result.status !== "succeeded") throw new Error("Expected screenshot bytes");
+    expect(new Uint8Array(await result.blob.arrayBuffer())).toEqual(png);
     expect(fetch).toHaveBeenCalledWith(
       new URL("http://127.0.0.1:13773/api/apple/artifacts"),
       expect.objectContaining({ method: "POST" }),

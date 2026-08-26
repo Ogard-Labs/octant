@@ -1,10 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { decodeAppleSimulatorId } from "@octant/contracts/apple-toolchain";
 import type { AppleSimulatorLiveFrame } from "@octant/domain";
 import { AppleSimulatorLiveFrameView } from "./AppleSimulatorLiveFrame";
 
-const simulatorId = "90000000-0000-4000-8000-000000000006" as never;
+const simulatorId = decodeAppleSimulatorId("90000000-0000-4000-8000-000000000006");
 
 describe("AppleSimulatorLiveFrameView", () => {
   it("states why the frame is unavailable on a host without Apple tooling", () => {
@@ -54,6 +55,22 @@ describe("AppleSimulatorLiveFrameView", () => {
     );
     expect(screen.getByText("Simulator is stale after restart")).toBeVisible();
     expect(screen.getByText("apple-screenshot-before-restart")).toBeVisible();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("reports a pending capture until the host-held image URL is available", () => {
+    const frame: AppleSimulatorLiveFrame = {
+      status: "live",
+      simulatorId,
+      name: "iPhone 16",
+      screen: { kind: "screenshot", reference: "apple-screenshot-live" },
+      title: "Live · iPhone 16",
+      message:
+        "Showing the latest host-held screen capture for this thread. This is not a video stream.",
+    };
+    render(<AppleSimulatorLiveFrameView frame={frame} />);
+    expect(screen.getByText(/captured screen is not available/)).toBeVisible();
+    expect(screen.queryByText(/Showing the latest/)).not.toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
