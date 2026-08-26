@@ -628,8 +628,10 @@ describe("useCodeController", () => {
     rerender({ activeThreadId: nextThreadId });
 
     expect(result.current.activeView).toBeUndefined();
+    expect(result.current.conversationHistory).toBe("loading");
     nextView.resolve({ ...view(1), thread: { ...thread(1), id: nextThreadId } });
     await waitFor(() => expect(result.current.activeView?.thread.id).toBe(nextThreadId));
+    await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
     unmount();
   });
 

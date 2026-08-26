@@ -84,6 +84,23 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], [], [], "approval-gated");
   });
 
+  it("keeps new-thread setup hidden while an existing transcript is loading", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ conversation: [], conversationHistory: "loading" })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Loading conversation" })).toBeVisible();
+    expect(screen.getByRole("log")).not.toHaveTextContent(
+      "No messages yet. Send a prompt to start this thread.",
+    );
+    expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
+  });
+
   /**
    * A thread whose history could not be fetched has an empty transcript for a
    * reason that has nothing to do with being new. Showing it the new-thread

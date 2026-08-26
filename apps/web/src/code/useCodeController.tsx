@@ -379,13 +379,12 @@ export function useCodeController(options: CodeControllerOptions) {
   }, []);
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
   /*
-   * Whether the empty transcript means "nothing has been said yet" or "we could
-   * not fetch what was said". Both leave `conversation` empty, and only the
-   * first one is an invitation to start something.
+   * Whether an empty transcript is still loading, authoritatively empty, or
+   * unavailable. Only the loaded state is an invitation to start something.
    */
-  const [conversationHistory, setConversationHistory] = useState<"loaded" | "unavailable">(
-    "loaded",
-  );
+  const [conversationHistory, setConversationHistory] = useState<
+    "loading" | "loaded" | "unavailable"
+  >("loading");
   const [followUps, setFollowUps] = useState<ReadonlyMap<string, CodeThreadFollowUpView>>(
     () => new Map(),
   );
@@ -883,7 +882,7 @@ export function useCodeController(options: CodeControllerOptions) {
       // reason: hydration may fail, and offering one thread's way back on
       // another thread's checkout would overwrite files nobody asked about.
       setRestoreUndo(undefined);
-      setConversationHistory("loaded");
+      setConversationHistory("loading");
       try {
         const initial = await client.thread(threadId);
         if (!isActive(request, threadGeneration, mounted)) return;
@@ -897,6 +896,7 @@ export function useCodeController(options: CodeControllerOptions) {
           conversationIncomplete = hydrated?.incomplete === true;
           conversationOperationId = hydrated?.incompleteOperationId;
           conversationCursor = hydrated?.nextCursor ?? 0;
+          setConversationHistory("loaded");
           // A retried activation that succeeds must also take its own error
           // banner down. Only that message: a first-turn failure noted just
           // before activation still belongs to the user's bounced prompt.
@@ -1262,7 +1262,7 @@ export function useCodeController(options: CodeControllerOptions) {
     turnAbort.current?.abort();
     turnAbort.current = undefined;
     setConversation([]);
-    setConversationHistory("loaded");
+    setConversationHistory("loading");
     setProviderRequests([]);
     setTurnActivity(new Map());
     setTurnStatus(

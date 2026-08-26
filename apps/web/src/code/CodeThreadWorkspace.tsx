@@ -773,7 +773,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       {messages.length === 0 ? (
         <div className="code-thread-workspace__conversation" role="log" aria-live="polite">
           <div className="code-thread-workspace__transcript thread-column">
-            {showEmptyConversation ? (
+            {props.controller.conversationHistory === "loading" ? (
+              <ShellState
+                message="Loading the existing thread transcript from this host."
+                state="loading"
+                title="Loading conversation"
+              />
+            ) : showEmptyConversation ? (
               <>
                 <p className="code-thread-workspace__empty" role="status">
                   No messages yet. Send a prompt to start this thread.
