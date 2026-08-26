@@ -197,9 +197,9 @@ describe("WindowChrome", () => {
   it("keeps compact native chrome geometry and neutral tool controls", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 0;");
-    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: calc(var(--oct-space-2) + 4px);",
-    );
+    expect(
+      cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome'),
+    ).not.toContain("top: calc(var(--oct-space-2) + 4px);");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
       "z-index: 7;",
     );
@@ -243,7 +243,9 @@ describe("WindowChrome", () => {
   });
 
   it("keeps sidebar recovery and pane-tab controls aligned to compact hit targets", () => {
-    expect(cssRule(".sidebar__traffic-light-space")).toContain("flex: 0 0 74px;");
+    expect(cssRule(".sidebar__traffic-light-space")).toContain(
+      "flex: 0 0 var(--octant-native-traffic-light-leading-width, 74px);",
+    );
     expect(cssRule(".sidebar__native-collapse")).toContain("top: 0;");
     expect(cssRule(".window-chrome__new-thread")).toContain(
       "background: var(--oct-surface-muted);",
@@ -610,7 +612,9 @@ describe("WindowChrome", () => {
     expect(cssRule(".window-chrome__leading .window-chrome__button")).toContain(
       "color: var(--oct-fg-2);",
     );
-    expect(cssRule(".window-chrome__traffic-light-space")).toContain("flex: 0 0 88px;");
+    expect(cssRule(".window-chrome__traffic-light-space")).toContain(
+      "flex: 0 0 var(--octant-native-traffic-light-leading-width, 74px);",
+    );
     await user.click(opener);
     expect(onExpandSidebar).toHaveBeenCalledOnce();
   });
@@ -871,9 +875,9 @@ describe("WindowChrome", () => {
 
     expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
     expect(container.firstChild).not.toHaveClass("window-drag-region");
-    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: calc(var(--oct-space-2) + 4px);",
-    );
+    expect(
+      cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome'),
+    ).not.toContain("top: calc(var(--oct-space-2) + 4px);");
     expect(container.querySelector(".window-chrome__drag-space")).not.toHaveClass(
       "window-drag-region",
     );

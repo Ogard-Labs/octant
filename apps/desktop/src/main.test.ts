@@ -156,20 +156,19 @@ function deferred() {
 
 describe("Project window BrowserWindow construction", () => {
   it("consumes the resolved native presentation without overriding the frameless contract", () => {
-    expect(
-      createMainBrowserWindowOptions({
-        bounds: { x: 10, y: 20, width: 1000, height: 720 },
-        capability: "A".repeat(43),
-        preloadPath: "/app/preload.mjs",
-        browserWindow: {
-          backgroundColor: "#00000000",
-          titleBarStyle: "hiddenInset",
-          trafficLightPosition: { x: 16, y: 18 },
-          transparent: true,
-          vibrancy: "sidebar",
-        },
-      }),
-    ).toMatchObject({
+    const options = createMainBrowserWindowOptions({
+      bounds: { x: 10, y: 20, width: 1000, height: 720 },
+      capability: "A".repeat(43),
+      preloadPath: "/app/preload.mjs",
+      browserWindow: {
+        backgroundColor: "#00000000",
+        titleBarStyle: "hiddenInset",
+        transparent: true,
+        vibrancy: "sidebar",
+      },
+    });
+    expect(options).not.toHaveProperty("trafficLightPosition");
+    expect(options).toMatchObject({
       x: 10,
       y: 20,
       width: 1000,
@@ -178,7 +177,6 @@ describe("Project window BrowserWindow construction", () => {
       minHeight: 600,
       backgroundColor: "#00000000",
       titleBarStyle: "hiddenInset",
-      trafficLightPosition: { x: 16, y: 18 },
       transparent: true,
       vibrancy: "sidebar",
       visualEffectState: "followWindow",
@@ -199,7 +197,6 @@ describe("Project window BrowserWindow construction", () => {
         browserWindow: {
           backgroundColor: "#00000000",
           titleBarStyle: "hiddenInset",
-          trafficLightPosition: { x: 16, y: 18 },
           transparent: true,
         },
       }).webPreferences?.additionalArguments,
@@ -221,7 +218,6 @@ describe("Project window BrowserWindow construction", () => {
         browserWindow: {
           backgroundColor: "#00000000",
           titleBarStyle: "hiddenInset",
-          trafficLightPosition: { x: 16, y: 18 },
           transparent: true,
         },
       }).webPreferences?.additionalArguments,
@@ -244,7 +240,6 @@ describe("Project window BrowserWindow construction", () => {
         browserWindow: {
           backgroundColor: "#00000000",
           titleBarStyle: "hiddenInset",
-          trafficLightPosition: { x: 16, y: 18 },
           transparent: true,
         },
       }),

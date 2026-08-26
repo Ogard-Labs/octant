@@ -3,6 +3,30 @@ import { NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT } from "@octant/contracts/shell";
 export type ResolvedSidebarMaterial = "opaque" | "translucent";
 export const INITIAL_SIDEBAR_MATERIAL_PREFERENCE = "opaque" as const;
 
+/**
+ * AppKit close-button frame height. Electron's WindowButtonsProxy uses this
+ * when a custom `trafficLightPosition` is set:
+ * `NSTitlebarContainerView.height = buttonHeight + 2 * y`.
+ */
+export const MACOS_TRAFFIC_LIGHT_BUTTON_HEIGHT = 14;
+
+/** Compact title row the renderer paints under macOS hiddenInset. */
+export const COMPACT_TITLE_ROW_HEIGHT = 34;
+
+export type TrafficLightPosition = { readonly x: number; readonly y: number };
+
+/**
+ * Native overlay height Electron will give the titlebar container. `undefined`
+ * means we never called `setMargin`, so AppKit keeps the default hiddenInset
+ * container instead of growing one to `buttonHeight + 2 * y`.
+ */
+export function nativeTitlebarContainerHeight(
+  trafficLightPosition: TrafficLightPosition | undefined,
+): number | "appkit-default" {
+  if (trafficLightPosition === undefined) return "appkit-default";
+  return MACOS_TRAFFIC_LIGHT_BUTTON_HEIGHT + 2 * trafficLightPosition.y;
+}
+
 export interface WindowPresentationInput {
   readonly platform: NodeJS.Platform;
   readonly sidebarMaterial: "opaque" | "system";
@@ -20,7 +44,6 @@ export interface WindowPresentation {
     | {
         readonly backgroundColor: "#00000000";
         readonly titleBarStyle: "hiddenInset";
-        readonly trafficLightPosition: { readonly x: 16; readonly y: 18 };
         readonly transparent: true;
         readonly vibrancy?: "sidebar";
       }
@@ -100,8 +123,9 @@ export function resolveWindowPresentation(input: WindowPresentationInput): Windo
       input.platform === "darwin"
         ? {
             backgroundColor: "#00000000",
+            // Omit trafficLightPosition: specifying y resizes NSTitlebarContainerView
+            // to buttonHeight + 2*y and that native overlay eats title-row clicks.
             titleBarStyle: "hiddenInset",
-            trafficLightPosition: { x: 16, y: 18 },
             transparent: true,
             // A window constructed while the translucent conditions already
             // hold gets its NSVisualEffectView from the first frame instead of

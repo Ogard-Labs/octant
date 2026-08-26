@@ -175,7 +175,7 @@ small/medium/large actions; the pointer target is at least 24px on desktop and
 44px on touch surfaces. The workspace sidebar defaults to 232px, supports
 resizing, and may collapse completely while leaving Show sidebar and New thread
 in the native title rail. Settings uses a separate compact 248px navigation
-rail. The right dock defaults to 320px. The pane/title control rail is 42px in
+rail. The right dock defaults to 320px. The pane/title control rail is 34px in
 the native host and the status bar is 26px.
 
 Panes are flat and separated by a one-pixel semantic border. Cards are for a
@@ -340,10 +340,14 @@ must be visible and must not move layout.
 
 On macOS the desktop window keeps Electron's native frame and uses
 `titleBarStyle: hiddenInset`; `frame: false` is not combined with that mode.
-One explicit blank drag strip reaches the physical top edge after the traffic
-lights. Pane tabs and window controls share the compact visual rail at a higher
-stacking layer; unused spans remain drag regions. Collapsed-sidebar Show sidebar
-and New thread actions reserve their own no-drag space after the traffic lights.
+Do not set a custom `trafficLightPosition`: Electron then resizes
+`NSTitlebarContainerView` to `buttonHeight + 2 * y`, and that native overlay
+eats title-row clicks. One explicit blank drag strip reaches the physical top
+edge after the traffic lights and, when the sidebar is collapsed, after the
+measured leading cluster. Pane tabs and window controls share the compact
+visual rail at a higher stacking layer; unused spans remain drag regions.
+Collapsed-sidebar Show sidebar and New thread actions reserve their own no-drag
+space after the same traffic-light width the sidebar uses.
 Packaged smoke checks both compact geometry and real native state transitions
 for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 

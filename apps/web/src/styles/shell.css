@@ -58,6 +58,13 @@ html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
   pointer-events: auto;
 }
 
+/* The expanded-sidebar strip starts after traffic lights plus Hide sidebar.
+   Once the sidebar is gone, that 112px origin sits on Show sidebar / New thread
+   unless it moves to the measured leading cluster. */
+html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__native-drag-strip {
+  left: var(--octant-window-chrome-leading-width, 148px);
+}
+
 .window-no-drag,
 .window-no-drag * {
   -webkit-app-region: no-drag;
@@ -84,9 +91,11 @@ html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
    pane header. They sit above both and explicitly opt out of dragging; the
    unused rail remains draggable underneath. The chrome must outrank the pane
    header outright — while the two merely tied, the header won on document
-   order and covered every control in this row. */
+   order and covered every control in this row. Stay at top: 0 so the compact
+   row lines up with AppKit's default hiddenInset lights; a downward shift was
+   compensating for a custom trafficLightPosition that enlarged the native
+   overlay and ate the whole row. */
 html[data-octant-native-host="true"] .shell-frame > .window-chrome {
-  top: calc(var(--oct-space-2) + 4px);
   z-index: 7;
 }
 
@@ -123,7 +132,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 /* Same reserve the sidebar keeps for the macOS traffic lights (see
    .sidebar__traffic-light-space); it moves here while the sidebar is hidden. */
 .window-chrome__traffic-light-space {
-  flex: 0 0 88px;
+  flex: 0 0 var(--octant-native-traffic-light-leading-width, 74px);
   height: 100%;
 }
 
@@ -313,7 +322,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 }
 
 .sidebar__traffic-light-space {
-  flex: 0 0 74px;
+  flex: 0 0 var(--octant-native-traffic-light-leading-width, 74px);
   height: 100%;
 }
 

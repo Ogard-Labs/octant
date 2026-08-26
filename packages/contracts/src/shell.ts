@@ -32,11 +32,20 @@ export const MAX_CONTEXT_SIDEBAR_WIDTH = 640;
  * draggable on its own. Remote/web clients have no native inset and keep the
  * zero-offset presentation.
  *
- * This is a drag affordance, not a hit-test boundary: measuring the running
- * app showed macOS delivers pointer events to web content above this height,
- * so controls do not have to clear it to be clickable.
+ * This strip is a drag affordance inside AppKit's default hiddenInset
+ * container. A custom `trafficLightPosition` must not be set: Electron's
+ * WindowButtonsProxy then resizes `NSTitlebarContainerView` to
+ * `buttonHeight + 2 * y`, stacking a native overlay above the renderer that
+ * eats clicks in the compact title row. CSS `z-index` cannot beat that overlay.
  */
 export const NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT = 24;
+
+/**
+ * Horizontal reserve for macOS traffic lights in the native leading row.
+ * Shared by the sidebar and the collapsed-sidebar chrome so Show sidebar sits
+ * where Hide sidebar was, rather than jumping after a wider spacer.
+ */
+export const NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH = 74;
 export const MIN_SPLIT_RATIO = 0.2;
 export const MAX_SPLIT_RATIO = 0.8;
 

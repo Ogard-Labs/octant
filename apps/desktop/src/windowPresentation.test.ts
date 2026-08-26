@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT } from "@octant/contracts/shell";
 import {
+  COMPACT_TITLE_ROW_HEIGHT,
   INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
+  MACOS_TRAFFIC_LIGHT_BUTTON_HEIGHT,
   createWindowPresentationController,
+  nativeTitlebarContainerHeight,
   observeThermalPerformance,
   resolveWindowPresentation,
   type NativeThemePort,
@@ -24,19 +27,37 @@ function system(overrides: Partial<Parameters<typeof resolveWindowPresentation>[
 }
 
 describe("resolveWindowPresentation", () => {
-  it("uses the supported macOS hidden-inset window with native traffic-light placement", () => {
-    expect(resolveWindowPresentation(system())).toEqual({
+  it("uses the supported macOS hidden-inset window without a custom traffic-light overlay", () => {
+    const presentation = resolveWindowPresentation(system());
+    expect(presentation).toEqual({
       interactiveTitlebarInset: NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
       browserWindow: {
         backgroundColor: "#00000000",
         titleBarStyle: "hiddenInset",
-        trafficLightPosition: { x: 16, y: 18 },
         transparent: true,
         vibrancy: "sidebar",
       },
       material: "translucent",
       vibrancy: "sidebar",
     });
+    expect(presentation.browserWindow).not.toHaveProperty("trafficLightPosition");
+    expect(nativeTitlebarContainerHeight(undefined)).toBe("appkit-default");
+  });
+
+  it("does not enlarge NSTitlebarContainerView past the compact title row", () => {
+    expect(nativeTitlebarContainerHeight(undefined)).toBe("appkit-default");
+    expect(resolveWindowPresentation(system()).browserWindow).not.toHaveProperty(
+      "trafficLightPosition",
+    );
+    // Electron WindowButtonsProxy: height = buttonHeight + 2 * y. The former
+    // { x: 16, y: 18 } made a ~50px native overlay that covered the 34px row.
+    expect(nativeTitlebarContainerHeight({ x: 16, y: 18 })).toBe(
+      MACOS_TRAFFIC_LIGHT_BUTTON_HEIGHT + 2 * 18,
+    );
+    expect(nativeTitlebarContainerHeight({ x: 16, y: 18 })).toBeGreaterThan(
+      COMPACT_TITLE_ROW_HEIGHT,
+    );
+    expect(NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT).toBeLessThanOrEqual(COMPACT_TITLE_ROW_HEIGHT);
   });
 
   it("constructs a window that resolves opaque without any vibrancy material", () => {
