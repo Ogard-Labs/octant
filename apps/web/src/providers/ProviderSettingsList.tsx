@@ -31,6 +31,7 @@ import {
   capabilityLabels,
   driverLabel,
   formatProbeTimestamp,
+  incompatibleReadinessFacts,
   protocolLabel,
   providerRowReadinessLabel,
   titleCase,
@@ -649,7 +650,7 @@ function ProviderRow(props: ProviderRowProps) {
           {autoRegisteredDisabled ? (
             <p className="provider-card__guidance">Detected on this host — enable to use</p>
           ) : null}
-          {guidance(props.instance, readiness, props.observed?.message)}
+          {guidance(props.instance, readiness, props.observed)}
           {usesCredential && !props.credentialManagementAvailable ? (
             <p className="provider-card__guidance">
               Manage credentials in the Octant host app. Credential replacement, clearing, and
@@ -938,10 +939,11 @@ function providerBinaryPath(instance: ProviderInstance): string | undefined {
 function guidance(
   instance: ProviderInstance,
   readiness: ProviderObservedState["readiness"] | undefined,
-  message?: string,
+  observed?: ProviderObservedState,
 ) {
   const driverKind = instance.driverKind;
   const label = driverLabel(driverKind);
+  const message = observed?.message;
   if (readiness === "unauthenticated")
     return (
       <p className="provider-card__guidance">
@@ -978,20 +980,33 @@ function guidance(
                                 : "Add a bearer API key in the Octant host, then check the connection again."}
       </p>
     );
-  if (readiness === "incompatible")
+  if (readiness === "incompatible") {
+    const nextAction =
+      driverKind === "openai-compatible" ||
+      driverKind === "anthropic-compatible" ||
+      driverKind === "azure-foundry"
+        ? "The endpoint returned an incompatible protocol response. Review its API compatibility."
+        : driverKind === "ollama"
+          ? "The loopback endpoint returned an incompatible native Ollama response. Update Ollama or verify the native API endpoint."
+          : driverKind === "kimi-code"
+            ? "The Kimi Code runtime or its Octant-managed safety profile is incompatible. Review the connection detail and supported version before retrying."
+            : `Update your ${label} installation to a compatible version, then retry.`;
     return (
-      <p className="provider-card__guidance">
-        {driverKind === "openai-compatible" ||
-        driverKind === "anthropic-compatible" ||
-        driverKind === "azure-foundry"
-          ? "The endpoint returned an incompatible protocol response. Review its API compatibility."
-          : driverKind === "ollama"
-            ? "The loopback endpoint returned an incompatible native Ollama response. Update Ollama or verify the native API endpoint."
-            : driverKind === "kimi-code"
-              ? "The Kimi Code runtime or its Octant-managed safety profile is incompatible. Review the connection detail and supported version before retrying."
-              : `Update your ${label} installation to a compatible version, then retry.`}
-      </p>
+      <>
+        <p className="provider-card__guidance">{nextAction}</p>
+        <div
+          aria-label="Incompatibility details"
+          className="provider-card__facts provider-card__facts--incompatible"
+        >
+          {incompatibleReadinessFacts(instance, observed).map((fact) => (
+            <span key={fact.label}>
+              {fact.label}: {fact.value}
+            </span>
+          ))}
+        </div>
+      </>
     );
+  }
   if (readiness === "degraded")
     return (
       <p className="provider-card__guidance">

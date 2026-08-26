@@ -87,6 +87,53 @@ export function titleCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1).replaceAll("-", " ");
 }
 
+export function providerConfiguredBinaryPath(instance: ProviderInstance): string | undefined {
+  return "binaryPath" in instance.configuration ? instance.configuration.binaryPath : undefined;
+}
+
+export function providerAuthenticationFact(instance: ProviderInstance): string | undefined {
+  const { configuration, driverKind } = instance;
+  if (!("authentication" in configuration)) return undefined;
+  if (driverKind === "claude") {
+    return configuration.authentication === "api-key" ? "Anthropic API key" : "Claude subscription";
+  }
+  return titleCase(configuration.authentication);
+}
+
+/** Authoritative probe message, binary, version, auth, and capability confirmation. */
+export function incompatibleReadinessFacts(
+  instance: ProviderInstance,
+  observed: ProviderObservedState | undefined,
+): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+  const binaryPath = providerConfiguredBinaryPath(instance);
+  const authentication = providerAuthenticationFact(instance);
+  const capabilities = observed?.capabilities;
+  const confirmed =
+    capabilities === undefined
+      ? []
+      : capabilityLabels.filter(([key]) => capabilities[key] === "supported");
+  const refused =
+    capabilities === undefined
+      ? []
+      : capabilityLabels.filter(([key]) => capabilities[key] === "unsupported");
+  const capabilityMismatch =
+    confirmed.length === 0
+      ? "Not confirmed"
+      : refused.length === 0
+        ? "None reported"
+        : refused.map(([, label]) => label).join(", ");
+  return [
+    {
+      label: "Host check",
+      value: observed?.message ?? "No host incompatibility detail was recorded.",
+    },
+    ...(binaryPath === undefined ? [] : [{ label: "Binary", value: binaryPath }]),
+    { label: "Version", value: observed?.detectedVersion ?? "Unavailable" },
+    ...(authentication === undefined ? [] : [{ label: "Authentication", value: authentication }]),
+    { label: "Capabilities", value: capabilityMismatch },
+  ];
+}
+
 export function formatProbeTimestamp(value: string): string {
   return probeTimestampFormatter.format(new Date(value));
 }

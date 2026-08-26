@@ -2350,7 +2350,7 @@ describe("Claude driver probe", () => {
     expect(observation).toMatchObject({
       readiness: "incompatible",
       models: [],
-      message: "Claude runtime policy is incompatible with Octant.",
+      message: "Claude initialized an unexpected runtime surface.",
     });
     expect(JSON.stringify(observation)).not.toContain("command-probe");
     expect(f.queries[0]?.close).toHaveBeenCalledOnce();
@@ -2367,7 +2367,7 @@ describe("Claude driver probe", () => {
     expect(observation).toMatchObject({
       readiness: "incompatible",
       models: [],
-      message: "Claude runtime policy is incompatible with Octant.",
+      message: "Claude initialized an unsupported account routing policy.",
     });
   });
 
@@ -2387,6 +2387,23 @@ describe("Claude driver probe", () => {
       readiness: "incompatible",
       detectedVersion: "2.1.211",
       models: [],
+      message: "Claude initialization version did not match the configured binary.",
+    });
+  });
+
+  it("reports a probe that returns no usable models as incompatible", async () => {
+    const f = harness("subscription");
+    f.setOpenQuery((input) => {
+      const query = new FakeQuery("empty-models", undefined, input.model);
+      query.supportedModels.mockReturnValue(Effect.succeed([]));
+      return Effect.acquireRelease(Effect.succeed(query), (value) => value.close());
+    });
+    const observation = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    expect(observation).toMatchObject({
+      readiness: "incompatible",
+      detectedVersion: "2.1.211",
+      models: [],
+      message: "Claude returned no usable models.",
     });
   });
 });
