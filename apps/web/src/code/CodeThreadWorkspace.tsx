@@ -4,7 +4,7 @@ import {
   type CodeThread,
   type CodeThreadId,
 } from "@octant/contracts/code";
-import type { CodeCheckpoint } from "@octant/contracts/code-operations";
+import type { CodeCheckpoint, CodeThreadChangedFileState } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import {
   clampTurnAccessPosture,
@@ -30,6 +30,8 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController, CodeTurnStatus } from "./useCodeController";
 import { ChatRichText } from "../chat/ChatRichText";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
+import { useThreadPlan } from "../plan/ThreadPlanContext";
+import type { ThreadTaskChangedFiles } from "../plan/ThreadTaskViewer";
 import { ThreadChildRunStatusSlot } from "../agents/ThreadChildRunStatusSlot";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -156,6 +158,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       ? props.controller.activeView
       : undefined;
   const profileName = useAgentProfileName(view?.thread.profileId);
+  const plan = useThreadPlan()?.plan;
+  // The board observation is the host's changed-file evidence. Ask only when
+  // the plan surface will render it: a thread with no plan has nowhere to put
+  // the count, and querying every open conversation would rescan every worktree.
+  const changedFiles = useObservedChangedFiles({
+    client: props.controller.client,
+    enabled: view !== undefined && plan != null && plan.status !== "withdrawn",
+    projectId: view?.thread.projectId,
+    threadId: props.threadId,
+  });
   const [draft, setDraft] = useState(props.controller.pendingDraft);
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -994,7 +1006,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         />
       )}
 
-      <InlineThreadPlan />
+      <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
 
       <ThreadComposer
         className={`code-thread-workspace__composer thread-column${
@@ -1519,4 +1531,56 @@ function ProviderInputPrompt(props: {
       </OctantButton>
     </form>
   );
+}
+
+function useObservedChangedFiles(options: {
+  readonly client: CodeClient | undefined;
+  readonly enabled: boolean;
+  readonly projectId: CodeThread["projectId"] | undefined;
+  readonly threadId: CodeThreadId;
+}): ThreadTaskChangedFiles | undefined {
+  const [changedFiles, setChangedFiles] = useState<ThreadTaskChangedFiles>();
+  const { client, enabled, projectId, threadId } = options;
+
+  useEffect(() => {
+    if (!enabled || client === undefined) {
+      setChangedFiles(undefined);
+      return;
+    }
+    let active = true;
+    setChangedFiles(undefined);
+    void client
+      .queryBoard({
+        version: 1,
+        ...(projectId === undefined ? {} : { projectIds: [projectId] }),
+      })
+      .then(
+        (view) => {
+          if (!active) return;
+          const card = view.cards.find((entry) => String(entry.threadId) === String(threadId));
+          setChangedFiles(observedTaskChangedFiles(card?.changedFiles));
+        },
+        () => {
+          if (active) setChangedFiles(undefined);
+        },
+      );
+    return () => {
+      active = false;
+    };
+  }, [client, enabled, projectId, threadId]);
+
+  return changedFiles;
+}
+
+function observedTaskChangedFiles(
+  state: CodeThreadChangedFileState | undefined,
+): ThreadTaskChangedFiles | undefined {
+  if (state?.kind !== "observed") return undefined;
+  return {
+    kind: "observed",
+    changedPathCount: state.changedPathCount,
+    freshness: state.freshness,
+    insertions: state.insertions,
+    deletions: state.deletions,
+  };
 }

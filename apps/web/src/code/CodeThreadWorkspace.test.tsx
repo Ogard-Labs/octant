@@ -1,18 +1,21 @@
+import type { PlanClient } from "@octant/client-runtime/plan-client";
+import type { CodeAttachmentId, CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { StrictMode, useState } from "react";
+import { StrictMode, useState, type ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentProfileNamesProvider } from "../agentProfile/AgentProfileNames";
+import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
 import type { CodeAttachmentClient } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
-import type { CodeAttachmentId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 
 const threadId = "10000000-0000-4000-8000-000000000001" as never;
 const anotherThreadId = "10000000-0000-4000-8000-000000000002" as never;
+const projectId = "30000000-0000-4000-8000-000000000001" as never;
 const providerId = "80000000-0000-4000-8000-0000000000a1" as never;
 const modelId = "model-one" as never;
 const mentionedThreadId = "90000000-0000-4000-8000-000000000001" as never;
@@ -1634,6 +1637,91 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Mark for follow-up" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Complete follow-up" })).not.toBeInTheDocument();
   });
+
+  it("shows the host's observed changed-file evidence on the thread plan", async () => {
+    const user = userEvent.setup();
+    const queryBoard = vi.fn(async () =>
+      boardView([
+        boardCard({
+          changedFiles: {
+            kind: "observed",
+            freshness: "fresh",
+            changedPathCount: 4,
+            stagedCount: 1,
+            committedAhead: 0,
+            workingTreeClean: false,
+            insertions: 173,
+            deletions: 0,
+          },
+        }),
+      ]),
+    );
+
+    render(
+      withPlan(
+        <CodeThreadWorkspace controller={controllerWithBoard(queryBoard)} threadId={threadId} />,
+      ),
+    );
+
+    const trigger = await screen.findByRole("button", { name: /4 files changed \+173 −0/ });
+    expect(trigger).not.toHaveTextContent("stale");
+    await user.click(trigger);
+    expect(screen.getByRole("dialog", { name: "Task progress" })).toHaveTextContent(
+      "4 files changed +173 −0",
+    );
+    expect(queryBoard).toHaveBeenCalledWith({
+      version: 1,
+      projectIds: [projectId],
+    });
+  });
+
+  it("marks a stale changed-file observation rather than treating it as current", async () => {
+    const queryBoard = vi.fn(async () =>
+      boardView([
+        boardCard({
+          changedFiles: {
+            kind: "observed",
+            freshness: "stale",
+            changedPathCount: 1,
+            stagedCount: 0,
+            committedAhead: 0,
+            workingTreeClean: false,
+            insertions: 4,
+            deletions: 2,
+          },
+        }),
+      ]),
+    );
+
+    render(
+      withPlan(
+        <CodeThreadWorkspace controller={controllerWithBoard(queryBoard)} threadId={threadId} />,
+      ),
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /1 file changed \+4 −2 · stale/ }),
+    ).toBeVisible();
+  });
+
+  it("shows no changed-file count when the worktree could not be observed", async () => {
+    const queryBoard = vi.fn(async () =>
+      boardView([boardCard({ changedFiles: { kind: "unavailable" } })]),
+    );
+
+    render(
+      withPlan(
+        <CodeThreadWorkspace controller={controllerWithBoard(queryBoard)} threadId={threadId} />,
+      ),
+    );
+
+    const trigger = await screen.findByRole("button", { name: /^Show task progress/ });
+    await waitFor(() => expect(queryBoard).toHaveBeenCalled());
+    expect(trigger).toHaveTextContent("Step 2 / 2");
+    expect(trigger).not.toHaveTextContent("0");
+    expect(trigger).not.toHaveTextContent("file");
+    expect(trigger).not.toHaveTextContent("changed");
+  });
 });
 
 function providerGroup(): PickerGroup {
@@ -1737,6 +1825,96 @@ function controller(
     retry: vi.fn(),
     ...overrides,
   } as never;
+}
+
+function withPlan(ui: ReactElement): ReactElement {
+  const client: PlanClient = {
+    read: vi.fn(async () => ({ plan: approvedPlan(), history: [] })),
+    execute: vi.fn(),
+  };
+  return (
+    <ThreadPlanProvider client={client} threadId={String(threadId)}>
+      {ui}
+    </ThreadPlanProvider>
+  );
+}
+
+function controllerWithBoard(queryBoard: CodeController["client"]["queryBoard"]): CodeController {
+  const base = controller();
+  return {
+    ...base,
+    activeView: {
+      ...base.activeView!,
+      thread: { ...base.activeView!.thread, projectId },
+    },
+    client: { queryBoard },
+  } as never;
+}
+
+function approvedPlan(): ThreadPlan {
+  return {
+    id: "20000000-0000-4000-8000-000000000001",
+    threadId,
+    revisionId: "30000000-0000-4000-8000-000000000002",
+    title: "Ship the context controls",
+    status: "approved",
+    approvedRevisionId: "30000000-0000-4000-8000-000000000002",
+    steps: [
+      {
+        stepId: "40000000-0000-4000-8000-000000000001",
+        position: 0,
+        title: "Map the context",
+        status: "done",
+      },
+      {
+        stepId: "40000000-0000-4000-8000-000000000002",
+        position: 1,
+        title: "Build the viewer",
+        status: "in-progress",
+      },
+    ],
+    proposedAt: "2026-08-21T12:00:00.000Z",
+    updatedAt: "2026-08-21T12:00:00.000Z",
+    version: 5,
+  } as never;
+}
+
+function boardView(cards: ReadonlyArray<CodeBoardCard>): CodeBoardView {
+  return {
+    version: 1,
+    query: { version: 1 },
+    cards,
+    generatedAt: "2026-07-27T09:00:00.000Z",
+  } as CodeBoardView;
+}
+
+function boardCard(overrides: Partial<CodeBoardCard> = {}): CodeBoardCard {
+  return {
+    threadId,
+    projectId,
+    checkoutId: "20000000-0000-4000-8000-000000000002",
+    checkoutKind: "existing-worktree",
+    title: "find bugs in this repo",
+    status: "in-progress",
+    statusReason: "executing",
+    outcomeKind: "opened-pr",
+    deliverySatisfaction: "pending",
+    providerInstanceId: providerId,
+    modelId,
+    executing: true,
+    worktree: { kind: "unavailable", checkoutId: "20000000-0000-4000-8000-000000000002" },
+    changedFiles: { kind: "unavailable" },
+    linkedPullRequest: { kind: "none", freshness: "fresh" },
+    pullRequestSummaries: { items: [], hiddenCount: 0 },
+    checks: { freshness: "fresh", state: "unknown" },
+    reviewState: { freshness: "fresh", state: "unknown" },
+    childAgents: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },
+    recovery: { kind: "ok" },
+    githubFreshness: "fresh",
+    followUp: false,
+    lastMeaningfulActivityAt: null,
+    ...overrides,
+  } as unknown as CodeBoardCard;
 }
 
 /**
