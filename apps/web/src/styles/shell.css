@@ -1463,6 +1463,8 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-adapter__card {
+  display: flex;
+  flex-direction: column;
   overflow: visible;
   background: transparent;
   border: 0;
@@ -1492,9 +1494,10 @@ form > .work-composer-adapter__attachments {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  order: -1;
   gap: 5px 10px;
-  margin-top: 6px;
-  padding: 2px 2px 0;
+  margin: 0 0 8px;
+  padding: 0 2px;
   color: var(--oct-meta);
   background: var(--octant-workspace);
   border: 0;
