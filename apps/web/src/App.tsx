@@ -1928,6 +1928,10 @@ function LaunchedShell(
     [activeMode, activeProjectId],
   );
   const localHost = hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID));
+  const draftRequestedExecutionPolicy =
+    activeMode === "code"
+      ? (codeController.bootstrap?.settings.defaultExecutionPolicy ?? "approval-gated")
+      : "approval-gated";
   const executionProfileController = useExecutionProfileController({
     client: agentProfileClient,
     ...(localHost === undefined ? {} : { hostHealth: localHost.health }),
@@ -1939,10 +1943,8 @@ function LaunchedShell(
       setDraftModelId(selection.modelId);
     },
     profileSelectionStorageKey: `octant.execution-profile.${activeMode}.${activeProjectId ?? "unfiled"}`,
-    projectExecutionPolicy:
-      activeMode === "code"
-        ? (codeController.bootstrap?.settings.defaultExecutionPolicy ?? "approval-gated")
-        : "approval-gated",
+    projectExecutionPolicy: draftRequestedExecutionPolicy,
+    requestedExecutionPolicy: draftRequestedExecutionPolicy,
     providerGroups: draftProviderGroups,
     ...(effectiveDraftProviderInstanceId === undefined
       ? {}

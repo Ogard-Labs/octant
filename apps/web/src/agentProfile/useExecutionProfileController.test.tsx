@@ -96,6 +96,7 @@ describe("useExecutionProfileController", () => {
           onSelectProvider,
           profileSelectionStorageKey: "octant.test.execution-profile",
           projectExecutionPolicy: "approval-gated",
+          requestedExecutionPolicy: "approval-gated",
           providerGroups: groups(modelId),
           selectedModelId: modelId as never,
           selectedProviderInstanceId: providerId,
@@ -148,6 +149,7 @@ describe("useExecutionProfileController", () => {
           onSelectProvider: vi.fn(),
           profileSelectionStorageKey: "octant.test.execution-profile",
           projectExecutionPolicy: "approval-gated",
+          requestedExecutionPolicy: "approval-gated",
           providerGroups: groups("gpt-5", readiness),
           selectedModelId: "gpt-5" as never,
           selectedProviderInstanceId: providerId,
@@ -181,6 +183,7 @@ describe("useExecutionProfileController", () => {
           onSelectProvider: vi.fn(),
           profileSelectionStorageKey: "octant.test.execution-profile",
           projectExecutionPolicy: "approval-gated",
+          requestedExecutionPolicy: "approval-gated",
           providerGroups: groups(),
           selectedModelId: "gpt-5" as never,
           selectedProviderInstanceId: providerId,
@@ -230,6 +233,7 @@ describe("useExecutionProfileController", () => {
         onSelectProvider,
         profileSelectionStorageKey: "octant.test.execution-profile",
         projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "approval-gated",
         providerGroups: groups(),
         selectedModelId: "gpt-5" as never,
         selectedProviderInstanceId: providerId,
@@ -269,6 +273,7 @@ describe("useExecutionProfileController", () => {
         onSelectProvider: vi.fn(),
         profileSelectionStorageKey: "octant.test.execution-profile",
         projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "approval-gated",
         providerGroups: groups(),
         selectedModelId: "gpt-5" as never,
         selectedProviderInstanceId: providerId,
@@ -307,5 +312,65 @@ describe("useExecutionProfileController", () => {
     });
     expect(result.current.profiles).toEqual([]);
     expect(window.localStorage.getItem("octant.test.execution-profile")).toBeNull();
+  });
+
+  it("keeps a restored Full-access profile available for a Plan draft and resolves the narrowed posture", async () => {
+    const fullAccessProfile: AgentProfile = {
+      ...profile,
+      displayName: "Full-access engineer",
+      defaultExecutionPolicy: "full-access",
+    };
+    window.localStorage.setItem("octant.test.execution-profile", String(fullAccessProfile.id));
+    const resolveEffectiveProfile = vi.fn(async () => ({
+      ...receipt("gpt-5"),
+      profileId: fullAccessProfile.id,
+      executionPolicy: "plan" as const,
+      effectivePermissions: {
+        filesystem: false,
+        shell: false,
+        git: false,
+        network: false,
+        tools: false,
+        subagents: false,
+      },
+    }));
+    const client = {
+      list: vi.fn(async () => [fullAccessProfile]),
+      read: vi.fn(),
+      execute: vi.fn(),
+      resolveEffectiveProfile,
+    } as never;
+    const { result } = renderHook(() =>
+      useExecutionProfileController({
+        client,
+        hostId,
+        hostLabel: "This Mac",
+        mode: "code",
+        onSelectProvider: vi.fn(),
+        profileSelectionStorageKey: "octant.test.execution-profile",
+        projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "plan",
+        providerGroups: groups(),
+        selectedModelId: "gpt-5" as never,
+        selectedProviderInstanceId: providerId,
+        scope: { scopeKind: "mode", scopeRef: "code" },
+      }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("resolved"));
+    const profileEntry = result.current.entries.find(
+      (entry) => String(entry.profileId) === String(fullAccessProfile.id),
+    );
+    expect(profileEntry?.unavailableReason).toBeUndefined();
+    expect(profileEntry?.executionPolicy).toBe("plan");
+    expect(result.current.receipt?.executionPolicy).toBe("plan");
+    expect(resolveEffectiveProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        requestedExecutionPolicy: "plan",
+        oneOffOverride: expect.objectContaining({
+          profileId: fullAccessProfile.id,
+        }),
+      }),
+    );
   });
 });

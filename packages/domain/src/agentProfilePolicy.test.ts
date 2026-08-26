@@ -142,17 +142,29 @@ describe("agentProfilePolicy", () => {
         validateProfileAuthoritySafety({
           profile: profile({ defaultExecutionPolicy: "plan" }),
           projectExecutionPolicy: "approval-gated",
+          requestedExecutionPolicy: "approval-gated",
         }),
       ).not.toThrow();
     });
 
-    it("throws when profile policy exceeds project policy", () => {
+    it("throws when the narrowed posture still exceeds project policy", () => {
       expect(() =>
         validateProfileAuthoritySafety({
           profile: profile({ defaultExecutionPolicy: "full-access" }),
           projectExecutionPolicy: "plan",
+          requestedExecutionPolicy: "full-access",
         }),
       ).toThrow(AgentProfileRejected);
+    });
+
+    it("accepts a Full-access profile asked to start under Plan", () => {
+      expect(() =>
+        validateProfileAuthoritySafety({
+          profile: profile({ defaultExecutionPolicy: "full-access" }),
+          projectExecutionPolicy: "approval-gated",
+          requestedExecutionPolicy: "plan",
+        }),
+      ).not.toThrow();
     });
   });
 
@@ -172,6 +184,7 @@ describe("agentProfilePolicy", () => {
         hostLabel: "This Mac",
         mode: "code",
         projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "approval-gated",
       });
       expect(entries.length).toBeGreaterThanOrEqual(1);
       expect(entries.some((e) => e.modelId === "gpt-4o")).toBe(true);
@@ -192,8 +205,101 @@ describe("agentProfilePolicy", () => {
         hostLabel: "This Mac",
         mode: "code",
         projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "approval-gated",
       });
       expect(entries).toEqual([]);
+    });
+
+    it("keeps a Full-access profile available for a Plan draft and shows the narrowed posture", () => {
+      const fullAccess = profile({ defaultExecutionPolicy: "full-access" });
+      const pickerInput = {
+        providers: [
+          {
+            instanceId: instance().id,
+            displayName: "OpenAI",
+            models: [model("gpt-4o")],
+            readiness: "ready",
+          },
+        ],
+        profiles: [fullAccess],
+        hostId: "local",
+        hostLabel: "This Mac",
+        mode: "code" as const,
+        projectExecutionPolicy: "approval-gated" as const,
+        requestedExecutionPolicy: "plan" as const,
+      };
+      const entries = buildExecutionContextPickerEntries(pickerInput);
+      const profileEntry = entries.find(
+        (entry) => String(entry.profileId) === String(fullAccess.id),
+      );
+      expect(profileEntry?.unavailableReason).toBeUndefined();
+      expect(profileEntry?.executionPolicy).toBe("plan");
+
+      const applied = applyProfileToThread({
+        profile: fullAccess,
+        mode: "code",
+        modelId: model("gpt-4o").id,
+        requestedExecutionPolicy: pickerInput.requestedExecutionPolicy,
+        requestedPermissionPersistence: "current-session",
+        projectExecutionPolicy: pickerInput.projectExecutionPolicy,
+      });
+      expect(applied).toEqual({
+        status: "applied",
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+      });
+      expect(profileEntry?.executionPolicy).toBe(
+        applied.status === "applied" ? applied.executionPolicy : undefined,
+      );
+    });
+
+    it("keeps a Full-access profile available for an approval-gated draft", () => {
+      const fullAccess = profile({ defaultExecutionPolicy: "full-access" });
+      const entries = buildExecutionContextPickerEntries({
+        providers: [
+          {
+            instanceId: instance().id,
+            displayName: "OpenAI",
+            models: [model("gpt-4o")],
+            readiness: "ready",
+          },
+        ],
+        profiles: [fullAccess],
+        hostId: "local",
+        hostLabel: "This Mac",
+        mode: "code",
+        projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "approval-gated",
+      });
+      const profileEntry = entries.find(
+        (entry) => String(entry.profileId) === String(fullAccess.id),
+      );
+      expect(profileEntry?.unavailableReason).toBeUndefined();
+      expect(profileEntry?.executionPolicy).toBe("approval-gated");
+    });
+
+    it("marks a Full-access profile unavailable when the draft still asks for more than the Project allows", () => {
+      const fullAccess = profile({ defaultExecutionPolicy: "full-access" });
+      const entries = buildExecutionContextPickerEntries({
+        providers: [
+          {
+            instanceId: instance().id,
+            displayName: "OpenAI",
+            models: [model("gpt-4o")],
+            readiness: "ready",
+          },
+        ],
+        profiles: [fullAccess],
+        hostId: "local",
+        hostLabel: "This Mac",
+        mode: "code",
+        projectExecutionPolicy: "plan",
+        requestedExecutionPolicy: "full-access",
+      });
+      const profileEntry = entries.find(
+        (entry) => String(entry.profileId) === String(fullAccess.id),
+      );
+      expect(profileEntry?.unavailableReason).toBeDefined();
     });
   });
 
@@ -213,6 +319,7 @@ describe("agentProfilePolicy", () => {
         hostLabel: "This Mac",
         mode: "code",
         projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "approval-gated",
       });
       const filtered = filterExecutionContextPickerEntries(entries, "o3");
       expect(filtered.every((e) => e.modelId === "o3")).toBe(true);
@@ -257,6 +364,7 @@ describe("agentProfilePolicy", () => {
       mode: "code" as OctantMode,
       hostId: "local" as never,
       projectExecutionPolicy: "approval-gated",
+      requestedExecutionPolicy: "approval-gated",
       providers: [instance().id],
       catalogs: [catalog(instance().id, [model("gpt-4o")])],
       profiles: [],
@@ -447,11 +555,34 @@ describe("agentProfilePolicy", () => {
       const receipt = resolveEffectiveProfile(
         baseInput({
           projectExecutionPolicy: "plan",
+          requestedExecutionPolicy: "full-access",
           profiles: [{ profile: userProfile, scope: scope({ scopeKind: "user" }) }],
         }),
       );
       expect(receipt.source).toBe("none");
       expect(receipt.downgradeReasons.some((r) => r.step === "user-default")).toBe(true);
+    });
+
+    it("resolves a Full-access profile for a Plan draft under the narrowed posture", () => {
+      const fullAccess = profile({
+        id: "00000000-0000-0000-0000-000000000099" as AgentProfile["id"],
+        defaultExecutionPolicy: "full-access",
+        compatibleModes: ["code"],
+      });
+      const receipt = resolveEffectiveProfile(
+        baseInput({
+          projectExecutionPolicy: "approval-gated",
+          requestedExecutionPolicy: "plan",
+          oneOffOverride: {
+            profile: fullAccess,
+            providerInstanceId: instance().id,
+            modelId: "gpt-4o" as never,
+          },
+        }),
+      );
+      expect(receipt.source).toBe("one-off-override");
+      expect(receipt.profileId).toBe(fullAccess.id);
+      expect(receipt.executionPolicy).toBe("plan");
     });
 
     it("produces a deterministic fallback chain in priority order", () => {

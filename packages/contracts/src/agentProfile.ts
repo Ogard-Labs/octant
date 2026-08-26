@@ -309,6 +309,8 @@ export const ResolveEffectiveProfileRequest = Schema.Struct({
   mode: OctantMode,
   hostId: HostId,
   projectExecutionPolicy: ProviderExecutionPolicy,
+  /** The posture the thread actually asked for. Resolution narrows the profile to this. */
+  requestedExecutionPolicy: Schema.optional(ProviderExecutionPolicy),
   scope: AgentProfileScope,
   oneOffOverride: Schema.optional(
     Schema.Struct({
