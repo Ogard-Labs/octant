@@ -113,6 +113,7 @@ export function AgentHierarchyPanel(props: {
                   type="button"
                   aria-label={`View conversation for ${row.task}`}
                   onClick={() => props.onInspectConversation?.(row.runId)}
+                  variant="ghost"
                 >
                   {props.conversation?.runId === row.runId ? "Hide transcript" : "View transcript"}
                 </OctantButton>
@@ -136,6 +137,7 @@ export function AgentHierarchyPanel(props: {
                     onClick={() =>
                       props.onAcknowledge?.({ runId: row.runId, version: row.version })
                     }
+                    variant="secondary"
                   >
                     Acknowledge result
                   </OctantButton>
@@ -153,6 +155,7 @@ export function AgentHierarchyPanel(props: {
                     type="button"
                     aria-label={`Retry ${row.task}`}
                     onClick={() => props.onRetry?.({ runId: row.runId, version: row.version })}
+                    variant="secondary"
                   >
                     Retry
                   </OctantButton>
@@ -164,6 +167,7 @@ export function AgentHierarchyPanel(props: {
                     type="button"
                     aria-label={`Resume ${row.task}`}
                     onClick={() => props.onResume?.({ runId: row.runId, version: row.version })}
+                    variant="secondary"
                   >
                     Resume
                   </OctantButton>
@@ -173,6 +177,7 @@ export function AgentHierarchyPanel(props: {
                     type="button"
                     aria-label={`Cancel ${row.task}`}
                     onClick={() => props.onCancel?.({ runId: row.runId })}
+                    variant="secondary"
                   >
                     Cancel
                   </OctantButton>
@@ -224,7 +229,12 @@ function SteerControl(props: {
   const [message, setMessage] = useState("");
   if (!open) {
     return (
-      <OctantButton type="button" aria-label={`Steer ${props.task}`} onClick={() => setOpen(true)}>
+      <OctantButton
+        type="button"
+        aria-label={`Steer ${props.task}`}
+        onClick={() => setOpen(true)}
+        variant="ghost"
+      >
         Steer
       </OctantButton>
     );
@@ -252,7 +262,7 @@ function SteerControl(props: {
         />
       </label>
       <OctantButton type="submit">Send steering</OctantButton>
-      <OctantButton type="button" onClick={() => setOpen(false)}>
+      <OctantButton type="button" onClick={() => setOpen(false)} variant="ghost">
         Cancel steering
       </OctantButton>
     </form>

@@ -456,6 +456,7 @@ function RevokeSourceButton(props: {
         disabled={pending}
         onClick={() => void submit()}
         type="button"
+        variant="destructive"
       >
         Revoke
       </OctantButton>

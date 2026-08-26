@@ -765,16 +765,16 @@ interface UsageControlsProps {
 function UsageControls(props: UsageControlsProps) {
   return (
     <div className="usage-dashboard__controls" role="group" aria-label="Usage data controls">
-      <OctantButton onClick={props.onExportCsv} type="button">
+      <OctantButton onClick={props.onExportCsv} type="button" variant="secondary">
         <Download aria-hidden="true" size={14} /> Export CSV
       </OctantButton>
-      <OctantButton onClick={props.onExportJson} type="button">
+      <OctantButton onClick={props.onExportJson} type="button" variant="secondary">
         <Download aria-hidden="true" size={14} /> Export JSON
       </OctantButton>
-      <OctantButton onClick={props.onRetain} type="button">
+      <OctantButton onClick={props.onRetain} type="button" variant="destructive">
         <Eraser aria-hidden="true" size={14} /> Purge older than 30 days
       </OctantButton>
-      <OctantButton onClick={props.onReset} type="button">
+      <OctantButton onClick={props.onReset} type="button" variant="destructive">
         <Trash2 aria-hidden="true" size={14} /> Reset all usage
       </OctantButton>
       {props.message !== undefined ? (

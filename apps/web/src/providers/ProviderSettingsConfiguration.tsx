@@ -1230,6 +1230,7 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
               );
             }}
             type="button"
+            variant="destructive"
           >
             Clear stored API key for {props.instance.displayName}
           </OctantButton>
@@ -1352,6 +1353,7 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
               );
             }}
             type="button"
+            variant="destructive"
           >
             Clear stored API key for {props.instance.displayName}
           </OctantButton>
@@ -1461,6 +1463,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
               );
             }}
             type="button"
+            variant="destructive"
           >
             Clear stored API key for {props.instance.displayName}
           </OctantButton>
