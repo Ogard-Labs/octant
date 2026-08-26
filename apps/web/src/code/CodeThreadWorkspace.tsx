@@ -72,6 +72,16 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
   attachment: () => Promise.reject(new Error("Code attachments are unavailable.")),
 };
 
+/**
+ * Whether two lists carry the same items, by a caller-supplied identity.
+ * Used to tell whether a queued send's attachments, paths, or mentions are
+ * still exactly what the composer holds now — order matters, since these
+ * lists are only ever appended to or removed from, never reordered.
+ */
+function sameByKey<T>(a: ReadonlyArray<T>, b: ReadonlyArray<T>, key: (item: T) => string): boolean {
+  return JSON.stringify(a.map(key)) === JSON.stringify(b.map(key));
+}
+
 export interface CodeThreadWorkspaceProps {
   readonly agentRunClient?: AgentRunClient;
   readonly onAddAgent?: () => void;
@@ -147,6 +157,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       : undefined;
   const profileName = useAgentProfileName(view?.thread.profileId);
   const [draft, setDraft] = useState(props.controller.pendingDraft);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const [providerChanging, setProviderChanging] = useState(false);
   const [accessChanging, setAccessChanging] = useState(false);
   const [accessMessage, setAccessMessage] = useState<string>();
@@ -253,6 +265,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
+  // Read inside the queued send's async closure, after an await, to see
+  // whether the user has since changed what a queued send would carry.
+  // Plain closure captures of these hook-returned values would only ever see
+  // the render that started the send, never a later one.
+  const pathMentionsSelectedRef = useRef(pathMentions.selectedPaths);
+  pathMentionsSelectedRef.current = pathMentions.selectedPaths;
+  const threadMentionChipsRef = useRef(threadMentions.chips);
+  threadMentionChipsRef.current = threadMentions.chips;
+  const turnAccessOverrideRef = useRef(turnAccessOverride);
+  turnAccessOverrideRef.current = turnAccessOverride;
   const peekAbandoned = attachments.peekAbandoned;
   const markDraftStagedDropped = props.controller.markDraftStagedDropped;
   useEffect(() => {
@@ -395,24 +417,69 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const threadKey = String(props.threadId);
     const prompt = draft.trim();
     if (prompt.length === 0) return false;
+    // The full intent this queued send is carrying. A settlement that
+    // arrives after the user has changed any of it belongs to a draft this
+    // send never carried, so clearing state on success must compare against
+    // this whole snapshot rather than the draft text alone. Attachments are
+    // NOT taken here — `takeForSend` also revokes their preview URLs, and a
+    // refused or dropped send must leave the queued images retryable, not
+    // silently gone.
     const attachmentSnapshot = attachments.peekForSend();
     const fileMentionPaths = pathMentions.selectedPaths;
+    const threadMentionChips = threadMentions.chips;
     const access = nextTurnAccess;
-    attachments.takeForSend();
+    const queuedAccessOverride = turnAccessOverride;
+    const stillHoldsQueuedSnapshot = () =>
+      String(props.threadId) === threadKey &&
+      draftRef.current.trim() === prompt &&
+      turnAccessOverrideRef.current === queuedAccessOverride &&
+      sameByKey(attachments.peekForSend(), attachmentSnapshot, (ref) => String(ref.attachmentId)) &&
+      sameByKey(pathMentionsSelectedRef.current, fileMentionPaths, (path) => path) &&
+      sameByKey(threadMentionChipsRef.current, threadMentionChips, (chip) => String(chip.threadId));
+    const restoreQueuedSend = () => {
+      if (String(props.threadId) !== threadKey) return;
+      // A queued send is still an ordinary, refusal-capable command. The
+      // staged images were never taken, so restoring the text alone is
+      // enough to leave the whole queued message retryable — but only when
+      // the composer still holds the empty state this queued send cleared
+      // it to. If the user typed a newer draft while resolveForSend or
+      // sendFollowUp was pending, that draft is the one worth keeping; a
+      // stale queued prompt must not overwrite it.
+      if (draftRef.current.length > 0) return;
+      setDraft(prompt);
+      props.controller.setPendingDraft?.(prompt);
+    };
     setDraft("");
     props.controller.setPendingDraft?.("");
-    const threadMentionIds = await threadMentions.resolveForSend();
-    threadMentions.clear();
-    pathMentions.clear();
-    setTurnAccessOverride(undefined);
-    if (String(props.threadId) !== threadKey) return false;
-    return await props.controller.sendFollowUp(
-      prompt,
-      threadMentionIds,
-      attachmentSnapshot,
-      fileMentionPaths,
-      access,
-    );
+    try {
+      const threadMentionIds = await threadMentions.resolveForSend();
+      if (String(props.threadId) !== threadKey) return false;
+      const sent = await props.controller.sendFollowUp(
+        prompt,
+        threadMentionIds,
+        attachmentSnapshot,
+        fileMentionPaths,
+        access,
+      );
+      if (sent) {
+        // Do not clear or take context the user added while this queued turn
+        // was in flight. The queued prompt owns its original text,
+        // attachments, mentions, paths, and access choice; a newer draft
+        // owns anything changed after it was parked.
+        if (stillHoldsQueuedSnapshot()) {
+          attachments.takeForSend();
+          threadMentions.clear();
+          pathMentions.clear();
+          setTurnAccessOverride(undefined);
+        }
+      } else {
+        restoreQueuedSend();
+      }
+      return sent;
+    } catch {
+      restoreQueuedSend();
+      return false;
+    }
   };
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
@@ -930,7 +997,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       <InlineThreadPlan />
 
       <ThreadComposer
-        className="code-thread-workspace__composer thread-column"
+        className={`code-thread-workspace__composer thread-column${
+          queued.state.status === "idle"
+            ? ""
+            : ` code-thread-workspace__composer--${queued.state.status}`
+        }`}
         chips={
           <>
             {/*
@@ -1144,14 +1215,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           },
         }}
         footer={
-          <div className="code-thread-workspace__status">
+          <div aria-live="polite" className="code-thread-workspace__status">
             <span className="code-thread-workspace__hint">
               {providerChanging
                 ? "Checking the selected provider…"
                 : queued.state.status !== "idle"
-                  ? "Enter to edit · Discard to drop the queued message"
+                  ? "Queued follow-up · Enter to edit · Discard to remove"
                   : busy
-                    ? "Waiting for the provider · Enter queues the next message"
+                    ? "Response in progress · Enter queues this message"
                     : "Enter to send · Shift+Enter for a new line"}
             </span>
             {accessMessage === undefined ? null : (

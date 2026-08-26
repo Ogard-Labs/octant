@@ -26,6 +26,8 @@ export const ChatThreadId = brandedUuid("ChatThreadId");
 export type ChatThreadId = typeof ChatThreadId.Type;
 export const ChatTurnId = brandedUuid("ChatTurnId");
 export type ChatTurnId = typeof ChatTurnId.Type;
+export const ChatSubmissionId = brandedUuid("ChatSubmissionId");
+export type ChatSubmissionId = typeof ChatSubmissionId.Type;
 export const ChatAttemptId = brandedUuid("ChatAttemptId");
 export type ChatAttemptId = typeof ChatAttemptId.Type;
 export const ChatContentId = brandedUuid("ChatContentId");
@@ -183,6 +185,8 @@ export type ChatAttempt = typeof ChatAttempt.Type;
 export const ChatTurn = Schema.Struct({
   id: ChatTurnId,
   threadId: ChatThreadId,
+  /** Stable client submission identity used to reconcile an unknown response. */
+  submissionId: Schema.optional(ChatSubmissionId),
   sequence: PositiveInt,
   userMessageRef: ChatContentReference,
   attachmentIds: Schema.Array(ChatAttachmentId),
@@ -360,6 +364,8 @@ export const SendChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("send-chat-turn"),
   ...ChatThreadCommandFields,
   prompt: PromptText,
+  /** Optional for older clients; new clients preserve it across retry after an unknown outcome. */
+  submissionId: Schema.optional(ChatSubmissionId),
   attachmentIds: Schema.optional(
     Schema.Array(ChatAttachmentId).pipe(
       Schema.filter((attachmentIds) => attachmentIds.length <= MAX_CHAT_TURN_ATTACHMENTS),
@@ -803,6 +809,7 @@ export const CHAT_EVENT_NAMES = [
 ] as const;
 
 export const decodeChatThreadId = Schema.decodeUnknownSync(ChatThreadId);
+export const decodeChatSubmissionId = Schema.decodeUnknownSync(ChatSubmissionId);
 export const decodeChatTurnId = Schema.decodeUnknownSync(ChatTurnId);
 export const decodeChatAttemptId = Schema.decodeUnknownSync(ChatAttemptId);
 export const decodeChatContentId = Schema.decodeUnknownSync(ChatContentId);

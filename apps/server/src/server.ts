@@ -384,6 +384,7 @@ import {
   createWorkThreadMentionDirectory,
   createChatSideChatThreadFactory,
 } from "./chat/threadMentionService";
+import { ThreadDialogueService } from "./chat/threadDialogueService";
 import { codeForkHandoffResolver } from "./code/codeForkHandoff";
 import { createThreadMentionRouteHandler } from "./threadMentionRoutes";
 import { createFileMentionRouteHandler } from "./fileMentionRoutes";
@@ -1085,9 +1086,11 @@ function threadMentionContextResolver(threadMentions: () => ThreadMentionService
   return async ({
     threadMentionIds,
     windowId,
+    dialogueEnabled,
   }: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
     readonly windowId?: WindowId;
+    readonly dialogueEnabled?: boolean;
   }): Promise<
     ReadonlyArray<
       | { readonly kind: "resolved"; readonly threadId: MentionableThreadId; readonly text: string }
@@ -1117,7 +1120,13 @@ function threadMentionContextResolver(threadMentions: () => ThreadMentionService
       const mention = byThreadId.get(String(threadId));
       return mention === undefined
         ? { kind: "unreadable" as const, threadId }
-        : { kind: "resolved" as const, threadId, text: formatThreadMentionContext([mention]) };
+        : {
+            kind: "resolved" as const,
+            threadId,
+            text: formatThreadMentionContext([mention], {
+              dialogueEnabled: dialogueEnabled === true,
+            }),
+          };
     });
   };
 }
@@ -3372,6 +3381,7 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
     });
     let zenAssistantTools: ZenAssistantTools | undefined;
+    let threadDialogueService: ThreadDialogueService | undefined;
     // Composed after the Canvas service exists, the same way Zen's tools are.
     let canvasAgentToolPort: CanvasAgentToolPort | undefined;
     // Side Chat sidecars are ordinary Chat threads that must not appear in
@@ -3445,9 +3455,16 @@ export function startOctantServer(
       researchRouter,
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
-      resolveAppManagedTools: ({ windowId, thread }) =>
+      resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) =>
         combineAppManagedToolSets(
           zenAssistantTools?.forThread(windowId, thread),
+          threadDialogueService?.forThread({
+            windowId,
+            sourceThreadId: thread.id,
+            sourceTitle: thread.title,
+            targetThreadIds: threadMentionIds ?? [],
+            ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
+          }),
           canvasAgentToolPort === undefined
             ? undefined
             : createCanvasAgentTools({
@@ -3529,6 +3546,12 @@ export function startOctantServer(
       }),
       clock: () => new Date().toISOString(),
       uuid: randomUUID,
+    });
+    threadDialogueService = new ThreadDialogueService({
+      resolveChatTargets: (windowId, threadIds) =>
+        threadMentionService.chatDialogueTargets(windowId, threadIds),
+      readChatThread: (threadId) => chatService.read(threadId),
+      executeChat: (command, context) => chatService.execute(command, context),
     });
     const threadMentionRoutes = createThreadMentionRouteHandler({
       service: threadMentionService,

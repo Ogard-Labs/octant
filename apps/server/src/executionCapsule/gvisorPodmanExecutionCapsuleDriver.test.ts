@@ -1,0 +1,1108 @@
+import { createHash } from "node:crypto";
+import { chmod, link, mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { decodeExecutionCapsuleAcquireRequest } from "@octant/contracts/execution-capsule";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+  ExecutionCapsuleDiskLocation,
+  ExecutionCapsuleDiskStore,
+} from "./fuseExecutionCapsuleDiskStore";
+import {
+  GvisorPodmanExecutionCapsuleDriver,
+  type ExecutionCapsuleArtifactWriter,
+  type ExecutionCapsuleCommandRunner,
+  type ExecutionCapsuleGitBundleStore,
+  type ExecutionCapsuleSourceBundleStore,
+} from "./gvisorPodmanExecutionCapsuleDriver";
+
+const capacity = {
+  cpuMillicores: 4_000,
+  memoryBytes: 8 * 1_024 * 1_024 * 1_024,
+  diskBytes: 40 * 1_024 * 1_024 * 1_024,
+  pidLimit: 2_048,
+};
+
+const fixtureRuntimeId = "octant-capsule-11111111111141118111111111111111";
+
+function fixturePodmanArgs(args: ReadonlyArray<string>): ReadonlyArray<string> {
+  return [
+    "--root",
+    `/var/lib/octant/capsules/stores/${fixtureRuntimeId}/mount/graph`,
+    "--runroot",
+    `/var/lib/octant/capsules/stores/${fixtureRuntimeId}/mount/run`,
+    "--storage-driver",
+    "vfs",
+    "--cgroup-manager",
+    "cgroupfs",
+    ...args,
+  ];
+}
+
+function diskLocation(runtimeId: string, diskBytes: number): ExecutionCapsuleDiskLocation {
+  const directory = `/var/lib/octant/capsules/stores/${runtimeId}`;
+  const mountPath = `${directory}/mount`;
+  return {
+    directory,
+    imagePath: `${directory}/capsule.ext4`,
+    mountPath,
+    graphRoot: `${mountPath}/graph`,
+    runRoot: `${mountPath}/run`,
+    diskBytes,
+  };
+}
+
+const diskStore: ExecutionCapsuleDiskStore = {
+  create: async ({ runtimeId, diskBytes }) => diskLocation(runtimeId, diskBytes),
+  recover: async ({ runtimeId, diskBytes }) => diskLocation(runtimeId, diskBytes),
+  close: async () => undefined,
+  release: async () => undefined,
+};
+
+const artifactWriter: ExecutionCapsuleArtifactWriter = {
+  write: async () => ({ exitCode: 0, stderr: "" }),
+};
+
+const stationIdentity = {
+  homeDirectory: "/var/lib/octant",
+  expectedHomeDirectory: "/var/lib/octant",
+  gid: 1001,
+  supplementaryGroups: [1001],
+  identityProbe: {
+    probe: async () => ({ passwordlessSudo: false, dockerSocketAccessible: false }),
+  },
+  diskStore,
+  artifactWriter,
+  scopeInspector: { accepts: async () => true },
+} as const;
+
+const capsuleRequest = decodeExecutionCapsuleAcquireRequest({
+  capsuleId: "11111111-1111-4111-8111-111111111111",
+  owner: {
+    kind: "code-thread",
+    threadId: "22222222-2222-4222-8222-222222222222",
+  },
+  projectId: "33333333-3333-4333-8333-333333333333",
+  recipe: {
+    recipeId: "44444444-4444-4444-8444-444444444444",
+    revision: 1,
+    image: `ghcr.io/ogard-labs/octant-capsule@sha256:${"a".repeat(64)}`,
+    setup: [],
+  },
+  budget: {
+    cpuMillicores: 1_000,
+    memoryBytes: 2 * 1_024 * 1_024 * 1_024,
+    diskBytes: 10 * 1_024 * 1_024 * 1_024,
+    pidLimit: 512,
+  },
+});
+
+const source = {
+  bundlePath: "/source/octant.bundle",
+  sha256: "d".repeat(64),
+  byteLength: 4_096,
+  revision: "b".repeat(40),
+};
+const roots: string[] = [];
+
+afterEach(async () => {
+  for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true });
+});
+
+describe("GvisorPodmanExecutionCapsuleDriver", () => {
+  it("reports a protected backend only after rootless Podman and systrap execute", async () => {
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command) => {
+      if (command === "/usr/bin/podman") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+    });
+
+    await expect(driver.probe()).resolves.toEqual({
+      host: {
+        platform: "linux",
+        rootlessPodman: true,
+        runsc: true,
+        systrap: true,
+        cgroupsV2: true,
+        dedicatedIdentity: true,
+      },
+      available: capacity,
+    });
+    expect(run).toHaveBeenNthCalledWith(1, "/usr/bin/podman", ["info", "--format", "json"]);
+    expect(run).toHaveBeenNthCalledWith(2, "/usr/bin/podman", [
+      "unshare",
+      "/usr/bin/runsc",
+      "--ignore-cgroups",
+      "--platform=systrap",
+      "--network=none",
+      "do",
+      "true",
+    ]);
+  });
+
+  it("refuses to call a grouped or sudo-capable octant account a dedicated Station identity", async () => {
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command) => {
+      if (command === "/usr/bin/podman") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      supplementaryGroups: [1001, 999],
+      identityProbe: {
+        probe: async () => ({ passwordlessSudo: true, dockerSocketAccessible: false }),
+      },
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+    });
+
+    await expect(driver.probe()).resolves.toMatchObject({
+      host: { dedicatedIdentity: false },
+    });
+  });
+
+  it("accepts source bundles only from the dedicated owner-only source root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-capsule-source-test-"));
+    roots.push(root);
+    const stateRoot = join(root, "state");
+    const sourceRoot = join(stateRoot, "sources");
+    await mkdir(sourceRoot, { recursive: true, mode: 0o700 });
+    const bundlePath = join(sourceRoot, "source.bundle");
+    const linkedPath = join(sourceRoot, "source-hardlink.bundle");
+    const outsideBundlePath = join(root, "outside.bundle");
+    const bytes = Buffer.from("bundle-fixture");
+    await writeFile(bundlePath, bytes);
+    await writeFile(outsideBundlePath, bytes);
+    await chmod(bundlePath, 0o600);
+    await chmod(outsideBundlePath, 0o600);
+    await link(bundlePath, linkedPath);
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/podman" && args[0] === "info") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: process.getuid?.() ?? 0,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot,
+      capacity,
+      runner: { run },
+    });
+    const verifiedSource = {
+      bundlePath,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      byteLength: bytes.byteLength,
+      revision: "b".repeat(40),
+    };
+
+    await expect(
+      driver.create({ request: capsuleRequest, source: verifiedSource }),
+    ).resolves.toEqual({ status: "refused", reason: "source-unavailable" });
+    await unlink(linkedPath);
+    await expect(
+      driver.create({
+        request: capsuleRequest,
+        source: { ...verifiedSource, sha256: "e".repeat(64) },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "source-unavailable" });
+    await expect(
+      driver.create({
+        request: capsuleRequest,
+        source: { ...verifiedSource, bundlePath: outsideBundlePath },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "source-unavailable" });
+    expect(run.mock.calls.some(([, args]) => args.includes("create"))).toBe(false);
+
+    await expect(
+      driver.create({
+        request: capsuleRequest,
+        source: verifiedSource,
+      }),
+    ).resolves.toMatchObject({ status: "ready" });
+  });
+
+  it("creates a resource-bounded runsc capsule from a verified source bundle", async () => {
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/podman" && args[0] === "info") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const verifySource = vi.fn<ExecutionCapsuleSourceBundleStore["verify"]>(async () => undefined);
+    const acceptsScope = vi.fn(async () => true);
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: verifySource },
+      scopeInspector: { accepts: acceptsScope },
+    });
+
+    await expect(
+      driver.create({
+        request: capsuleRequest,
+        source,
+      }),
+    ).resolves.toEqual({
+      status: "ready",
+      runtimeId: "octant-capsule-11111111111141118111111111111111",
+    });
+
+    expect(verifySource).toHaveBeenCalledWith(source);
+    expect(acceptsScope).toHaveBeenCalledWith({
+      runtimeId: fixtureRuntimeId,
+      disk: diskLocation(fixtureRuntimeId, capsuleRequest.budget.diskBytes),
+      cpuMillicores: capsuleRequest.budget.cpuMillicores,
+      memoryBytes: capsuleRequest.budget.memoryBytes,
+      pidLimit: capsuleRequest.budget.pidLimit,
+    });
+    const createCall = run.mock.calls.find(
+      ([command, args]) => command === "/usr/bin/podman" && args.includes("create"),
+    );
+    expect(createCall?.[1]).toEqual([
+      "--root",
+      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/graph",
+      "--runroot",
+      "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/run",
+      "--storage-driver",
+      "vfs",
+      "--cgroup-manager",
+      "cgroupfs",
+      "--runtime",
+      "/usr/bin/runsc",
+      "--runtime-flag",
+      "platform=systrap",
+      "--runtime-flag",
+      "ignore-cgroups",
+      "--runtime-flag",
+      "network=none",
+      "--runtime-flag",
+      "overlay2=none",
+      "--runtime-flag",
+      "file-access=shared",
+      "create",
+      "--name",
+      "octant-capsule-11111111111141118111111111111111",
+      "--log-driver",
+      "none",
+      "--network",
+      "none",
+      "--cgroups",
+      "no-conmon",
+      "--userns",
+      "auto",
+      "--user",
+      "0:0",
+      "--cap-drop",
+      "all",
+      "--security-opt",
+      "no-new-privileges",
+      "--workdir",
+      "/",
+      "--env",
+      "HOME=/workspace/.home",
+      "--env",
+      "TMPDIR=/tmp",
+      "--label",
+      `app.octant.capsule=${String(capsuleRequest.capsuleId)}`,
+      "--entrypoint",
+      "/bin/sh",
+      String(capsuleRequest.recipe.image),
+      "-c",
+      "while :; do sleep 3600; done",
+    ]);
+    expect(createCall?.[1].join(" ")).not.toContain(source.bundlePath);
+    expect(
+      run.mock.calls.some(
+        ([command, args]) =>
+          command === "/usr/bin/podman" &&
+          args.includes("cp") &&
+          args.includes("--archive=true") &&
+          args.includes("octant-capsule-11111111111141118111111111111111:/workspace"),
+      ),
+    ).toBe(true);
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs([
+        "cp",
+        source.bundlePath,
+        "octant-capsule-11111111111141118111111111111111:/tmp/octant-source.bundle",
+      ]),
+    );
+    expect(run).toHaveBeenCalledWith("/usr/bin/systemd-run", [
+      "--user",
+      "--scope",
+      "--quiet",
+      "--collect",
+      "--unit",
+      "octant-capsule-11111111111141118111111111111111.scope",
+      "--property",
+      "CPUQuota=100%",
+      "--property",
+      `MemoryMax=${String(capsuleRequest.budget.memoryBytes)}`,
+      "--property",
+      `TasksMax=${String(capsuleRequest.budget.pidLimit)}`,
+      "/usr/bin/podman",
+      ...fixturePodmanArgs([
+        "--runtime",
+        "/usr/bin/runsc",
+        "--runtime-flag",
+        "platform=systrap",
+        "--runtime-flag",
+        "ignore-cgroups",
+        "--runtime-flag",
+        "network=none",
+        "--runtime-flag",
+        "overlay2=none",
+        "--runtime-flag",
+        "file-access=shared",
+        "start",
+        "octant-capsule-11111111111141118111111111111111",
+      ]),
+    ]);
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs([
+        "exec",
+        "--workdir",
+        "/",
+        "--",
+        "octant-capsule-11111111111141118111111111111111",
+        "git",
+        "clone",
+        "/tmp/octant-source.bundle",
+        "/workspace",
+      ]),
+    );
+  });
+
+  it("refuses a started capsule before cloning when live cgroup limits are unproven", async () => {
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/podman" && args[0] === "info") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      scopeInspector: { accepts: async () => false },
+    });
+
+    await expect(driver.create({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "creation-failed",
+    });
+    expect(run.mock.calls.some(([, args]) => args.includes("clone"))).toBe(false);
+    expect(
+      run.mock.calls.some(
+        ([command, args]) =>
+          command === "/usr/bin/podman" && args.includes("rm") && args.at(-1) === fixtureRuntimeId,
+      ),
+    ).toBe(true);
+  });
+
+  it("executes argv only inside a runtime the driver created", async () => {
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/podman" && args[0] === "info") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      if (command === "/usr/bin/podman" && args.at(-1) === "--short") {
+        return { exitCode: 0, stdout: "M src/index.ts\n", stderr: "" };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    const created = await driver.create({
+      request: capsuleRequest,
+      source,
+    });
+    if (created.status !== "ready") throw new Error("Expected the fixture capsule to start.");
+
+    await expect(
+      driver.execute({ runtimeId: created.runtimeId, argv: ["git", "status", "--short"] }),
+    ).resolves.toEqual({
+      status: "exited",
+      exitCode: 0,
+      stdout: "M src/index.ts\n",
+      stderr: "",
+    });
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs([
+        "exec",
+        "--workdir",
+        "/workspace",
+        "--",
+        created.runtimeId,
+        "git",
+        "status",
+        "--short",
+      ]),
+    );
+
+    await expect(
+      driver.execute({ runtimeId: "octant-capsule-unknown", argv: ["git", "status"] }),
+    ).resolves.toEqual({ status: "failed", reason: "runtime-unavailable" });
+  });
+
+  it("starts, exports, verifies, and stops a persisted capsule", async () => {
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/podman" && args[0] === "info") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      if (command === "/usr/bin/podman" && args.includes("rev-parse")) {
+        return { exitCode: 0, stdout: `${"c".repeat(40)}\n`, stderr: "" };
+      }
+      if (command === "/usr/bin/podman" && args.includes("sha256sum")) {
+        return {
+          exitCode: 0,
+          stdout: `${"b".repeat(64)}  /tmp/octant-export.bundle\n`,
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const reserve = vi.fn<ExecutionCapsuleGitBundleStore["reserve"]>(
+      async () => "/var/lib/octant/capsules/exports/capsule.bundle",
+    );
+    const verify = vi.fn<ExecutionCapsuleGitBundleStore["verify"]>(async () => ({
+      sha256: "b".repeat(64),
+      byteLength: 4_096,
+    }));
+    const writeArtifact = vi.fn<ExecutionCapsuleArtifactWriter["write"]>(async () => ({
+      exitCode: 0,
+      stderr: "",
+    }));
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      bundleStore: { reserve, verify },
+      artifactWriter: { write: writeArtifact },
+    });
+    const created = await driver.create({
+      request: capsuleRequest,
+      source,
+    });
+    if (created.status !== "ready") throw new Error("Expected the fixture capsule to start.");
+    await expect(driver.stop({ runtimeId: created.runtimeId })).resolves.toEqual({
+      status: "stopped",
+    });
+
+    await expect(driver.exportGitBundle({ runtimeId: created.runtimeId })).resolves.toEqual({
+      status: "exported",
+      artifactPath: "/var/lib/octant/capsules/exports/capsule.bundle",
+      sha256: "b".repeat(64),
+      byteLength: 4_096,
+      headRevision: "c".repeat(40),
+    });
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs([
+        "exec",
+        "--workdir",
+        "/workspace",
+        "--",
+        created.runtimeId,
+        "git",
+        "-C",
+        "/workspace",
+        "bundle",
+        "create",
+        "/tmp/octant-export.bundle",
+        "--all",
+      ]),
+    );
+    expect(writeArtifact).toHaveBeenCalledWith({
+      command: "/usr/bin/podman",
+      args: fixturePodmanArgs([
+        "exec",
+        "--workdir",
+        "/workspace",
+        "--",
+        created.runtimeId,
+        "cat",
+        "/tmp/octant-export.bundle",
+      ]),
+      artifactPath: "/var/lib/octant/capsules/exports/capsule.bundle",
+      maxBytes: 1_024 * 1_024 * 1_024,
+    });
+    expect(verify).toHaveBeenCalledWith({
+      artifactPath: "/var/lib/octant/capsules/exports/capsule.bundle",
+      expectedSha256: "b".repeat(64),
+    });
+    const verifierProvisionIndex = run.mock.calls.findIndex(
+      ([command, args]) =>
+        command === "/usr/bin/podman" &&
+        args.includes("cp") &&
+        args.includes("--archive=true") &&
+        args.some((arg) => arg.endsWith(":/verify")),
+    );
+    const verifierStartIndex = run.mock.calls.findIndex(
+      ([command, args]) =>
+        command === "/usr/bin/systemd-run" &&
+        args.at(-1)?.startsWith(`${fixtureRuntimeId}-verify-`) === true,
+    );
+    expect(verifierProvisionIndex).toBeGreaterThan(-1);
+    expect(verifierStartIndex).toBeGreaterThan(verifierProvisionIndex);
+    expect(
+      run.mock.calls.some(
+        ([command, args]) =>
+          command === "/usr/bin/podman" &&
+          args.includes("/verify") &&
+          args.includes("/tmp/capsule.bundle") &&
+          args.includes("verify"),
+      ),
+    ).toBe(true);
+  });
+
+  it("releases only a runtime it owns and forgets it after confirmed removal", async () => {
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/podman" && args[0] === "info") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    const created = await driver.create({
+      request: capsuleRequest,
+      source,
+    });
+    if (created.status !== "ready") throw new Error("Expected the fixture capsule to start.");
+
+    await expect(driver.release({ runtimeId: created.runtimeId })).resolves.toEqual({
+      status: "released",
+    });
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["rm", "--force", "--time", "10", created.runtimeId]),
+    );
+    await expect(
+      driver.execute({ runtimeId: created.runtimeId, argv: ["git", "status"] }),
+    ).resolves.toEqual({ status: "failed", reason: "runtime-unavailable" });
+    await expect(driver.release({ runtimeId: "octant-capsule-unknown" })).resolves.toEqual({
+      status: "failed",
+      reason: "release-failed",
+    });
+  });
+
+  it("retries private store cleanup without removing the same container twice", async () => {
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/podman" && args[0] === "info") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    let releaseAttempts = 0;
+    const releaseDisk = vi.fn(async () => {
+      releaseAttempts += 1;
+      if (releaseAttempts === 1) throw new Error("transient unmount failure");
+    });
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      diskStore: { ...diskStore, release: releaseDisk },
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    const created = await driver.create({ request: capsuleRequest, source });
+    if (created.status !== "ready") throw new Error("Expected the fixture capsule to start.");
+
+    await expect(driver.release({ runtimeId: created.runtimeId })).resolves.toEqual({
+      status: "failed",
+      reason: "release-failed",
+    });
+    await expect(driver.release({ runtimeId: created.runtimeId })).resolves.toEqual({
+      status: "released",
+    });
+
+    expect(releaseDisk).toHaveBeenCalledTimes(2);
+    expect(
+      run.mock.calls.filter(
+        ([command, args]) =>
+          command === "/usr/bin/podman" && args.includes("rm") && args.at(-1) === created.runtimeId,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("stops a capsule without removing it and recovers the exact stopped identity", async () => {
+    const runtimeId = "octant-capsule-11111111111141118111111111111111";
+    let recoveredOciRuntime = "/usr/bin/runsc";
+    let recoveredEffectiveCaps: unknown = [];
+    let recoveredMounts: unknown = [];
+    let recoveredRunning = false;
+    let recoveredStopExitCode = 0;
+    let recoveredKillExitCode = 0;
+    const run = vi.fn<ExecutionCapsuleCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/podman" && args[0] === "info") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ host: { security: { rootless: true }, cgroupVersion: "v2" } }),
+          stderr: "",
+        };
+      }
+      if (command === "/usr/bin/podman" && args.includes("inspect")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              Name: runtimeId,
+              ImageName: String(capsuleRequest.recipe.image),
+              OCIRuntime: recoveredOciRuntime,
+              EffectiveCaps: recoveredEffectiveCaps,
+              Mounts: recoveredMounts,
+              State: { Running: recoveredRunning },
+              Config: {
+                User: "0:0",
+                CreateCommand: [
+                  "podman",
+                  "--root",
+                  "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/graph",
+                  "--runroot",
+                  "/var/lib/octant/capsules/stores/octant-capsule-11111111111141118111111111111111/mount/run",
+                  "--storage-driver",
+                  "vfs",
+                  "--cgroup-manager",
+                  "cgroupfs",
+                  "--runtime",
+                  "/usr/bin/runsc",
+                  "--runtime-flag",
+                  "platform=systrap",
+                  "--runtime-flag",
+                  "ignore-cgroups",
+                  "--runtime-flag",
+                  "network=none",
+                  "--runtime-flag",
+                  "overlay2=none",
+                  "--runtime-flag",
+                  "file-access=shared",
+                  "create",
+                  "--log-driver",
+                  "none",
+                  "--network",
+                  "none",
+                  "--cgroups",
+                  "no-conmon",
+                  "--userns",
+                  "auto",
+                  "--cap-drop",
+                  "all",
+                  "--security-opt",
+                  "no-new-privileges",
+                ],
+                Labels: { "app.octant.capsule": String(capsuleRequest.capsuleId) },
+              },
+              HostConfig: {
+                NetworkMode: "none",
+                SecurityOpt: ["no-new-privileges"],
+                Privileged: false,
+                UsernsMode: "private",
+              },
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      if (command === "/usr/bin/podman" && args.includes("stop")) {
+        return { exitCode: recoveredStopExitCode, stdout: "", stderr: "" };
+      }
+      if (command === "/usr/bin/podman" && args.includes("kill")) {
+        return { exitCode: recoveredKillExitCode, stdout: "", stderr: "" };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const driver = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    const created = await driver.create({ request: capsuleRequest, source });
+    if (created.status !== "ready") throw new Error("Expected the fixture capsule to start.");
+
+    await expect(driver.stop({ runtimeId: created.runtimeId })).resolves.toEqual({
+      status: "stopped",
+    });
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["stop", "--time", "10", runtimeId]),
+    );
+
+    const afterRestart = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    await expect(afterRestart.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "stopped",
+      runtimeId,
+    });
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["inspect", "--format", "json", runtimeId]),
+    );
+    await expect(afterRestart.execute({ runtimeId, argv: ["git", "status"] })).resolves.toEqual({
+      status: "failed",
+      reason: "runtime-unavailable",
+    });
+
+    recoveredOciRuntime = "/usr/bin/runc";
+    const recordDiagnostic = vi.fn();
+    const forgedRuntime = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      recordDiagnostic,
+    });
+    await expect(forgedRuntime.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    expect(recordDiagnostic).toHaveBeenCalledWith({
+      operation: "recover-inspected-runtime",
+      message: "runtime protection mismatch: oci-runtime",
+    });
+
+    recoveredOciRuntime = "/usr/bin/runsc";
+    recoveredEffectiveCaps = null;
+    const stoppedInspect = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    await expect(stoppedInspect.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "stopped",
+      runtimeId,
+    });
+
+    recoveredMounts = [
+      {
+        Type: "volume",
+        Source: `${diskLocation(runtimeId, capsuleRequest.budget.diskBytes).graphRoot}/volumes/image-data/_data`,
+      },
+    ];
+    const imageVolumeInspect = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    await expect(imageVolumeInspect.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "stopped",
+      runtimeId,
+    });
+
+    recoveredMounts = [
+      {
+        Type: "bind",
+        Source: `${diskLocation(runtimeId, capsuleRequest.budget.diskBytes).graphRoot}/forged-bind`,
+      },
+    ];
+    const bindMountDiagnostic = vi.fn();
+    const bindMountInspect = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      recordDiagnostic: bindMountDiagnostic,
+    });
+    await expect(bindMountInspect.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    expect(bindMountDiagnostic).toHaveBeenCalledWith({
+      operation: "recover-inspected-runtime",
+      message: "runtime protection mismatch: host-mounts",
+    });
+
+    recoveredMounts = [];
+    recoveredEffectiveCaps = [];
+    recoveredRunning = true;
+    const recoveryScope = vi.fn(async () => false);
+    const recoveryScopeDiagnostic = vi.fn();
+    const liveRecovery = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      scopeInspector: { accepts: recoveryScope },
+      recordDiagnostic: recoveryScopeDiagnostic,
+    });
+    await expect(liveRecovery.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    expect(recoveryScope).toHaveBeenCalledWith({
+      runtimeId,
+      disk: diskLocation(runtimeId, capsuleRequest.budget.diskBytes),
+      cpuMillicores: capsuleRequest.budget.cpuMillicores,
+      memoryBytes: capsuleRequest.budget.memoryBytes,
+      pidLimit: capsuleRequest.budget.pidLimit,
+    });
+    expect(recoveryScopeDiagnostic).toHaveBeenCalledWith({
+      operation: "recover-scope",
+      message: "live recovered runtime exceeded its budget",
+    });
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["stop", "--time", "10", runtimeId]),
+    );
+
+    recoveredStopExitCode = 1;
+    recoveredKillExitCode = 0;
+    const forcedStop = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    await expect(forcedStop.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    expect(run).toHaveBeenCalledWith(
+      "/usr/bin/podman",
+      fixturePodmanArgs(["kill", "--signal", "KILL", runtimeId]),
+    );
+
+    recoveredKillExitCode = 1;
+    const failedStop = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+    });
+    await expect(failedStop.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    recoveredStopExitCode = 0;
+    recoveredKillExitCode = 0;
+    await expect(failedStop.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "stopped",
+      runtimeId,
+    });
+
+    recoveredRunning = false;
+    recoveredMounts = [];
+    recoveredEffectiveCaps = 7;
+    const inspectShapeDiagnostic = vi.fn();
+    const malformedInspect = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      recordDiagnostic: inspectShapeDiagnostic,
+    });
+    await expect(malformedInspect.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    expect(inspectShapeDiagnostic).toHaveBeenCalledWith({
+      operation: "recover-inspected-runtime",
+      message: expect.stringContaining("EffectiveCaps=number"),
+    });
+
+    const diskRecoveryDiagnostic = vi.fn();
+    const unavailableDisk = new GvisorPodmanExecutionCapsuleDriver({
+      platform: "linux",
+      username: "octant",
+      uid: 1001,
+      ...stationIdentity,
+      diskStore: {
+        ...diskStore,
+        recover: async () => {
+          throw new Error("private path must not escape diagnostics");
+        },
+      },
+      podmanPath: "/usr/bin/podman",
+      runscPath: "/usr/bin/runsc",
+      stateRoot: "/var/lib/octant/capsules",
+      capacity,
+      runner: { run },
+      sourceBundleStore: { verify: async () => undefined },
+      recordDiagnostic: diskRecoveryDiagnostic,
+    });
+    await expect(unavailableDisk.recover({ request: capsuleRequest, source })).resolves.toEqual({
+      status: "refused",
+      reason: "runtime-unavailable",
+    });
+    expect(diskRecoveryDiagnostic).toHaveBeenCalledWith({
+      operation: "recover-disk",
+      message: "capsule disk recovery failed",
+    });
+  });
+});

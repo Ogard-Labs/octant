@@ -130,6 +130,18 @@ thread, the server records a **promotion proposal**; only explicit user approval
 creates a linked Code thread, and the new thread inherits no authority from the
 Work thread.
 
+Rebinding a Code Project supersedes the checkout its existing threads were
+created against, and no later observation can produce those threads' checkout
+ids again, so the server reports them as unavailable rather than waiting on a
+reconnection nobody is attempting. Per `docs/decisions/0032`, that refusal names
+a way out: the thread's fail-closed surface offers an explicit rebind that moves
+it onto the checkout the Project binds now. The server authorizes and journals
+the move, and it never happens on its own — a matching filesystem root is not
+consent to change what authority a thread holds. A session grant of Full access
+does not survive the move; the thread lands on its persisted posture. A thread
+that owns a managed worktree is refused, because that checkout is the thread's
+own tree rather than the Project's.
+
 A child AgentRun receives a server-prepared workspace: Chat a research-only
 virtual workspace, Work the current confined Project root and binding revision,
 and Code an isolated managed worktree that is confirmed before admission.
@@ -148,15 +160,20 @@ ambiguous state resolves to Waiting.
 
 A `#thread` mention points at another thread the sender can already Open. The
 host resolves a bounded, read-only title, status, and transcript window at send
-time; the mentioned thread is not interrupted, steered, or mutated. In Work and
-Code, an `@file` mention completes a path inside the thread's bound root; the
-host refuses a path outside that root before reading it. Chat Projects have no
-filesystem authority, so `@file` is absent there. Unknown `@` text stays
-ordinary text; `@plugin` / `$skill` addressing is unchanged. Side Chat is a
-Chat-mode sidecar about exactly one source thread: ordinary Chat with that
-thread's bounded context, no inherited Work or Code authority, and no path that
-approves, steers, or appends to the source. Unavailable, unauthorized, or
-deleted targets fail closed.
+time. In Chat, an explicit mention also grants the source provider the bounded
+`octant_thread_message` tool for that turn: it may send one of the user's
+instructions to the mentioned Chat thread and receive its completed reply. The
+target's own Chat turn, provider, Project, and authority remain authoritative;
+an active target returns Waiting rather than being interrupted or duplicated.
+Coordination is one hop and unavailable, unauthorized, or deleted targets fail
+closed. Work and Code mentions remain read-only. In Work and Code, an `@file`
+mention completes a path inside the thread's bound root; the host refuses a path
+outside that root before reading it. Chat Projects have no filesystem authority,
+so `@file` is absent there. Unknown `@` text stays ordinary text; `@plugin` /
+`$skill` addressing is unchanged. Side Chat is a Chat-mode sidecar about
+exactly one source thread: ordinary Chat with that thread's bounded context,
+no inherited Work or Code authority, and no path that approves, steers, or
+appends to the source.
 
 ## Workspace shell
 
@@ -418,6 +435,30 @@ mechanisms are:
   launch's exact roots are re-allowed after those denials. Path checks alone
   are never the boundary. Confined reads open a handle and verify identity
   against what containment resolved.
+- **Linux Station isolation tracer, not product-wired.** The server now has a
+  provider-neutral execution-capsule service plus a rootless Podman and gVisor
+  `systrap` driver. The tracer accepts only digest-pinned images, independent
+  clones created inside gVisor from owner-only source bundles, explicit
+  resource budgets, no network, and no host bind mounts. Each capsule's full
+  persistent Podman VFS graph store lives in an owner-only fixed-size ext4
+  image mounted through `fuse2fs`, so its image, dependencies, and clone share
+  one hard disk ceiling without privileged project-quota administration. Its
+  disposable Podman runroot is a short owned runtime directory preserved long
+  enough for recovery to inspect and stop a surviving runtime, then removed
+  through Podman's mapped user namespace on release. Intermediate Podman state
+  paths may be owner-controlled and traverse-only, while backing images remain
+  owner-only. A transient systemd
+  user scope owns the outer CPU, memory, and PID limits. The driver and
+  independent evidence derive their effective values from the live sandbox
+  process cgroup ancestry before accepting it. The tracer can
+  execute argv, verify and
+  export a Git bundle, stop without deleting the filesystem, recover only as
+  stopped after live-authority revalidation, briefly restart a stopped capsule
+  inside its verified budget to export it, and release the exact runtime after
+  an explicit export. A dedicated Linux CI job proves two real capsules
+  cannot see or signal one another. Ordinary Code threads do not use this
+  service yet, so Linux remains an incompatible destination until the AgentRun
+  and Station launch paths are wired and revalidated.
 - **Subagents.** Child runs receive equal-or-narrower authority, clamped
   server-side; Code children require a verified isolated worktree receipt.
 - **Remote clients.** Pairing issues a revocable device key; the private

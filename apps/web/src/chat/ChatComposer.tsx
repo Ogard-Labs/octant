@@ -222,9 +222,12 @@ export function ChatComposer(props: ChatComposerProps) {
   const trimmedDraft = props.draft.trim();
   const queueStatus = props.queueStatus ?? "idle";
   const queued = queueStatus === "queued" || queueStatus === "held";
-  const sendDisabledReason =
+  const baseSendDisabledReason =
     props.sendDisabledReason ??
     (trimmedDraft.length === 0 && !queued ? "Enter a message before sending." : undefined);
+  const [sendPending, setSendPending] = useState(false);
+  const [sendError, setSendError] = useState<string | undefined>(undefined);
+  const sendDisabledReason = sendPending ? "Sending message…" : baseSendDisabledReason;
   const stopDisabledReason =
     props.stopDisabledReason ??
     (props.isSending && props.onStop === undefined
@@ -247,6 +250,8 @@ export function ChatComposer(props: ChatComposerProps) {
     imageAttachment,
     research: props.research.backend,
     sendDisabledReason,
+    sendError,
+    sendPending,
     statusMessage: props.statusMessage,
     stopDisabledReason,
     isSending: props.isSending,
@@ -285,7 +290,20 @@ export function ChatComposer(props: ChatComposerProps) {
   function send() {
     if (sendDisabledReason !== undefined) return;
     if (queueStatus === "queued") return;
-    void props.onSend(props.draft);
+    setSendPending(true);
+    setSendError(undefined);
+    void (async () => {
+      try {
+        const sent = await props.onSend(props.draft);
+        if (!sent) {
+          setSendError("Message could not be sent. Your draft is still here; try again.");
+        }
+      } catch {
+        setSendError("Message could not be sent. Your draft is still here; try again.");
+      } finally {
+        setSendPending(false);
+      }
+    })();
   }
 
   /**
@@ -400,6 +418,9 @@ export function ChatComposer(props: ChatComposerProps) {
     <>
       <ThreadMentionChips
         chips={props.threadMentions?.chips ?? []}
+        {...(props.threadMentions?.dialogueEnabled === undefined
+          ? {}
+          : { dialogueEnabled: props.threadMentions.dialogueEnabled })}
         onRemove={(threadId) => props.threadMentions?.onRemoveChip(threadId)}
         {...(props.threadMentions?.onOpenSideChat === undefined
           ? {}
@@ -519,6 +540,7 @@ export function ChatComposer(props: ChatComposerProps) {
       }
       className="composer-input window-no-drag"
       onChange={(event) => {
+        setSendError(undefined);
         props.onDraftChange(event.currentTarget.value);
         rememberCaret(event.currentTarget.selectionStart);
         syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
@@ -759,7 +781,9 @@ export function ChatComposer(props: ChatComposerProps) {
     <ThreadComposer
       ariaLabel="Chat composer"
       chips={chips}
-      className="chat-composer thread-column"
+      className={`chat-composer thread-column${
+        queueStatus === "idle" ? "" : ` chat-composer--${queueStatus}`
+      }`}
       footer={
         <div
           aria-live="polite"
@@ -819,6 +843,8 @@ function composeStatus(input: {
   readonly queueStatus: "idle" | "queued" | "held";
   readonly research: ChatComposerResearchBackend;
   readonly sendDisabledReason?: string | undefined;
+  readonly sendError?: string | undefined;
+  readonly sendPending: boolean;
   readonly statusMessage?: string | undefined;
   readonly stopDisabledReason?: string | undefined;
 }): { readonly text: string; readonly loud: boolean } {
@@ -841,12 +867,15 @@ function composeStatus(input: {
     );
   }
   if (input.statusMessage !== undefined) loud.push(input.statusMessage);
+  if (input.sendError !== undefined) loud.push(input.sendError);
   if (input.queueStatus === "queued") {
     loud.push("This message is queued and will send when the response finishes.");
   } else if (input.queueStatus === "held" && input.statusMessage === undefined) {
     loud.push("The queued message was not sent.");
   }
-  if (input.isSending && input.stopDisabledReason !== undefined) {
+  if (input.sendPending) {
+    loud.push("Sending message…");
+  } else if (input.isSending && input.stopDisabledReason !== undefined) {
     loud.push(input.stopDisabledReason);
   } else if (input.isSending && input.queueStatus === "idle") {
     loud.push("Response is streaming. You can type the next message.");

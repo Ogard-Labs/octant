@@ -55,6 +55,8 @@ distilled successor of the earlier long-form design specifications.
 | [0045](0045-environment-summarizes-the-active-thread.md)      | Environment summarizes the active thread                          | Accepted           |
 | [0046](0046-shadcn-recipes-own-product-controls.md)           | shadcn recipes own product controls                               | Accepted           |
 | [0047](0047-workspace-translucency-opt-in.md)                 | Workspace translucency opt-in                                     | Accepted           |
+| [0048](0048-linux-stations-and-execution-capsules.md)         | Linux Stations isolate Code work in execution capsules            | Proposed           |
+| [0049](0049-thread-dialogue-lane.md)                          | Explicit Chat thread dialogue                                     | Accepted           |
 
 ## Adding an ADR
 
@@ -66,6 +68,9 @@ distilled successor of the earlier long-form design specifications.
 - To change an `Accepted` decision, write a new ADR and add
   `**Status:** Superseded by 00NN` to the old one; do not edit history in place.
   A superseding number always points at a later record.
+- A scoped exception may partially supersede one rule without replacing the
+  whole record: leave the older record `Accepted`, and make the newer ADR name
+  the exact rule it supersedes and state which remaining rules still stand.
 - A `Proposed` record is still being agreed, so it is revised in place. There is
   no history to preserve until it is accepted, and superseding a proposal with a
   second proposal would leave two records describing one undecided direction.

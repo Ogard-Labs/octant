@@ -41,6 +41,7 @@ export * from "./dataLifecyclePolicy";
 export * from "./threadRetentionPolicy";
 export * from "./threadExportPolicy";
 export * from "./eventPolicy";
+export * from "./executionCapsulePolicy";
 export * from "./goalPolicy";
 export * from "./goalLoopPolicy";
 export * from "./shipPolicy";

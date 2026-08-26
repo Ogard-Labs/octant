@@ -161,6 +161,23 @@ export class ThreadMentionService {
     }
   }
 
+  /**
+   * Re-resolve explicitly mentioned Chat targets for the coordination tool.
+   * The renderer's ids are only hints; the current window's Openable directory
+   * remains the authority at the moment the provider asks to send.
+   */
+  async chatDialogueTargets(
+    windowId: WindowId,
+    threadIds: ReadonlyArray<MentionableThreadId>,
+  ): Promise<ReadonlyArray<ThreadMentionDirectoryThread>> {
+    const directory = this.#directories.find((candidate) => candidate.mode === "chat");
+    if (directory === undefined || threadIds.length === 0) return [];
+    const allowed = new Set(threadIds.map((threadId) => String(threadId)));
+    return (await directory.listOpenable(windowId)).filter((thread) =>
+      allowed.has(String(thread.threadId)),
+    );
+  }
+
   async #openable(windowId: WindowId): Promise<ReadonlyMap<string, ThreadMentionDirectoryThread>> {
     const openable = new Map<string, ThreadMentionDirectoryThread>();
     const hidden = this.#sidecars.hiddenThreadIds();
