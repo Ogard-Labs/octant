@@ -110,6 +110,8 @@ describe("CodeOverview", () => {
           stagedCount: 1,
           committedAhead: 2,
           workingTreeClean: false,
+          insertions: 12,
+          deletions: 3,
         },
         checks: { freshness: "fresh", state: "passing" },
         linkedPullRequest: {
@@ -166,7 +168,7 @@ describe("CodeOverview", () => {
     expect(screen.queryByText("Another Project")).not.toBeInTheDocument();
     expect(screen.getByText("feature/controller")).toBeVisible();
     expect(
-      screen.getByText("3 changed files · 1 staged · 2 committed ahead · stale"),
+      screen.getByText("3 changed files · +12 −3 · 1 staged · 2 committed ahead · stale"),
     ).toBeVisible();
     expect(screen.getByText("Passing")).toBeVisible();
     expect(screen.getByText("#806 · open")).toBeVisible();
@@ -458,6 +460,7 @@ function controller(): CodeController {
     forkThread: vi.fn(async () => undefined),
     renameThread: vi.fn(async () => true),
     pinThread: vi.fn(async () => true),
+    rebindThreadCheckout: vi.fn(async () => undefined),
 
     turnActivity: new Map(),
     providerRequests: [],

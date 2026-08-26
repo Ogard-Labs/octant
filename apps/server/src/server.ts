@@ -165,6 +165,10 @@ import {
   type ManagedCodeThreadCreationPort,
 } from "./code/codeService";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
+import {
+  createCodeProfileSkillResolver,
+  createStoredCodeProfileSkillTextLoader,
+} from "./code/codeProfileSkillResolver";
 import { CodeOperationEventStore } from "./code/codeOperationEventStore";
 import {
   CodeThreadMetadataService,
@@ -385,6 +389,7 @@ import {
   createWorkThreadMentionDirectory,
   createChatSideChatThreadFactory,
 } from "./chat/threadMentionService";
+import { ThreadDialogueService } from "./chat/threadDialogueService";
 import { codeForkHandoffResolver } from "./code/codeForkHandoff";
 import { createThreadMentionRouteHandler } from "./threadMentionRoutes";
 import { createFileMentionRouteHandler } from "./fileMentionRoutes";
@@ -1086,9 +1091,11 @@ function threadMentionContextResolver(threadMentions: () => ThreadMentionService
   return async ({
     threadMentionIds,
     windowId,
+    dialogueEnabled,
   }: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
     readonly windowId?: WindowId;
+    readonly dialogueEnabled?: boolean;
   }): Promise<
     ReadonlyArray<
       | { readonly kind: "resolved"; readonly threadId: MentionableThreadId; readonly text: string }
@@ -1118,7 +1125,13 @@ function threadMentionContextResolver(threadMentions: () => ThreadMentionService
       const mention = byThreadId.get(String(threadId));
       return mention === undefined
         ? { kind: "unreadable" as const, threadId }
-        : { kind: "resolved" as const, threadId, text: formatThreadMentionContext([mention]) };
+        : {
+            kind: "resolved" as const,
+            threadId,
+            text: formatThreadMentionContext([mention], {
+              dialogueEnabled: dialogueEnabled === true,
+            }),
+          };
     });
   };
 }
@@ -1143,6 +1156,7 @@ function withCodeOperationRuntime(
 ): CodeRouteService {
   return {
     bootstrap: (windowId) => service.bootstrap(windowId),
+    navigation: (windowId) => service.navigation(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
     execute: (windowId, command) => service.execute(windowId, command),
     executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
@@ -1218,6 +1232,7 @@ function withCodeBoard(
 ): CodeRouteService {
   return {
     bootstrap: (windowId) => service.bootstrap(windowId),
+    navigation: (windowId) => service.navigation(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
     execute: (windowId, command, signal) => service.execute(windowId, command, signal),
     subscribe: (windowId, threadId, afterSequence, signal) =>
@@ -1456,7 +1471,7 @@ export function startOctantServer(
         }),
         onSessionStarted: ({ runId }) => agentRunLiveConversations.begin(runId),
         onTextDelta: ({ runId, text, occurredAt }) =>
-          agentRunLiveConversations.appendText(runId, text, occurredAt as UtcTimestamp),
+          agentRunLiveConversations.appendText(runId, text, occurredAt),
         onSessionSettled: ({ runId, outcome }) => {
           if (outcome.kind === "completed") {
             agentRunLiveConversations.complete(runId);
@@ -2031,7 +2046,7 @@ export function startOctantServer(
     // A plan belongs to a Code thread, so the window must currently be in Code
     // on the Project that owns it. Same shape as the Goal check above: read the
     // window's own workspace, never a scope the caller supplied.
-    // Hoisted so the Code board can read the same durable state (0048) instead
+    // Hoisted so the Code board can read the same durable state (0051) instead
     // of standing up a second plan store.
     const planService = new PlanService({
       store: new JournalPlanStore({ journal: persistence.journal, uuid: randomUUID }),
@@ -2784,6 +2799,18 @@ export function startOctantServer(
         browserAuthority,
         () => new Date().toISOString(),
         (threadId) => readThreadExternalContentTaint(persistence.connection, threadId),
+        (threadId) => {
+          const thread = persistence.readCodeThread(threadId as never);
+          if (thread === undefined) return undefined;
+          return {
+            ...(thread.toolConstraints === undefined
+              ? {}
+              : { toolConstraints: thread.toolConstraints }),
+            ...(thread.profileDisplayName === undefined
+              ? {}
+              : { profileDisplayName: thread.profileDisplayName }),
+          };
+        },
       ),
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       uuid: randomUUID,
@@ -3014,6 +3041,14 @@ export function startOctantServer(
             : undefined;
         },
         resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
+        resolveProfileSkills: createCodeProfileSkillResolver({
+          snapshot: () => extensionApiService.snapshot(),
+          loadSkillText: createStoredCodeProfileSkillTextLoader({
+            snapshot: () => extensionApiService.snapshot(),
+            readVerifiedComponentText: async (target) =>
+              extensionPackageStore.readVerifiedComponentText(target, target.componentId),
+          }),
+        }),
         githubReadTools: ({ windowId, thread, readThread }) =>
           githubReadToolService.createToolSet({ windowId, thread, readThread }),
         resolvePullRequestTarget: async (threadId) => {
@@ -3378,6 +3413,7 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
     });
     let zenAssistantTools: ZenAssistantTools | undefined;
+    let threadDialogueService: ThreadDialogueService | undefined;
     // Composed after the Canvas service exists, the same way Zen's tools are.
     let canvasAgentToolPort: CanvasAgentToolPort | undefined;
     // Side Chat sidecars are ordinary Chat threads that must not appear in
@@ -3451,9 +3487,16 @@ export function startOctantServer(
       researchRouter,
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
-      resolveAppManagedTools: ({ windowId, thread }) =>
+      resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) =>
         combineAppManagedToolSets(
           zenAssistantTools?.forThread(windowId, thread),
+          threadDialogueService?.forThread({
+            windowId,
+            sourceThreadId: thread.id,
+            sourceTitle: thread.title,
+            targetThreadIds: threadMentionIds ?? [],
+            ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
+          }),
           canvasAgentToolPort === undefined
             ? undefined
             : createCanvasAgentTools({
@@ -3535,6 +3578,12 @@ export function startOctantServer(
       }),
       clock: () => new Date().toISOString(),
       uuid: randomUUID,
+    });
+    threadDialogueService = new ThreadDialogueService({
+      resolveChatTargets: (windowId, threadIds) =>
+        threadMentionService.chatDialogueTargets(windowId, threadIds),
+      readChatThread: (threadId) => chatService.read(threadId),
+      executeChat: (command, context) => chatService.execute(command, context),
     });
     const threadMentionRoutes = createThreadMentionRouteHandler({
       service: threadMentionService,
@@ -5816,6 +5865,14 @@ export function startOctantServer(
             githubRepositoryObservationPort.close();
           } catch (error) {
             shutdownFailure = error;
+          }
+          try {
+            // Drop process-local live transcripts before HTTP drain. Open
+            // NDJSON subscribers would otherwise keep connections alive, and
+            // Git observations must still abort without waiting for that drain.
+            agentRunLiveConversations.close();
+          } catch (error) {
+            shutdownFailure ??= error;
           }
           try {
             httpStop = server.stop(true);

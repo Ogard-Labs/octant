@@ -4,6 +4,7 @@ import type {
   CodeProjectPullRequestFreshness,
   CodeProjectPullRequestLinkedThread,
 } from "@octant/contracts";
+import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PullRequestConversation } from "./CodeReviewPane";
 
@@ -12,6 +13,16 @@ const PR_STATE_LABELS: Record<CodeProjectPullRequestDetailObserved["pullRequestS
   draft: "Draft",
   merged: "Merged",
   closed: "Closed",
+};
+
+const PR_STATE_VARIANTS: Record<
+  CodeProjectPullRequestDetailObserved["pullRequestState"],
+  NonNullable<OctantBadgeProps["variant"]>
+> = {
+  open: "secondary",
+  draft: "outline",
+  merged: "success",
+  closed: "destructive",
 };
 
 const CHECK_STATE_LABELS: Record<
@@ -23,6 +34,17 @@ const CHECK_STATE_LABELS: Record<
   pending: "Pending",
   neutral: "Neutral",
   unknown: "Unknown",
+};
+
+const CHECK_STATE_VARIANTS: Record<
+  CodeProjectPullRequestDetailObserved["checks"][number]["state"],
+  NonNullable<OctantBadgeProps["variant"]>
+> = {
+  success: "success",
+  failure: "destructive",
+  pending: "warning",
+  neutral: "secondary",
+  unknown: "secondary",
 };
 
 export interface ProjectPullRequestReviewPaneProps {
@@ -47,9 +69,9 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           <span>Pull request #{detail.number}</span>
           <h1>{detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}</h1>
           <p className="code-pr-review__meta">
-            <span className="code-pr-review__badge">
+            <OctantBadge variant={PR_STATE_VARIANTS[detail.pullRequestState]}>
               {PR_STATE_LABELS[detail.pullRequestState]}
-            </span>
+            </OctantBadge>
             <span>
               {detail.headBranch} → {detail.baseRepository}:{detail.baseBranch}
             </span>
@@ -191,7 +213,9 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
             {detail.checks.map((check, index) => (
               <li key={`${check.name}-${index}`}>
                 <span>{check.name}</span>
-                <span className="code-pr-review__badge">{CHECK_STATE_LABELS[check.state]}</span>
+                <OctantBadge variant={CHECK_STATE_VARIANTS[check.state]}>
+                  {CHECK_STATE_LABELS[check.state]}
+                </OctantBadge>
               </li>
             ))}
           </ul>

@@ -11,6 +11,7 @@ import {
   type ContextCompositionEntry,
 } from "./contextInspectorModel";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCard } from "../ui/base/OctantCard";
 import "./context.css";
 
 const numberFormat = new Intl.NumberFormat();
@@ -202,10 +203,11 @@ function ContextEntryCard(props: {
 }) {
   const controls = contextEntryControls(props.entry, props.snapshot);
   return (
-    <article
+    <OctantCard
       aria-label={props.entry.label}
-      className="context-entry-card"
+      className="context-entry-card gap-0 p-2"
       data-state={props.entry.plannedState}
+      role="article"
     >
       <header>
         <div>
@@ -243,7 +245,7 @@ function ContextEntryCard(props: {
           {controls.excluded ? "Include" : "Exclude"} {props.entry.label} next turn
         </OctantButton>
       </div>
-    </article>
+    </OctantCard>
   );
 }
 

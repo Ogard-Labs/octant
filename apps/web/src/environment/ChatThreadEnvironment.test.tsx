@@ -6,7 +6,7 @@ import {
   type ProjectSummary,
   type WorkspaceTab,
 } from "@octant/contracts";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatController } from "../chat/useChatController";
 import { ChatThreadEnvironment } from "./ChatThreadEnvironment";
@@ -107,7 +107,7 @@ function controller(): ChatController {
 }
 
 describe("the Chat thread environment summary", () => {
-  it("keeps independent open state for two tab views of the same thread", () => {
+  it("keeps independent open state for two tab views of the same thread", async () => {
     const authoritative = controller();
 
     render(
@@ -127,13 +127,15 @@ describe("the Chat thread environment summary", () => {
     expect(first).toBeInstanceOf(HTMLButtonElement);
     if (!(first instanceof HTMLButtonElement)) return;
     fireEvent.click(first);
-    expect(screen.getAllByRole("dialog", { name: "Environment" })).toHaveLength(1);
+    await waitFor(() =>
+      expect(screen.getAllByRole("dialog", { name: "Environment" })).toHaveLength(1),
+    );
     expect(screen.getByText("1 attachment")).toBeVisible();
     expect(screen.getByText("First view")).toBeVisible();
     expect(screen.getByText("Second view")).toBeVisible();
   });
 
-  it("fails closed when the authoritative thread references an unresolved Project", () => {
+  it("fails closed when the authoritative thread references an unresolved Project", async () => {
     render(
       <ChatThreadEnvironment controller={controller()} projects={[]} tab={tabA}>
         <div />
@@ -144,7 +146,7 @@ describe("the Chat thread environment summary", () => {
     expect(environment).toHaveAttribute("data-environment-status", "unavailable");
     expect(screen.getByText("Chat · Project unavailable")).toHaveClass("sr-only");
     fireEvent.click(environment);
-    expect(screen.getByRole("dialog", { name: "Environment" })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Environment" })).toBeVisible());
     expect(screen.getByText("Authoritative Chat context is unavailable.")).toBeVisible();
     expect(screen.queryByText("Unavailable for unfiled Chat")).not.toBeInTheDocument();
     expect(screen.queryByText("1 attachment")).not.toBeInTheDocument();

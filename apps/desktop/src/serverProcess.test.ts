@@ -1,8 +1,17 @@
+import { chmod, mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import {
+  HostRuntimePathError,
+  prepareHostRuntimePaths,
+  resolveHostRuntimePaths,
+} from "@octant/host-runtime";
 import {
   AutomaticHostStartupDisabled,
   ServerReadyTimeout,
   assertAutomaticHostStartupEnabled,
+  formatDesktopStartupFailure,
   ManagedServerCleanupFailed,
   createSingleFlight,
   managedServerNeedsStart,
@@ -738,6 +747,52 @@ describe("waitForStorageReady", () => {
       }),
     ).resolves.toBeUndefined();
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("desktop startup failure copy", () => {
+  it("reports an unsafe data-directory mode instead of a storage-ready timeout", async () => {
+    const temporaryRoot = await mkdtemp(join(await realpath(tmpdir()), "octant-unsafe-mode-"));
+    const directory = join(temporaryRoot, "data");
+    try {
+      const paths = resolveHostRuntimePaths({
+        env: { OCTANT_DATA_DIR: directory },
+        platform: process.platform === "darwin" ? "darwin" : "linux",
+        home: join(temporaryRoot, "home"),
+        temporaryDirectory: temporaryRoot,
+        uid: process.getuid?.() ?? 0,
+      });
+      await prepareHostRuntimePaths(paths);
+      await chmod(paths.dataDirectory, 0o755);
+
+      let thrown: unknown;
+      try {
+        await prepareHostRuntimePaths(paths);
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(HostRuntimePathError);
+      expect(thrown).toMatchObject({
+        code: "unsafe-mode",
+        path: paths.dataDirectory,
+      });
+
+      const message = formatDesktopStartupFailure(thrown);
+      expect(message).toContain("unsafe-mode");
+      expect(message).toContain(paths.dataDirectory);
+      expect(message).toContain("0700");
+      expect(message).toMatch(/group or other/i);
+      expect(message).not.toMatch(/did not become ready|15000ms|request-failed/i);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an unrelated startup error as its original message", () => {
+    expect(formatDesktopStartupFailure(new ServerReadyTimeout(15_000, "request-failed", 147))).toBe(
+      "Octant storage did not become ready within 15000ms (last probe: request-failed; attempts: 147).",
+    );
   });
 });
 

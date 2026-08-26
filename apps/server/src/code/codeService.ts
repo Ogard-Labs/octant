@@ -27,10 +27,12 @@ import {
   type AggregateVersion,
   type BindingRevisionId,
   type CodeBootstrap,
+  type CodeNavigation,
   type CodeApprovalEffect,
   type CodeCheckoutId,
   type CodeCheckoutIdentity,
   type CodeCommandResult,
+  type CodeThreadCheckoutRebindRefusal,
   type CodeRepositoryId,
   type CodeWorktreeSourcePreview,
   type CodeWorktreeRef,
@@ -69,7 +71,12 @@ import type {
   AgentProfileId,
   AgentProfileScope,
 } from "@octant/contracts/agent-profile";
-import { applyProfileToThread, profileScopeApplies } from "@octant/domain/agent-profile-policy";
+import {
+  applyProfileToThread,
+  profileScopeApplies,
+  snapshotProfileThreadContext,
+  type ProfileThreadContextSnapshot,
+} from "@octant/domain/agent-profile-policy";
 import { authorizeCodeOperation } from "@octant/domain/code-policy";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import { Schema } from "effect";
@@ -231,6 +238,32 @@ function highestPolicy(
 ): ProviderExecutionPolicy {
   const rank = { plan: 0, "approval-gated": 1, "auto-accept-edits": 2, "full-access": 3 } as const;
   return rank[left] >= rank[right] ? left : right;
+}
+
+type ProfiledThreadAuthority = {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly permissionPersistence: PermissionPersistence;
+  readonly toolConstraints: ReadonlyArray<string>;
+  readonly profileDisplayName?: string;
+  readonly profileContext?: ProfileThreadContextSnapshot;
+};
+
+function profileToolSnapshot(profiled: ProfiledThreadAuthority): {
+  readonly toolConstraints?: ReadonlyArray<string>;
+  readonly profileDisplayName?: string;
+} {
+  if (profiled.profileDisplayName === undefined) return {};
+  return {
+    toolConstraints: profiled.toolConstraints,
+    profileDisplayName: profiled.profileDisplayName,
+  };
+}
+
+function profileContextSnapshot(profiled: ProfiledThreadAuthority): {
+  readonly profileContext?: ProfileThreadContextSnapshot;
+} {
+  if (profiled.profileContext === undefined) return {};
+  return { profileContext: profiled.profileContext };
 }
 
 export interface CodePersistencePort {
@@ -590,25 +623,36 @@ export class CodeService {
     this.#onWorkingDirectoryChanged = options.onWorkingDirectoryChanged;
   }
 
+  async navigation(authenticatedWindowId: WindowId): Promise<CodeNavigation> {
+    const threads = await this.#visibleThreads(authenticatedWindowId);
+    return { threads, activity: this.#visibleActivity(threads) };
+  }
+
   async bootstrap(authenticatedWindowId: WindowId): Promise<CodeBootstrap> {
-    const threads: CodeThread[] = [];
-    for (const thread of this.#persistence.readCodeThreads()) {
-      if (await this.#access.canAccessProject(authenticatedWindowId, thread.projectId)) {
-        threads.push(this.#sessionAuthority.effectiveThread(authenticatedWindowId, thread));
-      }
-    }
+    const threads = await this.#visibleThreads(authenticatedWindowId);
     const recoveredCheckouts = new Map<string, CodeCheckoutIdentity>();
     const observedExistingCheckouts = new Map<string, CodeCheckoutIdentity | undefined>();
     const attemptedManagedCheckoutIds = new Set<string>();
     for (const thread of threads) {
       const persisted = this.#persistence.readCodeCheckout(thread.checkoutId);
       if (persisted === undefined) continue;
+      if (persisted.kind === "managed-worktree") {
+        const checkoutId = String(persisted.id);
+        if (attemptedManagedCheckoutIds.has(checkoutId)) continue;
+        attemptedManagedCheckoutIds.add(checkoutId);
+      }
+      // Available and unavailable checkouts already have a recorded answer.
+      // Re-probing them on every bootstrap — including the 2s sidebar refresh
+      // that used to call this — walks the filesystem while the person is
+      // switching threads. Waiting is the only state whose next fact is still
+      // on disk.
+      if (persisted.availability !== "waiting") {
+        recoveredCheckouts.set(String(persisted.id), persisted);
+        continue;
+      }
       try {
         let recovered: CodeCheckoutIdentity | undefined;
         if (persisted.kind === "managed-worktree") {
-          const checkoutId = String(persisted.id);
-          if (attemptedManagedCheckoutIds.has(checkoutId)) continue;
-          attemptedManagedCheckoutIds.add(checkoutId);
           recovered =
             (await this.#roots.resolve(
               authenticatedWindowId,
@@ -702,7 +746,6 @@ export class CodeService {
         // restart will retry the compensation.
       }
     }
-    const threadIds = new Set(threads.map((thread) => String(thread.id)));
     return {
       settings: this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings(),
       threads,
@@ -710,13 +753,28 @@ export class CodeService {
         .readCodeCheckouts()
         .filter((checkout) => checkoutIds.has(String(checkout.id)))
         .map((checkout) => recoveredCheckouts.get(String(checkout.id)) ?? checkout),
-      // Filtered by the same authorization the thread list went through: a
-      // window that cannot see a thread must not learn that it is running from
-      // its activity sequence either.
-      activity: this.#persistence
-        .readCodeThreadActivity()
-        .filter((entry) => threadIds.has(String(entry.threadId))),
+      activity: this.#visibleActivity(threads),
     };
+  }
+
+  async #visibleThreads(authenticatedWindowId: WindowId): Promise<CodeThread[]> {
+    const threads: CodeThread[] = [];
+    for (const thread of this.#persistence.readCodeThreads()) {
+      if (await this.#access.canAccessProject(authenticatedWindowId, thread.projectId)) {
+        threads.push(this.#sessionAuthority.effectiveThread(authenticatedWindowId, thread));
+      }
+    }
+    return threads;
+  }
+
+  #visibleActivity(threads: ReadonlyArray<CodeThread>): ReadonlyArray<CodeThreadActivity> {
+    // Filtered by the same authorization the thread list went through: a
+    // window that cannot see a thread must not learn that it is running from
+    // its activity sequence either.
+    const threadIds = new Set(threads.map((thread) => String(thread.id)));
+    return this.#persistence
+      .readCodeThreadActivity()
+      .filter((entry) => threadIds.has(String(entry.threadId)));
   }
 
   async read(authenticatedWindowId: WindowId, threadId: CodeThreadId): Promise<CodeThreadView> {
@@ -841,6 +899,8 @@ export class CodeService {
           deliveryTarget: command.deliveryTarget,
           ...(command.forkedFrom === undefined ? {} : { forkedFrom: command.forkedFrom }),
           ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
+          ...profileToolSnapshot(managedAuthority),
+          ...profileContextSnapshot(managedAuthority),
           version: 1,
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -1139,15 +1199,7 @@ export class CodeService {
           requestedExecutionPolicy: command.thread.executionPolicy,
           requestedPermissionPersistence: command.thread.permissionPersistence,
         });
-        const thread =
-          profiled.executionPolicy === command.thread.executionPolicy &&
-          profiled.permissionPersistence === command.thread.permissionPersistence
-            ? command.thread
-            : decodeCodeThread({
-                ...command.thread,
-                executionPolicy: profiled.executionPolicy,
-                permissionPersistence: profiled.permissionPersistence,
-              });
+        const thread = this.#threadWithProfiledAuthority(command.thread, profiled);
         const project = this.#persistence.readProject?.(thread.projectId);
         if (
           thread.executionPolicy === "full-access" &&
@@ -1211,6 +1263,71 @@ export class CodeService {
         current,
       );
       const updatedAt = decodeTimestamp(this.#clock());
+      if (command.kind === "rebind-code-thread-checkout") {
+        // Recovery from a superseded checkout. The thread's id was derived from
+        // the binding revision it was created against, so once the Project is
+        // rebound the recovery loop can only ever call it unavailable. This is
+        // the way back out, and 0032 requires one to exist: explicit, journaled,
+        // and never inferred from a filesystem root that happens to match.
+        const bound = this.#persistence.readCodeCheckout(current.checkoutId);
+        if (bound?.kind === "managed-worktree") {
+          return this.#rebindRefused(current.id, "managed-worktree");
+        }
+        let prepared;
+        try {
+          prepared = await this.#checkouts.observe(authenticatedWindowId, current.projectId);
+        } catch {
+          return this.#rebindRefused(current.id, "checkout-unavailable");
+        }
+        if (prepared.checkout.availability !== "available") {
+          return this.#rebindRefused(current.id, "checkout-unavailable");
+        }
+        if (String(prepared.checkout.id) === String(current.checkoutId)) {
+          return this.#rebindRefused(current.id, "already-bound");
+        }
+        if (
+          !repeatsJournaledCheckout(
+            this.#persistence.readCodeCheckout(prepared.checkout.id),
+            prepared.checkout,
+          )
+        ) {
+          this.#append(
+            "code-checkout",
+            prepared.checkout.id,
+            this.#persistence.readCodeCheckoutAggregateVersion(prepared.checkout.id),
+            "code.checkout-observed@1",
+            { kind: "checkout-observed", checkout: prepared.checkout },
+          );
+        }
+        const rebound = decodeCodeThread({
+          ...current,
+          bindingRevisionId: prepared.bindingRevisionId,
+          repositoryId: prepared.checkout.repositoryId,
+          checkoutId: prepared.checkout.id,
+          version: command.expectedVersion + 1,
+          updatedAt,
+        });
+        this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
+          kind: "thread-updated",
+          thread: rebound,
+        });
+        // 0032: recovery discards, never revalidates. A session grant of Full
+        // access was minted against the checkout the thread just left, so it
+        // does not carry onto the new one; the thread returns to its persisted
+        // posture and the user re-grants if they still want it. Discard the
+        // grant in every window that holds it, not only the acting window —
+        // recovery invalidates every capability minted under the old checkout.
+        this.#sessionAuthority.revokeThreadEverywhere(current.id);
+        return {
+          kind: "thread-checkout-rebind",
+          threadId: current.id,
+          outcome: {
+            status: "rebound",
+            thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, rebound),
+            checkout: prepared.checkout,
+          },
+        };
+      }
       const currentContextDigest = currentCheckoutDigest(
         this.#persistence.readCodeCheckout(current.checkoutId),
         current,
@@ -2105,6 +2222,13 @@ export class CodeService {
     };
   }
 
+  #rebindRefused(
+    threadId: CodeThreadId,
+    reason: CodeThreadCheckoutRebindRefusal,
+  ): CodeCommandResult {
+    return { kind: "thread-checkout-rebind", threadId, outcome: { status: "refused", reason } };
+  }
+
   async #authorizeThread(authenticatedWindowId: WindowId, thread: CodeThread): Promise<void> {
     if (!(await this.#access.canAccessProject(authenticatedWindowId, thread.projectId))) {
       throw this.#failure("unauthorized", "Code thread is unauthorized.");
@@ -2254,14 +2378,12 @@ export class CodeService {
     readonly modelId: ProviderModelId;
     readonly requestedExecutionPolicy: ProviderExecutionPolicy;
     readonly requestedPermissionPersistence: PermissionPersistence;
-  }): {
-    readonly executionPolicy: ProviderExecutionPolicy;
-    readonly permissionPersistence: PermissionPersistence;
-  } {
+  }): ProfiledThreadAuthority {
     if (input.profileId === undefined) {
       return {
         executionPolicy: input.requestedExecutionPolicy,
         permissionPersistence: input.requestedPermissionPersistence,
+        toolConstraints: [],
       };
     }
     const binding = this.#persistence.readAgentProfileBinding?.(input.profileId);
@@ -2304,7 +2426,31 @@ export class CodeService {
     return {
       executionPolicy: applied.executionPolicy,
       permissionPersistence: applied.permissionPersistence,
+      toolConstraints: applied.toolConstraints,
+      profileDisplayName: applied.profileDisplayName,
+      profileContext: snapshotProfileThreadContext(binding.profile),
     };
+  }
+
+  /**
+   * Overlay the profile's snapshotted posture, tool allowlist, and context onto
+   * a starting thread. Client-supplied snapshot fields are stripped: only the
+   * profile the server loaded may write them.
+   */
+  #threadWithProfiledAuthority(thread: CodeThread, profiled: ProfiledThreadAuthority): CodeThread {
+    const {
+      toolConstraints: _clientTools,
+      profileDisplayName: _clientName,
+      profileContext: _clientContext,
+      ...rest
+    } = thread;
+    return decodeCodeThread({
+      ...rest,
+      executionPolicy: profiled.executionPolicy,
+      permissionPersistence: profiled.permissionPersistence,
+      ...profileToolSnapshot(profiled),
+      ...profileContextSnapshot(profiled),
+    });
   }
 
   #failure(category: CodeFailure["category"], message: string): CodeServiceError {

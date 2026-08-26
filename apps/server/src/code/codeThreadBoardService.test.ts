@@ -128,6 +128,8 @@ function gitObserved(
     stagedCount: 0,
     committedAhead: 0,
     workingTreeClean: true,
+    insertions: 0,
+    deletions: 0,
     ...overrides,
   };
 }
@@ -591,7 +593,7 @@ describe("CodeThreadBoardService derivation", () => {
     expect(card.pullRequestSummaries.items[0]?.readyToMerge).toBe(true);
   });
 
-  it("carries the plan-progress source's count onto the matching card (0048)", async () => {
+  it("reports plan progress on the matching card", async () => {
     const board = service({
       threads: [boardThread({ thread: thread({ id: ids.ready }) })],
       planProgress: {
@@ -608,7 +610,7 @@ describe("CodeThreadBoardService derivation", () => {
     });
   });
 
-  it("defaults an unwired plan-progress source to absent", async () => {
+  it("reports no plan progress when no source is configured", async () => {
     const board = service({ threads: [boardThread({ thread: thread({ id: ids.ready }) })] });
 
     const view = await board.query(decodeCodeBoardQuery({ version: 1 }));

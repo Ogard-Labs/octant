@@ -253,7 +253,7 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Set your name" }));
-    await user.click(screen.getByRole("menuitem", { name: "Plugins" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
 
     // Skills and extensions have a real Settings section, so the entry opens it
     // rather than a placeholder explaining where the surface would be.
@@ -1289,11 +1289,10 @@ describe("App", () => {
     ).toBeNull();
 
     await user.click(meter);
-    const popover = screen.getByRole("dialog", { name: "Context usage" });
-    expect(popover).toHaveTextContent("Used104 · Provider reported");
-    expect(popover).toHaveTextContent("Maximum1,000");
-    expect(popover).toHaveTextContent("Percentage10%");
-    expect(popover).toHaveTextContent("Free space796");
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    expect(popover).toHaveTextContent("Context window104 / 1K (10%)");
+    expect(popover).toHaveTextContent("Last sent · model-a · Provider reported");
+    expect(popover).toHaveTextContent("Free space79680%");
     expect(popover).toHaveTextContent(/Tools2 loaded· 6 deferred/);
     expect(inspect.mock.calls.length).toBe(inspectCalls);
 
@@ -1309,7 +1308,7 @@ describe("App", () => {
 
     await user.keyboard("{Escape}");
     await user.keyboard("{Control>}{Shift>}u{/Shift}{/Control}");
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     expect(inspect.mock.calls.length).toBe(inspectCalls);
 
     await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
@@ -1367,10 +1366,10 @@ describe("App", () => {
         name: /Show context usage for Exact created chat/i,
       }),
     );
-    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
 
     await user.click(screen.getByRole("region", { name: "Workspace pane: Older chat" }));
-    expect(screen.queryByRole("dialog", { name: "Context usage" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Context window" })).not.toBeInTheDocument();
     await waitFor(() =>
       expect(contextApi.inspect).toHaveBeenCalledWith(
         {
@@ -1539,7 +1538,7 @@ describe("App", () => {
     ).toBeVisible();
     expect(screen.queryByRole("dialog", { name: "Navigator" })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "Set your name" }));
-    await user.click(screen.getByRole("menuitem", { name: "Navigator" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Navigator" }));
 
     const navigator = await screen.findByRole("dialog", { name: "Navigator" });
     expect(navigator).toBeVisible();
@@ -1559,7 +1558,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Navigator" })).toBeNull());
 
     await user.click(screen.getByRole("button", { name: "Set your name" }));
-    await user.click(screen.getByRole("menuitem", { name: "Navigator" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Navigator" }));
     expect(await screen.findByRole("dialog", { name: "Navigator" })).toBeVisible();
     expect(screen.getByText("Answered: Stay on this thread")).toBeVisible();
     expect(
@@ -2790,7 +2789,7 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: "Project actions for Octant" })).toBeVisible();
     expect(screen.getByRole("button", { name: "New thread" })).toBeVisible();
     await user.click(within(sidebar).getByRole("button", { name: "Set your name" }));
-    expect(within(sidebar).getByRole("menuitem", { name: "Plugins" })).toBeVisible();
+    expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Thread board" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
     const addFolder = screen.getByRole("button", { name: "Add folder" });
@@ -3205,9 +3204,6 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Octant is disconnected" })).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent("Shell unavailable.");
     expect(screen.getByRole("button", { name: "Retry connection" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Retry connection" })).toHaveClass(
-      "shell-state__action",
-    );
   });
 
   it("opens utilities in the right dock and restores each active thread's selection", async () => {

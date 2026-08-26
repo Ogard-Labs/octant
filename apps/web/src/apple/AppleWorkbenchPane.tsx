@@ -169,11 +169,13 @@ function WorkspaceActions(props: {
     <section aria-labelledby="apple-actions-heading" className="apple-workbench__section">
       <h2 id="apple-actions-heading">Actions</h2>
       <div className="apple-workbench__actions">
+        {/* Peer scheme actions: neither is the one primary of the pane. */}
         <OctantButton
           aria-label={`Build ${scheme}`}
           disabled={props.busy}
           onClick={() => props.onRun({ kind: "build" })}
           type="button"
+          variant="secondary"
         >
           Build
         </OctantButton>
@@ -182,6 +184,7 @@ function WorkspaceActions(props: {
           disabled={props.busy}
           onClick={() => props.onRun({ kind: "test" })}
           type="button"
+          variant="secondary"
         >
           Test
         </OctantButton>
@@ -248,6 +251,7 @@ function SimulatorActions(props: {
           disabled={disabled || simulator.state !== "shutdown"}
           onClick={() => props.onRun({ kind: "boot", simulatorId: simulator.simulatorId })}
           type="button"
+          variant="secondary"
         >
           Boot
         </OctantButton>
@@ -260,6 +264,7 @@ function SimulatorActions(props: {
               disabled={disabled}
               onClick={() => props.onRun({ kind: "run", simulatorId: simulator.simulatorId })}
               type="button"
+              variant="secondary"
             >
               Run
             </OctantButton>
@@ -269,6 +274,7 @@ function SimulatorActions(props: {
             disabled={disabled}
             onClick={() => props.onRun({ kind: "screenshot", simulatorId: simulator.simulatorId })}
             type="button"
+            variant="secondary"
           >
             Capture screen
           </OctantButton>
@@ -277,6 +283,7 @@ function SimulatorActions(props: {
             disabled={disabled}
             onClick={() => props.onRun({ kind: "shutdown", simulatorId: simulator.simulatorId })}
             type="button"
+            variant="destructive"
           >
             Shut down
           </OctantButton>
@@ -308,6 +315,7 @@ function ProgressList(props: {
                   disabled={props.busy}
                   onClick={() => props.onCancel?.(progress.actionId)}
                   type="button"
+                  variant="ghost"
                 >
                   Cancel
                 </OctantButton>

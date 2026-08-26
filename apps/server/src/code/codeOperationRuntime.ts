@@ -181,6 +181,7 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly resolveBaseCheckoutRoot?: (thread: CodeThread) => Promise<string | undefined>;
   readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
+  readonly resolveProfileSkills?: CodeOperationServiceOptions["resolveProfileSkills"];
   /**
    * Where a curated scaffold runs. Absent on a host that offers none, which
    * refuses the operation rather than running a generator nobody configured.
@@ -430,6 +431,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveForkHandoff === undefined
       ? {}
       : { resolveForkHandoff: options.resolveForkHandoff }),
+    ...(options.resolveProfileSkills === undefined
+      ? {}
+      : { resolveProfileSkills: options.resolveProfileSkills }),
   });
   turns.bindService(service);
 
@@ -1529,6 +1533,8 @@ function mapGitObservation(
     stateToken: result.stateToken,
     statusEntries: result.statusEntries,
     changedPaths: result.changedPaths,
+    insertions: result.insertions,
+    deletions: result.deletions,
     diff,
     diffTruncated: result.diff.truncated || diff !== result.diff.text,
     remotes: result.remotes.map((remote) => ({

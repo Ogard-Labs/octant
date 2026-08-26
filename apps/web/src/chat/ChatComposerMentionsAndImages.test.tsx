@@ -239,6 +239,27 @@ describe("ChatComposer thread mentions", () => {
     expect(onRemoveChip).toHaveBeenCalledWith("thread-1");
   });
 
+  it("labels an explicitly mentioned Chat as able to receive a message", () => {
+    renderComposer({
+      draft: "#[Target Chat] ",
+      threadMentions: mentions({
+        dialogueEnabled: true,
+        chips: [
+          {
+            threadId: "thread-chat" as never,
+            title: "Target Chat",
+            mode: "chat",
+            placementLabel: "Recents",
+          },
+        ],
+      }),
+    });
+
+    expect(screen.getByRole("list", { name: "Mentioned threads" })).toHaveTextContent(
+      "Chat · Recents · Can receive a message",
+    );
+  });
+
   it("shows an unavailable chip without a Side Chat affordance", () => {
     renderComposer({
       draft: "#[Secret] ",

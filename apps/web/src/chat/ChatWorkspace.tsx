@@ -54,6 +54,8 @@ import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { OctantButton } from "../ui/base/OctantButton";
+import { samePollingData } from "../polling/samePollingData";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export interface ChatWorkspaceProps {
   readonly controller: ChatController;
@@ -229,26 +231,28 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     const controller = new AbortController();
     let inFlight = false;
     const refresh = async () => {
-      if (inFlight) return;
+      if (!documentIsVisible() || inFlight) return;
       inFlight = true;
       try {
         const approvals = await props.extensionClient!.listToolApprovals(controller.signal);
         if (!controller.signal.aborted) {
-          setToolApprovals(
-            approvals.filter((approval) => String(approval.threadId) === String(activeThreadId)),
+          const next = approvals.filter(
+            (approval) => String(approval.threadId) === String(activeThreadId),
           );
+          setToolApprovals((current) => (samePollingData(current, next) ? current : next));
         }
       } catch {
-        if (!controller.signal.aborted) setToolApprovals([]);
+        if (!controller.signal.aborted) {
+          setToolApprovals((current) => (current.length === 0 ? current : []));
+        }
       } finally {
         inFlight = false;
       }
     };
-    void refresh();
-    const interval = setInterval(() => void refresh(), 500);
+    const stop = scheduleVisibleInterval(() => void refresh(), 500, { runImmediately: true });
     return () => {
       controller.abort();
-      clearInterval(interval);
+      stop();
     };
   }, [activeThreadId, props.extensionClient]);
   const threadMentions = useThreadMentions({
@@ -256,6 +260,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: props.controller.pendingDraft,
+    dialogueEnabled: true,
     ...(props.onOpenSideChat === undefined ? {} : { onSideChatOpened: props.onOpenSideChat }),
   });
   const parallelReview = useLinkedThreadParallelReview({
@@ -747,6 +752,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         </section>
       )}
       <ChatComposer
+        key={String(thread.id)}
         attachment={attachmentCapability}
         attachmentBusy={uploadingMessage !== undefined || attachmentStatus.kind === "removing"}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}

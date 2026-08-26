@@ -112,6 +112,27 @@ describe("Code aggregate contracts", () => {
     expect(decodeCodeThread({ ...thread, workingDirectory: "packages/app" })).toMatchObject({
       workingDirectory: "packages/app",
     });
+    expect(
+      decodeCodeThread({
+        ...thread,
+        profileId: "00000000-0000-4000-8000-000000000099",
+        profileDisplayName: "Reviewer",
+        toolConstraints: ["octant_browser"],
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic.",
+          approvedSkillIds: ["code-reviewer"],
+        },
+      }),
+    ).toMatchObject({
+      profileDisplayName: "Reviewer",
+      toolConstraints: ["octant_browser"],
+      profileContext: {
+        displayName: "Reviewer",
+        instructions: "Review as a skeptic.",
+        approvedSkillIds: ["code-reviewer"],
+      },
+    });
     expect(() => decodeCodeThread({ ...thread, repositoryRoot: "/private/repo" })).toThrow();
     expect(() =>
       decodeCodeCommand({
@@ -171,6 +192,13 @@ describe("Code aggregate contracts", () => {
         permissionPersistence: "current-session",
       }).kind,
     ).toBe("change-code-thread-access");
+    expect(
+      decodeCodeCommand({
+        kind: "rebind-code-thread-checkout",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }).kind,
+    ).toBe("rebind-code-thread-checkout");
     expect(
       decodeCodeCommand({
         kind: "change-code-thread-provider",
@@ -295,6 +323,25 @@ describe("Code aggregate contracts", () => {
     expect(
       codeContracts.decodeCodeBootstrap({ settings, threads: [], checkouts: [] }).activity,
     ).toEqual([]);
+    expect(codeContracts.decodeCodeNavigation({ threads: [thread] })).toEqual({
+      threads: [thread],
+      activity: [],
+    });
+    expect(
+      codeContracts.decodeCodeNavigation({
+        threads: [thread],
+        activity: [{ threadId: ids.thread, lastSequence: 42 }],
+      }),
+    ).toEqual({
+      threads: [thread],
+      activity: [{ threadId: ids.thread, lastSequence: 42 }],
+    });
+    expect(() =>
+      codeContracts.decodeCodeNavigation({
+        threads: [thread],
+        checkouts: [checkout],
+      }),
+    ).toThrow();
     expect(() =>
       codeContracts.decodeCodeThreadActivity({ threadId: ids.thread, lastSequence: -1 }),
     ).toThrow();
@@ -787,5 +834,31 @@ describe("Code managed thread creation contracts", () => {
       provenance: { mode: "origin", resolvedHead: "a".repeat(40), receiptId: ids.receipt },
     });
     expect(codeContracts.CODE_EVENT_NAMES).not.toContain("code.managed-thread-created@1");
+  });
+
+  it("carries a checkout rebind refusal as a value rather than an absent result", () => {
+    // A rebind that cannot happen is an ordinary answer — the Project may be
+    // unreadable, or the thread may already be where it belongs — so the result
+    // has to say so in a shape every caller must destructure.
+    const refused = decodeCodeCommandResult({
+      kind: "thread-checkout-rebind",
+      threadId: ids.thread,
+      outcome: { status: "refused", reason: "checkout-unavailable" },
+    });
+    expect(refused).toEqual({
+      kind: "thread-checkout-rebind",
+      threadId: ids.thread,
+      outcome: { status: "refused", reason: "checkout-unavailable" },
+    });
+    expect(() =>
+      decodeCodeCommandResult({
+        kind: "thread-checkout-rebind",
+        threadId: ids.thread,
+        outcome: { status: "refused", reason: "because-i-said-so" },
+      }),
+    ).toThrow();
+    // The rebind is a command, never a journaled event name of its own: it is
+    // recorded as the thread update and checkout observation it actually makes.
+    expect(codeContracts.CODE_EVENT_NAMES).not.toContain("code.thread-checkout-rebind@1");
   });
 });

@@ -3,6 +3,7 @@ import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
   NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
+  NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH,
 } from "@octant/contracts/shell";
 import type { SidebarVibrancyMode, ThemeSettings, ThemeTypography } from "@octant/contracts/theme";
 import type { ResolvedSidebarMaterial } from "./hostBridge";
@@ -100,6 +101,7 @@ export function ShellFrame(props: ShellFrameProps) {
                 : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
               "--octant-context-sidebar-width": `${props.contextSidebarWidth}px`,
               "--octant-native-hidden-inset-titlebar-height": `${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px`,
+              "--octant-native-traffic-light-leading-width": `${NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH}px`,
               "--octant-sidebar-width": `${props.sidebarWidth}px`,
             } as CSSProperties
           }

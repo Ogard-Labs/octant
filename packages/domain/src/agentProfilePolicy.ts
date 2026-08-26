@@ -13,6 +13,7 @@ import type {
   ProviderCatalogSnapshot,
   ProviderExecutionPolicy,
   ProviderInstanceId,
+  ProviderModel,
   ProviderModelId,
 } from "@octant/contracts/providers";
 import type { HostId } from "@octant/contracts/shell";
@@ -23,15 +24,18 @@ export type AgentProfileRejectionCode =
   | "profile-not-found"
   | "authority-escalation";
 
-export class AgentProfileRejected extends Error {
-  override readonly name = "AgentProfileRejected";
-  constructor(
-    readonly code: AgentProfileRejectionCode,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+/**
+ * Whether binding a profile would escalate past the Project's grant.
+ * Expected refusal is a value: picker and resolver callers have to mark the
+ * profile unavailable or record a downgrade rather than crash.
+ */
+export type ProfileAuthoritySafety =
+  | { readonly status: "accepted" }
+  | {
+      readonly status: "refused";
+      readonly code: Extract<AgentProfileRejectionCode, "authority-escalation">;
+      readonly reason: string;
+    };
 
 /**
  * Check whether a profile is compatible with the given mode.
@@ -50,22 +54,40 @@ export function isModelAllowedByProfile(profile: AgentProfile, modelId: Provider
 }
 
 /**
- * Validate that selecting a profile does not silently escalate authority.
- * A profile may only narrow permissions, never widen them beyond what the
- * Project/root/host already grants.
+ * Check whether a tool is allowed by a snapshotted profile allowlist.
+ * An empty list means all tools are allowed, matching
+ * {@link isModelAllowedByProfile} for models.
  */
-export function validateProfileAuthoritySafety(input: {
-  readonly profile: AgentProfile;
-  readonly projectExecutionPolicy: ProviderExecutionPolicy;
-}): void {
-  if (
-    POLICY_RANK[input.profile.defaultExecutionPolicy] > POLICY_RANK[input.projectExecutionPolicy]
-  ) {
-    throw new AgentProfileRejected(
-      "authority-escalation",
-      `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
-    );
+export function isToolAllowedByAllowlist(
+  toolConstraints: ReadonlyArray<string>,
+  toolId: string,
+): boolean {
+  if (toolConstraints.length === 0) return true;
+  return toolConstraints.some((id) => id === toolId);
+}
+
+/** What checking a tool against a snapshotted profile allowlist did. */
+export type ProfileToolConstraintDecision =
+  | { readonly status: "allowed" }
+  | { readonly status: "refused"; readonly reason: string };
+
+/**
+ * Refuse a tool that the snapshotted profile allowlist does not include.
+ * The reason names the profile so a caller can show why the thread cannot
+ * call it without reloading the live profile.
+ */
+export function decideProfileToolConstraint(input: {
+  readonly toolId: string;
+  readonly toolConstraints: ReadonlyArray<string>;
+  readonly profileDisplayName: string;
+}): ProfileToolConstraintDecision {
+  if (isToolAllowedByAllowlist(input.toolConstraints, input.toolId)) {
+    return { status: "allowed" };
   }
+  return {
+    status: "refused",
+    reason: `Profile "${input.profileDisplayName}" does not permit "${input.toolId}".`,
+  };
 }
 
 /**
@@ -78,6 +100,39 @@ const POLICY_RANK = {
   "auto-accept-edits": 2,
   "full-access": 3,
 } as const;
+
+function narrowerPolicy(
+  left: ProviderExecutionPolicy,
+  right: ProviderExecutionPolicy,
+): ProviderExecutionPolicy {
+  return POLICY_RANK[left] < POLICY_RANK[right] ? left : right;
+}
+
+/**
+ * Validate that selecting a profile does not silently escalate authority.
+ * The posture the thread would actually run under is what has to clear the
+ * Project, not the profile's own default: a Full-access profile asked to
+ * start in Plan produces a Plan thread and takes nothing the Project has not
+ * already granted.
+ */
+export function validateProfileAuthoritySafety(input: {
+  readonly profile: AgentProfile;
+  readonly projectExecutionPolicy: ProviderExecutionPolicy;
+  readonly requestedExecutionPolicy: ProviderExecutionPolicy;
+}): ProfileAuthoritySafety {
+  const executionPolicy = narrowerPolicy(
+    input.profile.defaultExecutionPolicy,
+    input.requestedExecutionPolicy,
+  );
+  if (POLICY_RANK[executionPolicy] > POLICY_RANK[input.projectExecutionPolicy]) {
+    return {
+      status: "refused",
+      code: "authority-escalation",
+      reason: `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
+    };
+  }
+  return { status: "accepted" };
+}
 
 /**
  * How long a granted permission outlives the thread that asked for it. A
@@ -112,6 +167,8 @@ export type ProfileApplication =
       readonly status: "applied";
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly permissionPersistence: PermissionPersistence;
+      readonly toolConstraints: ReadonlyArray<string>;
+      readonly profileDisplayName: string;
     }
   | {
       readonly status: "refused";
@@ -155,19 +212,24 @@ export function applyProfileToThread(input: {
       reason: `Profile "${input.profile.displayName}" does not allow model "${String(input.modelId)}".`,
     };
   }
-  const executionPolicy =
-    POLICY_RANK[input.profile.defaultExecutionPolicy] < POLICY_RANK[input.requestedExecutionPolicy]
-      ? input.profile.defaultExecutionPolicy
-      : input.requestedExecutionPolicy;
+  const executionPolicy = narrowerPolicy(
+    input.profile.defaultExecutionPolicy,
+    input.requestedExecutionPolicy,
+  );
   // The posture the thread would actually run under is what has to clear the
   // Project, not the profile's own default. A Full-access profile asked to
   // start in Plan produces a Plan thread and takes nothing the Project has not
   // already granted; refusing it would refuse the narrower of the two choices.
-  if (POLICY_RANK[executionPolicy] > POLICY_RANK[input.projectExecutionPolicy]) {
+  const authority = validateProfileAuthoritySafety({
+    profile: input.profile,
+    projectExecutionPolicy: input.projectExecutionPolicy,
+    requestedExecutionPolicy: input.requestedExecutionPolicy,
+  });
+  if (authority.status === "refused") {
     return {
       status: "refused",
-      code: "authority-escalation",
-      reason: `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
+      code: authority.code,
+      reason: authority.reason,
     };
   }
   const permissionPersistence =
@@ -175,12 +237,126 @@ export function applyProfileToThread(input: {
     PERSISTENCE_RANK[input.requestedPermissionPersistence]
       ? input.profile.defaultPermissionPersistence
       : input.requestedPermissionPersistence;
-  return { status: "applied", executionPolicy, permissionPersistence };
+  return {
+    status: "applied",
+    executionPolicy,
+    permissionPersistence,
+    toolConstraints: input.profile.toolConstraints,
+    profileDisplayName: input.profile.displayName,
+  };
+}
+
+/**
+ * The instructions and skill allowlist a thread keeps after a profile binds it.
+ * Copied by value so a later edit of the live profile cannot change a thread
+ * already running under it — the same rule the posture already follows.
+ */
+export interface ProfileThreadContextSnapshot {
+  readonly displayName: string;
+  readonly instructions?: string;
+  readonly approvedSkillIds: ReadonlyArray<string>;
+}
+
+export function snapshotProfileThreadContext(profile: AgentProfile): ProfileThreadContextSnapshot {
+  return {
+    displayName: profile.displayName,
+    ...(profile.instructions === undefined ? {} : { instructions: profile.instructions }),
+    approvedSkillIds: [...profile.approvedSkillIds],
+  };
+}
+
+export interface ProfileContextAttribution {
+  readonly sourceKind: "instruction" | "skill";
+  readonly referenceId: string;
+  readonly category: "user-instructions" | "extension-instructions";
+  readonly label: string;
+  readonly text: string;
+}
+
+/**
+ * Attribute profile instructions so a reader of the composed context can see
+ * which working mode they came from, rather than treating them as anonymous
+ * system text.
+ */
+export function attributeProfileInstructions(input: {
+  readonly profileId: string;
+  readonly displayName: string;
+  readonly instructions: string;
+}): ProfileContextAttribution {
+  return {
+    sourceKind: "instruction",
+    referenceId: `profile:${input.profileId}`,
+    category: "user-instructions",
+    label: `${input.displayName} profile instructions`,
+    text: input.instructions,
+  };
+}
+
+export function attributeProfileSkillInstructions(input: {
+  readonly qualifiedId: string;
+  readonly displayName: string;
+  readonly text: string;
+}): ProfileContextAttribution {
+  return {
+    sourceKind: "skill",
+    referenceId: input.qualifiedId,
+    category: "extension-instructions",
+    label: input.displayName,
+    text: input.text,
+  };
+}
+
+/**
+ * A skill the host has already discovered and resolved. Effectiveness is the
+ * activation ladder's answer — installed, trusted, enabled, and allowed —
+ * never something a profile can assert for itself.
+ */
+export interface ProfileSkillCandidate {
+  readonly qualifiedId: string;
+  readonly name: string;
+  readonly displayName: string;
+  readonly effective: boolean;
+}
+
+export interface AdmittedProfileSkill {
+  readonly qualifiedId: string;
+  readonly name: string;
+  readonly displayName: string;
+}
+
+/**
+ * Gate the skills a profiled thread may load: only identifiers the snapshot
+ * named, and only when the host would already load them. A name that matches
+ * more than one effective skill is skipped rather than guessed.
+ */
+export function admitApprovedProfileSkills(input: {
+  readonly approvedSkillIds: ReadonlyArray<string>;
+  readonly skills: ReadonlyArray<ProfileSkillCandidate>;
+}): ReadonlyArray<AdmittedProfileSkill> {
+  const admitted: AdmittedProfileSkill[] = [];
+  const seen = new Set<string>();
+  for (const approvedId of input.approvedSkillIds) {
+    const matches = input.skills.filter(
+      (skill) => skill.effective && (skill.name === approvedId || skill.qualifiedId === approvedId),
+    );
+    const skill = matches.length === 1 ? matches[0] : undefined;
+    if (skill === undefined || seen.has(skill.qualifiedId)) continue;
+    seen.add(skill.qualifiedId);
+    admitted.push({
+      qualifiedId: skill.qualifiedId,
+      name: skill.name,
+      displayName: skill.displayName,
+    });
+  }
+  return admitted;
 }
 
 /**
  * Build execution context picker entries from provider/model/profile combinations.
  * Provider remains the primary grouping; direct API endpoints are first-class.
+ *
+ * Profile entries are judged by the posture the thread asked for, not the
+ * profile's own default, and they show the narrowed result the server applies.
  */
 export function buildExecutionContextPickerEntries(input: {
   readonly providers: ReadonlyArray<{
@@ -194,6 +370,7 @@ export function buildExecutionContextPickerEntries(input: {
   readonly hostLabel: string;
   readonly mode: OctantMode;
   readonly projectExecutionPolicy: ProviderExecutionPolicy;
+  readonly requestedExecutionPolicy: ProviderExecutionPolicy;
 }): ReadonlyArray<ExecutionContextPickerEntry> {
   const entries: ExecutionContextPickerEntry[] = [];
   for (const provider of input.providers) {
@@ -207,23 +384,22 @@ export function buildExecutionContextPickerEntries(input: {
         modelDisplayName: model.displayName,
         hostId: input.hostId as ExecutionContextPickerEntry["hostId"],
         hostLabel: input.hostLabel,
-        executionPolicy: input.projectExecutionPolicy,
-        effectivePermissions: defaultPermissionsForPolicy(input.projectExecutionPolicy),
+        executionPolicy: input.requestedExecutionPolicy,
+        effectivePermissions: defaultPermissionsForPolicy(input.requestedExecutionPolicy),
       });
       // Entries with compatible profiles
       for (const profile of input.profiles) {
         if (!isProfileModeCompatible(profile, input.mode)) continue;
         if (!isModelAllowedByProfile(profile, model.id)) continue;
-        let unavailableReason: string | undefined;
-        try {
-          validateProfileAuthoritySafety({
-            profile,
-            projectExecutionPolicy: input.projectExecutionPolicy,
-          });
-        } catch (error) {
-          unavailableReason =
-            error instanceof AgentProfileRejected ? error.message : "Profile rejected.";
-        }
+        const executionPolicy = narrowerPolicy(
+          profile.defaultExecutionPolicy,
+          input.requestedExecutionPolicy,
+        );
+        const authority = validateProfileAuthoritySafety({
+          profile,
+          projectExecutionPolicy: input.projectExecutionPolicy,
+          requestedExecutionPolicy: input.requestedExecutionPolicy,
+        });
         entries.push({
           providerInstanceId: provider.instanceId,
           providerDisplayName: provider.displayName,
@@ -233,9 +409,9 @@ export function buildExecutionContextPickerEntries(input: {
           profileDisplayName: profile.displayName,
           hostId: input.hostId as ExecutionContextPickerEntry["hostId"],
           hostLabel: input.hostLabel,
-          executionPolicy: profile.defaultExecutionPolicy,
-          effectivePermissions: defaultPermissionsForPolicy(profile.defaultExecutionPolicy),
-          ...(unavailableReason === undefined ? {} : { unavailableReason }),
+          executionPolicy,
+          effectivePermissions: defaultPermissionsForPolicy(executionPolicy),
+          ...(authority.status === "refused" ? { unavailableReason: authority.reason } : {}),
         });
       }
     }
@@ -333,7 +509,30 @@ export function validateCapabilityConstraints(input: {
   if (model === undefined) {
     return { ok: false, reason: "Model is not in provider catalog." };
   }
+  if (input.toolConstraints.length > 0 && !modelSupportsToolCalling(model)) {
+    return {
+      ok: false,
+      reason: "Model does not support tool calling required by the profile's tool constraints.",
+    };
+  }
   return { ok: true };
+}
+
+/**
+ * Whether the catalog proves this model can call tools. Missing evidence is
+ * not a refusal: many catalogs never recorded tool-calling support, and an
+ * empty allowlist already means "no constraint". A recorded unsupported
+ * capability is the case that cannot satisfy a non-empty tool allowlist.
+ */
+function modelSupportsToolCalling(model: ProviderModel): boolean {
+  if (model.toolCalling === "unsupported" || model.toolCalling === "unavailable") return false;
+  const evidence = model.capabilityEvidence?.filter(
+    (record) => record.capability === "tool-calling" && !record.invalidated,
+  );
+  if (evidence !== undefined && evidence.length > 0) {
+    return evidence.some((record) => record.support === "supported");
+  }
+  return true;
 }
 
 /**
@@ -357,6 +556,7 @@ export interface ResolveEffectiveProfileInput {
   readonly mode: OctantMode;
   readonly hostId: HostId;
   readonly projectExecutionPolicy: ProviderExecutionPolicy;
+  readonly requestedExecutionPolicy: ProviderExecutionPolicy;
   readonly providers: ReadonlyArray<ProviderInstanceId>;
   readonly catalogs: ReadonlyArray<ProviderCatalogSnapshot>;
   readonly profiles: ReadonlyArray<{
@@ -394,8 +594,9 @@ const FALLBACK_CHAIN: ReadonlyArray<ExecutionResolutionSource> = [
  * Resolution order: one-off thread override > Project/mode default > user
  * default > no implicit privileged fallback. Each step is validated for
  * mode compatibility, model presence in the provider catalog, and authority
- * safety (profile policy must not exceed Project policy). Failed steps
- * record a downgrade reason and the next step is attempted.
+ * safety (the narrowed posture the thread would run under must not exceed
+ * Project policy). Failed steps record a downgrade reason and the next step
+ * is attempted.
  *
  * When all steps fail, the receipt resolves to "none" with the Project's
  * execution policy — never an implicit privileged fallback.
@@ -475,15 +676,12 @@ function validateCandidate(
     if (!isModelAllowedByProfile(candidate.profile, candidate.modelId)) {
       return "Model is not allowed by the profile's model constraints.";
     }
-    try {
-      validateProfileAuthoritySafety({
-        profile: candidate.profile,
-        projectExecutionPolicy: input.projectExecutionPolicy,
-      });
-    } catch (error) {
-      if (error instanceof AgentProfileRejected) return error.message;
-      return "Profile authority validation failed.";
-    }
+    const authority = validateProfileAuthoritySafety({
+      profile: candidate.profile,
+      projectExecutionPolicy: input.projectExecutionPolicy,
+      requestedExecutionPolicy: input.requestedExecutionPolicy,
+    });
+    if (authority.status === "refused") return authority.reason;
   }
   const capability = validateCapabilityConstraints({
     modelId: candidate.modelId,
@@ -499,7 +697,10 @@ function buildReceipt(
   input: ResolveEffectiveProfileInput,
   downgradeReasons: ExecutionDowngradeReason[],
 ): ExecutionResolutionReceipt {
-  const policy = candidate.profile?.defaultExecutionPolicy ?? input.projectExecutionPolicy;
+  const policy =
+    candidate.profile === undefined
+      ? input.requestedExecutionPolicy
+      : narrowerPolicy(candidate.profile.defaultExecutionPolicy, input.requestedExecutionPolicy);
   return {
     providerInstanceId: candidate.providerInstanceId,
     modelId: candidate.modelId,

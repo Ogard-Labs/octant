@@ -11,6 +11,12 @@ import { useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import {
+  OctantEmptyStateActions,
+  OctantEmptyStateCopy,
+  OctantEmptyStateRoot,
+  OctantEmptyStateTitle,
+} from "../ui/base/OctantEmptyState";
 import { OctantInput } from "../ui/base/OctantInput";
 
 export interface CodeProjectPullRequestsProps {
@@ -197,12 +203,18 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             </p>
           ) : null}
           {visibleRows.length === 0 && normalizedSearch !== "" ? (
-            <div className="code-project-pull-requests__no-results" role="status">
-              <strong>No pull requests match “{search.trim()}”.</strong>
-              <OctantButton onClick={() => setSearch("")} size="sm" type="button" variant="ghost">
-                Clear search
-              </OctantButton>
-            </div>
+            <OctantEmptyStateRoot role="status">
+              <OctantEmptyStateCopy className="col-span-2">
+                <OctantEmptyStateTitle>
+                  No pull requests match “{search.trim()}”.
+                </OctantEmptyStateTitle>
+              </OctantEmptyStateCopy>
+              <OctantEmptyStateActions className="col-span-2 col-start-1">
+                <OctantButton onClick={() => setSearch("")} size="sm" type="button" variant="ghost">
+                  Clear search
+                </OctantButton>
+              </OctantEmptyStateActions>
+            </OctantEmptyStateRoot>
           ) : null}
           <div className="code-project-pull-requests__groups">
             {view.projects.map((project) => (

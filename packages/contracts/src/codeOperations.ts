@@ -694,6 +694,8 @@ const GitObservation = Schema.Struct({
     Schema.filter((entries) => entries.length <= MAX_CODE_OPERATION_PATHS),
   ),
   changedPaths: uniqueArray(CodeRelativePath, MAX_CODE_OPERATION_PATHS),
+  insertions: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  deletions: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   diff: CodeEvidenceReference,
   remotes: Schema.Array(
     Schema.Struct({
@@ -1313,10 +1315,11 @@ export const CodeThreadWorktreeMetadata = Schema.Union(
 export type CodeThreadWorktreeMetadata = typeof CodeThreadWorktreeMetadata.Type;
 
 /**
- * Changed-file state for the thread's worktree. `observed` carries the counts
- * and the committed-ahead/working-tree signals the delivery-target policy needs
- * to classify a local implementation; `unavailable` means the worktree could
- * not be observed.
+ * Changed-file state for the thread's worktree. `observed` carries the path
+ * counts, insertion and deletion totals, and the committed-ahead/working-tree
+ * signals the delivery-target policy needs to classify a local implementation.
+ * `unavailable` means the worktree could not be observed and therefore carries
+ * no counts.
  */
 export const CodeThreadChangedFileState = Schema.Union(
   Schema.Struct({
@@ -1326,6 +1329,8 @@ export const CodeThreadChangedFileState = Schema.Union(
     stagedCount: Schema.Int.pipe(Schema.nonNegative()),
     committedAhead: Schema.Int.pipe(Schema.nonNegative()),
     workingTreeClean: Schema.Boolean,
+    insertions: Schema.Int.pipe(Schema.nonNegative()),
+    deletions: Schema.Int.pipe(Schema.nonNegative()),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
@@ -1397,7 +1402,7 @@ export const CodeThreadMetadataRecoveryReason = Schema.Literal(
 export type CodeThreadMetadataRecoveryReason = typeof CodeThreadMetadataRecoveryReason.Type;
 
 /**
- * A board card's plan-completion count (0048): how many of the thread's live
+ * A board card's plan-completion count (0051): how many of the thread's live
  * plan's steps are done, out of how many the plan carries. `none` covers a
  * thread with no live plan (0027 keeps at most one). Only the count crosses
  * onto the board; step titles, rationale, and per-step status stay in the

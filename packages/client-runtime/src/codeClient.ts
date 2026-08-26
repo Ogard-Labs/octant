@@ -31,6 +31,7 @@ import {
   decodeCodeRepositoryTestListing,
   decodeCodeSettings,
   decodeCodeThread,
+  decodeCodeNavigation,
   decodeCodeThreadActivity,
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
@@ -48,6 +49,7 @@ import {
   type CodeProjectPullRequestDetailRefreshCommand,
   type CodeProjectPullRequestDetailView,
   type CodeBootstrap,
+  type CodeNavigation,
   type CodeCheckoutId,
   type CodeCommand,
   type CodeCommandResult,
@@ -116,6 +118,7 @@ export interface CodeFileSave {
 
 export interface CodeClient {
   bootstrap(): Promise<CodeBootstrap>;
+  navigation(): Promise<CodeNavigation>;
   thread(threadId: CodeThreadId): Promise<CodeThreadView>;
   execute(command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult>;
   executeOperation(command: CodeOperationCommand): Promise<CodeOperationResult>;
@@ -236,6 +239,14 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         new URL("/api/code/bootstrap", options.baseUrl).toString(),
         { method: "GET", headers },
         decodeBootstrap,
+      );
+    },
+    navigation() {
+      return request(
+        fetch,
+        new URL("/api/code/navigation", options.baseUrl).toString(),
+        { method: "GET", headers },
+        decodeCodeNavigation,
       );
     },
     thread(threadId) {

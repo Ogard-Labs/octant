@@ -1,6 +1,7 @@
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import { decodeComputerUseSessionView } from "@octant/contracts/computer-use";
 import { render, screen, waitFor } from "@testing-library/react";
+import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ComputerUseActivitySurface } from "./ComputerUseActivitySurface";
 
@@ -138,6 +139,27 @@ describe("ComputerUseActivitySurface", () => {
     expect(
       screen.queryByRole("complementary", { name: "Background computer use" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not commit again when polling returns the same sessions", async () => {
+    const client = clientWith([view]);
+    const commits: Array<string> = [];
+    render(
+      <Profiler id="computer-use-activity" onRender={(_, phase) => commits.push(phase)}>
+        <ComputerUseActivitySurface
+          client={client}
+          excludedSessions={new Map([[String(view.threadId), new Set([String(view.sessionId)])]])}
+          pollIntervalMs={5}
+        />
+      </Profiler>,
+    );
+
+    await waitFor(() => expect(client.list).toHaveBeenCalled());
+    await waitFor(() => expect(client.list.mock.calls.length).toBeGreaterThan(2));
+    const commitsAfterPolling = commits.length;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(commits.length).toBe(commitsAfterPolling);
   });
 });
 

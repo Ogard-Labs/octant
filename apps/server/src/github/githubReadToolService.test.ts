@@ -101,6 +101,93 @@ describe("GithubReadToolService", () => {
     );
   });
 
+  it("refuses a profile-excluded tool before any catalogue side effect", async () => {
+    const constrained = {
+      ...thread,
+      profileDisplayName: "Reviewer",
+      toolConstraints: ["octant_browser"],
+    } as CodeThread;
+    const read = vi.fn();
+    const snapshot = vi.fn(async () => readySnapshot);
+    const service = new GithubReadToolService({
+      catalogue: { read } as never,
+      snapshot,
+    });
+    const toolSet = service.createToolSet({
+      windowId: "window-1" as never,
+      thread: constrained,
+      readThread: () => constrained,
+    });
+
+    const outcome = await execute(toolSet, { operation: "issues" });
+    expect(outcome).toEqual({
+      result: {
+        error: "profile-tool-refused",
+        message: 'Profile "Reviewer" does not permit "octant_github".',
+      },
+      isError: true,
+    });
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("names a stale thread before a profile refusal", async () => {
+    const constrained = {
+      ...thread,
+      profileDisplayName: "Reviewer",
+      toolConstraints: ["octant_browser"],
+    } as CodeThread;
+    const read = vi.fn();
+    const snapshot = vi.fn(async () => readySnapshot);
+    const service = new GithubReadToolService({
+      catalogue: { read } as never,
+      snapshot,
+    });
+    const toolSet = service.createToolSet({
+      windowId: "window-1" as never,
+      thread: constrained,
+      readThread: () => undefined,
+    });
+
+    const outcome = await execute(toolSet, { operation: "issues" });
+    expect(outcome).toEqual({
+      result: { error: "thread-stale" },
+      isError: true,
+    });
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("refuses a profile-excluded tool even when the input is malformed", async () => {
+    const constrained = {
+      ...thread,
+      profileDisplayName: "Reviewer",
+      toolConstraints: ["octant_browser"],
+    } as CodeThread;
+    const read = vi.fn();
+    const snapshot = vi.fn(async () => readySnapshot);
+    const service = new GithubReadToolService({
+      catalogue: { read } as never,
+      snapshot,
+    });
+    const toolSet = service.createToolSet({
+      windowId: "window-1" as never,
+      thread: constrained,
+      readThread: () => constrained,
+    });
+
+    const outcome = await execute(toolSet, { operation: "issues", owner: "attacker" });
+    expect(outcome).toEqual({
+      result: {
+        error: "profile-tool-refused",
+        message: 'Profile "Reviewer" does not permit "octant_github".',
+      },
+      isError: true,
+    });
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it("rejects any input that tries to choose a repository, host, endpoint, or flags", async () => {
     const { toolSet, read } = setup();
     for (const input of [

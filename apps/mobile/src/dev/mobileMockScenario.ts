@@ -349,6 +349,8 @@ function createCodeBoardView(threads: ReadonlyArray<CodeThread>) {
         stagedCount: 1,
         committedAhead: 0,
         workingTreeClean: false,
+        insertions: 42,
+        deletions: 12,
       },
       linkedPullRequest: { kind: "none", freshness: "fresh" },
       checks: { freshness: "fresh", state: "passing" },

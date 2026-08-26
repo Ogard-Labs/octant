@@ -5,7 +5,7 @@ import type { CodeBoardPlanProgressSource } from "./codeThreadBoardService";
 
 /**
  * Adapts the durable {@link PlanService} (0027) to the Code board's
- * step-completion count (0048). Reads the same per-thread state the Plan
+ * step-completion count (0051). Reads the same per-thread state the Plan
  * dock reads; no new subsystem, no new write path.
  */
 export function createCodeBoardPlanProgressSource(

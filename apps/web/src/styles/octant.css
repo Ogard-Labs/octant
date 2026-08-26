@@ -724,12 +724,6 @@ h4 {
   padding: var(--oct-space-6) 0 0;
   border-radius: 0;
 }
-.card-raised {
-  box-shadow: var(--oct-elev-raised);
-}
-.card-tight {
-  padding: var(--oct-space-5);
-}
 .card-head {
   display: flex;
   align-items: baseline;
@@ -1322,35 +1316,6 @@ input.switch:checked::after {
 .sheet td[aria-selected="true"] {
   outline: 1.5px solid var(--oct-accent-fg);
   outline-offset: -1.5px;
-}
-/* worksheet tabs sit under the grid, the way a spreadsheet does */
-.sheet-tabs {
-  display: flex;
-  gap: 2px;
-  padding: var(--oct-space-2);
-  border-top: 1px solid var(--oct-border);
-  background: var(--oct-surface-warm);
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-.sheet-tab {
-  min-height: 24px;
-  padding-inline: var(--oct-space-3);
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: none;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  white-space: nowrap;
-}
-.sheet-tab:hover {
-  color: var(--oct-fg);
-}
-.sheet-tab[aria-selected="true"] {
-  border-color: var(--oct-border);
-  background: var(--oct-surface);
-  color: var(--oct-fg);
 }
 
 /* ─── viewer chrome ───────────────────────────────────────────────────
@@ -2037,26 +2002,6 @@ input.switch:checked::after {
   margin: var(--oct-space-2) 0;
   background: var(--oct-border);
   border: 0;
-}
-
-/* ─── popover panel ───────────────────────────────────────────────────
-   A small dialog anchored to the control that opened it (model options,
-   execution profile). Like .menu, the surface is the system's; the caller
-   positions the panel against its trigger and sizes its width. The height
-   clamp is shared because it is chrome, not layout: a panel growing upward
-   from a bottom-row trigger climbed past the tab strip and clipped on short
-   windows, so every panel scrolls its own content instead. */
-.popover-panel {
-  position: absolute;
-  z-index: var(--oct-z-overlay);
-  max-height: calc(100vh - 96px);
-  overflow: auto;
-  padding: var(--oct-space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--popover);
-  color: var(--popover-foreground);
-  box-shadow: var(--octant-shadow-pop);
 }
 
 .octant-tooltip__positioner {
@@ -4227,10 +4172,6 @@ input.switch:checked::after {
 }
 .composer-row .composer-model-picker__trigger[aria-expanded="true"] {
   border-color: var(--oct-accent-fg);
-}
-.composer-row .composer-model-picker__menu {
-  right: auto;
-  left: 0;
 }
 /* The frame's direct labels are its message fields; they must be blocks so
    the content-sized textarea has a full-width box to fill (an inline label

@@ -562,6 +562,54 @@ describe("ProviderSettingsView", () => {
     expect(within(card).queryByText(/update your Kimi Code installation/i)).not.toBeInTheDocument();
   });
 
+  it("surfaces Claude incompatibility facts from the host observation", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: claudeProvider(),
+          observed: observation({
+            readiness: "incompatible",
+            processState: "stopped",
+            detectedVersion: "2.1.211",
+            models: [],
+            message: "Claude initialization version did not match the configured binary.",
+            capabilities: {
+              streaming: "unavailable",
+              resume: "unavailable",
+              interruption: "unavailable",
+              approvals: "unavailable",
+              userQuestions: "unavailable",
+              reasoning: "unavailable",
+              usage: "unavailable",
+              toolActivity: "unavailable",
+              fileChanges: "unavailable",
+              diffs: "unavailable",
+              taskProgress: "unavailable",
+              nativeChildAgents: "unavailable",
+              nativeAttachments: "unavailable",
+              nativeWebResearch: "unavailable",
+              appManagedTools: "unavailable",
+              citations: "unavailable",
+            },
+          }),
+        })}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Claude local" });
+    const details = within(card).getByLabelText("Incompatibility details");
+    expect(within(card).getByText(/update your Claude installation/i)).toBeVisible();
+    expect(
+      within(details).getByText(
+        "Host check: Claude initialization version did not match the configured binary.",
+      ),
+    ).toBeVisible();
+    expect(within(details).getByText("Binary: /opt/homebrew/bin/claude")).toBeVisible();
+    expect(within(details).getByText("Version: 2.1.211")).toBeVisible();
+    expect(within(details).getByText("Authentication: Claude subscription")).toBeVisible();
+    expect(within(details).getByText("Capabilities: Not confirmed")).toBeVisible();
+  });
+
   it("renders Claude provider-native guidance, auth configuration, and one-shot authority copy", () => {
     renderExpanded(
       <ProviderSettingsView

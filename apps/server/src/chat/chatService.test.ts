@@ -4968,6 +4968,138 @@ describe("ChatService", () => {
     expect(resolveAppManagedTools).toHaveBeenCalledTimes(2);
   });
 
+  it("offers the Chat dialogue tool only for explicit mentions and never at coordination depth", async () => {
+    const windowId = "84000000-0000-4000-8000-000000000098" as WindowId;
+    const targetThreadId = "85000000-0000-4000-8000-000000000001" as never;
+    const resolveAppManagedTools = vi.fn(
+      (input: {
+        readonly windowId: WindowId;
+        readonly thread: ChatThread;
+        readonly threadMentionIds?: ReadonlyArray<unknown>;
+        readonly coordinationDepth?: number;
+      }) =>
+        input.coordinationDepth !== undefined || input.threadMentionIds?.length !== 1
+          ? undefined
+          : {
+              definitions: [
+                {
+                  name: "octant_thread_message",
+                  inputSchema: { type: "object", properties: {}, required: [] },
+                },
+              ],
+              execute: async () => ({ result: { status: "completed" } }),
+            },
+    );
+    const { service, fakeDriver } = openFixture({ resolveAppManagedTools });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Coordinator",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await (
+      service.execute as never as (
+        command: unknown,
+        context: { readonly windowId: WindowId; readonly coordinationDepth?: number },
+      ) => Promise<unknown>
+    )(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Ask the mentioned thread to investigate this.",
+        threadMentionIds: [targetThreadId],
+      },
+      { windowId },
+    );
+
+    expect(fakeDriver.sentTurns[0]?.tools.map((tool) => tool.name)).toContain(
+      "octant_thread_message",
+    );
+    expect(resolveAppManagedTools).toHaveBeenCalledWith(
+      expect.objectContaining({ threadMentionIds: [targetThreadId] }),
+    );
+  });
+
+  it("reconciles a repeated Chat submission instead of creating a duplicate turn", async () => {
+    const { service, fakeDriver } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Retry-safe Chat",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const command = {
+      kind: "send-chat-turn" as const,
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      submissionId: "86000000-0000-4000-8000-000000000001" as never,
+      prompt: "Do not create this twice.",
+    };
+
+    const first = await service.execute(command);
+    const second = await service.execute(command);
+
+    if (first.kind !== "turn-created" || second.kind !== "turn-created") {
+      throw new Error("Expected both submissions to resolve to the created turn.");
+    }
+    expect(second.turn.id).toBe(first.turn.id);
+    expect(fakeDriver.sentTurns).toHaveLength(1);
+  });
+
+  it("does not create a second turn for a submission whose only attempt failed", async () => {
+    // Reconciliation used to only look at turns with a queued/streaming/
+    // waiting/completed attempt, so a turn whose lone attempt already
+    // failed was invisible to the lookup. A retried `send-chat-turn` with
+    // the same submissionId then fell through to turn creation and minted
+    // a second turn sharing that submission's identity.
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const driver = {
+      acquire: () =>
+        Effect.succeed({
+          events: Stream.fromQueue(queue),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.succeed({ sessionId: input.sessionId }),
+          send: (input: { readonly sessionId: string }) =>
+            Queue.offer(queue, {
+              kind: "failed",
+              sessionId: input.sessionId,
+              failure: { category: "provider-failed", message: "fixture failure" },
+            } as never),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        }),
+    } as unknown as ProviderDriver;
+    const { service } = openFixture({ driver });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Retry after failure",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const command = {
+      kind: "send-chat-turn" as const,
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      submissionId: "86000000-0000-4000-8000-000000000002" as never,
+      prompt: "Do not duplicate this failed submission.",
+    };
+
+    const first = await service.execute(command);
+    if (first.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.outcome).toBe("failed");
+
+    const second = await service.execute(command);
+
+    if (second.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    expect(second.turn.id).toBe(first.turn.id);
+    expect(service.read(created.thread.id).turns).toHaveLength(1);
+  });
+
   describe("multi-model pool routing", () => {
     // The fixture's single synthetic driver/probe is stamped for one
     // provider instance (`ids.provider`), so candidates here vary by model

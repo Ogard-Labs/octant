@@ -59,7 +59,7 @@ describe("ThreadTaskViewer", () => {
     const setStepStatus = vi.fn(async () => true);
     render(<ThreadTaskViewer controller={controller({ setStepStatus })} />);
 
-    const trigger = screen.getByRole("button", { name: "Show task progress" });
+    const trigger = screen.getByRole("button", { name: /^Show task progress/ });
     expect(trigger).toHaveTextContent("Step 2 / 3");
     await user.click(trigger);
 
@@ -87,13 +87,64 @@ describe("ThreadTaskViewer", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Show task progress" })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: /^Show task progress/ })).toHaveTextContent(
       "3 files changed · stale",
     );
-    await user.click(screen.getByRole("button", { name: "Show task progress" }));
+    await user.click(screen.getByRole("button", { name: /^Show task progress/ }));
     expect(screen.getByRole("dialog", { name: "Task progress" })).toHaveTextContent(
       "3 files changed · stale",
     );
+  });
+
+  it("includes host-supplied insertion and deletion totals in that same label", async () => {
+    const user = userEvent.setup();
+    render(
+      <ThreadTaskViewer
+        changedFiles={{
+          kind: "observed",
+          changedPathCount: 4,
+          freshness: "fresh",
+          insertions: 173,
+          deletions: 0,
+        }}
+        controller={controller()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /^Show task progress/ })).toHaveTextContent(
+      "4 files changed +173 −0",
+    );
+    expect(screen.getByRole("button", { name: /^Show task progress/ })).not.toHaveTextContent(
+      "stale",
+    );
+    await user.click(screen.getByRole("button", { name: /^Show task progress/ }));
+    expect(screen.getByRole("dialog", { name: "Task progress" })).toHaveTextContent(
+      "4 files changed +173 −0",
+    );
+  });
+
+  it("does not invent insertion or deletion totals when the observation omitted them", () => {
+    render(
+      <ThreadTaskViewer
+        changedFiles={{ kind: "observed", changedPathCount: 1, freshness: "fresh" }}
+        controller={controller()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /^Show task progress/ })).toHaveTextContent(
+      "1 file changed",
+    );
+    expect(screen.getByRole("button", { name: /^Show task progress/ })).not.toHaveTextContent("+");
+    expect(screen.getByRole("button", { name: /^Show task progress/ })).not.toHaveTextContent("−");
+  });
+
+  it("omits a changed-file count when the host supplied none", () => {
+    render(<ThreadTaskViewer controller={controller()} />);
+
+    const trigger = screen.getByRole("button", { name: /^Show task progress/ });
+    expect(trigger).toHaveTextContent("Step 2 / 3");
+    expect(trigger).not.toHaveTextContent("file");
+    expect(trigger).not.toHaveTextContent("changed");
   });
 
   it("lets the reader approve a proposed task plan", async () => {
@@ -108,10 +159,10 @@ describe("ThreadTaskViewer", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Show task progress" })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: /^Show task progress/ })).toHaveTextContent(
       "Review 3-step plan",
     );
-    await user.click(screen.getByRole("button", { name: "Show task progress" }));
+    await user.click(screen.getByRole("button", { name: /^Show task progress/ }));
     await user.click(screen.getByRole("button", { name: "Approve plan" }));
     expect(approve).toHaveBeenCalledOnce();
   });

@@ -70,6 +70,7 @@ export interface UseExecutionProfileControllerOptions {
   }) => void;
   readonly profileSelectionStorageKey: string;
   readonly projectExecutionPolicy: ProviderExecutionPolicy;
+  readonly requestedExecutionPolicy: ProviderExecutionPolicy;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
@@ -174,12 +175,14 @@ export function useExecutionProfileController(
         hostLabel: options.hostLabel,
         mode: options.mode,
         projectExecutionPolicy: options.projectExecutionPolicy,
+        requestedExecutionPolicy: options.requestedExecutionPolicy,
       }),
     [
       options.hostId,
       options.hostLabel,
       options.mode,
       options.projectExecutionPolicy,
+      options.requestedExecutionPolicy,
       profiles,
       providers,
     ],
@@ -230,6 +233,7 @@ export function useExecutionProfileController(
         mode: options.mode,
         hostId: options.hostId,
         projectExecutionPolicy: options.projectExecutionPolicy,
+        requestedExecutionPolicy: options.requestedExecutionPolicy,
         scope: {
           scopeKind: options.scope.scopeKind,
           scopeRef: options.scope.scopeRef,
@@ -271,6 +275,7 @@ export function useExecutionProfileController(
     options.hostLabel,
     options.mode,
     options.projectExecutionPolicy,
+    options.requestedExecutionPolicy,
     options.scope.scopeKind,
     options.scope.scopeRef,
     providerFactKey,

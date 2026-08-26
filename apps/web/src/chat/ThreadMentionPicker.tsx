@@ -33,6 +33,8 @@ export interface ThreadMentionChip {
 export interface ThreadMentions {
   readonly candidates: ReadonlyArray<ThreadMentionCandidate>;
   readonly chips: ReadonlyArray<ThreadMentionChip>;
+  /** The current Chat turn may explicitly ask a mentioned Chat thread to reply. */
+  readonly dialogueEnabled?: boolean;
   /** Receives the text after `#`, or `undefined` when the typeahead closes. */
   readonly onQueryChange: (query: string | undefined) => void;
   readonly onSelectCandidate: (candidate: ThreadMentionCandidate) => void;
@@ -199,6 +201,7 @@ export function ThreadMentionTypeahead(props: {
  */
 export function ThreadMentionChips(props: {
   readonly chips: ReadonlyArray<ThreadMentionChip>;
+  readonly dialogueEnabled?: boolean;
   readonly disabled?: boolean;
   readonly onRemove: (threadId: MentionableThreadId) => void;
   readonly onOpenSideChat?: (threadId: MentionableThreadId) => void;
@@ -212,7 +215,11 @@ export function ThreadMentionChips(props: {
           <span>{chip.title}</span>
           <span className="thread-mention__chip-receipt">
             {chip.unavailableReason === undefined
-              ? `${threadModeLabel(chip.mode)} · ${chip.placementLabel} · Read-only`
+              ? `${threadModeLabel(chip.mode)} · ${chip.placementLabel} · ${
+                  props.dialogueEnabled && chip.mode === "chat"
+                    ? "Can receive a message"
+                    : "Read-only"
+                }`
               : `Unavailable: ${chip.unavailableReason}`}
           </span>
           {props.onOpenSideChat === undefined ? null : (

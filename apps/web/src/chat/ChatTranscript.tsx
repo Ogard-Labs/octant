@@ -13,6 +13,7 @@ import { activeChatTurns } from "@octant/domain/chat-policy";
 import { Ban, Check, Circle, CircleAlert, CircleX, Clock3, LoaderCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
@@ -424,9 +425,7 @@ function AttemptBlock(props: {
   return (
     <>
       {handoff === undefined ? null : (
-        <div aria-label={handoff} className="chat-transcript__handoff" role="separator">
-          {handoff}
-        </div>
+        <OctantSeparatorWithLabel aria-label={handoff}>{handoff}</OctantSeparatorWithLabel>
       )}
       <article
         aria-label={`Assistant response · ${attemptLabels[props.attempt.outcome]}`}

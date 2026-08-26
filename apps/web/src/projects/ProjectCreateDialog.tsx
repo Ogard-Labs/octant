@@ -356,7 +356,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         needs the native picker bridge.
       </p>
       <div className="project-dialog__actions">
-        <OctantButton onClick={props.onClose} type="button">
+        <OctantButton onClick={props.onClose} type="button" variant="ghost">
           Close
         </OctantButton>
       </div>

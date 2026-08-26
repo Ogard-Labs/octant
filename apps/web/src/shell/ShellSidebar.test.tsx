@@ -58,7 +58,7 @@ describe("ShellSidebar", () => {
       await user.click(screen.getByRole("button", { name: label }));
     }
     await user.click(screen.getByRole("button", { name: "Set your name" }));
-    await user.click(screen.getByRole("menuitem", { name: "Plugins" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
     expect(actions["new-work-thread"]).toHaveBeenCalledOnce();
     expect(actions.plugins).toHaveBeenCalledOnce();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
@@ -92,7 +92,7 @@ describe("ShellSidebar", () => {
       await user.click(screen.getByRole("button", { name: label }));
     }
     await user.click(screen.getByRole("button", { name: "Set your name" }));
-    await user.click(screen.getByRole("menuitem", { name: "Plugins" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
     expect(actions["new-code-thread"]).toHaveBeenCalledOnce();
     expect(actions.automations).not.toHaveBeenCalled();
     expect(actions.plugins).toHaveBeenCalledOnce();
@@ -128,7 +128,7 @@ describe("ShellSidebar", () => {
 
     render(sidebar(true));
     await user.click(screen.getByRole("button", { name: "Set your name" }));
-    await user.click(screen.getByRole("menuitem", { name: "Automations" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Automations" }));
     expect(automations).toHaveBeenCalledOnce();
   });
 
@@ -201,7 +201,7 @@ describe("ShellSidebar", () => {
       await user.click(search);
       expect(onOpenSearch).toHaveBeenCalledOnce();
       await user.click(profile);
-      await user.click(screen.getByRole("menuitem", { name: "Settings" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Settings" }));
       expect(onOpenSettings).toHaveBeenCalledOnce();
     },
   );

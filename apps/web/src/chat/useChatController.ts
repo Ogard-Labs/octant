@@ -12,10 +12,12 @@ import type {
   ChatCommandResult,
   ChatEventFrame,
   ChatNavigationThread,
+  ChatSubmissionId,
   ChatThread,
   ChatThreadId,
   ChatThreadView,
 } from "@octant/contracts/chat";
+import { decodeChatSubmissionId } from "@octant/contracts/chat";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
@@ -24,6 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { buildChatThreadNavigation, type ChatThreadNavigationItem } from "../shell/navigationModel";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export type ChatControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 
@@ -38,9 +41,63 @@ const MAX_RECONNECT_DELAY_MS = 10_000;
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_RECONNECT_BACKOFF_MS = 100;
 
-/** Background windows do not need to poll every thread while hidden. */
-function documentIsVisible(): boolean {
-  return typeof document === "undefined" || document.visibilityState !== "hidden";
+/**
+ * A stable identifier for one extension/skill selection. `ExtensionSelection`
+ * has no single id field the way attachments and canvas/preview selections
+ * do, so the fields that distinguish one selection from another are encoded
+ * explicitly.
+ */
+function extensionSelectionKey(selection: ExtensionSelection): unknown {
+  const origin = [selection.origin.kind, String(selection.origin.reference)];
+  if (selection.kind === "skill") {
+    return [
+      "skill",
+      String(selection.skillId),
+      selection.packageVersion === undefined ? null : String(selection.packageVersion),
+      String(selection.packageDigest),
+      String(selection.catalogEpoch),
+      origin,
+    ];
+  }
+  return [
+    "plugin",
+    String(selection.extensionId),
+    String(selection.packageId),
+    selection.componentId === undefined ? null : String(selection.componentId),
+    String(selection.packageVersion),
+    String(selection.packageDigest),
+    String(selection.catalogEpoch),
+    origin,
+  ];
+}
+
+/**
+ * The identity a retry must match to be treated as "the same submission" by
+ * the server's submissionId reconciliation. Keying off thread + text alone
+ * let a retry that changed attachments, selections, extensions, or mentions
+ * reuse the prior submissionId; the server then matched by submissionId plus
+ * body text and handed back the original turn, silently discarding whatever
+ * about the resend had actually changed. JSON-encoding the whole tuple, rather
+ * than joining strings, keeps adjacent fields from bleeding into each other.
+ */
+function submissionIntentKey(
+  threadId: string,
+  prompt: string,
+  attachmentIds: ReadonlyArray<ChatAttachmentId>,
+  previewSelections: ReadonlyArray<PreviewContextSelection>,
+  canvasSelections: ReadonlyArray<CanvasContextSelection>,
+  extensionSelections: ReadonlyArray<ExtensionSelection>,
+  threadMentionIds: ReadonlyArray<MentionableThreadId>,
+): string {
+  return JSON.stringify([
+    threadId,
+    prompt,
+    attachmentIds.map((id) => String(id)),
+    previewSelections.map((selection) => String(selection.id)),
+    canvasSelections.map((selection) => String(selection.id)),
+    extensionSelections.map(extensionSelectionKey),
+    threadMentionIds.map((id) => String(id)),
+  ]);
 }
 
 export interface ChatControllerOptions {
@@ -190,6 +247,7 @@ export function useChatController(options: ChatControllerOptions) {
   const bootstrapGeneration = useRef(0);
   const threadGeneration = useRef(0);
   const streamAbort = useRef<AbortController | undefined>(undefined);
+  const pendingSubmissionIds = useRef(new Map<string, ChatSubmissionId>());
   const bootstrapped = useRef(false);
   const composerDraftRef = useRef(composerDraft);
   composerDraftRef.current = composerDraft;
@@ -466,7 +524,6 @@ export function useChatController(options: ChatControllerOptions) {
     if (bootstrap === undefined) return;
     let cancelled = false;
     let inFlight = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
     const refresh = async () => {
       if (!documentIsVisible() || inFlight) return;
       inFlight = true;
@@ -482,23 +539,12 @@ export function useChatController(options: ChatControllerOptions) {
         inFlight = false;
       }
     };
-    const schedule = () => {
-      if (timer !== undefined) clearInterval(timer);
-      timer = documentIsVisible()
-        ? setInterval(() => void refresh(), Math.max(10, navigationRefreshMs))
-        : undefined;
-    };
-    const onVisibilityChange = () => {
-      schedule();
-      if (documentIsVisible()) void refresh();
-    };
-    schedule();
-    if (documentIsVisible()) void refresh();
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    const stop = scheduleVisibleInterval(() => void refresh(), Math.max(10, navigationRefreshMs), {
+      runImmediately: true,
+    });
     return () => {
       cancelled = true;
-      if (timer !== undefined) clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
+      stop();
     };
   }, [applyNavigation, bootstrap, client, navigationRefreshMs]);
 
@@ -647,6 +693,19 @@ export function useChatController(options: ChatControllerOptions) {
       return false;
     }
     const sendingThreadId = String(activeView.thread.id);
+    const submissionKey = submissionIntentKey(
+      sendingThreadId,
+      prompt,
+      attachmentIds,
+      previewSelections,
+      canvasSelections,
+      extensionSelections,
+      threadMentionIds,
+    );
+    const submissionId =
+      pendingSubmissionIds.current.get(submissionKey) ??
+      decodeChatSubmissionId(globalThis.crypto.randomUUID());
+    pendingSubmissionIds.current.set(submissionKey, submissionId);
     const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
     composerDraftRef.current.clearFor(sendingThreadId);
     const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
@@ -655,6 +714,7 @@ export function useChatController(options: ChatControllerOptions) {
       threadId: activeView.thread.id,
       expectedVersion: expectedVersion ?? activeView.thread.version,
       prompt,
+      submissionId,
       ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
       ...(previewSelections.length === 0 ? {} : { previewSelections: [...previewSelections] }),
       ...(canvasSelections.length === 0 ? {} : { canvasSelections: [...canvasSelections] }),
@@ -673,6 +733,7 @@ export function useChatController(options: ChatControllerOptions) {
         stagedDropped: previousDraft?.stagedDropped === true,
       });
     }
+    if (result !== undefined) pendingSubmissionIds.current.delete(submissionKey);
     return result !== undefined;
   }
 

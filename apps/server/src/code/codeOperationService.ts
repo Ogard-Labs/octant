@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   decodeCodeOperationCommand,
   decodeCodeOperationResult,
@@ -26,6 +27,8 @@ import {
   type ProviderContextBlock,
   type WindowId,
 } from "@octant/contracts";
+import { composeCodeProfileContext } from "./codeTurnContext";
+import type { CodeProfileSkillResolver } from "./codeProfileSkillResolver";
 import {
   authorizeCodeOperation,
   clampTurnAccessPosture,
@@ -159,7 +162,7 @@ export interface CodeOperationTerminalPort {
   readonly observe?: (
     terminalId: string,
     listener: (emission: TerminalOutputEmission) => void,
-    options?: { readonly afterTranscript: string },
+    options?: { readonly afterCharacters: number },
   ) => () => void;
   readonly write: (terminalId: string, data: string) => void;
   readonly resize: (terminalId: string, columns: number, rows: number) => void;
@@ -170,7 +173,11 @@ export interface CodeOperationTerminalSnapshot {
   readonly terminalId: string;
   readonly status: "running" | "exited" | "interrupted";
   readonly exitCode?: number;
-  readonly transcript: { readonly chunks: readonly string[]; readonly truncated: boolean };
+  readonly transcript: {
+    readonly chunks: readonly string[];
+    readonly truncated: boolean;
+    readonly characters: number;
+  };
 }
 
 interface TerminalOutputEmission {
@@ -215,7 +222,8 @@ interface TerminalOwner {
   /** Every surface currently following this terminal, keyed by its operation. */
   readonly readers: Map<string, TerminalOutputReader>;
   removeOutputListener?: () => void;
-  outputBaseline?: string;
+  /** How far the surface has already been caught up by the snapshot it was sent. */
+  outputBaseline?: number;
 }
 
 export interface CodeOperationRepositoryTestPort {
@@ -289,6 +297,8 @@ export interface CodeOperationGitPort {
       readonly worktree: string;
     }[];
     readonly changedPaths?: readonly string[];
+    readonly insertions?: number;
+    readonly deletions?: number;
     readonly diff?: string;
     readonly diffTruncated?: boolean;
     readonly remotes?: readonly {
@@ -689,6 +699,12 @@ export interface CodeOperationServiceOptions {
      */
     readonly operationId: CodeOperationId;
   }) => Promise<string | undefined>;
+  /**
+   * Loads skills named by the thread's snapshotted profile allowlist. Absent
+   * on a host that cannot resolve skills, where a profile still injects its
+   * instructions and simply loads none of the named skills.
+   */
+  readonly resolveProfileSkills?: CodeProfileSkillResolver;
 }
 
 export class CodeOperationService {
@@ -1218,7 +1234,7 @@ export class CodeOperationService {
           threadId: thread.id,
           checkoutId: checkout.id,
           readers: new Map(),
-          outputBaseline: snapshot.transcript.chunks.join(""),
+          outputBaseline: snapshot.transcript.characters,
         });
         return this.#terminal(command.operationId, snapshot);
       }
@@ -1227,7 +1243,7 @@ export class CodeOperationService {
         if (ownerFailure !== undefined) return ownerFailure;
         const snapshot = this.#options.terminals.attach(command.terminalId);
         const owner = this.#terminalOwners.get(command.terminalId)!;
-        owner.outputBaseline = snapshot.transcript.chunks.join("");
+        owner.outputBaseline = snapshot.transcript.characters;
         return this.#terminal(command.operationId, snapshot);
       }
       case "write-terminal": {
@@ -1576,7 +1592,7 @@ export class CodeOperationService {
           this.#deactivateTerminalOutput(terminalId);
         }
       },
-      outputBaseline === undefined ? undefined : { afterTranscript: outputBaseline },
+      outputBaseline === undefined ? undefined : { afterCharacters: outputBaseline },
     );
   }
 
@@ -1874,6 +1890,9 @@ export class CodeOperationService {
       stateToken: result.stateToken,
       status: result.statusEntries,
       changedPaths: result.changedPaths,
+      ...(typeof result.insertions === "number" && typeof result.deletions === "number"
+        ? { insertions: result.insertions, deletions: result.deletions }
+        : {}),
       diff: this.#options.evidence.put(result.diff, { truncated: result.diffTruncated === true }),
       remotes: result.remotes.map((remote) => ({
         name: remote.name,
@@ -2071,7 +2090,9 @@ export class CodeOperationService {
         supportsImages,
       })
       .catch(() => undefined);
+    const profileContext = await this.#resolveProfileContext(thread);
     const context = [
+      ...profileContext,
       ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
       ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
       ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
@@ -2176,6 +2197,28 @@ export class CodeOperationService {
    * and a source it cannot read contributes nothing rather than a claimed
    * history the model would treat as real.
    */
+  /**
+   * Inject the profile snapshot this thread started under. The live profile is
+   * never re-read here: instructions and the skill allowlist come from the
+   * thread record, so a later profile edit cannot change a running thread.
+   */
+  async #resolveProfileContext(thread: CodeThread): Promise<ReadonlyArray<ProviderContextBlock>> {
+    if (thread.profileContext === undefined) return [];
+    const skills =
+      this.#options.resolveProfileSkills === undefined
+        ? []
+        : await this.#options.resolveProfileSkills({
+            approvedSkillIds: thread.profileContext.approvedSkillIds,
+            threadId: String(thread.id),
+            projectId: String(thread.projectId),
+          });
+    return composeCodeProfileContext({
+      thread,
+      skills,
+      uuid: randomUUID,
+    }).blocks;
+  }
+
   async #resolveForkHandoff(
     thread: CodeThread,
     windowId: WindowId,

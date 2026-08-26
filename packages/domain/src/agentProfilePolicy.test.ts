@@ -12,14 +12,19 @@ import type {
 } from "@octant/contracts/providers";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
-  AgentProfileRejected,
+  admitApprovedProfileSkills,
   applyProfileToThread,
+  attributeProfileInstructions,
+  attributeProfileSkillInstructions,
   buildExecutionContextPickerEntries,
+  decideProfileToolConstraint,
   filterExecutionContextPickerEntries,
   isModelAllowedByProfile,
   isProfileModeCompatible,
+  isToolAllowedByAllowlist,
   profileScopeApplies,
   resolveEffectiveProfile,
+  snapshotProfileThreadContext,
   validateCapabilityConstraints,
   validateProfileAuthoritySafety,
   type ResolveEffectiveProfileInput,
@@ -136,23 +141,78 @@ describe("agentProfilePolicy", () => {
     });
   });
 
+  describe("isToolAllowedByAllowlist", () => {
+    it("allows every tool when the snapshotted allowlist is empty", () => {
+      expect(isToolAllowedByAllowlist([], "octant_terminal")).toBe(true);
+    });
+
+    it("allows a tool named on the snapshotted allowlist", () => {
+      expect(
+        isToolAllowedByAllowlist(["octant_browser", "octant_terminal"], "octant_terminal"),
+      ).toBe(true);
+    });
+
+    it("refuses a tool the snapshotted allowlist excluded", () => {
+      expect(isToolAllowedByAllowlist(["octant_browser"], "octant_terminal")).toBe(false);
+    });
+  });
+
+  describe("decideProfileToolConstraint", () => {
+    it("allows a posture-permitted tool when the allowlist is empty", () => {
+      expect(
+        decideProfileToolConstraint({
+          toolId: "octant_terminal",
+          toolConstraints: [],
+          profileDisplayName: "Reviewer",
+        }),
+      ).toEqual({ status: "allowed" });
+    });
+
+    it("refuses an excluded tool with a reason that names the profile", () => {
+      expect(
+        decideProfileToolConstraint({
+          toolId: "octant_terminal",
+          toolConstraints: ["octant_browser"],
+          profileDisplayName: "Reviewer",
+        }),
+      ).toEqual({
+        status: "refused",
+        reason: 'Profile "Reviewer" does not permit "octant_terminal".',
+      });
+    });
+  });
+
   describe("validateProfileAuthoritySafety", () => {
-    it("passes when profile policy does not exceed project policy", () => {
-      expect(() =>
+    it("accepts a profile whose narrowed posture does not exceed project policy", () => {
+      expect(
         validateProfileAuthoritySafety({
           profile: profile({ defaultExecutionPolicy: "plan" }),
           projectExecutionPolicy: "approval-gated",
+          requestedExecutionPolicy: "approval-gated",
         }),
-      ).not.toThrow();
+      ).toEqual({ status: "accepted" });
     });
 
-    it("throws when profile policy exceeds project policy", () => {
-      expect(() =>
+    it("refuses when the narrowed posture still exceeds project policy", () => {
+      const result = validateProfileAuthoritySafety({
+        profile: profile({ defaultExecutionPolicy: "full-access" }),
+        projectExecutionPolicy: "plan",
+        requestedExecutionPolicy: "full-access",
+      });
+      expect(result.status).toBe("refused");
+      if (result.status !== "refused") return;
+      expect(result.code).toBe("authority-escalation");
+      expect(result.reason).toContain("exceeds Project policy");
+    });
+
+    it("accepts a Full-access profile asked to start under Plan", () => {
+      expect(
         validateProfileAuthoritySafety({
           profile: profile({ defaultExecutionPolicy: "full-access" }),
-          projectExecutionPolicy: "plan",
+          projectExecutionPolicy: "approval-gated",
+          requestedExecutionPolicy: "plan",
         }),
-      ).toThrow(AgentProfileRejected);
+      ).toEqual({ status: "accepted" });
     });
   });
 
@@ -172,6 +232,7 @@ describe("agentProfilePolicy", () => {
         hostLabel: "This Mac",
         mode: "code",
         projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "approval-gated",
       });
       expect(entries.length).toBeGreaterThanOrEqual(1);
       expect(entries.some((e) => e.modelId === "gpt-4o")).toBe(true);
@@ -192,8 +253,103 @@ describe("agentProfilePolicy", () => {
         hostLabel: "This Mac",
         mode: "code",
         projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "approval-gated",
       });
       expect(entries).toEqual([]);
+    });
+
+    it("keeps a Full-access profile available for a Plan draft and shows the narrowed posture", () => {
+      const fullAccess = profile({ defaultExecutionPolicy: "full-access" });
+      const pickerInput = {
+        providers: [
+          {
+            instanceId: instance().id,
+            displayName: "OpenAI",
+            models: [model("gpt-4o")],
+            readiness: "ready",
+          },
+        ],
+        profiles: [fullAccess],
+        hostId: "local",
+        hostLabel: "This Mac",
+        mode: "code" as const,
+        projectExecutionPolicy: "approval-gated" as const,
+        requestedExecutionPolicy: "plan" as const,
+      };
+      const entries = buildExecutionContextPickerEntries(pickerInput);
+      const profileEntry = entries.find(
+        (entry) => String(entry.profileId) === String(fullAccess.id),
+      );
+      expect(profileEntry?.unavailableReason).toBeUndefined();
+      expect(profileEntry?.executionPolicy).toBe("plan");
+
+      const applied = applyProfileToThread({
+        profile: fullAccess,
+        mode: "code",
+        modelId: model("gpt-4o").id,
+        requestedExecutionPolicy: pickerInput.requestedExecutionPolicy,
+        requestedPermissionPersistence: "current-session",
+        projectExecutionPolicy: pickerInput.projectExecutionPolicy,
+      });
+      expect(applied).toEqual({
+        status: "applied",
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+        toolConstraints: [],
+        profileDisplayName: "Code Reviewer",
+      });
+      expect(profileEntry?.executionPolicy).toBe(
+        applied.status === "applied" ? applied.executionPolicy : undefined,
+      );
+    });
+
+    it("keeps a Full-access profile available for an approval-gated draft", () => {
+      const fullAccess = profile({ defaultExecutionPolicy: "full-access" });
+      const entries = buildExecutionContextPickerEntries({
+        providers: [
+          {
+            instanceId: instance().id,
+            displayName: "OpenAI",
+            models: [model("gpt-4o")],
+            readiness: "ready",
+          },
+        ],
+        profiles: [fullAccess],
+        hostId: "local",
+        hostLabel: "This Mac",
+        mode: "code",
+        projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "approval-gated",
+      });
+      const profileEntry = entries.find(
+        (entry) => String(entry.profileId) === String(fullAccess.id),
+      );
+      expect(profileEntry?.unavailableReason).toBeUndefined();
+      expect(profileEntry?.executionPolicy).toBe("approval-gated");
+    });
+
+    it("marks a Full-access profile unavailable when the draft still asks for more than the Project allows", () => {
+      const fullAccess = profile({ defaultExecutionPolicy: "full-access" });
+      const entries = buildExecutionContextPickerEntries({
+        providers: [
+          {
+            instanceId: instance().id,
+            displayName: "OpenAI",
+            models: [model("gpt-4o")],
+            readiness: "ready",
+          },
+        ],
+        profiles: [fullAccess],
+        hostId: "local",
+        hostLabel: "This Mac",
+        mode: "code",
+        projectExecutionPolicy: "plan",
+        requestedExecutionPolicy: "full-access",
+      });
+      const profileEntry = entries.find(
+        (entry) => String(entry.profileId) === String(fullAccess.id),
+      );
+      expect(profileEntry?.unavailableReason).toBeDefined();
     });
   });
 
@@ -213,6 +369,7 @@ describe("agentProfilePolicy", () => {
         hostLabel: "This Mac",
         mode: "code",
         projectExecutionPolicy: "approval-gated",
+        requestedExecutionPolicy: "approval-gated",
       });
       const filtered = filterExecutionContextPickerEntries(entries, "o3");
       expect(filtered.every((e) => e.modelId === "o3")).toBe(true);
@@ -227,6 +384,25 @@ describe("agentProfilePolicy", () => {
         toolConstraints: [],
       });
       expect(result.ok).toBe(true);
+    });
+
+    it("passes a non-empty tool allowlist when the model can call tools", () => {
+      const result = validateCapabilityConstraints({
+        modelId: "gpt-4o" as never,
+        catalog: catalog(instance().id, [model("gpt-4o", { toolCalling: "supported" })]),
+        toolConstraints: ["octant_browser"],
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it("fails a non-empty tool allowlist when the model cannot call tools", () => {
+      const result = validateCapabilityConstraints({
+        modelId: "gpt-4o" as never,
+        catalog: catalog(instance().id, [model("gpt-4o", { toolCalling: "unsupported" })]),
+        toolConstraints: ["octant_browser"],
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toContain("tool calling");
     });
 
     it("fails when model is not in catalog", () => {
@@ -257,6 +433,7 @@ describe("agentProfilePolicy", () => {
       mode: "code" as OctantMode,
       hostId: "local" as never,
       projectExecutionPolicy: "approval-gated",
+      requestedExecutionPolicy: "approval-gated",
       providers: [instance().id],
       catalogs: [catalog(instance().id, [model("gpt-4o")])],
       profiles: [],
@@ -400,6 +577,31 @@ describe("agentProfilePolicy", () => {
       expect(receipt.downgradeReasons.some((r) => r.step === "project-default")).toBe(true);
     });
 
+    it("downgrades a profile whose tool allowlist needs tool calling the catalog model cannot do", () => {
+      const projectProfile = profile({
+        id: "00000000-0000-0000-0000-000000000020" as AgentProfile["id"],
+        compatibleModes: ["code"],
+        toolConstraints: ["octant_browser"],
+      });
+      const receipt = resolveEffectiveProfile(
+        baseInput({
+          catalogs: [catalog(instance().id, [model("gpt-4o", { toolCalling: "unsupported" })])],
+          projectDefault: {
+            profile: projectProfile,
+            providerInstanceId: instance().id,
+            modelId: "gpt-4o" as never,
+          },
+          profiles: [],
+        }),
+      );
+      expect(receipt.source).not.toBe("project-default");
+      expect(
+        receipt.downgradeReasons.some(
+          (reason) => reason.step === "project-default" && reason.reason.includes("tool calling"),
+        ),
+      ).toBe(true);
+    });
+
     it("fails closed without changing authority when all sources unavailable", () => {
       const receipt = resolveEffectiveProfile(
         baseInput({
@@ -447,11 +649,34 @@ describe("agentProfilePolicy", () => {
       const receipt = resolveEffectiveProfile(
         baseInput({
           projectExecutionPolicy: "plan",
+          requestedExecutionPolicy: "full-access",
           profiles: [{ profile: userProfile, scope: scope({ scopeKind: "user" }) }],
         }),
       );
       expect(receipt.source).toBe("none");
       expect(receipt.downgradeReasons.some((r) => r.step === "user-default")).toBe(true);
+    });
+
+    it("resolves a Full-access profile for a Plan draft under the narrowed posture", () => {
+      const fullAccess = profile({
+        id: "00000000-0000-0000-0000-000000000099" as AgentProfile["id"],
+        defaultExecutionPolicy: "full-access",
+        compatibleModes: ["code"],
+      });
+      const receipt = resolveEffectiveProfile(
+        baseInput({
+          projectExecutionPolicy: "approval-gated",
+          requestedExecutionPolicy: "plan",
+          oneOffOverride: {
+            profile: fullAccess,
+            providerInstanceId: instance().id,
+            modelId: "gpt-4o" as never,
+          },
+        }),
+      );
+      expect(receipt.source).toBe("one-off-override");
+      expect(receipt.profileId).toBe(fullAccess.id);
+      expect(receipt.executionPolicy).toBe("plan");
     });
 
     it("produces a deterministic fallback chain in priority order", () => {
@@ -544,6 +769,8 @@ describe("applyProfileToThread", () => {
       status: "applied",
       executionPolicy: "approval-gated",
       permissionPersistence: "current-session",
+      toolConstraints: [],
+      profileDisplayName: "Code Reviewer",
     });
   });
 
@@ -561,6 +788,8 @@ describe("applyProfileToThread", () => {
       status: "applied",
       executionPolicy: "plan",
       permissionPersistence: "current-session",
+      toolConstraints: [],
+      profileDisplayName: "Code Reviewer",
     });
   });
 
@@ -592,6 +821,8 @@ describe("applyProfileToThread", () => {
       status: "applied",
       executionPolicy: "plan",
       permissionPersistence: "current-session",
+      toolConstraints: [],
+      profileDisplayName: "Code Reviewer",
     });
   });
 
@@ -612,6 +843,8 @@ describe("applyProfileToThread", () => {
       status: "applied",
       executionPolicy: "full-access",
       permissionPersistence: "current-session",
+      toolConstraints: [],
+      profileDisplayName: "Code Reviewer",
     });
   });
 
@@ -654,5 +887,154 @@ describe("applyProfileToThread", () => {
 
     expect(applied.status).toBe("refused");
     expect(applied.status === "refused" ? applied.code : undefined).toBe("model-not-allowed");
+  });
+
+  it("snapshots the profile's tool allowlist and display name onto the thread", () => {
+    const applied = applyProfileToThread({
+      profile: profile({
+        displayName: "Reviewer",
+        toolConstraints: ["octant_browser"],
+      }),
+      mode: "code",
+      modelId: "gpt-5.6-luna" as ProviderModel["id"],
+      requestedExecutionPolicy: "full-access",
+      requestedPermissionPersistence: "current-session",
+      projectExecutionPolicy: "full-access",
+    });
+
+    expect(applied).toEqual({
+      status: "applied",
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+      toolConstraints: ["octant_browser"],
+      profileDisplayName: "Reviewer",
+    });
+  });
+});
+
+describe("snapshotProfileThreadContext", () => {
+  it("copies instructions and approved skills by value", () => {
+    const approvedSkillIds = ["code-reviewer"];
+    const source = profile({
+      displayName: "Reviewer",
+      instructions: "Review as a skeptic.",
+      approvedSkillIds,
+    });
+    const snapshot = snapshotProfileThreadContext(source);
+
+    expect(snapshot).toEqual({
+      displayName: "Reviewer",
+      instructions: "Review as a skeptic.",
+      approvedSkillIds: ["code-reviewer"],
+    });
+    approvedSkillIds.push("later-edit");
+    expect(snapshot.approvedSkillIds).toEqual(["code-reviewer"]);
+  });
+
+  it("omits instructions when the profile carries none", () => {
+    expect(snapshotProfileThreadContext(profile()).instructions).toBeUndefined();
+  });
+});
+
+describe("attributeProfileInstructions", () => {
+  it("names the profile so a reader can see where the instructions came from", () => {
+    expect(
+      attributeProfileInstructions({
+        profileId: "00000000-0000-0000-0000-000000000001",
+        displayName: "Reviewer",
+        instructions: "Review as a skeptic.",
+      }),
+    ).toEqual({
+      sourceKind: "instruction",
+      referenceId: "profile:00000000-0000-0000-0000-000000000001",
+      category: "user-instructions",
+      label: "Reviewer profile instructions",
+      text: "Review as a skeptic.",
+    });
+  });
+});
+
+describe("admitApprovedProfileSkills", () => {
+  const digest = `sha256:${"a".repeat(64)}`;
+  const reviewer = {
+    qualifiedId: `agents-skills-directory:project:code-reviewer:${digest}`,
+    name: "code-reviewer",
+    displayName: "Code reviewer",
+    effective: true,
+  };
+
+  it("admits an approved skill the host already treats as effective", () => {
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["code-reviewer"],
+        skills: [reviewer],
+      }),
+    ).toEqual([
+      {
+        qualifiedId: reviewer.qualifiedId,
+        name: "code-reviewer",
+        displayName: "Code reviewer",
+      },
+    ]);
+  });
+
+  it("does not activate an approved skill that is not installed", () => {
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["code-reviewer"],
+        skills: [],
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not activate an approved skill the host has not trusted", () => {
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["code-reviewer"],
+        skills: [{ ...reviewer, effective: false }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not load a skill the snapshot did not name", () => {
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["other-skill"],
+        skills: [reviewer],
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not guess when two effective skills share an approved name", () => {
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["code-reviewer"],
+        skills: [
+          reviewer,
+          {
+            ...reviewer,
+            qualifiedId: `agents-skills-directory:user:code-reviewer:${digest}`,
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("attributeProfileSkillInstructions", () => {
+  it("attributes loaded skill text to the skill itself", () => {
+    expect(
+      attributeProfileSkillInstructions({
+        qualifiedId: "agents-skills-directory:project:code-reviewer:sha256:aa",
+        displayName: "Code reviewer",
+        text: "Review diffs in isolation.",
+      }),
+    ).toEqual({
+      sourceKind: "skill",
+      referenceId: "agents-skills-directory:project:code-reviewer:sha256:aa",
+      category: "extension-instructions",
+      label: "Code reviewer",
+      text: "Review diffs in isolation.",
+    });
   });
 });

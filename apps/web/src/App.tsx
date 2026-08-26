@@ -212,6 +212,7 @@ import {
   useFirstRunOnboardingController,
   type FirstRunOnboardingOutcome,
 } from "./onboarding/useFirstRunOnboardingController";
+import { projectViewEnvironmentOptionsFromHosts } from "./code/codeProjectViewModel";
 import { ProjectSidebarSection } from "./projects/ProjectSidebarSection";
 import { OctantButton } from "./ui/base/OctantButton";
 import { useProjectController } from "./projects/useProjectController";
@@ -618,6 +619,8 @@ function LaunchedShell(
     useState<import("@octant/contracts/providers").ProviderInstanceId>();
   const [draftModelId, setDraftModelId] =
     useState<import("@octant/contracts/providers").ProviderModelId>();
+  const [draftComposerExecutionPolicy, setDraftComposerExecutionPolicy] =
+    useState<import("@octant/contracts/providers").ProviderExecutionPolicy>();
   const [searchOpen, setSearchOpen] = useState(false);
   // The Thread Search query lives here as well as in the overlay, because the
   // archived half of the Chat listing is fetched from the host per query.
@@ -1339,8 +1342,19 @@ function LaunchedShell(
     }
     return undefined;
   }, [activeChatThreadId, activeCodeThreadId, activeMode, activeWorkThreadId]);
+  // The context snapshot measures a conversation that keeps growing, so it has
+  // to be asked again when the subject's own turns move on. Work threads run
+  // their controller inside their workspace rather than here, so their meter
+  // still only refreshes on thread change.
+  const contextRevision =
+    activeMode === "chat"
+      ? chatController.activeView?.lastSequence
+      : activeMode === "code"
+        ? activeCodeThreadView?.lastSequence
+        : undefined;
   const contextController = useContextController({
     client: contextClient,
+    ...(contextRevision === undefined ? {} : { revision: Number(contextRevision) }),
     subject: contextSubject,
   });
   const projectController = useProjectController({
@@ -1917,6 +1931,12 @@ function LaunchedShell(
     [activeMode, activeProjectId],
   );
   const localHost = hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID));
+  const codeDefaultExecutionPolicy =
+    codeController.bootstrap?.settings.defaultExecutionPolicy ?? "approval-gated";
+  const draftRequestedExecutionPolicy =
+    activeMode === "code"
+      ? (draftComposerExecutionPolicy ?? codeDefaultExecutionPolicy)
+      : "approval-gated";
   const executionProfileController = useExecutionProfileController({
     client: agentProfileClient,
     ...(localHost === undefined ? {} : { hostHealth: localHost.health }),
@@ -1928,10 +1948,8 @@ function LaunchedShell(
       setDraftModelId(selection.modelId);
     },
     profileSelectionStorageKey: `octant.execution-profile.${activeMode}.${activeProjectId ?? "unfiled"}`,
-    projectExecutionPolicy:
-      activeMode === "code"
-        ? (codeController.bootstrap?.settings.defaultExecutionPolicy ?? "approval-gated")
-        : "approval-gated",
+    projectExecutionPolicy: draftRequestedExecutionPolicy,
+    requestedExecutionPolicy: draftRequestedExecutionPolicy,
     providerGroups: draftProviderGroups,
     ...(effectiveDraftProviderInstanceId === undefined
       ? {}
@@ -3907,6 +3925,8 @@ function LaunchedShell(
                           projectViewSwitcherPresentation: (
                             presentedShellSettings ?? controller.settings
                           ).projectViewSwitcherPresentation,
+                          projectViewEnvironmentOptions:
+                            projectViewEnvironmentOptionsFromHosts(hosts),
                         }
                       : {})}
                     activityMode={activeMode}
@@ -4406,10 +4426,14 @@ function LaunchedShell(
                     {...(effectiveDraftModelId === undefined
                       ? {}
                       : { draftSelectedModelId: effectiveDraftModelId })}
+                    {...(activeMode === "code"
+                      ? { draftDefaultExecutionPolicy: codeDefaultExecutionPolicy }
+                      : {})}
                     onDraftSelectProvider={(selection) => {
                       setDraftProviderInstanceId(selection.providerInstanceId);
                       setDraftModelId(selection.modelId);
                     }}
+                    onDraftRequestedExecutionPolicyChange={setDraftComposerExecutionPolicy}
                     onDraftCreateThread={handleDraftCreateThread}
                     onDraftCreateCodeThread={handleDraftCreateCodeThread}
                     onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}

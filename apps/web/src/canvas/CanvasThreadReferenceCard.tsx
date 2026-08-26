@@ -1,4 +1,6 @@
 import type { CanvasThreadReferenceCard as Card } from "@octant/contracts/canvas-cards";
+import { OctantBadge } from "../ui/base/OctantBadge";
+import { OctantCard } from "../ui/base/OctantCard";
 
 export interface CanvasThreadReferenceCardProps {
   readonly card: Card;
@@ -6,13 +8,13 @@ export interface CanvasThreadReferenceCardProps {
 
 export function CanvasThreadReferenceCard({ card }: CanvasThreadReferenceCardProps) {
   return (
-    <div className="card card-tight" data-testid="canvas-card">
+    <OctantCard className="p-5" data-testid="canvas-card">
       <h3 className="h4" data-testid="canvas-card-title">
         {card.title}
       </h3>
-      <div className="badge" data-testid="canvas-card-status">
+      <OctantBadge data-testid="canvas-card-status" variant="secondary">
         {card.status}
-      </div>
+      </OctantBadge>
       <div className="meta" data-testid="canvas-card-scope">
         {card.scope.mode} / {card.scope.workspace.kind}
       </div>
@@ -20,6 +22,6 @@ export function CanvasThreadReferenceCard({ card }: CanvasThreadReferenceCardPro
       <div className="meta" data-testid="canvas-card-actions">
         {card.actionCount}
       </div>
-    </div>
+    </OctantCard>
   );
 }

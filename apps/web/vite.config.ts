@@ -9,6 +9,7 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const domTestFilesWithoutJsx = [
   "src/code/monacoRuntime.test.ts",
   "src/code/xtermRuntime.test.ts",
+  "src/polling/documentVisibility.test.ts",
   "src/preview/usePreviewController.test.ts",
   "src/settings/useSettingsRoute.test.ts",
   "src/shell/useLaunchSession.test.ts",

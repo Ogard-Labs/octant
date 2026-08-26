@@ -87,6 +87,11 @@ export interface CodeComposerAdapterProps {
   readonly baseBranch?: string;
   readonly defaultExecutionPolicy: ProviderExecutionPolicy;
   readonly defaultPermissionPersistence: PermissionPersistence;
+  /**
+   * The access dropdown is composer-local, but the execution-profile picker
+   * lives in the shell and must judge profiles by the same requested posture.
+   */
+  readonly onExecutionPolicyChange?: (executionPolicy: ProviderExecutionPolicy) => void;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
@@ -178,6 +183,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(props.creating === true ? { disabled: true } : {}),
   });
   const [executionPolicy, setExecutionPolicy] = useState(props.defaultExecutionPolicy);
+  const onExecutionPolicyChange = props.onExecutionPolicyChange;
+  useEffect(() => {
+    onExecutionPolicyChange?.(executionPolicy);
+  }, [executionPolicy, onExecutionPolicyChange]);
   const [permissionPersistence, setPermissionPersistence] = useState(
     props.defaultPermissionPersistence,
   );
@@ -459,6 +468,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 <>
                   <label>
                     <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                    {/* ui-boundary-exception: native-file-input */}
                     <input
                       aria-label="Choose attachment file"
                       accept="image/png,image/jpeg,image/webp,image/gif"
@@ -498,6 +508,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     <ComposerModelPicker
                       ariaLabel="Provider and model"
                       groups={props.providerGroups}
+                      menuSide="bottom"
                       onSelect={props.onSelectProvider}
                       {...(props.selectedModelId === undefined
                         ? {}

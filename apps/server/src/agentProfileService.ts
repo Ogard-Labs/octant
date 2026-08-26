@@ -167,6 +167,8 @@ export class AgentProfileService implements AgentProfileServiceApi {
         mode: request.mode,
         hostId: request.hostId,
         projectExecutionPolicy: request.projectExecutionPolicy,
+        requestedExecutionPolicy:
+          request.requestedExecutionPolicy ?? request.projectExecutionPolicy,
         providers: providerIds,
         catalogs,
         profiles: profiles.map((p) => ({

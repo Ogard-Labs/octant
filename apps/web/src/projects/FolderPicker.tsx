@@ -8,7 +8,9 @@ import type { HostId } from "@octant/contracts/host";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import { ChevronRight, FolderOpen, GitBranch, Home, Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 
 export interface FolderPickerProps {
@@ -33,7 +35,6 @@ export function FolderPicker(props: FolderPickerProps) {
   const [searching, setSearching] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const mounted = useRef(true);
   const parentCandidateIdRef = useRef<string | undefined>(undefined);
 
@@ -72,19 +73,6 @@ export function FolderPicker(props: FolderPickerProps) {
       if (searchTimer.current !== undefined) clearTimeout(searchTimer.current);
     };
   }, [load]);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (dialog === null) return;
-    if (!dialog.open) {
-      if (typeof dialog.showModal === "function") dialog.showModal();
-      else dialog.setAttribute("open", "");
-    }
-    return () => {
-      if (typeof dialog.close === "function") dialog.close();
-      else dialog.removeAttribute("open");
-    };
-  }, []);
 
   function clearSearchTimer() {
     if (searchTimer.current !== undefined) clearTimeout(searchTimer.current);
@@ -143,15 +131,7 @@ export function FolderPicker(props: FolderPickerProps) {
       : "Navigate into a folder, then Select the confined project root.";
 
   return (
-    <dialog
-      aria-label="Add folder"
-      className="folder-picker window-no-drag"
-      onCancel={(event) => {
-        event.preventDefault();
-        requestClose();
-      }}
-      ref={dialogRef}
-    >
+    <OctantDialog className="folder-picker" label="Add folder" onClose={requestClose} open>
       <div className="folder-picker__header">
         <div>
           <span>{props.mode === "code" ? "Code" : "Work"}</span>
@@ -248,7 +228,7 @@ export function FolderPicker(props: FolderPickerProps) {
                 )}
                 <span className="folder-picker__item-name">{candidate.displayName}</span>
                 {props.mode === "code" && !candidate.isGitRepository ? (
-                  <span className="folder-picker__item-badge">Not a git repo</span>
+                  <OctantBadge variant="secondary">Not a git repo</OctantBadge>
                 ) : null}
               </OctantButton>
               {candidate.isSelectable ? (
@@ -293,6 +273,6 @@ export function FolderPicker(props: FolderPickerProps) {
           Cancel
         </OctantButton>
       </div>
-    </dialog>
+    </OctantDialog>
   );
 }

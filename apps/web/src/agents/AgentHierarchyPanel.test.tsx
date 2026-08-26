@@ -1,11 +1,37 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import {
+  decodeAgentRunId,
+  decodeAgentRunParentThreadId,
+  decodeProviderModelId,
+  decodeUtcTimestamp,
+  type AgentRunConversationResponse,
+} from "@octant/contracts";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
+
+const liveRunId = "11111111-1111-4111-8111-111111111111";
+const liveConversation: AgentRunConversationResponse = {
+  runId: decodeAgentRunId(liveRunId),
+  parentThreadId: decodeAgentRunParentThreadId("22222222-2222-4222-8222-222222222222"),
+  executionKind: "octant-managed",
+  modelId: decodeProviderModelId("gpt-5.6-luna"),
+  lifecycleStatus: "running",
+  status: "live",
+  entries: [
+    {
+      sequence: 1,
+      kind: "assistant",
+      text: "Live child reply",
+      occurredAt: decodeUtcTimestamp("2026-08-23T00:00:00.000Z"),
+    },
+  ],
+  truncated: false,
+};
 
 const entries = [
   {
-    runId: "run-1",
+    runId: liveRunId,
     role: "research",
     task: "Active research",
     lifecycleStatus: "running",
@@ -100,8 +126,15 @@ describe("AgentHierarchyPanel", () => {
     render(
       <AgentHierarchyPanel entries={entries} creationPosture="automatic" onCancel={onCancel} />,
     );
+    expect(
+      screen.getByRole("button", { name: "View conversation for Active research" }),
+    ).toHaveAttribute("data-variant", "ghost");
+    expect(screen.getByRole("button", { name: "Cancel Active research" })).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
     await user.click(screen.getByRole("button", { name: "Cancel Active research" }));
-    expect(onCancel).toHaveBeenCalledWith({ runId: "run-1" });
+    expect(onCancel).toHaveBeenCalledWith({ runId: liveRunId });
 
     await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
     await waitFor(() =>
@@ -114,5 +147,25 @@ describe("AgentHierarchyPanel", () => {
     expect(
       screen.queryByRole("button", { name: "Cancel Completed review" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("inspects a live transcript while remaining the control surface", async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    const onInspectConversation = vi.fn();
+    render(
+      <AgentHierarchyPanel
+        conversation={liveConversation}
+        creationPosture="automatic"
+        entries={entries}
+        onCancel={onCancel}
+        onInspectConversation={onInspectConversation}
+      />,
+    );
+    expect(screen.getByText("Live child reply")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Cancel Active research" }));
+    expect(onCancel).toHaveBeenCalledWith({ runId: liveRunId });
+    await user.click(screen.getByRole("button", { name: "View conversation for Active research" }));
+    expect(onInspectConversation).toHaveBeenCalledWith(liveRunId);
   });
 });

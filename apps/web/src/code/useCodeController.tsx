@@ -1,6 +1,7 @@
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
 import type {
   CodeBootstrap,
+  CodeNavigation,
   CodeCommand,
   CodeCommandResult,
   CodeEventFrame,
@@ -22,6 +23,7 @@ import {
   type CodeEvidenceContentId,
   type CodeOperationEvent,
   type CodeOperationId,
+  type CodeThreadCheckoutRebindOutcome,
   type CodeThreadFollowUpView,
   type CodeAttachmentId,
   type CodeAttachmentReference,
@@ -37,6 +39,9 @@ import {
   applyActivityEvent,
   type CodeTurnActivity,
 } from "./transcriptActivity";
+import { samePollingData } from "../polling/samePollingData";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import { markInteraction } from "../polling/interactionTrace";
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type CodeTurnStatus = "idle" | "sending" | "running" | "failed";
@@ -144,6 +149,12 @@ function refreshActiveThreadView(
     (candidate) => String(candidate.id) === String(current.thread.id),
   );
   if (checkout === undefined && refreshedThread === undefined) return current;
+  if (
+    (checkout === undefined || samePollingData(checkout, current.checkout)) &&
+    (refreshedThread === undefined || samePollingData(refreshedThread, current.thread))
+  ) {
+    return current;
+  }
   return {
     ...current,
     ...(checkout === undefined ? {} : { checkout }),
@@ -251,11 +262,6 @@ const HISTORY_UNAVAILABLE_MESSAGE = "Conversation history could not be loaded.";
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
-
-/** Hidden windows should not spend a request cycle keeping a background list hot. */
-function documentIsVisible(): boolean {
-  return typeof document === "undefined" || document.visibilityState !== "hidden";
-}
 
 /**
  * What a Code thread has consumed, and the provider usage windows it last
@@ -612,21 +618,48 @@ export function useCodeController(options: CodeControllerOptions) {
   );
 
   const applyNavigationRefresh = useCallback(
-    (next: CodeBootstrap, read: number) => {
+    (next: CodeNavigation, read: number) => {
       if (read <= appliedNavigationRead.current) return;
       appliedNavigationRead.current = read;
-      bootstrapRef.current = next;
-      setBootstrap((current) =>
-        current === undefined
-          ? next
-          : {
-              ...current,
-              checkouts: next.checkouts,
-              threads: next.threads,
-              activity: next.activity,
-            },
-      );
-      setActiveView((current) => refreshActiveThreadView(current, next));
+      const currentBootstrap = bootstrapRef.current;
+      if (currentBootstrap !== undefined) {
+        if (
+          !(
+            samePollingData(currentBootstrap.threads, next.threads) &&
+            samePollingData(currentBootstrap.activity, next.activity)
+          )
+        ) {
+          bootstrapRef.current = {
+            ...currentBootstrap,
+            threads: next.threads,
+            activity: next.activity,
+          };
+        }
+      }
+      setBootstrap((current) => {
+        if (current === undefined) return current;
+        if (
+          samePollingData(current.threads, next.threads) &&
+          samePollingData(current.activity, next.activity)
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          threads: next.threads,
+          activity: next.activity,
+        };
+      });
+      setActiveView((current) => {
+        if (current === undefined) return current;
+        const refreshedThread = next.threads.find(
+          (candidate) => String(candidate.id) === String(current.thread.id),
+        );
+        if (refreshedThread === undefined || samePollingData(refreshedThread, current.thread)) {
+          return current;
+        }
+        return { ...current, thread: refreshedThread };
+      });
       reconcileDrafts(next.threads.map((thread) => String(thread.id)));
     },
     [reconcileDrafts],
@@ -647,7 +680,7 @@ export function useCodeController(options: CodeControllerOptions) {
     async (threadId: CodeThreadId) => {
       try {
         const read = nextNavigationRead();
-        const next = await client.bootstrap();
+        const next = await client.navigation();
         if (!mounted.current) return;
         applyNavigationRefresh(next, read);
         const seen = next.activity.find(
@@ -671,6 +704,7 @@ export function useCodeController(options: CodeControllerOptions) {
    */
   const markThreadRead = useCallback(
     (threadId: CodeThreadId) => {
+      markInteraction("renderer", "code-thread-read");
       void recordSeenActivity(threadId);
     },
     [recordSeenActivity],
@@ -1311,13 +1345,13 @@ export function useCodeController(options: CodeControllerOptions) {
     if (navigationRefreshMs <= 0) return;
     let cancelled = false;
     let inFlight = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
     const refresh = async () => {
       if (!documentIsVisible() || inFlight) return;
       inFlight = true;
+      markInteraction("renderer", "code-navigation-refresh");
       try {
         const read = nextNavigationRead();
-        const next = await client.bootstrap();
+        const next = await client.navigation();
         if (cancelled || !mounted.current) return;
         applyNavigationRefresh(next, read);
       } catch {
@@ -1327,22 +1361,10 @@ export function useCodeController(options: CodeControllerOptions) {
         inFlight = false;
       }
     };
-    const schedule = () => {
-      if (timer !== undefined) clearInterval(timer);
-      timer = documentIsVisible()
-        ? setInterval(() => void refresh(), navigationRefreshMs)
-        : undefined;
-    };
-    const onVisibilityChange = () => {
-      schedule();
-      if (documentIsVisible()) void refresh();
-    };
-    schedule();
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    const stop = scheduleVisibleInterval(() => void refresh(), navigationRefreshMs);
     return () => {
       cancelled = true;
-      if (timer !== undefined) clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
+      stop();
     };
   }, [applyNavigationRefresh, client, navigationRefreshMs, nextNavigationRead]);
 
@@ -1602,6 +1624,32 @@ export function useCodeController(options: CodeControllerOptions) {
       }
       const created = await execute({ kind: "create-code-thread", thread });
       return created?.kind === "thread-created" ? created.thread : undefined;
+    },
+    [execute],
+  );
+
+  /**
+   * Move a thread onto the checkout its Project binds now, because the user
+   * asked from the fail-closed banner.
+   *
+   * Never inferred: a thread whose Project was rebound keeps the authority it
+   * was created with until someone deliberately moves it, which is the whole
+   * point of binding a checkout in the first place. The host decides whether
+   * the move is admissible and answers with a refusal reason this renderer
+   * shows rather than a failure it swallows.
+   */
+  const rebindThreadCheckout = useCallback(
+    async (threadId: CodeThreadId): Promise<CodeThreadCheckoutRebindOutcome | undefined> => {
+      const thread = bootstrapRef.current?.threads.find(
+        (candidate) => String(candidate.id) === String(threadId),
+      );
+      if (thread === undefined) return undefined;
+      const result = await execute({
+        kind: "rebind-code-thread-checkout",
+        threadId,
+        expectedVersion: thread.version,
+      });
+      return result?.kind === "thread-checkout-rebind" ? result.outcome : undefined;
     },
     [execute],
   );
@@ -2032,6 +2080,7 @@ export function useCodeController(options: CodeControllerOptions) {
     markDraftStagedDropped: composerDraft.markStagedDropped,
     purgeThreadDraft: composerDraft.purge,
     pinThread,
+    rebindThreadCheckout,
     renameThread,
     providerRequests,
     refreshFollowUp,
@@ -2140,6 +2189,14 @@ function applyResult(current: CodeBootstrap | undefined, result: CodeCommandResu
     case "worktree-source-previewed":
     case "worktree-remote-facts-retrieved":
       return current;
+    case "thread-checkout-rebind":
+      return result.outcome.status === "refused"
+        ? current
+        : {
+            ...current,
+            threads: replaceById(current.threads, result.outcome.thread),
+            checkouts: replaceById(current.checkouts, result.outcome.checkout),
+          };
     case "managed-thread-created":
       return {
         ...current,

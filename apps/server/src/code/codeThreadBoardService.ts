@@ -128,7 +128,7 @@ export interface CodeBoardPullRequestSource {
 
 /**
  * Reads a thread's live plan (0027) and reduces it to the board's
- * step-completion count (0048). A dropped step leaves the plan's own record
+ * step-completion count (0051). A dropped step leaves the plan's own record
  * but no longer counts toward either side of the fraction, so a plan that
  * dropped a step can still read as fully done.
  */

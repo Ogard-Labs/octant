@@ -19,6 +19,8 @@ export interface ThreadMentionsOptions {
   /** Called with the host's sidecar linkage after Side Chat opens. */
   readonly onSideChatOpened?: (sidecar: SideChatSidecar) => void;
   readonly requestId?: () => ThreadMentionRequestId;
+  /** Enables the explicit Chat-to-Chat dialogue capability for this composer. */
+  readonly dialogueEnabled?: boolean;
 }
 
 export interface ThreadMentionsController {
@@ -211,6 +213,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     return {
       candidates,
       chips,
+      ...(options.dialogueEnabled === true ? { dialogueEnabled: true } : {}),
       onQueryChange: setQuery,
       onSelectCandidate,
       onRemoveChip,
@@ -226,6 +229,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     busy,
     canOpenSideChat,
     candidates,
+    options.dialogueEnabled,
     chips,
     client,
     onOpenSideChat,

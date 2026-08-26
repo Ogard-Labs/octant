@@ -430,12 +430,20 @@ describe("Code operation contracts", () => {
     } as const;
 
     expect(decodeCodeOperationResult(observation)).toEqual(observation);
+    expect(decodeCodeOperationResult({ ...observation, insertions: 12, deletions: 3 })).toEqual({
+      ...observation,
+      insertions: 12,
+      deletions: 3,
+    });
     expect(
       decodeCodeOperationResult({
         ...observation,
         remotes: [{ name: "local", fetch: { kind: "local" }, push: { kind: "local" } }],
       }),
     ).toMatchObject({ remotes: [{ name: "local", fetch: { kind: "local" } }] });
+    expect(() =>
+      decodeCodeOperationResult({ ...observation, insertions: -1, deletions: 0 }),
+    ).toThrow();
     expect(() =>
       decodeCodeOperationResult({ ...observation, checkoutRoot: "/private/repository" }),
     ).toThrow();
@@ -739,6 +747,8 @@ describe("Code operation contracts", () => {
         stagedCount: 1,
         committedAhead: 3,
         workingTreeClean: false,
+        insertions: 12,
+        deletions: 3,
       },
       linkedPullRequest: {
         kind: "linked",
@@ -822,6 +832,33 @@ describe("Code operation contracts", () => {
     ).toThrow();
     // Excess properties are rejected.
     expect(() => decodeCodeThreadOperationalMetadata({ ...metadata, unexpected: true })).toThrow();
+    // Observed changed-file state requires insertion and deletion totals.
+    expect(() =>
+      decodeCodeThreadOperationalMetadata({
+        ...metadata,
+        changedFiles: {
+          kind: "observed",
+          freshness: "fresh",
+          changedPathCount: 2,
+          stagedCount: 1,
+          committedAhead: 3,
+          workingTreeClean: false,
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeThreadOperationalMetadata({
+        ...metadata,
+        changedFiles: { ...metadata.changedFiles, insertions: -1 },
+      }),
+    ).toThrow();
+    // Unavailable carries no partial numbers.
+    expect(() =>
+      decodeCodeThreadOperationalMetadata({
+        ...metadata,
+        changedFiles: { kind: "unavailable", insertions: 1, deletions: 0 },
+      }),
+    ).toThrow();
   });
 });
 

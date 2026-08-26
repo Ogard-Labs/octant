@@ -26,6 +26,7 @@ import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjectio
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { purgeThreadContent } from "../persistence/chatProjection";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -507,6 +508,234 @@ describe("agentRunRoutes", () => {
       ),
     );
     expect(response?.status).toBe(400);
+  });
+
+  it("does not leak a process-local transcript for a provider-native child", async () => {
+    const { handler, persistence, liveConversations, token } = createHandler();
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Native research",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: {
+          ...routing,
+          selectedExecutionKind: "provider-native",
+          capabilityDegradations: [],
+        },
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") return;
+    liveConversations.begin(accepted.run.id);
+    liveConversations.appendText(accepted.run.id, "native secret", now as never);
+    const response = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation?runId=${accepted.run.id}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      status: "unavailable",
+      entries: [],
+      staleReason: "Provider-native child transcript is not available through this host.",
+    });
+  });
+
+  it("returns a retained native result after completion", async () => {
+    const { handler, persistence, token } = createHandler();
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Native research",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: {
+          ...routing,
+          selectedExecutionKind: "provider-native",
+          capabilityDegradations: [],
+        },
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") return;
+    persistence.applyCommand({
+      kind: "start-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: accepted.run.version,
+    });
+    persistence.applyCommand({
+      kind: "mark-agent-run-running",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 1) as never,
+    });
+    const completed = persistence.applyCommand({
+      kind: "complete-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 2) as never,
+      result: {
+        reference: `octant://agent-run/${String(accepted.run.id)}/result`,
+        truncated: false,
+      },
+      resultText: "Native findings.",
+    });
+    expect(completed.kind).toBe("run-updated");
+    const response = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation?runId=${accepted.run.id}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      status: "complete",
+      entries: [{ text: "Native findings." }],
+    });
+  });
+
+  it("marks a cancelled managed child stale and keeps live text out of the journal", async () => {
+    const { handler, persistence, liveConversations, token, connection } = createHandler();
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Cancel me",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") return;
+    liveConversations.begin(accepted.run.id);
+    liveConversations.appendText(accepted.run.id, "partial-before-cancel", now as never);
+    liveConversations.markStale(
+      accepted.run.id,
+      "The child session ended before a complete transcript was retained.",
+    );
+    persistence.applyCommand({
+      kind: "start-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: accepted.run.version,
+    });
+    persistence.applyCommand({
+      kind: "mark-agent-run-running",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 1) as never,
+    });
+    persistence.applyCommand({
+      kind: "cancel-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 2) as never,
+      scope: "self",
+    });
+    const response = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation?runId=${accepted.run.id}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      status: "stale",
+      entries: [{ text: "partial-before-cancel" }],
+    });
+    const journalHits = (
+      connection
+        .prepare("SELECT COUNT(*) AS count FROM event_journal WHERE payload_json LIKE ?")
+        .get("%partial-before-cancel%") as { readonly count: number }
+    ).count;
+    expect(journalHits).toBe(0);
+  });
+
+  it("serves retained text after live completion and reports purged history as unavailable", async () => {
+    const { handler, persistence, liveConversations, token, connection } = createHandler();
+    const accepted = persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Finish",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") return;
+    liveConversations.begin(accepted.run.id);
+    liveConversations.appendText(accepted.run.id, "working", now as never);
+    liveConversations.complete(accepted.run.id);
+    persistence.applyCommand({
+      kind: "start-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: accepted.run.version,
+    });
+    persistence.applyCommand({
+      kind: "mark-agent-run-running",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 1) as never,
+    });
+    const completed = persistence.applyCommand({
+      kind: "complete-agent-run",
+      runId: accepted.run.id,
+      expectedVersion: (accepted.run.version + 2) as never,
+      result: {
+        reference: `octant://agent-run/${String(accepted.run.id)}/result`,
+        truncated: false,
+      },
+      resultText: "Final review.",
+    });
+    expect(completed.kind).toBe("run-updated");
+    const live = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation?runId=${accepted.run.id}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(await live?.json()).toMatchObject({
+      status: "complete",
+      entries: [{ text: "working" }],
+    });
+    liveConversations.clear(accepted.run.id);
+    const retained = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation?runId=${accepted.run.id}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(await retained?.json()).toMatchObject({
+      status: "complete",
+      entries: [{ text: "Final review." }],
+    });
+    purgeThreadContent(connection, String(ids.thread));
+    const purged = await handler(
+      new Request(`http://127.0.0.1/api/agent-runs/conversation?runId=${accepted.run.id}`, {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(await purged?.json()).toMatchObject({
+      status: "unavailable",
+      entries: [],
+      staleReason: "No retained child conversation is available.",
+    });
   });
 
   it("returns parent summary for an authenticated window", async () => {

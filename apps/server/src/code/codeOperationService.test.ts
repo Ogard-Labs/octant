@@ -66,7 +66,12 @@ describe("CodeOperationService", () => {
         terminalId: ids.terminal,
         status: "running" as const,
         canRerun: false,
-        transcript: { chunks: ["private output"], byteLength: 14, truncated: false },
+        transcript: {
+          chunks: ["private output"],
+          byteLength: 14,
+          truncated: false,
+          characters: 14,
+        },
       })),
       attach: vi.fn(),
       observe: vi.fn((_terminalId, listener) => {
@@ -237,7 +242,7 @@ describe("CodeOperationService", () => {
       terminalId: ids.terminal,
       status: "running",
       canRerun: false,
-      transcript: { chunks: ["private output"], byteLength: 14, truncated: false },
+      transcript: { chunks: ["private output"], byteLength: 14, truncated: false, characters: 14 },
     });
     approved = false;
     const attached = await service.execute(ids.window, {
@@ -278,8 +283,10 @@ describe("CodeOperationService", () => {
     expect(terminals.write).toHaveBeenLastCalledWith(ids.terminal, "\u0003");
     expect(events.append).toHaveBeenCalledTimes(journalCallsBeforeInterrupt);
     terminals.write.mockClear();
+    // The surface resumes from where the snapshot it was already sent ends, so
+    // output between the attach and the observe is neither lost nor repeated.
     expect(terminals.observe).toHaveBeenLastCalledWith(ids.terminal, expect.any(Function), {
-      afterTranscript: "private output",
+      afterCharacters: 14,
     });
     approved = true;
     terminalOutputObserver?.({
@@ -293,6 +300,7 @@ describe("CodeOperationService", () => {
           chunks: ["private output\nTERMINAL_OK\n"],
           byteLength: 27,
           truncated: false,
+          characters: 0,
         },
       },
     });
@@ -404,6 +412,7 @@ describe("CodeOperationService", () => {
           chunks: ["private output\nTERMINAL_OK\n"],
           byteLength: 27,
           truncated: false,
+          characters: 0,
         },
       },
     });
@@ -655,7 +664,7 @@ describe("CodeOperationService", () => {
       terminalId: approvalTerminal,
       status: "running",
       canRerun: false,
-      transcript: { chunks: [], byteLength: 0, truncated: false },
+      transcript: { chunks: [], byteLength: 0, truncated: false, characters: 0 },
     });
     const approvalChecksAfterStart = approvals.validate.mock.calls.length;
     const resizeOperation = decodeCodeOperationId("67676767-6767-4676-8676-676767676767");
@@ -722,6 +731,7 @@ describe("CodeOperationService", () => {
           chunks: ["unpersisted output"],
           byteLength: 18,
           truncated: false,
+          characters: 0,
         },
       },
     });
@@ -1216,6 +1226,98 @@ describe("CodeOperationService", () => {
     expect(checkpoint).toHaveBeenCalledOnce();
   });
 
+  it("sends snapshotted profile instructions with the Code turn", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic.",
+          approvedSkillIds: ["code-reviewer"],
+        },
+      }),
+      resolveProfileSkills: vi.fn(async () => [
+        {
+          qualifiedId: "agents-skills-directory:project:code-reviewer:sha256:aa",
+          displayName: "Code reviewer",
+          text: "Review diffs in isolation.",
+        },
+      ]),
+    });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(fixture.turns.start.mock.calls[0]![0].context).toEqual([
+      { kind: "instructions", text: "Review as a skeptic." },
+      { kind: "instructions", text: "Review diffs in isolation." },
+    ]);
+  });
+
+  it("leaves a Code turn without a profile unchanged", async () => {
+    const resolveProfileSkills = vi.fn(async () => [
+      {
+        qualifiedId: "agents-skills-directory:project:code-reviewer:sha256:aa",
+        displayName: "Code reviewer",
+        text: "should never load",
+      },
+    ]);
+    const fixture = providerTurnFixture({ resolveProfileSkills });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(resolveProfileSkills).not.toHaveBeenCalled();
+    expect(fixture.turns.start.mock.calls[0]![0].context).toBeUndefined();
+  });
+
+  it("does not load an approved skill the resolver refused", async () => {
+    const resolveProfileSkills = vi.fn(async () => []);
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          approvedSkillIds: ["missing-skill"],
+        },
+      }),
+      resolveProfileSkills,
+    });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(resolveProfileSkills).toHaveBeenCalledWith({
+      approvedSkillIds: ["missing-skill"],
+      threadId: String(thread().id),
+      projectId: String(thread().projectId),
+    });
+    expect(fixture.turns.start.mock.calls[0]![0].context).toBeUndefined();
+  });
+
+  it("keeps using the snapshotted instructions after the live profile would have changed", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic.",
+          approvedSkillIds: [],
+        },
+      }),
+    });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(fixture.turns.start.mock.calls[0]![0].context).toEqual([
+      { kind: "instructions", text: "Review as a skeptic." },
+    ]);
+  });
+
   it("sends a thread that was never forked without asking for a handoff", async () => {
     const resolveForkHandoff = vi.fn(async () => "should never be read");
     const fixture = providerTurnFixture({ resolveForkHandoff });
@@ -1446,6 +1548,7 @@ function providerTurnFixture(
       CodeOperationServiceOptions,
       | "resolveThreadMentionContext"
       | "resolveForkHandoff"
+      | "resolveProfileSkills"
       | "attachments"
       | "supportsAttachments"
       | "git"
@@ -1511,7 +1614,7 @@ describe("CodeOperationService terminal readers", () => {
       terminalId: ids.terminal,
       status: "running" as const,
       canRerun: false,
-      transcript: { chunks, byteLength: chunks.join("").length, truncated: false },
+      transcript: { chunks, byteLength: chunks.join("").length, truncated: false, characters: 0 },
     });
     const terminals = {
       launch: vi.fn(async () => snapshot(["boot"])),

@@ -28,6 +28,7 @@ import {
 } from "electron";
 import {
   deriveHostRuntimeHostId,
+  prepareHostRuntimePaths,
   readHostInfoReceipt,
   resolveHostRuntimePaths,
   ServicePolicyStore,
@@ -95,6 +96,7 @@ import { createLocalPluginFolderPicker } from "./localPluginFolderPicker";
 import {
   createSingleFlight,
   assertAutomaticHostStartupEnabled,
+  formatDesktopStartupFailure,
   probeHostInfoReceipt,
   probeLocalHost,
   reserveLoopbackPort,
@@ -143,6 +145,7 @@ import {
   RemoteDeviceControlFailure,
   type RemoteDeviceControlService,
 } from "./remoteDeviceControls";
+import { markHostInteraction } from "./interactionTrace";
 
 const IPC_CHANNELS = {
   attentionBadge: "octant:attention:badge",
@@ -1121,6 +1124,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   await assertAutomaticHostStartupEnabled(
     new ServicePolicyStore({ path: desktopHostRuntimePaths.servicePolicyPath }),
   );
+  await prepareHostRuntimePaths(desktopHostRuntimePaths);
   const root = repositoryRoot();
   const portReservation = await reserveLoopbackPort(resolveConfiguredServerPort());
   const serverUrl = resolveManagedServerUrl({
@@ -1258,7 +1262,9 @@ const hostLifecycle = createHostLifecycleController({
 async function createWindow(): Promise<void> {
   if (mainWindow !== undefined && !mainWindow.isDestroyed()) return;
   const root = repositoryRoot();
+  markHostInteraction("host", "window-create-start");
   const host = await hostLifecycle.ensureRunning();
+  markHostInteraction("server", "host-running");
   const serverUrl = host.url;
   activeServerUrl = serverUrl;
   serverInstanceId = host.instanceId;
@@ -1425,7 +1431,10 @@ async function createWindow(): Promise<void> {
           if (!window.isDestroyed()) window.destroy();
         });
       });
-      window.once("ready-to-show", () => window.show());
+      window.once("ready-to-show", () => {
+        markHostInteraction("native-window", "ready-to-show");
+        window.show();
+      });
       window.on("close", (event) => {
         if (quitPrepared) return;
         event.preventDefault();
@@ -1623,7 +1632,10 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
             if (!window.isDestroyed()) window.destroy();
           });
         });
-        window.once("ready-to-show", () => window.show());
+        window.once("ready-to-show", () => {
+          markHostInteraction("native-window", "ready-to-show");
+          window.show();
+        });
         window.once("closed", () => {
           void browserSurfaceHost?.closeOwnerContexts(windowId).catch(() => undefined);
           unregisterTrustedRendererRequestContext(window);
@@ -2562,9 +2574,7 @@ async function prepareToQuit(): Promise<void> {
 
 async function handleFatalStartup(error: unknown): Promise<void> {
   preparingQuit = true;
-  const message =
-    error instanceof Error ? error.message : "Octant could not start its local server.";
-  dialog.showErrorBox("Octant could not start", message);
+  dialog.showErrorBox("Octant could not start", formatDesktopStartupFailure(error));
   try {
     await shutdownSecondaryProjectWindows();
     await projectWindowLifecycle.shutdown(async () => {

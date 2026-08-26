@@ -1,6 +1,6 @@
 # 0027. Plans as journaled artifacts
 
-**Status:** Superseded by 0048
+**Status:** Accepted
 
 ## Context
 

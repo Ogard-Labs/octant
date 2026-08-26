@@ -144,7 +144,12 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
         </p>
       ) : null}
       <div className="host-settings__controls">
-        <OctantButton disabled={saving} onClick={() => void toggleEnabled()} type="button">
+        <OctantButton
+          disabled={saving}
+          onClick={() => void toggleEnabled()}
+          type="button"
+          variant={status.preferences.enabled ? "secondary" : "default"}
+        >
           {status.preferences.enabled ? "Disable notifications" : "Enable notifications"}
         </OctantButton>
       </div>

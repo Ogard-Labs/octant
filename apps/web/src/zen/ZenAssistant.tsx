@@ -3,6 +3,7 @@ import type { SettingsDeepLink } from "@octant/contracts";
 import { NavigatorPanel } from "../navigator/NavigatorPanel";
 import type { NavigatorAssistantController } from "../navigator/useNavigatorAssistant";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCard } from "../ui/base/OctantCard";
 
 export interface ZenAssistantProps {
   /** The shared Navigator reader — the same one the profile popover uses. */
@@ -32,7 +33,7 @@ export function ZenAssistant(props: ZenAssistantProps) {
   const recipePreview = props.snapshot?.recipePreview;
 
   return (
-    <div className="zen-panel card card-tight card-raised zen-assistant" role="dialog">
+    <OctantCard className="zen-panel zen-assistant px-6" role="dialog">
       <NavigatorPanel
         controller={props.controller}
         onClose={props.onClose}
@@ -77,6 +78,6 @@ export function ZenAssistant(props: ZenAssistantProps) {
           </section>
         )}
       </NavigatorPanel>
-    </div>
+    </OctantCard>
   );
 }

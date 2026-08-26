@@ -762,6 +762,7 @@ describe("startOctantServer", () => {
             desktopBridgeSecret: "desktop-secret",
             codeService: {
               bootstrap,
+              navigation: vi.fn(async () => ({ threads: [], activity: [] })),
               read: vi.fn(),
               execute: vi.fn(),
               subscribe: vi.fn(async function* () {}),
@@ -1732,6 +1733,7 @@ describe("startOctantServer", () => {
         }),
     );
     const close = vi.fn(async () => undefined);
+    let listening = false;
 
     const completion = Effect.runPromise(
       Effect.scoped(
@@ -1739,10 +1741,14 @@ describe("startOctantServer", () => {
           hostname: "127.0.0.1",
           port: 0,
           gitEnvironmentPort: { observe: vi.fn(), close },
-          serve: () => ({ url: new URL("http://127.0.0.1:13773"), stop }),
+          serve: () => {
+            listening = true;
+            return { url: new URL("http://127.0.0.1:13773"), stop };
+          },
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),
     );
+    await vi.waitFor(() => expect(listening).toBe(true), { timeout: 10_000 });
     await vi.waitFor(() => expect(stop).toHaveBeenCalledWith(true));
     const closeCallsBeforeHttpSettled = close.mock.calls.length;
     finishHttpStop();
@@ -2261,6 +2267,7 @@ describe("startOctantServer", () => {
               desktopBridgeSecret: "desktop-secret",
               codeService: {
                 bootstrap: codeBootstrap,
+                navigation: vi.fn(async () => ({ threads: [], activity: [] })),
                 read: vi.fn(),
                 execute: vi.fn(),
                 subscribe: vi.fn(async function* () {}),

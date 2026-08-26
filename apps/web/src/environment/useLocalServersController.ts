@@ -9,6 +9,7 @@ import type {
   ProjectId,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export type LocalServersStatus = "idle" | "loading" | "ready" | "error";
 
@@ -158,11 +159,15 @@ export function useLocalServersController(
 
   useEffect(() => {
     if (!ready || options.poll === false) return;
-    void load("poll");
-    const interval = globalThis.setInterval(() => {
-      void load("poll");
-    }, options.refreshIntervalMs ?? LOCAL_SERVERS_REFRESH_INTERVAL_MS);
-    return () => globalThis.clearInterval(interval);
+    return scheduleVisibleInterval(
+      () => {
+        void load("poll");
+      },
+      options.refreshIntervalMs ?? LOCAL_SERVERS_REFRESH_INTERVAL_MS,
+      {
+        runImmediately: true,
+      },
+    );
   }, [load, options.poll, options.refreshIntervalMs, ready]);
 
   useEffect(() => {

@@ -22,6 +22,7 @@ import {
 import { Fragment, useEffect, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import type { CodeController, CodeThreadNavigationItem } from "./useCodeController";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { ThreadRenameField } from "../projects/ThreadRenameField";
@@ -568,7 +569,7 @@ function CodeProjectThreadRow(props: {
               <span className="tag">{policyLabel(row.thread.executionPolicy)}</span>
             )}
             {row.thread?.unread === true ? (
-              <span className="badge badge-accent">New activity</span>
+              <OctantBadge variant="default">New activity</OctantBadge>
             ) : null}
             {(row.thread?.followUp ?? row.card?.followUp) === true ? (
               <span className="tag">Follow-up</span>
@@ -737,7 +738,8 @@ function observedChangesLabel(
       : "Working tree clean";
   }
   const files = `${changes.changedPathCount} changed ${changes.changedPathCount === 1 ? "file" : "files"}`;
-  return `${files} · ${changes.stagedCount} staged · ${changes.committedAhead} committed ahead`;
+  const diffstat = `+${changes.insertions.toLocaleString()} −${changes.deletions.toLocaleString()}`;
+  return `${files} · ${diffstat} · ${changes.stagedCount} staged · ${changes.committedAhead} committed ahead`;
 }
 
 function childAgentsLabel(agents: CodeBoardCard["childAgents"]): string | undefined {

@@ -1,3 +1,40 @@
+import {
+  DEFAULT_PROJECT_VIEW_FILTERS,
+  filterProjectViewThreads,
+  filterProjectsForView as filterProjectsByViewFilters,
+  normalizeProjectViewFilters,
+  projectViewActivityRange,
+  projectViewActivityRangeError,
+  type ProjectViewActivityPeriod,
+  type ProjectViewActivityRange,
+  type ProjectViewEnvironment,
+  type ProjectViewFilters,
+  type ProjectViewGrouping,
+  type ProjectViewLifecycle,
+  type ProjectViewProjectLike,
+  type ProjectViewSort,
+  type ProjectViewThreadLike,
+} from "@octant/domain";
+
+export {
+  DEFAULT_PROJECT_VIEW_FILTERS,
+  filterProjectViewThreads,
+  normalizeProjectViewFilters,
+  projectViewActivityRange,
+  projectViewActivityRangeError,
+};
+export type {
+  ProjectViewActivityPeriod,
+  ProjectViewActivityRange,
+  ProjectViewEnvironment,
+  ProjectViewFilters,
+  ProjectViewGrouping,
+  ProjectViewLifecycle,
+  ProjectViewProjectLike,
+  ProjectViewSort,
+  ProjectViewThreadLike,
+};
+
 export const CODE_PROJECT_VIEWS_STORAGE_KEY = "octant.code.project-views.v1";
 export const WORK_PROJECT_VIEWS_STORAGE_KEY = "octant.work.project-views.v1";
 export const ALL_CODE_PROJECTS_VIEW_ID = "all";
@@ -41,58 +78,6 @@ export const CODE_PROJECT_VIEW_COLORS = [
 ] as const;
 export type CodeProjectViewColor = (typeof CODE_PROJECT_VIEW_COLORS)[number];
 export const DEFAULT_CODE_PROJECT_VIEW_COLOR: CodeProjectViewColor = "neutral";
-
-/** The lifecycle scope used by a Project View. */
-export const PROJECT_VIEW_LIFECYCLES = ["active", "archived", "all"] as const;
-export type ProjectViewLifecycle = (typeof PROJECT_VIEW_LIFECYCLES)[number];
-
-/** Grouping choices intentionally stay at the Project-list seam. */
-export const PROJECT_VIEW_GROUPINGS = ["project", "environment", "status", "none"] as const;
-export type ProjectViewGrouping = (typeof PROJECT_VIEW_GROUPINGS)[number];
-
-export const PROJECT_VIEW_SORTS = ["recency", "alphabetical", "created"] as const;
-export type ProjectViewSort = (typeof PROJECT_VIEW_SORTS)[number];
-
-export const PROJECT_VIEW_ACTIVITY_PERIODS = [
-  "all",
-  "today",
-  "3-days",
-  "7-days",
-  "14-days",
-  "30-days",
-  "custom",
-] as const;
-export type ProjectViewActivityPeriod = (typeof PROJECT_VIEW_ACTIVITY_PERIODS)[number];
-
-export interface ProjectViewActivityRange {
-  readonly from?: string;
-  readonly to?: string;
-}
-
-export interface ProjectViewFilters {
-  readonly lifecycle: ProjectViewLifecycle;
-  /** Empty means every environment. `local` is the only implicit environment. */
-  readonly environmentIds: ReadonlyArray<string>;
-  readonly showEmptyProjects: boolean;
-  readonly grouping: ProjectViewGrouping;
-  readonly sorting: ProjectViewSort;
-  readonly activity: ProjectViewActivityPeriod;
-  readonly activityRange?: ProjectViewActivityRange;
-}
-
-export interface ProjectViewEnvironment {
-  readonly id: string;
-  readonly name: string;
-}
-
-export const DEFAULT_PROJECT_VIEW_FILTERS: ProjectViewFilters = {
-  lifecycle: "active",
-  environmentIds: [],
-  showEmptyProjects: true,
-  grouping: "project",
-  sorting: "recency",
-  activity: "all",
-};
 
 export const CODE_PROJECT_VIEW_PREFERENCES_STORAGE_KEY = "octant.code.project-view-preferences.v1";
 export const WORK_PROJECT_VIEW_PREFERENCES_STORAGE_KEY = "octant.work.project-view-preferences.v1";
@@ -313,18 +298,6 @@ export function visibleCodeProjects<T extends { readonly id: string }>(
   return projects.filter((project) => allowed.has(String(project.id)));
 }
 
-export interface ProjectViewProjectLike {
-  readonly id: string;
-  readonly lifecycle?: ProjectViewLifecycle;
-  readonly createdAt?: string;
-  readonly updatedAt?: string;
-}
-
-export interface ProjectViewThreadLike {
-  readonly projectId?: string;
-  readonly updatedAt?: string;
-}
-
 /**
  * Applies the saved Project View membership and its normalized filters to the
  * server-authored Project summaries. Projects without an explicit environment
@@ -336,114 +309,32 @@ export function filterProjectsForView<T extends ProjectViewProjectLike>(
   preferences: ProjectViewPreferences = defaultProjectViewPreferences(),
   environmentByProjectId: ReadonlyMap<string, ProjectViewEnvironment> = new Map(),
 ): ReadonlyArray<T> {
-  const filters = projectViewFiltersFor(state, state.activeViewId, preferences);
-  const selected = visibleCodeProjects(projects, state);
-  return selected.filter((project) => {
-    const lifecycle = project.lifecycle ?? "active";
-    if (filters.lifecycle !== "all" && lifecycle !== filters.lifecycle) return false;
-    if (filters.environmentIds.length === 0) return true;
-    const environment = environmentByProjectId.get(String(project.id));
-    const environmentId = environment?.id ?? "local";
-    return filters.environmentIds.includes(environmentId);
-  });
+  return filterProjectsByViewFilters(
+    visibleCodeProjects(projects, state),
+    projectViewFiltersFor(state, state.activeViewId, preferences),
+    environmentByProjectId,
+  );
 }
 
-/** Returns only server-authored thread activity in the requested inclusive window. */
-export function filterProjectViewThreads<T extends ProjectViewThreadLike>(
-  threads: ReadonlyArray<T>,
-  filters: ProjectViewFilters,
-  now: Date = new Date(),
-): ReadonlyArray<T> {
-  if (filters.activity === "all") return threads;
-  const range = projectViewActivityRange(filters, now);
-  if (range === undefined) return threads;
-  return threads.filter((thread) => {
-    if (thread.updatedAt === undefined) return false;
-    const timestamp = Date.parse(thread.updatedAt);
-    if (Number.isNaN(timestamp)) return false;
-    return timestamp >= range.from.getTime() && timestamp <= range.to.getTime();
-  });
-}
-
-export function projectViewActivityRange(
-  filters: ProjectViewFilters,
-  now: Date = new Date(),
-): { readonly from: Date; readonly to: Date } | undefined {
-  if (filters.activity === "all") return undefined;
-  if (filters.activity === "custom") {
-    if (projectViewActivityRangeError(filters) !== undefined) return undefined;
-    const from = parseLocalDateStart(filters.activityRange?.from);
-    const to = parseLocalDateEnd(filters.activityRange?.to);
-    if (from === undefined && to === undefined) return undefined;
-    return {
-      from: from ?? new Date(0),
-      to: to ?? new Date(8640000000000000),
-    };
+/**
+ * The menu lists Local plus named connected hosts the window actually reported.
+ * A host that is not in that catalog is a dead choice, not an environment.
+ */
+export function projectViewEnvironmentOptionsFromHosts(
+  hosts: ReadonlyArray<{ readonly hostId: string; readonly displayName: string }>,
+): ReadonlyArray<ProjectViewEnvironment> {
+  const local = { id: "local", name: "Local" };
+  const seen = new Set<string>([local.id]);
+  const remotes: ProjectViewEnvironment[] = [];
+  for (const host of hosts) {
+    const id = String(host.hostId).trim();
+    if (id === "" || seen.has(id)) continue;
+    const name = host.displayName.trim();
+    if (name === "") continue;
+    seen.add(id);
+    remotes.push({ id, name });
   }
-  const days =
-    filters.activity === "today"
-      ? 1
-      : filters.activity === "3-days"
-        ? 3
-        : filters.activity === "7-days"
-          ? 7
-          : filters.activity === "14-days"
-            ? 14
-            : 30;
-  const today = localDayStart(now);
-  return {
-    from: new Date(today.getFullYear(), today.getMonth(), today.getDate() - days + 1),
-    to: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 0, 0, 0, -1),
-  };
-}
-
-export function projectViewActivityRangeError(filters: ProjectViewFilters): string | undefined {
-  if (filters.activity !== "custom") return undefined;
-  const fromValue = filters.activityRange?.from;
-  const toValue = filters.activityRange?.to;
-  const from = parseLocalDateStart(fromValue);
-  const to = parseLocalDateStart(toValue);
-  if (fromValue !== undefined && fromValue !== "" && from === undefined) {
-    return "Choose a valid start date.";
-  }
-  if (toValue !== undefined && toValue !== "" && to === undefined) {
-    return "Choose a valid end date.";
-  }
-  if (from !== undefined && to !== undefined && from.getTime() > to.getTime()) {
-    return "Start date must be on or before end date.";
-  }
-  return undefined;
-}
-
-function parseLocalDateStart(value: string | undefined): Date | undefined {
-  if (value === undefined) return undefined;
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (match === null) return undefined;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(year, month - 1, day);
-  if (
-    Number.isNaN(date.getTime()) ||
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
-  ) {
-    return undefined;
-  }
-  return date;
-}
-
-function parseLocalDateEnd(value: string | undefined): Date | undefined {
-  const start = parseLocalDateStart(value);
-  if (start === undefined) return undefined;
-  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1);
-  end.setMilliseconds(-1);
-  return end;
-}
-
-function localDayStart(value: Date): Date {
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  return [local, ...remotes];
 }
 
 export function createCodeProjectViewId(): string {
@@ -552,63 +443,4 @@ function normalizeView(value: unknown): CodeProjectView | undefined {
     color: color ?? DEFAULT_CODE_PROJECT_VIEW_COLOR,
     ...(legacyFilters === undefined ? {} : { filters }),
   };
-}
-
-export function normalizeProjectViewFilters(value: unknown): ProjectViewFilters {
-  if (value === null || typeof value !== "object") return DEFAULT_PROJECT_VIEW_FILTERS;
-  const record = value as {
-    readonly lifecycle?: unknown;
-    readonly environmentIds?: unknown;
-    readonly environments?: unknown;
-    readonly showEmptyProjects?: unknown;
-    readonly grouping?: unknown;
-    readonly sorting?: unknown;
-    readonly activity?: unknown;
-    readonly activityRange?: unknown;
-  };
-  const lifecycle = PROJECT_VIEW_LIFECYCLES.find((candidate) => candidate === record.lifecycle);
-  const grouping = PROJECT_VIEW_GROUPINGS.find((candidate) => candidate === record.grouping);
-  const sorting = PROJECT_VIEW_SORTS.find((candidate) => candidate === record.sorting);
-  const activity = PROJECT_VIEW_ACTIVITY_PERIODS.find((candidate) => candidate === record.activity);
-  const environmentValue = record.environmentIds ?? record.environments;
-  const environmentIds = Array.isArray(environmentValue)
-    ? [
-        ...new Set(
-          environmentValue.filter(
-            (environment): environment is string =>
-              typeof environment === "string" && environment.trim() !== "",
-          ),
-        ),
-      ]
-    : [];
-  const range = normalizeActivityRange(record.activityRange);
-  return {
-    lifecycle: lifecycle ?? DEFAULT_PROJECT_VIEW_FILTERS.lifecycle,
-    environmentIds,
-    showEmptyProjects:
-      typeof record.showEmptyProjects === "boolean"
-        ? record.showEmptyProjects
-        : DEFAULT_PROJECT_VIEW_FILTERS.showEmptyProjects,
-    grouping: grouping ?? DEFAULT_PROJECT_VIEW_FILTERS.grouping,
-    sorting: sorting ?? DEFAULT_PROJECT_VIEW_FILTERS.sorting,
-    activity: activity ?? DEFAULT_PROJECT_VIEW_FILTERS.activity,
-    ...(range === undefined ? {} : { activityRange: range }),
-  };
-}
-
-function normalizeActivityRange(value: unknown): ProjectViewActivityRange | undefined {
-  if (value === null || typeof value !== "object") return undefined;
-  const record = value as { readonly from?: unknown; readonly to?: unknown };
-  const from = normalizeDateOnly(record.from);
-  const to = normalizeDateOnly(record.to);
-  if (from === undefined && to === undefined) return undefined;
-  return {
-    ...(from === undefined ? {} : { from }),
-    ...(to === undefined ? {} : { to }),
-  };
-}
-
-function normalizeDateOnly(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  return parseLocalDateStart(value) === undefined ? undefined : value;
 }

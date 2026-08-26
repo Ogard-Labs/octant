@@ -174,8 +174,8 @@ describe("CodeThreadBoard", () => {
     const waitingColumn = screen.getByRole("region", { name: "Waiting (0)" });
     expect(within(waitingColumn).getByText("No threads")).toBeVisible();
 
-    fireEvent.click(screen.getByText("View"));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show empty groups" }));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Show empty groups" }));
     expect(screen.queryByRole("region", { name: "In Progress (0)" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Ready (1)" })).toBeVisible();
 
@@ -195,8 +195,8 @@ describe("CodeThreadBoard", () => {
 
     await screen.findByText("Thread 01");
     expect(screen.getByRole("region", { name: "Done (0)" })).toBeVisible();
-    fireEvent.click(screen.getByText("View"));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show empty groups" }));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Show empty groups" }));
     expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
     first.unmount();
 
@@ -254,7 +254,7 @@ describe("CodeThreadBoard", () => {
     const statusStatus = within(cardFor("A thread")).getByText("Ready");
     expect(statusStatus).toHaveClass("sr-only");
 
-    fireEvent.click(screen.getByRole("radio", { name: "Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Project" }));
 
     expect(await screen.findByRole("region", { name: "Project A (1)" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Project B (1)" })).toBeVisible();
@@ -289,7 +289,7 @@ describe("CodeThreadBoard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
 
     // Unchecking Ready leaves an explicit, summarized status filter.
-    fireEvent.click(screen.getByRole("checkbox", { name: "Ready" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Ready" }));
     await waitFor(() =>
       expect(loadBoard).toHaveBeenLastCalledWith({
         version: 1,
@@ -312,7 +312,7 @@ describe("CodeThreadBoard", () => {
     expect(screen.queryByRole("combobox", { name: "Pull request" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    const panel = screen.getByRole("dialog", { name: "Filters" });
+    const panel = await screen.findByRole("dialog", { name: "Filters" });
     expect(within(panel).getByRole("checkbox", { name: "Ready" })).toBeChecked();
     fireEvent.change(within(panel).getByRole("combobox", { name: "Project" }), {
       target: { value: String(projectB) },
@@ -340,8 +340,9 @@ describe("CodeThreadBoard", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
     // Escape unmounts the dialog the person was in, so focus goes back to the
-    // control that opened it rather than falling to the document body.
-    expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
+    // control that opened it rather than falling to the document body. Base UI
+    // restores focus inside a microtask, so this settles a tick after close.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus());
   });
 
   it("shows a typed search term as typed in the active filters, not as an uppercase label", async () => {
@@ -364,7 +365,7 @@ describe("CodeThreadBoard", () => {
 
     // Fixed-vocabulary filter labels stay plain tags and keep the label look.
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Pull request" }), {
+    fireEvent.change(await screen.findByRole("combobox", { name: "Pull request" }), {
       target: { value: "open" },
     });
     expect(await within(activeFilters).findByText("Open PR")).not.toHaveClass("tag-value");
@@ -525,6 +526,8 @@ describe("CodeThreadBoard", () => {
             stagedCount: 1,
             committedAhead: 1,
             workingTreeClean: false,
+            insertions: 12,
+            deletions: 3,
           },
           linkedPullRequest: {
             kind: "linked",
@@ -559,7 +562,7 @@ describe("CodeThreadBoard", () => {
     expect(facts).toHaveTextContent("Project A");
     expect(facts).toHaveTextContent("Current checkout");
     expect(facts).toHaveTextContent("feature/board");
-    expect(facts).toHaveTextContent("3 files");
+    expect(facts).toHaveTextContent("3 files +12 −3");
     expect(facts).toHaveTextContent("Studio · model-a");
     expect(facts).toHaveTextContent("1 active run");
     expect(facts).toHaveTextContent("3 of 7 tasks");

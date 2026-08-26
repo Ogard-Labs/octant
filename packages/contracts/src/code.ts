@@ -251,6 +251,37 @@ export const CodeThread = Schema.Struct({
    * afterwards cannot change what a running thread may do.
    */
   profileId: Schema.optional(AgentProfileId),
+  /**
+   * Display name of the profile that produced this thread's posture and tool
+   * allowlist. Snapshotted so a later refusal can name the profile without
+   * reloading it. Optional for the same replay reason as `profileId`.
+   */
+  profileDisplayName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
+  /**
+   * The profile's tool allowlist, snapshotted at creation so a later profile
+   * edit cannot change what this thread may call. Absent or empty means no
+   * constraint, matching how an empty model constraint list allows every model.
+   * Optional so a journal written before this field existed replays as "no
+   * constraint" rather than being rejected. The live profile is never consulted
+   * for this list.
+   */
+  toolConstraints: Schema.optional(
+    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  ),
+  /**
+   * Instructions and skill allowlist copied from the profile when this thread
+   * started. Optional so a journal written before profiles contributed context
+   * replays as unconstrained. Later turns read this snapshot, never the live
+   * profile, so editing a profile cannot change a thread already running under
+   * it.
+   */
+  profileContext: Schema.optional(
+    Schema.Struct({
+      displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+      instructions: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(100_000))),
+      approvedSkillIds: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+    }).annotations(strict),
+  ),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   deliveryTarget: CodeDeliveryTarget,
   version: AggregateVersion,
@@ -447,6 +478,20 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("pin-code-thread"),
     ...CodeThreadCommandFields,
     pinned: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * Move a thread onto the checkout its Project binds now.
+   *
+   * A thread's checkout id is derived from the binding revision it was created
+   * against, so rebinding the Project supersedes it and no later observation
+   * can produce the thread's own id again. Without this the thread is
+   * fail-closed for good, which 0032 refuses as a resting state. The act is
+   * the user's, never inferred from a matching filesystem root: what authority
+   * a thread holds only changes because someone asked.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("rebind-code-thread-checkout"),
+    ...CodeThreadCommandFields,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-access"),
@@ -743,6 +788,48 @@ export const CodeWorktreeRefsListed = Schema.Struct({
   refs: Schema.Array(CodeWorktreeRef),
 }).annotations(strict);
 export type CodeWorktreeRefsListed = typeof CodeWorktreeRefsListed.Type;
+/**
+ * Why a checkout rebind was refused.
+ *
+ * `already-bound` means the thread is on the checkout its Project binds, so
+ * there is nothing to recover. `managed-worktree` means the thread owns its own
+ * worktree: that checkout is the thread's, not the Project's, and moving it
+ * would hand the thread a tree it never asked for. `checkout-unavailable` means
+ * the Project's own checkout could not be observed, so there is no destination
+ * to name.
+ */
+export const CodeThreadCheckoutRebindRefusal = Schema.Literal(
+  "already-bound",
+  "managed-worktree",
+  "checkout-unavailable",
+);
+export type CodeThreadCheckoutRebindRefusal = typeof CodeThreadCheckoutRebindRefusal.Type;
+
+export const CodeThreadCheckoutRebindOutcome = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("rebound"),
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: CodeThreadCheckoutRebindRefusal,
+  }).annotations(strict),
+);
+export type CodeThreadCheckoutRebindOutcome = typeof CodeThreadCheckoutRebindOutcome.Type;
+
+/**
+ * A refusal here is an expected answer, not a fault: the Project may be
+ * unreadable or the thread may already be where it belongs. Carrying it as a
+ * value keeps every caller handling it instead of catching it.
+ */
+export const CodeThreadCheckoutRebound = Schema.Struct({
+  kind: Schema.Literal("thread-checkout-rebind"),
+  threadId: CodeThreadId,
+  outcome: CodeThreadCheckoutRebindOutcome,
+}).annotations(strict);
+export type CodeThreadCheckoutRebound = typeof CodeThreadCheckoutRebound.Type;
+
 export const CodeCommandResult = Schema.Union(
   CodePublicEvent,
   CodeCheckoutPrepared,
@@ -750,6 +837,7 @@ export const CodeCommandResult = Schema.Union(
   CodeManagedThreadCreated,
   CodeWorktreeRemoteFactsRetrieved,
   CodeWorktreeRefsListed,
+  CodeThreadCheckoutRebound,
 );
 export type CodeCommandResult = typeof CodeCommandResult.Type;
 
@@ -795,6 +883,18 @@ export const CodeBootstrap = Schema.Struct({
 }).annotations(strict);
 export type CodeBootstrap = typeof CodeBootstrap.Type;
 
+/**
+ * The bounded read used to keep the Code sidebar current. It carries only
+ * thread row metadata and journaled activity. Checkout filesystem observation
+ * belongs to bootstrap: a navigation tick that probed every checkout would
+ * contend with thread switching and title-bar work on the packaged host.
+ */
+export const CodeNavigation = Schema.Struct({
+  threads: Schema.Array(CodeThread),
+  activity: Schema.optionalWith(Schema.Array(CodeThreadActivity), { default: () => [] }),
+}).annotations(strict);
+export type CodeNavigation = typeof CodeNavigation.Type;
+
 export const CodeEventFrame = Schema.Struct({
   threadId: CodeThreadId,
   sequence: GlobalSequence.pipe(Schema.positive()),
@@ -839,6 +939,7 @@ export const decodeCodeWorktreeRef = Schema.decodeUnknownSync(CodeWorktreeRef);
 export const decodeCodeWorktreeRefsListed = Schema.decodeUnknownSync(CodeWorktreeRefsListed);
 export const decodeCodeFailure = Schema.decodeUnknownSync(CodeFailure);
 export const decodeCodeBootstrap = Schema.decodeUnknownSync(CodeBootstrap);
+export const decodeCodeNavigation = Schema.decodeUnknownSync(CodeNavigation);
 export const decodeCodeThreadActivity = Schema.decodeUnknownSync(CodeThreadActivity);
 export const decodeCodeThreadView = Schema.decodeUnknownSync(CodeThreadView);
 export const decodeCodeFileMetadata = Schema.decodeUnknownSync(CodeFileMetadata);

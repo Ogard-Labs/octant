@@ -12,8 +12,10 @@ import type { UsageClient } from "@octant/client-runtime/usage-client";
 import { BarChart3, RefreshCw, AlertTriangle, Download, Trash2, Eraser } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import "../styles/usage.css";
 
 export interface UsageDashboardProps {
@@ -678,23 +680,18 @@ function ActivitySection({ view, onViewChange, series, isNarrow }: ActivitySecti
     <div className="usage-dashboard__section">
       <div className="usage-dashboard__section-header">
         <h3>Activity</h3>
-        <div role="group" aria-label="Activity view" className="usage-dashboard__view-toggle">
-          {(["daily", "weekly", "cumulative"] as const).map((option) => (
-            <OctantButton
-              aria-pressed={view === option}
-              key={option}
-              onClick={() => onViewChange(option)}
-              type="button"
-              // One of three mutually exclusive views, so only the chosen one
-              // reads as chosen. Left to the default recipe all three would
-              // look like the primary action and `aria-pressed` would be the
-              // only thing saying which is on.
-              variant={view === option ? "default" : "outline"}
-            >
-              {option === "daily" ? "Daily" : option === "weekly" ? "Weekly" : "Cumulative"}
-            </OctantButton>
-          ))}
-        </div>
+        <OctantToggleGroup<ActivityView>
+          aria-label="Activity view"
+          onValueChange={(value) => {
+            const selected = value[0];
+            if (selected !== undefined) onViewChange(selected);
+          }}
+          value={[view]}
+        >
+          <OctantToggleGroupItem value="daily">Daily</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="weekly">Weekly</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="cumulative">Cumulative</OctantToggleGroupItem>
+        </OctantToggleGroup>
       </div>
       <table
         aria-label={`${view} activity`}
@@ -768,16 +765,16 @@ interface UsageControlsProps {
 function UsageControls(props: UsageControlsProps) {
   return (
     <div className="usage-dashboard__controls" role="group" aria-label="Usage data controls">
-      <OctantButton onClick={props.onExportCsv} type="button">
+      <OctantButton onClick={props.onExportCsv} type="button" variant="secondary">
         <Download aria-hidden="true" size={14} /> Export CSV
       </OctantButton>
-      <OctantButton onClick={props.onExportJson} type="button">
+      <OctantButton onClick={props.onExportJson} type="button" variant="secondary">
         <Download aria-hidden="true" size={14} /> Export JSON
       </OctantButton>
-      <OctantButton onClick={props.onRetain} type="button">
+      <OctantButton onClick={props.onRetain} type="button" variant="destructive">
         <Eraser aria-hidden="true" size={14} /> Purge older than 30 days
       </OctantButton>
-      <OctantButton onClick={props.onReset} type="button">
+      <OctantButton onClick={props.onReset} type="button" variant="destructive">
         <Trash2 aria-hidden="true" size={14} /> Reset all usage
       </OctantButton>
       {props.message !== undefined ? (
@@ -842,14 +839,14 @@ function TotalsCard(props: {
   readonly suffix?: string;
 }) {
   return (
-    <div className="usage-dashboard__total-card">
+    <OctantCard className="usage-dashboard__total-card grid min-w-0 gap-[3px] p-3">
       <span className="usage-dashboard__total-value">
         {props.value === undefined
           ? "Unavailable"
           : `${formatNumber(props.value)}${props.suffix ?? ""}`}
       </span>
       <span className="usage-dashboard__total-label">{props.label}</span>
-    </div>
+    </OctantCard>
   );
 }
 

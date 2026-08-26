@@ -1,5 +1,6 @@
 import type { ZenThreadCatalogEntry, ZenThreadCatalogRef } from "@octant/contracts/zen";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
 
 export interface ZenThreadPickerProps {
@@ -14,11 +15,7 @@ export interface ZenThreadPickerProps {
 
 export function ZenThreadPicker(props: ZenThreadPickerProps) {
   return (
-    <section
-      aria-label="Threads"
-      className="zen-panel card card-tight card-raised zen-thread-picker"
-      role="dialog"
-    >
+    <OctantCard aria-label="Threads" className="zen-panel zen-thread-picker px-6" role="dialog">
       <header className="card-head">
         <div>
           <h2>Threads</h2>
@@ -63,7 +60,7 @@ export function ZenThreadPicker(props: ZenThreadPickerProps) {
           </article>
         ))}
       </div>
-    </section>
+    </OctantCard>
   );
 }
 

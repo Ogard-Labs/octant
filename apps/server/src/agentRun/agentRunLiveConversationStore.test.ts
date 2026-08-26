@@ -72,6 +72,27 @@ describe("AgentRunLiveConversationStore", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("unblocks live subscribers as soon as the host shuts down", async () => {
+    const store = new AgentRunLiveConversationStore();
+    store.begin(runId);
+    const controller = new AbortController();
+    const stream = store.subscribe({ runId, signal: controller.signal });
+    await stream.next();
+    const pending = stream.next();
+    store.close();
+    await expect(pending).resolves.toMatchObject({
+      value: {
+        status: "stale",
+        staleReason: "The host is shutting down.",
+      },
+      done: false,
+    });
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+    store.begin(runId);
+    store.appendText(runId, "after close", occurredAt);
+    expect(store.read({ runId })?.entries).toEqual([]);
+  });
+
   it("removes an aborted subscriber and does not retain its listener", async () => {
     const store = new AgentRunLiveConversationStore();
     store.begin(runId);
