@@ -1489,10 +1489,9 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 /* Published by WindowChrome from the leading cluster's measured width. The
-   literal is only the pre-measurement fallback: a fixed 110px was narrower
-   than the traffic lights plus Show sidebar plus New thread actually render,
-   so the pane tab was drawn over the New thread button. */
-html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header {
+   browser has no traffic-light reserve, but it still needs the Show sidebar
+   and New thread cluster kept clear of the pane tab. */
+.shell--sidebar-collapsed .workspace-pane__header {
   padding-left: var(--octant-window-chrome-leading-width, 148px);
 }
 
