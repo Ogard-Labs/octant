@@ -54,6 +54,39 @@ describe("SplitWorkspace", () => {
     expect(screen.getByRole("region", { name: "Workspace pane: A thread" })).toBeVisible();
   });
 
+  it("adds Browser and Terminal surfaces from the plus beside a Code tab", async () => {
+    const user = userEvent.setup();
+    const onAddSurface = vi.fn();
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "code-overview",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        threadId: "00000000-0000-4000-8000-000000000614",
+        title: "Implementation",
+      },
+    });
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        mode="code"
+        onAddSurface={onAddSurface}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    const addTab = screen.getByRole("button", { name: "Add tab" });
+    expect(addTab).toBeVisible();
+    await user.click(addTab);
+    expect(await screen.findByRole("menuitem", { name: "Browser" })).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+    expect(onAddSurface).toHaveBeenCalledWith(firstPaneId, "terminal");
+  });
+
   it("marks the focused pane and puts pane operations in a keyboard disclosure", async () => {
     const user = userEvent.setup();
     const handlers = splitCallbacks();

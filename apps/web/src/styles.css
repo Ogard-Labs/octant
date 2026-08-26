@@ -1537,6 +1537,24 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   flex: 0 0 auto;
 }
 
+.workspace-pane__add-tab {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  color: var(--oct-meta);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.workspace-pane__add-tab:hover,
+.workspace-pane__add-tab[aria-expanded="true"] {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
 .workspace-pane__provider {
   display: inline-flex;
   flex: 0 0 auto;

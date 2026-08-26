@@ -533,6 +533,50 @@ describe("useShellController", () => {
     );
   });
 
+  it("adds a fresh Terminal in a split beside the current Code tab", async () => {
+    const initial = codeBootstrap();
+    const server = statefulClient({
+      ...initial,
+      workspace: {
+        ...initial.workspace,
+        contextByMode: {
+          ...initial.workspace.contextByMode,
+          code: {
+            ...initial.workspace.contextByMode.code,
+            projectId: decodeProjectId("00000000-0000-4000-8000-000000000896"),
+            boundRoot: "/repo",
+          },
+        },
+      },
+    });
+    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000895");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openCodeThread(threadId, "Terminal QA"));
+    const sourcePane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () => result.current.openSurfaceInSplit("terminal", sourcePane.paneId));
+
+    const terminalPane = panes(result.current.workspace!.layouts.code).find(
+      (pane) => pane.surface.kind === "code-terminal",
+    );
+    expect(terminalPane?.surface).toMatchObject({
+      kind: "code-terminal",
+      threadId,
+      title: "Terminal",
+    });
+    expect(
+      terminalPane?.surface.kind === "code-terminal" ? terminalPane.surface.terminalId : undefined,
+    ).toBeDefined();
+    expect(server.client.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        operation: expect.objectContaining({ kind: "split-pane", mode: "code" }),
+      }),
+    );
+  });
+
   it("offers a real Project window when a thread selection crosses workspace authority", async () => {
     const currentProjectId = decodeProjectId("00000000-0000-4000-8000-000000000898");
     const nextProjectId = decodeProjectId("00000000-0000-4000-8000-000000000899");

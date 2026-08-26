@@ -4435,6 +4435,9 @@ function LaunchedShell(
                       void controller.openCodeThread(threadId, title, undefined, projectId)
                     }
                     onOpenReview={(threadId) => openReviewForThread(String(threadId))}
+                    onAddSurface={(paneId, surface) =>
+                      void controller.openSurfaceInSplit(surface, paneId)
+                    }
                     onOpenCodeSurface={(kind, threadId, title, terminalId) =>
                       void controller.openCodeSurface(
                         kind === "code-terminal"

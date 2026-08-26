@@ -2,6 +2,8 @@ import {
   type WorkThreadId,
   type BrowserContextId,
   type BrowserThreadId,
+  decodeCodeTerminalId,
+  decodeCodeThreadId,
   decodeLayoutNodeId,
   type ChatThreadId,
   type CodeThreadId,
@@ -713,6 +715,26 @@ export function useShellController(options: ShellControllerOptions) {
     );
   }
 
+  async function openSurfaceInSplit(
+    surface: WorkspaceSurfaceKind,
+    targetPaneId: PaneId,
+  ): Promise<boolean> {
+    const latest = committedShell.current;
+    if (latest === undefined) return false;
+    const mode = latest.workspace.activeMode;
+    const pane = findPaneInWorkspace(latest.workspace, targetPaneId);
+    if (pane === undefined) return false;
+    const tab = surfaceTab(
+      surface,
+      mode,
+      boundThreadId(pane.surface),
+      sideChatSource(pane.surface),
+    );
+    if (tab === undefined) return false;
+    await splitPane(targetPaneId, "horizontal", "after", tab);
+    return true;
+  }
+
   function dismissCrossContextOffer(): void {
     setCrossContextOffer(undefined);
   }
@@ -1067,6 +1089,7 @@ export function useShellController(options: ShellControllerOptions) {
     openSideChat,
     openSettings,
     openSurface,
+    openSurfaceInSplit,
     pendingSettingsDeepLink,
     presentedLayout,
     previewSplitResize,
@@ -2001,9 +2024,36 @@ function surfaceTab(
       sourceThreadId: sideChat.threadId,
     };
   }
-  // terminal and git-review require an active Code thread context and are
-  // not advertised by the launcher catalog; they are opened via code surface
-  // controls within a Code thread.
+  if (mode !== "code" || threadId === undefined) return undefined;
+  const codeThreadId = decodeCodeThreadId(String(threadId));
+  if (surface === "terminal") {
+    return {
+      kind: "code-terminal",
+      id: newTabId(),
+      mode: "code",
+      title: "Terminal",
+      threadId: codeThreadId,
+      terminalId: decodeCodeTerminalId(crypto.randomUUID()),
+    };
+  }
+  if (surface === "git-review") {
+    return {
+      kind: "code-git",
+      id: newTabId(),
+      mode: "code",
+      title: "Git",
+      threadId: codeThreadId,
+    };
+  }
+  if (surface === "diff") {
+    return {
+      kind: "code-local-review",
+      id: newTabId(),
+      mode: "code",
+      title: "Review",
+      threadId: codeThreadId,
+    };
+  }
   return undefined;
 }
 
