@@ -219,6 +219,7 @@ import {
 import { createCodeOperationApprovalRouteHandler } from "./codeOperationApprovalRoutes";
 import {
   createComputerUseRuntime,
+  reportComputerUseDestination,
   type ComputerUseNativeAdapter,
   type ComputerUseRuntime,
 } from "./computerUse/computerUseRuntime";
@@ -1818,12 +1819,20 @@ export function startOctantServer(
     const computerUseProcess = createNodeComputerUseProcessPort({
       receiptDirectory: join(persistence.dataDirectory, "computer-use", "runtime-receipts"),
     });
+    const computerUseDestination =
+      options.computerUseAdapter === undefined
+        ? reportComputerUseDestination({ platform: process.platform })
+        : { status: "available" as const, kind: "macos-host" as const };
+    const computerUseAdapter =
+      options.computerUseAdapter ??
+      (computerUseDestination.status === "available"
+        ? createMacOsComputerUseAdapter({ process: computerUseProcess })
+        : undefined);
     const computerUseRuntime =
       options.computerUseRuntime ??
       createComputerUseRuntime({
-        adapter:
-          options.computerUseAdapter ??
-          createMacOsComputerUseAdapter({ process: computerUseProcess }),
+        ...(computerUseAdapter === undefined ? {} : { adapter: computerUseAdapter }),
+        destination: computerUseDestination,
         evidence: createComputerUseValidationEvidenceRecorder({
           eventStore: validationEventStore,
           uuid: randomUUID,

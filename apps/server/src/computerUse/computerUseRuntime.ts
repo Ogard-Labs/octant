@@ -9,6 +9,17 @@ import type {
 } from "@octant/contracts";
 import { decodeComputerUseSessionView, sameToolActionAuthority } from "@octant/contracts";
 import { evaluateComputerUseAction } from "@octant/domain";
+import {
+  refuseComputerUseDestination,
+  type ComputerUseDestinationRefusal,
+  type ComputerUseDestinationReport,
+} from "./computerUseDestination";
+
+export type {
+  ComputerUseDestinationRefusal,
+  ComputerUseDestinationReport,
+} from "./computerUseDestination";
+export { reportComputerUseDestination } from "./computerUseDestination";
 
 export type ComputerUseRuntimeState =
   | "waiting-for-approval"
@@ -78,14 +89,17 @@ export interface ComputerUseEvidenceEvent {
   readonly event: ComputerUseRuntimeEvent;
 }
 
+export type ComputerUseStartResult = ComputerUseRuntimeView | ComputerUseDestinationRefusal;
+
 export interface ComputerUseRuntime {
+  readonly destination: () => ComputerUseDestinationReport;
   readonly start: (input: {
     readonly ownerWindowId: WindowId;
     readonly threadId: string;
     readonly requestedBy: EventActor;
     readonly request: ComputerUseActionRequest;
     readonly policy: ComputerUsePolicy;
-  }) => Promise<ComputerUseRuntimeView>;
+  }) => Promise<ComputerUseStartResult>;
   readonly decide: (input: {
     readonly ownerWindowId: WindowId;
     readonly threadId: string;
@@ -126,7 +140,8 @@ export class ComputerUseRuntimeError extends Error {
 const TERMINAL_SESSION_RETENTION_MS = 5 * 60_000;
 
 export function createComputerUseRuntime(_options: {
-  readonly adapter: ComputerUseNativeAdapter;
+  readonly adapter?: ComputerUseNativeAdapter;
+  readonly destination?: ComputerUseDestinationReport;
   readonly evidence: { readonly record: (event: ComputerUseEvidenceEvent) => void | Promise<void> };
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -135,6 +150,11 @@ export function createComputerUseRuntime(_options: {
   const options = _options;
   const approvalTtlMs = options.approvalTtlMs ?? 60_000;
   const sessions = new Map<string, RuntimeSession>();
+  const destination = (): ComputerUseDestinationReport =>
+    options.destination ??
+    (options.adapter === undefined
+      ? { status: "unavailable", kind: "no-provider-configured" }
+      : { status: "available", kind: "macos-host" });
 
   const append = async (
     session: RuntimeSession,
@@ -198,7 +218,10 @@ export function createComputerUseRuntime(_options: {
     if (session.expirationTimer !== undefined) clearTimeout(session.expirationTimer);
     let cleaned = false;
     try {
-      cleaned = await options.adapter.cleanup(session.request.sessionId);
+      cleaned =
+        options.adapter === undefined
+          ? true
+          : await options.adapter.cleanup(session.request.sessionId);
     } catch {
       cleaned = false;
     }
@@ -218,8 +241,15 @@ export function createComputerUseRuntime(_options: {
 
   const execute = async (session: RuntimeSession): Promise<ComputerUseRuntimeView> => {
     session.state = "running";
+    const adapter = options.adapter;
+    if (adapter === undefined) {
+      session.state = "failed";
+      await append(session, "session-failed", "Computer-use destination is unavailable.");
+      await cleanup(session);
+      return view(session);
+    }
     try {
-      const refreshed = await options.adapter.observe(session.request, session.controller.signal);
+      const refreshed = await adapter.observe(session.request, session.controller.signal);
       if (session.controller.signal.aborted) return await finishAborted(session);
       await append(session, "observation-recorded", "Pre-action host observation refreshed.");
       if (session.controller.signal.aborted) return await finishAborted(session);
@@ -266,11 +296,7 @@ export function createComputerUseRuntime(_options: {
       }
       await append(session, "action-started", "Visible host action started.");
       if (session.controller.signal.aborted) return await finishAborted(session);
-      await options.adapter.execute(
-        session.request,
-        session.observation,
-        session.controller.signal,
-      );
+      await adapter.execute(session.request, session.observation, session.controller.signal);
       if (session.controller.signal.aborted) return await finishAborted(session);
       session.state = "completed";
       await append(session, "action-completed", "Visible host action completed.");
@@ -299,6 +325,16 @@ export function createComputerUseRuntime(_options: {
   };
 
   const start: ComputerUseRuntime["start"] = async (input) => {
+    const refusal = refuseComputerUseDestination(destination());
+    if (refusal !== undefined) return refusal;
+    const adapter = options.adapter;
+    if (adapter === undefined) {
+      return {
+        status: "refused",
+        kind: "unavailable",
+        reason: "no-provider-configured",
+      };
+    }
     if (sessions.has(input.request.sessionId)) {
       throw new ComputerUseRuntimeError("invalid", "Computer-use session already exists.");
     }
@@ -338,7 +374,7 @@ export function createComputerUseRuntime(_options: {
     );
 
     try {
-      session.observation = await options.adapter.observe(input.request, session.controller.signal);
+      session.observation = await adapter.observe(input.request, session.controller.signal);
     } catch (error) {
       if (session.controller.signal.aborted) return await finishAborted(session);
       session.state = isProcessDeath(error) ? "interrupted" : "failed";
@@ -564,6 +600,7 @@ export function createComputerUseRuntime(_options: {
   };
 
   return {
+    destination,
     start,
     decide,
     stop,

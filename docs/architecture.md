@@ -410,7 +410,11 @@ prompt, schema, tool, or route.
 - A structured mention cannot install, trust, enable, or elevate anything.
 - Core capabilities (browser/computer use, tests, Apple validation, approvals,
   memory, subagents) are app-managed and provider-neutral; no core capability
-  depends on an optional extension.
+  depends on an optional extension. Computer use is destination-shaped: the
+  host reports whether a screen exists, and an adapter performs
+  observe/execute/cleanup. A host with no destination reports the capability
+  absent and refuses actions as a value rather than throwing. See
+  [decisions/0053-computer-use-destinations.md](decisions/0053-computer-use-destinations.md).
 
 The path from this extensions model to a general plugin host — first-party
 features as toggleable plugins, renderer contribution points, integration and

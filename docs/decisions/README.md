@@ -60,6 +60,7 @@ distilled successor of the earlier long-form design specifications.
 | [0050](0050-bounded-live-child-conversation.md)               | Bounded live child conversation is a server read                  | Accepted           |
 | [0051](0051-board-cards-summarize-plan-progress.md)           | Board cards summarize plan progress                               | Accepted           |
 | [0052](0052-canvas-boards.md)                                 | Canvas boards are the diagram block                               | Proposed           |
+| [0053](0053-computer-use-destinations.md)                     | Computer-use destinations                                         | Proposed           |
 
 ## Adding an ADR
 
