@@ -6,7 +6,9 @@ import type {
   AppleSimulatorId,
   AppleSimulatorRecord,
 } from "@octant/contracts/apple-toolchain";
+import type { AppleSimulatorLiveFrame } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
+import { AppleSimulatorLiveFrameView } from "./AppleSimulatorLiveFrame";
 
 export type AppleWorkbenchStatus =
   | "loading"
@@ -43,15 +45,24 @@ export interface AppleWorkbenchPaneProps {
   /** True while a request this pane started is still in flight. */
   readonly busy?: boolean;
   readonly actionMessage?: string;
+  readonly liveFrame?: AppleSimulatorLiveFrame;
+  readonly screenUrl?: string;
 }
 
 export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
   if (props.status !== "ready") return <AppleWorkbenchState {...props} />;
   if (props.discovery === undefined || props.runtime === undefined) {
-    return <AppleWorkbenchState status="waiting" />;
+    return (
+      <AppleWorkbenchState
+        status="waiting"
+        {...(props.liveFrame === undefined ? {} : { liveFrame: props.liveFrame })}
+        {...(props.screenUrl === undefined ? {} : { screenUrl: props.screenUrl })}
+      />
+    );
   }
   return (
     <section aria-label="Apple development workbench" className="apple-workbench">
+      <LiveFrame {...props} />
       <header className="apple-workbench__header">
         <div>
           <span className="apple-workbench__eyebrow">Apple development</span>
@@ -95,8 +106,21 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
   );
 }
 
+function LiveFrame(props: Pick<AppleWorkbenchPaneProps, "liveFrame" | "screenUrl">) {
+  if (props.liveFrame === undefined) return null;
+  return (
+    <AppleSimulatorLiveFrameView
+      frame={props.liveFrame}
+      {...(props.screenUrl === undefined ? {} : { screenUrl: props.screenUrl })}
+    />
+  );
+}
+
 function AppleWorkbenchState(
-  props: Pick<AppleWorkbenchPaneProps, "status" | "errorMessage" | "onRetry">,
+  props: Pick<
+    AppleWorkbenchPaneProps,
+    "status" | "errorMessage" | "onRetry" | "liveFrame" | "screenUrl"
+  >,
 ) {
   const presentation = {
     loading: ["Loading Apple toolchain", "Discovering Xcode, SDKs, and Simulator destinations."],
@@ -125,6 +149,7 @@ function AppleWorkbenchState(
       className={`apple-workbench apple-workbench--${props.status}`}
     >
       <span className="apple-workbench__eyebrow">Apple development</span>
+      <LiveFrame {...props} />
       <h1>{title}</h1>
       <p role={props.status === "failed" ? "alert" : undefined}>{message}</p>
       {props.onRetry === undefined ? null : (

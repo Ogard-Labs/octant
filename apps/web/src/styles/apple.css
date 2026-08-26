@@ -1,0 +1,44 @@
+.apple-workbench {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-4);
+  padding: var(--oct-space-4);
+  color: var(--oct-fg);
+}
+
+.apple-simulator-frame {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface-warm);
+}
+
+.apple-simulator-frame figcaption {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
+}
+
+.apple-simulator-frame p,
+.apple-simulator-frame img {
+  margin: 0;
+}
+
+.apple-simulator-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--oct-bg);
+}
+
+.apple-simulator-frame--unavailable,
+.apple-simulator-frame--interrupted,
+.apple-simulator-frame--stale-after-restart {
+  color: var(--oct-muted);
+}

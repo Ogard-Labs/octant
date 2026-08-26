@@ -70,14 +70,17 @@ describe("packaged desktop host capabilities", () => {
   it("reports vibrancy support only for the native macOS host", () => {
     expect(resolveDesktopHostCapabilities("darwin")).toEqual({
       liveBrowserSupported: false,
+      liveSimulatorFrameSupported: true,
       sidebarVibrancySupported: true,
     });
     expect(resolveDesktopHostCapabilities("linux")).toEqual({
       liveBrowserSupported: false,
+      liveSimulatorFrameSupported: false,
       sidebarVibrancySupported: false,
     });
     expect(resolveDesktopHostCapabilities("darwin", true)).toEqual({
       liveBrowserSupported: true,
+      liveSimulatorFrameSupported: true,
       sidebarVibrancySupported: true,
     });
   });

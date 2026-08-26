@@ -1,5 +1,8 @@
 import type { AppleDiscoverySnapshot } from "@octant/contracts/apple-toolchain-rpc";
-import type { AppleRuntimeSnapshot } from "@octant/contracts/apple-toolchain";
+import {
+  decodeAppleRuntimeSnapshot,
+  type AppleRuntimeSnapshot,
+} from "@octant/contracts/apple-toolchain";
 import { beforeAll, describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -60,6 +63,17 @@ const discovery: AppleDiscoverySnapshot = {
     },
   ],
 };
+
+function runtimeSnapshot(): AppleRuntimeSnapshot {
+  return decodeAppleRuntimeSnapshot({
+    sequence: 1,
+    snapshotAt: "2026-07-27T20:00:03.000Z",
+    toolchain,
+    simulators: discovery.simulators,
+    active: [],
+    recentEvidence: [],
+  });
+}
 
 describe("AppleWorkbenchPane", () => {
   it("renders normalized toolchain, Simulator, progress, and evidence state", () => {
@@ -261,5 +275,67 @@ describe("AppleWorkbenchPane", () => {
     expect(renderToStaticMarkup(<AppleWorkbenchPane status="interrupted" />)).toContain(
       "Apple action interrupted",
     );
+  });
+
+  it("shows an unavailable live frame on a host without Apple tooling", () => {
+    const html = renderToStaticMarkup(
+      <AppleWorkbenchPane
+        liveFrame={{
+          status: "unavailable",
+          reason: "toolchain-missing",
+          title: "Simulator is unavailable",
+          message:
+            "Install or select Xcode and an iOS Simulator runtime on the Mac that owns this Code thread, then retry.",
+        }}
+        status="unavailable"
+      />,
+    );
+    expect(html).toContain("Simulator is unavailable");
+    expect(html).not.toContain("<video");
+  });
+
+  it("does not shut down the destination when the live frame unmounts", async () => {
+    const { render } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    const onRun = vi.fn();
+    const view = render(
+      <AppleWorkbenchPane
+        discovery={discovery}
+        liveFrame={{
+          status: "live",
+          simulatorId: discovery.simulators[0]!.simulatorId,
+          name: "iPhone 16",
+          screen: { kind: "pending" },
+          title: "Live · iPhone 16",
+          message: "The destination is live.",
+        }}
+        onRun={onRun}
+        runtime={runtimeSnapshot()}
+        status="ready"
+      />,
+    );
+    view.unmount();
+    expect(onRun).not.toHaveBeenCalled();
+  });
+
+  it("labels stale-after-restart instead of showing the destination as live", () => {
+    const html = renderToStaticMarkup(
+      <AppleWorkbenchPane
+        liveFrame={{
+          status: "stale-after-restart",
+          simulatorId: discovery.simulators[0]!.simulatorId,
+          name: "iPhone 16",
+          lastScreen: { reference: "apple-screenshot-before-restart" },
+          title: "Simulator is stale after restart",
+          message: "Ownership was reconciled after a host restart.",
+        }}
+        status="ready"
+        discovery={discovery}
+        runtime={runtimeSnapshot()}
+      />,
+    );
+    expect(html).toContain("stale after restart");
+    expect(html).toContain('data-status="stale-after-restart"');
+    expect(html).not.toContain('data-status="live"');
   });
 });

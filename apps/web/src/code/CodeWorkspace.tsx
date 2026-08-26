@@ -8,7 +8,13 @@ import type {
 import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-definitions";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import type { CodeThreadCheckoutRebindRefusal } from "@octant/contracts/code";
-import { decidesCodeEffectsByApproval } from "@octant/domain";
+import {
+  appleLiveFrameIsStaleAfterRestart,
+  decidesCodeEffectsByApproval,
+  latestAppleScreenshotEvidence,
+  presentAppleSimulatorLiveFrame,
+  type AppleSimulatorLiveFrameAttach,
+} from "@octant/domain";
 import { LoaderCircle } from "lucide-react";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
@@ -42,6 +48,7 @@ import type { HostId } from "@octant/contracts/host";
 import type { CodeTerminalId } from "@octant/contracts/code";
 import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import { AppleWorkbenchPane, type AppleWorkbenchIntent } from "../apple/AppleWorkbenchPane";
+import { useAppleSimulatorScreen } from "../apple/useAppleSimulatorScreen";
 import { useAppleWorkbench } from "../apple/useAppleWorkbench";
 
 const MonacoEditorPane = lazy(() =>
@@ -311,6 +318,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
             : { requestApproval: props.approvals.apple })}
           client={props.appleToolchainClient}
           createUuid={nextUuid}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           tab={props.tab}
           thread={view.thread}
           checkoutId={view.checkout.id}
@@ -322,6 +330,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
 function AppleWorkbenchSurface(props: {
   readonly client: AppleToolchainClient;
   readonly createUuid: () => string;
+  readonly hostBridge?: OctantHostBridge;
   readonly requestApproval?: (request: AppleActionRequest) => Promise<string | undefined>;
   readonly tab: Extract<CodeTab, { readonly kind: "apple-workbench" }>;
   readonly thread: NonNullable<CodeController["activeView"]>["thread"];
@@ -382,6 +391,69 @@ function AppleWorkbenchSurface(props: {
   const scheme = controller.discovery?.workspace.schemes[0];
   const createUuid = props.createUuid;
   const requestApproval = props.requestApproval;
+  const [frameAttach, setFrameAttach] = useState<AppleSimulatorLiveFrameAttach>({
+    kind: "not-attachable",
+    reason:
+      "This client cannot attach a live Simulator frame. Open the thread on the Mac that owns the destination.",
+  });
+  useEffect(() => {
+    let active = true;
+    void Promise.resolve(props.hostBridge?.getHostCapabilities?.()).then((capabilities) => {
+      if (!active) return;
+      if (capabilities?.liveSimulatorFrameSupported === true) {
+        setFrameAttach({ kind: "attachable" });
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [props.hostBridge]);
+  const recentEvidence = controller.runtime?.recentEvidence ?? [];
+  const latestScreenshot = latestAppleScreenshotEvidence(recentEvidence);
+  const liveFrame = presentAppleSimulatorLiveFrame({
+    discovering: controller.status === "loading" || controller.status === "waiting",
+    interrupted: controller.status === "interrupted",
+    toolchainAvailable: controller.discovery?.toolchain.available === true,
+    frameAttach,
+    simulators: controller.discovery?.simulators ?? controller.runtime?.simulators ?? [],
+    boundThreadId: props.thread.id,
+    boundCheckoutId: props.checkoutId,
+    visibleThreadId: props.thread.id,
+    visibleCheckoutId: props.checkoutId,
+    restartReconciled: appleLiveFrameIsStaleAfterRestart(recentEvidence),
+    ...(latestScreenshot === undefined
+      ? {}
+      : {
+          latestScreenshot: {
+            reference: latestScreenshot.reference,
+            ...(latestScreenshot.simulatorId === undefined
+              ? {}
+              : { simulatorId: latestScreenshot.simulatorId }),
+          },
+        }),
+  });
+  const screenshotReference =
+    liveFrame.status === "live" && liveFrame.screen.kind === "screenshot"
+      ? liveFrame.screen.reference
+      : undefined;
+  const screenshotRequest = useMemo(
+    () =>
+      screenshotReference === undefined
+        ? undefined
+        : {
+            kind: "apple-artifact-request" as const,
+            authority,
+            threadId: props.thread.id,
+            checkoutId: props.checkoutId,
+            reference: screenshotReference,
+          },
+    [authority, props.checkoutId, props.thread.id, screenshotReference],
+  );
+  const screenUrl = useAppleSimulatorScreen({
+    client: props.client,
+    enabled: liveFrame.status === "live",
+    ...(screenshotRequest === undefined ? {} : { request: screenshotRequest }),
+  });
 
   const run = useCallback(
     async (intent: AppleWorkbenchIntent) => {
@@ -472,6 +544,8 @@ function AppleWorkbenchSurface(props: {
     <AppleWorkbenchPane
       {...(actionMessage === undefined ? {} : { actionMessage })}
       busy={busy}
+      liveFrame={liveFrame}
+      {...(screenUrl === undefined ? {} : { screenUrl })}
       status={controller.status}
       {...(controller.discovery === undefined ? {} : { discovery: controller.discovery })}
       {...(controller.runtime === undefined ? {} : { runtime: controller.runtime })}
