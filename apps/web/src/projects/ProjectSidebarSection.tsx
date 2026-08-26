@@ -1199,7 +1199,7 @@ function ProjectViewFilterMenu(props: {
     <OctantMenuRoot>
       <OctantMenuTrigger
         aria-label={triggerLabel}
-        className="code-project-views__filter"
+        className="code-project-views__filter window-no-drag"
         title={triggerLabel}
       >
         <ListFilter aria-hidden="true" size={14} strokeWidth={1.8} />
