@@ -46,6 +46,17 @@ export class AppleRuntimeStore {
     await rename(temporary, target);
   }
 
+  async readArtifact(reference: string): Promise<Uint8Array | undefined> {
+    if (!SAFE_REFERENCE.test(reference)) return undefined;
+    try {
+      const bytes = await readFile(join(this.#artifactRoot, reference));
+      if (bytes.byteLength > MAX_ARTIFACT_BYTES) return undefined;
+      return new Uint8Array(bytes);
+    } catch {
+      return undefined;
+    }
+  }
+
   async persistReceipts(receipts: ReadonlyArray<AppleRuntimeReceipt>): Promise<void> {
     if (receipts.length > MAX_RECEIPTS) throw new Error("Too many Apple runtime receipts.");
     const validated = receipts.map(validateReceipt);

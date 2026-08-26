@@ -1,4 +1,5 @@
 import {
+  decodeAppleArtifactRequest,
   decodeAppleRpcEnvelope,
   type AppleAuthorityScopeRequest,
   type AppleRpcEnvelope,
@@ -13,7 +14,10 @@ const DEFAULT_BODY_LIMIT = 1_048_576;
 
 export interface AppleToolchainRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
-  readonly service: Pick<AppleToolchainService, "discover" | "execute" | "cancel" | "snapshot">;
+  readonly service: Pick<
+    AppleToolchainService,
+    "discover" | "execute" | "cancel" | "snapshot" | "readScreenshotArtifact"
+  >;
   readonly resolveContext: (
     windowId: WindowId,
     scope: AppleAuthorityScopeRequest,
@@ -34,7 +38,9 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
   const bodyLimit = dependencies.maxRequestBodySize ?? DEFAULT_BODY_LIMIT;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== "/api/apple/toolchain") return undefined;
+    if (url.pathname !== "/api/apple/toolchain" && url.pathname !== "/api/apple/artifacts") {
+      return undefined;
+    }
     const origin = request.headers.get("origin");
     if (
       !isLoopbackHostname(url.hostname) ||
@@ -82,6 +88,15 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
         body.kind === "too-large" ? 413 : 400,
         origin,
       );
+    }
+    if (url.pathname === "/api/apple/artifacts") {
+      return await handleArtifactRequest({
+        body: body.value,
+        origin,
+        windowId,
+        resolveContext: dependencies.resolveContext,
+        service: dependencies.service,
+      });
     }
     let envelope: AppleRpcEnvelope;
     try {
@@ -161,6 +176,55 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
       return failure("unavailable", "Apple toolchain service is unavailable.", 503, origin);
     }
   };
+}
+
+async function handleArtifactRequest(input: {
+  readonly body: unknown;
+  readonly origin: string | null;
+  readonly windowId: WindowId;
+  readonly resolveContext: AppleToolchainRouteDependencies["resolveContext"];
+  readonly service: AppleToolchainRouteDependencies["service"];
+}): Promise<Response> {
+  let request;
+  try {
+    request = decodeAppleArtifactRequest(input.body);
+  } catch {
+    return failure("invalid", "Apple toolchain request is invalid.", 400, input.origin);
+  }
+  const envelope: AppleRpcEnvelope = {
+    kind: "apple-snapshot-request",
+    authority: request.authority,
+    threadId: request.threadId,
+    checkoutId: request.checkoutId,
+  };
+  let context: AppleExecutionContext | undefined;
+  try {
+    context = await input.resolveContext(input.windowId, request, envelope);
+  } catch {
+    context = undefined;
+  }
+  if (context === undefined) {
+    return failure("unauthorized", "Apple toolchain request is unauthorized.", 403, input.origin);
+  }
+  try {
+    const artifact = await input.service.readScreenshotArtifact(request.reference, context);
+    if (artifact.kind === "unauthorized") {
+      return failure("unauthorized", artifact.message, 403, input.origin);
+    }
+    if (artifact.kind === "unavailable") {
+      return failure("unavailable", artifact.message, 404, input.origin);
+    }
+    return new Response(Buffer.from(artifact.bytes), {
+      status: 200,
+      headers: {
+        ...corsHeaders(input.origin),
+        "content-type": "image/png",
+        "cache-control": "private, no-store",
+      },
+    });
+  } catch {
+    return failure("unavailable", "Apple toolchain service is unavailable.", 503, input.origin);
+  }
 }
 
 function requestScope(envelope: AppleRpcEnvelope): AppleAuthorityScopeRequest | undefined {

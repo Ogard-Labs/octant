@@ -1,5 +1,6 @@
 import {
   decodeAppleRpcEnvelope,
+  type AppleArtifactRequest,
   type AppleCancelRequest,
   type AppleDiscoverySnapshot,
   type AppleSnapshotRequest,
@@ -24,6 +25,7 @@ export interface AppleToolchainClient {
   execute(request: AppleActionRequest, signal?: AbortSignal): Promise<AppleBuildEvidence>;
   cancel(request: AppleCancelRequest, signal?: AbortSignal): Promise<boolean>;
   snapshot(request: AppleSnapshotRequest, signal?: AbortSignal): Promise<AppleRuntimeSnapshot>;
+  readScreenshot(request: AppleArtifactRequest, signal?: AbortSignal): Promise<Blob>;
 }
 
 export type AppleToolchainClientFailureCategory =
@@ -66,7 +68,48 @@ export function createAppleToolchainClient(
       if (reply.kind !== "apple-runtime-snapshot") throw protocol();
       return reply.snapshot;
     },
+    readScreenshot: async (request, signal) => readPng(resolved, request, signal),
   };
+}
+
+async function readPng(
+  options: AppleToolchainClientOptions,
+  body: AppleArtifactRequest,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  let response: Response;
+  try {
+    response = await options.fetch(new URL("/api/apple/artifacts", options.baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": options.windowCapability,
+      },
+      body: JSON.stringify(body),
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw new AppleToolchainClientFailure(
+        "interrupted",
+        "Apple toolchain request was interrupted.",
+      );
+    }
+    throw new AppleToolchainClientFailure("unavailable", "Apple toolchain service is unavailable.");
+  }
+  if (response.ok && response.headers.get("content-type") === "image/png") {
+    return await response.blob();
+  }
+  let reply;
+  try {
+    reply = decodeAppleRpcEnvelope(await response.json());
+  } catch {
+    throw protocol();
+  }
+  if (reply.kind === "apple-failure") {
+    throw new AppleToolchainClientFailure(reply.failure.category, reply.failure.message);
+  }
+  throw protocol();
 }
 
 async function post(options: AppleToolchainClientOptions, body: unknown, signal?: AbortSignal) {

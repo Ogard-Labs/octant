@@ -25,9 +25,11 @@ describe("desktop preload bridge", () => {
   });
 
   it("reports the native sidebar vibrancy capability through a fixed channel", async () => {
-    const invoke = vi
-      .fn()
-      .mockResolvedValue({ sidebarVibrancySupported: true, liveBrowserSupported: true });
+    const invoke = vi.fn().mockResolvedValue({
+      sidebarVibrancySupported: true,
+      liveBrowserSupported: true,
+      liveSimulatorFrameSupported: true,
+    });
     const bridge = createHostBridge(
       { invoke, on: vi.fn(), removeListener: vi.fn() },
       projectWindowCapability,
@@ -35,6 +37,7 @@ describe("desktop preload bridge", () => {
 
     await expect(bridge.getHostCapabilities?.()).resolves.toEqual({
       liveBrowserSupported: true,
+      liveSimulatorFrameSupported: true,
       sidebarVibrancySupported: true,
     });
     expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.hostCapabilities);

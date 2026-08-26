@@ -23,10 +23,12 @@ export const AppleProjectPath = Schema.NonEmptyTrimmedString.pipe(
   }),
 );
 export type AppleProjectPath = typeof AppleProjectPath.Type;
-const opaqueReference = Schema.NonEmptyTrimmedString.pipe(
+export const AppleEvidenceReference = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(512),
   Schema.filter((value) => !value.includes("/") && !value.includes("\\") && !value.includes("\0")),
 );
+export type AppleEvidenceReference = typeof AppleEvidenceReference.Type;
+const opaqueReference = AppleEvidenceReference;
 
 export const AppleToolchainId = brandedUuid("AppleToolchainId");
 export type AppleToolchainId = typeof AppleToolchainId.Type;

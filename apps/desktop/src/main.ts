@@ -331,10 +331,12 @@ export function resolveDesktopHostCapabilities(
 ): {
   readonly sidebarVibrancySupported: boolean;
   readonly liveBrowserSupported: boolean;
+  readonly liveSimulatorFrameSupported: boolean;
 } {
   return {
     sidebarVibrancySupported: platform === "darwin",
     liveBrowserSupported,
+    liveSimulatorFrameSupported: platform === "darwin",
   };
 }
 

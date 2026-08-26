@@ -36,5 +36,21 @@ describe("Apple toolchain RPC", () => {
         ...scope,
       }),
     ).toMatchObject({ kind: "apple-cancel-request" });
+    expect(
+      rpc!.decodeAppleArtifactRequest({
+        kind: "apple-artifact-request",
+        authority,
+        ...scope,
+        reference: "apple-screenshot-1",
+      }),
+    ).toMatchObject({ kind: "apple-artifact-request", reference: "apple-screenshot-1" });
+    expect(() =>
+      rpc!.decodeAppleArtifactRequest({
+        kind: "apple-artifact-request",
+        authority,
+        ...scope,
+        reference: "../escape",
+      }),
+    ).toThrow();
   });
 });

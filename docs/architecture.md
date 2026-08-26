@@ -207,7 +207,10 @@ and iOS Simulator, as mode and capability allow. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
-tool does not stop its server-owned lifecycle. At narrow widths the dock
+tool does not stop its server-owned lifecycle. The iOS Simulator dock tab
+shows a thread-bound live frame from host-held screenshot evidence, with
+honest setup, unavailable, booting, live, interrupted, and stale-after-restart
+states; closing the tab does not shut down the destination. At narrow widths the dock
 becomes an overlay drawer. Environment belongs to a thread as a compact header
 summary with a transient disclosure whose open state is renderer-only. It may
 summarize the active thread's server-authored child AgentRuns, including their

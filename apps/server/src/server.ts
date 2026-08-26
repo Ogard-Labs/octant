@@ -3195,6 +3195,7 @@ export function startOctantServer(
       execute: (input, signal) => appleProcess.execute(input, signal),
       realpath,
       writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
+      readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),
       persistReceipts: (receipts) => appleRuntimeStore.persistReceipts(receipts),
       now: () => new Date().toISOString(),
       newId: randomUUID,

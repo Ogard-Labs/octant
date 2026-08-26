@@ -60,14 +60,22 @@ shows the project path, the "Apple development" eyebrow, Xcode version,
 scheme, revision, SDK count, Simulator count, **Actions**, **Simulator
 destinations**, **Current progress**, and **Validation evidence**.
 
-An inline Simulator pane with a live frame, orientation, accessibility
-hierarchy, screenshot, recording, and log surfaces is not yet built. Today
-the Simulator is a destination list with the actions that destination can
-perform.
+The iOS Simulator dock tab shows a live frame bound to the owning Code thread
+and checkout. Its states are setup, unavailable, booting, live, interrupted,
+and stale after a host restart. A live frame is a still of the latest
+host-held screenshot evidence — never Simulator.app, never a video stream,
+and never image bytes in the journal. Remote, Linux, and headless clients
+say the native frame is not attachable instead of hanging or inventing a
+picture. Closing the tab unmounts the view only; it does not shut down,
+erase, or transfer the destination.
 
-States include loading the toolchain, waiting for Apple evidence, toolchain
-unavailable, action interrupted, and action failed, with **Retry**. Outcome
-labels are **Succeeded**, **Failed**, **Cancelled**, **Timed out**,
+Orientation, accessibility hierarchy, recording, logs, and typed input are
+not part of this surface yet. Destination actions remain on the workbench
+list: each Simulator offers only what its reported state can perform.
+
+States also include loading the toolchain, waiting for Apple evidence,
+toolchain unavailable, action interrupted, and action failed, with **Retry**.
+Outcome labels are **Succeeded**, **Failed**, **Cancelled**, **Timed out**,
 **Interrupted**, **Unavailable**, **Unauthorized**, **Invalid destination**,
 and **Process died**.
 

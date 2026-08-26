@@ -105,6 +105,33 @@ describe("thread utility dock content", () => {
     expect(screen.getByRole("heading", { name: "iOS Simulator is unavailable" })).toBeVisible();
   });
 
+  it("states why iOS Simulator is unavailable when the Apple toolchain client is missing", () => {
+    const { appleToolchainClient: _missing, ...withoutClient } = props();
+    render(<ThreadUtilityDockContent {...withoutClient} />);
+    expect(screen.getByRole("heading", { name: "iOS Simulator is unavailable" })).toBeVisible();
+    expect(screen.queryByText(/apple-workbench/)).not.toBeInTheDocument();
+  });
+
+  it("does not leak Simulator state from another pane's thread", () => {
+    render(
+      <ThreadUtilityDockContent
+        {...props()}
+        subject={{ mode: "code", threadId: "10000000-0000-4000-8000-000000000099" }}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "iOS Simulator is unavailable" })).toBeVisible();
+    expect(screen.queryByText("apple-workbench:App/App.xcodeproj")).not.toBeInTheDocument();
+  });
+
+  it("does not stop the Simulator destination when the dock tab unmounts", () => {
+    const execute = vi.fn();
+    const { unmount } = render(
+      <ThreadUtilityDockContent {...props()} appleToolchainClient={{ execute } as never} />,
+    );
+    unmount();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("renders the live Browser instance owned by the thread", () => {
     const stop = vi.fn();
     const { unmount } = render(

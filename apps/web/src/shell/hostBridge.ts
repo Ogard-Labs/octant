@@ -44,6 +44,7 @@ export type CodeDeepLink =
 export interface HostCapabilities {
   readonly sidebarVibrancySupported: boolean;
   readonly liveBrowserSupported?: boolean;
+  readonly liveSimulatorFrameSupported?: boolean;
 }
 
 export interface BrowserSurfaceTabState {

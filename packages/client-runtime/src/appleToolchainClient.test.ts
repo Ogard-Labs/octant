@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 let createAppleToolchainClient: (options: Record<string, unknown>) => {
   discover(request: AppleDiscoveryRequest, signal?: AbortSignal): Promise<any>;
   snapshot(request: unknown): Promise<any>;
+  readScreenshot(request: unknown, signal?: AbortSignal): Promise<Blob>;
 };
 
 beforeAll(async () => {
@@ -89,5 +90,29 @@ describe("appleToolchainClient", () => {
     await expect(client.discover(request, controller.signal)).rejects.toMatchObject({
       category: "interrupted",
     });
+  });
+
+  it("reads a host-held screenshot as image bytes instead of a JSON envelope", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const fetch = vi.fn(
+      async () => new Response(png, { headers: { "content-type": "image/png" } }),
+    );
+    const client = createAppleToolchainClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: "A".repeat(43),
+    });
+    const blob = await client.readScreenshot({
+      kind: "apple-artifact-request",
+      authority: request.authority,
+      threadId: request.threadId,
+      checkoutId: request.checkoutId,
+      reference: "apple-screenshot-1",
+    });
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(png);
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("http://127.0.0.1:13773/api/apple/artifacts"),
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });
