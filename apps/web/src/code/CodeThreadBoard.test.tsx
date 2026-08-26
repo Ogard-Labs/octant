@@ -168,8 +168,8 @@ describe("CodeThreadBoard", () => {
     const waitingColumn = screen.getByRole("region", { name: "Waiting (0)" });
     expect(within(waitingColumn).getByText("No threads")).toBeVisible();
 
-    fireEvent.click(screen.getByText("View"));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show empty groups" }));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Show empty groups" }));
     expect(screen.queryByRole("region", { name: "In Progress (0)" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Ready (1)" })).toBeVisible();
 
@@ -189,8 +189,8 @@ describe("CodeThreadBoard", () => {
 
     await screen.findByText("Thread 01");
     expect(screen.getByRole("region", { name: "Done (0)" })).toBeVisible();
-    fireEvent.click(screen.getByText("View"));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Show empty groups" }));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Show empty groups" }));
     expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
     first.unmount();
 
@@ -248,7 +248,7 @@ describe("CodeThreadBoard", () => {
     const statusStatus = within(cardFor("A thread")).getByText("Ready");
     expect(statusStatus).toHaveClass("sr-only");
 
-    fireEvent.click(screen.getByRole("radio", { name: "Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Project" }));
 
     expect(await screen.findByRole("region", { name: "Project A (1)" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Project B (1)" })).toBeVisible();

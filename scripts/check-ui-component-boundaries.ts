@@ -5,19 +5,24 @@ const WEB_SOURCE = "apps/web/src";
 const SOURCE_EXTENSION = /\.(?:ts|tsx)$/;
 const BASE_UI_IMPORT = /from\s+["']@base-ui\/react(?:\/[^"']+)?["']/;
 const SHADCN_IMPORT = /from\s+["'][^"']*ui\/shadcn(?:\/[^"']+)?["']/;
-const RAW_CONTROL_OPENING_TAG = /<\s*(button|select|textarea|input)(?=\s|>)/g;
+const RAW_CONTROL_OPENING_TAG = /<\s*(button|select|textarea|input|dialog)(?=\s|>)/g;
 const RAW_CONTROL_EXCEPTION = /\{?\/\*\s*ui-boundary-exception:\s*([a-z-]+)\s*\*\/\}?\s*$/i;
+const OCTANT_INPUT_OPEN = /<OctantInput\b/g;
+const OCTANT_INPUT_CHOICE_TYPE =
+  /\btype\s*=\s*(?:["'](checkbox|radio)["']|\{\s*["'](checkbox|radio)["']\s*\})/;
 
 export type RawControlException =
   | "native-file-input"
   | "native-platform-control"
   | "specialized-editor-surface";
 
+export type RawControlTag = "button" | "select" | "textarea" | "input" | "dialog";
+
 export interface RawControlFinding {
   readonly category: "ordinary" | RawControlException;
   readonly file: string;
   readonly line: number;
-  readonly tag: "button" | "select" | "textarea" | "input";
+  readonly tag: RawControlTag;
 }
 
 export function findUiComponentBoundaryViolations(
@@ -60,7 +65,7 @@ export function findRawControlInventory(
     }
     RAW_CONTROL_OPENING_TAG.lastIndex = 0;
     for (const match of source.matchAll(RAW_CONTROL_OPENING_TAG)) {
-      const tag = match[1] as RawControlFinding["tag"];
+      const tag = match[1] as RawControlTag;
       const index = match.index ?? 0;
       const line = source.slice(0, index).split("\n").length;
       const marker = source
@@ -97,6 +102,76 @@ export function findRawControlBoundaryViolations(
     );
 }
 
+function octantInputOpeningTag(source: string, start: number): string | undefined {
+  let quote: '"' | "'" | "`" | undefined;
+  let braces = 0;
+  for (let i = start + "<OctantInput".length; i < source.length; i += 1) {
+    const ch = source[i];
+    if (ch === undefined) break;
+    if (quote !== undefined) {
+      if (ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = undefined;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "{") {
+      braces += 1;
+      continue;
+    }
+    if (ch === "}" && braces > 0) {
+      braces -= 1;
+      continue;
+    }
+    if (braces === 0 && ch === ">") {
+      return source.slice(start, i + 1);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Checkbox and radio choices have owned recipes. Using the text-input adapter
+ * for those types is the same leak as a raw control: the wrong primitive paints
+ * and the check would otherwise stay green.
+ */
+export function findWrongAdapterBoundaryViolations(
+  files: Readonly<Record<string, string>>,
+): ReadonlyArray<string> {
+  const violations: string[] = [];
+  for (const [file, source] of Object.entries(files).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    const normalized = file.split(sep).join("/");
+    if (
+      !normalized.startsWith(`${WEB_SOURCE}/`) ||
+      normalized.startsWith(`${WEB_SOURCE}/ui/`) ||
+      normalized.includes(".test.")
+    ) {
+      continue;
+    }
+    OCTANT_INPUT_OPEN.lastIndex = 0;
+    for (const match of source.matchAll(OCTANT_INPUT_OPEN)) {
+      const openIndex = match.index ?? 0;
+      const tag = octantInputOpeningTag(source, openIndex);
+      if (tag === undefined) continue;
+      const typeMatch = OCTANT_INPUT_CHOICE_TYPE.exec(tag);
+      if (typeMatch === null) continue;
+      const line = source.slice(0, openIndex + (typeMatch.index ?? 0)).split("\n").length;
+      const type = typeMatch[1] ?? typeMatch[2] ?? "checkbox";
+      violations.push(
+        `${normalized}:${String(line)} uses OctantInput type="${type}"; import OctantCheckbox or OctantToggleGroup.`,
+      );
+    }
+  }
+  return violations;
+}
+
 async function sourceFiles(root: string): Promise<Readonly<Record<string, string>>> {
   const files: Record<string, string> = {};
   const visit = async (directory: string): Promise<void> => {
@@ -117,23 +192,34 @@ async function sourceFiles(root: string): Promise<Readonly<Record<string, string
 async function main(): Promise<void> {
   const root = resolve(import.meta.dir, "..");
   const files = await sourceFiles(root);
-  const violations = findUiComponentBoundaryViolations(files);
+  const importViolations = findUiComponentBoundaryViolations(files);
+  const rawControls = findRawControlInventory(files);
+  const ordinary = rawControls.filter((finding) => finding.category === "ordinary");
+  const exceptions = rawControls.filter((finding) => finding.category !== "ordinary");
+  const adapterViolations = findWrongAdapterBoundaryViolations(files);
+  const violations = [
+    ...importViolations,
+    ...ordinary.map(
+      (finding) =>
+        `${finding.file}:${String(finding.line)} renders raw <${finding.tag}>; import the corresponding Octant adapter.`,
+    ),
+    ...adapterViolations,
+  ];
   if (violations.length > 0) {
     for (const violation of violations) console.error(violation);
     process.exitCode = 1;
     return;
   }
   console.log("UI component boundaries are valid.");
-  const rawControls = findRawControlInventory(files);
-  const ordinary = rawControls.filter((finding) => finding.category === "ordinary");
-  if (ordinary.length > 0) {
-    console.error(`Raw control inventory: ${String(ordinary.length)} ordinary controls remain.`);
-    for (const finding of ordinary) {
-      console.error(
-        `  ${finding.file}:${String(finding.line)} <${finding.tag}> (migrate to ui/base)`,
+  if (exceptions.length > 0) {
+    console.log(
+      `Documented raw-control exceptions: ${String(exceptions.length)} platform controls.`,
+    );
+    for (const finding of exceptions) {
+      console.log(
+        `  ${finding.file}:${String(finding.line)} <${finding.tag}> (${finding.category})`,
       );
     }
-    process.exitCode = 1;
   }
 }
 

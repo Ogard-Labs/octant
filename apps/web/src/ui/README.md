@@ -23,6 +23,20 @@ primitives from `ui/base`, not from `ui/shadcn`, inside features. The recipes
 use the repository's Base UI interaction primitives while retaining shadcn's
 New York composition and semantic Tailwind variables.
 
+`bun run ui:check` fails closed on new `@base-ui/react` or `ui/shadcn` imports
+outside this directory, on raw `<button>`, `<input>`, `<select>`, `<textarea>`,
+or `<dialog>` in feature modules, and on `OctantInput` used as a checkbox or
+radio. Remaining raw controls must be native platform exceptions:
+
+| Exception comment            | Use for                                            |
+| ---------------------------- | -------------------------------------------------- |
+| `native-file-input`          | Hidden or OS file choosers the adapter cannot host |
+| `native-platform-control`    | Native color/media/window controls                 |
+| `specialized-editor-surface` | Monaco, xterm, Canvas, or drag hit regions         |
+
+Place `{/* ui-boundary-exception: native-file-input */}` immediately above the
+element. Hidden `type="file"` inputs are also recognized without a comment.
+
 ## Surface utilities (`styles/components.css`)
 
 - `octant-card` / `octant-card--flat` — raised or flat in-flow container.

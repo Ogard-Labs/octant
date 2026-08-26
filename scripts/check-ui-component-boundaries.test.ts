@@ -3,6 +3,7 @@ import {
   findRawControlBoundaryViolations,
   findRawControlInventory,
   findUiComponentBoundaryViolations,
+  findWrongAdapterBoundaryViolations,
 } from "./check-ui-component-boundaries";
 
 describe("UI component boundary check", () => {
@@ -106,5 +107,55 @@ describe("UI component boundary check", () => {
     ).toEqual([
       "apps/web/src/browser/BrowserWorkspace.tsx:3 renders raw <input>; import the corresponding Octant adapter.",
     ]);
+  });
+
+  it("treats a native dialog as an ordinary control", () => {
+    expect(
+      findRawControlBoundaryViolations({
+        "apps/web/src/projects/FolderPicker.tsx":
+          'export function FolderPicker() { return <dialog aria-label="Add folder" />; }',
+      }),
+    ).toEqual([
+      "apps/web/src/projects/FolderPicker.tsx:1 renders raw <dialog>; import the corresponding Octant adapter.",
+    ]);
+  });
+
+  it("rejects checkbox and radio types on the text-input adapter", () => {
+    expect(
+      findWrongAdapterBoundaryViolations({
+        "apps/web/src/code/CodeThreadBoard.tsx":
+          'export function Board() { return <OctantInput type="checkbox" />;\nreturn <OctantInput type="radio" />; }',
+      }),
+    ).toEqual([
+      'apps/web/src/code/CodeThreadBoard.tsx:1 uses OctantInput type="checkbox"; import OctantCheckbox or OctantToggleGroup.',
+      'apps/web/src/code/CodeThreadBoard.tsx:2 uses OctantInput type="radio"; import OctantCheckbox or OctantToggleGroup.',
+    ]);
+    expect(
+      findWrongAdapterBoundaryViolations({
+        "apps/web/src/code/CodeThreadBoard.tsx":
+          'export function Board() { return <OctantCheckbox type="checkbox" />;\nreturn <OctantInput type="search" />; }',
+      }),
+    ).toEqual([]);
+  });
+
+  it("rejects a JSX-string checkbox or radio type on OctantInput", () => {
+    expect(
+      findWrongAdapterBoundaryViolations({
+        "apps/web/src/code/CodeThreadBoard.tsx":
+          "export function Board() { return <OctantInput type={\"checkbox\"} />;\nreturn <OctantInput type={'radio'} />; }",
+      }),
+    ).toEqual([
+      'apps/web/src/code/CodeThreadBoard.tsx:1 uses OctantInput type="checkbox"; import OctantCheckbox or OctantToggleGroup.',
+      'apps/web/src/code/CodeThreadBoard.tsx:2 uses OctantInput type="radio"; import OctantCheckbox or OctantToggleGroup.',
+    ]);
+  });
+
+  it("does not attribute a later checkbox type to OctantInput", () => {
+    expect(
+      findWrongAdapterBoundaryViolations({
+        "apps/web/src/code/CodeThreadBoard.tsx":
+          'export function Board() { return <OctantInput type="search" />;\nreturn <OctantCheckbox type="checkbox" />; }',
+      }),
+    ).toEqual([]);
   });
 });
