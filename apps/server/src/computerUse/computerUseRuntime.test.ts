@@ -12,6 +12,7 @@ import {
   type ComputerUseEvidenceEvent,
   type ComputerUseNativeAdapter,
 } from "./computerUseRuntime";
+import { isComputerUseDestinationRefusal } from "./computerUseDestination";
 
 const ownerWindowId = "10000000-0000-4000-8000-000000000001" as WindowId;
 const otherWindowId = "10000000-0000-4000-8000-000000000002" as WindowId;
@@ -71,7 +72,7 @@ function fixture(options?: {
     ),
     cleanup: vi.fn(async () => true),
   };
-  const runtime = createComputerUseRuntime({
+  const inner = createComputerUseRuntime({
     adapter,
     evidence: {
       record: async (event) => {
@@ -86,7 +87,16 @@ function fixture(options?: {
   return {
     adapter,
     recorded,
-    runtime,
+    runtime: {
+      ...inner,
+      start: async (input: Parameters<typeof inner.start>[0]) => {
+        const result = await inner.start(input);
+        if (isComputerUseDestinationRefusal(result)) {
+          throw new Error(`unexpected destination refusal: ${result.reason}`);
+        }
+        return result;
+      },
+    },
     advance: (milliseconds: number) => (now += milliseconds),
   };
 }
@@ -468,6 +478,79 @@ describe("ComputerUseRuntime", () => {
     expect(new ComputerUseRuntimeError("unauthorized", "no")).toMatchObject({
       name: "ComputerUseRuntimeError",
       category: "unauthorized",
+    });
+  });
+
+  it("reports the capability absent and refuses actions when no destination is configured", async () => {
+    const adapter: ComputerUseNativeAdapter = {
+      observe: vi.fn(async () => ({ targetApp: "Preview", reference: "unused" })),
+      execute: vi.fn(async () => ({ reference: "unused" })),
+      cleanup: vi.fn(async () => true),
+    };
+    const runtime = createComputerUseRuntime({
+      adapter,
+      destination: { status: "unavailable", kind: "no-provider-configured" },
+      evidence: { record: vi.fn() },
+      uuid: () => "b0000000-0000-4000-8000-000000000001",
+      clock: () => "2026-07-27T20:00:00.000Z",
+    });
+
+    expect(runtime.destination()).toEqual({
+      status: "unavailable",
+      kind: "no-provider-configured",
+    });
+    await expect(
+      runtime.start({ ownerWindowId, threadId, requestedBy, request, policy }),
+    ).resolves.toEqual({
+      status: "refused",
+      kind: "unavailable",
+      reason: "no-provider-configured",
+    });
+    expect(adapter.observe).not.toHaveBeenCalled();
+    expect(adapter.execute).not.toHaveBeenCalled();
+    expect(adapter.cleanup).not.toHaveBeenCalled();
+  });
+
+  it("refuses as a value when no adapter is provided", async () => {
+    const runtime = createComputerUseRuntime({
+      evidence: { record: vi.fn() },
+      uuid: () => "b0000000-0000-4000-8000-000000000001",
+      clock: () => "2026-07-27T20:00:00.000Z",
+    });
+
+    expect(runtime.destination()).toEqual({
+      status: "unavailable",
+      kind: "no-provider-configured",
+    });
+    await expect(
+      runtime.start({ ownerWindowId, threadId, requestedBy, request, policy }),
+    ).resolves.toEqual({
+      status: "refused",
+      kind: "unavailable",
+      reason: "no-provider-configured",
+    });
+  });
+
+  it("refuses as a value when a provider is configured but no screen exists", async () => {
+    const runtime = createComputerUseRuntime({
+      destination: { status: "unavailable", kind: "no-destination" },
+      evidence: { record: vi.fn() },
+      uuid: () => "b0000000-0000-4000-8000-000000000001",
+      clock: () => "2026-07-27T20:00:00.000Z",
+    });
+
+    const result = await runtime.start({
+      ownerWindowId,
+      threadId,
+      requestedBy,
+      request,
+      policy,
+    });
+    expect(isComputerUseDestinationRefusal(result)).toBe(true);
+    expect(result).toEqual({
+      status: "refused",
+      kind: "unavailable",
+      reason: "no-destination",
     });
   });
 });
