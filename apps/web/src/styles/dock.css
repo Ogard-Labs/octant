@@ -376,9 +376,9 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
 }
 
 .bottom-utility-panel .dock-tool-strip__close {
-  width: 20px;
-  height: 20px;
-  min-height: 20px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
 }
 
 .bottom-utility-panel__content {

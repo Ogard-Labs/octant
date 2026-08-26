@@ -285,7 +285,7 @@
   font-size: var(--oct-text-sm);
 }
 
-.child-run-status__metrics span + span::before {
+.child-run-status__metrics > span:not(.sr-only) ~ span:not(.sr-only)::before {
   margin-right: 8px;
   color: var(--octant-border-strong);
   content: "·";

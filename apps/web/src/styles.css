@@ -1266,7 +1266,7 @@ button:focus-visible {
 .workspace-layer--bottom-panel-open {
   grid-template-rows:
     minmax(320px, 1fr)
-    min(var(--octant-bottom-panel-height, 260px), 38vh);
+    min(var(--octant-bottom-panel-height, 260px), 38vh, max(0px, calc(100% - 320px)));
 }
 
 .workspace-layer > .primary-workspace-layer {

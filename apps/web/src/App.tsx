@@ -2248,6 +2248,8 @@ function LaunchedShell(
       closeDock();
       return;
     }
+    markInteraction("renderer", "dock-open-requested");
+    markInteractionAfterPaint("dock-open");
     setDockVisible(true);
   }
   useEffect(() => {

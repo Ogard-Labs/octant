@@ -1003,7 +1003,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   markRenderedActivity(threadId);
                   if (terminalState !== undefined) {
                     activeTurnOperations.current.delete(String(threadId));
-                    setProviderRequests([]);
+                    if (terminalState !== "waiting") setProviderRequests([]);
                     const hydrated = await hydrateConversation(threadId, request).catch(
                       () => undefined,
                     );
