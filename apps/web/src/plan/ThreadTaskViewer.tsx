@@ -21,6 +21,9 @@ export interface ThreadTaskChangedFiles {
   readonly kind: "observed";
   readonly changedPathCount: number;
   readonly freshness: "fresh" | "stale";
+  /** Host-authored diffstat. Omitted rather than invented when the observation has none. */
+  readonly insertions?: number;
+  readonly deletions?: number;
 }
 
 const STEP_LABELS: Record<ThreadPlanStepStatus, string> = {
@@ -55,11 +58,7 @@ export function ThreadTaskViewer(props: ThreadTaskViewerProps) {
   const ProgressIcon =
     plan.status === "proposed" ? ListChecks : activeIndex === -1 ? CheckCircle2 : LoaderCircle;
   const changedFilesLabel =
-    props.changedFiles === undefined
-      ? undefined
-      : `${String(props.changedFiles.changedPathCount)} ${
-          props.changedFiles.changedPathCount === 1 ? "file" : "files"
-        } changed${props.changedFiles.freshness === "stale" ? " · stale" : ""}`;
+    props.changedFiles === undefined ? undefined : formatChangedFilesLabel(props.changedFiles);
 
   return (
     <div className="thread-task-viewer">
@@ -143,6 +142,18 @@ export function ThreadTaskViewer(props: ThreadTaskViewerProps) {
       </OctantPopover>
     </div>
   );
+}
+
+function formatChangedFilesLabel(files: ThreadTaskChangedFiles): string {
+  const count = `${String(files.changedPathCount)} ${
+    files.changedPathCount === 1 ? "file" : "files"
+  } changed`;
+  const diffstat =
+    files.insertions === undefined || files.deletions === undefined
+      ? undefined
+      : `+${files.insertions.toLocaleString()} −${files.deletions.toLocaleString()}`;
+  const stale = files.freshness === "stale" ? " · stale" : "";
+  return `${count}${diffstat === undefined ? "" : ` ${diffstat}`}${stale}`;
 }
 
 function TaskActions(props: {
