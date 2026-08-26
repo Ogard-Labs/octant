@@ -1,5 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { execFile as nodeExecFile, execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -197,6 +198,24 @@ describe("GitObservationPort", () => {
     expect(result.deletions).toBe(1);
   });
 
+  it("refuses observation when a numstat field is not a complete integer", async () => {
+    const repository = createRepository();
+    writeFileSync(join(repository, "README.md"), "changed\n");
+    const result = await observationPortWithNumstat("12invalid\t1\tREADME.md\0").observe(
+      repository,
+    );
+    expect(result).toEqual({ status: "failed" });
+  });
+
+  it("refuses observation when insertion or deletion totals overflow a safe integer", async () => {
+    const repository = createRepository();
+    writeFileSync(join(repository, "README.md"), "changed\n");
+    const result = await observationPortWithNumstat(
+      `${Number.MAX_SAFE_INTEGER}\t0\tREADME.md\0${1}\t0\tother.txt\0`,
+    ).observe(repository);
+    expect(result).toEqual({ status: "failed" });
+  });
+
   it("reports unavailable without path or line counts when the checkout cannot be observed", async () => {
     const missing = join(temporaryDirectory(), "missing");
     const result = await new GitObservationPort(confinedOptions()).observe(missing);
@@ -245,6 +264,36 @@ describe("GitObservationPort", () => {
     expect(fifth.stateToken).not.toBe(fourth.stateToken);
   });
 });
+
+function observationPortWithNumstat(stdout: string): GitObservationPort {
+  return new GitObservationPort(confinedOptions(), {
+    realpath,
+    execFile: (file, args, environment, signal) =>
+      new Promise((resolve) => {
+        if (args.includes("--numstat")) {
+          resolve({ exitCode: 0, stdout });
+          return;
+        }
+        nodeExecFile(
+          file,
+          [...args],
+          {
+            encoding: "utf8",
+            env: environment,
+            shell: false,
+            signal,
+            maxBuffer: 2 * 1024 * 1024,
+          },
+          (error, stdoutText) => {
+            resolve({
+              exitCode: error && typeof error.code === "number" ? error.code : error ? 1 : 0,
+              stdout: stdoutText,
+            });
+          },
+        );
+      }),
+  });
+}
 
 function createRepository(): string {
   const root = temporaryDirectory();

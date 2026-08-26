@@ -576,18 +576,16 @@ function parseNumstat(
     const addedText = field.slice(0, firstTab);
     const deletedText =
       secondTab === -1 ? field.slice(firstTab + 1) : field.slice(firstTab + 1, secondTab);
-    const added = addedText === "-" ? 0 : Number.parseInt(addedText, 10);
-    const deleted = deletedText === "-" ? 0 : Number.parseInt(deletedText, 10);
-    if (
-      !Number.isSafeInteger(added) ||
-      added < 0 ||
-      !Number.isSafeInteger(deleted) ||
-      deleted < 0
-    ) {
+    const added = parseNumstatCount(addedText);
+    const deleted = parseNumstatCount(deletedText);
+    if (added === undefined || deleted === undefined) return undefined;
+    const nextInsertions = insertions + added;
+    const nextDeletions = deletions + deleted;
+    if (!Number.isSafeInteger(nextInsertions) || !Number.isSafeInteger(nextDeletions)) {
       return undefined;
     }
-    insertions += added;
-    deletions += deleted;
+    insertions = nextInsertions;
+    deletions = nextDeletions;
     // Rename/copy with `-z` is `added\tdeleted\t\0from\0to\0` (and sometimes
     // without the trailing tab). A regular path stays in the same field.
     const renamed = secondTab === -1 || secondTab === field.length - 1;
@@ -599,6 +597,15 @@ function parseNumstat(
     }
   }
   return { insertions, deletions };
+}
+
+function parseNumstatCount(text: string): number | undefined {
+  if (text === "-") return 0;
+  // `parseInt` accepts numeric prefixes such as "12invalid". A ready
+  // observation cannot invent or undercount totals from a malformed token.
+  if (!/^\d+$/.test(text)) return undefined;
+  const value = Number.parseInt(text, 10);
+  return Number.isSafeInteger(value) ? value : undefined;
 }
 
 function parseStatus(output: string): GitStatusEntry[] | undefined {
