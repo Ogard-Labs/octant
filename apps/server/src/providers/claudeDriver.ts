@@ -60,6 +60,17 @@ import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 const CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"];
 const CLAUDE_PLAN_TOOLS = ["Read", "Glob", "Grep"] as const;
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
+const CLAUDE_INCOMPATIBLE_FALLBACK = "Claude runtime policy is incompatible with Octant.";
+const CLAUDE_INCOMPATIBLE_REASONS = new Set([
+  "Claude probe did not initialize its runtime.",
+  "Claude initialization version did not match the configured binary.",
+  "Claude initialized an unsupported account routing policy.",
+  "Claude returned no usable models.",
+  "Claude initialized an unexpected runtime surface.",
+  "Claude did not initialize its runtime stream.",
+  "Claude returned an unsupported runtime message.",
+  "Claude returned an invalid SDK response.",
+]);
 /** The tools that write files inside the Project, and nothing else. */
 const CLAUDE_EDIT_TOOLS = new Set<string>(["Edit", "Write"]);
 const PROBE_MODEL = "sonnet";
@@ -471,6 +482,10 @@ function selectedEffort(
   return option?.kind === "selection" && option.values.includes(requested) ? requested : undefined;
 }
 
+function claudeIncompatibleMessage(message: string): string {
+  return CLAUDE_INCOMPATIBLE_REASONS.has(message) ? message : CLAUDE_INCOMPATIBLE_FALLBACK;
+}
+
 function observation(
   options: ClaudeDriverOptions,
   input: {
@@ -667,7 +682,10 @@ function makeProbe(
         Effect.map((models) => ({ kind: "ready" as const, models })),
         Effect.catchAll((providerFailure) =>
           providerFailure.category === "protocol" || providerFailure.category === "unsupported"
-            ? Effect.succeed({ kind: "incompatible" as const })
+            ? Effect.succeed({
+                kind: "incompatible" as const,
+                message: claudeIncompatibleMessage(providerFailure.message),
+              })
             : Effect.fail(providerFailure),
         ),
         Effect.ensuring(Effect.sync(() => (apiKey = undefined))),
@@ -681,7 +699,7 @@ function makeProbe(
             ...(options.authentication === "api-key"
               ? { credentialStatus: "stored" as const }
               : {}),
-            message: "Claude runtime policy is incompatible with Octant.",
+            message: sdkResult.message,
           },
           clock,
         );
