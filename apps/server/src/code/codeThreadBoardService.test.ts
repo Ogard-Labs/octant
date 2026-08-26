@@ -127,6 +127,8 @@ function gitObserved(
     stagedCount: 0,
     committedAhead: 0,
     workingTreeClean: true,
+    insertions: 0,
+    deletions: 0,
     ...overrides,
   };
 }

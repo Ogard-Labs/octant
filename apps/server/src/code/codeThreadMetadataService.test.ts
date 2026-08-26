@@ -137,6 +137,8 @@ function gitObserved(
     stagedCount: 0,
     committedAhead: 0,
     workingTreeClean: true,
+    insertions: 0,
+    deletions: 0,
     ...overrides,
   };
 }
@@ -206,6 +208,30 @@ function input(overrides: Partial<CodeThreadMetadataInput> = {}): CodeThreadMeta
   };
 }
 
+function journaledGitObserved(options: { readonly omitLineTotals?: boolean } = {}) {
+  return {
+    kind: "git-observed",
+    operationId: ids.operation,
+    gitOperationId: ids.operation,
+    head: { kind: "branch", name: "feature/x", oid: "a".repeat(40) },
+    stateToken: "a".repeat(64),
+    status: [
+      { path: "src/a.ts", index: "M", worktree: " " },
+      { path: "src/b.ts", index: " ", worktree: "M" },
+    ],
+    changedPaths: ["src/a.ts", "src/b.ts"],
+    ...(options.omitLineTotals === true ? {} : { insertions: 12, deletions: 3 }),
+    diff: {
+      contentId: "00000000-0000-4000-8000-0000000020a1",
+      digest: "a".repeat(64),
+      byteLength: 1,
+    },
+    remotes: [],
+    upstream: null,
+    worktrees: [],
+  } as never;
+}
+
 describe("CodeThreadMetadataService projection", () => {
   it("projects worktree, branch, changes, PR, checks, review, child agents, and activity", async () => {
     const fixture = serviceFixture({
@@ -215,6 +241,8 @@ describe("CodeThreadMetadataService projection", () => {
           stagedCount: 1,
           committedAhead: 2,
           workingTreeClean: false,
+          insertions: 12,
+          deletions: 3,
         }),
       github: () =>
         githubObserved({
@@ -266,6 +294,8 @@ describe("CodeThreadMetadataService projection", () => {
       stagedCount: 1,
       committedAhead: 2,
       workingTreeClean: false,
+      insertions: 12,
+      deletions: 3,
     });
     expect(metadata.linkedPullRequest).toEqual({
       kind: "linked",
@@ -413,7 +443,53 @@ describe("CodeThreadMetadataService staleness", () => {
 
     expect(metadata.worktree).toEqual({ kind: "unavailable", checkoutId: ids.checkout });
     expect(metadata.changedFiles).toEqual({ kind: "unavailable" });
+    expect(metadata.changedFiles).not.toHaveProperty("changedPathCount");
+    expect(metadata.changedFiles).not.toHaveProperty("insertions");
+    expect(metadata.changedFiles).not.toHaveProperty("deletions");
     expect(metadata.deliverySatisfaction).toBe("waiting");
+  });
+
+  it("carries last-known insertion and deletion totals as stale when Git cannot refresh", async () => {
+    const fresh = serviceFixture({
+      git: () =>
+        gitObserved({
+          changedPathCount: 2,
+          stagedCount: 1,
+          committedAhead: 1,
+          workingTreeClean: false,
+          insertions: 12,
+          deletions: 3,
+        }),
+    });
+    const first = await fresh.service.project([
+      input({ thread: thread({ outcomeKind: "local-implementation" }) }),
+    ]);
+    expect(first.threads[0]!.changedFiles).toEqual({
+      kind: "observed",
+      freshness: "fresh",
+      changedPathCount: 2,
+      stagedCount: 1,
+      committedAhead: 1,
+      workingTreeClean: false,
+      insertions: 12,
+      deletions: 3,
+    });
+
+    const offline = serviceFixture({ git: () => ({ status: "unavailable" }) });
+    const second = await offline.service.project(
+      [input({ thread: thread({ outcomeKind: "local-implementation" }) })],
+      first,
+    );
+    expect(second.threads[0]!.changedFiles).toEqual({
+      kind: "observed",
+      freshness: "stale",
+      changedPathCount: 2,
+      stagedCount: 1,
+      committedAhead: 1,
+      workingTreeClean: false,
+      insertions: 12,
+      deletions: 3,
+    });
   });
 
   it("keeps a local-implementation target done only with fresh committed, clean work", async () => {
@@ -569,6 +645,54 @@ describe("CodeThreadMetadataService cached GitHub evidence", () => {
     });
     expect(view.threads[0]!.checks).toEqual({ freshness: "fresh", state: "passing" });
     expect(view.threads[0]!.reviewState).toEqual({ freshness: "fresh", state: "approved" });
+  });
+});
+
+describe("CodeThreadMetadataService cached Git observation", () => {
+  it("rebuilds stale path and line totals from the same journaled git observation", async () => {
+    const fixture = serviceFixture({
+      git: () => ({ status: "unavailable" }),
+      history: () => ({
+        status: "ok",
+        frames: [frame({ kind: "operation-result", result: journaledGitObserved() }, now)],
+      }),
+    });
+
+    const view = await fixture.service.project([input()]);
+    expect(view.threads[0]!.changedFiles).toEqual({
+      kind: "observed",
+      freshness: "stale",
+      changedPathCount: 2,
+      stagedCount: 1,
+      committedAhead: 0,
+      workingTreeClean: false,
+      insertions: 12,
+      deletions: 3,
+    });
+  });
+
+  it("does not reconstruct partial changed-file numbers from a journaled observation that lacks line totals", async () => {
+    const fixture = serviceFixture({
+      git: () => ({ status: "unavailable" }),
+      history: () => ({
+        status: "ok",
+        frames: [
+          frame(
+            {
+              kind: "operation-result",
+              result: journaledGitObserved({ omitLineTotals: true }),
+            },
+            now,
+          ),
+        ],
+      }),
+    });
+
+    const view = await fixture.service.project([input()]);
+    expect(view.threads[0]!.changedFiles).toEqual({ kind: "unavailable" });
+    expect(view.threads[0]!.changedFiles).not.toHaveProperty("changedPathCount");
+    expect(view.threads[0]!.changedFiles).not.toHaveProperty("insertions");
+    expect(view.threads[0]!.changedFiles).not.toHaveProperty("deletions");
   });
 });
 

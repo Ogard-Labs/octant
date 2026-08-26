@@ -1,5 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { execFile as nodeExecFile, execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -52,6 +53,10 @@ describe("GitObservationPort", () => {
     if (result.status !== "ready") return;
     expect(result.head).toEqual({ kind: "branch", name: "main", oid: beforeHead });
     expect(result.changedPaths).toEqual(["new file.txt", "tracked.txt"]);
+    // Line totals come from numstat against the same baseline, so a truncated
+    // unified diff cannot undercount the summary the thread later carries.
+    expect(result.insertions).toBe(1);
+    expect(result.deletions).toBe(1);
     expect(result.statusEntries).toEqual([
       { path: "new file.txt", index: "?", worktree: "?" },
       { path: "tracked.txt", index: " ", worktree: "M" },
@@ -175,6 +180,46 @@ describe("GitObservationPort", () => {
       },
     ]);
     expect(result.changedPaths).toEqual(["README.md", "renamed.md"]);
+    expect(result.insertions).toBe(0);
+    expect(result.deletions).toBe(0);
+  });
+
+  it("derives path counts and insertion and deletion totals from one observation", async () => {
+    const repository = createRepository();
+    writeFileSync(join(repository, "README.md"), "alpha\nbeta\ngamma\n");
+    writeFileSync(join(repository, "untracked.txt"), "loose\n");
+
+    const result = await new GitObservationPort(confinedOptions()).observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.changedPaths).toEqual(["README.md", "untracked.txt"]);
+    expect(result.insertions).toBe(3);
+    expect(result.deletions).toBe(1);
+  });
+
+  it("refuses observation when a numstat field is not a complete integer", async () => {
+    const repository = createRepository();
+    writeFileSync(join(repository, "README.md"), "changed\n");
+    const result = await observationPortWithNumstat("12invalid\t1\tREADME.md\0").observe(
+      repository,
+    );
+    expect(result).toEqual({ status: "failed" });
+  });
+
+  it("refuses observation when insertion or deletion totals overflow a safe integer", async () => {
+    const repository = createRepository();
+    writeFileSync(join(repository, "README.md"), "changed\n");
+    const result = await observationPortWithNumstat(
+      `${Number.MAX_SAFE_INTEGER}\t0\tREADME.md\0${1}\t0\tother.txt\0`,
+    ).observe(repository);
+    expect(result).toEqual({ status: "failed" });
+  });
+
+  it("reports unavailable without path or line counts when the checkout cannot be observed", async () => {
+    const missing = join(temporaryDirectory(), "missing");
+    const result = await new GitObservationPort(confinedOptions()).observe(missing);
+    expect(result).toEqual({ status: "unavailable" });
   });
 
   it("binds the state token to reviewed bytes, untracked bytes, and remote destinations", async () => {
@@ -219,6 +264,36 @@ describe("GitObservationPort", () => {
     expect(fifth.stateToken).not.toBe(fourth.stateToken);
   });
 });
+
+function observationPortWithNumstat(stdout: string): GitObservationPort {
+  return new GitObservationPort(confinedOptions(), {
+    realpath,
+    execFile: (file, args, environment, signal) =>
+      new Promise((resolve) => {
+        if (args.includes("--numstat")) {
+          resolve({ exitCode: 0, stdout });
+          return;
+        }
+        nodeExecFile(
+          file,
+          [...args],
+          {
+            encoding: "utf8",
+            env: environment,
+            shell: false,
+            signal,
+            maxBuffer: 2 * 1024 * 1024,
+          },
+          (error, stdoutText) => {
+            resolve({
+              exitCode: error && typeof error.code === "number" ? error.code : error ? 1 : 0,
+              stdout: stdoutText,
+            });
+          },
+        );
+      }),
+  });
+}
 
 function createRepository(): string {
   const root = temporaryDirectory();

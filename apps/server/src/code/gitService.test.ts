@@ -355,6 +355,8 @@ function readyObservation(): GitObservation {
     head: { kind: "branch", name: "main", oid: headOid },
     statusEntries: [staged],
     changedPaths: ["file.txt"],
+    insertions: 1,
+    deletions: 0,
     stagedSummary: [staged],
     diff: { text: "", byteLength: 0, truncated: false },
     remotes: [{ name: "origin", fetchUrl: "/remote.git", pushUrl: "/remote.git" }],

@@ -128,6 +128,8 @@ const codeBoard = decodeCodeBoardView({
         stagedCount: 1,
         committedAhead: 0,
         workingTreeClean: false,
+        insertions: 42,
+        deletions: 12,
       },
       linkedPullRequest: { kind: "none", freshness: "fresh" },
       pullRequestSummaries: { items: [], hiddenCount: 0 },
