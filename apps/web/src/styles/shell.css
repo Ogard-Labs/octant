@@ -1161,7 +1161,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
    controls wear; the menu opens downward because the draft composer sits
    mid-screen rather than at the window's bottom edge. */
 .work-composer-adapter__composer-bar .composer-model-picker__trigger {
-  min-height: 27px;
+  min-height: 28px;
   padding: 0 7px;
   color: var(--oct-muted);
   background: transparent;
@@ -1423,7 +1423,7 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__canvas {
   display: flex;
-  width: min(100% - 48px, 720px);
+  width: min(100% - 48px, 680px);
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
@@ -1459,16 +1459,45 @@ form > .work-composer-adapter__attachments {
 .code-composer-adapter__composer {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+}
+
+.code-composer-adapter__card {
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.code-composer-adapter__card > .composer-input {
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+}
+
+.code-composer-adapter__card > .composer-row {
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: 0 0 8px 8px;
+}
+
+.code-composer-adapter__card:focus-within > .composer-input,
+.code-composer-adapter__card:focus-within > .composer-row {
+  border-color: var(--octant-border-strong);
 }
 
 .code-composer-adapter__context-strip {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
-  padding: 8px 12px 8px 14px;
-  border-top: 1px solid var(--oct-border-soft);
+  gap: 5px 10px;
+  margin-top: 6px;
+  padding: 2px 2px 0;
+  color: var(--oct-meta);
+  background: var(--octant-workspace);
+  border: 0;
 }
 
 /* Panels a strip control expands into are further rows of the same card, so
@@ -1476,11 +1505,11 @@ form > .work-composer-adapter__attachments {
    a bordered card reads as two cards, not as one that grew a row. */
 .code-composer-adapter__card > .code-worktree-source,
 .code-composer-adapter__card > .code-composer-adapter__delivery {
-  padding: 10px 12px 10px 14px;
-  background: transparent;
-  border: 0;
-  border-top: 1px solid var(--oct-border-soft);
-  border-radius: 0;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: 8px;
 }
 
 @media (max-width: 640px) {
@@ -1524,9 +1553,22 @@ form > .work-composer-adapter__attachments {
 .code-composer-adapter__policy-select {
   width: auto;
   min-width: 7rem;
-  height: 27px;
+  height: 28px;
   padding: 0 6px;
   font-size: var(--oct-text-xs);
+}
+
+.code-composer-adapter__composer-bar > button[data-size="icon"],
+.code-composer-adapter__composer-bar label + button[data-size="icon"] {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.code-composer-adapter__composer-bar .code-composer-adapter__context-item > svg {
+  display: none;
 }
 
 .code-composer-adapter__composer-bar .code-composer-adapter__policy-select {
@@ -1670,7 +1712,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-adapter__composer-bar .composer-model-picker__trigger {
-  min-height: 27px;
+  min-height: 28px;
   padding: 0 7px;
   color: var(--oct-muted);
   background: transparent;
@@ -1686,7 +1728,7 @@ form > .work-composer-adapter__attachments {
 /* The profile trigger is a peer of the model picker in this row, so it wears
    the same quiet chrome rather than the outlined button it is elsewhere. */
 .code-composer-adapter__composer-bar .execution-profile-workflow__trigger {
-  min-height: 27px;
+  min-height: 28px;
   padding: 0 7px;
   color: var(--oct-muted);
   background: transparent;
