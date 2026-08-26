@@ -47,7 +47,9 @@ without over-trusting a surface that has not shipped.
 
 ## Technical-preview boundary
 
-Octant is an unsigned Apple Silicon technical preview. Capabilities that are
-still in progress or planned are labeled explicitly on each page. When a page
+Octant is an Apple Silicon technical preview. Declared releases are signed,
+notarized, and update themselves; a local package is unsigned because
+signing needs maintainer credentials. Capabilities that are still in
+progress or planned are labeled explicitly on each page. When a page
 mentions a planned surface, treat it as direction, not a promise that the
 workflow is available today.
