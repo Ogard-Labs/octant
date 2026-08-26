@@ -442,7 +442,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   if (props.creating === true) return;
                   if (attachFromTransfer(event.clipboardData)) event.preventDefault();
                 }}
-                placeholder="Describe the change…"
+                placeholder="What should we build?"
                 ref={textareaRef}
                 rows={3}
                 value={prompt}
