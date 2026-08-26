@@ -261,6 +261,30 @@ describe("App", () => {
     expect(document.querySelector(".rail-placeholder")).toBeNull();
   });
 
+  it("opens the global Archive from the profile menu", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("banner", { name: "Workspace actions for Controller foundation" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
+
+    expect(await screen.findByRole("heading", { name: "Archive" })).toBeVisible();
+    expect(screen.getByLabelText("Filter archive by Project")).toBeVisible();
+  });
+
   it("authenticates a browser session by exchanging a launch token from the URL fragment", async () => {
     const launchToken = `${"A".repeat(42)}A`;
     const browserCapability = `${"C".repeat(42)}A`;

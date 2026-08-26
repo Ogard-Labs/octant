@@ -55,6 +55,7 @@ export interface ShellSidebarProps {
     readonly actions: SidebarNavigationProps["actions"];
   };
   readonly onAddFolder: () => void;
+  readonly onOpenArchive?: () => void;
   readonly onOpenNavigator: () => void;
   /** Absent until Navigator has a model, so the profile menu does not advertise it. */
   readonly navigatorAvailable?: boolean;
@@ -218,6 +219,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
         )}
         <SidebarProfile
           navigatorAvailable={props.navigatorAvailable === true}
+          {...(props.onOpenArchive === undefined ? {} : { onOpenArchive: props.onOpenArchive })}
           onOpenNavigator={props.onOpenNavigator}
           onOpenSettings={props.onOpenSettings}
           {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}

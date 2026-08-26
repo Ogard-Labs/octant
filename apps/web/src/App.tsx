@@ -152,6 +152,7 @@ import {
   type SidebarThreadDragRow,
   type SidebarThreadDragTargets,
 } from "./shell/useWorkspaceTabDrag";
+import type { ArchivedThreadEntry } from "./shell/ArchiveView";
 import { WorkspaceRailLayers } from "./shell/WorkspaceRailLayers";
 import { BottomUtilityPanel } from "./shell/BottomUtilityPanel";
 import { ShellDialogHost } from "./shell/ShellDialogHost";
@@ -615,6 +616,7 @@ function LaunchedShell(
   const [workBoardOpen, setWorkBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] =
     useState<import("@octant/contracts/providers").ProviderInstanceId>();
@@ -2475,6 +2477,30 @@ function LaunchedShell(
         controller.workspace.layouts[activeMode],
         controller.workspace.activePaneIds[activeMode],
       );
+  const archiveEntries: ReadonlyArray<ArchivedThreadEntry> = [
+    ...(workNavigation.bootstrap?.threads ?? [])
+      .filter((thread) => thread.lifecycle === "archived")
+      .map((thread) => ({
+        mode: "work" as const,
+        threadId: String(thread.id),
+        title: thread.title,
+        ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
+        updatedAt: thread.updatedAt,
+      })),
+    ...(codeController.bootstrap?.threads ?? [])
+      .filter((thread) => thread.lifecycle === "archived")
+      .map((thread) => ({
+        mode: "code" as const,
+        threadId: String(thread.id),
+        title: thread.title,
+        projectId: String(thread.projectId),
+        updatedAt: thread.updatedAt,
+      })),
+  ];
+  const archiveProjects = projectController.allProjects.map((project) => ({
+    id: String(project.id),
+    name: project.name,
+  }));
   const automationCenterVisible =
     automationCenterOpen && (activeMode === "code" || activeMode === "work");
   const agentsCenterVisible = agentsCenterOpen;
@@ -2485,6 +2511,7 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     workBoardOpen ||
+    archiveOpen ||
     automationCenterVisible ||
     agentsCenterVisible
       ? new Map<string, ReadonlySet<string>>()
@@ -2701,6 +2728,33 @@ function LaunchedShell(
     );
   }
 
+  function openArchivedThread(entry: ArchivedThreadEntry) {
+    setArchiveOpen(false);
+    markInteraction("renderer", "thread-open-requested");
+    markInteractionAfterPaint("thread-open");
+    const projectId = entry.projectId === undefined ? undefined : decodeProjectId(entry.projectId);
+    if (entry.mode === "chat") {
+      void controller.openChatThread(decodeChatThreadId(entry.threadId), entry.title, projectId);
+      return;
+    }
+    if (entry.mode === "work") {
+      void controller.openWorkThread(
+        decodeWorkThreadId(entry.threadId),
+        entry.title,
+        undefined,
+        projectId,
+      );
+      return;
+    }
+    if (projectId === undefined) return;
+    void controller.openCodeThread(
+      decodeCodeThreadId(entry.threadId),
+      entry.title,
+      undefined,
+      projectId,
+    );
+  }
+
   // The Project Overview sits below surfaces this file does not own, so the
   // active mode's thread navigation reaches it through a provider rather than
   // through props. It carries the same list the sidebar nests, so neither can
@@ -2792,6 +2846,7 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setWorkBoardOpen(false);
+    setArchiveOpen(false);
     setArtifactLibraryOpen(false);
     setAgentsCenterOpen(false);
     setAutomationCenterOpen(true);
@@ -2802,6 +2857,7 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setWorkBoardOpen(false);
+    setArchiveOpen(false);
     setArtifactLibraryOpen(false);
     setAutomationCenterOpen(false);
     setAgentsCenterOpen(true);
@@ -2815,9 +2871,21 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setWorkBoardOpen(false);
+    setArchiveOpen(false);
     setAutomationCenterOpen(false);
     setAgentsCenterOpen(false);
     setArtifactLibraryOpen(true);
+  }
+
+  function openArchive() {
+    setRailPlaceholder(undefined);
+    setCodeBoardOpen(false);
+    setCodePullRequestsOpen(false);
+    setWorkBoardOpen(false);
+    setAutomationCenterOpen(false);
+    setAgentsCenterOpen(false);
+    setArtifactLibraryOpen(false);
+    setArchiveOpen(true);
   }
 
   function handleSelectMode(mode: OctantMode) {
@@ -3891,6 +3959,7 @@ function LaunchedShell(
                 }
               : {})}
             onAddFolder={() => openProjectCreate()}
+            onOpenArchive={openArchive}
             nativeHost={hostReservesTitlebarInset}
             navigatorAvailable={navigatorAssistant.state.kind === "ready"}
             onOpenSearch={openThreadSearch}
@@ -4124,6 +4193,12 @@ function LaunchedShell(
                     target.projectId,
                   );
                 }}
+                archiveOpen={archiveOpen}
+                {...(props.chatClient === undefined ? {} : { archiveChatClient: props.chatClient })}
+                archiveEntries={archiveEntries}
+                archiveProjects={archiveProjects}
+                onCloseArchive={() => setArchiveOpen(false)}
+                onOpenArchivedThread={openArchivedThread}
                 artifactLibraryOpen={artifactLibraryOpen}
                 onCloseArtifactLibrary={() => setArtifactLibraryOpen(false)}
                 onCreateArtifact={() => {
@@ -4274,6 +4349,7 @@ function LaunchedShell(
                       codeBoardOpen ||
                       codePullRequestsOpen ||
                       workBoardOpen ||
+                      archiveOpen ||
                       automationCenterVisible ||
                       agentsCenterVisible
                     }

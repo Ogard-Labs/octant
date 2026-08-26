@@ -1,6 +1,7 @@
 import type { SettingsDeepLink } from "@octant/contracts";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
+  Archive,
   Blocks,
   Bot,
   ChevronUp,
@@ -34,6 +35,7 @@ export interface SidebarSecondaryAction {
 }
 
 export interface SidebarProfileProps {
+  readonly onOpenArchive?: () => void;
   readonly onOpenNavigator: () => void;
   /** False until Navigator has a host-configured model; the row is then absent. */
   readonly navigatorAvailable?: boolean;
@@ -96,6 +98,9 @@ export function SidebarProfile(props: SidebarProfileProps) {
                     onClick={() => props.onOpenNavigator()}
                   />
                 ) : null}
+                {props.onOpenArchive === undefined ? null : (
+                  <ProfileAction icon={Archive} label="Archive" onClick={props.onOpenArchive} />
+                )}
                 <ProfileAction
                   icon={Settings}
                   label="Settings"
