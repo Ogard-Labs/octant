@@ -70,7 +70,12 @@ import type {
   AgentProfileId,
   AgentProfileScope,
 } from "@octant/contracts/agent-profile";
-import { applyProfileToThread, profileScopeApplies } from "@octant/domain/agent-profile-policy";
+import {
+  applyProfileToThread,
+  profileScopeApplies,
+  snapshotProfileThreadContext,
+  type ProfileThreadContextSnapshot,
+} from "@octant/domain/agent-profile-policy";
 import { authorizeCodeOperation } from "@octant/domain/code-policy";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import { Schema } from "effect";
@@ -239,6 +244,7 @@ type ProfiledThreadAuthority = {
   readonly permissionPersistence: PermissionPersistence;
   readonly toolConstraints: ReadonlyArray<string>;
   readonly profileDisplayName?: string;
+  readonly profileContext?: ProfileThreadContextSnapshot;
 };
 
 function profileToolSnapshot(profiled: ProfiledThreadAuthority): {
@@ -250,6 +256,13 @@ function profileToolSnapshot(profiled: ProfiledThreadAuthority): {
     toolConstraints: profiled.toolConstraints,
     profileDisplayName: profiled.profileDisplayName,
   };
+}
+
+function profileContextSnapshot(profiled: ProfiledThreadAuthority): {
+  readonly profileContext?: ProfileThreadContextSnapshot;
+} {
+  if (profiled.profileContext === undefined) return {};
+  return { profileContext: profiled.profileContext };
 }
 
 export interface CodePersistencePort {
@@ -861,6 +874,7 @@ export class CodeService {
           ...(command.forkedFrom === undefined ? {} : { forkedFrom: command.forkedFrom }),
           ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
           ...profileToolSnapshot(managedAuthority),
+          ...profileContextSnapshot(managedAuthority),
           version: 1,
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -2388,21 +2402,28 @@ export class CodeService {
       permissionPersistence: applied.permissionPersistence,
       toolConstraints: applied.toolConstraints,
       profileDisplayName: applied.profileDisplayName,
+      profileContext: snapshotProfileThreadContext(binding.profile),
     };
   }
 
   /**
-   * Overlay the profile's snapshotted posture and tool allowlist onto a starting
-   * thread. Client-supplied allowlist fields are stripped: only the profile the
-   * server loaded may write them.
+   * Overlay the profile's snapshotted posture, tool allowlist, and context onto
+   * a starting thread. Client-supplied snapshot fields are stripped: only the
+   * profile the server loaded may write them.
    */
   #threadWithProfiledAuthority(thread: CodeThread, profiled: ProfiledThreadAuthority): CodeThread {
-    const { toolConstraints: _clientTools, profileDisplayName: _clientName, ...rest } = thread;
+    const {
+      toolConstraints: _clientTools,
+      profileDisplayName: _clientName,
+      profileContext: _clientContext,
+      ...rest
+    } = thread;
     return decodeCodeThread({
       ...rest,
       executionPolicy: profiled.executionPolicy,
       permissionPersistence: profiled.permissionPersistence,
       ...profileToolSnapshot(profiled),
+      ...profileContextSnapshot(profiled),
     });
   }
 

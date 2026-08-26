@@ -12,7 +12,10 @@ import type {
 } from "@octant/contracts/providers";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
+  admitApprovedProfileSkills,
   applyProfileToThread,
+  attributeProfileInstructions,
+  attributeProfileSkillInstructions,
   buildExecutionContextPickerEntries,
   decideProfileToolConstraint,
   filterExecutionContextPickerEntries,
@@ -21,6 +24,7 @@ import {
   isToolAllowedByAllowlist,
   profileScopeApplies,
   resolveEffectiveProfile,
+  snapshotProfileThreadContext,
   validateCapabilityConstraints,
   validateProfileAuthoritySafety,
   type ResolveEffectiveProfileInput,
@@ -904,6 +908,133 @@ describe("applyProfileToThread", () => {
       permissionPersistence: "current-session",
       toolConstraints: ["octant_browser"],
       profileDisplayName: "Reviewer",
+    });
+  });
+});
+
+describe("snapshotProfileThreadContext", () => {
+  it("copies instructions and approved skills by value", () => {
+    const approvedSkillIds = ["code-reviewer"];
+    const source = profile({
+      displayName: "Reviewer",
+      instructions: "Review as a skeptic.",
+      approvedSkillIds,
+    });
+    const snapshot = snapshotProfileThreadContext(source);
+
+    expect(snapshot).toEqual({
+      displayName: "Reviewer",
+      instructions: "Review as a skeptic.",
+      approvedSkillIds: ["code-reviewer"],
+    });
+    approvedSkillIds.push("later-edit");
+    expect(snapshot.approvedSkillIds).toEqual(["code-reviewer"]);
+  });
+
+  it("omits instructions when the profile carries none", () => {
+    expect(snapshotProfileThreadContext(profile()).instructions).toBeUndefined();
+  });
+});
+
+describe("attributeProfileInstructions", () => {
+  it("names the profile so a reader can see where the instructions came from", () => {
+    expect(
+      attributeProfileInstructions({
+        profileId: "00000000-0000-0000-0000-000000000001",
+        displayName: "Reviewer",
+        instructions: "Review as a skeptic.",
+      }),
+    ).toEqual({
+      sourceKind: "instruction",
+      referenceId: "profile:00000000-0000-0000-0000-000000000001",
+      category: "user-instructions",
+      label: "Reviewer profile instructions",
+      text: "Review as a skeptic.",
+    });
+  });
+});
+
+describe("admitApprovedProfileSkills", () => {
+  const digest = `sha256:${"a".repeat(64)}`;
+  const reviewer = {
+    qualifiedId: `agents-skills-directory:project:code-reviewer:${digest}`,
+    name: "code-reviewer",
+    displayName: "Code reviewer",
+    effective: true,
+  };
+
+  it("admits an approved skill the host already treats as effective", () => {
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["code-reviewer"],
+        skills: [reviewer],
+      }),
+    ).toEqual([
+      {
+        qualifiedId: reviewer.qualifiedId,
+        name: "code-reviewer",
+        displayName: "Code reviewer",
+      },
+    ]);
+  });
+
+  it("does not activate an approved skill that is not installed", () => {
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["code-reviewer"],
+        skills: [],
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not activate an approved skill the host has not trusted", () => {
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["code-reviewer"],
+        skills: [{ ...reviewer, effective: false }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not load a skill the snapshot did not name", () => {
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["other-skill"],
+        skills: [reviewer],
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not guess when two effective skills share an approved name", () => {
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["code-reviewer"],
+        skills: [
+          reviewer,
+          {
+            ...reviewer,
+            qualifiedId: `agents-skills-directory:user:code-reviewer:${digest}`,
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("attributeProfileSkillInstructions", () => {
+  it("attributes loaded skill text to the skill itself", () => {
+    expect(
+      attributeProfileSkillInstructions({
+        qualifiedId: "agents-skills-directory:project:code-reviewer:sha256:aa",
+        displayName: "Code reviewer",
+        text: "Review diffs in isolation.",
+      }),
+    ).toEqual({
+      sourceKind: "skill",
+      referenceId: "agents-skills-directory:project:code-reviewer:sha256:aa",
+      category: "extension-instructions",
+      label: "Code reviewer",
+      text: "Review diffs in isolation.",
     });
   });
 });

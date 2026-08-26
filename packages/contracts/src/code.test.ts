@@ -118,10 +118,20 @@ describe("Code aggregate contracts", () => {
         profileId: "00000000-0000-4000-8000-000000000099",
         profileDisplayName: "Reviewer",
         toolConstraints: ["octant_browser"],
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic.",
+          approvedSkillIds: ["code-reviewer"],
+        },
       }),
     ).toMatchObject({
       profileDisplayName: "Reviewer",
       toolConstraints: ["octant_browser"],
+      profileContext: {
+        displayName: "Reviewer",
+        instructions: "Review as a skeptic.",
+        approvedSkillIds: ["code-reviewer"],
+      },
     });
     expect(() => decodeCodeThread({ ...thread, repositoryRoot: "/private/repo" })).toThrow();
     expect(() =>

@@ -268,6 +268,20 @@ export const CodeThread = Schema.Struct({
   toolConstraints: Schema.optional(
     Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
   ),
+  /**
+   * Instructions and skill allowlist copied from the profile when this thread
+   * started. Optional so a journal written before profiles contributed context
+   * replays as unconstrained. Later turns read this snapshot, never the live
+   * profile, so editing a profile cannot change a thread already running under
+   * it.
+   */
+  profileContext: Schema.optional(
+    Schema.Struct({
+      displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+      instructions: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(100_000))),
+      approvedSkillIds: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+    }).annotations(strict),
+  ),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   deliveryTarget: CodeDeliveryTarget,
   version: AggregateVersion,

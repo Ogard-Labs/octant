@@ -1226,6 +1226,98 @@ describe("CodeOperationService", () => {
     expect(checkpoint).toHaveBeenCalledOnce();
   });
 
+  it("sends snapshotted profile instructions with the Code turn", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic.",
+          approvedSkillIds: ["code-reviewer"],
+        },
+      }),
+      resolveProfileSkills: vi.fn(async () => [
+        {
+          qualifiedId: "agents-skills-directory:project:code-reviewer:sha256:aa",
+          displayName: "Code reviewer",
+          text: "Review diffs in isolation.",
+        },
+      ]),
+    });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(fixture.turns.start.mock.calls[0]![0].context).toEqual([
+      { kind: "instructions", text: "Review as a skeptic." },
+      { kind: "instructions", text: "Review diffs in isolation." },
+    ]);
+  });
+
+  it("leaves a Code turn without a profile unchanged", async () => {
+    const resolveProfileSkills = vi.fn(async () => [
+      {
+        qualifiedId: "agents-skills-directory:project:code-reviewer:sha256:aa",
+        displayName: "Code reviewer",
+        text: "should never load",
+      },
+    ]);
+    const fixture = providerTurnFixture({ resolveProfileSkills });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(resolveProfileSkills).not.toHaveBeenCalled();
+    expect(fixture.turns.start.mock.calls[0]![0].context).toBeUndefined();
+  });
+
+  it("does not load an approved skill the resolver refused", async () => {
+    const resolveProfileSkills = vi.fn(async () => []);
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          approvedSkillIds: ["missing-skill"],
+        },
+      }),
+      resolveProfileSkills,
+    });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(resolveProfileSkills).toHaveBeenCalledWith({
+      approvedSkillIds: ["missing-skill"],
+      threadId: String(thread().id),
+      projectId: String(thread().projectId),
+    });
+    expect(fixture.turns.start.mock.calls[0]![0].context).toBeUndefined();
+  });
+
+  it("keeps using the snapshotted instructions after the live profile would have changed", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic.",
+          approvedSkillIds: [],
+        },
+      }),
+    });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(fixture.turns.start.mock.calls[0]![0].context).toEqual([
+      { kind: "instructions", text: "Review as a skeptic." },
+    ]);
+  });
+
   it("sends a thread that was never forked without asking for a handoff", async () => {
     const resolveForkHandoff = vi.fn(async () => "should never be read");
     const fixture = providerTurnFixture({ resolveForkHandoff });
@@ -1456,6 +1548,7 @@ function providerTurnFixture(
       CodeOperationServiceOptions,
       | "resolveThreadMentionContext"
       | "resolveForkHandoff"
+      | "resolveProfileSkills"
       | "attachments"
       | "supportsAttachments"
       | "git"
