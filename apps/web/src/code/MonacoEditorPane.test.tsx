@@ -304,6 +304,7 @@ function client(
 ): CodeClient {
   return {
     bootstrap: vi.fn(),
+    navigation: vi.fn(),
     queryBoard: vi.fn(),
     queryProjectPullRequests: vi.fn(),
     refreshProjectPullRequests: vi.fn(),

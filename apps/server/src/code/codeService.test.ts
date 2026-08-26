@@ -197,12 +197,11 @@ describe("CodeService reads", () => {
 
   it("journals nothing when a reconnect poll observes the checkout it already recorded as unavailable", async () => {
     // A previous bootstrap already journaled this checkout as unavailable after
-    // the Project was rebound. The renderer re-runs bootstrap on every
-    // navigation refresh and stream reconnect, so journaling each identical
-    // observation grew one dogfooding host's journal by ~21k events in days —
-    // enough to exhaust the bounded conversation replay scan. The journal
-    // records changes of state; a poll that confirms the recorded state must
-    // append nothing.
+    // the Project was rebound. Re-observing that recorded answer on every
+    // refresh used to append identical events until one dogfooding host's
+    // journal grew by ~21k events in days — enough to exhaust the bounded
+    // conversation replay scan. Unavailable is already the answer, so bootstrap
+    // must not probe the filesystem or append again.
     const unavailable = decodeCodeCheckoutIdentity({ ...checkout, availability: "unavailable" });
     const superseding = decodeCodeCheckoutIdentity({
       ...checkout,
@@ -217,10 +216,41 @@ describe("CodeService reads", () => {
 
     const result = await fixture.service.bootstrap(ids.window);
 
+    expect(fixture.checkouts.observe).not.toHaveBeenCalled();
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
     expect(result.checkouts).toContainEqual(
       expect.objectContaining({ id: ids.checkout, availability: "unavailable" }),
     );
+  });
+
+  it("does not re-observe an available checkout during bootstrap", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+
+    const result = await fixture.service.bootstrap(ids.window);
+
+    expect(fixture.checkouts.observe).not.toHaveBeenCalled();
+    expect(fixture.roots.resolve).not.toHaveBeenCalled();
+    expect(result.checkouts).toEqual([checkout]);
+  });
+
+  it("reads authorized threads and activity without observing checkouts", async () => {
+    const allowed = thread();
+    const hidden = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({
+      threads: [allowed, hidden],
+      activity: [
+        { threadId: allowed.id, lastSequence: 11 as never },
+        { threadId: hidden.id, lastSequence: 12 as never },
+      ],
+    });
+
+    await expect(fixture.service.navigation(ids.window)).resolves.toEqual({
+      threads: [allowed],
+      activity: [{ threadId: allowed.id, lastSequence: 11 }],
+    });
+    expect(fixture.checkouts.observe).not.toHaveBeenCalled();
+    expect(fixture.roots.resolve).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("re-observes a shared existing checkout only once during restart bootstrap", async () => {

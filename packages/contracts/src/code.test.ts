@@ -323,6 +323,25 @@ describe("Code aggregate contracts", () => {
     expect(
       codeContracts.decodeCodeBootstrap({ settings, threads: [], checkouts: [] }).activity,
     ).toEqual([]);
+    expect(codeContracts.decodeCodeNavigation({ threads: [thread] })).toEqual({
+      threads: [thread],
+      activity: [],
+    });
+    expect(
+      codeContracts.decodeCodeNavigation({
+        threads: [thread],
+        activity: [{ threadId: ids.thread, lastSequence: 42 }],
+      }),
+    ).toEqual({
+      threads: [thread],
+      activity: [{ threadId: ids.thread, lastSequence: 42 }],
+    });
+    expect(() =>
+      codeContracts.decodeCodeNavigation({
+        threads: [thread],
+        checkouts: [checkout],
+      }),
+    ).toThrow();
     expect(() =>
       codeContracts.decodeCodeThreadActivity({ threadId: ids.thread, lastSequence: -1 }),
     ).toThrow();

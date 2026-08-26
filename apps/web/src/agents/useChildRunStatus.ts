@@ -6,6 +6,8 @@ import {
 } from "@octant/client-runtime";
 import type { AgentRunParentThreadId } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import { samePollingData } from "../polling/samePollingData";
 import type { AgentHierarchyInputEntry } from "./buildAgentHierarchyModel";
 import {
   buildChildRunStatusSummary,
@@ -138,15 +140,26 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
     let cancelled = false;
     let inFlight = false;
     const load = async () => {
-      if (inFlight) return;
+      if (!documentIsVisible() || inFlight) return;
       inFlight = true;
       try {
         const summary = await client.parentSummary(parentThreadId);
         if (cancelled || !mounted.current) return;
-        setRead({
-          parentThreadId,
-          entries: summary.entries.map(toHierarchyEntry),
-          reconnecting: false,
+        const entries = summary.entries.map(toHierarchyEntry);
+        setRead((previous) => {
+          if (
+            previous?.parentThreadId === parentThreadId &&
+            previous.reconnecting === false &&
+            previous.entries !== undefined &&
+            samePollingData(previous.entries, entries)
+          ) {
+            return previous;
+          }
+          return {
+            parentThreadId,
+            entries,
+            reconnecting: false,
+          };
         });
       } catch {
         // Keep this parent's last server-authored hierarchy visible and say so,
@@ -163,11 +176,12 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
         inFlight = false;
       }
     };
-    void load();
-    const timer = setInterval(() => void load(), Math.max(10, refreshMs));
+    const stop = scheduleVisibleInterval(() => void load(), Math.max(10, refreshMs), {
+      runImmediately: true,
+    });
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stop();
     };
   }, [client, parentThreadId, refreshMs, refreshToken]);
 

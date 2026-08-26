@@ -1960,7 +1960,11 @@ describe("useCodeController", () => {
     });
     try {
       const bootstrapRead = vi.fn(async () => bootstrap(1, 4));
-      const client = fakeClient({ bootstrap: bootstrapRead });
+      const navigationRead = vi.fn(async () => ({
+        threads: bootstrap(1, 4).threads,
+        activity: bootstrap(1, 4).activity ?? [],
+      }));
+      const client = fakeClient({ bootstrap: bootstrapRead, navigation: navigationRead });
       const { result, unmount } = renderHook(() =>
         useCodeController({ client, navigationRefreshMs: 10 }),
       );
@@ -1968,13 +1972,15 @@ describe("useCodeController", () => {
       await waitFor(() => expect(result.current.status).toBe("ready"));
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(bootstrapRead).toHaveBeenCalledOnce();
+      expect(navigationRead).not.toHaveBeenCalled();
 
       Object.defineProperty(document, "visibilityState", {
         configurable: true,
         value: "visible",
       });
       document.dispatchEvent(new Event("visibilitychange"));
-      await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(1));
+      await waitFor(() => expect(navigationRead.mock.calls.length).toBeGreaterThan(0));
+      expect(bootstrapRead).toHaveBeenCalledOnce();
       unmount();
     } finally {
       Object.defineProperty(document, "visibilityState", {
@@ -1984,20 +1990,37 @@ describe("useCodeController", () => {
     }
   });
 
-  it("refreshes a restored active checkout when reconnect polling recovers it", async () => {
+  it("refreshes the sidebar and mark-read through navigation instead of bootstrap", async () => {
+    const bootstrapRead = vi.fn(async () => bootstrap(1, 4));
+    const navigationRead = vi.fn(async () => ({
+      threads: bootstrap(1, 9).threads,
+      activity: bootstrap(1, 9).activity ?? [],
+    }));
+    const client = fakeClient({ bootstrap: bootstrapRead, navigation: navigationRead });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ client, navigationRefreshMs: 10 }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(bootstrapRead).toHaveBeenCalledOnce();
+    await waitFor(() => expect(navigationRead.mock.calls.length).toBeGreaterThan(0));
+    expect(bootstrapRead).toHaveBeenCalledOnce();
+
+    act(() => result.current.markThreadRead(ids.thread));
+    await waitFor(() => expect(navigationRead.mock.calls.length).toBeGreaterThan(1));
+    expect(bootstrapRead).toHaveBeenCalledOnce();
+    unmount();
+  });
+
+  it("does not let a navigation refresh replace a checkout recovered by bootstrap", async () => {
     const waitingCheckout = { ...checkout(), availability: "waiting" as const };
-    const recoveredBootstrap = deferred<CodeBootstrap>();
-    let bootstrapReads = 0;
-    const bootstrapRead = vi.fn(async () => {
-      bootstrapReads += 1;
-      if (bootstrapReads > 1) return recoveredBootstrap.promise;
-      return {
-        ...bootstrap(),
-        checkouts: [bootstrapReads === 1 ? waitingCheckout : checkout()],
-      };
-    });
+    const navigationRead = vi.fn(async () => ({
+      threads: bootstrap().threads,
+      activity: bootstrap().activity ?? [],
+    }));
     const client = fakeClient({
-      bootstrap: bootstrapRead,
+      bootstrap: vi.fn(async () => bootstrap()),
+      navigation: navigationRead,
       thread: vi.fn(async () => ({ ...view(1), checkout: waitingCheckout })),
     });
     const { result, unmount } = renderHook(() =>
@@ -2009,10 +2032,9 @@ describe("useCodeController", () => {
       }),
     );
 
-    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("waiting"));
-    await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(1));
-    recoveredBootstrap.resolve(bootstrap());
     await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("available"));
+    await waitFor(() => expect(navigationRead.mock.calls.length).toBeGreaterThan(0));
+    expect(result.current.activeView?.checkout.availability).toBe("available");
     unmount();
   });
 
@@ -2075,20 +2097,15 @@ describe("useCodeController", () => {
     unmount();
   });
 
-  it("does not let a slower navigation read undo a checkout another read recovered", async () => {
-    // The host answers concurrent bootstrap reads out of order. A read that saw
-    // the checkout still coming up could land after one that already reported it
-    // available, and putting that back left the thread's terminal waiting on a
-    // checkout the host had finished.
+  it("does not let marking a thread read replace a checkout recovered by bootstrap", async () => {
     const waitingCheckout = { ...checkout(), availability: "waiting" as const };
-    const waiting = (): CodeBootstrap => ({ ...bootstrap(), checkouts: [waitingCheckout] });
-    const reads: ReturnType<typeof deferred<CodeBootstrap>>[] = [];
+    const navigationRead = vi.fn(async () => ({
+      threads: bootstrap().threads,
+      activity: bootstrap().activity ?? [],
+    }));
     const client = fakeClient({
-      bootstrap: vi.fn(() => {
-        const read = deferred<CodeBootstrap>();
-        reads.push(read);
-        return read.promise;
-      }),
+      bootstrap: vi.fn(async () => bootstrap()),
+      navigation: navigationRead,
       thread: vi.fn(async () => ({ ...view(1), checkout: waitingCheckout })),
     });
     const { result, unmount } = renderHook(() =>
@@ -2100,26 +2117,9 @@ describe("useCodeController", () => {
       }),
     );
 
-    await act(async () => {
-      reads[0]?.resolve(waiting());
-    });
-    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("waiting"));
-
-    // Ask for more reads while the first of them is still outstanding, so the
-    // controller has two answers in flight that it cannot order by arrival.
-    act(() => result.current.markThreadRead(ids.thread));
-    act(() => result.current.markThreadRead(ids.thread));
-    await waitFor(() => expect(reads.length).toBeGreaterThan(2));
-
-    const stale = reads[1];
-    await act(async () => {
-      for (const read of reads.slice(2)) read.resolve(bootstrap());
-    });
     await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("available"));
-
-    await act(async () => {
-      stale?.resolve(waiting());
-    });
+    act(() => result.current.markThreadRead(ids.thread));
+    await waitFor(() => expect(navigationRead).toHaveBeenCalled());
     expect(result.current.activeView?.checkout.availability).toBe("available");
     unmount();
   });
@@ -2369,8 +2369,13 @@ describe("useCodeController", () => {
 });
 
 function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
+  const bootstrapFn = overrides.bootstrap ?? vi.fn(async () => bootstrap());
   return {
-    bootstrap: vi.fn(async () => bootstrap()),
+    bootstrap: bootstrapFn,
+    navigation: vi.fn(async () => {
+      const next = await bootstrapFn();
+      return { threads: next.threads, activity: next.activity ?? [] };
+    }),
     queryBoard: vi.fn(),
     queryProjectPullRequests: vi.fn(),
     refreshProjectPullRequests: vi.fn(),

@@ -883,6 +883,18 @@ export const CodeBootstrap = Schema.Struct({
 }).annotations(strict);
 export type CodeBootstrap = typeof CodeBootstrap.Type;
 
+/**
+ * The bounded read used to keep the Code sidebar current. It carries only
+ * thread row metadata and journaled activity. Checkout filesystem observation
+ * belongs to bootstrap: a navigation tick that probed every checkout would
+ * contend with thread switching and title-bar work on the packaged host.
+ */
+export const CodeNavigation = Schema.Struct({
+  threads: Schema.Array(CodeThread),
+  activity: Schema.optionalWith(Schema.Array(CodeThreadActivity), { default: () => [] }),
+}).annotations(strict);
+export type CodeNavigation = typeof CodeNavigation.Type;
+
 export const CodeEventFrame = Schema.Struct({
   threadId: CodeThreadId,
   sequence: GlobalSequence.pipe(Schema.positive()),
@@ -927,6 +939,7 @@ export const decodeCodeWorktreeRef = Schema.decodeUnknownSync(CodeWorktreeRef);
 export const decodeCodeWorktreeRefsListed = Schema.decodeUnknownSync(CodeWorktreeRefsListed);
 export const decodeCodeFailure = Schema.decodeUnknownSync(CodeFailure);
 export const decodeCodeBootstrap = Schema.decodeUnknownSync(CodeBootstrap);
+export const decodeCodeNavigation = Schema.decodeUnknownSync(CodeNavigation);
 export const decodeCodeThreadActivity = Schema.decodeUnknownSync(CodeThreadActivity);
 export const decodeCodeThreadView = Schema.decodeUnknownSync(CodeThreadView);
 export const decodeCodeFileMetadata = Schema.decodeUnknownSync(CodeFileMetadata);

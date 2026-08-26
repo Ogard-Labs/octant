@@ -55,6 +55,7 @@ import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCa
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { OctantButton } from "../ui/base/OctantButton";
 import { samePollingData } from "../polling/samePollingData";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export interface ChatWorkspaceProps {
   readonly controller: ChatController;
@@ -230,7 +231,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     const controller = new AbortController();
     let inFlight = false;
     const refresh = async () => {
-      if (inFlight) return;
+      if (!documentIsVisible() || inFlight) return;
       inFlight = true;
       try {
         const approvals = await props.extensionClient!.listToolApprovals(controller.signal);
@@ -248,11 +249,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         inFlight = false;
       }
     };
-    void refresh();
-    const interval = setInterval(() => void refresh(), 500);
+    const stop = scheduleVisibleInterval(() => void refresh(), 500, { runImmediately: true });
     return () => {
       controller.abort();
-      clearInterval(interval);
+      stop();
     };
   }, [activeThreadId, props.extensionClient]);
   const threadMentions = useThreadMentions({

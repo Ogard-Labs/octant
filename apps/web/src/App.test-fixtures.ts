@@ -415,6 +415,7 @@ export function codes(): CodeClient {
           threads: [thread],
         }) as never,
     ),
+    navigation: vi.fn(async () => ({ threads: [thread], activity: [] }) as never),
     queryBoard: vi.fn(
       async () => ({ version: 1, query: { version: 1 }, cards: [], generatedAt: now }) as never,
     ),

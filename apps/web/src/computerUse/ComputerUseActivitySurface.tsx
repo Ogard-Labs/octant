@@ -3,6 +3,7 @@ import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
 import { useEffect, useState } from "react";
 import { ComputerUseLifecycleSurface } from "./ComputerUseLifecycleSurface";
 import { samePollingData } from "../polling/samePollingData";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export function ComputerUseActivitySurface(props: {
   readonly client: ComputerUseClient;
@@ -14,7 +15,7 @@ export function ComputerUseActivitySurface(props: {
     let active = true;
     let inFlight = false;
     const load = async () => {
-      if (inFlight) return;
+      if (!documentIsVisible() || inFlight) return;
       inFlight = true;
       try {
         const next = await props.client.list();
@@ -26,11 +27,12 @@ export function ComputerUseActivitySurface(props: {
         inFlight = false;
       }
     };
-    void load();
-    const timer = setInterval(() => void load(), props.pollIntervalMs ?? 1_000);
+    const stop = scheduleVisibleInterval(() => void load(), props.pollIntervalMs ?? 1_000, {
+      runImmediately: true,
+    });
     return () => {
       active = false;
-      clearInterval(timer);
+      stop();
     };
   }, [props.client, props.pollIntervalMs]);
 

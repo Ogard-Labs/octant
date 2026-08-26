@@ -1,6 +1,7 @@
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import type { CodeEnvironmentObservation, CodeThreadId, ProjectSummary } from "@octant/contracts";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export type CodeEnvironmentControllerStatus = "idle" | "loading" | "ready" | "error";
 
@@ -112,10 +113,9 @@ export function useCodeEnvironmentController(
 
   useEffect(() => {
     if (!options.enabled || options.project?.type !== "code") return;
-    const interval = globalThis.setInterval(() => {
+    return scheduleVisibleInterval(() => {
       void load("poll");
     }, CODE_ENVIRONMENT_REFRESH_INTERVAL_MS);
-    return () => globalThis.clearInterval(interval);
   }, [load, options.enabled, options.project?.type]);
 
   useEffect(() => {

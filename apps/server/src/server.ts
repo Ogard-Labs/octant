@@ -1155,6 +1155,7 @@ function withCodeOperationRuntime(
 ): CodeRouteService {
   return {
     bootstrap: (windowId) => service.bootstrap(windowId),
+    navigation: (windowId) => service.navigation(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
     execute: (windowId, command) => service.execute(windowId, command),
     executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
@@ -1230,6 +1231,7 @@ function withCodeBoard(
 ): CodeRouteService {
   return {
     bootstrap: (windowId) => service.bootstrap(windowId),
+    navigation: (windowId) => service.navigation(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
     execute: (windowId, command, signal) => service.execute(windowId, command, signal),
     subscribe: (windowId, threadId, afterSequence, signal) =>
