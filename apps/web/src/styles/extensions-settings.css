@@ -27,10 +27,22 @@
 
 .extensions-settings__cards {
   display: grid;
-  gap: var(--oct-space-2);
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.extensions-settings__cards .extcard {
+  padding: 12px 4px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--oct-border-soft);
+  border-radius: 0;
+}
+
+.extensions-settings__cards > li:last-child .extcard {
+  border-bottom: 0;
 }
 
 .extensions-settings__state {
@@ -67,8 +79,10 @@
   grid-column: 2 / -1;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
+  overflow: hidden;
   color: var(--oct-meta);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .extensions-settings__components {
@@ -180,11 +194,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-1);
-  margin: var(--oct-space-4) 0 0;
-  padding: var(--oct-space-3) var(--oct-space-4);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-warn-soft);
+  margin: var(--oct-space-2) 0 0;
+  padding: 6px 9px;
   color: var(--oct-warn-fg);
+  background: transparent;
+  border-left: 2px solid var(--oct-warn-fg);
+  border-radius: 0;
   font-size: var(--oct-text-xs);
 }
 

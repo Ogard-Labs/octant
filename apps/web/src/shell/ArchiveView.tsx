@@ -152,9 +152,7 @@ export function ArchiveView(props: ArchiveViewProps) {
               >
                 <span className="archive-view__row-copy">
                   <strong>{entry.title}</strong>
-                  <small>
-                    {modeLabel(entry.mode)} · {projectNames.get(entry.projectId ?? "") ?? "Unfiled"}
-                  </small>
+                  <small>{projectNames.get(entry.projectId ?? "") ?? "Unfiled"}</small>
                 </span>
                 <span className="archive-view__mode">{modeLabel(entry.mode)}</span>
               </OctantButton>

@@ -1617,3 +1617,40 @@
   min-height: 28px;
   padding: 0;
 }
+
+.code-settings {
+  gap: 0;
+  padding-block: 0;
+  background: var(--octant-surface-muted);
+  border-color: var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  box-shadow: none;
+}
+
+.code-settings > [data-slot="card-content"] {
+  padding: 16px;
+}
+
+.code-settings__note {
+  margin: 0 0 16px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.code-settings [data-slot="field-group"] {
+  gap: 16px;
+}
+
+.code-settings [data-slot="field"] {
+  gap: 5px;
+}
+
+.code-settings [data-slot="field-label"] {
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.code-settings [data-slot="field-description"] {
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}

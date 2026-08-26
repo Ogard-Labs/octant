@@ -65,10 +65,8 @@ export function AgentsCenter(props: AgentsCenterProps) {
     >
       <header className="agents-center__header">
         <div>
-          <h2 className="agents-center__title">Agents Center</h2>
-          <p className="agents-center__subtitle">
-            Active and historical child runs across Chat, Work, and Code.
-          </p>
+          <h2 className="agents-center__title">Agents</h2>
+          <p className="agents-center__subtitle">Child runs across Chat, Work, and Code.</p>
         </div>
         {props.onClose === undefined ? null : (
           <OctantButton onClick={props.onClose} type="button" variant="secondary">
@@ -86,7 +84,7 @@ export function AgentsCenter(props: AgentsCenterProps) {
         </div>
       )}
 
-      <div className="agents-center__body">
+      <div className="agents-center__body" data-detail-open={detailOpen ? "true" : "false"}>
         {hideListForNarrow ? null : (
           <div className="agents-center__list-pane">
             <AgentsCenterToolbar controller={controller} />

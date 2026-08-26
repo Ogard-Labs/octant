@@ -96,6 +96,10 @@
   overflow: auto;
 }
 
+.automation-center__list-pane > [data-slot="empty-state"] {
+  margin: 32px auto;
+}
+
 .automation-center__start {
   display: grid;
   gap: 0.75rem;

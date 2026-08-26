@@ -30,6 +30,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { ShellState } from "../shell/ShellState";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
 import { useProductFeedback } from "./useProductFeedback";
 import type { OctantHostBridge } from "../shell/hostBridge";
@@ -222,9 +223,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         aria-label="Browser automation"
         className="browser-workspace browser-workspace--state"
       >
-        <p className="browser-workspace__eyebrow">Browser unavailable</p>
-        <h2>Open Browser from a Work or Code thread</h2>
-        <p>The host requires one exact owning thread before it can create an isolated context.</p>
+        <ShellState
+          eyebrow="Browser unavailable"
+          message="The host requires one exact owning thread before it can create an isolated context."
+          state="neutral"
+          title="Open Browser from a Work or Code thread"
+        />
       </section>
     );
   }
