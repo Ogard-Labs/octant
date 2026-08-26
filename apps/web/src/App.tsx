@@ -3890,6 +3890,7 @@ function LaunchedShell(
                 }
               : {})}
             onAddFolder={() => openProjectCreate()}
+            nativeHost={hostReservesTitlebarInset}
             navigatorAvailable={navigatorAssistant.state.kind === "ready"}
             onOpenSearch={openThreadSearch}
             {...(isNarrow ? {} : { onCollapseSidebar: () => setSidebarCollapsedPersistent(true) })}

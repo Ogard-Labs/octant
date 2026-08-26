@@ -2433,6 +2433,7 @@ describe("App", () => {
 
     await screen.findByRole("banner");
     expect(document.documentElement.dataset.octantNativeHost).toBeUndefined();
+    expect(document.querySelector(".sidebar__native-leading")).not.toBeInTheDocument();
 
     rerender(
       <App
@@ -2443,6 +2444,9 @@ describe("App", () => {
     );
 
     await waitFor(() => expect(document.documentElement.dataset.octantNativeHost).toBe("true"));
+    expect(document.querySelector(".sidebar__native-leading")).toContainElement(
+      screen.getByRole("button", { name: "Hide sidebar" }),
+    );
   });
 
   it("applies reduced transparency to the native sidebar material", async () => {
@@ -2768,7 +2772,10 @@ describe("App", () => {
     );
     expect(document.querySelector(".shell-frame")?.children[3]).toHaveClass("workspace-layer");
     expect(sidebar).not.toHaveClass("window-drag-region");
-    expect(sidebar.querySelector(".sidebar__drag-surface")).toHaveClass("window-drag-region");
+    expect(sidebar.querySelector(".sidebar__drag-surface")).not.toBeInTheDocument();
+    expect(sidebar.querySelector(".sidebar__chrome-actions")).toContainElement(
+      within(sidebar).getByRole("button", { name: "Hide sidebar" }),
+    );
     expect(sidebar.querySelector(".sidebar__content")).toHaveClass("window-no-drag");
     expect(within(sidebar).getByRole("button", { name: "Workspace mode, Code" })).toHaveClass(
       "window-no-drag",
