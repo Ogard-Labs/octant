@@ -6,6 +6,7 @@
     "./agent-profile-policy": "./src/agentProfilePolicy.ts",
     "./agent-run-policy": "./src/agentRunPolicy.ts",
     "./agent-run-control-policy": "./src/agentRunControlPolicy.ts",
+    "./agent-run-conversation-policy": "./src/agentRunConversationPolicy.ts",
     "./agent-run-workspace-policy": "./src/agentRunWorkspacePolicy.ts",
     "./automation-policy": "./src/automationPolicy.ts",
     "./linked-thread-policy": "./src/linkedThreadPolicy.ts",

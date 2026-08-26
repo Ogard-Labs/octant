@@ -49,6 +49,33 @@ describe("AgentRunConversationResponse", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts unavailable and stale snapshots with explicit reasons", () => {
+    const base = {
+      runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      parentThreadId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      executionKind: "provider-native",
+      modelId: "gpt-5.6-luna",
+      lifecycleStatus: "running",
+      entries: [],
+      truncated: false,
+    };
+    expect(
+      decodeAgentRunConversationResponse({
+        ...base,
+        status: "unavailable",
+        staleReason: "Provider-native child transcript is not available through this host.",
+      }).status,
+    ).toBe("unavailable");
+    expect(
+      decodeAgentRunConversationResponse({
+        ...base,
+        executionKind: "octant-managed",
+        status: "stale",
+        staleReason: "The child session is no longer connected to this host.",
+      }).status,
+    ).toBe("stale");
+  });
 });
 
 const ids = {

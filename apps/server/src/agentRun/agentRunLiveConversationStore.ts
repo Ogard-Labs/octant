@@ -47,8 +47,10 @@ const MAX_PENDING_SUBSCRIBER_UPDATES = 32;
 export class AgentRunLiveConversationStore {
   readonly #runs = new Map<AgentRunId, ConversationState>();
   readonly #subscribers = new Map<AgentRunId, Set<ConversationSubscriber>>();
+  #closed = false;
 
   begin(runId: AgentRunId): void {
+    if (this.#closed) return;
     this.clear(runId);
     this.#runs.set(runId, {
       status: "live",
@@ -60,6 +62,7 @@ export class AgentRunLiveConversationStore {
   }
 
   appendText(runId: AgentRunId, text: string, occurredAt: UtcTimestamp): void {
+    if (this.#closed) return;
     const state = this.#runs.get(runId);
     if (state === undefined || state.status !== "live") return;
     const bounded = takeUtf8Prefix(text, MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS);
@@ -137,6 +140,27 @@ export class AgentRunLiveConversationStore {
   }
 
   /**
+   * Host shutdown must abort live transcripts without waiting for HTTP to
+   * drain. Open NDJSON subscribers keep connections alive; Git observations
+   * still have to stop immediately.
+   */
+  close(): void {
+    this.#closed = true;
+    for (const [runId, state] of this.#runs) {
+      if (state.status === "live") {
+        this.markStale(runId, "The host is shutting down.");
+      }
+    }
+    for (const subscribers of this.#subscribers.values()) {
+      for (const subscriber of subscribers) {
+        subscriber.closed = true;
+        subscriber.resolve?.();
+      }
+    }
+    this.#subscribers.clear();
+  }
+
+  /**
    * Subscribe to one process-local child transcript. The first yielded value
    * is a bounded snapshot after the requested cursor; later values are
    * incremental snapshots published by append/terminal transitions. The
@@ -147,6 +171,7 @@ export class AgentRunLiveConversationStore {
     readonly afterSequence?: number;
     readonly signal: AbortSignal;
   }): AsyncGenerator<AgentRunLiveConversationSnapshot> {
+    if (this.#closed) return;
     const state = this.#runs.get(input.runId);
     if (state === undefined || input.signal.aborted) return;
     const subscribers = this.#subscribers.get(input.runId) ?? new Set();
