@@ -213,6 +213,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 <>
                   <label>
                     <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                    {/* ui-boundary-exception: native-file-input */}
                     <input
                       aria-label="Choose attachment file"
                       accept="image/png,image/jpeg,image/webp,image/gif"

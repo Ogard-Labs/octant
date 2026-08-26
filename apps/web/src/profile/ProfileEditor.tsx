@@ -247,6 +247,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
               Use initials
             </OctantButton>
           ) : null}
+          {/* ui-boundary-exception: native-file-input */}
           <input
             accept="image/png,image/jpeg,image/webp,image/gif"
             aria-label="Avatar photo"

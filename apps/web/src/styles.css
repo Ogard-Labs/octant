@@ -2265,16 +2265,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   }
 }
 
-.folder-picker {
-  position: fixed;
-  z-index: 50;
-  color: inherit;
-}
-
-.folder-picker::backdrop {
-  background: var(--octant-scrim);
-}
-
 .project-dialog {
   /*
    * Said as the shared dialog's own variable, not as a competing max-width.
@@ -2483,20 +2473,15 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .folder-picker {
-  inset: max(48px, 8vh) 0 auto;
+  --octant-dialog-width: 520px;
+  --octant-dialog-height: min(720px, 84vh);
+
   display: flex;
-  width: min(100% - 32px, 520px);
-  max-height: min(720px, 84vh);
+  height: min(var(--octant-dialog-height), calc(100vh - 48px));
   flex-direction: column;
   gap: 12px;
-  padding: 20px;
-  margin: 0 auto;
   overflow: hidden;
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 14px;
-  box-shadow: 0 28px 80px rgb(0 0 0 / 55%);
+  padding: 20px;
 }
 
 .folder-picker__header {
@@ -2524,20 +2509,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .folder-picker__header > button {
-  width: 28px;
-  height: 28px;
-  color: var(--octant-text-muted);
-  background: transparent;
-  border: 0;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: calc(18 * var(--oct-text-step));
-  line-height: 1;
-}
-
-.folder-picker__header > button:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  flex: none;
 }
 
 .folder-picker__hint {
@@ -7084,49 +7056,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 0;
 }
 
-.code-board__grouping-options {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
-}
-
-.code-board__grouping-option {
-  position: relative;
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-}
-
-.code-board__grouping-option input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.code-board__grouping-option span {
-  padding: 4px 10px;
-  border-radius: 6px;
-  color: var(--oct-fg-2);
-  font-size: 0.78rem;
-  line-height: 1.2;
-}
-
-.code-board__grouping-option input:checked + span {
-  color: var(--oct-fg);
-  background: var(--oct-bg);
-  box-shadow: var(--oct-elev-ring);
-}
-
-.code-board__grouping-option input:focus-visible + span {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 1px;
-}
-
 .code-board__search {
   display: flex;
   flex: 0 1 240px;
@@ -7319,7 +7248,18 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex-direction: column;
 }
 
-.code-board__view-options summary,
+.code-board__view-toggle {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+}
+
+.code-board__view-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
 .code-board__card-details summary {
   display: flex;
   align-items: center;
@@ -7330,25 +7270,15 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: 0.78rem;
 }
 
-.code-board__view-options summary {
-  height: 28px;
-  padding: 0 9px;
-  border-radius: 6px;
-}
-
-.code-board__view-options summary::-webkit-details-marker,
 .code-board__card-details summary::-webkit-details-marker {
   display: none;
 }
 
-.code-board__view-options summary:hover,
-.code-board__view-options[open] summary,
 .code-board__card-details summary:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
 
-.code-board__view-options[open] summary svg,
 .code-board__card-details[open] summary svg {
   transform: rotate(180deg);
 }

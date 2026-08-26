@@ -13,9 +13,11 @@ import { ChevronDown, Filter, Folder, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   groupWorkBoardCards,
   workBoardStatusLabel,
@@ -85,6 +87,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
   );
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
   const [showEmptyGroups, setShowEmptyGroups] = useState(
     () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? true,
   );
@@ -160,23 +163,18 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
 
       <div aria-label="Board controls" className="code-board__toolbar" role="group">
         <div className="code-board__primary-controls">
-          <fieldset className="code-board__grouping">
-            <legend className="sr-only">Group by</legend>
-            <div className="code-board__grouping-options">
-              {(["status", "project"] as const).map((option) => (
-                <label className="code-board__grouping-option" key={option}>
-                  <OctantInput
-                    checked={grouping === option}
-                    name="work-board-grouping"
-                    onChange={() => changeGrouping(option)}
-                    type="radio"
-                    value={option}
-                  />
-                  <span>{option === "status" ? "Status" : "Project"}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
+          <OctantToggleGroup<WorkBoardGrouping>
+            aria-label="Group by"
+            className="code-board__grouping"
+            onValueChange={(value) => {
+              const selected = value[0];
+              if (selected === "status" || selected === "project") changeGrouping(selected);
+            }}
+            value={[grouping]}
+          >
+            <OctantToggleGroupItem value="status">Status</OctantToggleGroupItem>
+            <OctantToggleGroupItem value="project">Project</OctantToggleGroupItem>
+          </OctantToggleGroup>
 
           <label className="code-board__search">
             <span className="sr-only">Search threads</span>
@@ -220,12 +218,11 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
                 <div className="code-board__status-options">
                   {ALL_STATUSES.map((status) => (
                     <label className="code-board__status-option" key={status}>
-                      <OctantInput
+                      <OctantCheckbox
                         checked={filters.statuses.has(status)}
                         onChange={(event) =>
                           setFilters((prev) => toggleStatus(prev, status, event.target.checked))
                         }
-                        type="checkbox"
                       />
                       <span>
                         <span aria-hidden="true" className={`st st-${status}`} />
@@ -324,14 +321,24 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
             <span>{board.status === "refreshing" ? "Refreshing" : "Refresh"}</span>
           </OctantButton>
 
-          <details className="code-board__view-options">
-            <summary>
-              <span>View</span>
-              <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
-            </summary>
-            <div className="code-board__view-popover">
+          <div className="code-board__view-options">
+            <OctantPopover
+              className="code-board__view-popover"
+              onOpenChange={setViewOpen}
+              open={viewOpen}
+              title="View"
+              trigger={
+                <>
+                  <span>View</span>
+                  <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
+                </>
+              }
+              triggerClassName="code-board__view-toggle"
+              triggerLabel="View"
+              triggerVariant="ghost"
+            >
               <label>
-                <OctantInput
+                <OctantCheckbox
                   checked={showEmptyGroups}
                   onChange={(event) => {
                     setShowEmptyGroups(event.target.checked);
@@ -341,12 +348,11 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
                       event.target.checked,
                     );
                   }}
-                  type="checkbox"
                 />
                 <span>Show empty groups</span>
               </label>
-            </div>
-          </details>
+            </OctantPopover>
+          </div>
         </div>
 
         {activeFilters.length === 0 ? null : (

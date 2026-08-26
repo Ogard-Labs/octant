@@ -618,6 +618,7 @@ export function ChatComposer(props: ChatComposerProps) {
       <div className="chat-composer__leading">
         <label>
           <span className="chat-composer__visually-hidden">Add attachment</span>
+          {/* ui-boundary-exception: native-file-input */}
           <input
             aria-label="Choose attachment file"
             disabled={attachment.kind === "unavailable" || props.attachmentBusy === true}

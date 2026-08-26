@@ -221,6 +221,29 @@ describe("FolderPicker", () => {
     await user.keyboard("{Enter}");
     await waitFor(() => expect(onCancel).toHaveBeenCalled());
   });
+
+  it("dismisses through Escape using the owned dialog recipe", async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    render(
+      <FolderPicker
+        client={
+          {
+            browse: vi.fn(async () => browseResult({ candidates: [] })),
+            select: vi.fn(),
+          } as unknown as FolderBrowseClient
+        }
+        hostId={hostId}
+        mode="code"
+        onCancel={onCancel}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("dialog", { name: "Add folder" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(onCancel).toHaveBeenCalled());
+  });
 });
 
 function renderPicker(browse: FolderBrowseClient["browse"]) {

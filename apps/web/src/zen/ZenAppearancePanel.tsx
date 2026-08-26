@@ -244,6 +244,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
 
       <label>
         Local Zen background
+        {/* ui-boundary-exception: native-file-input */}
         <input
           accept="image/png,image/jpeg,image/webp,image/gif"
           aria-label="Upload local Zen background"

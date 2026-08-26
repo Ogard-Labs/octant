@@ -294,9 +294,28 @@ describe("WorkThreadBoard", () => {
 
     await screen.findByRole("region", { name: "Ready (1)" });
     expect(loadBoard).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("radio", { name: "Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Project" }));
     expect(await screen.findByRole("region", { name: "Project A (1)" })).toBeVisible();
     expect(loadBoard).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides empty groups from the View popover and remembers the preference", async () => {
+    const loadBoard = vi.fn(async () => view([card({ id: "01", status: "ready" })]));
+    const storage = memoryStorage();
+    const first = render(
+      <WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={storage} />,
+    );
+
+    await screen.findByText("Thread 01");
+    expect(screen.getByRole("region", { name: "Done (0)" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Show empty groups" }));
+    expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
+    first.unmount();
+
+    render(<WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={storage} />);
+    await screen.findByText("Thread 01");
+    expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
   });
 
   it("explains active filters on an empty result without implying deletion", async () => {
