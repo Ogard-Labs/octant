@@ -8071,16 +8071,19 @@ p.board-col-empty {
 
 .code-project-pull-requests {
   display: flex;
+  width: min(100%, 1080px);
   flex-direction: column;
-  gap: var(--oct-space-4);
+  gap: 12px;
   height: 100%;
   min-height: 0;
-  padding: 20px clamp(20px, 3vw, 48px) 32px;
+  padding: 18px clamp(16px, 3vw, 32px) 32px;
+  margin: 0 auto;
   overflow: auto;
 }
 
 .code-project-pull-requests > .code-board__header {
-  padding-bottom: var(--oct-space-4);
+  margin-bottom: 0;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--oct-border);
 }
 
@@ -8092,9 +8095,9 @@ p.board-col-empty {
 }
 
 .code-project-pull-requests__status {
-  margin: 0;
-  color: var(--oct-muted);
-  font-size: calc(12 * var(--oct-text-step));
+  margin: -4px 0 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .code-project-pull-requests__status[data-state="stale"] {
@@ -8112,7 +8115,7 @@ p.board-col-empty {
 .code-project-pull-requests__search {
   position: relative;
   display: flex;
-  width: min(520px, 100%);
+  width: min(360px, 100%);
   align-items: center;
   color: var(--oct-muted);
 }
@@ -8120,17 +8123,17 @@ p.board-col-empty {
 .code-project-pull-requests__search > svg {
   position: absolute;
   z-index: 1;
-  left: 11px;
+  left: 9px;
   pointer-events: none;
 }
 
 .code-project-pull-requests__search input {
   width: 100%;
-  height: 34px;
-  padding: 0 36px 0 34px;
+  height: 30px;
+  padding: 0 32px 0 30px;
   border-color: var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface-muted);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
 }
 
 .code-project-pull-requests__search-clear {
@@ -8154,15 +8157,16 @@ p.board-col-empty {
   display: flex;
   width: 100%;
   flex-direction: column;
-  gap: var(--oct-space-3);
+  gap: 16px;
   min-width: 0;
 }
 
 .code-project-pull-requests__project {
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--oct-radius-md);
-  background: var(--card);
+  border: 0;
+  border-top: 1px solid var(--oct-border);
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
 }
 
@@ -8177,11 +8181,11 @@ p.board-col-empty {
 }
 
 .code-project-pull-requests__project-header {
-  min-height: 44px;
+  min-height: 34px;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border);
+  padding: 0 4px;
+  border-bottom: 0;
 }
 
 .code-project-pull-requests__project-heading {
@@ -8212,23 +8216,25 @@ p.board-col-empty {
 }
 
 .code-project-pull-requests__repository h3 {
-  padding: var(--oct-space-3) var(--oct-space-3) var(--oct-space-2);
-  color: var(--oct-muted);
+  padding: 6px 8px;
+  color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-regular);
+  font-weight: 400;
+  background: var(--oct-fg-soft);
+  border-block: 1px solid var(--oct-border-soft);
 }
 
 .code-project-pull-requests__unconnected,
 .code-project-pull-requests__empty {
   margin: 0;
-  padding: var(--oct-space-3);
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
+  padding: 7px 4px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .code-project-pull-requests__unconnected {
-  color: var(--oct-warning-text, var(--oct-muted));
+  color: var(--oct-muted);
 }
 
 .code-project-pull-requests__list {
@@ -8241,12 +8247,13 @@ p.board-col-empty {
 
 .code-project-pull-requests__row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   width: 100%;
-  gap: var(--oct-space-3);
-  padding: var(--oct-space-3);
+  min-height: 48px;
+  gap: 8px;
+  padding: 7px 8px;
   border: 0;
-  border-top: 1px solid var(--oct-border-soft);
+  border-bottom: 1px solid var(--oct-border-soft);
   border-radius: 0;
   background: transparent;
   color: inherit;
@@ -8271,12 +8278,12 @@ p.board-col-empty {
 .code-project-pull-requests__row-content {
   display: grid;
   min-width: 0;
-  gap: 5px;
+  gap: 3px;
 }
 
 .code-project-pull-requests__title {
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-medium);
+  font-weight: 500;
 }
 
 .code-project-pull-requests__number,
