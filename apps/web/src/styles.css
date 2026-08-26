@@ -730,7 +730,7 @@ button:focus-visible {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 4px;
-  margin: 0 4px 4px;
+  margin: 0 0 4px;
 }
 
 .code-project-views__filter {
@@ -755,12 +755,16 @@ button:focus-visible {
 }
 
 .code-project-views__trigger-wrap {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   min-width: 0;
 }
 
 .code-project-views__row .octant-menu__trigger {
+  width: 100%;
+  min-height: 28px;
   justify-content: flex-start;
+  padding: 0;
   text-align: start;
 }
 
@@ -1260,7 +1264,9 @@ button:focus-visible {
 }
 
 .workspace-layer--bottom-panel-open {
-  grid-template-rows: minmax(0, 1fr) var(--octant-bottom-panel-height, 260px);
+  grid-template-rows:
+    minmax(320px, 1fr)
+    min(var(--octant-bottom-panel-height, 260px), 38vh, max(0px, calc(100% - 320px)));
 }
 
 .workspace-layer > .primary-workspace-layer {
@@ -1278,7 +1284,11 @@ button:focus-visible {
     minmax(var(--octant-wide-primary-min), 1fr)
     minmax(
       var(--octant-context-sidebar-min),
-      min(var(--octant-context-sidebar-width, 360px), calc(100% - var(--octant-wide-primary-min)))
+      min(
+        var(--octant-context-sidebar-width, 360px),
+        38vw,
+        calc(100% - var(--octant-wide-primary-min))
+      )
     );
 }
 
@@ -1483,10 +1493,9 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 /* Published by WindowChrome from the leading cluster's measured width. The
-   literal is only the pre-measurement fallback: a fixed 110px was narrower
-   than the traffic lights plus Show sidebar plus New thread actually render,
-   so the pane tab was drawn over the New thread button. */
-html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header {
+   browser has no traffic-light reserve, but it still needs the Show sidebar
+   and New thread cluster kept clear of the pane tab. */
+.shell--sidebar-collapsed .workspace-pane__header {
   padding-left: var(--octant-window-chrome-leading-width, 148px);
 }
 
@@ -3104,6 +3113,12 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   width: min(320px, calc(100vw - 24px));
   max-height: min(620px, calc(100vh - 72px));
   padding: 0;
+  overflow: auto;
+  color: var(--oct-fg);
+  background: var(--octant-floating);
+  border-color: var(--octant-border-strong);
+  border-radius: 8px;
+  box-shadow: var(--octant-shadow-overlay);
   font-family: var(--oct-font-display);
 }
 
@@ -3118,7 +3133,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: var(--oct-space-3);
   padding: 0 var(--oct-space-3);
   border-bottom: 1px solid var(--oct-border);
-  background: var(--popover);
+  background: var(--octant-floating);
 }
 
 .thread-environment-disclosure__heading {
@@ -3159,8 +3174,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .thread-environment-disclosure__body > * + * {
-  margin-top: var(--oct-space-2);
-  padding-top: var(--oct-space-2);
+  margin-top: 0;
+  padding-top: 0;
   border-top: 1px solid var(--oct-border);
 }
 
@@ -3182,7 +3197,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .thread-environment-disclosure .environment-group__header {
-  min-height: 32px;
+  min-height: 44px;
   padding: 0;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
@@ -3585,7 +3600,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .environment-group__action {
-  justify-self: start;
+  width: 100%;
+  min-height: 40px;
+  justify-self: stretch;
+  justify-content: flex-start;
   padding: 0;
   border: none;
   background: transparent;
@@ -5284,6 +5302,23 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: var(--oct-text-sm);
 }
 
+.code-thread-workspace__waiting {
+  display: flex;
+  flex: 0 0 auto;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-2) auto 0;
+  padding-inline: var(--oct-space-1);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+}
+
+.code-thread-workspace__waiting svg {
+  flex: 0 0 auto;
+  color: var(--octant-warning-text);
+}
+
 /* Placement only: the recipe is the system's `.callout`, the measure the
    shared `.thread-column`. A notice about this thread spans the thread's
    own column — running it edge to edge made it read as window chrome. */
@@ -5400,12 +5435,55 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   position: relative;
   z-index: 2;
   flex: 0 0 auto;
-  margin: 0 auto 16px;
-  box-shadow: var(--octant-shadow-sm);
+  margin: 0 auto 12px;
+  border-radius: 10px;
+  box-shadow: none;
   transition:
     border-color 140ms ease,
-    background-color 140ms ease,
-    box-shadow 140ms ease;
+    background-color 140ms ease;
+}
+
+.code-thread-workspace__composer:focus-within {
+  border-color: var(--octant-border-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-fg) 5%, transparent);
+}
+
+.code-thread-workspace__composer .composer-input {
+  min-height: 48px;
+  max-height: 180px;
+  padding: 12px 14px 10px;
+}
+
+.code-thread-workspace__composer .composer-row {
+  min-height: 40px;
+  gap: 6px;
+  padding: 4px 8px 4px 12px;
+}
+
+.code-thread-workspace__composer .composer-row [role="combobox"],
+.code-thread-workspace__composer .composer-row .composer-model-picker__trigger {
+  height: 30px;
+  min-height: 30px;
+}
+
+.code-thread-workspace__composer .composer-row .composer-model-picker__trigger {
+  padding-inline: 8px;
+  background: transparent;
+  border-color: transparent;
+}
+
+.code-thread-workspace__composer
+  .composer-row
+  .composer-model-picker__trigger:hover:not(:disabled) {
+  background: var(--oct-fg-soft);
+  border-color: var(--oct-border);
+}
+
+.code-thread-workspace__composer .composer-row > button[data-size="icon"] {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
 }
 
 .code-thread-workspace__composer--queued {
@@ -5673,10 +5751,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex-wrap: wrap;
   align-items: center;
   gap: 2px 10px;
-  min-height: 18px;
+  min-height: 16px;
   margin: 0;
-  padding: 0 var(--oct-space-3) var(--oct-space-2);
-  line-height: 1.35;
+  padding: 1px 12px 6px;
+  line-height: 1.3;
 }
 
 .code-thread-workspace__composer--queued .code-thread-workspace__status {

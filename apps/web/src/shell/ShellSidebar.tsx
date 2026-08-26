@@ -58,6 +58,7 @@ export interface ShellSidebarProps {
   readonly onOpenNavigator: () => void;
   /** Absent until Navigator has a model, so the profile menu does not advertise it. */
   readonly navigatorAvailable?: boolean;
+  readonly nativeHost?: boolean;
   readonly onOpenSettings: (deepLink?: SettingsDeepLink) => void;
   /** Opens the App-level thread Search overlay. */
   readonly onOpenSearch?: () => void;
@@ -137,22 +138,24 @@ export function ShellSidebar(props: ShellSidebarProps) {
           fetcher={props.backgroundFetcher}
         />
       ) : null}
-      <div className="sidebar__native-leading">
-        <span
-          aria-hidden="true"
-          className="sidebar__traffic-light-space"
-          data-traffic-light-safe-space
-        />
-        {props.onCollapseSidebar === undefined ? null : (
-          <IconButton
-            className="sidebar__native-collapse"
-            icon={PanelLeftClose}
-            label="Hide sidebar"
-            onClick={props.onCollapseSidebar}
+      {props.nativeHost === true ? (
+        <div className="sidebar__native-leading">
+          <span
+            aria-hidden="true"
+            className="sidebar__traffic-light-space"
+            data-traffic-light-safe-space
           />
-        )}
-        <span aria-hidden="true" className="sidebar__drag-surface window-drag-region" />
-      </div>
+          {props.onCollapseSidebar === undefined ? null : (
+            <IconButton
+              className="sidebar__native-collapse"
+              icon={PanelLeftClose}
+              label="Hide sidebar"
+              onClick={props.onCollapseSidebar}
+            />
+          )}
+          <span aria-hidden="true" className="sidebar__drag-surface window-drag-region" />
+        </div>
+      ) : null}
       <div className="sidebar__content window-no-drag" data-octant-sidebar-content>
         {props.environments === undefined || props.environments.hostStates.length < 2 ? null : (
           <EnvironmentFilter
@@ -173,6 +176,14 @@ export function ShellSidebar(props: ShellSidebarProps) {
                 label="Search"
                 onClick={props.onOpenSearch}
               />
+              {props.nativeHost === true || props.onCollapseSidebar === undefined ? null : (
+                <IconButton
+                  className="sidebar__browser-collapse"
+                  icon={PanelLeftClose}
+                  label="Hide sidebar"
+                  onClick={props.onCollapseSidebar}
+                />
+              )}
               <span className="sidebar__chrome-activity" data-octant-sidebar-chrome-actions />
             </>
           }

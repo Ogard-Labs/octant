@@ -119,6 +119,13 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   pointer-events: auto;
 }
 
+.window-chrome__leading--browser {
+  position: relative;
+  z-index: 8;
+  padding: 2px 4px;
+  pointer-events: auto;
+}
+
 .window-chrome__leading .window-chrome__button {
   position: relative;
   top: 0;
@@ -127,6 +134,13 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   min-width: 22px;
   min-height: 22px;
   color: var(--oct-fg-2);
+}
+
+.window-chrome__leading--browser .window-chrome__button {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
 }
 
 /* Same reserve the sidebar keeps for the macOS traffic lights (see
@@ -350,7 +364,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  padding: 8px 12px 12px;
+  padding: 6px 8px 10px;
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -522,7 +536,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 /* Navigation rows must not shrink when the Project tree below them grows. */
@@ -751,6 +765,12 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   grid-row: 1 / -1;
   border-left: 0;
   background: var(--oct-bg);
+}
+
+@media (min-width: 1100px) {
+  .shell.shell-frame.shell--wide-context-open {
+    --octant-wide-primary-min: 560px;
+  }
 }
 
 @media (min-width: 681px) and (max-width: 960px) {

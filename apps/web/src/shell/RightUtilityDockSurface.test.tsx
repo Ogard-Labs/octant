@@ -15,7 +15,7 @@ function surface(id: "browser" | "terminal" | "files") {
 }
 
 describe("the right sidebar surface", () => {
-  it("shows a compact launcher with no tool open", async () => {
+  it("shows the active thread work map with no tool open", async () => {
     const user = userEvent.setup();
     const onOpenTab = vi.fn();
     render(
@@ -29,14 +29,16 @@ describe("the right sidebar surface", () => {
       />,
     );
 
-    expect(screen.getByText("Open a tool beside the active pane.")).toBeVisible();
-    expect(screen.queryByText("Tools")).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "No tool open" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Browser" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Files" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Current work" })).toBeVisible();
+    expect(screen.getByText("Tools available for the active thread.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Browser" })).toHaveTextContent(
+      "Inspect live web activity",
+    );
+    expect(screen.getByRole("button", { name: "Files" })).toHaveTextContent(
+      "Browse the active checkout",
+    );
     expect(screen.getByRole("button", { name: "Add tool" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Add tool" }));
-    await user.click(screen.getAllByRole("button", { name: "Terminal" })[1]!);
+    await user.click(screen.getByRole("button", { name: "Terminal" }));
     expect(onOpenTab).toHaveBeenCalledWith("terminal");
     expect(screen.queryByRole("tab", { name: "Thread tools" })).not.toBeInTheDocument();
   });
