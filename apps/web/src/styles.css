@@ -730,7 +730,7 @@ button:focus-visible {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 4px;
-  margin: 0 4px 4px;
+  margin: 0 0 4px;
 }
 
 .code-project-views__filter {
@@ -755,12 +755,16 @@ button:focus-visible {
 }
 
 .code-project-views__trigger-wrap {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   min-width: 0;
 }
 
 .code-project-views__row .octant-menu__trigger {
+  width: 100%;
+  min-height: 28px;
   justify-content: flex-start;
+  padding: 0;
   text-align: start;
 }
 
