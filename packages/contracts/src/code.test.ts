@@ -112,6 +112,17 @@ describe("Code aggregate contracts", () => {
     expect(decodeCodeThread({ ...thread, workingDirectory: "packages/app" })).toMatchObject({
       workingDirectory: "packages/app",
     });
+    expect(
+      decodeCodeThread({
+        ...thread,
+        profileId: "00000000-0000-4000-8000-000000000099",
+        profileDisplayName: "Reviewer",
+        toolConstraints: ["octant_browser"],
+      }),
+    ).toMatchObject({
+      profileDisplayName: "Reviewer",
+      toolConstraints: ["octant_browser"],
+    });
     expect(() => decodeCodeThread({ ...thread, repositoryRoot: "/private/repo" })).toThrow();
     expect(() =>
       decodeCodeCommand({

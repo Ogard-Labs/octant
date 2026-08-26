@@ -9,10 +9,12 @@ import type {
   ToolNetworkEgressPolicy,
 } from "@octant/contracts";
 import { lookupClosedToolCatalogEntry } from "@octant/contracts";
+import { decideProfileToolConstraint } from "./agentProfilePolicy";
 import { authorizePrincipalAction, type PrincipalKind } from "./remoteAccessPolicy";
 
 export type ToolCallPolicyStep =
   | "tool-identity"
+  | "profile-constraints"
   | "argument-schema"
   | "mode-policy"
   | "provider-capability"
@@ -86,6 +88,13 @@ export type ToolCallPolicyInput = {
      * even if standing full-access / session grants would otherwise allow.
      */
     readonly externalContentIngested: boolean;
+    /**
+     * Snapshotted profile tool allowlist. Empty or absent means no constraint.
+     * Reloading the live profile here would let an edit change a running thread.
+     */
+    readonly toolConstraints?: ReadonlyArray<string>;
+    /** Snapshotted profile name used when a tool is refused by that allowlist. */
+    readonly profileDisplayName?: string;
   };
   /** Manifest-declared capabilities for extension/MCP ceiling checks (AC2). */
   readonly declaredCapabilities?: ReadonlyArray<ExtensionCapability>;
@@ -138,24 +147,34 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
     }
   }
 
-  // 2. Argument schema
+  // 2. Snapshotted profile tool allowlist. Empty means no constraint.
+  const profileConstraint = decideProfileToolConstraint({
+    toolId: String(input.capability.id),
+    toolConstraints: input.thread.toolConstraints ?? [],
+    profileDisplayName: input.thread.profileDisplayName ?? "the bound profile",
+  });
+  if (profileConstraint.status === "refused") {
+    return deny("profile-constraints", profileConstraint.reason);
+  }
+
+  // 3. Argument schema
   try {
     catalogEntry.decodeArguments(input.arguments);
   } catch {
     return deny("argument-schema", "argument-schema-invalid");
   }
 
-  // 3. Mode policy (§8.1 capability matrix)
+  // 4. Mode policy (§8.1 capability matrix)
   if (!catalogEntry.modes.includes(input.mode)) {
     return deny("mode-policy", "mode-capability-denied");
   }
 
-  // 4. Provider capability
+  // 5. Provider capability
   if (catalogEntry.requiresAppManagedTools && input.providerAppManagedTools !== "supported") {
     return deny("provider-capability", "provider-capability-unsupported");
   }
 
-  // 5. Host policy
+  // 6. Host policy
   if (catalogEntry.requiredCapabilityClass === "computer-use" && !input.host.computerUseEnabled) {
     return deny("host-policy", "computer-use-disabled");
   }
@@ -165,7 +184,7 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
     return deny("host-policy", "host-capability-prohibited");
   }
 
-  // 6. Remote actor
+  // 7. Remote actor
   if (input.remoteActor !== undefined) {
     const principal = authorizePrincipalAction({
       principalKind: input.remoteActor.principalKind,
@@ -179,7 +198,7 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
     }
   }
 
-  // 7. Thread elevation / approval / taint (untrusted-content taint hook)
+  // 8. Thread elevation / approval / taint (untrusted-content taint hook)
   const elevation = resolveThreadElevation({
     entry: catalogEntry,
     executionPolicy: input.thread.executionPolicy,

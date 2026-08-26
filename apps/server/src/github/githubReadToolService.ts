@@ -5,7 +5,12 @@ import type {
   GithubCatalogueReadResponse,
   WindowId,
 } from "@octant/contracts";
-import { decideGithubAgentRead, type GithubAgentReadOperation } from "@octant/domain";
+import {
+  decideGithubAgentRead,
+  decideProfileToolConstraint,
+  isToolAllowedByAllowlist,
+  type GithubAgentReadOperation,
+} from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 
 const MAX_TOOL_INPUT_BYTES = 4 * 1024;
@@ -63,13 +68,24 @@ export class GithubReadToolService {
   }
 
   createToolSet(context: GithubReadToolContext): AppManagedToolSet {
+    const allowlist = context.thread.toolConstraints ?? [];
     return {
-      definitions: [githubReadDefinition],
+      definitions: isToolAllowedByAllowlist(allowlist, GITHUB_READ_TOOL_NAME)
+        ? [githubReadDefinition]
+        : [],
       execute: async ({ name, inputJson, signal }) => {
         if (signal?.aborted) return failure("tool-interrupted");
         if (name !== GITHUB_READ_TOOL_NAME) return failure("tool-unavailable");
         const input = parseGithubReadInput(inputJson);
         if (input === undefined) return failure("invalid-github-input");
+        const profileConstraint = decideProfileToolConstraint({
+          toolId: GITHUB_READ_TOOL_NAME,
+          toolConstraints: context.thread.toolConstraints ?? [],
+          profileDisplayName: context.thread.profileDisplayName ?? "the bound profile",
+        });
+        if (profileConstraint.status === "refused") {
+          return failure("profile-tool-refused", profileConstraint.reason);
+        }
         const current = context.readThread(context.windowId, context.thread.id);
         const snapshot = await this.#snapshot(signal ?? new AbortController().signal);
         const decision = decideGithubAgentRead({

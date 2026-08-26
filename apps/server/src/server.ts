@@ -2788,6 +2788,18 @@ export function startOctantServer(
         browserAuthority,
         () => new Date().toISOString(),
         (threadId) => readThreadExternalContentTaint(persistence.connection, threadId),
+        (threadId) => {
+          const thread = persistence.readCodeThread(threadId as never);
+          if (thread === undefined) return undefined;
+          return {
+            ...(thread.toolConstraints === undefined
+              ? {}
+              : { toolConstraints: thread.toolConstraints }),
+            ...(thread.profileDisplayName === undefined
+              ? {}
+              : { profileDisplayName: thread.profileDisplayName }),
+          };
+        },
       ),
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       uuid: randomUUID,

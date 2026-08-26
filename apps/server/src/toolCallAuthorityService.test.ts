@@ -123,6 +123,52 @@ describe("ToolCallAuthorityService", () => {
     });
   });
 
+  it("refuses a profile-excluded tool before any later permissive step", () => {
+    const service = new ToolCallAuthorityService({
+      resolveGrantedAuthority: () => granted,
+      resolveLiveFacts: () => ({
+        providerAppManagedTools: "supported",
+        host: { computerUseEnabled: true },
+        executionPolicy: "full-access",
+        approvalSatisfied: true,
+        externalContentIngested: false,
+        toolConstraints: ["computer-use"],
+        profileDisplayName: "Reviewer",
+      }),
+    });
+    const decision = service.authorize({
+      threadId,
+      request: request(),
+      arguments: browserCreateArgs,
+    });
+    expect(decision).toMatchObject({
+      kind: "deny",
+      step: "profile-constraints",
+      reason: 'Profile "Reviewer" does not permit "browser-automation".',
+    });
+  });
+
+  it("still allows an ordinary posture-permitted tool when the snapshotted allowlist is empty", () => {
+    const service = new ToolCallAuthorityService({
+      resolveGrantedAuthority: () => granted,
+      resolveLiveFacts: () => ({
+        providerAppManagedTools: "supported",
+        host: { computerUseEnabled: true },
+        executionPolicy: "full-access",
+        approvalSatisfied: true,
+        externalContentIngested: false,
+        toolConstraints: [],
+        profileDisplayName: "Reviewer",
+      }),
+    });
+    const decision = service.authorize({
+      threadId,
+      request: request(),
+      arguments: browserCreateArgs,
+    });
+    expect(decision.kind).toBe("allow");
+  });
+
   it("denies unknown tools through the same choke point", () => {
     const service = new ToolCallAuthorityService({
       resolveGrantedAuthority: () => granted,
