@@ -7,6 +7,20 @@ import {
 
 describe("computer-use destination capability", () => {
   it("reports a macOS host screen as an available destination", () => {
+    expect(reportComputerUseDestination({ platform: "darwin", hasScreen: true })).toEqual({
+      status: "available",
+      kind: "macos-host",
+    });
+  });
+
+  it("reports no destination on a headless macOS host without a usable screen", () => {
+    expect(reportComputerUseDestination({ platform: "darwin", hasScreen: false })).toEqual({
+      status: "unavailable",
+      kind: "no-destination",
+    });
+  });
+
+  it("defaults to available on macOS when hasScreen is not provided", () => {
     expect(reportComputerUseDestination({ platform: "darwin" })).toEqual({
       status: "available",
       kind: "macos-host",

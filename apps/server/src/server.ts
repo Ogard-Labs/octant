@@ -223,6 +223,7 @@ import {
   type ComputerUseNativeAdapter,
   type ComputerUseRuntime,
 } from "./computerUse/computerUseRuntime";
+import { detectMacOsScreen } from "./computerUse/computerUseDestination";
 import { createMacOsComputerUseAdapter } from "./computerUse/macOsComputerUseAdapter";
 import { createNodeComputerUseProcessPort } from "./computerUse/nodeComputerUseProcessPort";
 import { createComputerUseValidationEvidenceRecorder } from "./computerUse/computerUseValidationEvidence";
@@ -1821,7 +1822,10 @@ export function startOctantServer(
     });
     const computerUseDestination =
       options.computerUseAdapter === undefined
-        ? reportComputerUseDestination({ platform: process.platform })
+        ? reportComputerUseDestination({
+            platform: process.platform,
+            ...(process.platform === "darwin" ? { hasScreen: detectMacOsScreen() } : {}),
+          })
         : { status: "available" as const, kind: "macos-host" as const };
     const computerUseAdapter =
       options.computerUseAdapter ??

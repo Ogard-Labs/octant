@@ -1,6 +1,6 @@
 # 0053. Computer-use destinations
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
