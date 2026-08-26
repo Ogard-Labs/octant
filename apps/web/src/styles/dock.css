@@ -233,10 +233,10 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   min-height: 0;
   grid-column: 1 / -1;
   grid-row: 2;
-  grid-template-rows: 34px minmax(0, 1fr);
+  grid-template-rows: 30px minmax(0, 1fr);
   overflow: hidden;
   color: var(--oct-fg);
-  background: var(--oct-bg);
+  background: var(--octant-workspace);
   border-top: 1px solid var(--oct-border);
 }
 
@@ -271,8 +271,9 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 3px 8px 3px 10px;
+  gap: 6px;
+  padding: 2px 6px 2px 8px;
+  background: var(--octant-chrome);
   border-bottom: 1px solid var(--oct-border);
 }
 
@@ -285,15 +286,26 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
 
 .bottom-utility-panel__tab {
   display: inline-flex;
-  min-height: 26px;
+  min-height: 24px;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px;
+  gap: 5px;
+  padding: 0 7px;
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
   border: 0;
-  border-radius: var(--oct-radius-sm);
+  border-radius: 5px;
   font-size: var(--oct-text-xs);
+}
+
+.bottom-utility-panel .dock-tool-strip__select {
+  min-height: 24px;
+  padding-inline: 6px 3px;
+}
+
+.bottom-utility-panel .dock-tool-strip__close {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
 }
 
 .bottom-utility-panel__content {

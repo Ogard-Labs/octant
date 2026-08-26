@@ -3577,7 +3577,7 @@ input.switch:checked::after {
   color: var(--oct-fg);
 }
 .sidebar-section {
-  margin-top: var(--oct-space-4);
+  margin-top: var(--oct-space-3);
   padding: var(--oct-space-1) var(--oct-space-2);
   font-family: var(--oct-font-display);
   font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
@@ -3590,9 +3590,9 @@ input.switch:checked::after {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: var(--oct-space-3);
+  gap: var(--oct-space-2);
   width: 100%;
-  min-height: var(--oct-control-height-sm);
+  min-height: 28px;
   padding-inline: var(--oct-space-2);
   border: 0;
   border-radius: 6px;

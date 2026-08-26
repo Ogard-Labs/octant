@@ -350,7 +350,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  padding: 8px 12px 12px;
+  padding: 6px 8px 10px;
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -522,7 +522,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 /* Navigation rows must not shrink when the Project tree below them grows. */

@@ -3110,6 +3110,12 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   width: min(320px, calc(100vw - 24px));
   max-height: min(620px, calc(100vh - 72px));
   padding: 0;
+  overflow: auto;
+  color: var(--oct-fg);
+  background: var(--octant-floating);
+  border-color: var(--octant-border-strong);
+  border-radius: 8px;
+  box-shadow: var(--octant-shadow-overlay);
   font-family: var(--oct-font-display);
 }
 
@@ -3124,7 +3130,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: var(--oct-space-3);
   padding: 0 var(--oct-space-3);
   border-bottom: 1px solid var(--oct-border);
-  background: var(--popover);
+  background: var(--octant-floating);
 }
 
 .thread-environment-disclosure__heading {
@@ -3165,8 +3171,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .thread-environment-disclosure__body > * + * {
-  margin-top: var(--oct-space-2);
-  padding-top: var(--oct-space-2);
+  margin-top: 0;
+  padding-top: 0;
   border-top: 1px solid var(--oct-border);
 }
 
@@ -3188,7 +3194,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .thread-environment-disclosure .environment-group__header {
-  min-height: 32px;
+  min-height: 44px;
   padding: 0;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
@@ -3591,7 +3597,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .environment-group__action {
-  justify-self: start;
+  width: 100%;
+  min-height: 40px;
+  justify-self: stretch;
+  justify-content: flex-start;
   padding: 0;
   border: none;
   background: transparent;
