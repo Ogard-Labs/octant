@@ -269,7 +269,8 @@
 .setrow[data-setting-id="vision-reviewer"],
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
-.setrow[data-setting-id="app-updates"] {
+.setrow[data-setting-id="app-updates"],
+.setrow[data-setting-id="export-diagnostics"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -279,7 +280,8 @@
 .setrow[data-setting-id="vision-reviewer"] > .setrow-control,
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
-.setrow[data-setting-id="app-updates"] > .setrow-control {
+.setrow[data-setting-id="app-updates"] > .setrow-control,
+.setrow[data-setting-id="export-diagnostics"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;
@@ -377,8 +379,8 @@
 }
 
 .settings-view__content-inner {
-  width: min(calc(100% - 48px), 760px);
-  padding: 36px 0 80px;
+  width: min(calc(100% - 48px), 840px);
+  padding: 28px 0 72px;
   margin: 0 auto;
 }
 
@@ -401,12 +403,12 @@
 
 .settings-section-stack {
   display: grid;
-  gap: 28px;
+  gap: 20px;
 }
 
 .settings-card-section {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 /* One section heading treatment for the whole surface. The Appearance blocks
@@ -463,7 +465,7 @@
   overflow: hidden;
   background: var(--octant-surface-muted);
   border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   box-shadow: none;
 }
 
@@ -496,8 +498,8 @@
 }
 
 .setrow {
-  column-gap: 24px;
-  padding: 12px 16px;
+  column-gap: 20px;
+  padding: 10px 14px;
   font-family: var(--oct-font-display);
 }
 
@@ -642,7 +644,7 @@
    the same rhythm between them rather than a tighter one of their own. */
 .settings-theme-editor {
   display: grid;
-  gap: 28px;
+  gap: 20px;
   padding: 0;
   margin: 0;
 }
@@ -1329,6 +1331,54 @@
   .github-settings__facts dd {
     margin-bottom: 6px;
   }
+}
+
+/* Host and GitHub expose different operations, but their facts, sections, and
+   states use one Settings rhythm. */
+.host-settings,
+.github-settings {
+  gap: 0;
+}
+
+.host-settings__heading,
+.github-settings__heading {
+  margin: 20px 0 8px;
+  padding-top: 20px;
+  color: var(--octant-text-secondary);
+  border-top: 1px solid var(--octant-border);
+  font-size: var(--oct-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.host-settings > .host-settings__controls:first-child + .host-settings__heading,
+.github-settings > .github-settings__controls:first-child + .github-settings__heading {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.host-settings__facts,
+.github-settings__facts {
+  gap: 6px 20px;
+  padding: 2px 4px 8px;
+}
+
+.host-settings__facts dt,
+.github-settings__facts dt {
+  font-size: var(--oct-text-xs);
+}
+
+.host-settings__facts dd,
+.github-settings__facts dd {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+}
+
+.host-settings__note,
+.github-settings__note {
+  max-width: 68ch;
 }
 
 /*

@@ -309,6 +309,19 @@
   margin: 0;
 }
 
+.provider-limits__header h2 {
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-lg);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.provider-limits__identity h3 {
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
 .provider-limits__header p,
 .provider-limits__identity p,
 .provider-limits__state,

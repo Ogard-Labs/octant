@@ -6586,9 +6586,9 @@ input.switch:checked::after {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: var(--oct-space-1) var(--oct-space-3);
-  padding: var(--oct-space-4);
+  padding: var(--oct-space-3);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
 }
 .extcard > .icon-mark {
