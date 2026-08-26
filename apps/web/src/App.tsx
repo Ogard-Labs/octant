@@ -3758,6 +3758,10 @@ function LaunchedShell(
                   client={browserAutomationClient}
                   dock={dock}
                   {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                  serverUrl={props.launch.serverUrl}
+                  {...(props.projectWindowCapability === undefined
+                    ? {}
+                    : { windowCapability: props.projectWindowCapability })}
                   onCollapse={(collapsed) =>
                     void zen.dockResearch({
                       thread: {

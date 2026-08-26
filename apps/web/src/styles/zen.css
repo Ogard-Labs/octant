@@ -658,10 +658,16 @@
   white-space: nowrap;
 }
 
-.zen-research__page {
+.zen-research__page,
+.zen-research__web-browser {
   position: relative;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+}
+
+.zen-research__web-browser > .browser-workspace {
+  height: 100%;
 }
 
 .zen-research__empty {
