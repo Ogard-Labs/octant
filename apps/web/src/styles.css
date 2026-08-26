@@ -877,7 +877,7 @@ button:focus-visible {
 
 .activity-nav {
   display: grid;
-  gap: 0;
+  gap: 8px;
 }
 
 /* Group labels are h2s for the document outline wearing the system's quiet
@@ -889,22 +889,42 @@ button:focus-visible {
   font-weight: 400;
 }
 
+.activity-nav__group {
+  display: grid;
+  gap: 2px;
+}
+
 .activity-nav__threads {
   display: grid;
   gap: 2px;
 }
 
-.activity-nav__thread {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+.sidebar-navigation__thread.activity-nav__thread {
   min-height: 42px;
-  padding: 7px 8px;
+  align-items: flex-start;
+  padding: 5px 6px;
 }
 
 .sidebar-navigation__thread-copy {
   display: grid;
   min-width: 0;
   gap: 2px;
+}
+
+.activity-nav__thread .sidebar-navigation__thread-copy {
+  flex: 1 1 auto;
+  grid-template-rows: 16px 14px;
+  gap: 1px;
+}
+
+.activity-nav__thread .sidebar-navigation__thread-title,
+.activity-nav__thread .sidebar-navigation__thread-project {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar-navigation__thread-project {
