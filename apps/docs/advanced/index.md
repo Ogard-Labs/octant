@@ -36,7 +36,7 @@ without over-trusting a surface that has not shipped.
 ## Appearance and workflows
 
 - [Themes and appearance](/advanced/themes) — semantic themes, presets, typography, and sidebar appearance.
-- [Keyboard workflows](/advanced/keyboard-workflows) — mode switching, Zen, and keyboard navigation.
+- [Keyboard workflows](/advanced/keyboard-workflows) — command palette, remappable shortcuts, Zen, and keyboard navigation.
 
 ## Remote, privacy, and recovery
 
