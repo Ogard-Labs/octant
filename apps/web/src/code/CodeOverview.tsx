@@ -738,7 +738,8 @@ function observedChangesLabel(
       : "Working tree clean";
   }
   const files = `${changes.changedPathCount} changed ${changes.changedPathCount === 1 ? "file" : "files"}`;
-  return `${files} · ${changes.stagedCount} staged · ${changes.committedAhead} committed ahead`;
+  const diffstat = `+${changes.insertions.toLocaleString()} −${changes.deletions.toLocaleString()}`;
+  return `${files} · ${diffstat} · ${changes.stagedCount} staged · ${changes.committedAhead} committed ahead`;
 }
 
 function childAgentsLabel(agents: CodeBoardCard["childAgents"]): string | undefined {

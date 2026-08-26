@@ -585,6 +585,8 @@ describe("CodeOperationRuntime", () => {
         head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
         statusEntries: [],
         changedPaths: [],
+        insertions: 0,
+        deletions: 0,
         stagedSummary: [{ path: "src/staged.ts", index: "M", worktree: " " }],
         diff: { text: "", byteLength: 0, truncated: false },
         remotes: [],
@@ -637,6 +639,8 @@ describe("CodeOperationRuntime", () => {
         head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
         statusEntries: [{ path: "src/a.ts", index: " ", worktree: "M" }],
         changedPaths: ["src/a.ts"],
+        insertions: 1,
+        deletions: 0,
         stagedSummary: [],
         diff: { text: "+changed", byteLength: 8, truncated: true },
         remotes: [
@@ -673,6 +677,8 @@ describe("CodeOperationRuntime", () => {
 
     expect(result).toMatchObject({
       kind: "git-observed",
+      insertions: 1,
+      deletions: 0,
       diff: { truncated: true },
       remotes: [
         {
@@ -719,6 +725,8 @@ describe("CodeOperationRuntime", () => {
         head: { kind: "unborn", name: "main" },
         statusEntries: [{ path: "src/a.ts", index: "A", worktree: " " }],
         changedPaths: ["src/a.ts"],
+        insertions: 1,
+        deletions: 0,
         stagedSummary: [{ path: "src/a.ts", index: "A", worktree: " " }],
         diff: { text: "+first", byteLength: 6, truncated: false },
         remotes: [],

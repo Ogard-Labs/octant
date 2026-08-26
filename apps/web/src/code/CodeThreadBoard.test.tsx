@@ -518,6 +518,8 @@ describe("CodeThreadBoard", () => {
             stagedCount: 1,
             committedAhead: 1,
             workingTreeClean: false,
+            insertions: 12,
+            deletions: 3,
           },
           linkedPullRequest: {
             kind: "linked",
@@ -551,7 +553,7 @@ describe("CodeThreadBoard", () => {
     expect(facts).toHaveTextContent("Project A");
     expect(facts).toHaveTextContent("Current checkout");
     expect(facts).toHaveTextContent("feature/board");
-    expect(facts).toHaveTextContent("3 files");
+    expect(facts).toHaveTextContent("3 files +12 −3");
     expect(facts).toHaveTextContent("Studio · model-a");
     expect(facts).toHaveTextContent("1 active run");
     expect(facts).toHaveTextContent("#18 · stale");

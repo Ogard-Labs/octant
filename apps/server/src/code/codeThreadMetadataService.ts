@@ -68,6 +68,8 @@ export type CodeGitWorktreeObservation =
       readonly stagedCount: number;
       readonly committedAhead: number;
       readonly workingTreeClean: boolean;
+      readonly insertions: number;
+      readonly deletions: number;
     }
   | { readonly status: "unavailable" };
 
@@ -358,6 +360,8 @@ function buildChangedFiles(
       stagedCount: git.stagedCount,
       committedAhead: git.committedAhead,
       workingTreeClean: git.workingTreeClean,
+      insertions: git.insertions,
+      deletions: git.deletions,
     };
   }
   const journaled = cachedChangedFilesFromHistory(history);
@@ -686,6 +690,11 @@ function cachedChangedFilesFromHistory(
     if (frame.event.result.kind === "git-observed") latest = frame.event.result;
   }
   if (latest === undefined) return undefined;
+  if (typeof latest.insertions !== "number" || typeof latest.deletions !== "number") {
+    // Line totals were not on the journaled observation, so this cannot become
+    // an observed state without inventing numbers the host never recorded.
+    return undefined;
+  }
   const stagedCount = latest.status.filter(
     (entry) => entry.index !== " " && entry.index !== "?",
   ).length;
@@ -696,5 +705,7 @@ function cachedChangedFilesFromHistory(
     stagedCount,
     committedAhead: 0,
     workingTreeClean: latest.changedPaths.length === 0 && stagedCount === 0,
+    insertions: latest.insertions,
+    deletions: latest.deletions,
   };
 }

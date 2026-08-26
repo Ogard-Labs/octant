@@ -1533,6 +1533,8 @@ function mapGitObservation(
     stateToken: result.stateToken,
     statusEntries: result.statusEntries,
     changedPaths: result.changedPaths,
+    insertions: result.insertions,
+    deletions: result.deletions,
     diff,
     diffTruncated: result.diff.truncated || diff !== result.diff.text,
     remotes: result.remotes.map((remote) => ({

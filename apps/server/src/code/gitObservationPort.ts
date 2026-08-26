@@ -36,6 +36,8 @@ export interface GitObservation {
   readonly head: GitObservedHead;
   readonly statusEntries: readonly GitStatusEntry[];
   readonly changedPaths: readonly string[];
+  readonly insertions: number;
+  readonly deletions: number;
   readonly stagedSummary: readonly GitStatusEntry[];
   readonly diff: {
     readonly text: string;
@@ -263,6 +265,21 @@ export class GitObservationPort {
       const diffResult = await run(["diff", "--no-ext-diff", "--no-color", baseline, "--"]);
       if (diffResult.exitCode !== 0) return { status: "failed" };
       const diff = boundUtf8(diffResult.stdout, this.#maxDiffBytes);
+      // Numstat is the same baseline as the unified diff, in the same
+      // observation: path counts come from porcelain, line totals from this
+      // compact listing, so a truncated patch cannot undercount the summary.
+      const numstatResult = await run([
+        "diff",
+        "--numstat",
+        "-z",
+        "--no-ext-diff",
+        "--no-color",
+        baseline,
+        "--",
+      ]);
+      if (numstatResult.exitCode !== 0) return { status: "failed" };
+      const lineCounts = parseNumstat(numstatResult.stdout);
+      if (!lineCounts) return { status: "failed" };
       const remotes = await readRemotes(run);
       if (remotes === undefined) return { status: "failed" };
       let upstream: GitObservation["upstream"] = null;
@@ -326,6 +343,8 @@ export class GitObservationPort {
         head,
         statusEntries,
         changedPaths,
+        insertions: lineCounts.insertions,
+        deletions: lineCounts.deletions,
         stagedSummary,
         diff,
         remotes,
@@ -538,6 +557,48 @@ async function readRemotes(
     });
   }
   return remotes;
+}
+
+function parseNumstat(
+  output: string,
+): { readonly insertions: number; readonly deletions: number } | undefined {
+  if (output.length === 0) return { insertions: 0, deletions: 0 };
+  const fields = output.split("\0");
+  if (fields[fields.length - 1] === "") fields.pop();
+  let insertions = 0;
+  let deletions = 0;
+  for (let index = 0; index < fields.length;) {
+    const field = fields[index];
+    if (field === undefined) return undefined;
+    const firstTab = field.indexOf("\t");
+    if (firstTab <= 0) return undefined;
+    const secondTab = field.indexOf("\t", firstTab + 1);
+    const addedText = field.slice(0, firstTab);
+    const deletedText =
+      secondTab === -1 ? field.slice(firstTab + 1) : field.slice(firstTab + 1, secondTab);
+    const added = addedText === "-" ? 0 : Number.parseInt(addedText, 10);
+    const deleted = deletedText === "-" ? 0 : Number.parseInt(deletedText, 10);
+    if (
+      !Number.isSafeInteger(added) ||
+      added < 0 ||
+      !Number.isSafeInteger(deleted) ||
+      deleted < 0
+    ) {
+      return undefined;
+    }
+    insertions += added;
+    deletions += deleted;
+    // Rename/copy with `-z` is `added\tdeleted\t\0from\0to\0` (and sometimes
+    // without the trailing tab). A regular path stays in the same field.
+    const renamed = secondTab === -1 || secondTab === field.length - 1;
+    if (renamed) {
+      if (fields[index + 1] === undefined || fields[index + 2] === undefined) return undefined;
+      index += 3;
+    } else {
+      index += 1;
+    }
+  }
+  return { insertions, deletions };
 }
 
 function parseStatus(output: string): GitStatusEntry[] | undefined {

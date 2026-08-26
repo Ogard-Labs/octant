@@ -297,6 +297,8 @@ export interface CodeOperationGitPort {
       readonly worktree: string;
     }[];
     readonly changedPaths?: readonly string[];
+    readonly insertions?: number;
+    readonly deletions?: number;
     readonly diff?: string;
     readonly diffTruncated?: boolean;
     readonly remotes?: readonly {
@@ -1888,6 +1890,9 @@ export class CodeOperationService {
       stateToken: result.stateToken,
       status: result.statusEntries,
       changedPaths: result.changedPaths,
+      ...(typeof result.insertions === "number" && typeof result.deletions === "number"
+        ? { insertions: result.insertions, deletions: result.deletions }
+        : {}),
       diff: this.#options.evidence.put(result.diff, { truncated: result.diffTruncated === true }),
       remotes: result.remotes.map((remote) => ({
         name: remote.name,
