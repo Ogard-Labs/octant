@@ -291,6 +291,8 @@ describe("agentProfilePolicy", () => {
         status: "applied",
         executionPolicy: "plan",
         permissionPersistence: "current-session",
+        toolConstraints: [],
+        profileDisplayName: "Code Reviewer",
       });
       expect(profileEntry?.executionPolicy).toBe(
         applied.status === "applied" ? applied.executionPolicy : undefined,
