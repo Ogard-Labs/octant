@@ -171,21 +171,23 @@ export function ShellSidebar(props: ShellSidebarProps) {
         <ModeSwitcher
           actions={
             <>
-              <IconButton
-                data-navigation-id="search"
-                icon={Search}
-                label="Search"
-                onClick={props.onOpenSearch}
-              />
-              {props.nativeHost === true || props.onCollapseSidebar === undefined ? null : (
-                <IconButton
-                  className="sidebar__browser-collapse"
-                  icon={PanelLeftClose}
-                  label="Hide sidebar"
-                  onClick={props.onCollapseSidebar}
-                />
-              )}
               <span className="sidebar__chrome-activity" data-octant-sidebar-chrome-actions />
+              <span className="sidebar__primary-actions">
+                <IconButton
+                  data-navigation-id="search"
+                  icon={Search}
+                  label="Search"
+                  onClick={props.onOpenSearch}
+                />
+                {props.nativeHost === true || props.onCollapseSidebar === undefined ? null : (
+                  <IconButton
+                    className="sidebar__browser-collapse"
+                    icon={PanelLeftClose}
+                    label="Hide sidebar"
+                    onClick={props.onCollapseSidebar}
+                  />
+                )}
+              </span>
             </>
           }
           activeMode={props.workspace.activeMode}

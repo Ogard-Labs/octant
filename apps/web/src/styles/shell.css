@@ -520,11 +520,20 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 }
 
 .sidebar__chrome-actions,
-.sidebar__chrome-activity {
+.sidebar__chrome-activity,
+.sidebar__primary-actions {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   gap: 2px;
+}
+
+.sidebar__primary-actions {
+  order: 2;
+}
+
+.sidebar__chrome-activity {
+  order: 1;
 }
 
 /* Space separates the navigation actions from the Project tree. A rule here
