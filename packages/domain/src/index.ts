@@ -84,6 +84,7 @@ export * from "./userProfilePolicy";
 export * from "./agentProfilePolicy";
 export * from "./agentRunPolicy";
 export * from "./agentRunControlPolicy";
+export * from "./agentRunConversationPolicy";
 export * from "./agentRunWorkspacePolicy";
 export * from "./agentRunAuthorityCeiling";
 export * from "./agentRunLiveGrant";

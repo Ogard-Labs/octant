@@ -116,4 +116,89 @@ describe("EnvironmentSubagents", () => {
     await user.click(await screen.findByRole("button", { name: /Investigate the outage/ }));
     expect(await screen.findByText(/child session is no longer connected/i)).toBeVisible();
   });
+
+  it("shows a compact live preview without inventing native text or offering Agents controls", async () => {
+    const user = userEvent.setup();
+    const onOpenAgents = vi.fn();
+    render(
+      <EnvironmentSubagents
+        client={
+          {
+            conversation: async (runId: string) =>
+              runId === "50000000-0000-4000-8000-000000000001"
+                ? {
+                    runId,
+                    parentThreadId: "20000000-0000-4000-8000-000000000001",
+                    executionKind: "octant-managed",
+                    modelId: "gpt-5.6-luna",
+                    lifecycleStatus: "running",
+                    status: "live",
+                    entries: [
+                      {
+                        sequence: 1,
+                        kind: "assistant",
+                        text: "Partial finding from the child.",
+                        occurredAt: "2026-08-23T00:00:00.000Z",
+                      },
+                    ],
+                    truncated: false,
+                  }
+                : {
+                    runId,
+                    parentThreadId: "20000000-0000-4000-8000-000000000001",
+                    executionKind: "provider-native",
+                    modelId: "gpt-5.6-luna",
+                    lifecycleStatus: "running",
+                    status: "unavailable",
+                    entries: [],
+                    truncated: false,
+                    staleReason:
+                      "Provider-native child transcript is not available through this host.",
+                  },
+            parentSummary: async () => ({
+              parentThreadId: "20000000-0000-4000-8000-000000000001",
+              entries: [
+                {
+                  runId: "50000000-0000-4000-8000-000000000001",
+                  requestId: "40000000-0000-4000-8000-000000000002",
+                  parentThreadId: "20000000-0000-4000-8000-000000000001",
+                  role: "research",
+                  task: "Investigate the outage",
+                  lifecycleStatus: "running",
+                  executionKind: "octant-managed",
+                  usageQuality: "unavailable",
+                  resultAcknowledgement: { required: false, acknowledged: false },
+                  version: 2,
+                  updatedAt: "2026-08-23T00:00:00.000Z",
+                },
+                {
+                  runId: "60000000-0000-4000-8000-000000000001",
+                  requestId: "40000000-0000-4000-8000-000000000003",
+                  parentThreadId: "20000000-0000-4000-8000-000000000001",
+                  role: "research",
+                  task: "Native scout",
+                  lifecycleStatus: "running",
+                  executionKind: "provider-native",
+                  usageQuality: "unavailable",
+                  resultAcknowledgement: { required: false, acknowledged: false },
+                  version: 2,
+                  updatedAt: "2026-08-23T00:00:00.000Z",
+                },
+              ],
+            }),
+          } as never
+        }
+        onOpenAgents={onOpenAgents}
+        threadId="20000000-0000-4000-8000-000000000001"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /Investigate the outage/ }));
+    expect(await screen.findByText("Partial finding from the child.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /cancel/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Native scout/ }));
+    expect(await screen.findByText(/live response text is unavailable/i)).toBeVisible();
+    expect(screen.queryByText("secret native transcript")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Agents" }));
+    expect(onOpenAgents).toHaveBeenCalledOnce();
+  });
 });

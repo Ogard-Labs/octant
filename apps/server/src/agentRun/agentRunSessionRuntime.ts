@@ -759,12 +759,14 @@ function collectSessionEvents(
           return;
         }
         if (event.kind === "text-delta") {
-          state.responseText = (state.responseText + event.text).slice(0, MAX_RESPONSE_CHARACTERS);
+          const delta = publishableTextDelta(event);
+          if (delta === undefined) return;
+          state.responseText = (state.responseText + delta.text).slice(0, MAX_RESPONSE_CHARACTERS);
           try {
             input.onTextDelta?.({
               runId: input.run.id,
-              text: event.text,
-              occurredAt: event.occurredAt,
+              text: delta.text,
+              occurredAt: delta.occurredAt,
             });
           } catch {
             // A transient observer must never interrupt provider collection.
@@ -851,6 +853,19 @@ function collectSessionEvents(
       }),
     ),
   );
+}
+
+function publishableTextDelta(event: {
+  readonly kind: string;
+  readonly text?: unknown;
+  readonly occurredAt?: unknown;
+}): { readonly text: string; readonly occurredAt: string } | undefined {
+  if (event.kind !== "text-delta") return undefined;
+  if (typeof event.text !== "string" || event.text.trim().length === 0) return undefined;
+  return {
+    text: event.text,
+    occurredAt: typeof event.occurredAt === "string" ? event.occurredAt : "",
+  };
 }
 
 function capacityOutcomeFor(

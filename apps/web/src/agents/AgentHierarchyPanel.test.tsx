@@ -122,4 +122,42 @@ describe("AgentHierarchyPanel", () => {
       screen.queryByRole("button", { name: "Cancel Completed review" }),
     ).not.toBeInTheDocument();
   });
+
+  it("inspects a live transcript while remaining the control surface", async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    const onInspectConversation = vi.fn();
+    render(
+      <AgentHierarchyPanel
+        conversation={
+          {
+            runId: "run-1",
+            parentThreadId: "11111111-1111-4111-8111-111111111111",
+            executionKind: "octant-managed",
+            modelId: "gpt-5.6-luna",
+            lifecycleStatus: "running",
+            status: "live",
+            entries: [
+              {
+                sequence: 1,
+                kind: "assistant",
+                text: "Live child reply",
+                occurredAt: "2026-08-23T00:00:00.000Z",
+              },
+            ],
+            truncated: false,
+          } as never
+        }
+        creationPosture="automatic"
+        entries={entries}
+        onCancel={onCancel}
+        onInspectConversation={onInspectConversation}
+      />,
+    );
+    expect(screen.getByText("Live child reply")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Cancel Active research" }));
+    expect(onCancel).toHaveBeenCalledWith({ runId: "run-1" });
+    await user.click(screen.getByRole("button", { name: "View conversation for Active research" }));
+    expect(onInspectConversation).toHaveBeenCalledWith("run-1");
+  });
 });

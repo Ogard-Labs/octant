@@ -12,7 +12,6 @@ import {
   decodeAgentRunConversationStreamFrame,
   MAX_AGENT_RUN_CONVERSATION_NDJSON_LINE_BYTES,
   MAX_AGENT_RUN_CENTER_QUERY_LIMIT,
-  type AgentRunConversationEntry,
   type AgentRunConversationResponse,
   type AgentRunConversationStreamFrame,
   type AgentRun,
@@ -41,6 +40,7 @@ import {
   AgentRunPolicyRejected,
   type AgentRunNativeCapabilityEvidence,
 } from "@octant/domain/agent-run-control-policy";
+import { resolveAgentRunConversationDisclosure } from "@octant/domain/agent-run-conversation-policy";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -626,74 +626,19 @@ async function handleConversation(
     return failure("AgentRun conversation is not authorized for this run.", 403, origin);
   }
 
-  const base = {
-    runId: run.id,
-    parentThreadId: run.parentThreadId,
-    executionKind: run.executionKind,
-    modelId: effectiveAgentRunExecutionTarget(run.routingReceipt).modelId,
-    lifecycleStatus: run.lifecycleStatus,
-  } satisfies Omit<AgentRunConversationResponse, "status" | "entries" | "truncated">;
-
-  if (run.executionKind === "provider-native") {
-    return json(
-      {
-        ...base,
-        status: "unavailable",
-        entries: [],
-        truncated: false,
-        staleReason: "Provider-native child transcript is not available through this host.",
-      },
-      200,
-      origin,
-    );
-  }
-
-  const snapshot = dependencies.liveConversations.read({
+  const live = dependencies.liveConversations.read({
     runId,
     ...(afterSequence === undefined ? {} : { afterSequence }),
   });
-  if (snapshot !== undefined) {
-    return json({ ...base, ...snapshot }, 200, origin);
-  }
-
-  const result = run.result;
-  const resultText = result === undefined ? undefined : dependencies.persistence.resultText(run.id);
-  if (result !== undefined && resultText !== undefined) {
-    const entry: AgentRunConversationEntry = {
-      sequence: 1,
-      kind: "assistant",
-      text: resultText,
-      occurredAt: run.updatedAt,
-    };
-    return json(
-      {
-        ...base,
-        status: "complete",
-        entries: afterSequence !== undefined && afterSequence >= entry.sequence ? [] : [entry],
-        truncated: result.truncated,
-      },
-      200,
-      origin,
-    );
-  }
-
-  const active =
-    run.lifecycleStatus === "queued" ||
-    run.lifecycleStatus === "starting" ||
-    run.lifecycleStatus === "running";
-  const restarted =
-    run.lifecycleStatus === "interrupted" &&
-    run.recoveryReason === "restart-without-resumable-execution";
   return json(
     {
-      ...base,
-      status: active || restarted ? "stale" : "unavailable",
-      entries: [],
-      truncated: false,
-      ...(active || restarted
-        ? { staleReason: "The child session is no longer connected to this host." }
-        : { staleReason: "No retained child conversation is available." }),
-    },
+      ...conversationIdentity(dependencies, run),
+      ...agentRunConversationDisclosure(dependencies, run, {
+        surface: "snapshot",
+        ...(afterSequence === undefined ? {} : { afterSequence }),
+        ...(live === undefined ? {} : { live }),
+      }),
+    } satisfies AgentRunConversationResponse,
     200,
     origin,
   );
@@ -748,89 +693,95 @@ async function* conversationStreamFrames(
   afterSequence: number,
   signal: AbortSignal,
 ): AsyncGenerator<AgentRunConversationStreamFrame> {
-  const baseFor = (): Omit<
-    AgentRunConversationStreamFrame,
-    "kind" | "status" | "entries" | "truncated" | "nextCursor" | "staleReason"
-  > => {
-    const latestRun = dependencies.persistence.getById(run.id) ?? run;
-    return {
-      runId: latestRun.id,
-      parentThreadId: latestRun.parentThreadId,
-      executionKind: latestRun.executionKind,
-      modelId: effectiveAgentRunExecutionTarget(latestRun.routingReceipt).modelId,
-      lifecycleStatus: latestRun.lifecycleStatus,
-    };
-  };
-
-  if (run.executionKind === "provider-native") {
-    yield {
-      kind: "snapshot",
-      ...baseFor(),
-      status: "unavailable",
-      entries: [],
-      truncated: false,
-      staleReason: "Provider-native child transcript is not available through this host.",
-    };
-    return;
-  }
-
-  const liveSnapshot = dependencies.liveConversations.read({
-    runId: run.id,
-    afterSequence,
-  });
-  if (liveSnapshot !== undefined) {
-    let first = true;
-    for await (const snapshot of dependencies.liveConversations.subscribe({
+  const nativeLivePermitted = run.executionKind !== "provider-native";
+  if (nativeLivePermitted) {
+    const liveSnapshot = dependencies.liveConversations.read({
       runId: run.id,
       afterSequence,
-      signal,
-    })) {
-      const lastSequence = snapshot.entries.at(-1)?.sequence;
-      yield {
-        kind: first ? "snapshot" : "delta",
-        ...baseFor(),
-        ...snapshot,
-        ...(lastSequence === undefined ? {} : { nextCursor: String(lastSequence) }),
-      };
-      first = false;
+    });
+    if (liveSnapshot !== undefined) {
+      let first = true;
+      for await (const snapshot of dependencies.liveConversations.subscribe({
+        runId: run.id,
+        afterSequence,
+        signal,
+      })) {
+        const lastSequence = snapshot.entries.at(-1)?.sequence;
+        yield {
+          kind: first ? "snapshot" : "delta",
+          ...conversationIdentity(dependencies, run),
+          ...snapshot,
+          ...(lastSequence === undefined ? {} : { nextCursor: String(lastSequence) }),
+        };
+        first = false;
+      }
+      return;
     }
-    return;
   }
 
-  const result = run.result;
-  const resultText = result === undefined ? undefined : dependencies.persistence.resultText(run.id);
-  if (result !== undefined && resultText !== undefined) {
-    const entry: AgentRunConversationEntry = {
-      sequence: 1,
-      kind: "assistant",
-      text: resultText,
-      occurredAt: run.updatedAt,
-    };
-    yield {
-      kind: "snapshot",
-      ...baseFor(),
-      status: "complete",
-      entries: afterSequence >= entry.sequence ? [] : [entry],
-      truncated: result.truncated,
-      nextCursor: String(entry.sequence),
-    };
-    return;
-  }
-
-  const active =
-    run.lifecycleStatus === "queued" ||
-    run.lifecycleStatus === "starting" ||
-    run.lifecycleStatus === "running";
+  const disclosure = agentRunConversationDisclosure(dependencies, run, {
+    surface: "stream",
+    afterSequence,
+  });
+  const lastSequence = disclosure.entries.at(-1)?.sequence;
   yield {
     kind: "snapshot",
-    ...baseFor(),
-    status: active ? "stale" : "unavailable",
-    entries: [],
-    truncated: false,
-    staleReason: active
-      ? "The child session is no longer connected to this host; reconnect to resume viewing."
-      : "No retained child conversation is available.",
+    ...conversationIdentity(dependencies, run),
+    ...disclosure,
+    ...(lastSequence === undefined ? {} : { nextCursor: String(lastSequence) }),
   };
+}
+
+function conversationIdentity(
+  dependencies: AgentRunRouteDependencies,
+  run: AgentRun,
+): Omit<
+  AgentRunConversationResponse,
+  "status" | "entries" | "truncated" | "nextCursor" | "staleReason"
+> {
+  const latestRun = dependencies.persistence.getById(run.id) ?? run;
+  return {
+    runId: latestRun.id,
+    parentThreadId: latestRun.parentThreadId,
+    executionKind: latestRun.executionKind,
+    modelId: effectiveAgentRunExecutionTarget(latestRun.routingReceipt).modelId,
+    lifecycleStatus: latestRun.lifecycleStatus,
+  };
+}
+
+function agentRunConversationDisclosure(
+  dependencies: AgentRunRouteDependencies,
+  run: AgentRun,
+  options: {
+    readonly surface: "snapshot" | "stream";
+    readonly afterSequence?: number;
+    readonly live?: ReturnType<AgentRunLiveConversationStore["read"]>;
+  },
+) {
+  const latestRun = dependencies.persistence.getById(run.id) ?? run;
+  const result = latestRun.result;
+  const resultText =
+    result === undefined ? undefined : dependencies.persistence.resultText(latestRun.id);
+  return resolveAgentRunConversationDisclosure({
+    executionKind: latestRun.executionKind,
+    lifecycleStatus: latestRun.lifecycleStatus,
+    surface: options.surface,
+    ...(latestRun.recoveryReason === undefined ? {} : { recoveryReason: latestRun.recoveryReason }),
+    ...(latestRun.executionKind === "provider-native"
+      ? { nativeLiveTranscriptSupport: "unavailable" as const }
+      : {}),
+    ...(options.afterSequence === undefined ? {} : { afterSequence: options.afterSequence }),
+    ...(options.live === undefined ? {} : { live: options.live }),
+    ...(result === undefined || resultText === undefined
+      ? {}
+      : {
+          retained: {
+            text: resultText,
+            truncated: result.truncated,
+            occurredAt: latestRun.updatedAt,
+          },
+        }),
+  });
 }
 
 function conversationStreamResponse(

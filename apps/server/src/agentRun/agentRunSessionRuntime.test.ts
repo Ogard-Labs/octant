@@ -444,6 +444,32 @@ describe("createAgentRunSessionRuntime", () => {
     expect(settledOutcomes).toHaveLength(1);
   });
 
+  it("ignores malformed provider events and keeps a throwing observer from failing the run", async () => {
+    const provider = fakeProvider();
+    const deltas: string[] = [];
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        onTextDelta: ({ text }) => {
+          deltas.push(text);
+          throw new Error("observer failed");
+        },
+      }),
+    );
+    const outcome = settled(runtime.start(agentRun()));
+    await provider.emit({ kind: "text-delta", sessionId });
+    await provider.emit({
+      kind: "child-agent-activity",
+      sessionId,
+      childAgentId: "child-1",
+      status: "running",
+      summary: "secret native transcript",
+    });
+    await provider.emit({ kind: "text-delta", sessionId, text: "visible", occurredAt: now });
+    await provider.emit({ kind: "completed", sessionId });
+    await expect(outcome).resolves.toMatchObject({ kind: "completed", responseText: "visible" });
+    expect(deltas).toEqual(["visible"]);
+  });
+
   it("runs the child as an in-process provider session under the clamped authority", async () => {
     const provider = fakeProvider({
       onSend: (emit) => {
