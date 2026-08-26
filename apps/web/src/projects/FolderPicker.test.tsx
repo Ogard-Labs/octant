@@ -222,7 +222,7 @@ describe("FolderPicker", () => {
     await waitFor(() => expect(onCancel).toHaveBeenCalled());
   });
 
-  it("dismisses through Escape using the owned dialog recipe", async () => {
+  it("dismisses the Add folder dialog when the user presses Escape", async () => {
     const user = userEvent.setup();
     const onCancel = vi.fn();
     render(

@@ -7,8 +7,9 @@ const BASE_UI_IMPORT = /from\s+["']@base-ui\/react(?:\/[^"']+)?["']/;
 const SHADCN_IMPORT = /from\s+["'][^"']*ui\/shadcn(?:\/[^"']+)?["']/;
 const RAW_CONTROL_OPENING_TAG = /<\s*(button|select|textarea|input|dialog)(?=\s|>)/g;
 const RAW_CONTROL_EXCEPTION = /\{?\/\*\s*ui-boundary-exception:\s*([a-z-]+)\s*\*\/\}?\s*$/i;
-const OCTANT_INPUT_TYPE = /\btype\s*=\s*["'](checkbox|radio)["']/g;
 const OCTANT_INPUT_OPEN = /<OctantInput\b/g;
+const OCTANT_INPUT_CHOICE_TYPE =
+  /\btype\s*=\s*(?:["'](checkbox|radio)["']|\{\s*["'](checkbox|radio)["']\s*\})/;
 
 export type RawControlException =
   | "native-file-input"
@@ -101,6 +102,39 @@ export function findRawControlBoundaryViolations(
     );
 }
 
+function octantInputOpeningTag(source: string, start: number): string | undefined {
+  let quote: '"' | "'" | "`" | undefined;
+  let braces = 0;
+  for (let i = start + "<OctantInput".length; i < source.length; i += 1) {
+    const ch = source[i];
+    if (ch === undefined) break;
+    if (quote !== undefined) {
+      if (ch === "\\") {
+        i += 1;
+        continue;
+      }
+      if (ch === quote) quote = undefined;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "{") {
+      braces += 1;
+      continue;
+    }
+    if (ch === "}" && braces > 0) {
+      braces -= 1;
+      continue;
+    }
+    if (braces === 0 && ch === ">") {
+      return source.slice(start, i + 1);
+    }
+  }
+  return undefined;
+}
+
 /**
  * Checkbox and radio choices have owned recipes. Using the text-input adapter
  * for those types is the same leak as a raw control: the wrong primitive paints
@@ -121,23 +155,15 @@ export function findWrongAdapterBoundaryViolations(
     ) {
       continue;
     }
-    OCTANT_INPUT_TYPE.lastIndex = 0;
-    for (const match of source.matchAll(OCTANT_INPUT_TYPE)) {
-      const index = match.index ?? 0;
-      const preceding = source.slice(Math.max(0, index - 400), index);
-      let nearestName: string | undefined;
-      let nearestIndex = -1;
-      OCTANT_INPUT_OPEN.lastIndex = 0;
-      for (const open of preceding.matchAll(OCTANT_INPUT_OPEN)) {
-        const openIndex = open.index ?? 0;
-        if (openIndex >= nearestIndex) {
-          nearestIndex = openIndex;
-          nearestName = "OctantInput";
-        }
-      }
-      if (nearestName !== "OctantInput") continue;
-      const line = source.slice(0, index).split("\n").length;
-      const type = match[1] ?? "checkbox";
+    OCTANT_INPUT_OPEN.lastIndex = 0;
+    for (const match of source.matchAll(OCTANT_INPUT_OPEN)) {
+      const openIndex = match.index ?? 0;
+      const tag = octantInputOpeningTag(source, openIndex);
+      if (tag === undefined) continue;
+      const typeMatch = OCTANT_INPUT_CHOICE_TYPE.exec(tag);
+      if (typeMatch === null) continue;
+      const line = source.slice(0, openIndex + (typeMatch.index ?? 0)).split("\n").length;
+      const type = typeMatch[1] ?? typeMatch[2] ?? "checkbox";
       violations.push(
         `${normalized}:${String(line)} uses OctantInput type="${type}"; import OctantCheckbox or OctantToggleGroup.`,
       );

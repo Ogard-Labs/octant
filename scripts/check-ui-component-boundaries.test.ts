@@ -137,4 +137,25 @@ describe("UI component boundary check", () => {
       }),
     ).toEqual([]);
   });
+
+  it("rejects a JSX-string checkbox or radio type on OctantInput", () => {
+    expect(
+      findWrongAdapterBoundaryViolations({
+        "apps/web/src/code/CodeThreadBoard.tsx":
+          "export function Board() { return <OctantInput type={\"checkbox\"} />;\nreturn <OctantInput type={'radio'} />; }",
+      }),
+    ).toEqual([
+      'apps/web/src/code/CodeThreadBoard.tsx:1 uses OctantInput type="checkbox"; import OctantCheckbox or OctantToggleGroup.',
+      'apps/web/src/code/CodeThreadBoard.tsx:2 uses OctantInput type="radio"; import OctantCheckbox or OctantToggleGroup.',
+    ]);
+  });
+
+  it("does not attribute a later checkbox type to OctantInput", () => {
+    expect(
+      findWrongAdapterBoundaryViolations({
+        "apps/web/src/code/CodeThreadBoard.tsx":
+          'export function Board() { return <OctantInput type="search" />;\nreturn <OctantCheckbox type="checkbox" />; }',
+      }),
+    ).toEqual([]);
+  });
 });
