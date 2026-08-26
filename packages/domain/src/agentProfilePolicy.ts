@@ -23,15 +23,18 @@ export type AgentProfileRejectionCode =
   | "profile-not-found"
   | "authority-escalation";
 
-export class AgentProfileRejected extends Error {
-  override readonly name = "AgentProfileRejected";
-  constructor(
-    readonly code: AgentProfileRejectionCode,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+/**
+ * Whether binding a profile would escalate past the Project's grant.
+ * Expected refusal is a value: picker and resolver callers have to mark the
+ * profile unavailable or record a downgrade rather than crash.
+ */
+export type ProfileAuthoritySafety =
+  | { readonly status: "accepted" }
+  | {
+      readonly status: "refused";
+      readonly code: Extract<AgentProfileRejectionCode, "authority-escalation">;
+      readonly reason: string;
+    };
 
 /**
  * Check whether a profile is compatible with the given mode.
@@ -50,25 +53,6 @@ export function isModelAllowedByProfile(profile: AgentProfile, modelId: Provider
 }
 
 /**
- * Validate that selecting a profile does not silently escalate authority.
- * A profile may only narrow permissions, never widen them beyond what the
- * Project/root/host already grants.
- */
-export function validateProfileAuthoritySafety(input: {
-  readonly profile: AgentProfile;
-  readonly projectExecutionPolicy: ProviderExecutionPolicy;
-}): void {
-  if (
-    POLICY_RANK[input.profile.defaultExecutionPolicy] > POLICY_RANK[input.projectExecutionPolicy]
-  ) {
-    throw new AgentProfileRejected(
-      "authority-escalation",
-      `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
-    );
-  }
-}
-
-/**
  * How much authority each posture carries. A thread may move down this list
  * when a profile is stricter than it asked to be; it may never move up.
  */
@@ -78,6 +62,39 @@ const POLICY_RANK = {
   "auto-accept-edits": 2,
   "full-access": 3,
 } as const;
+
+function narrowerPolicy(
+  left: ProviderExecutionPolicy,
+  right: ProviderExecutionPolicy,
+): ProviderExecutionPolicy {
+  return POLICY_RANK[left] < POLICY_RANK[right] ? left : right;
+}
+
+/**
+ * Validate that selecting a profile does not silently escalate authority.
+ * The posture the thread would actually run under is what has to clear the
+ * Project, not the profile's own default: a Full-access profile asked to
+ * start in Plan produces a Plan thread and takes nothing the Project has not
+ * already granted.
+ */
+export function validateProfileAuthoritySafety(input: {
+  readonly profile: AgentProfile;
+  readonly projectExecutionPolicy: ProviderExecutionPolicy;
+  readonly requestedExecutionPolicy: ProviderExecutionPolicy;
+}): ProfileAuthoritySafety {
+  const executionPolicy = narrowerPolicy(
+    input.profile.defaultExecutionPolicy,
+    input.requestedExecutionPolicy,
+  );
+  if (POLICY_RANK[executionPolicy] > POLICY_RANK[input.projectExecutionPolicy]) {
+    return {
+      status: "refused",
+      code: "authority-escalation",
+      reason: `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
+    };
+  }
+  return { status: "accepted" };
+}
 
 /**
  * How long a granted permission outlives the thread that asked for it. A
@@ -155,19 +172,24 @@ export function applyProfileToThread(input: {
       reason: `Profile "${input.profile.displayName}" does not allow model "${String(input.modelId)}".`,
     };
   }
-  const executionPolicy =
-    POLICY_RANK[input.profile.defaultExecutionPolicy] < POLICY_RANK[input.requestedExecutionPolicy]
-      ? input.profile.defaultExecutionPolicy
-      : input.requestedExecutionPolicy;
+  const executionPolicy = narrowerPolicy(
+    input.profile.defaultExecutionPolicy,
+    input.requestedExecutionPolicy,
+  );
   // The posture the thread would actually run under is what has to clear the
   // Project, not the profile's own default. A Full-access profile asked to
   // start in Plan produces a Plan thread and takes nothing the Project has not
   // already granted; refusing it would refuse the narrower of the two choices.
-  if (POLICY_RANK[executionPolicy] > POLICY_RANK[input.projectExecutionPolicy]) {
+  const authority = validateProfileAuthoritySafety({
+    profile: input.profile,
+    projectExecutionPolicy: input.projectExecutionPolicy,
+    requestedExecutionPolicy: input.requestedExecutionPolicy,
+  });
+  if (authority.status === "refused") {
     return {
       status: "refused",
-      code: "authority-escalation",
-      reason: `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
+      code: authority.code,
+      reason: authority.reason,
     };
   }
   const permissionPersistence =
@@ -181,6 +203,9 @@ export function applyProfileToThread(input: {
 /**
  * Build execution context picker entries from provider/model/profile combinations.
  * Provider remains the primary grouping; direct API endpoints are first-class.
+ *
+ * Profile entries are judged by the posture the thread asked for, not the
+ * profile's own default, and they show the narrowed result the server applies.
  */
 export function buildExecutionContextPickerEntries(input: {
   readonly providers: ReadonlyArray<{
@@ -194,6 +219,7 @@ export function buildExecutionContextPickerEntries(input: {
   readonly hostLabel: string;
   readonly mode: OctantMode;
   readonly projectExecutionPolicy: ProviderExecutionPolicy;
+  readonly requestedExecutionPolicy: ProviderExecutionPolicy;
 }): ReadonlyArray<ExecutionContextPickerEntry> {
   const entries: ExecutionContextPickerEntry[] = [];
   for (const provider of input.providers) {
@@ -207,23 +233,22 @@ export function buildExecutionContextPickerEntries(input: {
         modelDisplayName: model.displayName,
         hostId: input.hostId as ExecutionContextPickerEntry["hostId"],
         hostLabel: input.hostLabel,
-        executionPolicy: input.projectExecutionPolicy,
-        effectivePermissions: defaultPermissionsForPolicy(input.projectExecutionPolicy),
+        executionPolicy: input.requestedExecutionPolicy,
+        effectivePermissions: defaultPermissionsForPolicy(input.requestedExecutionPolicy),
       });
       // Entries with compatible profiles
       for (const profile of input.profiles) {
         if (!isProfileModeCompatible(profile, input.mode)) continue;
         if (!isModelAllowedByProfile(profile, model.id)) continue;
-        let unavailableReason: string | undefined;
-        try {
-          validateProfileAuthoritySafety({
-            profile,
-            projectExecutionPolicy: input.projectExecutionPolicy,
-          });
-        } catch (error) {
-          unavailableReason =
-            error instanceof AgentProfileRejected ? error.message : "Profile rejected.";
-        }
+        const executionPolicy = narrowerPolicy(
+          profile.defaultExecutionPolicy,
+          input.requestedExecutionPolicy,
+        );
+        const authority = validateProfileAuthoritySafety({
+          profile,
+          projectExecutionPolicy: input.projectExecutionPolicy,
+          requestedExecutionPolicy: input.requestedExecutionPolicy,
+        });
         entries.push({
           providerInstanceId: provider.instanceId,
           providerDisplayName: provider.displayName,
@@ -233,9 +258,9 @@ export function buildExecutionContextPickerEntries(input: {
           profileDisplayName: profile.displayName,
           hostId: input.hostId as ExecutionContextPickerEntry["hostId"],
           hostLabel: input.hostLabel,
-          executionPolicy: profile.defaultExecutionPolicy,
-          effectivePermissions: defaultPermissionsForPolicy(profile.defaultExecutionPolicy),
-          ...(unavailableReason === undefined ? {} : { unavailableReason }),
+          executionPolicy,
+          effectivePermissions: defaultPermissionsForPolicy(executionPolicy),
+          ...(authority.status === "refused" ? { unavailableReason: authority.reason } : {}),
         });
       }
     }
@@ -357,6 +382,7 @@ export interface ResolveEffectiveProfileInput {
   readonly mode: OctantMode;
   readonly hostId: HostId;
   readonly projectExecutionPolicy: ProviderExecutionPolicy;
+  readonly requestedExecutionPolicy: ProviderExecutionPolicy;
   readonly providers: ReadonlyArray<ProviderInstanceId>;
   readonly catalogs: ReadonlyArray<ProviderCatalogSnapshot>;
   readonly profiles: ReadonlyArray<{
@@ -394,8 +420,9 @@ const FALLBACK_CHAIN: ReadonlyArray<ExecutionResolutionSource> = [
  * Resolution order: one-off thread override > Project/mode default > user
  * default > no implicit privileged fallback. Each step is validated for
  * mode compatibility, model presence in the provider catalog, and authority
- * safety (profile policy must not exceed Project policy). Failed steps
- * record a downgrade reason and the next step is attempted.
+ * safety (the narrowed posture the thread would run under must not exceed
+ * Project policy). Failed steps record a downgrade reason and the next step
+ * is attempted.
  *
  * When all steps fail, the receipt resolves to "none" with the Project's
  * execution policy — never an implicit privileged fallback.
@@ -475,15 +502,12 @@ function validateCandidate(
     if (!isModelAllowedByProfile(candidate.profile, candidate.modelId)) {
       return "Model is not allowed by the profile's model constraints.";
     }
-    try {
-      validateProfileAuthoritySafety({
-        profile: candidate.profile,
-        projectExecutionPolicy: input.projectExecutionPolicy,
-      });
-    } catch (error) {
-      if (error instanceof AgentProfileRejected) return error.message;
-      return "Profile authority validation failed.";
-    }
+    const authority = validateProfileAuthoritySafety({
+      profile: candidate.profile,
+      projectExecutionPolicy: input.projectExecutionPolicy,
+      requestedExecutionPolicy: input.requestedExecutionPolicy,
+    });
+    if (authority.status === "refused") return authority.reason;
   }
   const capability = validateCapabilityConstraints({
     modelId: candidate.modelId,
@@ -499,7 +523,10 @@ function buildReceipt(
   input: ResolveEffectiveProfileInput,
   downgradeReasons: ExecutionDowngradeReason[],
 ): ExecutionResolutionReceipt {
-  const policy = candidate.profile?.defaultExecutionPolicy ?? input.projectExecutionPolicy;
+  const policy =
+    candidate.profile === undefined
+      ? input.requestedExecutionPolicy
+      : narrowerPolicy(candidate.profile.defaultExecutionPolicy, input.requestedExecutionPolicy);
   return {
     providerInstanceId: candidate.providerInstanceId,
     modelId: candidate.modelId,
