@@ -58,6 +58,7 @@ distilled successor of the earlier long-form design specifications.
 | [0048](0048-linux-stations-and-execution-capsules.md)         | Linux Stations isolate Code work in execution capsules            | Proposed           |
 | [0049](0049-thread-dialogue-lane.md)                          | Explicit Chat thread dialogue                                     | Accepted           |
 | [0050](0050-bounded-live-child-conversation.md)               | Bounded live child conversation is a server read                  | Accepted           |
+| [0051](0051-board-cards-summarize-plan-progress.md)           | Board cards summarize plan progress                               | Accepted           |
 
 ## Adding an ADR
 

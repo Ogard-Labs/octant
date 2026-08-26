@@ -126,11 +126,22 @@ export interface CodeBoardPullRequestSource {
   snapshot(): ThreadBoardPullRequestSnapshot | Promise<ThreadBoardPullRequestSnapshot>;
 }
 
+/**
+ * Reads a thread's live plan (0027) and reduces it to the board's
+ * step-completion count (0051). A dropped step leaves the plan's own record
+ * but no longer counts toward either side of the fraction, so a plan that
+ * dropped a step can still read as fully done.
+ */
+export interface CodeBoardPlanProgressSource {
+  read(threadId: CodeThreadId): CodeBoardCard["planProgress"];
+}
+
 export interface CodeThreadBoardServiceDependencies {
   readonly threads: CodeBoardThreadSource;
   readonly metadata: CodeThreadMetadataService;
   readonly runtime: CodeBoardRuntimeSource;
   readonly pullRequests: CodeBoardPullRequestSource;
+  readonly planProgress?: CodeBoardPlanProgressSource;
   readonly clock?: () => string;
 }
 
@@ -147,6 +158,7 @@ export class CodeThreadBoardService {
   readonly #metadata: CodeThreadMetadataService;
   readonly #runtime: CodeBoardRuntimeSource;
   readonly #pullRequests: CodeBoardPullRequestSource;
+  readonly #planProgress: CodeBoardPlanProgressSource;
   readonly #clock: () => string;
 
   constructor(dependencies: CodeThreadBoardServiceDependencies) {
@@ -154,6 +166,7 @@ export class CodeThreadBoardService {
     this.#metadata = dependencies.metadata;
     this.#runtime = dependencies.runtime;
     this.#pullRequests = dependencies.pullRequests;
+    this.#planProgress = dependencies.planProgress ?? { read: () => ({ kind: "none" }) };
     this.#clock = dependencies.clock ?? (() => new Date().toISOString());
   }
 
@@ -206,7 +219,8 @@ export class CodeThreadBoardService {
         if (metadata === undefined) return undefined;
         const activity = runtimeByThread.get(String(entry.thread.id));
         if (activity === undefined) return undefined;
-        return buildCard(entry, metadata, activity, pullRequestSnapshot);
+        const planProgress = this.#planProgress.read(entry.thread.id);
+        return buildCard(entry, metadata, activity, pullRequestSnapshot, planProgress);
       })
       .filter((card): card is CodeBoardCard => card !== undefined);
 
@@ -243,6 +257,7 @@ function buildCard(
   metadata: CodeThreadOperationalMetadata,
   activity: CodeBoardRuntimeActivity,
   pullRequestSnapshot: ThreadBoardPullRequestSnapshot,
+  planProgress: CodeBoardCard["planProgress"],
 ): CodeBoardCard {
   const pullRequestSummaries = joinCodeThreadBoardPullRequests({
     threadId: entry.thread.id,
@@ -276,6 +291,7 @@ function buildCard(
     checks: metadata.checks,
     reviewState: metadata.reviewState,
     childAgents: metadata.childAgents,
+    planProgress,
     recovery: metadata.recovery,
     githubFreshness: metadata.githubFreshness,
     ...(blockingReason === undefined ? {} : { blockingReason }),

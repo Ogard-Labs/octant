@@ -2905,6 +2905,18 @@ input.switch:checked::after {
 .board-card-facts .fact.live {
   color: var(--oct-accent-fg);
 }
+/* what the thread is doing right now — the summary a triager reads before opening it */
+.board-card-activity {
+  display: block;
+  overflow: hidden;
+  margin-top: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-transcript);
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* why a card cannot move — the one thing a triager needs and boards hide */
 .board-card-blocked {
   display: inline-flex;

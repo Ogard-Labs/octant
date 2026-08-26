@@ -626,6 +626,9 @@ function WorkBoardCardView(props: {
           {statusLabel}
         </span>
       </span>
+      {props.layout === "card" && card.childRuns.latestSummary !== undefined ? (
+        <span className="board-card-activity">{card.childRuns.latestSummary}</span>
+      ) : null}
       <span className={props.layout === "list" ? "issuerow-meta" : "board-card-facts"}>
         {cardFacts(card, props.projectName, props.providerLabel).map((fact) => (
           <span className={fact.className ?? "fact"} key={fact.key}>

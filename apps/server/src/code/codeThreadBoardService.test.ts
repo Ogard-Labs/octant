@@ -27,6 +27,7 @@ import {
 import {
   boardRuntimeActivityFromWorks,
   CodeThreadBoardService,
+  type CodeBoardPlanProgressSource,
   type CodeBoardRuntimeActivity,
   type CodeBoardThread,
 } from "./codeThreadBoardService";
@@ -189,12 +190,14 @@ function service(options: {
   readonly threads: readonly CodeBoardThread[];
   readonly runtime?: (threadId: unknown) => CodeBoardRuntimeActivity;
   readonly pullRequests?: ThreadBoardPullRequestSnapshot;
+  readonly planProgress?: CodeBoardPlanProgressSource;
 }) {
   return new CodeThreadBoardService({
     threads: { list: () => [...options.threads] },
     metadata: metadataService(),
     runtime: runtimeSource(options.runtime),
     pullRequests: { snapshot: () => options.pullRequests ?? emptyPullRequestSnapshot() },
+    ...(options.planProgress === undefined ? {} : { planProgress: options.planProgress }),
     clock: () => now,
   });
 }
@@ -588,6 +591,30 @@ describe("CodeThreadBoardService derivation", () => {
     const card = cardFor(view.cards, ids.ready);
     expect(card.pullRequestSummaries.items).toHaveLength(1);
     expect(card.pullRequestSummaries.items[0]?.readyToMerge).toBe(true);
+  });
+
+  it("reports plan progress on the matching card", async () => {
+    const board = service({
+      threads: [boardThread({ thread: thread({ id: ids.ready }) })],
+      planProgress: {
+        read: (threadId) =>
+          threadId === ids.ready ? { kind: "present", done: 3, total: 7 } : { kind: "none" },
+      },
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    expect(cardFor(view.cards, ids.ready).planProgress).toEqual({
+      kind: "present",
+      done: 3,
+      total: 7,
+    });
+  });
+
+  it("reports no plan progress when no source is configured", async () => {
+    const board = service({ threads: [boardThread({ thread: thread({ id: ids.ready }) })] });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    expect(cardFor(view.cards, ids.ready).planProgress).toEqual({ kind: "none" });
   });
 });
 

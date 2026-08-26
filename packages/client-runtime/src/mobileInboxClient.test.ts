@@ -136,6 +136,7 @@ const codeBoard = decodeCodeBoardView({
       checks: { freshness: "fresh", state: "passing" },
       reviewState: { freshness: "fresh", state: "approved" },
       childAgents: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },
+      planProgress: { kind: "none" },
       recovery: { kind: "ok" },
       githubFreshness: "fresh",
       followUp: false,
