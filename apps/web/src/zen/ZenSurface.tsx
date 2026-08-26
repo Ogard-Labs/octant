@@ -896,7 +896,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     </p>
                   ) : focusedThreadContext.threadKind === "code" ? (
                     <p className="zen-add-picker__hint" role="status">
-                      Add terminal pins the existing Code terminal. Start one from Code first.
+                      Add terminal starts a dedicated shell for this Code thread.
                     </p>
                   ) : null}
                 </div>

@@ -65,11 +65,13 @@ import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
+  decodeCodeTerminalId,
   decodeCodeThread,
   decodeCodeRelativePath,
   decodeCodeThreadId,
   type CodeDeliveryOutcomeKind,
 } from "@octant/contracts/code";
+import { decodeCodeOperationId } from "@octant/contracts/code-operations";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
 import { decodeContextSubjectRef, type ContextHealth } from "@octant/contracts/context";
 import {
@@ -3489,7 +3491,6 @@ function LaunchedShell(
     void openSelectedProject(project);
   }
 
-  /** Pin the Code thread's existing default terminal without starting one. */
   async function addZenTerminal(
     sourceContext: import("@octant/contracts/zen").ZenSourceContext,
   ): Promise<void> {
@@ -3498,7 +3499,19 @@ function LaunchedShell(
       codeController.bootstrap?.threads ?? [],
     );
     if (target === undefined) return;
-    await zen.pinTerminal(target);
+    const terminalId = decodeCodeTerminalId(crypto.randomUUID());
+    const started = await codeController.client.executeOperation({
+      kind: "start-terminal",
+      operationId: decodeCodeOperationId(crypto.randomUUID()),
+      threadId: target.threadId,
+      checkoutId: target.checkoutId,
+      terminalId,
+      columns: 100,
+      rows: 30,
+      credentialRefs: [],
+    });
+    if (started.kind !== "terminal-state" || started.state !== "running") return;
+    await zen.pinTerminal({ ...target, terminalId });
   }
 
   function canAddZenTerminal(
