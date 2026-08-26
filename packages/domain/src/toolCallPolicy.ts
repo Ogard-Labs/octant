@@ -149,7 +149,7 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
 
   // 2. Snapshotted profile tool allowlist. Empty means no constraint.
   const profileConstraint = decideProfileToolConstraint({
-    toolId: String(input.capability.id),
+    toolId: profileToolIdForCapability(String(input.capability.id)),
     toolConstraints: input.thread.toolConstraints ?? [],
     profileDisplayName: input.thread.profileDisplayName ?? "the bound profile",
   });
@@ -259,6 +259,17 @@ export function resolveNetworkEgressPolicy(input: {
     return "provider-endpoints-only";
   }
   return "unrestricted";
+}
+
+/**
+ * Profile allowlists name the app-managed tools a Code thread may call
+ * (`octant_browser`), not the closed-catalog capability ids those tools
+ * authorize through (`browser-automation`). Matching the catalog id denied
+ * an allowlisted browser call after the managed-tool gate had already
+ * admitted it.
+ */
+function profileToolIdForCapability(capabilityId: string): string {
+  return capabilityId === "browser-automation" ? "octant_browser" : capabilityId;
 }
 
 function requiredCapabilityClassForExtension(

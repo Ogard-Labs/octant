@@ -144,8 +144,29 @@ describe("ToolCallAuthorityService", () => {
     expect(decision).toMatchObject({
       kind: "deny",
       step: "profile-constraints",
-      reason: 'Profile "Reviewer" does not permit "browser-automation".',
+      reason: 'Profile "Reviewer" does not permit "octant_browser".',
     });
+  });
+
+  it("allows an allowlisted browser call whose catalog id is not the profile tool name", () => {
+    const service = new ToolCallAuthorityService({
+      resolveGrantedAuthority: () => granted,
+      resolveLiveFacts: () => ({
+        providerAppManagedTools: "supported",
+        host: { computerUseEnabled: true },
+        executionPolicy: "full-access",
+        approvalSatisfied: true,
+        externalContentIngested: false,
+        toolConstraints: ["octant_browser"],
+        profileDisplayName: "Reviewer",
+      }),
+    });
+    const decision = service.authorize({
+      threadId,
+      request: request(),
+      arguments: browserCreateArgs,
+    });
+    expect(decision.kind).toBe("allow");
   });
 
   it("still allows an ordinary posture-permitted tool when the snapshotted allowlist is empty", () => {

@@ -76,8 +76,12 @@ export class GithubReadToolService {
       execute: async ({ name, inputJson, signal }) => {
         if (signal?.aborted) return failure("tool-interrupted");
         if (name !== GITHUB_READ_TOOL_NAME) return failure("tool-unavailable");
-        const input = parseGithubReadInput(inputJson);
-        if (input === undefined) return failure("invalid-github-input");
+        // Identity first: a stale binding must not surface as a profile
+        // refusal, and malformed input must not beat either check.
+        const current = context.readThread(context.windowId, context.thread.id);
+        if (threadAuthority(context.thread, current) === "stale") {
+          return failure("thread-stale");
+        }
         const profileConstraint = decideProfileToolConstraint({
           toolId: GITHUB_READ_TOOL_NAME,
           toolConstraints: context.thread.toolConstraints ?? [],
@@ -86,7 +90,8 @@ export class GithubReadToolService {
         if (profileConstraint.status === "refused") {
           return failure("profile-tool-refused", profileConstraint.reason);
         }
-        const current = context.readThread(context.windowId, context.thread.id);
+        const input = parseGithubReadInput(inputJson);
+        if (input === undefined) return failure("invalid-github-input");
         const snapshot = await this.#snapshot(signal ?? new AbortController().signal);
         const decision = decideGithubAgentRead({
           operation: operationCapability(input.operation),

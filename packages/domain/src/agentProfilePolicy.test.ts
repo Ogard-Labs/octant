@@ -571,6 +571,31 @@ describe("agentProfilePolicy", () => {
       expect(receipt.downgradeReasons.some((r) => r.step === "project-default")).toBe(true);
     });
 
+    it("downgrades a profile whose tool allowlist needs tool calling the catalog model cannot do", () => {
+      const projectProfile = profile({
+        id: "00000000-0000-0000-0000-000000000020" as AgentProfile["id"],
+        compatibleModes: ["code"],
+        toolConstraints: ["octant_browser"],
+      });
+      const receipt = resolveEffectiveProfile(
+        baseInput({
+          catalogs: [catalog(instance().id, [model("gpt-4o", { toolCalling: "unsupported" })])],
+          projectDefault: {
+            profile: projectProfile,
+            providerInstanceId: instance().id,
+            modelId: "gpt-4o" as never,
+          },
+          profiles: [],
+        }),
+      );
+      expect(receipt.source).not.toBe("project-default");
+      expect(
+        receipt.downgradeReasons.some(
+          (reason) => reason.step === "project-default" && reason.reason.includes("tool calling"),
+        ),
+      ).toBe(true);
+    });
+
     it("fails closed without changing authority when all sources unavailable", () => {
       const receipt = resolveEffectiveProfile(
         baseInput({
