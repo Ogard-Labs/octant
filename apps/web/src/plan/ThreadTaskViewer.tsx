@@ -1,12 +1,5 @@
 import type { ThreadPlanStepId, ThreadPlanStepStatus } from "@octant/contracts";
-import {
-  CheckCircle2,
-  Circle,
-  CircleDot,
-  CircleSlash,
-  ListChecks,
-  LoaderCircle,
-} from "lucide-react";
+import { Check, CheckCircle2, ListChecks, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
@@ -103,16 +96,11 @@ export function ThreadTaskViewer(props: ThreadTaskViewerProps) {
               : `${String(done)} of ${String(counted.length)} done`}
           </span>
         </header>
-        {changedFilesLabel === undefined ? null : (
-          <p className="thread-task-viewer__evidence-detail" role="status">
-            {changedFilesLabel}
-          </p>
-        )}
         <ol className="thread-task-viewer__steps">
           {plan.steps.map((step) => (
             <li data-step-status={step.status} key={step.stepId}>
-              <span className="thread-task-viewer__mark">
-                <TaskIcon status={step.status} />
+              <span aria-hidden="true" className="thread-task-viewer__mark">
+                {step.status === "done" ? <Check size={12} strokeWidth={3} /> : null}
               </span>
               <span className="thread-task-viewer__body">
                 <span className="thread-task-viewer__title">{step.title}</span>
@@ -133,6 +121,15 @@ export function ThreadTaskViewer(props: ThreadTaskViewerProps) {
             </li>
           ))}
         </ol>
+        <p className="thread-task-viewer__footer" role="status">
+          <span className="thread-task-viewer__footer-progress">{progressLabel}</span>
+          {changedFilesLabel === undefined ? null : (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>{changedFilesLabel}</span>
+            </>
+          )}
+        </p>
         {plan.status !== "proposed" ? null : (
           <OctantButton
             disabled={controller.pending}
@@ -214,12 +211,4 @@ function Action(props: {
       {props.children}
     </OctantButton>
   );
-}
-
-function TaskIcon(props: { readonly status: ThreadPlanStepStatus }) {
-  const iconProps = { "aria-hidden": true, size: 14, strokeWidth: 1.8 } as const;
-  if (props.status === "done") return <CheckCircle2 {...iconProps} />;
-  if (props.status === "in-progress") return <CircleDot {...iconProps} />;
-  if (props.status === "dropped") return <CircleSlash {...iconProps} />;
-  return <Circle {...iconProps} />;
 }

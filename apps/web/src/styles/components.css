@@ -482,16 +482,6 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   font-variant-numeric: tabular-nums;
 }
 
-.thread-task-viewer__evidence-detail {
-  margin: 8px 2px 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Position/anchoring now comes from OctantPopover's floating positioner
-   (side="top" align="center"); only width, padding, and color remain this
-   surface's own. */
 .thread-task-viewer__popover {
   width: min(400px, calc(100vw - 32px));
   padding: 10px;
@@ -523,20 +513,36 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 
 .thread-task-viewer__steps {
   display: grid;
-  gap: 2px;
+  gap: 0;
   margin: 6px 0;
   padding: 0;
   list-style: none;
 }
 
 .thread-task-viewer__steps > li {
+  position: relative;
   display: grid;
   min-height: 34px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: start;
-  gap: 8px;
-  padding: 5px 4px;
+  gap: 10px;
+  padding: 6px 6px 6px 4px;
   border-radius: 6px;
+}
+
+/* The run of marks reads as one track rather than four loose dots, so the
+   connector is drawn between them and stopped short of the last. The rows sit
+   flush against each other, so reaching the next mark means clearing that row's
+   6px top padding and the mark's own 3px offset; anything shorter leaves a gap
+   that reads as a break in the sequence. */
+.thread-task-viewer__steps > li:not(:last-child)::before {
+  position: absolute;
+  top: 26px;
+  bottom: -9px;
+  left: 11.25px;
+  width: 1.5px;
+  background: var(--octant-border);
+  content: "";
 }
 
 .thread-task-viewer__steps > li[data-step-status="in-progress"] {
@@ -547,15 +553,44 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   text-decoration: line-through;
 }
 
+/* Drawn, not glyphed: a step's state is one mark that changes fill, so the
+   states line up on the same circle instead of on four icon silhouettes. */
 .thread-task-viewer__mark {
+  position: relative;
   display: inline-flex;
-  padding-top: 2px;
-  color: var(--octant-text-muted);
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--octant-border-strong);
+  border-radius: 50%;
+  margin-top: 3px;
+  color: var(--octant-accent-foreground);
+  background: transparent;
 }
 
-.thread-task-viewer__steps > li[data-step-status="done"] .thread-task-viewer__mark,
 .thread-task-viewer__steps > li[data-step-status="in-progress"] .thread-task-viewer__mark {
-  color: var(--octant-accent-text);
+  border-color: var(--octant-accent-text);
+}
+
+.thread-task-viewer__steps > li[data-step-status="in-progress"] .thread-task-viewer__mark::after {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--octant-accent-text);
+  content: "";
+}
+
+.thread-task-viewer__steps > li[data-step-status="done"] .thread-task-viewer__mark {
+  border-color: var(--octant-accent-text);
+  background: var(--octant-accent-text);
+}
+
+.thread-task-viewer__steps > li[data-step-status="dropped"] .thread-task-viewer__mark::after {
+  width: 7px;
+  height: 1.5px;
+  background: var(--octant-text-muted);
+  content: "";
 }
 
 .thread-task-viewer__body {
@@ -576,6 +611,24 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .thread-task-viewer__state {
   color: var(--octant-text-secondary);
   font-size: calc(10 * var(--oct-text-step));
+}
+
+/* The chip's own reading, restated where the steps it counts are on screen. */
+.thread-task-viewer__footer {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 2px 0;
+  border-top: 1px solid var(--octant-border);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-task-viewer__footer-progress {
+  color: var(--octant-text-primary);
+  font-weight: 500;
 }
 
 .thread-task-viewer__actions {
