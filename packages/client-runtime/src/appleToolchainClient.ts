@@ -110,7 +110,18 @@ async function readPng(
     };
   }
   if (response.ok && response.headers.get("content-type") === "image/png") {
-    return { status: "succeeded", blob: await response.blob() };
+    try {
+      return { status: "succeeded", blob: await response.blob() };
+    } catch (error) {
+      const interrupted = signal?.aborted || isAbortError(error);
+      return {
+        status: "failed",
+        kind: interrupted ? "interrupted" : "unavailable",
+        message: interrupted
+          ? "Apple screenshot read was interrupted."
+          : "Apple screenshot bytes are unavailable.",
+      };
+    }
   }
   let reply;
   try {

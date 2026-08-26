@@ -127,6 +127,32 @@ describe("appleToolchainClient", () => {
     });
   });
 
+  it("returns an explicit failure when screenshot body streaming fails", async () => {
+    const client = createAppleToolchainClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch: vi.fn(async () => ({
+        ok: true,
+        headers: new Headers({ "content-type": "image/png" }),
+        blob: vi.fn(async () => Promise.reject(new TypeError("stream failed"))),
+      })),
+      windowCapability: "A".repeat(43),
+    });
+
+    await expect(
+      client.readScreenshot({
+        kind: "apple-artifact-request",
+        authority: request.authority,
+        threadId: request.threadId,
+        checkoutId: request.checkoutId,
+        reference: "apple-screenshot-stream-failed",
+      }),
+    ).resolves.toEqual({
+      status: "failed",
+      kind: "unavailable",
+      message: "Apple screenshot bytes are unavailable.",
+    });
+  });
+
   it("reads a host-held screenshot as image bytes instead of a JSON envelope", async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     const fetch = vi.fn(
