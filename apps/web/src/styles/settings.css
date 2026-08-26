@@ -416,6 +416,7 @@
    also its trigger and a fieldset's heading must be its legend; before this
    they each carried their own inline-card head, which is why Appearance and
    General did not read as the same page. */
+.settings-view__content-inner .provider-settings__intro h2,
 .settings-card-section > h2,
 .settings-card-section > summary,
 .settings-card-section > legend {

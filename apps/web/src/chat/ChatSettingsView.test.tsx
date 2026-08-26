@@ -23,6 +23,10 @@ describe("ChatSettingsView", () => {
       />,
     );
 
+    expect(screen.getByRole("form", { name: "Chat defaults" })).toHaveClass(
+      "provider-settings__form",
+      "setgroup",
+    );
     expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveValue(
       "automatic",
     );

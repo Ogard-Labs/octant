@@ -85,6 +85,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       )}
       <form
         aria-label="Chat defaults"
+        className="provider-settings__form setgroup"
         onSubmit={async (event) => {
           event.preventDefault();
           const nextEndpointError = endpointValidationMessage(draft.searxngBaseUrl);

@@ -1884,6 +1884,26 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   line-height: 1.5;
 }
 
+.provider-settings__form {
+  display: grid;
+  gap: 0;
+  padding: var(--oct-space-3) var(--oct-space-4);
+}
+
+.provider-settings__form > .settings-view__field,
+.provider-settings__form > .settings-view__toggle {
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.provider-settings__form > .settings-view__field--block {
+  padding-bottom: var(--oct-space-3);
+}
+
+.provider-settings__form > .settings-view__action,
+.provider-settings__form > [role="alert"] {
+  margin-top: var(--oct-space-3);
+}
+
 .provider-settings__create label,
 .provider-card__edit label {
   display: grid;
