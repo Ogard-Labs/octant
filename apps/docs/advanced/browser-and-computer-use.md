@@ -41,19 +41,32 @@ evidence.
 
 ## Computer use
 
-Computer use is a macOS adapter with observe and control modes:
+Computer use is its own host-owned macOS surface, not the Apple workbench's
+Simulator interaction path. When a session is active it renders the
+**Computer use** lifecycle pane (eyebrow **Host-controlled computer use**)
+and, for the owning Work or Code thread, a **Computer Use** activity
+preview.
 
-- **Application allowlists** and scoped **one-time approvals** bound to host,
-  Project, thread, provider, action, and client
-- **Sensitive-field protection**
-- Visible **Stop computer use** control and a lifecycle evidence list
+Application allowlists, sensitive-field protection, and scoped one-time
+approvals bound to host, Project, thread, provider, action, and client
+govern every action before any effect.
+
+The lifecycle pane exposes:
+
+- **Approve once** and **Deny** while a one-time approval is pending
+- Visible **Stop computer use** while the session is waiting for approval,
+  running, or stopping (the thread activity preview labels the same stop
+  **Stop Computer Use**)
+- A **Computer-use lifecycle evidence** list
 - States: Waiting for approval, Running, Stopping, Stopped, Expired,
   Interrupted, Failed, Completed
+- **Retry** when the host lifecycle is unavailable, failed, or interrupted
 
-In the Apple Development Workbench, computer use is the fallback for UI that
-lacks a structured tool. The agent can never infer a tap succeeded from the
-input command returning; it must verify the next accessibility snapshot,
-screenshot, log, or assertion.
+Using computer use as the Apple workbench fallback for UI that lacks a
+structured tool — with the next accessibility snapshot, screenshot, log, or
+assertion verifying a tap — is not yet built. Today that workbench offers
+Simulator screenshots, destination controls, and the `octant_apple` tool;
+see [Apple Development Workbench](/advanced/apple-workbench).
 
 ## Boundaries
 
