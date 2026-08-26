@@ -128,6 +128,6 @@ the core Apple path.
 
 ## Next steps
 
-- [Browser and computer use](/advanced/browser-and-computer-use) for the UI fallback
+- [Browser and computer use](/advanced/browser-and-computer-use) for the host-owned computer-use surface
 - [Plugins and skills](/advanced/plugins-and-skills) for optional extension content
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries
