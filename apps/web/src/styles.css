@@ -5451,12 +5451,55 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   position: relative;
   z-index: 2;
   flex: 0 0 auto;
-  margin: 0 auto 16px;
-  box-shadow: var(--octant-shadow-sm);
+  margin: 0 auto 12px;
+  border-radius: 10px;
+  box-shadow: none;
   transition:
     border-color 140ms ease,
-    background-color 140ms ease,
-    box-shadow 140ms ease;
+    background-color 140ms ease;
+}
+
+.code-thread-workspace__composer:focus-within {
+  border-color: var(--octant-border-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-fg) 5%, transparent);
+}
+
+.code-thread-workspace__composer .composer-input {
+  min-height: 48px;
+  max-height: 180px;
+  padding: 12px 14px 10px;
+}
+
+.code-thread-workspace__composer .composer-row {
+  min-height: 40px;
+  gap: 6px;
+  padding: 4px 8px 4px 12px;
+}
+
+.code-thread-workspace__composer .composer-row [role="combobox"],
+.code-thread-workspace__composer .composer-row .composer-model-picker__trigger {
+  height: 30px;
+  min-height: 30px;
+}
+
+.code-thread-workspace__composer .composer-row .composer-model-picker__trigger {
+  padding-inline: 8px;
+  background: transparent;
+  border-color: transparent;
+}
+
+.code-thread-workspace__composer
+  .composer-row
+  .composer-model-picker__trigger:hover:not(:disabled) {
+  background: var(--oct-fg-soft);
+  border-color: var(--oct-border);
+}
+
+.code-thread-workspace__composer .composer-row > button[data-size="icon"] {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
 }
 
 .code-thread-workspace__composer--queued {
@@ -5724,10 +5767,10 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   flex-wrap: wrap;
   align-items: center;
   gap: 2px 10px;
-  min-height: 18px;
+  min-height: 16px;
   margin: 0;
-  padding: 0 var(--oct-space-3) var(--oct-space-2);
-  line-height: 1.35;
+  padding: 1px 12px 6px;
+  line-height: 1.3;
 }
 
 .code-thread-workspace__composer--queued .code-thread-workspace__status {
