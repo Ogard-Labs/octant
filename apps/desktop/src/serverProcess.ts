@@ -1,5 +1,9 @@
 import { createServer, type AddressInfo } from "node:net";
-import type { HostInfoReceipt, ServicePolicyStore } from "@octant/host-runtime";
+import {
+  HostRuntimePathError,
+  type HostInfoReceipt,
+  type ServicePolicyStore,
+} from "@octant/host-runtime";
 
 export class AutomaticHostStartupDisabled extends Error {
   readonly code = "automatic-start-disabled" as const;
@@ -114,6 +118,24 @@ export class ServerReadyTimeout extends Error {
     );
     this.name = "ServerReadyTimeout";
   }
+}
+
+export function formatDesktopStartupFailure(error: unknown): string {
+  if (error instanceof HostRuntimePathError) {
+    if (error.code === "unsafe-mode") {
+      const directory = error.path ?? "The Octant data directory";
+      return (
+        `Octant host path validation failed (unsafe-mode). ` +
+        `${directory} must have mode 0700 and must not be accessible to group or other users.`
+      );
+    }
+    if (error.path === undefined) {
+      return `Octant host path validation failed (${error.code}). ${error.message}`;
+    }
+    return `Octant host path validation failed (${error.code}): ${error.path}. ${error.message}`;
+  }
+  if (error instanceof Error) return error.message;
+  return "Octant could not start its local server.";
 }
 
 export type StorageReadyProbeOutcome =

@@ -248,6 +248,28 @@ describe("host runtime paths", () => {
     expect((await lstat(safe.dataDirectory)).mode & 0o777).toBe(0o700);
     expect((await lstat(safe.runtimeDirectory)).mode & 0o777).toBe(0o700);
   });
+
+  it("rejects an existing data directory that is accessible to group or other users", async () => {
+    const runtimeBase = await realpath(tmpdir());
+    const root = await mkdtemp(join(runtimeBase, "octant-host-mode-"));
+    temporaryRoots.push(root);
+    const dataDirectory = join(root, "data");
+    const paths = resolveHostRuntimePaths({
+      env: { OCTANT_DATA_DIR: dataDirectory },
+      platform: filesystemTestPlatform,
+      home: join(root, "home"),
+      temporaryDirectory: runtimeBase,
+      uid: process.getuid?.() ?? 1000,
+    });
+    await prepareHostRuntimePaths(paths);
+    await chmod(dataDirectory, 0o755);
+    await expect(prepareHostRuntimePaths(paths)).rejects.toMatchObject({
+      name: "HostRuntimePathError",
+      code: "unsafe-mode",
+      path: paths.dataDirectory,
+      message: "Octant runtime paths must not be accessible to group or other users.",
+    });
+  });
 });
 
 describe("owner receipts and redaction", () => {

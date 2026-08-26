@@ -28,6 +28,7 @@ import {
 } from "electron";
 import {
   deriveHostRuntimeHostId,
+  prepareHostRuntimePaths,
   readHostInfoReceipt,
   resolveHostRuntimePaths,
   ServicePolicyStore,
@@ -95,6 +96,7 @@ import { createLocalPluginFolderPicker } from "./localPluginFolderPicker";
 import {
   createSingleFlight,
   assertAutomaticHostStartupEnabled,
+  formatDesktopStartupFailure,
   probeHostInfoReceipt,
   probeLocalHost,
   reserveLoopbackPort,
@@ -1121,6 +1123,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   await assertAutomaticHostStartupEnabled(
     new ServicePolicyStore({ path: desktopHostRuntimePaths.servicePolicyPath }),
   );
+  await prepareHostRuntimePaths(desktopHostRuntimePaths);
   const root = repositoryRoot();
   const portReservation = await reserveLoopbackPort(resolveConfiguredServerPort());
   const serverUrl = resolveManagedServerUrl({
@@ -2562,9 +2565,7 @@ async function prepareToQuit(): Promise<void> {
 
 async function handleFatalStartup(error: unknown): Promise<void> {
   preparingQuit = true;
-  const message =
-    error instanceof Error ? error.message : "Octant could not start its local server.";
-  dialog.showErrorBox("Octant could not start", message);
+  dialog.showErrorBox("Octant could not start", formatDesktopStartupFailure(error));
   try {
     await shutdownSecondaryProjectWindows();
     await projectWindowLifecycle.shutdown(async () => {
