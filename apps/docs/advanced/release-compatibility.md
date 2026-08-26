@@ -4,9 +4,11 @@ description: Technical-preview boundaries, data location, and release compatibil
 
 # Release Compatibility
 
-Octant's first release is an **unsigned Apple Silicon technical preview**:
-no signing, notarization, automatic updater, Intel, Windows, or Linux
-packaging. Physical Apple devices, TestFlight, and App Store distribution are
+Octant's first release is an **Apple Silicon technical preview**. A declared
+release is signed with a Developer ID, notarized, and updates itself. A
+package you build locally is unsigned because signing needs maintainer
+credentials. The preview includes no Intel, Windows, or Linux packaging.
+Physical Apple devices, TestFlight, and App Store distribution are
 post-preview. This page records what that means for compatibility and
 migration.
 
@@ -40,16 +42,21 @@ validation remain post-preview work.
 - **Downgrade is unsupported.** Migration is forward-only and
   checksum-verified; a failed migration aborts and restores the complete
   pre-upgrade store and host-key state.
-- **Releases are not auto-applied.** There is no updater in the preview;
-  install new builds explicitly and keep a backup of your data directory.
+- **Updates apply on relaunch you choose.** A signed release checks for
+  updates, downloads them when you ask, and applies them the next time you
+  relaunch. It never replaces a running app, and it refuses to relaunch
+  while an agent is still working or a thread is waiting on you. An
+  unsigned local package cannot update itself. Keep a backup of your data
+  directory across upgrades. See [Installation](/guide/installation) for
+  how an update is verified.
 
 ## What is excluded from the preview
 
 - Full IDE/LSP/debugger/extension-host scope (Monaco and external-editor
   handoff are primary)
 - Hosted relay, Octant cloud account, and multi-host federation
-- Automatic updater, signing, notarization, Intel/Windows/Linux packaging,
-  and native mobile
+- Intel, Windows, and Linux packaging, and native mobile store
+  distribution
 - Mutating PR review and merge operations
 - Schedules, connector/OAuth marketplace, and data migration from current
   Octant
