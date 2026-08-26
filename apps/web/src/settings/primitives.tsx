@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import type { SettingsScope } from "./registry";
 
 const SCOPE_LABELS: Readonly<Record<SettingsScope, string>> = {
@@ -129,5 +129,55 @@ export function SettingGroup({ label, description, children }: SettingGroupProps
       {description === undefined ? null : <p className="setgroup-note">{description}</p>}
       {children}
     </div>
+  );
+}
+
+export function SettingsPanel(props: {
+  readonly title: string;
+  readonly description?: ReactNode;
+  readonly children: ReactNode;
+  readonly tone?: "default" | "danger";
+}) {
+  const titleId = useId();
+  return (
+    <section
+      aria-labelledby={titleId}
+      className={`settings-panel${props.tone === "danger" ? " settings-panel--danger" : ""}`}
+    >
+      <header className="settings-panel__header">
+        <h2 id={titleId}>{props.title}</h2>
+        {props.description === undefined ? null : <p>{props.description}</p>}
+      </header>
+      <div className="settings-panel__body">{props.children}</div>
+    </section>
+  );
+}
+
+export function SettingsFactList(props: {
+  readonly facts: ReadonlyArray<{ readonly label: string; readonly value: ReactNode }>;
+}) {
+  return (
+    <dl className="settings-fact-list">
+      {props.facts.map((fact) => (
+        <div className="settings-fact-list__row" key={fact.label}>
+          <dt>{fact.label}</dt>
+          <dd>{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+export function SettingsState(props: {
+  readonly kind: "empty" | "loading" | "error" | "success";
+  readonly children: ReactNode;
+}) {
+  return (
+    <p
+      className={`settings-state settings-state--${props.kind}`}
+      role={props.kind === "error" ? "alert" : "status"}
+    >
+      {props.children}
+    </p>
   );
 }

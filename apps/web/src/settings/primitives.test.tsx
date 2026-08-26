@@ -1,7 +1,15 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ScopeIndicator, scopeLabel, SettingGroup, SettingRow } from "./primitives";
+import {
+  ScopeIndicator,
+  scopeLabel,
+  SettingGroup,
+  SettingRow,
+  SettingsFactList,
+  SettingsPanel,
+  SettingsState,
+} from "./primitives";
 
 describe("scopeLabel", () => {
   it("maps each scope to a human label", () => {
@@ -91,6 +99,42 @@ describe("SettingRow", () => {
     );
     await user.click(screen.getByRole("switch", { name: "Enable Chat" }));
     expect(onChange).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("shared Settings surfaces", () => {
+  it("renders one quiet panel hierarchy", () => {
+    render(
+      <SettingsPanel title="Identity" description="Facts reported by this host.">
+        <p>Panel content</p>
+      </SettingsPanel>,
+    );
+
+    const panel = screen.getByRole("region", { name: "Identity" });
+    expect(panel).toHaveClass("settings-panel");
+    expect(screen.getByText("Facts reported by this host.")).toBeVisible();
+  });
+
+  it("renders aligned facts without inventing controls", () => {
+    render(
+      <SettingsFactList
+        facts={[
+          { label: "Owner mode", value: "Web session" },
+          { label: "Wire version", value: "1" },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Owner mode").tagName).toBe("DT");
+    expect(screen.getByText("Web session").tagName).toBe("DD");
+  });
+
+  it("uses one state treatment for loading and errors", () => {
+    const { rerender } = render(<SettingsState kind="loading">Loading host status…</SettingsState>);
+    expect(screen.getByRole("status")).toHaveClass("settings-state", "settings-state--loading");
+
+    rerender(<SettingsState kind="error">Host is unavailable.</SettingsState>);
+    expect(screen.getByRole("alert")).toHaveClass("settings-state", "settings-state--error");
   });
 });
 

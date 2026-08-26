@@ -108,6 +108,8 @@ describe("HostSettingsSection", () => {
     expect(screen.getByText(/42 \/ 42/)).toBeInTheDocument();
     expect(screen.getByText("platform:systemd-user-units")).toBeInTheDocument();
     expect(screen.getByText("platform:keychain")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Identity" })).toHaveClass("settings-panel");
+    expect(screen.getByRole("region", { name: "Readiness" })).toHaveClass("settings-panel");
   });
 
   it("keeps the section navigable by headings for assistive technology", async () => {

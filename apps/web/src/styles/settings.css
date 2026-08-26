@@ -228,6 +228,120 @@
 
 /* --- Settings primitives: app-side residue over .setrow/.setgroup --- */
 
+.settings-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-panel__header {
+  display: grid;
+  gap: 3px;
+  padding-inline: 2px;
+}
+
+.settings-panel__header h2,
+.settings-panel__header p {
+  margin: 0;
+}
+
+.settings-panel__header h2 {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.settings-panel__header p {
+  max-width: 68ch;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
+.settings-panel__body {
+  overflow: hidden;
+  background: var(--octant-surface-muted);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.settings-panel--danger .settings-panel__body {
+  border-color: color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
+}
+
+.settings-panel__stack {
+  display: grid;
+  gap: var(--oct-space-3);
+  padding: 12px 14px;
+}
+
+.settings-fact-list {
+  display: grid;
+  margin: 0;
+}
+
+.settings-fact-list__row {
+  display: grid;
+  min-height: 38px;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
+  align-items: center;
+  gap: var(--oct-space-4);
+  padding: 8px 14px;
+}
+
+.settings-fact-list__row + .settings-fact-list__row {
+  border-top: 1px solid var(--octant-border);
+}
+
+.settings-fact-list dt,
+.settings-fact-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-fact-list dt {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.settings-fact-list dd {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+}
+
+.settings-state {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--octant-text-secondary);
+  background: var(--octant-surface-muted);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  font-size: var(--oct-text-sm);
+}
+
+.settings-panel__body .settings-state {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.settings-state--error {
+  color: var(--octant-danger-text);
+}
+
+.settings-state--success {
+  color: var(--octant-success-text);
+}
+
+@media (max-width: 720px) {
+  .settings-fact-list__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
 .setrow[data-focused="true"] {
   scroll-margin-top: 16px;
 }
@@ -1180,6 +1294,11 @@
   overflow-wrap: anywhere;
 }
 
+.host-settings > .host-settings__controls:first-child {
+  justify-content: flex-end;
+  margin-bottom: -8px;
+}
+
 .host-settings__controls {
   display: flex;
   flex-wrap: wrap;
@@ -1338,7 +1457,7 @@
    states use one Settings rhythm. */
 .host-settings,
 .github-settings {
-  gap: 0;
+  gap: 20px;
 }
 
 .host-settings__heading,

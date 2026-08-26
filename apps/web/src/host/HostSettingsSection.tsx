@@ -18,6 +18,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
+import { SettingsFactList, SettingsPanel, SettingsState } from "../settings/primitives";
 import {
   AutomationNotificationSettings,
   type AutomationNotificationSettingsProps,
@@ -159,7 +160,7 @@ export function HostSettingsSection({
   if (statusState.kind === "loading") {
     return (
       <section aria-label="Host" className="host-settings" id="settings-host">
-        <p role="status">Loading host status…</p>
+        <SettingsState kind="loading">Loading host status…</SettingsState>
       </section>
     );
   }
@@ -167,7 +168,7 @@ export function HostSettingsSection({
   if (statusState.kind === "error") {
     return (
       <section aria-label="Host" className="host-settings" id="settings-host">
-        <p role="alert">{statusState.message}</p>
+        <SettingsState kind="error">{statusState.message}</SettingsState>
         <OctantButton
           onClick={() => {
             setStatusState({ kind: "loading" });
@@ -199,152 +200,156 @@ export function HostSettingsSection({
         </OctantButton>
       </div>
 
-      <h2 className="host-settings__heading">Identity</h2>
-      <dl className="host-settings__facts">
-        <dt>Host</dt>
-        <dd>{status.identity.hostId}</dd>
-        <dt>Instance</dt>
-        <dd>{status.identity.instanceId}</dd>
-        <dt>Owner mode</dt>
-        <dd>{OWNER_MODE_LABELS[status.identity.serviceMode]}</dd>
-        <dt>Server version</dt>
-        <dd>{status.versions.server}</dd>
-        <dt>Wire version</dt>
-        <dd>{status.versions.wire}</dd>
-      </dl>
-
-      <h2 className="host-settings__heading">Service policy</h2>
-      <p className="host-settings__note" id={policyStateId}>
-        {policy.kind === "known"
-          ? policy.enabled
-            ? `Automatic startup is enabled (updated ${policy.updatedAt}).`
-            : `Automatic startup is disabled (updated ${policy.updatedAt}).`
-          : `Startup policy is unavailable. ${policy.reason}`}
-      </p>
-      <div className="host-settings__controls">
-        <OctantButton
-          aria-describedby={policyStateId}
-          disabled={lifecycleBusy || policyToggle.kind === "unavailable"}
-          onClick={() => void runLifecycle(policyToggleAction)}
-          type="button"
-          variant="secondary"
-        >
-          {policyToggleAction === "disable"
-            ? "Disable automatic startup"
-            : "Enable automatic startup"}
-        </OctantButton>
-      </div>
-
-      <h2 className="host-settings__heading">Readiness</h2>
-      <dl className="host-settings__facts">
-        <dt>Store</dt>
-        <dd>
-          {status.readiness.store.state}, integrity {status.readiness.store.integrity}
-        </dd>
-        <dt>Replay (journal / projections)</dt>
-        <dd>
-          {status.readiness.replay.journalHead} / {status.readiness.replay.projections}
-        </dd>
-        <dt>Connected clients</dt>
-        <dd>{status.readiness.clientsConnected}</dd>
-        <dt>Uptime</dt>
-        <dd>{formatUptime(status.readiness.uptimeSeconds)}</dd>
-        <dt>Active work</dt>
-        <dd>
-          {status.work.active}
-          {status.work.attentionRequired ? " (attention required)" : ""}
-        </dd>
-      </dl>
-
-      <h2 className="host-settings__heading">Capabilities</h2>
-      {status.capabilities.length === 0 ? (
-        <p className="host-settings__note">No platform capabilities reported.</p>
-      ) : (
-        <ul className="host-settings__capabilities">
-          {status.capabilities.map((capability) => (
-            <li key={capability}>{capability}</li>
-          ))}
-        </ul>
-      )}
-
-      <h2 className="host-settings__heading">Lifecycle</h2>
-      <div className="host-settings__controls">
-        <OctantButton
-          disabled={lifecycleBusy || status.lifecycle.stop.kind === "unavailable"}
-          onClick={() => void runLifecycle("stop")}
-          type="button"
-          variant="secondary"
-        >
-          Stop host
-        </OctantButton>
-        <OctantButton
-          disabled={lifecycleBusy || status.lifecycle.restart.kind === "unavailable"}
-          onClick={() => void runLifecycle("restart")}
-          type="button"
-          variant="secondary"
-        >
-          Restart host
-        </OctantButton>
-      </div>
-      {status.lifecycle.stop.kind === "unavailable" ? (
-        <p className="host-settings__note">{status.lifecycle.stop.reason}</p>
-      ) : null}
-      {status.lifecycle.restart.kind === "unavailable" ? (
-        <p className="host-settings__note">{status.lifecycle.restart.reason}</p>
-      ) : null}
-      {lifecycleMessage === undefined ? null : lifecycleMessage.kind === "accepted" ? (
-        <p className="host-settings__note" role="status">
-          {lifecycleMessage.text}
-        </p>
-      ) : (
-        <p className="host-settings__note" role="alert">
-          {lifecycleMessage.text}
-        </p>
-      )}
-
-      <h2 className="host-settings__heading">Backup</h2>
-      <div className="host-settings__field">
-        <label htmlFor={backupLabelId}>Backup label</label>
-        <OctantInput
-          id={backupLabelId}
-          maxLength={64}
-          onChange={(event) => setBackupLabel(event.target.value)}
-          placeholder="Optional label, e.g. pre-upgrade"
-          value={backupLabel}
+      <SettingsPanel title="Identity" description="The host process serving this workspace.">
+        <SettingsFactList
+          facts={[
+            { label: "Host", value: status.identity.hostId },
+            { label: "Instance", value: status.identity.instanceId },
+            { label: "Owner mode", value: OWNER_MODE_LABELS[status.identity.serviceMode] },
+            { label: "Server version", value: status.versions.server },
+            { label: "Wire version", value: status.versions.wire },
+          ]}
         />
-      </div>
-      <div className="host-settings__controls">
-        <OctantButton
-          disabled={backupState.kind === "pending" || !backupLabelValid}
-          onClick={() => void runBackup()}
-          type="button"
-          variant="secondary"
-        >
-          {backupState.kind === "pending" ? "Creating backup…" : "Create backup"}
-        </OctantButton>
-      </div>
-      {backupState.kind === "done" ? <BackupOutcomeView outcome={backupState.outcome} /> : null}
-      {backupState.kind === "error" ? (
-        <p className="host-settings__note" role="alert">
-          {backupState.message}
-        </p>
-      ) : null}
+      </SettingsPanel>
 
-      <h2 className="host-settings__heading">Recovery</h2>
-      <p className="host-settings__note">
-        Restore replaces the live store, so it never runs while the host is online. Requesting a
-        restore returns the offline procedure.
-      </p>
-      <div className="host-settings__controls">
-        <OctantButton onClick={() => void runRestore()} type="button" variant="secondary">
-          Restore from backup
-        </OctantButton>
-      </div>
-      {restoreOutcome === undefined ? null : (
-        <p aria-live="polite" className="host-settings__note">
-          {restoreOutcome.guidance}
-        </p>
-      )}
+      <SettingsPanel title="Service policy" description="Controls automatic host startup.">
+        <div className="settings-panel__stack">
+          <p className="host-settings__note" id={policyStateId}>
+            {policy.kind === "known"
+              ? policy.enabled
+                ? `Automatic startup is enabled (updated ${policy.updatedAt}).`
+                : `Automatic startup is disabled (updated ${policy.updatedAt}).`
+              : `Startup policy is unavailable. ${policy.reason}`}
+          </p>
+          <div className="host-settings__controls">
+            <OctantButton
+              aria-describedby={policyStateId}
+              disabled={lifecycleBusy || policyToggle.kind === "unavailable"}
+              onClick={() => void runLifecycle(policyToggleAction)}
+              type="button"
+              variant="secondary"
+            >
+              {policyToggleAction === "disable"
+                ? "Disable automatic startup"
+                : "Enable automatic startup"}
+            </OctantButton>
+          </div>
+        </div>
+      </SettingsPanel>
+
+      <SettingsPanel title="Readiness" description="Current storage and client health.">
+        <SettingsFactList
+          facts={[
+            {
+              label: "Store",
+              value: `${status.readiness.store.state}, integrity ${status.readiness.store.integrity}`,
+            },
+            {
+              label: "Replay (journal / projections)",
+              value: `${status.readiness.replay.journalHead} / ${status.readiness.replay.projections}`,
+            },
+            { label: "Connected clients", value: status.readiness.clientsConnected },
+            { label: "Uptime", value: formatUptime(status.readiness.uptimeSeconds) },
+            {
+              label: "Active work",
+              value: `${status.work.active}${status.work.attentionRequired ? " (attention required)" : ""}`,
+            },
+          ]}
+        />
+      </SettingsPanel>
+
+      <SettingsPanel title="Capabilities" description="Host services available to this app.">
+        <div className="settings-panel__stack">
+          {status.capabilities.length === 0 ? (
+            <SettingsState kind="empty">No platform capabilities reported.</SettingsState>
+          ) : (
+            <ul className="host-settings__capabilities">
+              {status.capabilities.map((capability) => (
+                <li key={capability}>{capability}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </SettingsPanel>
+
+      <SettingsPanel title="Lifecycle" description="Stop or restart the selected host process.">
+        <div className="settings-panel__stack">
+          <div className="host-settings__controls">
+            <OctantButton
+              disabled={lifecycleBusy || status.lifecycle.stop.kind === "unavailable"}
+              onClick={() => void runLifecycle("stop")}
+              type="button"
+              variant="secondary"
+            >
+              Stop host
+            </OctantButton>
+            <OctantButton
+              disabled={lifecycleBusy || status.lifecycle.restart.kind === "unavailable"}
+              onClick={() => void runLifecycle("restart")}
+              type="button"
+              variant="secondary"
+            >
+              Restart host
+            </OctantButton>
+          </div>
+          {status.lifecycle.stop.kind === "unavailable" ? (
+            <p className="host-settings__note">{status.lifecycle.stop.reason}</p>
+          ) : null}
+          {status.lifecycle.restart.kind === "unavailable" ? (
+            <p className="host-settings__note">{status.lifecycle.restart.reason}</p>
+          ) : null}
+          {lifecycleMessage === undefined ? null : lifecycleMessage.kind === "accepted" ? (
+            <SettingsState kind="success">{lifecycleMessage.text}</SettingsState>
+          ) : (
+            <SettingsState kind="error">{lifecycleMessage.text}</SettingsState>
+          )}
+        </div>
+      </SettingsPanel>
+
+      <SettingsPanel title="Backup" description="Create a named snapshot before risky changes.">
+        <div className="settings-panel__stack">
+          <div className="host-settings__field">
+            <label htmlFor={backupLabelId}>Backup label</label>
+            <OctantInput
+              id={backupLabelId}
+              maxLength={64}
+              onChange={(event) => setBackupLabel(event.target.value)}
+              placeholder="Optional label, e.g. pre-upgrade"
+              value={backupLabel}
+            />
+          </div>
+          <div className="host-settings__controls">
+            <OctantButton
+              disabled={backupState.kind === "pending" || !backupLabelValid}
+              onClick={() => void runBackup()}
+              type="button"
+              variant="secondary"
+            >
+              {backupState.kind === "pending" ? "Creating backup…" : "Create backup"}
+            </OctantButton>
+          </div>
+          {backupState.kind === "done" ? <BackupOutcomeView outcome={backupState.outcome} /> : null}
+          {backupState.kind === "error" ? (
+            <SettingsState kind="error">{backupState.message}</SettingsState>
+          ) : null}
+        </div>
+      </SettingsPanel>
+
+      <SettingsPanel
+        title="Recovery"
+        description="Restore replaces the live store and runs only while the host is offline."
+      >
+        <div className="settings-panel__stack">
+          <div className="host-settings__controls">
+            <OctantButton onClick={() => void runRestore()} type="button" variant="secondary">
+              Restore from backup
+            </OctantButton>
+          </div>
+          {restoreOutcome === undefined ? null : (
+            <SettingsState kind="loading">{restoreOutcome.guidance}</SettingsState>
+          )}
+        </div>
+      </SettingsPanel>
 
       <ThreadRetentionPanel client={client} />
 
@@ -408,153 +413,154 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
     ({ kind: "forever" } as const);
 
   return (
-    <div id="settings-thread-retention">
-      <h2 className="host-settings__heading">Thread retention</h2>
-      <p className="host-settings__note">
-        A retention window never deletes on its own. A confirmed purge removes the named thread — or
-        expired threads in a Project or on this host — from ordinary reads, including derived
-        projections and that thread's own journal events. Unsent composer drafts for those threads
-        are removed from this client. Other threads, Projects, usage, and credentials stay. SQLite
-        free pages may keep bytes until the next store rebuild.
-      </p>
-      <p className="host-settings__note">Host default: {formatRetentionWindow(state)}.</p>
-      <div className="host-settings__field">
-        <label htmlFor="thread-retention-scope">Scope</label>
-        <OctantNativeSelect
-          id="thread-retention-scope"
-          onChange={(event) => setScopeKind(event.currentTarget.value as RetentionScope["kind"])}
-          value={scopeKind}
-        >
-          <option value="host">This host</option>
-          <option value="project">One Project</option>
-          <option value="thread">One thread</option>
-        </OctantNativeSelect>
-      </div>
-      {scopeKind === "project" ? (
+    <SettingsPanel
+      title="Thread retention"
+      description="Set retention windows or permanently purge selected thread history."
+      tone="danger"
+    >
+      <div className="settings-panel__stack" id="settings-thread-retention">
+        <p className="host-settings__note">
+          A retention window never deletes on its own. A confirmed purge removes the named thread —
+          or expired threads in a Project or on this host — from ordinary reads, including derived
+          projections and that thread's own journal events. Unsent composer drafts for those threads
+          are removed from this client. Other threads, Projects, usage, and credentials stay. SQLite
+          free pages may keep bytes until the next store rebuild.
+        </p>
+        <p className="host-settings__note">Host default: {formatRetentionWindow(state)}.</p>
         <div className="host-settings__field">
-          <label htmlFor="thread-retention-project">Project id</label>
-          <OctantInput
-            id="thread-retention-project"
-            onChange={(event) => setProjectId(event.currentTarget.value)}
-            value={projectId}
-          />
+          <label htmlFor="thread-retention-scope">Scope</label>
+          <OctantNativeSelect
+            id="thread-retention-scope"
+            onChange={(event) => setScopeKind(event.currentTarget.value as RetentionScope["kind"])}
+            value={scopeKind}
+          >
+            <option value="host">This host</option>
+            <option value="project">One Project</option>
+            <option value="thread">One thread</option>
+          </OctantNativeSelect>
         </div>
-      ) : null}
-      {scopeKind === "thread" ? (
-        <>
+        {scopeKind === "project" ? (
           <div className="host-settings__field">
-            <label htmlFor="thread-retention-mode">Mode</label>
-            <OctantNativeSelect
-              id="thread-retention-mode"
-              onChange={(event) => setMode(event.currentTarget.value as "chat" | "work" | "code")}
-              value={mode}
-            >
-              <option value="chat">Chat</option>
-              <option value="work">Work</option>
-              <option value="code">Code</option>
-            </OctantNativeSelect>
-          </div>
-          <div className="host-settings__field">
-            <label htmlFor="thread-retention-thread">Thread id</label>
+            <label htmlFor="thread-retention-project">Project id</label>
             <OctantInput
-              id="thread-retention-thread"
-              onChange={(event) => setThreadId(event.currentTarget.value)}
-              value={threadId}
+              id="thread-retention-project"
+              onChange={(event) => setProjectId(event.currentTarget.value)}
+              value={projectId}
             />
           </div>
-        </>
-      ) : null}
-      <div className="host-settings__field">
-        <label htmlFor="thread-retention-window">Retention window</label>
-        <OctantNativeSelect
-          id="thread-retention-window"
-          onChange={(event) => setWindowValue(event.currentTarget.value)}
-          value={windowValue}
-        >
-          <option value="forever">Keep forever</option>
-          <option value="7">7 days</option>
-          <option value="30">30 days</option>
-          <option value="90">90 days</option>
-          <option value="365">365 days</option>
-        </OctantNativeSelect>
+        ) : null}
+        {scopeKind === "thread" ? (
+          <>
+            <div className="host-settings__field">
+              <label htmlFor="thread-retention-mode">Mode</label>
+              <OctantNativeSelect
+                id="thread-retention-mode"
+                onChange={(event) => setMode(event.currentTarget.value as "chat" | "work" | "code")}
+                value={mode}
+              >
+                <option value="chat">Chat</option>
+                <option value="work">Work</option>
+                <option value="code">Code</option>
+              </OctantNativeSelect>
+            </div>
+            <div className="host-settings__field">
+              <label htmlFor="thread-retention-thread">Thread id</label>
+              <OctantInput
+                id="thread-retention-thread"
+                onChange={(event) => setThreadId(event.currentTarget.value)}
+                value={threadId}
+              />
+            </div>
+          </>
+        ) : null}
+        <div className="host-settings__field">
+          <label htmlFor="thread-retention-window">Retention window</label>
+          <OctantNativeSelect
+            id="thread-retention-window"
+            onChange={(event) => setWindowValue(event.currentTarget.value)}
+            value={windowValue}
+          >
+            <option value="forever">Keep forever</option>
+            <option value="7">7 days</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="365">365 days</option>
+          </OctantNativeSelect>
+        </div>
+        <div className="host-settings__controls">
+          <OctantButton
+            disabled={busy || scope() === undefined}
+            onClick={() => {
+              const next = scope();
+              if (next === undefined) return;
+              setBusy(true);
+              void client
+                .setThreadRetention({ scope: next, window: selectedWindow })
+                .then((result) => {
+                  setOutcome(result);
+                  // Success is the state snapshot; only a refusal carries `kind`.
+                  if (!("kind" in result)) setState(result);
+                })
+                .finally(() => setBusy(false));
+            }}
+            type="button"
+          >
+            Set retention window
+          </OctantButton>
+        </div>
+        <label className="host-settings__note">
+          <OctantCheckbox
+            checked={confirmPurge}
+            onChange={(event) => setConfirmPurge(event.currentTarget.checked)}
+          />{" "}
+          I understand this permanently erases the selected thread history.
+        </label>
+        <div className="host-settings__controls">
+          <OctantButton
+            disabled={busy || !confirmPurge || scope() === undefined}
+            onClick={() => {
+              const next = scope();
+              if (next === undefined) return;
+              setBusy(true);
+              void client
+                .purgeThreads({ scope: next, confirm: true })
+                .then(async (result) => {
+                  setOutcome(result);
+                  if (!("kind" in result)) {
+                    purgeComposerThreadDrafts([
+                      ...result.purged.map((thread) => String(thread.threadId)),
+                      ...result.alreadyPurged.map((thread) => String(thread.threadId)),
+                    ]);
+                  }
+                  await load();
+                })
+                .finally(() => {
+                  setBusy(false);
+                  setConfirmPurge(false);
+                });
+            }}
+            type="button"
+            variant="secondary"
+          >
+            Purge
+          </OctantButton>
+        </div>
+        {outcome === undefined ? null : "kind" in outcome ? (
+          <SettingsState kind="error">{outcome.guidance}</SettingsState>
+        ) : "operation" in outcome ? (
+          <SettingsState kind="success">
+            Purged {outcome.purged.length} thread{outcome.purged.length === 1 ? "" : "s"}
+            {outcome.alreadyPurged.length === 0
+              ? ""
+              : `, ${outcome.alreadyPurged.length} already purged`}
+            . Deleted {outcome.deleted.join(", ") || "nothing"}. Retained{" "}
+            {outcome.retained.join(", ")}.
+          </SettingsState>
+        ) : (
+          <SettingsState kind="success">Retention window saved.</SettingsState>
+        )}
       </div>
-      <div className="host-settings__controls">
-        <OctantButton
-          disabled={busy || scope() === undefined}
-          onClick={() => {
-            const next = scope();
-            if (next === undefined) return;
-            setBusy(true);
-            void client
-              .setThreadRetention({ scope: next, window: selectedWindow })
-              .then((result) => {
-                setOutcome(result);
-                // Success is the state snapshot; only a refusal carries `kind`.
-                if (!("kind" in result)) setState(result);
-              })
-              .finally(() => setBusy(false));
-          }}
-          type="button"
-        >
-          Set retention window
-        </OctantButton>
-      </div>
-      <label className="host-settings__note">
-        <OctantCheckbox
-          checked={confirmPurge}
-          onChange={(event) => setConfirmPurge(event.currentTarget.checked)}
-        />{" "}
-        I understand this permanently erases the selected thread history.
-      </label>
-      <div className="host-settings__controls">
-        <OctantButton
-          disabled={busy || !confirmPurge || scope() === undefined}
-          onClick={() => {
-            const next = scope();
-            if (next === undefined) return;
-            setBusy(true);
-            void client
-              .purgeThreads({ scope: next, confirm: true })
-              .then(async (result) => {
-                setOutcome(result);
-                if (!("kind" in result)) {
-                  purgeComposerThreadDrafts([
-                    ...result.purged.map((thread) => String(thread.threadId)),
-                    ...result.alreadyPurged.map((thread) => String(thread.threadId)),
-                  ]);
-                }
-                await load();
-              })
-              .finally(() => {
-                setBusy(false);
-                setConfirmPurge(false);
-              });
-          }}
-          type="button"
-          variant="secondary"
-        >
-          Purge
-        </OctantButton>
-      </div>
-      {outcome === undefined ? null : "kind" in outcome ? (
-        <p className="host-settings__note" role="alert">
-          {outcome.guidance}
-        </p>
-      ) : "operation" in outcome ? (
-        <p className="host-settings__note" role="status">
-          Purged {outcome.purged.length} thread{outcome.purged.length === 1 ? "" : "s"}
-          {outcome.alreadyPurged.length === 0
-            ? ""
-            : `, ${outcome.alreadyPurged.length} already purged`}
-          . Deleted {outcome.deleted.join(", ") || "nothing"}. Retained{" "}
-          {outcome.retained.join(", ")}.
-        </p>
-      ) : (
-        <p className="host-settings__note" role="status">
-          Retention window saved.
-        </p>
-      )}
-    </div>
+    </SettingsPanel>
   );
 }
 
