@@ -2,16 +2,16 @@ import type { SettingsDeepLink } from "@octant/contracts";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
   Archive,
-  Blocks,
-  Bot,
+  ChartNoAxesColumn,
   ChevronUp,
   Compass,
-  Gauge,
-  Library,
+  FileStack,
+  GitFork,
   Plug,
+  Puzzle,
   Settings,
   Sparkles,
-  Users,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { ComponentType } from "react";
@@ -47,10 +47,10 @@ export interface SidebarProfileProps {
 }
 
 const secondaryIcons: Record<SidebarAppMenuDescriptorId, LucideIcon> = {
-  agents: Users,
-  automations: Bot,
-  "artifact-library": Library,
-  plugins: Blocks,
+  agents: GitFork,
+  automations: Workflow,
+  "artifact-library": FileStack,
+  plugins: Puzzle,
 };
 
 /**
@@ -107,7 +107,7 @@ export function SidebarProfile(props: SidebarProfileProps) {
                   onClick={() => props.onOpenSettings()}
                 />
                 <ProfileAction
-                  icon={Gauge}
+                  icon={ChartNoAxesColumn}
                   label="Usage"
                   onClick={() => props.onOpenSettings({ section: "usage" })}
                 />
