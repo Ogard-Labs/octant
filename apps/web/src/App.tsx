@@ -3780,6 +3780,7 @@ function LaunchedShell(
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             isNarrow={isNarrow}
             material={material}
+            nativeTitlebarInset={hostReservesTitlebarInset}
             {...(sidebarCollapsed && !isNarrow
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}

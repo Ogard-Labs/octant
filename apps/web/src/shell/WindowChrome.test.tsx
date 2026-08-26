@@ -598,7 +598,7 @@ describe("WindowChrome", () => {
     expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
   });
 
-  it("carves the collapsed sidebar opener out of the native drag region", async () => {
+  it("keeps the browser sidebar opener clear of native titlebar spacing", async () => {
     const user = userEvent.setup();
     const onExpandSidebar = vi.fn();
     const { container } = renderChrome({ onExpandSidebar });
@@ -606,17 +606,25 @@ describe("WindowChrome", () => {
     const leading = container.querySelector(".window-chrome__leading");
     const opener = screen.getByRole("button", { name: "Show sidebar" });
 
-    expect(leading).toHaveClass("window-no-drag");
+    expect(leading).toHaveClass("window-no-drag", "window-chrome__leading--browser");
     expect(leading).toContainElement(opener);
-    expect(cssRule(".window-chrome__leading .window-chrome__button")).toContain("top: 0;");
-    expect(cssRule(".window-chrome__leading .window-chrome__button")).toContain(
-      "color: var(--oct-fg-2);",
+    expect(cssRule(".window-chrome__leading--browser .window-chrome__button")).toContain(
+      "width: 28px;",
     );
+    expect(leading?.querySelector(".window-chrome__traffic-light-space")).not.toBeInTheDocument();
+    await user.click(opener);
+    expect(onExpandSidebar).toHaveBeenCalledOnce();
+  });
+
+  it("reserves traffic-light space for the native sidebar opener", () => {
+    const { container } = renderChrome({ nativeTitlebarInset: true, onExpandSidebar: vi.fn() });
+
+    const leading = container.querySelector(".window-chrome__leading");
+    expect(leading).not.toHaveClass("window-chrome__leading--browser");
+    expect(leading?.querySelector(".window-chrome__traffic-light-space")).toBeInTheDocument();
     expect(cssRule(".window-chrome__traffic-light-space")).toContain(
       "flex: 0 0 var(--octant-native-traffic-light-leading-width, 74px);",
     );
-    await user.click(opener);
-    expect(onExpandSidebar).toHaveBeenCalledOnce();
   });
 
   it("reserves the title band for whichever window controls the thread actually renders", () => {

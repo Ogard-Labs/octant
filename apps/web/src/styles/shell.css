@@ -119,6 +119,13 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   pointer-events: auto;
 }
 
+.window-chrome__leading--browser {
+  position: relative;
+  z-index: 8;
+  padding: 2px 4px;
+  pointer-events: auto;
+}
+
 .window-chrome__leading .window-chrome__button {
   position: relative;
   top: 0;
@@ -127,6 +134,13 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   min-width: 22px;
   min-height: 22px;
   color: var(--oct-fg-2);
+}
+
+.window-chrome__leading--browser .window-chrome__button {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
 }
 
 /* Same reserve the sidebar keeps for the macOS traffic lights (see
