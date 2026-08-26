@@ -419,7 +419,16 @@ function paneAddTabOptions(
   if (mode === "chat" && surface.kind === "chat-thread") {
     return [{ kind: "side-chat", label: "Side Chat" }];
   }
-  return [];
+  if (mode === "chat") {
+    return withoutCurrentSurface([{ kind: "thread", label: "Conversation" }], surface);
+  }
+  return withoutCurrentSurface(
+    [
+      { kind: "thread", label: "Conversation" },
+      { kind: "files", label: "Files" },
+    ],
+    surface,
+  );
 }
 
 function withoutCurrentSurface(
@@ -427,17 +436,19 @@ function withoutCurrentSurface(
   surface: WorkspaceTab,
 ): ReadonlyArray<{ readonly kind: WorkspaceSurfaceKind; readonly label: string }> {
   const currentKind: WorkspaceSurfaceKind | undefined =
-    surface.kind === "browser"
-      ? "browser"
-      : surface.kind === "files"
-        ? "files"
-        : surface.kind === "side-chat"
-          ? "side-chat"
-          : surface.kind === "code-local-review"
-            ? "diff"
-            : surface.kind === "code-git"
-              ? "git-review"
-              : undefined;
+    surface.kind === "welcome" || surface.kind === "draft-thread"
+      ? "thread"
+      : surface.kind === "browser"
+        ? "browser"
+        : surface.kind === "files"
+          ? "files"
+          : surface.kind === "side-chat"
+            ? "side-chat"
+            : surface.kind === "code-local-review"
+              ? "diff"
+              : surface.kind === "code-git"
+                ? "git-review"
+                : undefined;
   return currentKind === undefined
     ? options
     : options.filter((option) => option.kind !== currentKind);

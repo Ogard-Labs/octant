@@ -87,6 +87,36 @@ describe("SplitWorkspace", () => {
     expect(onAddSurface).toHaveBeenCalledWith(firstPaneId, "terminal");
   });
 
+  it("keeps add-tab available on an unbound Browser without offering Terminal authority", async () => {
+    const user = userEvent.setup();
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "browser",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        title: "Browser",
+      },
+    });
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        mode="code"
+        onAddSurface={vi.fn()}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add tab" }));
+    expect(await screen.findByRole("menuitem", { name: "Conversation" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Files" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Browser" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
   it("marks the focused pane and puts pane operations in a keyboard disclosure", async () => {
     const user = userEvent.setup();
     const handlers = splitCallbacks();
