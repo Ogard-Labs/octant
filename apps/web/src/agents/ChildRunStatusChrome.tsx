@@ -46,11 +46,26 @@ export function ChildRunStatusChrome(props: ChildRunStatusChromeProps) {
   return (
     <section aria-label="Child run status" className="child-run-status">
       <div className="child-run-status__bar">
-        <p className="child-run-status__state">
-          <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span>{summary.label}</span>
-        </p>
-        <p className="child-run-status__detail">{summary.detail}</p>
+        <div className="child-run-status__summary">
+          <p className="child-run-status__state">
+            <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+            <span>{summary.label}</span>
+          </p>
+          {summary.currentTask === undefined ? (
+            <p className="child-run-status__detail">{summary.detail}</p>
+          ) : (
+            <p className="child-run-status__task">
+              <span>{summary.currentRole}</span>
+              <strong>{summary.currentTask}</strong>
+            </p>
+          )}
+        </div>
+        <div className="child-run-status__metrics">
+          <span className="sr-only">{summary.detail}</span>
+          {summary.working > 0 ? <span>{summary.working} running</span> : null}
+          {summary.waiting > 0 ? <span>{summary.waiting} waiting</span> : null}
+          {summary.blocked > 0 ? <span>{summary.blocked} blocked</span> : null}
+        </div>
         <div className="child-run-status__actions">
           {props.onAddAgent === undefined ? null : (
             <OctantButton onClick={props.onAddAgent} size="sm" type="button" variant="ghost">

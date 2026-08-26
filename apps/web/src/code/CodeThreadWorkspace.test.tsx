@@ -150,6 +150,25 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
+  it("shows a waiting turn as compact status instead of an alert card", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnError: "The provider turn is waiting for approval, input, or recovery.",
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(
+      screen.getByText("Waiting for approval or input").closest('[role="status"]'),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("The provider turn is waiting for approval, input, or recovery."),
+    ).not.toBeInTheDocument();
+  });
+
   it("reads a plan the assistant wrote as a plan, not as one long line", () => {
     render(
       <CodeThreadWorkspace

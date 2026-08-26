@@ -44,6 +44,16 @@ export function markInteraction(layer: InteractionLayer, name: string): void {
   }
 }
 
+export function markInteractionAfterPaint(name: string): void {
+  if (!isEnabled()) return;
+  const afterFrame = () => markInteraction("renderer", `${name}-painted`);
+  if (typeof requestAnimationFrame !== "function") {
+    queueMicrotask(afterFrame);
+    return;
+  }
+  requestAnimationFrame(() => requestAnimationFrame(afterFrame));
+}
+
 export function readInteractionMarks(): ReadonlyArray<InteractionMark> {
   return holder().__OCTANT_PERF_MARKS ?? [];
 }

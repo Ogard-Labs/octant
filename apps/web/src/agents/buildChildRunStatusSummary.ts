@@ -19,6 +19,8 @@ export interface ChildRunStatusSummary {
   readonly label: string;
   /** One sentence explaining the count, for the chrome's accessible name. */
   readonly detail: string;
+  readonly currentTask?: string;
+  readonly currentRole?: string;
   /** Run ids the parent thread may cancel right now. */
   readonly stoppableRunIds: ReadonlyArray<string>;
   /**
@@ -83,6 +85,7 @@ export function buildChildRunStatusSummary(
   // most needs the user, not the most common one.
   const state: ChildRunStatusState =
     blocked > 0 ? "blocked" : waiting > 0 ? "waiting" : working > 0 ? "working" : "none";
+  const current = currentEntry(entries, state);
   return {
     outstanding,
     working,
@@ -91,10 +94,27 @@ export function buildChildRunStatusSummary(
     state,
     label: `${countLabel(outstanding)} · ${stateLabel(state)}`,
     detail: detailLabel({ outstanding, working, waiting, blocked }),
+    ...(current === undefined ? {} : { currentTask: current.task, currentRole: current.role }),
     stoppableRunIds,
     confirmationRequired: stoppableRunIds.length > 1,
     deliveryEvidence: { active, unacknowledgedResults },
   };
+}
+
+function currentEntry(
+  entries: ReadonlyArray<AgentHierarchyInputEntry>,
+  state: ChildRunStatusState,
+): AgentHierarchyInputEntry | undefined {
+  if (state === "blocked") {
+    return entries.find(
+      (entry) =>
+        BLOCKED.has(entry.lifecycleStatus) &&
+        entry.resultAcknowledgement.required &&
+        !entry.resultAcknowledgement.acknowledged,
+    );
+  }
+  if (state === "waiting") return entries.find((entry) => WAITING.has(entry.lifecycleStatus));
+  return entries.find((entry) => WORKING.has(entry.lifecycleStatus));
 }
 
 function countLabel(outstanding: number): string {

@@ -521,7 +521,7 @@ export function useChatController(options: ChatControllerOptions) {
   }, [loadBootstrap]);
 
   useEffect(() => {
-    if (bootstrap === undefined) return;
+    if (bootstrap === undefined || navigationRefreshMs <= 0) return;
     let cancelled = false;
     let inFlight = false;
     const refresh = async () => {
