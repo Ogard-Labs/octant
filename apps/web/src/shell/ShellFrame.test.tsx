@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
-import { NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT } from "@octant/contracts/shell";
+import {
+  NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
+  NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH,
+} from "@octant/contracts/shell";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { describe, expect, it, vi } from "vitest";
 import { ShellFrame } from "./ShellFrame";
@@ -58,6 +61,11 @@ describe("ShellFrame", () => {
       "height: var(--octant-native-hidden-inset-titlebar-height);",
     );
     expect(nativeDragTarget).toContain("pointer-events: auto;");
+    expect(
+      cssRule(
+        'html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__native-drag-strip',
+      ),
+    ).toContain("left: var(--octant-window-chrome-leading-width, 148px);");
   });
 
   it("owns one edge-to-edge landmark composition without an outer client frame", () => {
@@ -83,6 +91,7 @@ describe("ShellFrame", () => {
     expect(shell).toHaveStyle({
       "--octant-context-sidebar-width": "360px",
       "--octant-native-hidden-inset-titlebar-height": `${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px`,
+      "--octant-native-traffic-light-leading-width": `${NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH}px`,
       "--octant-sidebar-width": "244px",
     });
     expect(shell).not.toHaveAttribute("data-client-frame");
@@ -293,9 +302,9 @@ describe("ShellFrame", () => {
     expect(chrome).toContain("background: transparent;");
     expect(chrome).toContain("border-bottom: 0;");
     expect(chrome).toContain("pointer-events: none;");
-    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: calc(var(--oct-space-2) + 4px);",
-    );
+    expect(
+      cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome'),
+    ).not.toContain("top: calc(var(--oct-space-2) + 4px);");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
       "z-index: 7;",
     );

@@ -83,12 +83,12 @@ export function assertNativeTitlebarActionResult(
  * CSS/window points, not screenshot pixels, so Retina screenshots do not move
  * a target outside the compact title rail.
  *
- * Placement is a sanity check, not the hit-test guarantee. Measuring the
- * running app showed macOS delivers pointer events to web content well inside
- * this rail, so a control's height above the traffic lights never decided
- * whether it was clickable. What actually swallowed these controls was renderer
- * stacking — the pane header covering the chrome, and its trailing drag region
- * reaching under them. The click pass below is what proves they still work.
+ * Placement is a sanity check, not the packaged click guarantee. A custom
+ * `trafficLightPosition` resizes `NSTitlebarContainerView` to
+ * `buttonHeight + 2 * y` and that native overlay eats renderer hits; CSS
+ * z-index cannot beat it. The desktop presentation therefore omits a custom
+ * position so AppKit keeps the default hiddenInset container. The click pass
+ * below is still what proves packaged controls work.
  */
 export function assertNativeTitlebarTargetsInRail(
   snapshot: NativeWindowSnapshot,
