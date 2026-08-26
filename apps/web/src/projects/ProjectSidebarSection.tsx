@@ -24,16 +24,32 @@ import {
   Terminal,
   type LucideIcon,
 } from "lucide-react";
+import { groupProjectsForView, sortProjectsForView } from "@octant/domain";
 import { ContextHealthWarning } from "../context/ContextHealthWarning";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import { OctantField, OctantFieldGroup, OctantFieldLabel } from "../ui/base/OctantField";
+import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
-import { OctantPopover } from "../ui/base/OctantPopover";
-import { OctantSelectField } from "../ui/base/OctantSelect";
+import {
+  OctantMenu,
+  OctantMenuCheckboxItem,
+  OctantMenuGroup,
+  OctantMenuGroupLabel,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRadioGroup,
+  OctantMenuRadioItem,
+  OctantMenuRoot,
+  OctantMenuSeparator,
+  OctantMenuSub,
+  OctantMenuSubPopup,
+  OctantMenuSubTrigger,
+  OctantMenuTrigger,
+  type OctantMenuItem,
+} from "../ui/base/OctantMenu";
 import {
   ALL_CODE_PROJECTS_VIEW_ID,
   ALL_CODE_PROJECTS_VIEW_NAME,
@@ -62,12 +78,8 @@ import {
   type CodeProjectViewIcon,
   type CodeProjectViewInput,
   type CodeProjectViewState,
-  type ProjectViewActivityPeriod,
   type ProjectViewEnvironment,
   type ProjectViewFilters,
-  type ProjectViewGrouping,
-  type ProjectViewLifecycle,
-  type ProjectViewSort,
   type ProjectViewMode,
 } from "../code/codeProjectViewModel";
 import {
@@ -290,7 +302,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const visibleProjects =
     currentFilters === undefined
       ? projectCandidates
-      : sortProjectsByView(projectCandidates, currentFilters.sorting, timeFilteredThreads ?? []);
+      : sortProjectsForView(projectCandidates, currentFilters.sorting, timeFilteredThreads ?? []);
   const visibleProjectIds = new Set(visibleProjects.map((project) => String(project.id)));
   const viewScopedThreads =
     currentFilters === undefined || timeFilteredThreads === undefined
@@ -859,57 +871,6 @@ function sortProjects(
   );
 }
 
-function sortProjectsByView(
-  projects: ReadonlyArray<ProjectSummary>,
-  sorting: ProjectViewSort,
-  threads: ReadonlyArray<ChatThreadNavigationItem>,
-): ReadonlyArray<ProjectSummary> {
-  const latestByProject = new Map<string, string>();
-  for (const thread of threads) {
-    if (thread.projectId === undefined || thread.updatedAt === undefined) continue;
-    const current = latestByProject.get(thread.projectId);
-    if (current === undefined || thread.updatedAt > current) {
-      latestByProject.set(thread.projectId, thread.updatedAt);
-    }
-  }
-  return [...projects].sort((left, right) => {
-    if (sorting === "alphabetical") {
-      return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
-    }
-    if (sorting === "created") {
-      const leftCreated = String(left.createdAt ?? "");
-      const rightCreated = String(right.createdAt ?? "");
-      return rightCreated.localeCompare(leftCreated) || left.name.localeCompare(right.name);
-    }
-    const leftRecency = latestByProject.get(String(left.id)) ?? String(left.updatedAt ?? "");
-    const rightRecency = latestByProject.get(String(right.id)) ?? String(right.updatedAt ?? "");
-    return rightRecency.localeCompare(leftRecency) || left.name.localeCompare(right.name);
-  });
-}
-
-function groupProjectsForView(
-  projects: ReadonlyArray<ProjectSummary>,
-  grouping: ProjectViewGrouping,
-  environments?: ReadonlyMap<string, ProjectViewEnvironment>,
-): ReadonlyArray<{ readonly label: string; readonly projects: ReadonlyArray<ProjectSummary> }> {
-  const groups = new Map<string, ProjectSummary[]>();
-  for (const project of projects) {
-    const environment = environments?.get(String(project.id));
-    const label =
-      grouping === "none"
-        ? "Projects"
-        : grouping === "environment"
-          ? (environment?.name ?? "Local")
-          : project.lifecycle === "archived"
-            ? "Archived"
-            : "Active";
-    const current = groups.get(label);
-    if (current === undefined) groups.set(label, [project]);
-    else current.push(project);
-  }
-  return [...groups.entries()].map(([label, grouped]) => ({ label, projects: grouped }));
-}
-
 function ActivityViewToggle(props: { readonly enabled: boolean; readonly onToggle: () => void }) {
   const [host, setHost] = useState<Element | null>(null);
   useEffect(() => {
@@ -1106,7 +1067,7 @@ function CodeProjectViewSwitcher(props: {
           </OctantContextMenu>
         </div>
       )}
-      <ProjectViewFilterPopover
+      <ProjectViewFilterMenu
         environmentOptions={props.environmentOptions}
         filters={props.filters}
         onChange={props.onFiltersChange}
@@ -1183,24 +1144,23 @@ const PROJECT_VIEW_GROUPING_OPTIONS = [
 const PROJECT_VIEW_SORTING_OPTIONS = [
   { id: "recency", label: "Recency" },
   { id: "alphabetical", label: "Alphabetical" },
-  { id: "created", label: "Created" },
+  { id: "created", label: "Created time" },
 ] as const;
 const PROJECT_VIEW_ACTIVITY_OPTIONS = [
   { id: "all", label: "Any activity" },
   { id: "today", label: "Today" },
   { id: "3-days", label: "Last 3 days" },
-  { id: "7-days", label: "Last week" },
-  { id: "14-days", label: "Last 2 weeks" },
+  { id: "7-days", label: "Last 7 days" },
+  { id: "14-days", label: "Last 14 days" },
   { id: "30-days", label: "Last 30 days" },
   { id: "custom", label: "Custom range" },
 ] as const;
 
-function ProjectViewFilterPopover(props: {
+function ProjectViewFilterMenu(props: {
   readonly environmentOptions: ReadonlyArray<ProjectViewEnvironment>;
   readonly filters: ProjectViewFilters;
   readonly onChange: (filters: ProjectViewFilters) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const activityRangeErrorId = useId();
   const options = useMemo(() => {
     const local = { id: "local", name: "Local" };
@@ -1217,6 +1177,8 @@ function ProjectViewFilterPopover(props: {
     (props.filters.grouping === "project" ? 0 : 1) +
     (props.filters.sorting === "recency" ? 0 : 1) +
     (props.filters.activity === "all" ? 0 : 1);
+  const triggerLabel =
+    activeCount === 0 ? "Project view filters" : `Project view filters, ${activeCount} active`;
 
   function update(change: Partial<ProjectViewFilters>): void {
     props.onChange({ ...props.filters, ...change });
@@ -1234,167 +1196,203 @@ function ProjectViewFilterPopover(props: {
   }
 
   return (
-    <OctantPopover
-      className="project-view-filter-popover w-64 max-w-[calc(100vw-24px)]"
-      description="Filter and organize the Projects in this view."
-      onOpenChange={setOpen}
-      open={open}
-      title="Project view filters"
-      trigger={<ListFilter aria-hidden="true" size={14} strokeWidth={1.8} />}
-      triggerLabel={
-        activeCount === 0 ? "Project view filters" : `Project view filters, ${activeCount} active`
-      }
-    >
-      <div className="project-view-filter-popover__content" data-project-view-filter-content>
-        <div className="project-view-filter-popover__header">
-          <span>Filters</span>
-          {activeCount === 0 ? null : (
-            <span className="project-view-filter-popover__active-count">{activeCount} active</span>
-          )}
-        </div>
-        <OctantFieldGroup className="project-view-filter-popover__field-grid">
-          <OctantField className="project-view-filter-popover__field">
-            <OctantFieldLabel>Lifecycle</OctantFieldLabel>
-            <OctantSelectField
-              options={PROJECT_VIEW_LIFECYCLE_OPTIONS}
-              onValueChange={(value) => {
-                if (value === "active" || value === "archived" || value === "all") {
-                  update({ lifecycle: value as ProjectViewLifecycle });
-                }
-              }}
-              value={props.filters.lifecycle}
-            />
-          </OctantField>
-          <OctantField className="project-view-filter-popover__field">
-            <OctantFieldLabel>Thread activity</OctantFieldLabel>
-            <OctantSelectField
-              options={PROJECT_VIEW_ACTIVITY_OPTIONS}
-              onValueChange={(value) => {
-                if (
-                  ["all", "today", "3-days", "7-days", "14-days", "30-days", "custom"].includes(
-                    value,
-                  )
-                ) {
-                  update({ activity: value as ProjectViewActivityPeriod });
-                }
-              }}
-              value={props.filters.activity}
-            />
-          </OctantField>
-        </OctantFieldGroup>
-        <fieldset className="project-view-filter-popover__checks">
-          <legend>Environment</legend>
-          <div className="project-view-filter-popover__environment-options">
-            <label className="project-view-filter-popover__check">
-              <OctantCheckbox
-                checked={environmentSelection.length === 0}
-                onChange={() => update({ environmentIds: [] })}
+    <OctantMenuRoot>
+      <OctantMenuTrigger
+        aria-label={triggerLabel}
+        className="code-project-views__filter"
+        title={triggerLabel}
+      >
+        <ListFilter aria-hidden="true" size={14} strokeWidth={1.8} />
+      </OctantMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner
+          align="end"
+          className="z-50 outline-none window-no-drag"
+          side="bottom"
+        >
+          <OctantMenuPopup
+            aria-label="Project view filters"
+            className="min-w-56 max-w-[calc(100vw-24px)]"
+          >
+            <OctantMenuGroup>
+              <OctantMenuGroupLabel>Filters</OctantMenuGroupLabel>
+              <FilterRadioSubmenu
+                label="Lifecycle"
+                onValueChange={(value) => {
+                  const option = PROJECT_VIEW_LIFECYCLE_OPTIONS.find(
+                    (candidate) => candidate.id === value,
+                  );
+                  if (option !== undefined) update({ lifecycle: option.id });
+                }}
+                options={PROJECT_VIEW_LIFECYCLE_OPTIONS}
+                value={props.filters.lifecycle}
               />
-              All environments
-            </label>
-            {options.map((option) => (
-              <label className="project-view-filter-popover__check" key={option.id}>
-                <OctantCheckbox
-                  checked={environmentSelection.includes(option.id)}
-                  onChange={() => toggleEnvironment(option.id)}
-                />
-                {option.name}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        <label className="project-view-filter-popover__check">
-          <OctantCheckbox
-            checked={props.filters.showEmptyProjects}
-            onChange={(event) => update({ showEmptyProjects: event.currentTarget.checked })}
-          />
-          Show empty Projects
-        </label>
-        <OctantFieldGroup className="project-view-filter-popover__field-grid">
-          <OctantField className="project-view-filter-popover__field">
-            <OctantFieldLabel>Group by</OctantFieldLabel>
-            <OctantSelectField
-              options={PROJECT_VIEW_GROUPING_OPTIONS}
-              onValueChange={(value) => {
-                if (["project", "environment", "status", "none"].includes(value)) {
-                  update({ grouping: value as ProjectViewGrouping });
-                }
-              }}
-              value={props.filters.grouping}
-            />
-          </OctantField>
-          <OctantField className="project-view-filter-popover__field">
-            <OctantFieldLabel>Sort by</OctantFieldLabel>
-            <OctantSelectField
-              options={PROJECT_VIEW_SORTING_OPTIONS}
-              onValueChange={(value) => {
-                if (["recency", "alphabetical", "created"].includes(value)) {
-                  update({ sorting: value as ProjectViewSort });
-                }
-              }}
-              value={props.filters.sorting}
-            />
-          </OctantField>
-        </OctantFieldGroup>
-        {props.filters.activity === "custom" ? (
-          <OctantFieldGroup className="project-view-filter-popover__date-grid">
-            <OctantField className="project-view-filter-popover__field">
-              <OctantFieldLabel>From</OctantFieldLabel>
-              <OctantInput
-                aria-describedby={
-                  activityRangeError === undefined ? undefined : activityRangeErrorId
-                }
-                aria-invalid={activityRangeError === undefined ? undefined : true}
-                aria-label="Activity from"
-                onChange={(event) =>
-                  update({
-                    activityRange: {
-                      ...(props.filters.activityRange?.to === undefined
-                        ? {}
-                        : { to: props.filters.activityRange.to }),
-                      from: event.currentTarget.value,
-                    },
-                  })
-                }
-                type="date"
-                value={props.filters.activityRange?.from ?? ""}
-              />
-            </OctantField>
-            <OctantField className="project-view-filter-popover__field">
-              <OctantFieldLabel>To</OctantFieldLabel>
-              <OctantInput
-                aria-describedby={
-                  activityRangeError === undefined ? undefined : activityRangeErrorId
-                }
-                aria-invalid={activityRangeError === undefined ? undefined : true}
-                aria-label="Activity to"
-                onChange={(event) =>
-                  update({
-                    activityRange: {
-                      ...(props.filters.activityRange?.from === undefined
-                        ? {}
-                        : { from: props.filters.activityRange.from }),
-                      to: event.currentTarget.value,
-                    },
-                  })
-                }
-                type="date"
-                value={props.filters.activityRange?.to ?? ""}
-              />
-            </OctantField>
-            {activityRangeError === undefined ? null : (
-              <p
-                className="field-error project-view-filter-popover__date-error"
-                id={activityRangeErrorId}
-                role="alert"
+              <OctantMenuSub>
+                <OctantMenuSubTrigger>Environment</OctantMenuSubTrigger>
+                <OctantMenuSubPopup>
+                  <OctantMenuCheckboxItem
+                    checked={environmentSelection.length === 0}
+                    onCheckedChange={(checked) => {
+                      if (checked) update({ environmentIds: [] });
+                    }}
+                  >
+                    All environments
+                  </OctantMenuCheckboxItem>
+                  {options.map((option) => (
+                    <OctantMenuCheckboxItem
+                      checked={environmentSelection.includes(option.id)}
+                      key={option.id}
+                      onCheckedChange={() => toggleEnvironment(option.id)}
+                    >
+                      {option.name}
+                    </OctantMenuCheckboxItem>
+                  ))}
+                </OctantMenuSubPopup>
+              </OctantMenuSub>
+              <OctantMenuCheckboxItem
+                checked={props.filters.showEmptyProjects}
+                onCheckedChange={(checked) => update({ showEmptyProjects: checked })}
               >
-                {activityRangeError}
-              </p>
-            )}
-          </OctantFieldGroup>
-        ) : null}
-      </div>
-    </OctantPopover>
+                Show empty Projects
+              </OctantMenuCheckboxItem>
+            </OctantMenuGroup>
+            <OctantMenuSeparator />
+            <OctantMenuGroup>
+              <FilterRadioSubmenu
+                label="Group by"
+                onValueChange={(value) => {
+                  const option = PROJECT_VIEW_GROUPING_OPTIONS.find(
+                    (candidate) => candidate.id === value,
+                  );
+                  if (option !== undefined) update({ grouping: option.id });
+                }}
+                options={PROJECT_VIEW_GROUPING_OPTIONS}
+                value={props.filters.grouping}
+              />
+              <FilterRadioSubmenu
+                label="Sort by"
+                onValueChange={(value) => {
+                  const option = PROJECT_VIEW_SORTING_OPTIONS.find(
+                    (candidate) => candidate.id === value,
+                  );
+                  if (option !== undefined) update({ sorting: option.id });
+                }}
+                options={PROJECT_VIEW_SORTING_OPTIONS}
+                value={props.filters.sorting}
+              />
+            </OctantMenuGroup>
+            <OctantMenuSeparator />
+            <OctantMenuSub>
+              <OctantMenuSubTrigger>Activity</OctantMenuSubTrigger>
+              <OctantMenuSubPopup>
+                <OctantMenuRadioGroup
+                  onValueChange={(value) => {
+                    const option = PROJECT_VIEW_ACTIVITY_OPTIONS.find(
+                      (candidate) => candidate.id === value,
+                    );
+                    if (option !== undefined) update({ activity: option.id });
+                  }}
+                  value={props.filters.activity}
+                >
+                  {PROJECT_VIEW_ACTIVITY_OPTIONS.map((option) => (
+                    <OctantMenuRadioItem closeOnClick={false} key={option.id} value={option.id}>
+                      {option.label}
+                    </OctantMenuRadioItem>
+                  ))}
+                </OctantMenuRadioGroup>
+                {props.filters.activity === "custom" ? (
+                  <>
+                    <OctantMenuSeparator />
+                    <OctantField className="gap-1 px-2 py-1.5">
+                      <OctantFieldLabel>From</OctantFieldLabel>
+                      <OctantInput
+                        aria-describedby={
+                          activityRangeError === undefined ? undefined : activityRangeErrorId
+                        }
+                        aria-invalid={activityRangeError === undefined ? undefined : true}
+                        aria-label="Activity from"
+                        onChange={(event) =>
+                          update({
+                            activityRange: {
+                              ...(props.filters.activityRange?.to === undefined
+                                ? {}
+                                : { to: props.filters.activityRange.to }),
+                              from: event.currentTarget.value,
+                            },
+                          })
+                        }
+                        onKeyDown={(event) => event.stopPropagation()}
+                        type="date"
+                        value={props.filters.activityRange?.from ?? ""}
+                      />
+                    </OctantField>
+                    <OctantField className="gap-1 px-2 py-1.5">
+                      <OctantFieldLabel>To</OctantFieldLabel>
+                      <OctantInput
+                        aria-describedby={
+                          activityRangeError === undefined ? undefined : activityRangeErrorId
+                        }
+                        aria-invalid={activityRangeError === undefined ? undefined : true}
+                        aria-label="Activity to"
+                        onChange={(event) =>
+                          update({
+                            activityRange: {
+                              ...(props.filters.activityRange?.from === undefined
+                                ? {}
+                                : { from: props.filters.activityRange.from }),
+                              to: event.currentTarget.value,
+                            },
+                          })
+                        }
+                        onKeyDown={(event) => event.stopPropagation()}
+                        type="date"
+                        value={props.filters.activityRange?.to ?? ""}
+                      />
+                    </OctantField>
+                    {activityRangeError === undefined ? null : (
+                      <p
+                        className="px-2 pb-1.5 text-sm text-destructive"
+                        id={activityRangeErrorId}
+                        role="alert"
+                      >
+                        {activityRangeError}
+                      </p>
+                    )}
+                  </>
+                ) : null}
+              </OctantMenuSubPopup>
+            </OctantMenuSub>
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
+  );
+}
+
+function FilterRadioSubmenu(props: {
+  readonly label: string;
+  readonly onValueChange: (value: string) => void;
+  readonly options: ReadonlyArray<{ readonly id: string; readonly label: string }>;
+  readonly value: string;
+}) {
+  return (
+    <OctantMenuSub>
+      <OctantMenuSubTrigger>{props.label}</OctantMenuSubTrigger>
+      <OctantMenuSubPopup>
+        <OctantMenuRadioGroup
+          onValueChange={(value) => {
+            if (typeof value === "string") props.onValueChange(value);
+          }}
+          value={props.value}
+        >
+          {props.options.map((option) => (
+            <OctantMenuRadioItem closeOnClick={false} key={option.id} value={option.id}>
+              {option.label}
+            </OctantMenuRadioItem>
+          ))}
+        </OctantMenuRadioGroup>
+      </OctantMenuSubPopup>
+    </OctantMenuSub>
   );
 }
 

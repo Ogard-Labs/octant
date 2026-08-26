@@ -10,6 +10,7 @@ import {
   filterProjectsForView,
   projectViewActivityRangeError,
   projectViewActivityRange,
+  projectViewEnvironmentOptionsFromHosts,
   readCodeProjectViewState,
   readProjectViewPreferences,
   readProjectViewState,
@@ -223,6 +224,53 @@ describe("codeProjectViewModel", () => {
       activity: "3-days",
     });
     expect(readProjectViewPreferences("code", storage)).toEqual(defaultProjectViewPreferences());
+  });
+
+  it("keeps the saved Project set when filter JSON is malformed", () => {
+    const storage = memoryStorage({
+      [CODE_PROJECT_VIEWS_STORAGE_KEY]: JSON.stringify({
+        activeViewId: "view-main",
+        views: [
+          {
+            id: "view-main",
+            name: "Main",
+            projectIds: [alpha.id, beta.id],
+            icon: "rocket",
+            color: "purple",
+            filters: {
+              lifecycle: "nope",
+              environmentIds: 12,
+              grouping: "provider",
+              activity: "unread",
+            },
+          },
+        ],
+      }),
+    });
+    const restored = readCodeProjectViewState(storage);
+    expect(restored.views[0]).toMatchObject({
+      id: "view-main",
+      name: "Main",
+      projectIds: [alpha.id, beta.id],
+      icon: "rocket",
+      color: "purple",
+      filters: defaultProjectViewPreferences().filters,
+    });
+    expect(visibleCodeProjects([alpha, beta], restored)).toEqual([alpha, beta]);
+  });
+
+  it("offers Local plus named connected hosts and never a host the window did not report", () => {
+    expect(projectViewEnvironmentOptionsFromHosts([])).toEqual([{ id: "local", name: "Local" }]);
+    expect(
+      projectViewEnvironmentOptionsFromHosts([
+        { hostId: "local", displayName: "This Mac" },
+        { hostId: "devbox", displayName: "Devbox" },
+        { hostId: "gone", displayName: "   " },
+      ]),
+    ).toEqual([
+      { id: "local", name: "Local" },
+      { id: "devbox", name: "Devbox" },
+    ]);
   });
 
   it("filters Projects by lifecycle and only passed environment metadata", () => {

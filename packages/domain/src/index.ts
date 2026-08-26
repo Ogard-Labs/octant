@@ -61,6 +61,7 @@ export * from "./previewPolicy";
 export * from "./parallelRunPolicy";
 export * from "./productFeedbackPolicy";
 export * from "./projectPolicy";
+export * from "./projectViewPolicy";
 export * from "./providerCapacityPolicy";
 export * from "./modelCatalogPolicy";
 export * from "./modelPickerPolicy";

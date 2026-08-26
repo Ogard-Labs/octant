@@ -1,5 +1,5 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
-import { Check } from "lucide-react";
+import { Check, ChevronRight } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { useRef } from "react";
 import { cn } from "./utils";
@@ -88,6 +88,100 @@ export function DropdownMenuItem({
       closeOnClick
       {...props}
     />
+  );
+}
+
+export function DropdownMenuSeparator({
+  className,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.Separator>) {
+  return (
+    <MenuPrimitive.Separator
+      className={cn("-mx-1 my-1 h-px bg-border", className)}
+      data-slot="dropdown-menu-separator"
+      {...props}
+    />
+  );
+}
+
+export function DropdownMenuCheckboxItem({
+  className,
+  children,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.CheckboxItem>) {
+  return (
+    <MenuPrimitive.CheckboxItem
+      className={cn(dropdownMenuItemClassName, className)}
+      data-slot="dropdown-menu-checkbox-item"
+      {...props}
+    >
+      {children}
+      <MenuPrimitive.CheckboxItemIndicator className="octant-menu__indicator ml-auto text-foreground">
+        <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+      </MenuPrimitive.CheckboxItemIndicator>
+    </MenuPrimitive.CheckboxItem>
+  );
+}
+
+export function DropdownMenuRadioGroup(props: ComponentProps<typeof MenuPrimitive.RadioGroup>) {
+  return <MenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />;
+}
+
+export function DropdownMenuRadioItem({
+  className,
+  children,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.RadioItem>) {
+  return (
+    <MenuPrimitive.RadioItem
+      className={cn(dropdownMenuItemClassName, className)}
+      data-slot="dropdown-menu-radio-item"
+      {...props}
+    >
+      {children}
+      <MenuPrimitive.RadioItemIndicator className="octant-menu__indicator ml-auto text-foreground">
+        <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+      </MenuPrimitive.RadioItemIndicator>
+    </MenuPrimitive.RadioItem>
+  );
+}
+
+export function DropdownMenuSub(props: ComponentProps<typeof MenuPrimitive.SubmenuRoot>) {
+  return <MenuPrimitive.SubmenuRoot data-slot="dropdown-menu-sub" {...props} />;
+}
+
+export function DropdownMenuSubTrigger({
+  className,
+  children,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.SubmenuTrigger>) {
+  return (
+    <MenuPrimitive.SubmenuTrigger
+      className={cn(dropdownMenuItemClassName, className)}
+      data-slot="dropdown-menu-sub-trigger"
+      {...props}
+    >
+      {children}
+      <ChevronRight aria-hidden="true" className="ml-auto" size={14} strokeWidth={1.8} />
+    </MenuPrimitive.SubmenuTrigger>
+  );
+}
+
+export function DropdownMenuSubPopup({
+  className,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.Popup>) {
+  return (
+    <MenuPrimitive.Portal>
+      <MenuPrimitive.Positioner
+        align="start"
+        className="z-50 outline-none window-no-drag"
+        side="right"
+        sideOffset={0}
+      >
+        <DropdownMenuPopup className={cn("window-no-drag", className)} {...props} />
+      </MenuPrimitive.Positioner>
+    </MenuPrimitive.Portal>
   );
 }
 

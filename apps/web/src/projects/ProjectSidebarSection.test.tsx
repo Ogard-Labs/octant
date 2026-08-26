@@ -851,7 +851,7 @@ describe("ProjectSidebarSection code project views", () => {
     expect(screen.getByRole("dialog", { name: "New project view" })).toBeVisible();
   });
 
-  it("opens an accessible Project View filter popover with only truthful environments", async () => {
+  it("opens an accessible Project View filter menu with only truthful environments", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
 
@@ -877,13 +877,45 @@ describe("ProjectSidebarSection code project views", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Project view filters" }));
-    expect(screen.getByRole("heading", { name: "Project view filters" })).toBeInTheDocument();
-    expect(screen.getByText("All environments")).toBeVisible();
-    expect(screen.getByText("Local")).toBeVisible();
-    expect(screen.queryByText("Devbox")).not.toBeInTheDocument();
-    expect(screen.getByText("Show empty Projects")).toBeVisible();
-    expect(screen.getByText("Thread activity")).toBeVisible();
+    const trigger = screen.getByRole("button", { name: "Project view filters" });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(await screen.findByRole("menuitem", { name: "Lifecycle" })).toBeVisible();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Show empty Projects" })).toBeVisible();
+    await user.click(await screen.findByRole("menuitem", { name: "Environment" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "All environments" })).toBeVisible();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Local" })).toBeVisible();
+    expect(screen.queryByRole("menuitemcheckbox", { name: "Devbox" })).not.toBeInTheDocument();
+  });
+
+  it("lists a connected host when the window actually reported one", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewEnvironmentOptions={[
+          { id: "local", name: "Local" },
+          { id: "devbox", name: "Devbox" },
+        ]}
+        projectViewsEnabled
+        projects={[codeProjectA]}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Project view filters" });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("menuitem", { name: "Environment" }));
+    expect(await screen.findByRole("menuitemcheckbox", { name: "Local" })).toBeVisible();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Devbox" })).toBeVisible();
   });
 
   it("explains and preserves results for a reversed custom activity range", async () => {
@@ -928,12 +960,198 @@ describe("ProjectSidebarSection code project views", () => {
     );
 
     expect(screen.getByRole("button", { name: /Planning/i })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: /Project view filters/i }));
-    expect(screen.getByRole("alert")).toHaveTextContent(
+    const trigger = screen.getByRole("button", { name: /Project view filters/i });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("menuitem", { name: "Activity" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
       "Start date must be on or before end date.",
     );
     expect(screen.getByLabelText("Activity from")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByLabelText("Activity to")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("persists All Projects filters without mutating saved views", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-views.v1",
+      JSON.stringify({
+        activeViewId: "all",
+        views: [{ id: "view-main", name: "Main", projectIds: [codeProjectA.id] }],
+      }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectA, codeProjectB]}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Project view filters" });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    await screen.findByRole("menuitem", { name: "Lifecycle" });
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowRight}");
+    await waitFor(() =>
+      expect(screen.getByRole("menuitemradio", { name: "Project" })).toHaveFocus(),
+    );
+    await user.keyboard("{End} ");
+
+    expect(
+      JSON.parse(window.localStorage.getItem("octant.code.project-view-preferences.v1") ?? "{}"),
+    ).toMatchObject({ filters: { grouping: "none" } });
+    expect(
+      JSON.parse(window.localStorage.getItem("octant.code.project-views.v1") ?? "{}").views[0]
+        .filters,
+    ).toBeUndefined();
+  });
+
+  it("restores a saved view's complete filter state when switching views", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-views.v1",
+      JSON.stringify({
+        activeViewId: "view-main",
+        views: [
+          {
+            id: "view-main",
+            name: "Main",
+            projectIds: [codeProjectA.id, codeProjectB.id],
+            filters: { grouping: "status", lifecycle: "all" },
+          },
+          {
+            id: "view-writing",
+            name: "Writing",
+            projectIds: [codeProjectB.id],
+            filters: { grouping: "none", lifecycle: "active" },
+          },
+        ],
+      }),
+    );
+    const archived = { ...codeProjectA, lifecycle: "archived" as const };
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[archived]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectB]}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Active" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Archived" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Project view" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Writing" }));
+    expect(screen.getByRole("heading", { name: "Projects" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Archived" })).not.toBeInTheDocument();
+  });
+
+  it("keeps Work Project View filters independent of Code", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.work.project-view-preferences.v1",
+      JSON.stringify({ filters: { grouping: "none" } }),
+    );
+    window.localStorage.setItem(
+      "octant.code.project-view-preferences.v1",
+      JSON.stringify({ filters: { grouping: "status", lifecycle: "all" } }),
+    );
+
+    const { rerender } = render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewsEnabled
+        projectViewsMode="work"
+        projects={[codeProjectA]}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Projects" })).toBeVisible();
+    rerender(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewsEnabled
+        projectViewsMode="code"
+        projects={[codeProjectA]}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Active" })).toBeVisible();
+  });
+
+  it("hides Projects with no matching threads only when empty Projects are off", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-view-preferences.v1",
+      JSON.stringify({
+        filters: {
+          activity: "today",
+          showEmptyProjects: false,
+        },
+      }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        now={new Date("2026-08-23T15:00:00.000Z")}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectA, codeProjectB]}
+        threads={[
+          {
+            projectId: String(codeProjectA.id),
+            threadId: "thread-today",
+            title: "Today",
+            updatedAt: "2026-08-23T10:00:00.000Z",
+          },
+          {
+            projectId: String(codeProjectB.id),
+            threadId: "thread-old",
+            title: "Old",
+            updatedAt: "2026-08-01T10:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Today/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Collapse octant" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Old/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse auroradocs" })).not.toBeInTheDocument();
   });
 });
 

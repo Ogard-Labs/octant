@@ -1,7 +1,21 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { OctantMenu } from "./OctantMenu";
+import {
+  OctantMenu,
+  OctantMenuCheckboxItem,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRadioGroup,
+  OctantMenuRadioItem,
+  OctantMenuRoot,
+  OctantMenuSeparator,
+  OctantMenuSub,
+  OctantMenuSubPopup,
+  OctantMenuSubTrigger,
+  OctantMenuTrigger,
+} from "./OctantMenu";
 
 describe("OctantMenu", () => {
   it.each([
@@ -99,5 +113,58 @@ describe("OctantMenu", () => {
     await user.click(document.body);
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(document.body).toHaveFocus();
+  });
+
+  it("exposes checkbox, separator, and submenu items to keyboard and assistive tech", async () => {
+    const user = userEvent.setup();
+    const onCheckedChange = vi.fn();
+    const onValueChange = vi.fn();
+    render(
+      <OctantMenuRoot>
+        <OctantMenuTrigger aria-label="More actions">Open</OctantMenuTrigger>
+        <OctantMenuPortal>
+          <OctantMenuPositioner>
+            <OctantMenuPopup>
+              <OctantMenuCheckboxItem checked={false} onCheckedChange={onCheckedChange}>
+                Show empty Projects
+              </OctantMenuCheckboxItem>
+              <OctantMenuSeparator />
+              <OctantMenuSub>
+                <OctantMenuSubTrigger>Group by</OctantMenuSubTrigger>
+                <OctantMenuSubPopup>
+                  <OctantMenuRadioGroup onValueChange={onValueChange} value="project">
+                    <OctantMenuRadioItem closeOnClick={false} value="project">
+                      Project
+                    </OctantMenuRadioItem>
+                    <OctantMenuRadioItem closeOnClick={false} value="none">
+                      None
+                    </OctantMenuRadioItem>
+                  </OctantMenuRadioGroup>
+                </OctantMenuSubPopup>
+              </OctantMenuSub>
+            </OctantMenuPopup>
+          </OctantMenuPositioner>
+        </OctantMenuPortal>
+      </OctantMenuRoot>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "More actions" });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() =>
+      expect(screen.getByRole("menuitemcheckbox", { name: "Show empty Projects" })).toHaveFocus(),
+    );
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    await user.keyboard(" ");
+    expect(onCheckedChange).toHaveBeenCalledWith(true, expect.anything());
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "Group by" })).toHaveFocus());
+    await user.keyboard("{ArrowRight}");
+    await waitFor(() =>
+      expect(screen.getByRole("menuitemradio", { name: "Project" })).toHaveFocus(),
+    );
+    await user.keyboard("{ArrowDown}");
+    await user.keyboard(" ");
+    expect(onValueChange).toHaveBeenCalledWith("none", expect.anything());
   });
 });

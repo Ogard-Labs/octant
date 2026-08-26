@@ -212,6 +212,7 @@ import {
   useFirstRunOnboardingController,
   type FirstRunOnboardingOutcome,
 } from "./onboarding/useFirstRunOnboardingController";
+import { projectViewEnvironmentOptionsFromHosts } from "./code/codeProjectViewModel";
 import { ProjectSidebarSection } from "./projects/ProjectSidebarSection";
 import { OctantButton } from "./ui/base/OctantButton";
 import { useProjectController } from "./projects/useProjectController";
@@ -3924,6 +3925,8 @@ function LaunchedShell(
                           projectViewSwitcherPresentation: (
                             presentedShellSettings ?? controller.settings
                           ).projectViewSwitcherPresentation,
+                          projectViewEnvironmentOptions:
+                            projectViewEnvironmentOptionsFromHosts(hosts),
                         }
                       : {})}
                     activityMode={activeMode}
