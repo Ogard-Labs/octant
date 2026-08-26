@@ -247,6 +247,111 @@ export function applyProfileToThread(input: {
 }
 
 /**
+ * The instructions and skill allowlist a thread keeps after a profile binds it.
+ * Copied by value so a later edit of the live profile cannot change a thread
+ * already running under it — the same rule the posture already follows.
+ */
+export interface ProfileThreadContextSnapshot {
+  readonly displayName: string;
+  readonly instructions?: string;
+  readonly approvedSkillIds: ReadonlyArray<string>;
+}
+
+export function snapshotProfileThreadContext(profile: AgentProfile): ProfileThreadContextSnapshot {
+  return {
+    displayName: profile.displayName,
+    ...(profile.instructions === undefined ? {} : { instructions: profile.instructions }),
+    approvedSkillIds: [...profile.approvedSkillIds],
+  };
+}
+
+export interface ProfileContextAttribution {
+  readonly sourceKind: "instruction" | "skill";
+  readonly referenceId: string;
+  readonly category: "user-instructions" | "extension-instructions";
+  readonly label: string;
+  readonly text: string;
+}
+
+/**
+ * Attribute profile instructions so a reader of the composed context can see
+ * which working mode they came from, rather than treating them as anonymous
+ * system text.
+ */
+export function attributeProfileInstructions(input: {
+  readonly profileId: string;
+  readonly displayName: string;
+  readonly instructions: string;
+}): ProfileContextAttribution {
+  return {
+    sourceKind: "instruction",
+    referenceId: `profile:${input.profileId}`,
+    category: "user-instructions",
+    label: `${input.displayName} profile instructions`,
+    text: input.instructions,
+  };
+}
+
+export function attributeProfileSkillInstructions(input: {
+  readonly qualifiedId: string;
+  readonly displayName: string;
+  readonly text: string;
+}): ProfileContextAttribution {
+  return {
+    sourceKind: "skill",
+    referenceId: input.qualifiedId,
+    category: "extension-instructions",
+    label: input.displayName,
+    text: input.text,
+  };
+}
+
+/**
+ * A skill the host has already discovered and resolved. Effectiveness is the
+ * activation ladder's answer — installed, trusted, enabled, and allowed —
+ * never something a profile can assert for itself.
+ */
+export interface ProfileSkillCandidate {
+  readonly qualifiedId: string;
+  readonly name: string;
+  readonly displayName: string;
+  readonly effective: boolean;
+}
+
+export interface AdmittedProfileSkill {
+  readonly qualifiedId: string;
+  readonly name: string;
+  readonly displayName: string;
+}
+
+/**
+ * Gate the skills a profiled thread may load: only identifiers the snapshot
+ * named, and only when the host would already load them. A name that matches
+ * more than one effective skill is skipped rather than guessed.
+ */
+export function admitApprovedProfileSkills(input: {
+  readonly approvedSkillIds: ReadonlyArray<string>;
+  readonly skills: ReadonlyArray<ProfileSkillCandidate>;
+}): ReadonlyArray<AdmittedProfileSkill> {
+  const admitted: AdmittedProfileSkill[] = [];
+  const seen = new Set<string>();
+  for (const approvedId of input.approvedSkillIds) {
+    const matches = input.skills.filter(
+      (skill) => skill.effective && (skill.name === approvedId || skill.qualifiedId === approvedId),
+    );
+    const skill = matches.length === 1 ? matches[0] : undefined;
+    if (skill === undefined || seen.has(skill.qualifiedId)) continue;
+    seen.add(skill.qualifiedId);
+    admitted.push({
+      qualifiedId: skill.qualifiedId,
+      name: skill.name,
+      displayName: skill.displayName,
+    });
+  }
+  return admitted;
+}
+
+/**
  * Build execution context picker entries from provider/model/profile combinations.
  * Provider remains the primary grouping; direct API endpoints are first-class.
  *

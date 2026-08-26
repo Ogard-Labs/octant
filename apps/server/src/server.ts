@@ -165,6 +165,10 @@ import {
   type ManagedCodeThreadCreationPort,
 } from "./code/codeService";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
+import {
+  createCodeProfileSkillResolver,
+  createStoredCodeProfileSkillTextLoader,
+} from "./code/codeProfileSkillResolver";
 import { CodeOperationEventStore } from "./code/codeOperationEventStore";
 import {
   CodeThreadMetadataService,
@@ -3030,6 +3034,14 @@ export function startOctantServer(
             : undefined;
         },
         resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
+        resolveProfileSkills: createCodeProfileSkillResolver({
+          snapshot: () => extensionApiService.snapshot(),
+          loadSkillText: createStoredCodeProfileSkillTextLoader({
+            snapshot: () => extensionApiService.snapshot(),
+            readVerifiedComponentText: async (target) =>
+              extensionPackageStore.readVerifiedComponentText(target, target.componentId),
+          }),
+        }),
         githubReadTools: ({ windowId, thread, readThread }) =>
           githubReadToolService.createToolSet({ windowId, thread, readThread }),
         resolvePullRequestTarget: async (threadId) => {
