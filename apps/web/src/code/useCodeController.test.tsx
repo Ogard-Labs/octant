@@ -1560,6 +1560,51 @@ describe("useCodeController", () => {
     expect(result.current.turnError).toBe("Provider is offline.");
   });
 
+  it("restores a persisted waiting turn and its operation when the thread reopens", async () => {
+    const promptId = "60000000-0000-4000-8000-000000000053";
+    const operationId = "70000000-0000-4000-8000-000000000053";
+    const subscribeOperation = vi.fn((_threadId, _operationId, _cursor, signal: AbortSignal) =>
+      idleStream(signal),
+    );
+    const client = fakeClient({
+      conversation: vi.fn(async () => ({
+        version: 3 as const,
+        threadId: ids.thread,
+        turns: [
+          {
+            operationId,
+            providerInstanceId: ids.provider,
+            modelId: "model-a",
+            sessionId: "80000000-0000-4000-8000-000000000053",
+            prompt: { contentId: promptId, digest: "a".repeat(64), byteLength: 25 },
+            assistant: [],
+            status: "waiting" as const,
+            startedAt: now,
+            updatedAt: now,
+          },
+        ],
+        nextCursor: 1,
+        hasMore: false,
+      })) as never,
+      operationContent: vi.fn(async () => new TextEncoder().encode("Approve the waiting turn")),
+      subscribeOperation: subscribeOperation as never,
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(result.current.turnStatus).toBe("waiting"));
+    expect(result.current.conversation.at(-1)?.status).toBe("waiting");
+    expect(subscribeOperation).toHaveBeenCalledWith(
+      ids.thread,
+      operationId,
+      0,
+      expect.any(AbortSignal),
+    );
+
+    unmount();
+  });
+
   it("hydrates authoritative conversation evidence after reload", async () => {
     const promptId = "60000000-0000-4000-8000-000000000010";
     const replyId = "60000000-0000-4000-8000-000000000011";

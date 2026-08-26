@@ -470,7 +470,12 @@ export function useCodeController(options: CodeControllerOptions) {
   const firstTurnFailures = useRef(
     new Map<string, Readonly<{ prompt: string; message: string }>>(),
   );
-  const activeTurnOperations = useRef(new Map<string, CodeOperationId>());
+  const activeTurnOperations = useRef(
+    new Map<
+      string,
+      { readonly operationId: CodeOperationId; readonly status: "running" | "waiting" }
+    >(),
+  );
   const turnAbort = useRef<AbortController | undefined>(undefined);
   const editorDrafts = useMemo(
     () => ({
@@ -845,23 +850,29 @@ export function useCodeController(options: CodeControllerOptions) {
       }
       const latestTurn = turns.at(-1);
       const incomplete = latestTurn?.status === "incomplete";
-      if (incomplete && latestTurn !== undefined) {
-        activeTurnOperations.current.set(String(threadId), latestTurn.operationId);
+      const waiting = latestTurn?.status === "waiting";
+      if (latestTurn !== undefined && (incomplete || waiting)) {
+        activeTurnOperations.current.set(String(threadId), {
+          operationId: latestTurn.operationId,
+          status: waiting ? "waiting" : "running",
+        });
       } else {
         activeTurnOperations.current.delete(String(threadId));
       }
       setTurnStatus((current) =>
-        incomplete
-          ? current === "sending"
-            ? current
-            : "running"
-          : current === "running"
-            ? "idle"
-            : current,
+        waiting
+          ? "waiting"
+          : incomplete
+            ? current === "sending"
+              ? current
+              : "running"
+            : current === "running" || current === "waiting"
+              ? "idle"
+              : current,
       );
       return {
         incomplete,
-        incompleteOperationId: incomplete ? latestTurn?.operationId : undefined,
+        activeOperationId: incomplete || waiting ? latestTurn?.operationId : undefined,
         nextCursor,
       };
     },
@@ -895,7 +906,7 @@ export function useCodeController(options: CodeControllerOptions) {
         try {
           const hydrated = await hydrateConversation(threadId, request);
           conversationIncomplete = hydrated?.incomplete === true;
-          conversationOperationId = hydrated?.incompleteOperationId;
+          conversationOperationId = hydrated?.activeOperationId;
           conversationCursor = hydrated?.nextCursor ?? 0;
           // A retried activation that succeeds must also take its own error
           // banner down. Only that message: a first-turn failure noted just
@@ -1162,7 +1173,7 @@ export function useCodeController(options: CodeControllerOptions) {
                 try {
                   const hydrated = await hydrateConversation(threadId, request);
                   conversationIncomplete = hydrated?.incomplete === true;
-                  conversationOperationId = hydrated?.incompleteOperationId;
+                  conversationOperationId = hydrated?.activeOperationId;
                   conversationCursor = hydrated?.nextCursor ?? conversationCursor;
                   // The thread's state and its recorded turns were both
                   // re-read into the transcript, so the activity the host had
@@ -1266,10 +1277,9 @@ export function useCodeController(options: CodeControllerOptions) {
     setProviderRequests([]);
     setTurnActivity(new Map());
     setTurnStatus(
-      options.activeThreadId !== undefined &&
-        activeTurnOperations.current.has(String(options.activeThreadId))
-        ? "running"
-        : "idle",
+      options.activeThreadId === undefined
+        ? "idle"
+        : (activeTurnOperations.current.get(String(options.activeThreadId))?.status ?? "idle"),
     );
     const firstTurnFailure =
       options.activeThreadId === undefined
@@ -1498,7 +1508,10 @@ export function useCodeController(options: CodeControllerOptions) {
           failFirstTurn("The provider turn could not be started.");
           return false;
         }
-        activeTurnOperations.current.set(String(input.threadId), operationId);
+        activeTurnOperations.current.set(String(input.threadId), {
+          operationId,
+          status: "running",
+        });
         setTurnStatus("running");
         // Opening a newly created thread hydrates before this first turn is
         // journaled, so the transcript reads empty. A provider turn does not
