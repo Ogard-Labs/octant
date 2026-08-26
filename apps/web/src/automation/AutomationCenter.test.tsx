@@ -174,13 +174,22 @@ describe("AutomationCenter default surface", () => {
     expect(await screen.findByRole("list", { name: "Automations" })).toBeVisible();
   });
 
-  it("explains an empty list without implying deletion", async () => {
+  it("turns an empty list into creation paths and working suggestions", async () => {
     const client = fakeClient({
       list: vi.fn(async () => ({ kind: "automation-list" as const, items: [] })),
     });
     renderCenter({ client });
-    const empty = await screen.findByText("No automations match the current filters.");
-    expect(empty.closest("[role='status']")).not.toBeNull();
+
+    expect(await screen.findByRole("heading", { name: "Create an automation" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Describe with Octant/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Create manually/ })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Suggested automations" })).toBeVisible();
+    expect(screen.queryByText("No automations match the current filters.")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Every weekday morning/ }));
+    expect(screen.getByLabelText("What do you want automated?")).toHaveValue(
+      "Every weekday at 9:00, summarise what changed in this Project overnight",
+    );
   });
 });
 

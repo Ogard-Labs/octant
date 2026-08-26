@@ -10,6 +10,7 @@ import {
 import { routineScheduleLabel } from "./routinePresentation";
 
 export interface RoutineComposerProps {
+  readonly initialRequest?: string;
   readonly now: string;
   readonly timeZone: string;
   /** Hands the confirmed draft to whoever opens the editor with it filled in. */
@@ -26,8 +27,13 @@ export interface RoutineComposerProps {
  * in the one part that was missing rather than retyping the request.
  */
 export function RoutineComposer(props: RoutineComposerProps) {
-  const [request, setRequest] = useState("");
-  const [draft, setDraft] = useState<RoutineRequestDraft>();
+  const initialRequest = props.initialRequest?.trim() ?? "";
+  const [request, setRequest] = useState(initialRequest);
+  const [draft, setDraft] = useState<RoutineRequestDraft | undefined>(() =>
+    initialRequest === ""
+      ? undefined
+      : draftRoutineFromRequest(initialRequest, { now: props.now, timeZone: props.timeZone }),
+  );
 
   const read = (text: string) => {
     setRequest(text);

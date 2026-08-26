@@ -16,9 +16,10 @@ import {
   type ArrangeableItem,
   type ListArrangement,
 } from "@octant/client-runtime/list-arrangement";
-import { ChevronDown, Plus, Search } from "lucide-react";
+import { ChevronDown, Pencil, Plus, Search, Sparkles } from "lucide-react";
 import { RoutineCalendar } from "./RoutineCalendar";
 import { RoutineComposer } from "./RoutineComposer";
+import { ROUTINE_REQUEST_SUGGESTIONS } from "./routineRequestDraft";
 import {
   routineCadence,
   routineCadenceLabel,
@@ -107,6 +108,7 @@ const FILTERS: readonly { readonly value: AutomationCenterFilter; readonly label
 export function AutomationCenter(props: AutomationCenterProps) {
   const controller = useAutomationCenterController({ client: props.client });
   const [editor, setEditor] = useState<EditorState>({ kind: "closed" });
+  const [describeRequest, setDescribeRequest] = useState<string>();
   const [openMenuId, setOpenMenuId] = useState<string | undefined>(undefined);
   const [pendingFocusId, setPendingFocusId] = useState<string | undefined>(undefined);
   const [deliveryStatus, setDeliveryStatus] = useState<
@@ -242,9 +244,9 @@ export function AutomationCenter(props: AutomationCenterProps) {
     >
       <header className="automation-center__header">
         <div>
-          <h2 className="automation-center__title">Automation Center</h2>
+          <h2 className="automation-center__title">Automations</h2>
           <p className="automation-center__subtitle">
-            Scheduled Work and Code work that runs as ordinary threads.
+            Recurring and event-driven Work and Code threads.
           </p>
         </div>
         {props.onClose === undefined ? null : (
@@ -277,93 +279,162 @@ export function AutomationCenter(props: AutomationCenterProps) {
         </p>
       )}
 
-      <div className="automation-center__body">
+      <div className="automation-center__body" data-detail-open={detailOpen ? "true" : "false"}>
         {hideListForNarrow ? null : (
           <div className="automation-center__list-pane">
-            <RoutineComposer
-              now={nowInstant}
-              onConfirm={() => {
-                // The draft opens the ordinary editor, which is where a
-                // routine is checked and saved. The composer proposes; it
-                // never creates.
-                controller.select(undefined);
-                setEditor({ kind: "create" });
-              }}
-              timeZone={props.displayTimeZone ?? "UTC"}
-            />
-            <div
-              aria-label="Automation controls"
-              className="automation-center__toolbar"
-              role="group"
-            >
-              <label className="automation-center__search">
-                <span className="sr-only">Search automations</span>
-                <Search aria-hidden="true" size={14} strokeWidth={1.8} />
-                <OctantInput
-                  onChange={(event) => controller.setSearch(event.target.value)}
-                  placeholder="Search automations"
-                  type="search"
-                  value={controller.search}
-                />
-              </label>
-              <ListArrangementMenu arrangement={arrangement} onChange={setArrangement} />
-              <OctantToggleGroup<typeof view>
-                aria-label="Choose a view"
-                className="automation-center__views segmented"
-                onValueChange={(value) => {
-                  const next = value[0];
-                  if (next !== undefined) setView(next);
-                }}
-                value={[view]}
-              >
-                <OctantToggleGroupItem className="automation-center__view segment" value="list">
-                  List
-                </OctantToggleGroupItem>
-                <OctantToggleGroupItem className="automation-center__view segment" value="calendar">
-                  Calendar
-                </OctantToggleGroupItem>
-              </OctantToggleGroup>
-              <label className="automation-center__completed check">
-                <OctantCheckbox
-                  checked={includeCompleted}
-                  onChange={(event) => setIncludeCompleted(event.target.checked)}
-                />
-                <span>Show completed</span>
-              </label>
-              <OctantToggleGroup<AutomationCenterFilter>
-                aria-label="Filter by mode"
-                className="automation-center__filters segmented"
-                onValueChange={(value) => {
-                  const next = value[0];
-                  if (next !== undefined) controller.setFilter(next);
-                }}
-                value={[controller.filter]}
-              >
-                {FILTERS.map((filter) => (
-                  <OctantToggleGroupItem
-                    className="automation-center__filter segment"
-                    key={filter.value}
-                    value={filter.value}
-                  >
-                    {filter.label}
-                  </OctantToggleGroupItem>
-                ))}
-              </OctantToggleGroup>
-              <OctantButton
-                className="automation-center__create"
-                onClick={() => {
+            <section aria-labelledby="automation-create-title" className="automation-center__start">
+              <header>
+                <h3 id="automation-create-title">Create an automation</h3>
+                <p>Describe a recurring task or configure its trigger and authority directly.</p>
+              </header>
+              <div className="automation-center__creation-paths">
+                <OctantButton
+                  className="automation-center__creation-path automation-center__creation-path--featured"
+                  onClick={() => setDescribeRequest("")}
+                  type="button"
+                  variant="ghost"
+                >
+                  <Sparkles aria-hidden="true" size={16} strokeWidth={1.5} />
+                  <span>
+                    <strong>Describe with Octant</strong>
+                    <small>Start with the work and schedule in your own words.</small>
+                  </span>
+                </OctantButton>
+                <OctantButton
+                  className="automation-center__creation-path"
+                  onClick={() => {
+                    controller.select(undefined);
+                    setEditor({ kind: "create" });
+                  }}
+                  type="button"
+                  variant="ghost"
+                >
+                  <Pencil aria-hidden="true" size={16} strokeWidth={1.5} />
+                  <span>
+                    <strong>Create manually</strong>
+                    <small>Configure the trigger, task, environment, and approval policy.</small>
+                  </span>
+                </OctantButton>
+              </div>
+            </section>
+
+            {describeRequest === undefined ? null : (
+              <RoutineComposer
+                initialRequest={describeRequest}
+                key={describeRequest}
+                now={nowInstant}
+                onConfirm={() => {
                   controller.select(undefined);
                   setEditor({ kind: "create" });
                 }}
-                type="button"
-                variant="default"
-              >
-                <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
-                <span>New automation</span>
-              </OctantButton>
-            </div>
+                timeZone={props.displayTimeZone ?? "UTC"}
+              />
+            )}
 
-            {view === "calendar" && controller.list.status === "ready" ? (
+            {controller.list.status === "ready" &&
+            controller.list.items.length === 0 &&
+            describeRequest === undefined ? (
+              <section
+                aria-labelledby="automation-suggestions-title"
+                className="automation-center__suggestions"
+              >
+                <h3 id="automation-suggestions-title">Suggested automations</h3>
+                <div className="automation-center__suggestion-grid">
+                  {ROUTINE_REQUEST_SUGGESTIONS.map((suggestion) => (
+                    <OctantButton
+                      className="automation-center__suggestion"
+                      key={suggestion.label}
+                      onClick={() => setDescribeRequest(suggestion.request)}
+                      type="button"
+                      variant="ghost"
+                    >
+                      <strong>{suggestion.label}</strong>
+                      <span>{suggestion.request}</span>
+                    </OctantButton>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+            {controller.list.status === "ready" && controller.list.items.length === 0 ? null : (
+              <div
+                aria-label="Automation controls"
+                className="automation-center__toolbar"
+                role="group"
+              >
+                <label className="automation-center__search">
+                  <span className="sr-only">Search automations</span>
+                  <Search aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <OctantInput
+                    onChange={(event) => controller.setSearch(event.target.value)}
+                    placeholder="Search automations"
+                    type="search"
+                    value={controller.search}
+                  />
+                </label>
+                <ListArrangementMenu arrangement={arrangement} onChange={setArrangement} />
+                <OctantToggleGroup<typeof view>
+                  aria-label="Choose a view"
+                  className="automation-center__views segmented"
+                  onValueChange={(value) => {
+                    const next = value[0];
+                    if (next !== undefined) setView(next);
+                  }}
+                  value={[view]}
+                >
+                  <OctantToggleGroupItem className="automation-center__view segment" value="list">
+                    List
+                  </OctantToggleGroupItem>
+                  <OctantToggleGroupItem
+                    className="automation-center__view segment"
+                    value="calendar"
+                  >
+                    Calendar
+                  </OctantToggleGroupItem>
+                </OctantToggleGroup>
+                <label className="automation-center__completed check">
+                  <OctantCheckbox
+                    checked={includeCompleted}
+                    onChange={(event) => setIncludeCompleted(event.target.checked)}
+                  />
+                  <span>Show completed</span>
+                </label>
+                <OctantToggleGroup<AutomationCenterFilter>
+                  aria-label="Filter by mode"
+                  className="automation-center__filters segmented"
+                  onValueChange={(value) => {
+                    const next = value[0];
+                    if (next !== undefined) controller.setFilter(next);
+                  }}
+                  value={[controller.filter]}
+                >
+                  {FILTERS.map((filter) => (
+                    <OctantToggleGroupItem
+                      className="automation-center__filter segment"
+                      key={filter.value}
+                      value={filter.value}
+                    >
+                      {filter.label}
+                    </OctantToggleGroupItem>
+                  ))}
+                </OctantToggleGroup>
+                <OctantButton
+                  className="automation-center__create"
+                  onClick={() => {
+                    controller.select(undefined);
+                    setEditor({ kind: "create" });
+                  }}
+                  type="button"
+                  variant="default"
+                >
+                  <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>New automation</span>
+                </OctantButton>
+              </div>
+            )}
+
+            {controller.list.status === "ready" &&
+            controller.list.items.length === 0 ? null : view === "calendar" &&
+              controller.list.status === "ready" ? (
               <RoutineCalendar
                 month={calendarMonth ?? nowInstant}
                 now={nowInstant}
