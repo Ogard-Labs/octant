@@ -13,6 +13,7 @@ import type {
   ProviderCatalogSnapshot,
   ProviderExecutionPolicy,
   ProviderInstanceId,
+  ProviderModel,
   ProviderModelId,
 } from "@octant/contracts/providers";
 import type { HostId } from "@octant/contracts/shell";
@@ -50,6 +51,43 @@ export function isProfileModeCompatible(profile: AgentProfile, mode: OctantMode)
 export function isModelAllowedByProfile(profile: AgentProfile, modelId: ProviderModelId): boolean {
   if (profile.modelConstraints.length === 0) return true;
   return profile.modelConstraints.some((id: string) => String(id) === String(modelId));
+}
+
+/**
+ * Check whether a tool is allowed by a snapshotted profile allowlist.
+ * An empty list means all tools are allowed, matching
+ * {@link isModelAllowedByProfile} for models.
+ */
+export function isToolAllowedByAllowlist(
+  toolConstraints: ReadonlyArray<string>,
+  toolId: string,
+): boolean {
+  if (toolConstraints.length === 0) return true;
+  return toolConstraints.some((id) => id === toolId);
+}
+
+/** What checking a tool against a snapshotted profile allowlist did. */
+export type ProfileToolConstraintDecision =
+  | { readonly status: "allowed" }
+  | { readonly status: "refused"; readonly reason: string };
+
+/**
+ * Refuse a tool that the snapshotted profile allowlist does not include.
+ * The reason names the profile so a caller can show why the thread cannot
+ * call it without reloading the live profile.
+ */
+export function decideProfileToolConstraint(input: {
+  readonly toolId: string;
+  readonly toolConstraints: ReadonlyArray<string>;
+  readonly profileDisplayName: string;
+}): ProfileToolConstraintDecision {
+  if (isToolAllowedByAllowlist(input.toolConstraints, input.toolId)) {
+    return { status: "allowed" };
+  }
+  return {
+    status: "refused",
+    reason: `Profile "${input.profileDisplayName}" does not permit "${input.toolId}".`,
+  };
 }
 
 /**
@@ -129,6 +167,8 @@ export type ProfileApplication =
       readonly status: "applied";
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly permissionPersistence: PermissionPersistence;
+      readonly toolConstraints: ReadonlyArray<string>;
+      readonly profileDisplayName: string;
     }
   | {
       readonly status: "refused";
@@ -197,7 +237,13 @@ export function applyProfileToThread(input: {
     PERSISTENCE_RANK[input.requestedPermissionPersistence]
       ? input.profile.defaultPermissionPersistence
       : input.requestedPermissionPersistence;
-  return { status: "applied", executionPolicy, permissionPersistence };
+  return {
+    status: "applied",
+    executionPolicy,
+    permissionPersistence,
+    toolConstraints: input.profile.toolConstraints,
+    profileDisplayName: input.profile.displayName,
+  };
 }
 
 /**
@@ -358,7 +404,30 @@ export function validateCapabilityConstraints(input: {
   if (model === undefined) {
     return { ok: false, reason: "Model is not in provider catalog." };
   }
+  if (input.toolConstraints.length > 0 && !modelSupportsToolCalling(model)) {
+    return {
+      ok: false,
+      reason: "Model does not support tool calling required by the profile's tool constraints.",
+    };
+  }
   return { ok: true };
+}
+
+/**
+ * Whether the catalog proves this model can call tools. Missing evidence is
+ * not a refusal: many catalogs never recorded tool-calling support, and an
+ * empty allowlist already means "no constraint". A recorded unsupported
+ * capability is the case that cannot satisfy a non-empty tool allowlist.
+ */
+function modelSupportsToolCalling(model: ProviderModel): boolean {
+  if (model.toolCalling === "unsupported" || model.toolCalling === "unavailable") return false;
+  const evidence = model.capabilityEvidence?.filter(
+    (record) => record.capability === "tool-calling" && !record.invalidated,
+  );
+  if (evidence !== undefined && evidence.length > 0) {
+    return evidence.some((record) => record.support === "supported");
+  }
+  return true;
 }
 
 /**

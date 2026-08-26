@@ -122,6 +122,55 @@ describe("resolveToolCall fail-closed order", () => {
     });
   });
 
+  it("2. denies a profile-excluded tool before any later permissive step", () => {
+    const decision = resolveToolCall(
+      baseInput({
+        thread: {
+          executionPolicy: "full-access",
+          approvalSatisfied: true,
+          externalContentIngested: false,
+          toolConstraints: ["computer-use"],
+          profileDisplayName: "Reviewer",
+        },
+      }),
+    );
+    expect(decision).toMatchObject({
+      kind: "deny",
+      step: "profile-constraints",
+      reason: 'Profile "Reviewer" does not permit "octant_browser".',
+    });
+  });
+
+  it("2. allows an allowlisted browser call whose catalog id is not the profile tool name", () => {
+    const decision = resolveToolCall(
+      baseInput({
+        thread: {
+          executionPolicy: "full-access",
+          approvalSatisfied: true,
+          externalContentIngested: false,
+          toolConstraints: ["octant_browser"],
+          profileDisplayName: "Reviewer",
+        },
+      }),
+    );
+    expect(decision.kind).toBe("allow");
+  });
+
+  it("2. still allows an ordinary posture-permitted tool when the snapshotted allowlist is empty", () => {
+    const decision = resolveToolCall(
+      baseInput({
+        thread: {
+          executionPolicy: "approval-gated",
+          approvalSatisfied: true,
+          externalContentIngested: false,
+          toolConstraints: [],
+          profileDisplayName: "Reviewer",
+        },
+      }),
+    );
+    expect(decision.kind).toBe("allow");
+  });
+
   it("2. denies invalid arguments at argument-schema after identity succeeds", () => {
     const decision = resolveToolCall(
       baseInput({

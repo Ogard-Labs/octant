@@ -234,6 +234,24 @@ function highestPolicy(
   return rank[left] >= rank[right] ? left : right;
 }
 
+type ProfiledThreadAuthority = {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly permissionPersistence: PermissionPersistence;
+  readonly toolConstraints: ReadonlyArray<string>;
+  readonly profileDisplayName?: string;
+};
+
+function profileToolSnapshot(profiled: ProfiledThreadAuthority): {
+  readonly toolConstraints?: ReadonlyArray<string>;
+  readonly profileDisplayName?: string;
+} {
+  if (profiled.profileDisplayName === undefined) return {};
+  return {
+    toolConstraints: profiled.toolConstraints,
+    profileDisplayName: profiled.profileDisplayName,
+  };
+}
+
 export interface CodePersistencePort {
   readonly journal: Pick<Journal, "append" | "replay" | "replayAggregate">;
   readonly readCodeSettings: () => { readonly settings: CodeSettings } | undefined;
@@ -842,6 +860,7 @@ export class CodeService {
           deliveryTarget: command.deliveryTarget,
           ...(command.forkedFrom === undefined ? {} : { forkedFrom: command.forkedFrom }),
           ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
+          ...profileToolSnapshot(managedAuthority),
           version: 1,
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -1140,15 +1159,7 @@ export class CodeService {
           requestedExecutionPolicy: command.thread.executionPolicy,
           requestedPermissionPersistence: command.thread.permissionPersistence,
         });
-        const thread =
-          profiled.executionPolicy === command.thread.executionPolicy &&
-          profiled.permissionPersistence === command.thread.permissionPersistence
-            ? command.thread
-            : decodeCodeThread({
-                ...command.thread,
-                executionPolicy: profiled.executionPolicy,
-                permissionPersistence: profiled.permissionPersistence,
-              });
+        const thread = this.#threadWithProfiledAuthority(command.thread, profiled);
         const project = this.#persistence.readProject?.(thread.projectId);
         if (
           thread.executionPolicy === "full-access" &&
@@ -2327,14 +2338,12 @@ export class CodeService {
     readonly modelId: ProviderModelId;
     readonly requestedExecutionPolicy: ProviderExecutionPolicy;
     readonly requestedPermissionPersistence: PermissionPersistence;
-  }): {
-    readonly executionPolicy: ProviderExecutionPolicy;
-    readonly permissionPersistence: PermissionPersistence;
-  } {
+  }): ProfiledThreadAuthority {
     if (input.profileId === undefined) {
       return {
         executionPolicy: input.requestedExecutionPolicy,
         permissionPersistence: input.requestedPermissionPersistence,
+        toolConstraints: [],
       };
     }
     const binding = this.#persistence.readAgentProfileBinding?.(input.profileId);
@@ -2377,7 +2386,24 @@ export class CodeService {
     return {
       executionPolicy: applied.executionPolicy,
       permissionPersistence: applied.permissionPersistence,
+      toolConstraints: applied.toolConstraints,
+      profileDisplayName: applied.profileDisplayName,
     };
+  }
+
+  /**
+   * Overlay the profile's snapshotted posture and tool allowlist onto a starting
+   * thread. Client-supplied allowlist fields are stripped: only the profile the
+   * server loaded may write them.
+   */
+  #threadWithProfiledAuthority(thread: CodeThread, profiled: ProfiledThreadAuthority): CodeThread {
+    const { toolConstraints: _clientTools, profileDisplayName: _clientName, ...rest } = thread;
+    return decodeCodeThread({
+      ...rest,
+      executionPolicy: profiled.executionPolicy,
+      permissionPersistence: profiled.permissionPersistence,
+      ...profileToolSnapshot(profiled),
+    });
   }
 
   #failure(category: CodeFailure["category"], message: string): CodeServiceError {

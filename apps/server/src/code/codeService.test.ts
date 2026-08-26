@@ -671,10 +671,14 @@ describe("CodeService commands", () => {
       expect.objectContaining({
         events: [
           expect.objectContaining({
-            payload: {
+            payload: expect.objectContaining({
               kind: "thread-created",
-              thread: { ...created, executionPolicy: "approval-gated" },
-            },
+              thread: expect.objectContaining({
+                executionPolicy: "approval-gated",
+                profileDisplayName: "Reviewer",
+                toolConstraints: [],
+              }),
+            }),
           }),
         ],
       }),
@@ -690,7 +694,14 @@ describe("CodeService commands", () => {
 
     await expect(
       fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
-    ).resolves.toEqual({ kind: "thread-created", thread: created });
+    ).resolves.toMatchObject({
+      kind: "thread-created",
+      thread: {
+        ...created,
+        profileDisplayName: "Reviewer",
+        toolConstraints: [],
+      },
+    });
   });
 
   it("starts a thread that asked for less than its Project grants under a broader profile", async () => {
@@ -845,6 +856,70 @@ describe("CodeService commands", () => {
       fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("snapshots the profile's tool allowlist onto a new thread", async () => {
+    const created = thread({
+      executionPolicy: "full-access",
+      profileId: ids.profile as never,
+      toolConstraints: ["octant_terminal"],
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      approve: true,
+      profiles: [
+        agentProfile({
+          defaultExecutionPolicy: "full-access",
+          toolConstraints: ["octant_browser"],
+        }),
+      ],
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: created,
+        approvalId: "00000000-0000-4000-8000-000000000088" as never,
+      }),
+    ).resolves.toMatchObject({
+      thread: {
+        profileDisplayName: "Reviewer",
+        toolConstraints: ["octant_browser"],
+      },
+    });
+  });
+
+  it("keeps the snapshotted allowlist when the live profile is later edited", async () => {
+    const created = thread({
+      executionPolicy: "full-access",
+      profileId: ids.profile as never,
+    });
+    const liveProfile = agentProfile({
+      defaultExecutionPolicy: "full-access",
+      toolConstraints: ["octant_browser"],
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      approve: true,
+      profiles: [liveProfile],
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "create-code-thread",
+      thread: created,
+      approvalId: "00000000-0000-4000-8000-000000000088" as never,
+    });
+    expect(result).toMatchObject({
+      thread: { toolConstraints: ["octant_browser"], profileDisplayName: "Reviewer" },
+    });
+
+    (liveProfile as { toolConstraints: ReadonlyArray<string> }).toolConstraints = [
+      "octant_terminal",
+    ];
+    (liveProfile as { displayName: string }).displayName = "Edited Reviewer";
+    if (result.kind !== "thread-created") throw new Error("expected thread-created");
+    expect(result.thread.toolConstraints).toEqual(["octant_browser"]);
+    expect(result.thread.profileDisplayName).toBe("Reviewer");
   });
 
   it("refuses to start a thread under a profile that no longer exists", async () => {

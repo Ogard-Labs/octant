@@ -768,6 +768,90 @@ describe("Code app-managed tools", () => {
     ).resolves.toEqual({ result: { error: "full-access-required" }, isError: true });
     expect(executeOperation).not.toHaveBeenCalled();
   });
+
+  it("refuses a profile-excluded tool before any host side effect", async () => {
+    const executeOperation = vi.fn();
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread({
+        executionPolicy: "full-access",
+        profileDisplayName: "Reviewer",
+        toolConstraints: ["octant_browser"],
+      }),
+      readThread: () =>
+        thread({
+          executionPolicy: "full-access",
+          profileDisplayName: "Reviewer",
+          toolConstraints: ["octant_browser"],
+        }),
+      uuid: uuidFactory(),
+      executeOperation,
+      terminal: { read: vi.fn() },
+    });
+
+    await expect(
+      tools.execute({
+        name: CODE_TERMINAL_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
+      }),
+    ).resolves.toEqual({
+      result: {
+        error: "profile-tool-refused",
+        message: 'Profile "Reviewer" does not permit "octant_terminal".',
+      },
+      isError: true,
+    });
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("still runs an ordinary posture-permitted tool when the snapshotted allowlist is empty", async () => {
+    const executeOperation = vi.fn(
+      async (_windowId: WindowId, command: CodeOperationCommand): Promise<CodeOperationResult> =>
+        command.kind === "start-terminal"
+          ? ({
+              kind: "terminal-state",
+              operationId: command.operationId,
+              terminalId: command.terminalId,
+              state: "running",
+            } as never)
+          : ({
+              kind: "operation-failed",
+              operationId: command.operationId,
+              failure: { category: "invalid", message: "Unexpected operation." },
+            } as never),
+    );
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread({
+        executionPolicy: "full-access",
+        profileDisplayName: "Reviewer",
+        toolConstraints: [],
+      }),
+      readThread: () =>
+        thread({
+          executionPolicy: "full-access",
+          profileDisplayName: "Reviewer",
+          toolConstraints: [],
+        }),
+      uuid: uuidFactory(),
+      executeOperation,
+      terminal: {
+        read: async () => ({
+          terminalId: threadId,
+          status: "running",
+          canRerun: false,
+          transcript: { chunks: [], byteLength: 0, truncated: false, characters: 0 },
+        }),
+      },
+      wait: async () => undefined,
+    });
+
+    await tools.execute({
+      name: CODE_TERMINAL_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
+    });
+    expect(executeOperation).toHaveBeenCalled();
+  });
 });
 
 describe("the Apple capability as an agent tool", () => {

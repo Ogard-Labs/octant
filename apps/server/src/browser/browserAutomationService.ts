@@ -804,29 +804,47 @@ export function createBrowserToolCallAuthorityService(
   authority: BrowserAuthorityResolver,
   clock?: () => string,
   readThreadTaint?: (threadId: string) => ThreadExternalContentTaint,
+  readThreadProfileConstraints?: (threadId: string) =>
+    | {
+        readonly toolConstraints?: ReadonlyArray<string>;
+        readonly profileDisplayName?: string;
+      }
+    | undefined,
 ): ToolCallAuthorityService {
   return new ToolCallAuthorityService({
     resolveGrantedAuthority: (threadId, mode) => {
       if (mode !== "work" && mode !== "code") return undefined;
       return authority.resolve(threadId as BrowserThreadId, mode);
     },
-    resolveLiveFacts: ({ threadId, request }) => ({
-      providerAppManagedTools: "supported",
-      host: { computerUseEnabled: true },
-      executionPolicy: "approval-gated",
-      approvalSatisfied:
-        request.approval.kind === "not-required" || request.approval.kind === "approved",
-      // A caller that cannot supply the persisted taint projection is not
-      // allowed to turn unknown provenance into authority. The production
-      // server passes the projection reader explicitly; this fallback keeps
-      // direct service construction fail-closed.
-      externalContentIngested: readThreadTaint?.(threadId)?.externalContentIngested ?? true,
-    }),
+    resolveLiveFacts: ({ threadId, request }) => {
+      const constraints = readThreadProfileConstraints?.(threadId);
+      return {
+        providerAppManagedTools: "supported" as const,
+        host: { computerUseEnabled: true },
+        executionPolicy: "approval-gated" as const,
+        approvalSatisfied:
+          request.approval.kind === "not-required" || request.approval.kind === "approved",
+        // A caller that cannot supply the persisted taint projection is not
+        // allowed to turn unknown provenance into authority. The production
+        // server passes the projection reader explicitly; this fallback keeps
+        // direct service construction fail-closed.
+        externalContentIngested: readThreadTaint?.(threadId)?.externalContentIngested ?? true,
+        ...(constraints?.toolConstraints === undefined
+          ? {}
+          : { toolConstraints: constraints.toolConstraints }),
+        ...(constraints?.profileDisplayName === undefined
+          ? {}
+          : { profileDisplayName: constraints.profileDisplayName }),
+      };
+    },
     ...(clock === undefined ? {} : { clock }),
   });
 }
 
 function mapToolCallDenial(reason: string, request: ToolActionRequest): BrowserAutomationFailure {
+  if (reason.startsWith("Profile ")) {
+    return { category: "policy-denied", message: reason };
+  }
   if (reason === "unknown-tool" || reason === "argument-schema-invalid") {
     return { category: "invalid", message: "Browser capability request is invalid." };
   }

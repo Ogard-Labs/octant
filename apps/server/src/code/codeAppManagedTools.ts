@@ -20,7 +20,11 @@ import type {
   AppleRuntimeSnapshot,
   ApplePlatform,
 } from "@octant/contracts";
-import { clampTurnAccessPosture } from "@octant/domain";
+import {
+  clampTurnAccessPosture,
+  decideProfileToolConstraint,
+  isToolAllowedByAllowlist,
+} from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { AppleDiscoveryResult } from "../apple/appleToolchainService";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
@@ -205,16 +209,21 @@ export interface CodeAppManagedToolsOptions {
 }
 
 export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): AppManagedToolSet {
+  const allowlist = options.thread.toolConstraints ?? [];
   return {
     definitions: [
       browserDefinition,
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
-    ],
+    ].filter((definition) => isToolAllowedByAllowlist(allowlist, definition.name)),
     execute: async ({ name, inputJson, signal }) => {
       if (signal?.aborted) return failure("tool-interrupted");
       const authorityFailure = currentAuthorityFailure(options);
       if (authorityFailure !== undefined) return failure(authorityFailure);
+      const profileFailure = profileToolConstraintFailure(options.thread, name);
+      if (profileFailure !== undefined) {
+        return failure("profile-tool-refused", profileFailure);
+      }
       if (name === CODE_TERMINAL_TOOL_NAME) {
         return terminalTool(options, parseTerminalInput(inputJson), signal);
       }
@@ -875,6 +884,15 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
   }
   return parsed as unknown as AppleToolInput;
+}
+
+function profileToolConstraintFailure(thread: CodeThread, toolName: string): string | undefined {
+  const decision = decideProfileToolConstraint({
+    toolId: toolName,
+    toolConstraints: thread.toolConstraints ?? [],
+    profileDisplayName: thread.profileDisplayName ?? "the bound profile",
+  });
+  return decision.status === "refused" ? decision.reason : undefined;
 }
 
 function currentAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {

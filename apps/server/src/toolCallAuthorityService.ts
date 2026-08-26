@@ -32,6 +32,12 @@ export type ToolCallLiveFacts = {
    * Thread-lifetime taint rebuilt from `thread.external-content-ingested@1`.
    */
   readonly externalContentIngested: boolean;
+  /**
+   * Snapshotted profile tool allowlist from the live Code thread. Empty or
+   * absent means no constraint.
+   */
+  readonly toolConstraints?: ReadonlyArray<string>;
+  readonly profileDisplayName?: string;
   readonly declaredCapabilities?: ReadonlyArray<ExtensionCapability>;
 };
 
@@ -142,6 +148,10 @@ export class ToolCallAuthorityService {
           input.request.approval.kind !== "pending" &&
           input.request.approval.kind !== "denied",
         externalContentIngested: live.externalContentIngested,
+        ...(live.toolConstraints === undefined ? {} : { toolConstraints: live.toolConstraints }),
+        ...(live.profileDisplayName === undefined
+          ? {}
+          : { profileDisplayName: live.profileDisplayName }),
       },
       ...(live.declaredCapabilities === undefined
         ? {}

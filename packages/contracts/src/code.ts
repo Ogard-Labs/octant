@@ -251,6 +251,23 @@ export const CodeThread = Schema.Struct({
    * afterwards cannot change what a running thread may do.
    */
   profileId: Schema.optional(AgentProfileId),
+  /**
+   * Display name of the profile that produced this thread's posture and tool
+   * allowlist. Snapshotted so a later refusal can name the profile without
+   * reloading it. Optional for the same replay reason as `profileId`.
+   */
+  profileDisplayName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
+  /**
+   * The profile's tool allowlist, snapshotted at creation so a later profile
+   * edit cannot change what this thread may call. Absent or empty means no
+   * constraint, matching how an empty model constraint list allows every model.
+   * Optional so a journal written before this field existed replays as "no
+   * constraint" rather than being rejected. The live profile is never consulted
+   * for this list.
+   */
+  toolConstraints: Schema.optional(
+    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  ),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   deliveryTarget: CodeDeliveryTarget,
   version: AggregateVersion,
