@@ -201,6 +201,31 @@ describe("CodeComposerAdapter interactions", () => {
     container.remove();
   });
 
+  it("reports the requested access policy when the composer access dropdown changes", async () => {
+    const onExecutionPolicyChange = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <CodeComposerAdapter
+          {...defaultProps}
+          defaultExecutionPolicy="approval-gated"
+          onExecutionPolicyChange={onExecutionPolicyChange}
+        />,
+      );
+    });
+    expect(onExecutionPolicyChange).toHaveBeenCalledWith("approval-gated");
+    const access = container.querySelector('select[aria-label="Access policy"]');
+    expect(access).not.toBeNull();
+    await act(async () => {
+      fireEvent.change(access!, { target: { value: "plan" } });
+    });
+    expect(onExecutionPolicyChange).toHaveBeenCalledWith("plan");
+    root.unmount();
+    container.remove();
+  });
+
   it("submits on Enter and cancels on Escape", async () => {
     const onCreateThread = vi.fn();
     const onCancel = vi.fn();

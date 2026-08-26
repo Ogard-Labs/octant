@@ -12,7 +12,6 @@ import type {
 } from "@octant/contracts/providers";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
-  AgentProfileRejected,
   applyProfileToThread,
   buildExecutionContextPickerEntries,
   filterExecutionContextPickerEntries,
@@ -137,34 +136,36 @@ describe("agentProfilePolicy", () => {
   });
 
   describe("validateProfileAuthoritySafety", () => {
-    it("passes when profile policy does not exceed project policy", () => {
-      expect(() =>
+    it("accepts a profile whose narrowed posture does not exceed project policy", () => {
+      expect(
         validateProfileAuthoritySafety({
           profile: profile({ defaultExecutionPolicy: "plan" }),
           projectExecutionPolicy: "approval-gated",
           requestedExecutionPolicy: "approval-gated",
         }),
-      ).not.toThrow();
+      ).toEqual({ status: "accepted" });
     });
 
-    it("throws when the narrowed posture still exceeds project policy", () => {
-      expect(() =>
-        validateProfileAuthoritySafety({
-          profile: profile({ defaultExecutionPolicy: "full-access" }),
-          projectExecutionPolicy: "plan",
-          requestedExecutionPolicy: "full-access",
-        }),
-      ).toThrow(AgentProfileRejected);
+    it("refuses when the narrowed posture still exceeds project policy", () => {
+      const result = validateProfileAuthoritySafety({
+        profile: profile({ defaultExecutionPolicy: "full-access" }),
+        projectExecutionPolicy: "plan",
+        requestedExecutionPolicy: "full-access",
+      });
+      expect(result.status).toBe("refused");
+      if (result.status !== "refused") return;
+      expect(result.code).toBe("authority-escalation");
+      expect(result.reason).toContain("exceeds Project policy");
     });
 
     it("accepts a Full-access profile asked to start under Plan", () => {
-      expect(() =>
+      expect(
         validateProfileAuthoritySafety({
           profile: profile({ defaultExecutionPolicy: "full-access" }),
           projectExecutionPolicy: "approval-gated",
           requestedExecutionPolicy: "plan",
         }),
-      ).not.toThrow();
+      ).toEqual({ status: "accepted" });
     });
   });
 

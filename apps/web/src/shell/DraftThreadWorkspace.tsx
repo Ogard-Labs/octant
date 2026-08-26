@@ -105,6 +105,7 @@ export interface DraftThreadWorkspaceProps {
   ) => Promise<CodeCommandResult | undefined>;
   readonly defaultExecutionPolicy?: ProviderExecutionPolicy;
   readonly defaultPermissionPersistence?: PermissionPersistence;
+  readonly onExecutionPolicyChange?: (executionPolicy: ProviderExecutionPolicy) => void;
   readonly onAttachFolder?: () => void;
   readonly onCreateProject?: (
     mode: OctantMode,
@@ -286,6 +287,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}
           defaultExecutionPolicy={props.defaultExecutionPolicy ?? "approval-gated"}
           defaultPermissionPersistence={props.defaultPermissionPersistence ?? "current-session"}
+          {...(props.onExecutionPolicyChange === undefined
+            ? {}
+            : { onExecutionPolicyChange: props.onExecutionPolicyChange })}
           folderControl={folderControl}
           {...(githubControl === null ? {} : { githubControl })}
           {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}

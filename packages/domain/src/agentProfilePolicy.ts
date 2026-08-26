@@ -23,15 +23,18 @@ export type AgentProfileRejectionCode =
   | "profile-not-found"
   | "authority-escalation";
 
-export class AgentProfileRejected extends Error {
-  override readonly name = "AgentProfileRejected";
-  constructor(
-    readonly code: AgentProfileRejectionCode,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+/**
+ * Whether binding a profile would escalate past the Project's grant.
+ * Expected refusal is a value: picker and resolver callers have to mark the
+ * profile unavailable or record a downgrade rather than crash.
+ */
+export type ProfileAuthoritySafety =
+  | { readonly status: "accepted" }
+  | {
+      readonly status: "refused";
+      readonly code: Extract<AgentProfileRejectionCode, "authority-escalation">;
+      readonly reason: string;
+    };
 
 /**
  * Check whether a profile is compatible with the given mode.
@@ -78,17 +81,19 @@ export function validateProfileAuthoritySafety(input: {
   readonly profile: AgentProfile;
   readonly projectExecutionPolicy: ProviderExecutionPolicy;
   readonly requestedExecutionPolicy: ProviderExecutionPolicy;
-}): void {
+}): ProfileAuthoritySafety {
   const executionPolicy = narrowerPolicy(
     input.profile.defaultExecutionPolicy,
     input.requestedExecutionPolicy,
   );
   if (POLICY_RANK[executionPolicy] > POLICY_RANK[input.projectExecutionPolicy]) {
-    throw new AgentProfileRejected(
-      "authority-escalation",
-      `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
-    );
+    return {
+      status: "refused",
+      code: "authority-escalation",
+      reason: `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
+    };
   }
+  return { status: "accepted" };
 }
 
 /**
@@ -175,11 +180,16 @@ export function applyProfileToThread(input: {
   // Project, not the profile's own default. A Full-access profile asked to
   // start in Plan produces a Plan thread and takes nothing the Project has not
   // already granted; refusing it would refuse the narrower of the two choices.
-  if (POLICY_RANK[executionPolicy] > POLICY_RANK[input.projectExecutionPolicy]) {
+  const authority = validateProfileAuthoritySafety({
+    profile: input.profile,
+    projectExecutionPolicy: input.projectExecutionPolicy,
+    requestedExecutionPolicy: input.requestedExecutionPolicy,
+  });
+  if (authority.status === "refused") {
     return {
       status: "refused",
-      code: "authority-escalation",
-      reason: `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
+      code: authority.code,
+      reason: authority.reason,
     };
   }
   const permissionPersistence =
@@ -234,17 +244,11 @@ export function buildExecutionContextPickerEntries(input: {
           profile.defaultExecutionPolicy,
           input.requestedExecutionPolicy,
         );
-        let unavailableReason: string | undefined;
-        try {
-          validateProfileAuthoritySafety({
-            profile,
-            projectExecutionPolicy: input.projectExecutionPolicy,
-            requestedExecutionPolicy: input.requestedExecutionPolicy,
-          });
-        } catch (error) {
-          unavailableReason =
-            error instanceof AgentProfileRejected ? error.message : "Profile rejected.";
-        }
+        const authority = validateProfileAuthoritySafety({
+          profile,
+          projectExecutionPolicy: input.projectExecutionPolicy,
+          requestedExecutionPolicy: input.requestedExecutionPolicy,
+        });
         entries.push({
           providerInstanceId: provider.instanceId,
           providerDisplayName: provider.displayName,
@@ -256,7 +260,7 @@ export function buildExecutionContextPickerEntries(input: {
           hostLabel: input.hostLabel,
           executionPolicy,
           effectivePermissions: defaultPermissionsForPolicy(executionPolicy),
-          ...(unavailableReason === undefined ? {} : { unavailableReason }),
+          ...(authority.status === "refused" ? { unavailableReason: authority.reason } : {}),
         });
       }
     }
@@ -498,16 +502,12 @@ function validateCandidate(
     if (!isModelAllowedByProfile(candidate.profile, candidate.modelId)) {
       return "Model is not allowed by the profile's model constraints.";
     }
-    try {
-      validateProfileAuthoritySafety({
-        profile: candidate.profile,
-        projectExecutionPolicy: input.projectExecutionPolicy,
-        requestedExecutionPolicy: input.requestedExecutionPolicy,
-      });
-    } catch (error) {
-      if (error instanceof AgentProfileRejected) return error.message;
-      return "Profile authority validation failed.";
-    }
+    const authority = validateProfileAuthoritySafety({
+      profile: candidate.profile,
+      projectExecutionPolicy: input.projectExecutionPolicy,
+      requestedExecutionPolicy: input.requestedExecutionPolicy,
+    });
+    if (authority.status === "refused") return authority.reason;
   }
   const capability = validateCapabilityConstraints({
     modelId: candidate.modelId,

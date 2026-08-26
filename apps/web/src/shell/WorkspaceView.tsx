@@ -286,10 +286,14 @@ export interface WorkspaceViewProps {
   readonly draftApprovalLabel?: string;
   readonly draftSelectedProviderInstanceId?: import("@octant/contracts/providers").ProviderInstanceId;
   readonly draftSelectedModelId?: import("@octant/contracts/providers").ProviderModelId;
+  readonly draftDefaultExecutionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy;
   readonly onDraftSelectProvider?: (selection: {
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
     readonly modelId: import("@octant/contracts/providers").ProviderModelId;
   }) => void;
+  readonly onDraftRequestedExecutionPolicyChange?: (
+    executionPolicy: import("@octant/contracts/providers").ProviderExecutionPolicy,
+  ) => void;
   readonly onDraftCreateThread?: (
     mode: string,
     prompt: string,
@@ -808,7 +812,13 @@ function renderNonCodeTab(
         {...(props.draftSelectedModelId === undefined
           ? {}
           : { selectedModelId: props.draftSelectedModelId })}
+        {...(props.draftDefaultExecutionPolicy === undefined
+          ? {}
+          : { defaultExecutionPolicy: props.draftDefaultExecutionPolicy })}
         onSelectProvider={props.onDraftSelectProvider ?? (() => {})}
+        {...(props.onDraftRequestedExecutionPolicyChange === undefined
+          ? {}
+          : { onExecutionPolicyChange: props.onDraftRequestedExecutionPolicyChange })}
         {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
         {...(props.onDraftCreateCodeThread === undefined
           ? {}
