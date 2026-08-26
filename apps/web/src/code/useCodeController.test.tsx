@@ -1177,7 +1177,7 @@ describe("useCodeController", () => {
 
     expect(ok).toBe(false);
     expect(subscribeOperation).toHaveBeenCalledOnce();
-    expect(result.current.turnStatus).toBe("failed");
+    expect(result.current.turnStatus).toBe("waiting");
     expect(result.current.turnError).toMatch(/waiting for approval, input, or recovery/i);
     expect(result.current.pendingDraft).toBe("approve this turn");
   });

@@ -5299,6 +5299,23 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: var(--oct-text-sm);
 }
 
+.code-thread-workspace__waiting {
+  display: flex;
+  flex: 0 0 auto;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-2) auto 0;
+  padding-inline: var(--oct-space-1);
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+}
+
+.code-thread-workspace__waiting svg {
+  flex: 0 0 auto;
+  color: var(--octant-warning-text);
+}
+
 /* Placement only: the recipe is the system's `.callout`, the measure the
    shared `.thread-column`. A notice about this thread spans the thread's
    own column — running it edge to edge made it read as window chrome. */

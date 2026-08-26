@@ -44,7 +44,7 @@ import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentV
 import { markInteraction } from "../polling/interactionTrace";
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
-export type CodeTurnStatus = "idle" | "sending" | "running" | "failed";
+export type CodeTurnStatus = "idle" | "sending" | "running" | "waiting" | "failed";
 
 /**
  * A question the running provider turn asked the user and is blocked on:
@@ -1022,7 +1022,7 @@ export function useCodeController(options: CodeControllerOptions) {
                         setTurnError(undefined);
                       }
                     } else {
-                      setTurnStatus("failed");
+                      setTurnStatus(terminalState === "waiting" ? "waiting" : "failed");
                       setTurnError(
                         terminalMessage ??
                           (terminalState === "waiting"
@@ -1862,8 +1862,11 @@ export function useCodeController(options: CodeControllerOptions) {
         let cursor = 0;
         let assistantText = "";
         let terminal = false;
-        const failActiveTurn = (status: "waiting" | "interrupted" | "failed", message: string) => {
-          setTurnStatus("failed");
+        const settleActiveTurn = (
+          status: "waiting" | "interrupted" | "failed",
+          message: string,
+        ) => {
+          setTurnStatus(status === "waiting" ? "waiting" : "failed");
           setTurnError(message);
           restoreFailedPrompt();
           setConversation((current) =>
@@ -1938,7 +1941,7 @@ export function useCodeController(options: CodeControllerOptions) {
               if (event.state !== "running") {
                 terminal = true;
                 if (event.state !== "completed") {
-                  failActiveTurn(
+                  settleActiveTurn(
                     event.state,
                     event.failure?.message ??
                       (event.state === "waiting"
@@ -1957,7 +1960,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   event.result.state === "interrupted" ||
                   event.result.state === "failed"
                 ) {
-                  failActiveTurn(
+                  settleActiveTurn(
                     event.result.state,
                     event.result.state === "waiting"
                       ? "The provider turn is waiting for approval, input, or recovery."
@@ -1967,7 +1970,7 @@ export function useCodeController(options: CodeControllerOptions) {
                 }
               } else if (event.result.kind === "operation-failed") {
                 terminal = true;
-                failActiveTurn("failed", event.result.failure.message);
+                settleActiveTurn("failed", event.result.failure.message);
                 return false;
               } else {
                 terminal = event.result.kind !== "operation-accepted";
