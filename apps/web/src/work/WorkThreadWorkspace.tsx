@@ -53,6 +53,7 @@ import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useW
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
 import { useWorkFileMentions } from "./useWorkFileMentions";
 import { samePollingData } from "../polling/samePollingData";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
@@ -216,8 +217,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     // arrives, so a host that consistently takes longer than 1s to answer
     // would never see its transcript or pending requests update at all.
     let inFlight = false;
-    const timer = globalThis.setInterval(() => {
-      if (cancelled || inFlight) return;
+    const stop = scheduleVisibleInterval(() => {
+      if (cancelled || inFlight || !documentIsVisible()) return;
       inFlight = true;
       const requestGeneration = ++transcriptGeneration.current;
       const transcript =
@@ -243,7 +244,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     }, 1_000);
     return () => {
       cancelled = true;
-      globalThis.clearInterval(timer);
+      stop();
     };
   }, [projectId, props.requestClient, props.threadId, props.turnClient]);
 

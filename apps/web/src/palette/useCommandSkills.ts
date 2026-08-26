@@ -1,5 +1,6 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useEffect, useState } from "react";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { CommandSkill } from "./buildOctantCommands";
 
 const NO_SKILLS: ReadonlyArray<CommandSkill> = [];
@@ -45,7 +46,7 @@ export function useCommandSkills(
     let active = true;
     let inFlight = false;
     const load = async () => {
-      if (inFlight) return;
+      if (!documentIsVisible() || inFlight) return;
       inFlight = true;
       try {
         const snapshot = await client.snapshot();
@@ -69,11 +70,12 @@ export function useCommandSkills(
         inFlight = false;
       }
     };
-    void load();
-    const timer = setInterval(() => void load(), Math.max(10, refreshMs));
+    const stop = scheduleVisibleInterval(() => void load(), Math.max(10, refreshMs), {
+      runImmediately: true,
+    });
     return () => {
       active = false;
-      clearInterval(timer);
+      stop();
     };
   }, [client, refreshMs]);
 

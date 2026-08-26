@@ -20,6 +20,7 @@ export const ids = {
 export function codeClient(options: { readonly evidence?: string } = {}): CodeClient {
   return {
     bootstrap: vi.fn(),
+    navigation: vi.fn(),
     queryBoard: vi.fn(),
     queryProjectPullRequests: vi.fn(),
     refreshProjectPullRequests: vi.fn(),

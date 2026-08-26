@@ -1,6 +1,7 @@
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
 import type {
   CodeBootstrap,
+  CodeNavigation,
   CodeCommand,
   CodeCommandResult,
   CodeEventFrame,
@@ -39,6 +40,8 @@ import {
   type CodeTurnActivity,
 } from "./transcriptActivity";
 import { samePollingData } from "../polling/samePollingData";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import { markInteraction } from "../polling/interactionTrace";
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type CodeTurnStatus = "idle" | "sending" | "running" | "failed";
@@ -259,11 +262,6 @@ const HISTORY_UNAVAILABLE_MESSAGE = "Conversation history could not be loaded.";
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
-
-/** Hidden windows should not spend a request cycle keeping a background list hot. */
-function documentIsVisible(): boolean {
-  return typeof document === "undefined" || document.visibilityState !== "hidden";
-}
 
 /**
  * What a Code thread has consumed, and the provider usage windows it last
@@ -620,14 +618,27 @@ export function useCodeController(options: CodeControllerOptions) {
   );
 
   const applyNavigationRefresh = useCallback(
-    (next: CodeBootstrap, read: number) => {
+    (next: CodeNavigation, read: number) => {
       if (read <= appliedNavigationRead.current) return;
       appliedNavigationRead.current = read;
-      bootstrapRef.current = next;
-      setBootstrap((current) => {
-        if (current === undefined) return next;
+      const currentBootstrap = bootstrapRef.current;
+      if (currentBootstrap !== undefined) {
         if (
-          samePollingData(current.checkouts, next.checkouts) &&
+          !(
+            samePollingData(currentBootstrap.threads, next.threads) &&
+            samePollingData(currentBootstrap.activity, next.activity)
+          )
+        ) {
+          bootstrapRef.current = {
+            ...currentBootstrap,
+            threads: next.threads,
+            activity: next.activity,
+          };
+        }
+      }
+      setBootstrap((current) => {
+        if (current === undefined) return current;
+        if (
           samePollingData(current.threads, next.threads) &&
           samePollingData(current.activity, next.activity)
         ) {
@@ -635,12 +646,20 @@ export function useCodeController(options: CodeControllerOptions) {
         }
         return {
           ...current,
-          checkouts: next.checkouts,
           threads: next.threads,
           activity: next.activity,
         };
       });
-      setActiveView((current) => refreshActiveThreadView(current, next));
+      setActiveView((current) => {
+        if (current === undefined) return current;
+        const refreshedThread = next.threads.find(
+          (candidate) => String(candidate.id) === String(current.thread.id),
+        );
+        if (refreshedThread === undefined || samePollingData(refreshedThread, current.thread)) {
+          return current;
+        }
+        return { ...current, thread: refreshedThread };
+      });
       reconcileDrafts(next.threads.map((thread) => String(thread.id)));
     },
     [reconcileDrafts],
@@ -661,7 +680,7 @@ export function useCodeController(options: CodeControllerOptions) {
     async (threadId: CodeThreadId) => {
       try {
         const read = nextNavigationRead();
-        const next = await client.bootstrap();
+        const next = await client.navigation();
         if (!mounted.current) return;
         applyNavigationRefresh(next, read);
         const seen = next.activity.find(
@@ -685,6 +704,7 @@ export function useCodeController(options: CodeControllerOptions) {
    */
   const markThreadRead = useCallback(
     (threadId: CodeThreadId) => {
+      markInteraction("renderer", "code-thread-read");
       void recordSeenActivity(threadId);
     },
     [recordSeenActivity],
@@ -1325,13 +1345,13 @@ export function useCodeController(options: CodeControllerOptions) {
     if (navigationRefreshMs <= 0) return;
     let cancelled = false;
     let inFlight = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
     const refresh = async () => {
       if (!documentIsVisible() || inFlight) return;
       inFlight = true;
+      markInteraction("renderer", "code-navigation-refresh");
       try {
         const read = nextNavigationRead();
-        const next = await client.bootstrap();
+        const next = await client.navigation();
         if (cancelled || !mounted.current) return;
         applyNavigationRefresh(next, read);
       } catch {
@@ -1341,22 +1361,10 @@ export function useCodeController(options: CodeControllerOptions) {
         inFlight = false;
       }
     };
-    const schedule = () => {
-      if (timer !== undefined) clearInterval(timer);
-      timer = documentIsVisible()
-        ? setInterval(() => void refresh(), navigationRefreshMs)
-        : undefined;
-    };
-    const onVisibilityChange = () => {
-      schedule();
-      if (documentIsVisible()) void refresh();
-    };
-    schedule();
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    const stop = scheduleVisibleInterval(() => void refresh(), navigationRefreshMs);
     return () => {
       cancelled = true;
-      if (timer !== undefined) clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
+      stop();
     };
   }, [applyNavigationRefresh, client, navigationRefreshMs, nextNavigationRead]);
 

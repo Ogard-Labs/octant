@@ -26,6 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { buildChatThreadNavigation, type ChatThreadNavigationItem } from "../shell/navigationModel";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export type ChatControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 
@@ -39,11 +40,6 @@ const MAX_RECONNECT_DELAY_MS = 10_000;
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_RECONNECT_BACKOFF_MS = 100;
-
-/** Background windows do not need to poll every thread while hidden. */
-function documentIsVisible(): boolean {
-  return typeof document === "undefined" || document.visibilityState !== "hidden";
-}
 
 /**
  * A stable identifier for one extension/skill selection. `ExtensionSelection`
@@ -528,7 +524,6 @@ export function useChatController(options: ChatControllerOptions) {
     if (bootstrap === undefined) return;
     let cancelled = false;
     let inFlight = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
     const refresh = async () => {
       if (!documentIsVisible() || inFlight) return;
       inFlight = true;
@@ -544,23 +539,12 @@ export function useChatController(options: ChatControllerOptions) {
         inFlight = false;
       }
     };
-    const schedule = () => {
-      if (timer !== undefined) clearInterval(timer);
-      timer = documentIsVisible()
-        ? setInterval(() => void refresh(), Math.max(10, navigationRefreshMs))
-        : undefined;
-    };
-    const onVisibilityChange = () => {
-      schedule();
-      if (documentIsVisible()) void refresh();
-    };
-    schedule();
-    if (documentIsVisible()) void refresh();
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    const stop = scheduleVisibleInterval(() => void refresh(), Math.max(10, navigationRefreshMs), {
+      runImmediately: true,
+    });
     return () => {
       cancelled = true;
-      if (timer !== undefined) clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
+      stop();
     };
   }, [applyNavigation, bootstrap, client, navigationRefreshMs]);
 

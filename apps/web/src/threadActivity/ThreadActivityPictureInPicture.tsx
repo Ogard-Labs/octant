@@ -5,6 +5,7 @@ import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automa
 import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
 import { ExternalLink, Eye, EyeOff, Globe2, MonitorUp, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { IconButton } from "../shell/IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -107,15 +108,17 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
         computerInFlight = false;
       });
     };
-    void refreshBrowser();
-    void refreshComputer();
-    const timer = globalThis.setInterval(() => {
-      void refreshBrowser();
-      void refreshComputer();
-    }, props.pollIntervalMs ?? 1_000);
+    const stop = scheduleVisibleInterval(
+      () => {
+        void refreshBrowser();
+        void refreshComputer();
+      },
+      props.pollIntervalMs ?? 1_000,
+      { runImmediately: true },
+    );
     return () => {
       controller.abort();
-      globalThis.clearInterval(timer);
+      stop();
     };
   }, [loadBrowser, loadComputerUse, props.pollIntervalMs]);
 

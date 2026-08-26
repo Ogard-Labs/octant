@@ -98,6 +98,18 @@ describe("Code routes", () => {
     expect(bootstrap).toHaveBeenCalledWith(windowId);
   });
 
+  it("passes only the authenticated window identity to navigation", async () => {
+    const navigation = vi.fn(async () => ({ threads: [], activity: [] }));
+    const bootstrap = vi.fn();
+    const route = routeFixture({ bootstrap, navigation });
+
+    const response = await route(request("/api/code/navigation"));
+
+    expect(response?.status).toBe(200);
+    expect(navigation).toHaveBeenCalledWith(windowId);
+    expect(bootstrap).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed and oversized JSON commands within the one MiB envelope", async () => {
     const execute = vi.fn();
     const route = routeFixture({ execute }, 16);
@@ -1022,6 +1034,7 @@ function routeFixture(overrides: Record<string, unknown> = {}, maxJsonBodySize?:
   store.register({ windowId, capability, now: 0 });
   const service = {
     bootstrap: vi.fn(async () => ({ settings: settings(), threads: [], checkouts: [] })),
+    navigation: vi.fn(async () => ({ threads: [], activity: [] })),
     read: vi.fn(() => ({ thread, checkout, lastSequence: 0 })),
     execute: vi.fn(),
     executeOperation: vi.fn(),

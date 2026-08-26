@@ -762,6 +762,7 @@ describe("startOctantServer", () => {
             desktopBridgeSecret: "desktop-secret",
             codeService: {
               bootstrap,
+              navigation: vi.fn(async () => ({ threads: [], activity: [] })),
               read: vi.fn(),
               execute: vi.fn(),
               subscribe: vi.fn(async function* () {}),
@@ -2266,6 +2267,7 @@ describe("startOctantServer", () => {
               desktopBridgeSecret: "desktop-secret",
               codeService: {
                 bootstrap: codeBootstrap,
+                navigation: vi.fn(async () => ({ threads: [], activity: [] })),
                 read: vi.fn(),
                 execute: vi.fn(),
                 subscribe: vi.fn(async function* () {}),

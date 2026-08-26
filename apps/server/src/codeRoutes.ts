@@ -53,6 +53,7 @@ import {
   type CodeAttachmentMediaType,
   type CodeAttachmentReference,
   type CodeBootstrap,
+  type CodeNavigation,
   type CodeCommand,
   type CodeCommandResult,
   type CodeEvidenceReference,
@@ -164,6 +165,9 @@ export interface CodeTestListingInput {
 
 export interface CodeRouteService {
   readonly bootstrap: (authenticatedWindowId: WindowId) => Promise<CodeBootstrap> | CodeBootstrap;
+  readonly navigation: (
+    authenticatedWindowId: WindowId,
+  ) => Promise<CodeNavigation> | CodeNavigation;
   readonly read: (
     authenticatedWindowId: WindowId,
     threadId: CodeThreadId,
@@ -407,6 +411,13 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           requireMethodAndEmptyQuery(request, url, "GET");
           return jsonResponse(
             await dependencies.service.bootstrap(authenticatedWindowId),
+            200,
+            origin,
+          );
+        case "navigation":
+          requireMethodAndEmptyQuery(request, url, "GET");
+          return jsonResponse(
+            await dependencies.service.navigation(authenticatedWindowId),
             200,
             origin,
           );
@@ -1033,6 +1044,7 @@ type MatchedRoute =
   | Readonly<{
       kind:
         | "bootstrap"
+        | "navigation"
         | "commands"
         | "terminal-inspection"
         | "file-save"
@@ -1152,6 +1164,7 @@ function readAttachmentIdentity(url: URL): {
 
 function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/bootstrap") return { kind: "bootstrap" };
+  if (pathname === "/api/code/navigation") return { kind: "navigation" };
   if (pathname === "/api/code/commands") return { kind: "commands" };
   if (pathname === "/api/code/terminals/inspect") return { kind: "terminal-inspection" };
   if (pathname === "/api/code/board") return { kind: "board" };

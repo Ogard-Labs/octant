@@ -129,6 +129,28 @@ describe("code client", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("reads navigation from the authenticated Code navigation route", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      Response.json({
+        threads: [thread],
+        activity: [{ threadId: ids.thread, lastSequence: 7 }],
+      }),
+    );
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.navigation()).resolves.toEqual({
+      threads: [thread],
+      activity: [{ threadId: ids.thread, lastSequence: 7 }],
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/navigation`,
+      expect.objectContaining({
+        method: "GET",
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+  });
+
   it("sends strict opaque Code operations through the authenticated command endpoint", async () => {
     const result = {
       kind: "operation-accepted",

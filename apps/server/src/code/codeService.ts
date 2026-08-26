@@ -27,6 +27,7 @@ import {
   type AggregateVersion,
   type BindingRevisionId,
   type CodeBootstrap,
+  type CodeNavigation,
   type CodeApprovalEffect,
   type CodeCheckoutId,
   type CodeCheckoutIdentity,
@@ -622,25 +623,36 @@ export class CodeService {
     this.#onWorkingDirectoryChanged = options.onWorkingDirectoryChanged;
   }
 
+  async navigation(authenticatedWindowId: WindowId): Promise<CodeNavigation> {
+    const threads = await this.#visibleThreads(authenticatedWindowId);
+    return { threads, activity: this.#visibleActivity(threads) };
+  }
+
   async bootstrap(authenticatedWindowId: WindowId): Promise<CodeBootstrap> {
-    const threads: CodeThread[] = [];
-    for (const thread of this.#persistence.readCodeThreads()) {
-      if (await this.#access.canAccessProject(authenticatedWindowId, thread.projectId)) {
-        threads.push(this.#sessionAuthority.effectiveThread(authenticatedWindowId, thread));
-      }
-    }
+    const threads = await this.#visibleThreads(authenticatedWindowId);
     const recoveredCheckouts = new Map<string, CodeCheckoutIdentity>();
     const observedExistingCheckouts = new Map<string, CodeCheckoutIdentity | undefined>();
     const attemptedManagedCheckoutIds = new Set<string>();
     for (const thread of threads) {
       const persisted = this.#persistence.readCodeCheckout(thread.checkoutId);
       if (persisted === undefined) continue;
+      if (persisted.kind === "managed-worktree") {
+        const checkoutId = String(persisted.id);
+        if (attemptedManagedCheckoutIds.has(checkoutId)) continue;
+        attemptedManagedCheckoutIds.add(checkoutId);
+      }
+      // Available and unavailable checkouts already have a recorded answer.
+      // Re-probing them on every bootstrap — including the 2s sidebar refresh
+      // that used to call this — walks the filesystem while the person is
+      // switching threads. Waiting is the only state whose next fact is still
+      // on disk.
+      if (persisted.availability !== "waiting") {
+        recoveredCheckouts.set(String(persisted.id), persisted);
+        continue;
+      }
       try {
         let recovered: CodeCheckoutIdentity | undefined;
         if (persisted.kind === "managed-worktree") {
-          const checkoutId = String(persisted.id);
-          if (attemptedManagedCheckoutIds.has(checkoutId)) continue;
-          attemptedManagedCheckoutIds.add(checkoutId);
           recovered =
             (await this.#roots.resolve(
               authenticatedWindowId,
@@ -734,7 +746,6 @@ export class CodeService {
         // restart will retry the compensation.
       }
     }
-    const threadIds = new Set(threads.map((thread) => String(thread.id)));
     return {
       settings: this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings(),
       threads,
@@ -742,13 +753,28 @@ export class CodeService {
         .readCodeCheckouts()
         .filter((checkout) => checkoutIds.has(String(checkout.id)))
         .map((checkout) => recoveredCheckouts.get(String(checkout.id)) ?? checkout),
-      // Filtered by the same authorization the thread list went through: a
-      // window that cannot see a thread must not learn that it is running from
-      // its activity sequence either.
-      activity: this.#persistence
-        .readCodeThreadActivity()
-        .filter((entry) => threadIds.has(String(entry.threadId))),
+      activity: this.#visibleActivity(threads),
     };
+  }
+
+  async #visibleThreads(authenticatedWindowId: WindowId): Promise<CodeThread[]> {
+    const threads: CodeThread[] = [];
+    for (const thread of this.#persistence.readCodeThreads()) {
+      if (await this.#access.canAccessProject(authenticatedWindowId, thread.projectId)) {
+        threads.push(this.#sessionAuthority.effectiveThread(authenticatedWindowId, thread));
+      }
+    }
+    return threads;
+  }
+
+  #visibleActivity(threads: ReadonlyArray<CodeThread>): ReadonlyArray<CodeThreadActivity> {
+    // Filtered by the same authorization the thread list went through: a
+    // window that cannot see a thread must not learn that it is running from
+    // its activity sequence either.
+    const threadIds = new Set(threads.map((thread) => String(thread.id)));
+    return this.#persistence
+      .readCodeThreadActivity()
+      .filter((entry) => threadIds.has(String(entry.threadId)));
   }
 
   async read(authenticatedWindowId: WindowId, threadId: CodeThreadId): Promise<CodeThreadView> {
