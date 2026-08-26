@@ -412,11 +412,9 @@ describe("WindowChrome", () => {
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
       "background: var(--octant-control);",
     );
-    expect(
-      cssRule(
-        'html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header',
-      ),
-    ).toContain("padding-left: var(--octant-window-chrome-leading-width");
+    expect(cssRule(".shell--sidebar-collapsed .workspace-pane__header")).toContain(
+      "padding-left: var(--octant-window-chrome-leading-width",
+    );
     expect(cssRule('.workspace-pane[data-active="true"]')).toContain(
       "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
     );
