@@ -132,7 +132,11 @@ export class GithubReadToolService {
             isError: true,
           };
         }
-        if (response.kind === "recent-repositories" || response.kind === "repositories") {
+        if (
+          response.kind === "recent-repositories" ||
+          response.kind === "repositories" ||
+          response.kind === "issue"
+        ) {
           return failure("tool-unavailable");
         }
         return {

@@ -24,6 +24,27 @@ const observationRow = {
   viewerPermission: "admin" as const,
 };
 
+const issueDetail = {
+  number: 7,
+  title: "Issue",
+  state: "open" as const,
+  author: "octocat",
+  createdAt: "2026-08-01T09:00:00Z",
+  updatedAt: "2026-08-11T10:00:00Z",
+  url: "https://github.com/octant/octant/issues/7",
+  labels: ["bug"],
+  body: "Steps to reproduce",
+  bodyTruncated: false,
+  comments: [
+    {
+      author: "hubot",
+      createdAt: "2026-08-02T09:00:00Z",
+      body: "Still happening",
+      truncated: false,
+    },
+  ],
+};
+
 function fakePort(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     listRepositories: vi.fn(async () => ({
@@ -45,6 +66,10 @@ function fakePort(overrides: Partial<Record<string, unknown>> = {}) {
         ],
         hasNextPage: false,
       },
+    })),
+    readIssue: vi.fn(async () => ({
+      kind: "ok" as const,
+      value: issueDetail,
     })),
     listPullRequests: vi.fn(async () => ({
       kind: "ok" as const,
@@ -300,6 +325,140 @@ describe("GithubCatalogueService", () => {
     expect(await catalogue.read({ kind: "repositories", pageSize: 30 }, signal())).toMatchObject({
       kind: "unavailable",
       capability: "repository-catalogue",
+      reason: "unavailable",
+    });
+  });
+
+  it("forwards bounded issue search to the catalogue port", async () => {
+    const { service: catalogue, port } = service();
+    await catalogue.read(
+      {
+        kind: "issues",
+        owner: "octant",
+        name: "octant",
+        pageSize: 10,
+        search: "crash #7 author:octocat",
+      },
+      signal(),
+    );
+    expect(port.listIssues).toHaveBeenCalledWith(
+      {
+        owner: "octant",
+        name: "octant",
+        pageSize: 10,
+        state: "open",
+        search: "crash #7 author:octocat",
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("serves a fresh issue detail gated on issues-read", async () => {
+    const { service: catalogue, port } = service();
+    const response = await catalogue.read(
+      { kind: "issue", owner: "octant", name: "octant", number: 7 },
+      signal(),
+    );
+    expect(response).toMatchObject({
+      kind: "issue",
+      issue: { number: 7, bodyTruncated: false },
+      freshness: { status: "fresh" },
+    });
+    expect(port.readIssue).toHaveBeenCalledWith(
+      { owner: "octant", name: "octant", number: 7 },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("denies issue reads when issues-read is unavailable without calling GitHub", async () => {
+    const snapshot: GithubAuthenticationSnapshot = {
+      state: "scope-limited",
+      account: { login: "octocat", gitProtocol: "https", scopes: ["repo"] },
+      capabilities: [
+        { kind: "repository-catalogue", available: true },
+        { kind: "issues-read", available: false, remediation: "issues-read-required" },
+        { kind: "pull-requests-read", available: true },
+        { kind: "projects-read", available: true },
+      ],
+    };
+    const { service: catalogue, port } = service({ snapshot });
+    expect(
+      await catalogue.read({ kind: "issue", owner: "octant", name: "octant", number: 7 }, signal()),
+    ).toEqual({
+      kind: "unavailable",
+      capability: "issues-read",
+      reason: "scope-limited",
+      remediation: "issues-read-required",
+    });
+    expect(
+      await catalogue.read(
+        { kind: "issues", owner: "octant", name: "octant", pageSize: 10 },
+        signal(),
+      ),
+    ).toEqual({
+      kind: "unavailable",
+      capability: "issues-read",
+      reason: "scope-limited",
+      remediation: "issues-read-required",
+    });
+    expect(port.readIssue).not.toHaveBeenCalled();
+    expect(port.listIssues).not.toHaveBeenCalled();
+  });
+
+  it("surfaces rate-limited issue reads with retryAfterSeconds when nothing is cached", async () => {
+    const port = fakePort({
+      readIssue: vi.fn(async () => ({
+        kind: "rate-limited" as const,
+        retryAfterSeconds: 45,
+      })),
+    });
+    const { service: catalogue } = service({ port });
+    expect(
+      await catalogue.read({ kind: "issue", owner: "octant", name: "octant", number: 7 }, signal()),
+    ).toEqual({
+      kind: "unavailable",
+      capability: "issues-read",
+      reason: "rate-limited",
+      retryAfterSeconds: 45,
+    });
+  });
+
+  it("labels a cached issue detail stale after a later rate-limited fetch", async () => {
+    let clock = 0;
+    let fail = false;
+    const port = fakePort({
+      readIssue: vi.fn(async () =>
+        fail ? { kind: "rate-limited" as const } : { kind: "ok" as const, value: issueDetail },
+      ),
+    });
+    const { service: catalogue } = service({ port, now: () => clock });
+    await catalogue.read({ kind: "issue", owner: "octant", name: "octant", number: 7 }, signal());
+    fail = true;
+    clock += 60_000;
+    expect(
+      await catalogue.read({ kind: "issue", owner: "octant", name: "octant", number: 7 }, signal()),
+    ).toMatchObject({
+      kind: "issue",
+      freshness: { status: "stale", staleReason: "rate-limited" },
+    });
+  });
+
+  it("fails closed when an issue body still contains token-like material", async () => {
+    const port = fakePort({
+      readIssue: vi.fn(async () => ({
+        kind: "ok" as const,
+        value: {
+          ...issueDetail,
+          body: "leak ghp_abcdefghijklmnopqrstuv",
+        },
+      })),
+    });
+    const { service: catalogue } = service({ port });
+    expect(
+      await catalogue.read({ kind: "issue", owner: "octant", name: "octant", number: 7 }, signal()),
+    ).toMatchObject({
+      kind: "unavailable",
+      capability: "issues-read",
       reason: "unavailable",
     });
   });

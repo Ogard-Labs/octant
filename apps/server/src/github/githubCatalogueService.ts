@@ -2,6 +2,7 @@ import type {
   GithubAuthenticationSnapshot,
   GithubCapability,
   GithubCapabilityKind,
+  GithubCatalogueFreshness,
   GithubCatalogueReadRequest,
   GithubCatalogueReadResponse,
   GithubCatalogueStaleReason,
@@ -14,6 +15,7 @@ import type {
   GhCatalogueFailure,
   GhCataloguePageObservation,
   GhCatalogueResult,
+  GhIssueDetailObservation,
   GhIssueObservationRow,
   GhProjectObservationRow,
   GhPullRequestObservationRow,
@@ -38,9 +40,18 @@ interface CataloguePort {
       readonly pageSize: number;
       readonly cursor?: string;
       readonly state: "open" | "closed" | "all";
+      readonly search?: string;
     },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhIssueObservationRow>>>;
+  readIssue(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly number: number;
+    },
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<GhIssueDetailObservation>>;
   listPullRequests(
     request: {
       readonly owner: string;
@@ -227,23 +238,38 @@ export class GithubCatalogueService {
         },
       };
     }
-    if (request.kind === "issues" || request.kind === "pull-requests") {
-      const scoped = {
-        owner: request.owner,
-        name: request.name,
-        pageSize: request.pageSize,
-        ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
-        state: request.state ?? DEFAULT_ISSUE_STATE,
-      };
-      const result =
-        request.kind === "issues"
-          ? await this.#port.listIssues(scoped, signal)
-          : await this.#port.listPullRequests(scoped, signal);
+    if (request.kind === "issue") {
+      const result = await this.#port.readIssue(
+        { owner: request.owner, name: request.name, number: request.number },
+        signal,
+      );
       if (result.kind !== "ok") return result;
       return {
         kind: "ok",
         value: {
-          kind: request.kind,
+          kind: "issue",
+          issue: result.value,
+          freshness: { status: "fresh" },
+        },
+      };
+    }
+    if (request.kind === "issues") {
+      const result = await this.#port.listIssues(
+        {
+          owner: request.owner,
+          name: request.name,
+          pageSize: request.pageSize,
+          ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
+          state: request.state ?? DEFAULT_ISSUE_STATE,
+          ...(request.search === undefined ? {} : { search: request.search }),
+        },
+        signal,
+      );
+      if (result.kind !== "ok") return result;
+      return {
+        kind: "ok",
+        value: {
+          kind: "issues",
           page: {
             rows: result.value.rows,
             sort: "updated-desc",
@@ -251,7 +277,33 @@ export class GithubCatalogueService {
             ...(result.value.endCursor === undefined ? {} : { endCursor: result.value.endCursor }),
             freshness: { status: "fresh" },
           },
-        } as GithubCatalogueReadResponse,
+        },
+      };
+    }
+    if (request.kind === "pull-requests") {
+      const result = await this.#port.listPullRequests(
+        {
+          owner: request.owner,
+          name: request.name,
+          pageSize: request.pageSize,
+          ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
+          state: request.state ?? DEFAULT_ISSUE_STATE,
+        },
+        signal,
+      );
+      if (result.kind !== "ok") return result;
+      return {
+        kind: "ok",
+        value: {
+          kind: "pull-requests",
+          page: {
+            rows: result.value.rows,
+            sort: "updated-desc",
+            hasNextPage: result.value.hasNextPage,
+            ...(result.value.endCursor === undefined ? {} : { endCursor: result.value.endCursor }),
+            freshness: { status: "fresh" },
+          },
+        },
       };
     }
     const result = await this.#port.listProjects(
@@ -336,12 +388,13 @@ export class GithubCatalogueService {
 }
 
 function capabilityFor(
-  kind: "repositories" | "issues" | "pull-requests" | "projects",
+  kind: Exclude<GithubCatalogueReadRequest["kind"], "recent-repositories">,
 ): GithubCapabilityKind {
   switch (kind) {
     case "repositories":
       return "repository-catalogue";
     case "issues":
+    case "issue":
       return "issues-read";
     case "pull-requests":
       return "pull-requests-read";
@@ -355,8 +408,17 @@ function markStale(
   staleReason: GithubCatalogueStaleReason,
 ): GithubCatalogueReadResponse {
   if (response.kind === "unavailable" || response.kind === "recent-repositories") return response;
-  return {
-    ...response,
-    page: { ...response.page, freshness: { status: "stale", staleReason } },
-  } as GithubCatalogueReadResponse;
+  const freshness: GithubCatalogueFreshness = { status: "stale", staleReason };
+  switch (response.kind) {
+    case "issue":
+      return { kind: "issue", issue: response.issue, freshness };
+    case "repositories":
+      return { kind: "repositories", page: { ...response.page, freshness } };
+    case "issues":
+      return { kind: "issues", page: { ...response.page, freshness } };
+    case "pull-requests":
+      return { kind: "pull-requests", page: { ...response.page, freshness } };
+    case "projects":
+      return { kind: "projects", page: { ...response.page, freshness } };
+  }
 }

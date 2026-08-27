@@ -18,6 +18,21 @@ function restRepository(index: number, overrides: Record<string, unknown> = {}) 
   };
 }
 
+function restIssue(number: number, overrides: Record<string, unknown> = {}) {
+  return {
+    number,
+    title: `Issue ${number}`,
+    state: "open",
+    user: { login: "octocat" },
+    created_at: "2026-08-01T09:00:00Z",
+    updated_at: "2026-08-11T10:00:00Z",
+    html_url: `https://github.com/octant/octant/issues/${number}`,
+    labels: [{ name: "bug" }],
+    body: "Steps to reproduce",
+    ...overrides,
+  };
+}
+
 function fakeCommandPort(
   respond: (
     arguments_: readonly string[],
@@ -366,22 +381,200 @@ describe("GhRepositoryCataloguePort", () => {
   });
 
   it("only ever issues allowlisted, non-mutating gh api reads", async () => {
-    const command = fakeCommandPort(() => ({ exitCode: 0, stdout: "[]" }));
+    const command = fakeCommandPort((arguments_) => {
+      const path = arguments_[1] ?? "";
+      if (path.includes("/issues/7") && !path.includes("/comments")) {
+        return { exitCode: 0, stdout: JSON.stringify(restIssue(7)) };
+      }
+      if (path.includes("/comments")) return { exitCode: 0, stdout: "[]" };
+      if (path.startsWith("search/issues")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ total_count: 0, incomplete_results: false, items: [] }),
+        };
+      }
+      return { exitCode: 0, stdout: "[]" };
+    });
     const catalogue = port(command);
     await catalogue.listRepositories({ pageSize: 5 }, signal());
     await catalogue.listIssues(
       { owner: "octant", name: "octant", pageSize: 5, state: "open" },
       signal(),
     );
+    await catalogue.listIssues(
+      { owner: "octant", name: "octant", pageSize: 5, state: "open", search: "crash" },
+      signal(),
+    );
     await catalogue.listPullRequests(
       { owner: "octant", name: "octant", pageSize: 5, state: "open" },
       signal(),
     );
+    await catalogue.readIssue({ owner: "octant", name: "octant", number: 7 }, signal());
     for (const call of command.calls) {
       expect(call[0]).toBe("api");
       expect(call).not.toContain("--method");
       expect(call).not.toContain("--input");
       expect(call.join(" ")).not.toMatch(/-X|POST|PATCH|PUT|DELETE/);
     }
+  });
+
+  it("composes a server-owned search query from title, number, and author terms", async () => {
+    const command = fakeCommandPort(() => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        total_count: 1,
+        incomplete_results: false,
+        items: [
+          {
+            number: 42,
+            title: "crash on save",
+            state: "open",
+            user: { login: "octocat" },
+            updated_at: "2026-08-11T10:00:00Z",
+            html_url: "https://github.com/octant/octant/issues/42",
+          },
+        ],
+      }),
+    }));
+    const result = await port(command).listIssues(
+      {
+        owner: "octant",
+        name: "octant",
+        pageSize: 10,
+        state: "open",
+        search: "crash #42 author:octocat",
+      },
+      signal(),
+    );
+    if (result.kind !== "ok") throw new Error(`expected ok, got ${result.kind}`);
+    expect(result.value.rows.map((row) => row.number)).toEqual([42]);
+    const path = command.calls[0]?.[1] ?? "";
+    expect(path.startsWith("search/issues?")).toBe(true);
+    const query = new URLSearchParams(path.slice(path.indexOf("?") + 1)).get("q") ?? "";
+    expect(query).toContain("repo:octant/octant");
+    expect(query).toContain("type:issue");
+    expect(query).toContain("is:open");
+    expect(query).toContain("author:octocat");
+    expect(query).toContain("42");
+    expect(query).toContain("in:title");
+    expect(query).toContain("crash");
+  });
+
+  it("does not forward raw GitHub search syntax from the client", async () => {
+    const command = fakeCommandPort(() => ({
+      exitCode: 0,
+      stdout: JSON.stringify({ total_count: 0, incomplete_results: false, items: [] }),
+    }));
+    const empty = await port(command).listIssues(
+      {
+        owner: "octant",
+        name: "octant",
+        pageSize: 10,
+        state: "open",
+        search: "repo:evil/other type:pr is:open",
+      },
+      signal(),
+    );
+    expect(empty).toEqual({ kind: "ok", value: { rows: [], hasNextPage: false } });
+    expect(command.calls).toEqual([]);
+
+    await port(command).listIssues(
+      {
+        owner: "octant",
+        name: "octant",
+        pageSize: 10,
+        state: "closed",
+        search: "crash repo:evil/other",
+      },
+      signal(),
+    );
+    const path = command.calls[0]?.[1] ?? "";
+    const query = new URLSearchParams(path.slice(path.indexOf("?") + 1)).get("q") ?? "";
+    expect(query).toContain("repo:octant/octant");
+    expect(query).toContain('"crash"');
+    expect(query).not.toContain("evil");
+    expect(query).not.toContain("type:pr");
+  });
+
+  it("reads a bounded issue detail, redacts token-like text, and discloses truncation", async () => {
+    const longBody = `${"a".repeat(8 * 1024)}tail`;
+    const longComment = `${"b".repeat(2 * 1024)}tail`;
+    const command = fakeCommandPort((arguments_) => {
+      const path = arguments_[1] ?? "";
+      if (path.includes("/comments")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            ...Array.from({ length: 12 }, (_, index) => ({
+              user: { login: "hubot" },
+              created_at: `2026-08-0${(index % 9) + 1}T10:00:00Z`,
+              body: `comment-${index}`,
+            })),
+            {
+              user: { login: "octocat" },
+              created_at: "2026-08-11T11:00:00Z",
+              body: `secret Authorization: bearer ghp_abcdefghijklmnopqrstuv ${longComment}`,
+            },
+          ]),
+        };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ...restIssue(7),
+          title: "leak Authorization: bearer ghp_abcdefghijklmnopqrstuv",
+          body: `token=github_pat_abcdefghijkl ${longBody}`,
+          labels: [
+            { name: "x".repeat(51) },
+            ...Array.from({ length: 21 }, (_, index) => ({ name: `label-${index}` })),
+          ],
+        }),
+      };
+    });
+    const result = await port(command).readIssue(
+      { owner: "octant", name: "octant", number: 7 },
+      signal(),
+    );
+    if (result.kind !== "ok") throw new Error(`expected ok, got ${result.kind}`);
+    expect(result.value.number).toBe(7);
+    expect(result.value.createdAt).toBe("2026-08-01T09:00:00Z");
+    expect(result.value.bodyTruncated).toBe(true);
+    expect(Buffer.byteLength(result.value.body, "utf8")).toBeLessThanOrEqual(8 * 1024);
+    expect(result.value.labels).toHaveLength(20);
+    expect(result.value.labels.every((label) => label.length <= 50)).toBe(true);
+    expect(result.value.comments).toHaveLength(10);
+    expect(result.value.comments[9]).toMatchObject({
+      author: "octocat",
+      truncated: true,
+    });
+    expect(JSON.stringify(result.value)).not.toMatch(
+      /ghp_|github_pat_|bearer|authorization|token=/i,
+    );
+    expect(result.value.comments[0]?.body).toBe("comment-3");
+  });
+
+  it("refuses to treat a pull request as an issue detail", async () => {
+    const command = fakeCommandPort(() => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        ...restIssue(8),
+        html_url: "https://github.com/octant/octant/pull/8",
+        pull_request: { url: "https://api.github.com/repos/octant/octant/pulls/8" },
+      }),
+    }));
+    expect(
+      await port(command).readIssue({ owner: "octant", name: "octant", number: 8 }, signal()),
+    ).toMatchObject({ kind: "unavailable" });
+  });
+
+  it("surfaces retryAfterSeconds when an issue detail is rate-limited", async () => {
+    const command = fakeCommandPort(() => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "HTTP 403: API rate limit exceeded retry after: 45",
+    }));
+    expect(
+      await port(command).readIssue({ owner: "octant", name: "octant", number: 7 }, signal()),
+    ).toEqual({ kind: "rate-limited", retryAfterSeconds: 45 });
   });
 });
