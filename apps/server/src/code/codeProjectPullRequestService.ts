@@ -435,7 +435,11 @@ export class CodeProjectPullRequestService {
     }
 
     this.#githubRevoked = false;
-    this.#cacheStats?.recordRefreshSucceeded("pull-request-list");
+    // Known-identity recovery that left rows stale is not a completed list
+    // refresh; lastRefreshAt stays at the last fully fresh list.
+    if (knownIdentityRefreshFailed.size === 0) {
+      this.#cacheStats?.recordRefreshSucceeded("pull-request-list");
+    }
     const now = decodeUtcTimestamp(this.#clock());
     const refreshedRows =
       command.kind === "refresh-project"

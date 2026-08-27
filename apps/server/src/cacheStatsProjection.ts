@@ -22,12 +22,20 @@ const CACHE_LABELS = {
 
 export type ObservedCache = keyof typeof CACHE_LABELS;
 
+/** Caches that skip an unattended refresh while their failure streak is pacing. */
+const HOLDS_UNATTENDED_REFRESH: ReadonlySet<ObservedCache> = new Set(["github-catalogue"]);
+
 /** What a cache owner reports; the caches never read their own statistics. */
 export interface CacheStatsRecorder {
   recordHit(cache: ObservedCache): void;
   recordMiss(cache: ObservedCache): void;
   recordRefreshSucceeded(cache: ObservedCache): void;
   recordRefreshFailed(cache: ObservedCache): void;
+  /**
+   * Drop failure pacing without recording a refresh. An account switch is not a
+   * successful fetch: lastRefreshAt must stay at the last time the source answered.
+   */
+  clearBackoff(cache: ObservedCache): void;
   /** True while a refresh nobody asked for is being paced after failures. */
   holdsUnattendedRefresh(cache: ObservedCache): boolean;
 }
@@ -80,7 +88,16 @@ export class CacheStatsProjection implements CacheStatsRecorder {
     reading.backoff = extendCacheBackoff(reading.backoff, this.#now());
   }
 
+  clearBackoff(cache: ObservedCache): void {
+    const reading = this.#readings.get(cache);
+    if (reading === undefined) return;
+    reading.backoff = undefined;
+  }
+
   holdsUnattendedRefresh(cache: ObservedCache): boolean {
+    // Pull-request list/detail only refresh when the user asks; a hold here
+    // would promise an automatic retry those caches never make.
+    if (!HOLDS_UNATTENDED_REFRESH.has(cache)) return false;
     return cacheBackoffHolds(this.#readings.get(cache)?.backoff, this.#now());
   }
 
@@ -101,9 +118,9 @@ export class CacheStatsProjection implements CacheStatsRecorder {
           ? {}
           : { stalenessMs: Math.max(0, Math.round(now - reading.lastRefreshAtMs)) }),
         failureStreak: reading.backoff?.failureStreak ?? 0,
-        ...(reading.backoff === undefined || now >= reading.backoff.retryAt
-          ? {}
-          : { retryAt: decodeUtcTimestamp(new Date(reading.backoff.retryAt).toISOString()) }),
+        ...(this.holdsUnattendedRefresh(cache) && reading.backoff !== undefined
+          ? { retryAt: decodeUtcTimestamp(new Date(reading.backoff.retryAt).toISOString()) }
+          : {}),
       });
     }
     return stats;

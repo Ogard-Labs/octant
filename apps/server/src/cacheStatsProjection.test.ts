@@ -81,4 +81,42 @@ describe("host cache statistics", () => {
     expect(projection.read()[0]?.failureStreak).toBe(0);
     expect(projection.holdsUnattendedRefresh("github-catalogue")).toBe(false);
   });
+
+  it("drops failure pacing without recording a refresh", () => {
+    const clock = { ms: 10_000 };
+    const projection = projectionAt(clock);
+
+    projection.recordRefreshSucceeded("github-catalogue");
+    clock.ms += 5_000;
+    projection.recordRefreshFailed("github-catalogue");
+    expect(projection.holdsUnattendedRefresh("github-catalogue")).toBe(true);
+
+    clock.ms += 1_000;
+    projection.clearBackoff("github-catalogue");
+
+    const [stat] = projection.read();
+    expect(stat?.failureStreak).toBe(0);
+    expect(stat?.retryAt).toBeUndefined();
+    expect(stat?.lastRefreshAt).toBe(new Date(10_000).toISOString());
+    expect(stat?.stalenessMs).toBe(6_000);
+    expect(projection.holdsUnattendedRefresh("github-catalogue")).toBe(false);
+  });
+
+  it("does not advertise an automatic retry for a cache that never holds unattended refreshes", () => {
+    const clock = { ms: 0 };
+    const projection = projectionAt(clock);
+
+    projection.recordRefreshFailed("pull-request-list");
+    projection.recordRefreshFailed("pull-request-detail");
+
+    expect(projection.holdsUnattendedRefresh("pull-request-list")).toBe(false);
+    expect(projection.holdsUnattendedRefresh("pull-request-detail")).toBe(false);
+    const stats = projection.read();
+    expect(stats).toEqual([
+      expect.objectContaining({ key: "pull-request-list", failureStreak: 1 }),
+      expect.objectContaining({ key: "pull-request-detail", failureStreak: 1 }),
+    ]);
+    expect(stats[0]?.retryAt).toBeUndefined();
+    expect(stats[1]?.retryAt).toBeUndefined();
+  });
 });

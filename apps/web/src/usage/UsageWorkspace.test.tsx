@@ -485,6 +485,33 @@ describe("UsageWorkspace", () => {
     expect(within(section).getByRole("meter", { name: "Token cache hit ratio" })).toHaveValue(0.75);
   });
 
+  it("does not promise an automatic retry for a cache that never holds unattended refreshes", async () => {
+    const paced = dashboard({
+      cacheStats: {
+        caches: [
+          {
+            key: "pull-request-list",
+            label: "Project pull requests",
+            hitCount: 8,
+            missCount: 2,
+            hitRatio: 0.8,
+            lastRefreshAt: queryAt,
+            stalenessMs: 60_000,
+            failureStreak: 2,
+          },
+        ],
+        providerTokenCaches: [],
+      },
+    } as unknown as Partial<UsageDashboardResponse>);
+    const { client } = clientReturning(paced);
+    render(<UsageWorkspace client={client} />);
+
+    const section = await screen.findByRole("region", { name: "Cache efficiency" });
+    expect(within(section).getByText(/2 failures in a row/)).toBeVisible();
+    expect(within(section).getByText(/next read may retry/)).toBeVisible();
+    expect(within(section).queryByText(/automatic retry/)).toBeNull();
+  });
+
   it("says a cache being paced after failures can still be refreshed by hand", async () => {
     const paced = dashboard({
       cacheStats: {

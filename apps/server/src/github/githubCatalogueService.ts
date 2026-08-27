@@ -217,11 +217,14 @@ export class GithubCatalogueService {
     const snapshot = await this.#snapshot(signal);
     const accountKey = `${snapshot.account?.login ?? ""}`;
     // A different active account must never see the previous account's cached
-    // catalogue, known rows, or recents.
+    // catalogue, known rows, or recents, and must not inherit that account's
+    // rate-limit hold.
     if (this.#cachedAccountKey !== undefined && this.#cachedAccountKey !== accountKey) {
       this.#cache.clear();
       this.#knownRows.clear();
       this.#recents = [];
+      this.#heldFailure = undefined;
+      this.#cacheStats.clearBackoff("github-catalogue");
     }
     this.#cachedAccountKey = accountKey;
     return snapshot;

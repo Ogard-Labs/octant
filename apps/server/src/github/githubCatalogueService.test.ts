@@ -337,6 +337,52 @@ describe("GithubCatalogueService", () => {
     expect(port.listRepositories).toHaveBeenCalledTimes(2);
   });
 
+  it("does not hold the next account's unattended reads after a rate-limited previous account", async () => {
+    const clock = { ms: 1_000 };
+    const now = () => clock.ms;
+    let login = "octocat";
+    let failing = true;
+    const port = fakePort({
+      listRepositories: vi.fn(async () =>
+        failing
+          ? { kind: "rate-limited" as const }
+          : {
+              kind: "ok" as const,
+              value: { rows: [observationRow], hasNextPage: false },
+            },
+      ),
+    });
+    const cacheStats = new CacheStatsProjection({
+      now,
+      clock: () => new Date(clock.ms).toISOString(),
+    });
+    const { service: catalogue } = service({
+      port,
+      now,
+      cacheStats,
+      snapshot: () => ({
+        ...readySnapshot,
+        account: { login, gitProtocol: "https", scopes: ["repo"] },
+      }),
+    });
+
+    await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());
+    expect(port.listRepositories).toHaveBeenCalledTimes(1);
+    expect(cacheStats.holdsUnattendedRefresh("github-catalogue")).toBe(true);
+
+    failing = false;
+    login = "someone-else";
+    clock.ms += 1;
+
+    const response = await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());
+    expect(port.listRepositories).toHaveBeenCalledTimes(2);
+    expect(response).toMatchObject({
+      kind: "repositories",
+      page: { freshness: { status: "fresh" } },
+    });
+    expect(cacheStats.holdsUnattendedRefresh("github-catalogue")).toBe(false);
+  });
+
   it("clears the failure streak once GitHub answers again", async () => {
     const clock = { ms: 1_000 };
     const now = () => clock.ms;
