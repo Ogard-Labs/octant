@@ -861,7 +861,7 @@ export class ZenService {
       throw new ZenError({ reason: "unknown-element", spaceId: space.spaceId });
     }
     if (input.action === "remove") {
-      return this.handleCommand(
+      const result = this.handleCommand(
         {
           command: "remove-element",
           spaceId: space.spaceId,
@@ -869,7 +869,15 @@ export class ZenService {
           expectedVersion: input.expectedVersion,
         },
         windowId,
-      ) as ZenMutationResult;
+      );
+      if (result.result !== "mutation") {
+        throw new ZenError({
+          reason: result.result === "refused" ? result.reason : "unsupported-action",
+          spaceId: space.spaceId,
+          ...(result.result === "refused" ? { message: result.message } : {}),
+        });
+      }
+      return result;
     }
     if (input.action === "focus") {
       if (space.version !== input.expectedVersion) {
@@ -898,7 +906,7 @@ export class ZenService {
       ...(input.action === "minimize" ? { minimized: true } : {}),
       ...(input.action === "restore" ? { minimized: false } : {}),
     };
-    return this.handleCommand(
+    const result = this.handleCommand(
       {
         command: "update-element",
         spaceId: space.spaceId,
@@ -906,7 +914,15 @@ export class ZenService {
         expectedVersion: input.expectedVersion,
       },
       windowId,
-    ) as ZenMutationResult;
+    );
+    if (result.result !== "mutation") {
+      throw new ZenError({
+        reason: result.result === "refused" ? result.reason : "unsupported-action",
+        spaceId: space.spaceId,
+        ...(result.result === "refused" ? { message: result.message } : {}),
+      });
+    }
+    return result;
   }
 
   applyAssistantAppearance(
@@ -937,8 +953,15 @@ export class ZenService {
     const existing = space.elements.find(
       (element) => String(element.elementId) === String(command.element.elementId),
     );
-    if (existing === undefined || (existing.kind !== "thread" && existing.kind !== "terminal")) {
-      throw new ZenError({ reason: "unknown-element", spaceId: command.spaceId });
+    if (existing === undefined) {
+      return {
+        result: "refused",
+        reason: "unknown-element",
+        message: `Element ${command.element.elementId} not found`,
+      };
+    }
+    if (existing.kind !== "thread" && existing.kind !== "terminal") {
+      throw new ZenError({ reason: "unsupported-action", spaceId: command.spaceId });
     }
     const requested = command.element;
     const element = {
@@ -980,6 +1003,8 @@ export class ZenService {
       case "reorder-checklist-item":
       case "remove-checklist-item":
         return this.mutateWidget(command, windowId, signal);
+      case "update-element":
+        return this.mutatePresentation(command, windowId);
       default:
         return this.mutate(command, windowId);
     }
@@ -1380,6 +1405,45 @@ export class ZenService {
       }
       if (this.deps.eventStore.isConcurrencyConflict(err)) {
         throw new ZenError({ reason: "stale-version", spaceId: command.spaceId });
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Apply a presentation mutation that the renderer is allowed to reconcile.
+   *
+   * Policy refusals (unknown element, stale version, invalid geometry, etc.) are
+   * returned as caller-actionable values rather than thrown, so a delayed resize or
+   * move that targets a removed element does not look like a service failure.
+   * Unexpected invariant failures and genuine service errors remain exceptional.
+   */
+  private mutatePresentation(
+    command: Extract<ZenCommand, { command: "update-element" }>,
+    windowId: WindowId,
+  ): ZenResult {
+    const space = this.loadSpaceOrFail(command.spaceId, windowId);
+
+    try {
+      const updated = processZenCommand(space, command, this.deps.localHostId);
+      if (updated === space) return { result: "mutation", space };
+      const committed = this.deps.eventStore.append(updated, command.expectedVersion);
+      this.#syncTimerSchedules(committed);
+      return { result: "mutation", space: committed };
+    } catch (err) {
+      if (err instanceof ZenPolicyRejected) {
+        return {
+          result: "refused",
+          reason: err.code as ZenFailureReason,
+          message: err.message,
+        };
+      }
+      if (this.deps.eventStore.isConcurrencyConflict(err)) {
+        return {
+          result: "refused",
+          reason: "stale-version",
+          message: "The space changed under this update; refresh and retry.",
+        };
       }
       throw err;
     }

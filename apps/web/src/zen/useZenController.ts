@@ -488,10 +488,38 @@ export function useZenController(options: UseZenControllerOptions) {
             element,
             expectedVersion: current.version,
           });
-          if (result.result === "mutation" && mounted.current) {
+          if (!mounted.current) return;
+          if (result.result === "mutation" || result.result === "truncated") {
             setSpace(result.space);
             presentationSpace.current = result.space;
+            if (result.result === "truncated") {
+              setMessage(result.message);
+            }
+            return;
           }
+          if (result.result === "refused" && result.reason === "stale-version") {
+            try {
+              const refreshed = await client.bootstrap();
+              if (mounted.current) setFocusZone(refreshed.focusZone);
+              if (refreshed.space !== null) {
+                setSpace(refreshed.space);
+                presentationSpace.current = refreshed.space;
+              }
+              setMessage("Zen changed elsewhere; refreshed the current space.");
+            } catch {
+              setSpace(previous);
+              presentationSpace.current = previous;
+              setMessage("Zen changed elsewhere and could not be refreshed.");
+            }
+            return;
+          }
+          setSpace(previous);
+          presentationSpace.current = previous;
+          setMessage(
+            result.result === "refused" || result.result === "failed"
+              ? result.message
+              : "Zen update was rejected.",
+          );
         } catch (error) {
           if (mounted.current) {
             if (isZenStaleConflict(error)) {

@@ -857,6 +857,47 @@ describe("ZenSurface", () => {
     expect(card).toHaveStyle({ width: "240px", height: "160px" });
   });
 
+  it("reverts the previewed geometry when the host settles without accepting the change", async () => {
+    const space = makeSpace([
+      {
+        elementId,
+        kind: "notes",
+        widgetVersion: 0 as AggregateVersion,
+        content: "Refused resize",
+        geometry: { x: 40, y: 40, width: 240, height: 160 },
+        zIndex: 1,
+        minimized: false,
+        locked: false,
+        title: "Refused resize",
+      },
+    ]);
+
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onHideBar={() => undefined}
+        onRemoveElement={() => undefined}
+        onUpdateElement={() => Promise.resolve(undefined)}
+        onUpdateViewport={() => undefined}
+        onExpandBar={() => undefined}
+        space={space}
+      />,
+    );
+
+    const card = screen.getByRole("group", { name: "Refused resize" });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Resize Refused resize" }), {
+      clientX: 280,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(card, { clientX: 320, clientY: 220 });
+    fireEvent.pointerUp(card, { clientX: 320, clientY: 220 });
+
+    expect(card).toHaveStyle({ width: "280px", height: "180px" });
+    await act(async () => Promise.resolve());
+    expect(card).toHaveStyle({ width: "240px", height: "160px" });
+  });
+
   it("resizes a focused element with Alt plus arrow keys and can minimize it", () => {
     const onUpdateElement = vi.fn();
     const space = makeSpace([

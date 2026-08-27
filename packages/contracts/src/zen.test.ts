@@ -1509,3 +1509,50 @@ describe("Zen Assistant typed actions", () => {
     ).toMatchObject({ action: "create-widget", status: "ok", kind: "timer", version: 3 });
   });
 });
+
+const decodeResult = Schema.decodeUnknownSync(zenContracts.ZenResult);
+
+describe("ZenResult", () => {
+  it("decodes the success, refused, failed, and truncated presentation mutation results", () => {
+    const space = decodeSpace({
+      spaceId: spaceId(),
+      windowId: windowId(),
+      version: 1,
+      elements: [],
+      viewport: DEFAULT_ZEN_VIEWPORT,
+      appearance: DEFAULT_ZEN_APPEARANCE,
+      assistant: null,
+      research: null,
+      createdAt: "2026-07-24T10:00:00.000Z",
+      updatedAt: "2026-07-24T10:00:00.000Z",
+    });
+
+    expect(decodeResult({ result: "mutation", space })).toMatchObject({
+      result: "mutation",
+      space,
+    });
+    expect(decodeResult({ result: "refused", reason: "unknown-element", message: "gone" })).toEqual(
+      {
+        result: "refused",
+        reason: "unknown-element",
+        message: "gone",
+      },
+    );
+    expect(decodeResult({ result: "failed", reason: "service", message: "down" })).toEqual({
+      result: "failed",
+      reason: "service",
+      message: "down",
+    });
+    expect(decodeResult({ result: "truncated", space, message: "clamped" })).toMatchObject({
+      result: "truncated",
+      space,
+      message: "clamped",
+    });
+  });
+
+  it("rejects a refusal that does not name a known failure reason", () => {
+    expect(() =>
+      decodeResult({ result: "refused", reason: "not-a-reason", message: "nope" }),
+    ).toThrow();
+  });
+});

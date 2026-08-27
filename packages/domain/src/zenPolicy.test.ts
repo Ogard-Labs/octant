@@ -387,13 +387,36 @@ describe("updateElement", () => {
         localHostId,
       ),
     ).toThrow(/source context cannot change/i);
+    try {
+      updateElement(
+        space,
+        {
+          ...thread,
+          sourceContext: {
+            ...thread.sourceContext,
+            threadId: makeId("99999999") as never,
+          },
+        },
+        0,
+        localHostId,
+      );
+    } catch (err) {
+      expect(err).toBeInstanceOf(ZenPolicyRejected);
+      expect((err as ZenPolicyRejected).code).toBe("unsupported-kind");
+    }
   });
 
-  it("rejects unknown element", () => {
+  it("rejects an unknown element with a policy refusal the service can turn into a value", () => {
     const space = makeSpace();
     expect(() => updateElement(space, makeNotesElement(), 0, localHostId)).toThrow(
       ZenPolicyRejected,
     );
+    try {
+      updateElement(space, makeNotesElement(), 0, localHostId);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ZenPolicyRejected);
+      expect((err as ZenPolicyRejected).code).toBe("unknown-element");
+    }
   });
 
   it("rejects stale version", () => {

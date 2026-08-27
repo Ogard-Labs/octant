@@ -498,6 +498,95 @@ function providerState(toolCapability: "supported" | "unsupported") {
   };
 }
 
+describe("ZenService presentation mutations", () => {
+  function notesElement(id: typeof ids.element = ids.element) {
+    return {
+      elementId: id,
+      kind: "notes" as const,
+      widgetVersion: 0 as AggregateVersion,
+      content: "Focus notes",
+      geometry: { x: 100, y: 100, width: 400, height: 300 },
+      zIndex: 1 as any,
+      minimized: false,
+      locked: false,
+    };
+  }
+
+  it("returns a typed refusal instead of throwing for an unknown element update", () => {
+    const { append, service } = fixture();
+
+    const result = service.handleCommand(
+      {
+        command: "update-element",
+        spaceId: ids.space,
+        element: notesElement(),
+        expectedVersion: 2 as AggregateVersion,
+      },
+      ids.window,
+    );
+
+    expect(result.result).toBe("refused");
+    if (result.result !== "refused") throw new Error("Expected refused result.");
+    expect(result.reason).toBe("unknown-element");
+    expect(result.message).toMatch(/not found/);
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("returns a mutation result when the element exists", () => {
+    const initial = { ...space(), elements: [notesElement()] };
+    const append = vi.fn((next: ZenSpace, expectedVersion: number) => ({
+      ...next,
+      version: (expectedVersion + 1) as AggregateVersion,
+    }));
+    const service = new ZenService({
+      focusZone: memoryFocusZone(),
+      loadSpace: () => initial,
+      loadSpaceByWindow: () => initial,
+      eventStore: { append, isConcurrencyConflict: () => false } as never,
+      localHostId: LOCAL_HOST_ID,
+    });
+
+    const result = service.handleCommand(
+      {
+        command: "update-element",
+        spaceId: ids.space,
+        element: { ...notesElement(), geometry: { ...notesElement().geometry, x: 240 } },
+        expectedVersion: 2 as AggregateVersion,
+      },
+      ids.window,
+    );
+
+    expect(result.result).toBe("mutation");
+    expect(append).toHaveBeenCalled();
+  });
+
+  it("returns a typed refusal for a bound element that has been removed", () => {
+    const { service } = fixture();
+
+    const result = service.updateBoundElementPresentation(
+      {
+        command: "update-element",
+        spaceId: ids.space,
+        element: {
+          elementId: ids.otherElement,
+          kind: "thread" as const,
+          sourceContext: entry.sourceContext,
+          geometry: { x: 0, y: 0, width: 420, height: 260 },
+          zIndex: 2 as any,
+          minimized: false,
+          locked: false,
+        },
+        expectedVersion: 2 as AggregateVersion,
+      },
+      ids.window,
+    );
+
+    expect(result.result).toBe("refused");
+    if (result.result !== "refused") throw new Error("Expected refused result.");
+    expect(result.reason).toBe("unknown-element");
+  });
+});
+
 describe("ZenService Reference widget", () => {
   it("normalizes a safe Reference URL server-side before persisting it", () => {
     const { append, service } = fixture();
