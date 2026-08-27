@@ -59,6 +59,7 @@
     "./validation-rpc": "./src/validationRpc.ts",
     "./host": "./src/host.ts",
     "./host-control": "./src/hostControl.ts",
+    "./integration": "./src/integration.ts",
     "./remote-access": "./src/remoteAccess.ts",
     "./remote-push-notifications": "./src/remotePushNotifications.ts",
     "./remote-request-proof": "./src/remoteRequestProof.ts",

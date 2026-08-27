@@ -58,6 +58,7 @@ const boardPlugin = firstPartyManifest({
       destinationId: "thread-board",
       label: "Thread board",
       modes: ["work", "code"],
+      entryPoint: "builtin:board/destination",
     },
     {
       point: "board.view",
@@ -103,6 +104,7 @@ const githubPlugin = firstPartyManifest({
       destinationId: "pull-requests",
       label: "Pull requests",
       modes: ["code"],
+      entryPoint: "builtin:github/sidebar-destination",
     },
     {
       point: "settings.section",
@@ -112,6 +114,8 @@ const githubPlugin = firstPartyManifest({
       scope: "host",
       keywords:
         "github account gh cli authentication connection setup sign in refresh scopes repositories issues pull requests",
+      entryPoint: "builtin:github/settings",
+      description: "Connect the GitHub CLI and manage authentication scopes.",
     },
   ],
 });
