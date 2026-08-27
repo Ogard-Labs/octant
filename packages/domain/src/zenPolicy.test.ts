@@ -373,7 +373,8 @@ describe("updateElement", () => {
     );
     expect(resized.elements[0]?.geometry).toMatchObject({ width: 420, height: 280 });
 
-    expect(() =>
+    let thrown: unknown;
+    try {
       updateElement(
         space,
         {
@@ -385,15 +386,26 @@ describe("updateElement", () => {
         },
         0,
         localHostId,
-      ),
-    ).toThrow(/source context cannot change/i);
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(ZenPolicyRejected);
+    if (!(thrown instanceof ZenPolicyRejected)) throw new Error("Expected a policy refusal.");
+    expect(thrown.code).toBe("unsupported-kind");
   });
 
-  it("rejects unknown element", () => {
+  it("rejects an unknown element with a policy refusal the service can turn into a value", () => {
     const space = makeSpace();
     expect(() => updateElement(space, makeNotesElement(), 0, localHostId)).toThrow(
       ZenPolicyRejected,
     );
+    try {
+      updateElement(space, makeNotesElement(), 0, localHostId);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ZenPolicyRejected);
+      expect((err as ZenPolicyRejected).code).toBe("unknown-element");
+    }
   });
 
   it("rejects stale version", () => {

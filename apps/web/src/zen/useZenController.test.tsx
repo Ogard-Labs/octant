@@ -635,6 +635,109 @@ describe("useZenController", () => {
     expect(result.current.message).toMatch(/stale|failed|rejected/i);
   });
 
+  it("reverts optimistic geometry and surfaces a typed refusal reason for a removed element", async () => {
+    const space = makeSpace({
+      elements: [
+        {
+          elementId: "00000000-0000-4000-8000-000000000903" as ZenElementId,
+          kind: "notes",
+          widgetVersion: 0 as AggregateVersion,
+          content: "note",
+          geometry: { x: 10, y: 10, width: 240, height: 160 },
+          zIndex: 1,
+          minimized: false,
+          locked: false,
+        },
+      ],
+    });
+    const client = createClient({
+      bootstrap: vi.fn(async () => ({ space, focusZone: makeZone(space), windowId })),
+      command: vi.fn(
+        async (): Promise<ZenResult> => ({
+          status: "refused",
+          kind: "unknown-element",
+          message: "That card was removed.",
+        }),
+      ),
+    });
+    const { result } = renderHook(() => useZenController({ client, windowId }));
+
+    await act(async () => {
+      await result.current.enterZen();
+    });
+
+    const updated = {
+      ...space.elements[0]!,
+      geometry: { x: 80, y: 10, width: 240, height: 160 },
+    };
+
+    await act(async () => {
+      await result.current.updateElement(updated);
+    });
+
+    expect(result.current.space?.elements[0]?.geometry.x).toBe(10);
+    expect(result.current.message).toMatch(/removed|unknown-element/i);
+  });
+
+  it("refreshes the server snapshot after a typed stale-version refusal", async () => {
+    const localSpace = makeSpace({
+      version: 1 as AggregateVersion,
+      active: true,
+      elements: [
+        {
+          elementId: "00000000-0000-4000-8000-000000000903" as ZenElementId,
+          kind: "notes",
+          widgetVersion: 0 as AggregateVersion,
+          content: "note",
+          geometry: { x: 10, y: 10, width: 240, height: 160 },
+          zIndex: 1,
+          minimized: false,
+          locked: false,
+        },
+      ],
+    });
+    const serverSpace = makeSpace({
+      version: 2 as AggregateVersion,
+      active: true,
+      viewport: { panX: 80, panY: 20, scale: 1.25 },
+    });
+    const client = createClient({
+      bootstrap: vi
+        .fn()
+        .mockResolvedValueOnce({ space: localSpace, focusZone: makeZone(localSpace), windowId })
+        .mockResolvedValueOnce({
+          space: serverSpace,
+          focusZone: makeZone(serverSpace),
+          windowId,
+        }),
+      command: vi.fn(
+        async (): Promise<ZenResult> => ({
+          status: "refused",
+          kind: "stale-version",
+          message: "The space changed elsewhere.",
+        }),
+      ),
+    });
+    const { result } = renderHook(() =>
+      useZenController({ client, windowId, storage: window.sessionStorage }),
+    );
+
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    await act(async () => {
+      await result.current.updateElement({
+        ...localSpace.elements[0]!,
+        geometry: { x: 80, y: 10, width: 240, height: 160 },
+      });
+    });
+
+    expect(client.bootstrap).toHaveBeenCalledTimes(2);
+    expect(result.current.space?.version).toBe(2);
+    expect(result.current.space?.viewport.panX).toBe(80);
+    expect(result.current.message).toMatch(/changed|refresh/i);
+  });
+
   it("serializes element updates so a resize cannot be replaced by a stale focus response", async () => {
     const element = {
       elementId: "00000000-0000-4000-8000-000000000903" as ZenElementId,

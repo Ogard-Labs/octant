@@ -20,10 +20,21 @@ import {
   type ZenFocusZone,
   type ChatThread,
   type ChatThreadView,
+  type ZenResult,
 } from "@octant/contracts";
+import { ZenNotesElementPayload, ZenThreadElementPayload } from "@octant/contracts/zen";
 import { createZenSpace } from "@octant/domain";
+import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { ZenService } from "./zenService";
+
+function assertMutation(
+  result: ZenResult,
+): asserts result is Extract<ZenResult, { result: "mutation" }> {
+  if (!("result" in result) || result.result !== "mutation") {
+    throw new Error(`Expected mutation result, got ${JSON.stringify(result)}`);
+  }
+}
 
 /** Each window's focus zone, held only for the life of one test. */
 function memoryFocusZone() {
@@ -262,8 +273,7 @@ describe("ZenService durable Notes and Checklist widgets", () => {
         ids.window,
       );
 
-      expect(result.result).toBe("mutation");
-      if (result.result !== "mutation") throw new Error("Expected widget mutation result.");
+      assertMutation(result);
       expect(result.space.elements[0]).toMatchObject({
         elementId: ids.element,
         kind,
@@ -310,7 +320,8 @@ describe("ZenService durable Notes and Checklist widgets", () => {
       ids.window,
     );
 
-    expect(result.result === "mutation" ? result.space.elements[1]?.geometry : null).toMatchObject({
+    assertMutation(result);
+    expect(result.space.elements[1]?.geometry).toMatchObject({
       x: 516,
       y: 96,
     });
@@ -344,8 +355,7 @@ describe("ZenService durable Notes and Checklist widgets", () => {
       ids.window,
     );
 
-    expect(result.result).toBe("mutation");
-    if (result.result !== "mutation") throw new Error("Expected widget mutation result.");
+    assertMutation(result);
     expect(result.space.elements.map((element) => element.zIndex)).toEqual([1, 2]);
   });
 
@@ -379,7 +389,8 @@ describe("ZenService durable Notes and Checklist widgets", () => {
       ids.window,
     );
 
-    expect(result.result === "mutation" ? result.space.elements[0] : null).toMatchObject({
+    assertMutation(result);
+    expect(result.space.elements[0]).toMatchObject({
       kind: "notes",
       content: "Saved",
       widgetVersion: 1,
@@ -421,7 +432,8 @@ describe("ZenService durable Notes and Checklist widgets", () => {
       ids.window,
     );
 
-    expect(added.result === "mutation" ? added.space.elements[0] : null).toMatchObject({
+    assertMutation(added);
+    expect(added.space.elements[0]).toMatchObject({
       widgetVersion: 1,
       items: [{ itemId: ids.element, text: "Run tests", done: false }],
     });
@@ -498,6 +510,95 @@ function providerState(toolCapability: "supported" | "unsupported") {
   };
 }
 
+describe("ZenService presentation mutations", () => {
+  function notesElement(id: typeof ids.element = ids.element) {
+    return Schema.decodeUnknownSync(ZenNotesElementPayload)({
+      elementId: id,
+      kind: "notes",
+      widgetVersion: 0,
+      content: "Focus notes",
+      geometry: { x: 100, y: 100, width: 400, height: 300 },
+      zIndex: 1,
+      minimized: false,
+      locked: false,
+    });
+  }
+
+  it("returns a typed refusal instead of throwing for an unknown element update", () => {
+    const { append, service } = fixture();
+
+    const result = service.handleCommand(
+      {
+        command: "update-element",
+        spaceId: ids.space,
+        element: notesElement(),
+        expectedVersion: 2 as AggregateVersion,
+      },
+      ids.window,
+    );
+
+    if (!("status" in result) || result.status !== "refused")
+      throw new Error("Expected refused result.");
+    expect(result.kind).toBe("unknown-element");
+    expect(result.message).toMatch(/not found/);
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("returns a mutation result when the element exists", () => {
+    const initial = { ...space(), elements: [notesElement()] };
+    const append = vi.fn((next: ZenSpace, expectedVersion: number) => ({
+      ...next,
+      version: (expectedVersion + 1) as AggregateVersion,
+    }));
+    const service = new ZenService({
+      focusZone: memoryFocusZone(),
+      loadSpace: () => initial,
+      loadSpaceByWindow: () => initial,
+      eventStore: { append, isConcurrencyConflict: () => false } as never,
+      localHostId: LOCAL_HOST_ID,
+    });
+
+    const result = service.handleCommand(
+      {
+        command: "update-element",
+        spaceId: ids.space,
+        element: { ...notesElement(), geometry: { ...notesElement().geometry, x: 240 } },
+        expectedVersion: 2 as AggregateVersion,
+      },
+      ids.window,
+    );
+
+    assertMutation(result);
+    expect(append).toHaveBeenCalled();
+  });
+
+  it("returns a typed refusal for a bound element that has been removed", () => {
+    const { service } = fixture();
+
+    const result = service.updateBoundElementPresentation(
+      {
+        command: "update-element",
+        spaceId: ids.space,
+        element: Schema.decodeUnknownSync(ZenThreadElementPayload)({
+          elementId: ids.otherElement,
+          kind: "thread",
+          sourceContext: entry.sourceContext,
+          geometry: { x: 0, y: 0, width: 420, height: 260 },
+          zIndex: 2,
+          minimized: false,
+          locked: false,
+        }),
+        expectedVersion: 2 as AggregateVersion,
+      },
+      ids.window,
+    );
+
+    if (!("status" in result) || result.status !== "refused")
+      throw new Error("Expected refused result.");
+    expect(result.kind).toBe("unknown-element");
+  });
+});
+
 describe("ZenService Reference widget", () => {
   it("normalizes a safe Reference URL server-side before persisting it", () => {
     const { append, service } = fixture();
@@ -513,8 +614,8 @@ describe("ZenService Reference widget", () => {
       ids.window,
     );
 
-    expect(result.result).toBe("mutation");
-    expect(result.result === "mutation" ? result.space.elements[0] : undefined).toMatchObject({
+    assertMutation(result);
+    expect(result.space.elements[0]).toMatchObject({
       elementId: ids.element,
       kind: "reference",
       url: "https://example.com/release-notes",
@@ -762,7 +863,7 @@ describe("ZenService timer lifecycle", () => {
         },
         windowId,
       );
-      if (created.result !== "mutation") throw new Error("Expected Timer mutation");
+      assertMutation(created);
       service.handleCommand(
         {
           command: "timer-action",

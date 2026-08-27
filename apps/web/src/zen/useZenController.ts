@@ -207,7 +207,7 @@ export function useZenController(options: UseZenControllerOptions) {
           ...(typeof next.active === "boolean" ? { active: next.active } : {}),
           ...(typeof next.barCollapsed === "boolean" ? { barCollapsed: next.barCollapsed } : {}),
         });
-        if (result.result === "mutation" && mounted.current) {
+        if ("result" in result && result.result === "mutation" && mounted.current) {
           // Reordered or late responses must not overwrite a newer optimistic/server state.
           if (result.space.version >= optimistic.version) {
             const accepted = exitGate ? keepExit(result.space) : result.space;
@@ -352,7 +352,7 @@ export function useZenController(options: UseZenControllerOptions) {
         command: "create-space",
         windowId,
       });
-      if (created.result !== "create-space") {
+      if (!("result" in created) || created.result !== "create-space") {
         throw new Error("Zen space creation failed.");
       }
       // The window's first space also opens its focus zone, and only a
@@ -419,7 +419,8 @@ export function useZenController(options: UseZenControllerOptions) {
       }
       if (current === null) {
         const created = await client.command({ command: "create-space", windowId });
-        if (created.result !== "create-space") throw new Error("Zen recovery failed.");
+        if (!("result" in created) || created.result !== "create-space")
+          throw new Error("Zen recovery failed.");
         const opened = await client.bootstrap();
         if (mounted.current) {
           setFocusZone(opened.focusZone);
@@ -488,10 +489,45 @@ export function useZenController(options: UseZenControllerOptions) {
             element,
             expectedVersion: current.version,
           });
-          if (result.result === "mutation" && mounted.current) {
+          if (!mounted.current) return;
+          if ("result" in result && result.result === "mutation") {
             setSpace(result.space);
             presentationSpace.current = result.space;
+            return;
           }
+          if ("status" in result && result.status === "truncated") {
+            setSpace(result.space);
+            presentationSpace.current = result.space;
+            setMessage(result.message);
+            return;
+          }
+          if (
+            "status" in result &&
+            result.status === "refused" &&
+            result.kind === "stale-version"
+          ) {
+            try {
+              const refreshed = await client.bootstrap();
+              if (mounted.current) setFocusZone(refreshed.focusZone);
+              if (refreshed.space !== null) {
+                setSpace(refreshed.space);
+                presentationSpace.current = refreshed.space;
+              }
+              setMessage("Zen changed elsewhere; refreshed the current space.");
+            } catch {
+              setSpace(previous);
+              presentationSpace.current = previous;
+              setMessage("Zen changed elsewhere and could not be refreshed.");
+            }
+            return;
+          }
+          setSpace(previous);
+          presentationSpace.current = previous;
+          setMessage(
+            "status" in result && (result.status === "refused" || result.status === "failed")
+              ? result.message
+              : "Zen update was rejected.",
+          );
         } catch (error) {
           if (mounted.current) {
             if (isZenStaleConflict(error)) {
@@ -539,7 +575,8 @@ export function useZenController(options: UseZenControllerOptions) {
           elementId,
           expectedVersion: space.version,
         });
-        if (result.result === "mutation" && mounted.current) setSpace(result.space);
+        if ("result" in result && result.result === "mutation" && mounted.current)
+          setSpace(result.space);
       } catch (error) {
         if (!mounted.current) return;
         if (isZenStaleConflict(error)) {
@@ -577,7 +614,7 @@ export function useZenController(options: UseZenControllerOptions) {
           viewport,
           expectedVersion: space.version,
         });
-        if (result.result === "mutation" && mounted.current) {
+        if ("result" in result && result.result === "mutation" && mounted.current) {
           setSpace(result.space);
         }
       } catch (error) {
@@ -757,7 +794,8 @@ export function useZenController(options: UseZenControllerOptions) {
           action,
           expectedVersion: space.version,
         });
-        if (result.result !== "mutation") throw new Error("Recipe confirmation failed.");
+        if (!("result" in result && result.result === "mutation"))
+          throw new Error("Recipe confirmation failed.");
         if (mounted.current) {
           setSpace(result.space);
           setAssistant(await client.assistant());
@@ -789,7 +827,7 @@ export function useZenController(options: UseZenControllerOptions) {
             appearance: { ...current.appearance, ...patch },
             expectedVersion: current.version,
           });
-          if (result.result === "mutation" && mounted.current) {
+          if ("result" in result && result.result === "mutation" && mounted.current) {
             setSpace(result.space);
             presentationSpace.current = result.space;
           }
@@ -1034,7 +1072,7 @@ export function useZenController(options: UseZenControllerOptions) {
           durationMs,
           expectedVersion: space.version,
         });
-        if (result.result === "mutation" && mounted.current) {
+        if ("result" in result && result.result === "mutation" && mounted.current) {
           setSpace(result.space);
           setMessage("Timer added.");
         }
@@ -1069,7 +1107,8 @@ export function useZenController(options: UseZenControllerOptions) {
           ...(durationMs === undefined ? {} : { durationMs }),
           expectedVersion: space.version,
         });
-        if (result.result === "mutation" && mounted.current) setSpace(result.space);
+        if ("result" in result && result.result === "mutation" && mounted.current)
+          setSpace(result.space);
       } catch (error) {
         if (!mounted.current) return;
         if (isZenStaleConflict(error)) {
@@ -1088,7 +1127,8 @@ export function useZenController(options: UseZenControllerOptions) {
       if (client === undefined) throw new Error("Zen widgets are unavailable.");
       try {
         const result = await client.command(command);
-        if (result.result !== "mutation") throw new Error("Zen widget mutation failed.");
+        if (!("result" in result && result.result === "mutation"))
+          throw new Error("Zen widget mutation failed.");
         if (mounted.current) {
           setSpace(result.space);
           setMessage(undefined);

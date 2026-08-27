@@ -117,7 +117,7 @@ export class ZenAssistantTools {
                   windowId,
                   signal,
                 );
-                if (result.result !== "mutation") {
+                if (!("result" in result && result.result === "mutation")) {
                   throw new ZenError({ reason: "recovery-required", spaceId: space.spaceId });
                 }
                 const element = [...result.space.elements]

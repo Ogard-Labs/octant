@@ -177,7 +177,8 @@ async function upload(
       },
       windowId,
     );
-    if (result.result !== "mutation") throw new Error("Zen background update failed.");
+    if (!("result" in result && result.result === "mutation"))
+      throw new Error("Zen background update failed.");
     await dependencies.store.reconcile(dependencies.liveAssets(), {
       ownerWindowId: windowId,
       spaceId,

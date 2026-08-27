@@ -1417,9 +1417,6 @@ export const ZenRecoverResult = Schema.Struct({
 }).annotations(strict);
 export type ZenRecoverResult = typeof ZenRecoverResult.Type;
 
-export const ZenResult = Schema.Union(ZenCreateSpaceResult, ZenMutationResult, ZenRecoverResult);
-export type ZenResult = typeof ZenResult.Type;
-
 // ── Typed failures ───────────────────────────────────────────────────────────
 
 export class ZenError extends Error {
@@ -1451,6 +1448,9 @@ export const ZenFailureReason = Schema.Literal(
   "oversized-recipe",
   "executable-content",
   "unsupported-action",
+  "unsupported-kind",
+  "invalid-background",
+  "invalid-presentation",
   "missing-capability",
   "unavailable-source",
   "unknown-element",
@@ -1462,6 +1462,45 @@ export const ZenFailureReason = Schema.Literal(
   "recovery-required",
 );
 export type ZenFailureReason = typeof ZenFailureReason.Type;
+
+// ── Presentation mutation results ───────────────────────────────────────────
+//
+// Presentation mutations (element geometry, z-order, viewport, and active state)
+// can be refused by policy without being a service failure. The result carries the
+// refusal kind and message so callers can reconcile optimistic UI state instead of
+// collapsing expected refusals into thrown exceptions.
+
+export const ZenRefusedResult = Schema.Struct({
+  status: Schema.Literal("refused"),
+  kind: ZenFailureReason,
+  message: Schema.String,
+}).annotations(strict);
+export type ZenRefusedResult = typeof ZenRefusedResult.Type;
+
+export const ZenFailedResult = Schema.Struct({
+  status: Schema.Literal("failed"),
+  kind: Schema.String,
+  message: Schema.String,
+}).annotations(strict);
+export type ZenFailedResult = typeof ZenFailedResult.Type;
+
+export const ZenTruncatedResult = Schema.Struct({
+  status: Schema.Literal("truncated"),
+  kind: Schema.Literal("truncated"),
+  space: ZenSpace,
+  message: Schema.String,
+}).annotations(strict);
+export type ZenTruncatedResult = typeof ZenTruncatedResult.Type;
+
+export const ZenResult = Schema.Union(
+  ZenCreateSpaceResult,
+  ZenMutationResult,
+  ZenRecoverResult,
+  ZenRefusedResult,
+  ZenFailedResult,
+  ZenTruncatedResult,
+);
+export type ZenResult = typeof ZenResult.Type;
 
 // ── Focus zone: the spaces one window holds ──────────────────────────────────
 
