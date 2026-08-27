@@ -24,6 +24,7 @@ import {
   type ContextSummaryId,
   type GlobalSequence,
   type OpenAiCompatibleProviderConfiguration,
+  type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderContextBlock,
   type MentionableThreadId,
@@ -330,7 +331,7 @@ function openFixture(options?: {
             history: [],
           }
         : { active: [], history: [] },
-    readProviderInstance: (instanceId) => {
+    readProviderInstance: (instanceId: ProviderInstanceId) => {
       const id = String(instanceId);
       if (options?.missingProviderInstanceIds?.includes(id)) return undefined;
       return {
