@@ -583,7 +583,7 @@ describe("SettingsView", () => {
     expect(styles).toContain("gap: var(--oct-space-1)");
   });
 
-  it("keeps search and the existing mode-switcher mutation wired", () => {
+  it("keeps search and the existing mode-switcher mutation wired", async () => {
     const { onSearchChange } = renderSettingsWithSearch("");
     navigateTo("Appearance");
 
@@ -592,7 +592,9 @@ describe("SettingsView", () => {
     });
     expect(onSearchChange).toHaveBeenCalledWith("translucent");
     // With a query active, the search results panel replaces section content.
-    expect(screen.getByRole("listbox", { name: "Settings search results" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("listbox", { name: "Settings search results" }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Mode switcher" })).not.toBeInTheDocument();
   });
 
@@ -617,7 +619,7 @@ describe("SettingsView", () => {
 
     const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
     await user.type(searchbox, "mode switcher");
-    const listbox = screen.getByRole("listbox", { name: "Settings search results" });
+    const listbox = await screen.findByRole("listbox", { name: "Settings search results" });
     listbox.focus();
     fireEvent.keyDown(listbox, { key: "ArrowDown" });
     fireEvent.keyDown(listbox, { key: "Enter" });
