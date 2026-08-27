@@ -45,15 +45,22 @@ export const IntegrationAccount = Schema.Struct({
 export type IntegrationAccount = typeof IntegrationAccount.Type;
 
 /**
- * A user-visible interaction required to finish authentication, such as a device
- * flow handoff. The URI and code are generic strings so the integration plugin
- * controls the external service's protocol.
+ * A user-visible interaction required to finish authentication. Device flow
+ * carries a verification URI and user code; authorization-code + PKCE carries
+ * the URL the host already prepared so the renderer can open it without seeing
+ * client secrets or token material.
  */
-export const IntegrationAuthenticationInteraction = Schema.Struct({
-  kind: Schema.Literal("device-flow"),
-  verificationUri: safeText(512),
-  userCode: safeText(64),
-}).annotations(strict);
+export const IntegrationAuthenticationInteraction = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("device-flow"),
+    verificationUri: safeText(512),
+    userCode: safeText(64),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("authorization-redirect"),
+    authorizationUri: safeText(2048),
+  }).annotations(strict),
+).annotations(strict);
 export type IntegrationAuthenticationInteraction = typeof IntegrationAuthenticationInteraction.Type;
 
 /**

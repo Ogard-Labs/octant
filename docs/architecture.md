@@ -394,7 +394,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Octant holds for an integration use the same Keychain path: the host keeps
   an opaque reference; plugins, the renderer, the journal, and diagnostics
   never receive raw token material. Broker URLs and tokens are stripped from
-  every child environment.
+  every child environment. Linear is the first bundled-off Integration plugin:
+  it contributes a Settings card through `settings.section`, connects with
+  authorization-code + PKCE, and stores access and refresh tokens only in that
+  host credential service. Connect fails closed when the public client id
+  (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
 
 ## Extensions and skills
 

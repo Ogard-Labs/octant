@@ -276,6 +276,14 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       settings: [],
     },
     {
+      id: "linear",
+      label: "Linear",
+      scope: "host",
+      keywords:
+        "linear workspace authentication connection setup oauth connect disconnect reconnect issues personal api key",
+      settings: [],
+    },
+    {
       id: "advanced",
       label: "Advanced",
       scope: "app",

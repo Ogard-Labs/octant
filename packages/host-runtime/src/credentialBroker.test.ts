@@ -108,7 +108,7 @@ describe("startCredentialBroker", () => {
       });
       const query = brokerRequest(broker.url, broker.token, "/v1/credentials/has?debug=true");
       const nested = brokerRequest(broker.url, broker.token, "/v1/credentials/has/");
-      const unknown = brokerRequest(broker.url, broker.token, "/v1/credentials/delete");
+      const unknown = brokerRequest(broker.url, broker.token, "/v1/credentials/rotate");
 
       expect((await broker.fetchForTest(get)).status).toBe(405);
       expect((await broker.fetchForTest(query)).status).toBe(400);
@@ -188,6 +188,37 @@ describe("startCredentialBroker", () => {
       expect(await hasResponse.json()).toEqual({ present: true });
       expect(resolveResponse.status).toBe(200);
       expect(await resolveResponse.json()).toEqual({ credential });
+
+      const nextId = randomUUID();
+      const setResponse = await fetch(new URL("/v1/credentials/set", broker.url), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-credential-broker-token": broker.token,
+        },
+        body: JSON.stringify({ providerInstanceId: nextId, credential: "next-secret" }),
+      });
+      expect(setResponse.status).toBe(200);
+      expect(await setResponse.json()).toEqual({ stored: true });
+      const stored = await fetch(new URL("/v1/credentials/has", broker.url), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-credential-broker-token": broker.token,
+        },
+        body: JSON.stringify({ providerInstanceId: nextId }),
+      });
+      expect(await stored.json()).toEqual({ present: true });
+      const deleteResponse = await fetch(new URL("/v1/credentials/delete", broker.url), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-credential-broker-token": broker.token,
+        },
+        body: JSON.stringify({ providerInstanceId: nextId }),
+      });
+      expect(deleteResponse.status).toBe(200);
+      expect(await deleteResponse.json()).toEqual({ deleted: true });
     } finally {
       await broker.close();
     }

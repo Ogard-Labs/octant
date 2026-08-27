@@ -30,6 +30,7 @@ describe("effective extension activation", () => {
     ["code", "board", [], true],
     ["work", "board", [], false],
     ["chat", "integration", ["network", "credentials"], false],
+    ["work", "integration", ["network", "credentials"], false],
     ["code", "integration", ["network", "credentials"], true],
     ["chat", "appearance-pack", [], true],
     ["work", "appearance-pack", [], true],

@@ -72,11 +72,25 @@ export async function loadIntegrationModule(
     };
   }
   const factory = "default" in imported ? imported.default : imported.createIntegrationRuntime;
+  return constructIntegrationRuntime(factory, hostPort, modulePath);
+}
+
+/**
+ * Constructs an Integration runtime from an already-resolved factory. Product
+ * callers use this with a statically imported first-party factory so packaging
+ * can tree-shake the plugin; the path-based loader above uses the same
+ * validation for third-party modules.
+ */
+export function constructIntegrationRuntime(
+  factory: unknown,
+  hostPort: IntegrationHostPort,
+  origin = "integration factory",
+): IntegrationLoaderResult {
   if (typeof factory !== "function") {
     return {
       kind: "failed",
       code: "factory-not-callable",
-      message: `Integration export from ${modulePath} is not a callable factory.`,
+      message: `Integration export from ${origin} is not a callable factory.`,
     };
   }
   let runtime: unknown;
@@ -89,14 +103,14 @@ export async function loadIntegrationModule(
       message:
         cause instanceof Error
           ? cause.message
-          : `Integration factory from ${modulePath} threw while constructing the runtime.`,
+          : `Integration factory from ${origin} threw while constructing the runtime.`,
     };
   }
   if (!isIntegrationRuntime(runtime)) {
     return {
       kind: "failed",
       code: "runtime-invalid",
-      message: `Integration factory from ${modulePath} did not return a runtime with observe, execute, and close methods.`,
+      message: `Integration factory from ${origin} did not return a runtime with observe, execute, and close methods.`,
     };
   }
   return { kind: "loaded", runtime };

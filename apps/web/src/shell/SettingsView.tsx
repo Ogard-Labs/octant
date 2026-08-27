@@ -46,6 +46,7 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { GithubClient } from "@octant/client-runtime/github-client";
+import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import { HostSettingsSection } from "../host/HostSettingsSection";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
@@ -105,6 +106,7 @@ export interface SettingsViewProps {
   readonly hostControlClient?: HostControlClient;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
   readonly githubClient?: GithubClient;
+  readonly integrationClient?: IntegrationClient;
   readonly extensionClient?: ExtensionClient;
   readonly pickLocalPluginFolder?: () => Promise<
     Readonly<{ receiptId: string; displayName: string }> | undefined
@@ -309,7 +311,11 @@ function ActiveSectionContent({
   const pluginEntryPoint = pluginSettingsEntryPoints.get(activeSection);
   if (pluginEntryPoint !== undefined) {
     return (
-      <PluginSettingsSection entryPoint={pluginEntryPoint} githubClient={props.githubClient} />
+      <PluginSettingsSection
+        entryPoint={pluginEntryPoint}
+        githubClient={props.githubClient}
+        integrationClient={props.integrationClient}
+      />
     );
   }
   switch (activeSection) {

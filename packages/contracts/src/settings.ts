@@ -23,6 +23,7 @@ export const SETTINGS_SECTION_IDS = [
   "usage",
   "host",
   "github",
+  "linear",
   "advanced",
 ] as const;
 

@@ -250,6 +250,14 @@ import { ManagedCloneService } from "./github/managedCloneService";
 import { ManagedRepositoryInventory } from "./github/managedRepositoryInventory";
 import { createGithubCloneRouteHandler } from "./githubCloneRoutes";
 import { createGithubRouteHandler } from "./githubRoutes";
+import {
+  createBrokerSecretVault,
+  createUnavailableSecretVault,
+  type IntegrationSecretVault,
+} from "./integration/integrationCredentialVault";
+import { createFileConnectionStore } from "./integration/integrationConnectionStore";
+import { createLinearIntegrationService } from "./integration/integrationService";
+import { createIntegrationRouteHandler } from "./integrationRoutes";
 import { healthResponse } from "./health";
 import { LaunchSessionStore } from "./launchSessionStore";
 import { createLaunchSessionRouteHandler } from "./launchSessionRoutes";
@@ -773,6 +781,9 @@ export interface StartOctantServerOptions {
   };
   readonly credentialBrokerToken?: string;
   readonly credentialBrokerUrl?: string;
+  readonly integrationSecretVault?: IntegrationSecretVault;
+  readonly linearOAuthClientId?: string;
+  readonly linearOAuthRedirectUri?: string;
   readonly packagedProviderSmokeControl?: true;
   readonly acquirePersistence?: Effect.Effect<PersistenceService, PersistenceStartupFailed>;
   readonly serve?: Serve;
@@ -1785,6 +1796,35 @@ export function startOctantServer(
       windowAuthorityStore,
       service: githubCapabilityService,
       catalogue: githubCatalogueService,
+    });
+    const integrationVault =
+      options.integrationSecretVault ??
+      (options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? createUnavailableSecretVault()
+        : createBrokerSecretVault(
+            makeCredentialBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            }),
+          ));
+    const linearRedirectUri =
+      options.linearOAuthRedirectUri ??
+      `http://127.0.0.1:${options.port}/oauth/integrations/linear/callback`;
+    const integrationService = createLinearIntegrationService({
+      vault: integrationVault,
+      connectionStore: createFileConnectionStore(
+        join(persistence.dataDirectory, "integrations", "linear-connection.json"),
+      ),
+      config: {
+        redirectUri: linearRedirectUri,
+        ...(options.linearOAuthClientId === undefined
+          ? {}
+          : { clientId: options.linearOAuthClientId }),
+      },
+    });
+    const integrationRoutes = createIntegrationRouteHandler({
+      windowAuthorityStore,
+      service: integrationService,
     });
     const zenEventStore = new ZenEventStore({
       journal: persistence.journal,
@@ -5565,6 +5605,7 @@ export function startOctantServer(
       (await agentRunRoutes(request)) ??
       (await agentRunSettingsRoutes(request)) ??
       (await githubRoutes(request)) ??
+      (await integrationRoutes(request)) ??
       (await githubCloneRoutes(request)) ??
       (await agentProfileRoutes(request)) ??
       (await folderBrowseRoutes(request)) ??

@@ -65,6 +65,13 @@ describe("redactDiagnosticText", () => {
     expect(result.tags).toContain("credential");
   });
 
+  it("redacts a Linear personal API key", () => {
+    const result = redactDiagnosticText("Rejected lin_api_abcdefghijklmnop1234 for the workspace");
+    expect(result.text).not.toContain("lin_api_abcdefghijklmnop1234");
+    expect(result.text).toContain("[redacted-credential]");
+    expect(result.tags).toContain("credential");
+  });
+
   it("redacts pairing material", () => {
     const result = redactDiagnosticText("pairing-code: 8F3K-2Q9Z expired");
     expect(result.text).not.toContain("8F3K-2Q9Z");

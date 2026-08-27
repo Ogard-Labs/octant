@@ -1344,7 +1344,8 @@
 /* Settings > GitHub: compact host connection card. Facts and
    capability rows wrap on narrow layouts; no animation is used, so Reduced
    Motion needs no override. */
-.github-settings {
+.github-settings,
+.linear-settings {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1376,19 +1377,27 @@
   overflow-wrap: anywhere;
 }
 
-.github-settings__controls {
+.github-settings__controls,
+.linear-settings__controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
-.github-settings__note {
+.github-settings__note,
+.linear-settings__note {
   margin: 0;
   max-width: 560px;
   color: var(--oct-muted);
   font-size: calc(11 * var(--oct-text-step));
   line-height: 1.4;
+}
+
+.linear-settings__advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .github-settings__capabilities {

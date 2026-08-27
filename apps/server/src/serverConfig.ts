@@ -87,6 +87,8 @@ export interface ServerLaunchConfig {
   readonly developmentWebBootstrap?: true;
   readonly packagedProviderSmokeControl?: true;
   readonly hostServiceMode: Exclude<HostRuntimeServiceMode, "maintenance">;
+  readonly linearOAuthClientId?: string;
+  readonly linearOAuthRedirectUri?: string;
 }
 
 export function parseHostServiceMode(
@@ -132,6 +134,10 @@ export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): S
   if (packagedProviderSmokeControl !== undefined && packagedProviderSmokeControl !== "1") {
     throw new Error("OCTANT packaged provider smoke control is invalid");
   }
+  const linearOAuthClientId = parseLinearOAuthClientId(environment.OCTANT_LINEAR_OAUTH_CLIENT_ID);
+  const linearOAuthRedirectUri = parseLinearOAuthRedirectUri(
+    environment.OCTANT_LINEAR_OAUTH_REDIRECT_URI,
+  );
   return {
     port: parseServerPort(environment.OCTANT_SERVER_PORT),
     hostServiceMode: parseHostServiceMode(environment.OCTANT_HOST_SERVICE_MODE),
@@ -149,7 +155,30 @@ export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): S
           credentialBrokerUrl: credentialBroker.url,
           credentialBrokerToken: credentialBroker.token,
         }),
+    ...(linearOAuthClientId === undefined ? {} : { linearOAuthClientId }),
+    ...(linearOAuthRedirectUri === undefined ? {} : { linearOAuthRedirectUri }),
   };
+}
+
+export function parseLinearOAuthClientId(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length < 8 || trimmed.length > 128 || !/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+export function parseLinearOAuthRedirectUri(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    if (url.username !== "" || url.password !== "") return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 export function parseCredentialBrokerConfig(
