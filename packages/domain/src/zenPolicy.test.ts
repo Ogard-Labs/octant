@@ -373,20 +373,7 @@ describe("updateElement", () => {
     );
     expect(resized.elements[0]?.geometry).toMatchObject({ width: 420, height: 280 });
 
-    expect(() =>
-      updateElement(
-        space,
-        {
-          ...thread,
-          sourceContext: {
-            ...thread.sourceContext,
-            threadId: makeId("99999999") as never,
-          },
-        },
-        0,
-        localHostId,
-      ),
-    ).toThrow(/source context cannot change/i);
+    let thrown: unknown;
     try {
       updateElement(
         space,
@@ -401,9 +388,10 @@ describe("updateElement", () => {
         localHostId,
       );
     } catch (err) {
-      expect(err).toBeInstanceOf(ZenPolicyRejected);
-      expect((err as ZenPolicyRejected).code).toBe("unsupported-kind");
+      thrown = err;
     }
+    expect(thrown).toBeInstanceOf(ZenPolicyRejected);
+    expect((thrown as ZenPolicyRejected).code).toBe("unsupported-kind");
   });
 
   it("rejects an unknown element with a policy refusal the service can turn into a value", () => {

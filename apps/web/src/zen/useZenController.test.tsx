@@ -654,8 +654,8 @@ describe("useZenController", () => {
       bootstrap: vi.fn(async () => ({ space, focusZone: makeZone(space), windowId })),
       command: vi.fn(
         async (): Promise<ZenResult> => ({
-          result: "refused",
-          reason: "unknown-element",
+          status: "refused",
+          kind: "unknown-element",
           message: "That card was removed.",
         }),
       ),
@@ -712,8 +712,8 @@ describe("useZenController", () => {
         }),
       command: vi.fn(
         async (): Promise<ZenResult> => ({
-          result: "refused",
-          reason: "stale-version",
+          status: "refused",
+          kind: "stale-version",
           message: "The space changed elsewhere.",
         }),
       ),
@@ -734,6 +734,7 @@ describe("useZenController", () => {
 
     expect(client.bootstrap).toHaveBeenCalledTimes(2);
     expect(result.current.space?.version).toBe(2);
+    expect(result.current.space?.viewport.panX).toBe(80);
     expect(result.current.message).toMatch(/changed|refresh/i);
   });
 

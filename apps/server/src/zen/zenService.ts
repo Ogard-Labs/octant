@@ -870,11 +870,17 @@ export class ZenService {
         },
         windowId,
       );
-      if (result.result !== "mutation") {
+      if (!("result" in result && result.result === "mutation")) {
+        const failure =
+          "status" in result && (result.status === "refused" || result.status === "failed")
+            ? result
+            : undefined;
         throw new ZenError({
-          reason: result.result === "refused" ? result.reason : "unsupported-action",
+          reason: failure?.status === "refused" ? failure.kind : "unsupported-action",
           spaceId: space.spaceId,
-          ...(result.result === "refused" ? { message: result.message } : {}),
+          ...(failure?.status === "refused" || failure?.status === "failed"
+            ? { message: failure.message }
+            : {}),
         });
       }
       return result;
@@ -915,11 +921,17 @@ export class ZenService {
       },
       windowId,
     );
-    if (result.result !== "mutation") {
+    if (!("result" in result && result.result === "mutation")) {
+      const failure =
+        "status" in result && (result.status === "refused" || result.status === "failed")
+          ? result
+          : undefined;
       throw new ZenError({
-        reason: result.result === "refused" ? result.reason : "unsupported-action",
+        reason: failure?.status === "refused" ? failure.kind : "unsupported-action",
         spaceId: space.spaceId,
-        ...(result.result === "refused" ? { message: result.message } : {}),
+        ...(failure?.status === "refused" || failure?.status === "failed"
+          ? { message: failure.message }
+          : {}),
       });
     }
     return result;
@@ -955,8 +967,8 @@ export class ZenService {
     );
     if (existing === undefined) {
       return {
-        result: "refused",
-        reason: "unknown-element",
+        status: "refused",
+        kind: "unknown-element",
         message: `Element ${command.element.elementId} not found`,
       };
     }
@@ -1422,26 +1434,35 @@ export class ZenService {
     command: Extract<ZenCommand, { command: "update-element" }>,
     windowId: WindowId,
   ): ZenResult {
-    const space = this.loadSpaceOrFail(command.spaceId, windowId);
-
     try {
+      const space = this.loadSpaceOrFail(command.spaceId, windowId);
       const updated = processZenCommand(space, command, this.deps.localHostId);
       if (updated === space) return { result: "mutation", space };
       const committed = this.deps.eventStore.append(updated, command.expectedVersion);
       this.#syncTimerSchedules(committed);
       return { result: "mutation", space: committed };
     } catch (err) {
+      if (
+        err instanceof ZenError &&
+        (err.reason === "unknown-space" || err.reason === "wrong-window")
+      ) {
+        return {
+          status: "refused",
+          kind: err.reason,
+          message: err.message,
+        };
+      }
       if (err instanceof ZenPolicyRejected) {
         return {
-          result: "refused",
-          reason: err.code as ZenFailureReason,
+          status: "refused",
+          kind: err.code,
           message: err.message,
         };
       }
       if (this.deps.eventStore.isConcurrencyConflict(err)) {
         return {
-          result: "refused",
-          reason: "stale-version",
+          status: "refused",
+          kind: "stale-version",
           message: "The space changed under this update; refresh and retry.",
         };
       }

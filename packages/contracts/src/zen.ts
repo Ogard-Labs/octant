@@ -1471,21 +1471,22 @@ export type ZenFailureReason = typeof ZenFailureReason.Type;
 // collapsing expected refusals into thrown exceptions.
 
 export const ZenRefusedResult = Schema.Struct({
-  result: Schema.Literal("refused"),
-  reason: ZenFailureReason,
+  status: Schema.Literal("refused"),
+  kind: ZenFailureReason,
   message: Schema.String,
 }).annotations(strict);
 export type ZenRefusedResult = typeof ZenRefusedResult.Type;
 
 export const ZenFailedResult = Schema.Struct({
-  result: Schema.Literal("failed"),
-  reason: Schema.String,
+  status: Schema.Literal("failed"),
+  kind: Schema.String,
   message: Schema.String,
 }).annotations(strict);
 export type ZenFailedResult = typeof ZenFailedResult.Type;
 
 export const ZenTruncatedResult = Schema.Struct({
-  result: Schema.Literal("truncated"),
+  status: Schema.Literal("truncated"),
+  kind: Schema.Literal("truncated"),
   space: ZenSpace,
   message: Schema.String,
 }).annotations(strict);

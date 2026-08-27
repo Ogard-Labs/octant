@@ -1531,20 +1531,21 @@ describe("ZenResult", () => {
       result: "mutation",
       space,
     });
-    expect(decodeResult({ result: "refused", reason: "unknown-element", message: "gone" })).toEqual(
-      {
-        result: "refused",
-        reason: "unknown-element",
-        message: "gone",
-      },
-    );
-    expect(decodeResult({ result: "failed", reason: "service", message: "down" })).toEqual({
-      result: "failed",
-      reason: "service",
+    expect(decodeResult({ status: "refused", kind: "unknown-element", message: "gone" })).toEqual({
+      status: "refused",
+      kind: "unknown-element",
+      message: "gone",
+    });
+    expect(decodeResult({ status: "failed", kind: "service", message: "down" })).toEqual({
+      status: "failed",
+      kind: "service",
       message: "down",
     });
-    expect(decodeResult({ result: "truncated", space, message: "clamped" })).toMatchObject({
-      result: "truncated",
+    expect(
+      decodeResult({ status: "truncated", kind: "truncated", space, message: "clamped" }),
+    ).toEqual({
+      status: "truncated",
+      kind: "truncated",
       space,
       message: "clamped",
     });
@@ -1552,7 +1553,7 @@ describe("ZenResult", () => {
 
   it("rejects a refusal that does not name a known failure reason", () => {
     expect(() =>
-      decodeResult({ result: "refused", reason: "not-a-reason", message: "nope" }),
+      decodeResult({ status: "refused", kind: "not-a-reason", message: "nope" }),
     ).toThrow();
   });
 });
