@@ -1,12 +1,15 @@
 import { useContext, useState } from "react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
+import { Archive, MoreHorizontal, Pin, PinOff } from "lucide-react";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantContextMenuRoot, OctantContextMenuTrigger } from "../ui/base/OctantContextMenu";
+import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 
 /**
  * Thread rows and their honest states, shared by the Project sidebar and the
@@ -90,6 +93,142 @@ function activityOf(thread: ChatThreadNavigationItem): ThreadRowActivity {
   return "idle";
 }
 
+function threadRowFacts(props: {
+  readonly projectName: string | undefined;
+  readonly thread: ChatThreadNavigationItem;
+}): string {
+  const facts: string[] = [];
+  if (props.thread.pinned === true) facts.push("Pinned");
+  if (props.thread.unread === true) facts.push("Unread");
+  if (props.thread.followUp === true) facts.push("Follow-up");
+  if (props.thread.provider !== undefined) facts.push(props.thread.provider.displayName);
+  if (props.projectName !== undefined) facts.push(props.projectName);
+  if (props.thread.updatedAt !== undefined) {
+    const date = new Date(props.thread.updatedAt);
+    facts.push(`Updated ${date.toLocaleDateString()}`);
+  }
+  return facts.join(" · ");
+}
+
+/**
+ * A delayed, non-modal summary of the facts the navigation row and its Project
+ * context already carry. It does not invent transcript detail, model names, or
+ * turn counts; those are not in the row's contract.
+ */
+function ThreadRowInfoCard(props: {
+  readonly projectName: string | undefined;
+  readonly thread: ChatThreadNavigationItem;
+}) {
+  return (
+    <span className="thread-row-info-card">
+      <span className="thread-row-info-card__title">{props.thread.title}</span>
+      <span className="thread-row-info-card__facts">
+        {threadRowFacts({ projectName: props.projectName, thread: props.thread })}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Wraps a row trigger so the info card appears after a short delay. The popup
+ * is rendered in a portal so it is never clipped by the sidebar.
+ */
+function ThreadRowTooltip(props: {
+  readonly children: ReactElement;
+  readonly projectName: string | undefined;
+  readonly thread: ChatThreadNavigationItem;
+}) {
+  return (
+    <OctantTooltip
+      label={<ThreadRowInfoCard projectName={props.projectName} thread={props.thread} />}
+    >
+      {props.children}
+    </OctantTooltip>
+  );
+}
+
+function ThreadRowActionsGutter(props: {
+  readonly actions: ThreadRowActions;
+  readonly thread: ChatThreadNavigationItem;
+}) {
+  const threadId = props.thread.navigationId ?? props.thread.threadId;
+  const pinned = props.thread.pinned === true;
+  const pinLabel = pinned ? "Unpin thread" : "Pin thread";
+  const overflowItems: ReadonlyArray<OctantMenuItem> = [
+    ...(props.actions.onPinThread === undefined
+      ? []
+      : [
+          {
+            icon: pinned ? (
+              <PinOff aria-hidden="true" size={14} strokeWidth={1.8} />
+            ) : (
+              <Pin aria-hidden="true" size={14} strokeWidth={1.8} />
+            ),
+            label: pinLabel,
+            value: "pin",
+          } as const,
+        ]),
+    ...(props.actions.onArchiveThread === undefined
+      ? []
+      : [
+          {
+            icon: <Archive aria-hidden="true" size={14} strokeWidth={1.8} />,
+            label: "Archive thread",
+            value: "archive",
+          } as const,
+        ]),
+  ];
+  return (
+    <span className="sidebar-navigation__thread-actions">
+      {props.actions.onPinThread === undefined ? null : (
+        <OctantIconButton
+          className="sidebar-navigation__thread-action sidebar-navigation__thread-action--inline"
+          label={pinLabel}
+          onClick={() => props.actions.onPinThread?.(threadId, !pinned)}
+          title={pinLabel}
+          type="button"
+        >
+          {pinned ? (
+            <PinOff aria-hidden="true" size={14} strokeWidth={1.8} />
+          ) : (
+            <Pin aria-hidden="true" size={14} strokeWidth={1.8} />
+          )}
+        </OctantIconButton>
+      )}
+      {props.actions.onArchiveThread === undefined ? null : (
+        <OctantIconButton
+          className="sidebar-navigation__thread-action sidebar-navigation__thread-action--inline"
+          label="Archive thread"
+          onClick={() => props.actions.onArchiveThread?.(threadId)}
+          title="Archive thread"
+          type="button"
+        >
+          <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
+        </OctantIconButton>
+      )}
+      {overflowItems.length === 0 ? null : (
+        <OctantMenu
+          items={overflowItems}
+          onValueChange={(value) => {
+            if (value === "pin") props.actions.onPinThread?.(threadId, !pinned);
+            if (value === "archive") props.actions.onArchiveThread?.(threadId);
+          }}
+          selectionMode="action"
+          trigger={<MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />}
+          triggerClassName="sidebar-navigation__thread-action sidebar-navigation__thread-action--overflow"
+          triggerLabel="Thread actions"
+          value=""
+        />
+      )}
+    </span>
+  );
+}
+
+function hasInlineActions(actions: ThreadRowActions | undefined): boolean {
+  if (actions === undefined) return false;
+  return actions.onPinThread !== undefined || actions.onArchiveThread !== undefined;
+}
+
 export interface ProjectThreadRowsProps {
   /** What the row offers on right-click. Absent leaves the rows without a menu. */
   readonly actions?: ThreadRowActions;
@@ -97,6 +236,8 @@ export interface ProjectThreadRowsProps {
   /** Absent when the host cannot accept a rename, which hides the affordance. */
   readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly onSelectThread: (threadId: string) => void;
+  /** Resolves the Project name for the thread; used only by the hover info card. */
+  readonly projectNameForThread?: (thread: ChatThreadNavigationItem) => string | undefined;
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
 }
 
@@ -107,7 +248,9 @@ export interface ProjectThreadRowsProps {
  *
  * The row ends with the provider's mark rather than the model name. Right-click
  * opens the row's own menu when the caller passed actions for it; renaming
- * happens in place, replacing the row with its field.
+ * happens in place, replacing the row with its field. Pin/Unpin and Archive are
+ * offered directly in the trailing gutter on hover or keyboard focus; the same
+ * actions remain reachable from the right-click menu as a secondary route.
  */
 export function ProjectThreadRows(props: ProjectThreadRowsProps) {
   const [renamingThreadId, setRenamingThreadId] = useState<string>();
@@ -121,10 +264,12 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
     ...(renameable ? { onStartRenameThread: setRenamingThreadId } : {}),
   };
   const hasMenu = !threadRowMenuIsEmpty(actions);
+  const inlineActions = hasInlineActions(actions);
   return (
     <>
       {props.threads.map((thread) => {
         const rowId = thread.navigationId ?? thread.threadId;
+        const projectName = props.projectNameForThread?.(thread);
         if (renameable && renamingThreadId === rowId) {
           return (
             <ThreadRenameField
@@ -190,8 +335,29 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
             </span>
           </OctantButton>
         );
-        if (!hasMenu) return <div key={rowId}>{row}</div>;
-        return <ThreadRowContextMenu actions={actions} key={rowId} row={row} thread={thread} />;
+        const wrappedRow = (
+          <ThreadRowTooltip projectName={projectName} thread={thread}>
+            {row}
+          </ThreadRowTooltip>
+        );
+        if (!hasMenu) {
+          return (
+            <div key={rowId} className="sidebar-navigation__thread-row">
+              {wrappedRow}
+              {inlineActions ? <ThreadRowActionsGutter actions={actions} thread={thread} /> : null}
+            </div>
+          );
+        }
+        return (
+          <ThreadRowContextMenu
+            actions={actions}
+            inlineActions={inlineActions}
+            key={rowId}
+            projectName={projectName}
+            row={row}
+            thread={thread}
+          />
+        );
       })}
     </>
   );
@@ -199,15 +365,24 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
 
 function ThreadRowContextMenu(props: {
   readonly actions: ThreadRowActions;
+  readonly inlineActions: boolean;
+  readonly projectName: string | undefined;
   readonly row: ReactElement;
   readonly thread: ChatThreadNavigationItem;
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <OctantContextMenuRoot onOpenChange={setOpen}>
-      <OctantContextMenuTrigger aria-expanded={open} aria-haspopup="menu" render={props.row} />
-      <ThreadRowMenu actions={props.actions} thread={props.thread} />
-    </OctantContextMenuRoot>
+    <div className="sidebar-navigation__thread-row">
+      <OctantContextMenuRoot onOpenChange={setOpen}>
+        <ThreadRowTooltip projectName={props.projectName} thread={props.thread}>
+          <OctantContextMenuTrigger aria-expanded={open} aria-haspopup="menu" render={props.row} />
+        </ThreadRowTooltip>
+        {props.inlineActions ? (
+          <ThreadRowActionsGutter actions={props.actions} thread={props.thread} />
+        ) : null}
+        <ThreadRowMenu actions={props.actions} thread={props.thread} />
+      </OctantContextMenuRoot>
+    </div>
   );
 }
 
@@ -227,6 +402,8 @@ export interface ProjectThreadListProps {
   readonly label?: string;
   readonly onRetry?: () => void;
   readonly onSelectThread: (threadId: string) => void;
+  /** Resolves the Project name for the thread; used only by the hover info card. */
+  readonly projectNameForThread?: (thread: ChatThreadNavigationItem) => string | undefined;
   readonly status?: ProjectThreadListStatus;
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
 }
@@ -259,6 +436,9 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
           {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
           {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
           onSelectThread={props.onSelectThread}
+          {...(props.projectNameForThread === undefined
+            ? {}
+            : { projectNameForThread: props.projectNameForThread })}
           threads={props.threads}
         />
       ) : status === "ready" && props.emptyMessage !== undefined ? (

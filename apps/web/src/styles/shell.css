@@ -737,14 +737,83 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   min-width: 0;
 }
 
-.sidebar-navigation__thread-pin {
+/* The trailing gutter reserves space so the row title does not jump when the
+   actions appear. It is hidden by default and revealed on row hover or focus,
+   and stays visible while any of its popups are open. */
+.sidebar-navigation__thread-actions {
+  display: inline-flex;
   flex: 0 0 auto;
-  padding: 2px 4px;
-  color: var(--oct-meta);
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
 
-.sidebar-navigation__thread-pin[aria-pressed="true"] {
+.sidebar-navigation__thread-row:hover .sidebar-navigation__thread-actions,
+.sidebar-navigation__thread-row:focus-within .sidebar-navigation__thread-actions,
+.sidebar-navigation__thread-actions:has([aria-expanded="true"]),
+.sidebar-navigation__thread-actions:has([data-popup-open]) {
+  opacity: 1;
+}
+
+.sidebar-navigation__thread-action {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  color: var(--oct-meta);
+  border-radius: 6px;
+}
+
+.sidebar-navigation__thread-action:hover,
+.sidebar-navigation__thread-action:focus-visible {
   color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
+/* The overflow action is reserved for coarse/narrow pointers where inline
+   hover buttons cannot be reached; it is hidden on fine-pointer desktops. */
+.sidebar-navigation__thread-action--overflow {
+  display: none;
+}
+
+@media (pointer: coarse), (max-width: 560px) {
+  .sidebar-navigation__thread-actions {
+    opacity: 1;
+  }
+
+  .sidebar-navigation__thread-action--inline {
+    display: none;
+  }
+
+  .sidebar-navigation__thread-action--overflow {
+    display: inline-flex;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-navigation__thread-actions {
+    transition: none;
+  }
+}
+
+/* Delayed, non-modal info card shown for a thread row. It uses only facts
+   already available in the navigation item and Project context. */
+.thread-row-info-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 240px;
+}
+
+.thread-row-info-card__title {
+  color: var(--oct-fg);
+  font-weight: 500;
+}
+
+.thread-row-info-card__facts {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .sidebar-navigation__thread-rename {

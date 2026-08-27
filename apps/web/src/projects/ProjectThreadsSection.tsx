@@ -67,6 +67,7 @@ export function ProjectThreadsSection(props: { readonly project: ProjectSummary 
         {...(access.errorMessage === undefined ? {} : { errorMessage: access.errorMessage })}
         {...(access.onRetry === undefined ? {} : { onRetry: access.onRetry })}
         onSelectThread={access.onSelectThread}
+        projectNameForThread={() => props.project.name}
         status={access.status}
         threads={threads}
       />
