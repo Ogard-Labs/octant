@@ -604,7 +604,7 @@ function WorkBoardCardView(props: {
       data-status={card.status}
     >
       <span className={props.layout === "list" ? "issuerow-main" : "board-card-top"}>
-        {props.unread ? <span aria-label="Unread" className="unread" role="img" /> : null}
+        {props.unread ? <span className="sr-only">Unread</span> : null}
         <OctantButton
           className="code-board__card-open"
           onClick={() =>

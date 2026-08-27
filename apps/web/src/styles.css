@@ -7704,6 +7704,7 @@ p.board-col-empty {
 .code-board__card-open {
   flex: 1 1 auto;
   min-width: 0;
+  justify-content: flex-start;
   padding: 0;
   border: 0;
   background: none;
@@ -7830,14 +7831,6 @@ p.board-col-empty {
 .code-board__list .issuerow .issuerow-title,
 .code-board__list .issuerow .issuerow-meta {
   font-family: var(--oct-font-display);
-}
-
-.code-board__list .issuerow .unread {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-accent-fg);
-  flex: 0 0 auto;
 }
 
 .code-board__body[data-layout="list"] {

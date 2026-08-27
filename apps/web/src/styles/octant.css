@@ -2866,10 +2866,6 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   min-width: 0;
 }
-.board-card-top > .unread {
-  align-self: center;
-  margin-top: 0;
-}
 .board-card-title {
   /* Two lines, then ellipsis — a long title must not make one card tower
      over its column. The element carries the full title in its title
@@ -2885,15 +2881,6 @@ input.switch:checked::after {
   font-weight: 500;
   line-height: var(--oct-leading-snug);
   overflow-wrap: anywhere;
-}
-/* unread is a presence, not a colour — it sits in the flow before the title */
-.board-card .unread {
-  width: 6px;
-  height: 6px;
-  margin-top: 0.4em;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-accent-fg);
-  flex: 0 0 auto;
 }
 .board-card-facts {
   display: flex;

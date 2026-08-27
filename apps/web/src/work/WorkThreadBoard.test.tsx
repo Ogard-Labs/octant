@@ -123,8 +123,9 @@ describe("WorkThreadBoard", () => {
     );
 
     await screen.findByRole("button", { name: "Unread thread" });
-    expect(within(cardFor("Unread thread")).getByRole("img", { name: "Unread" })).toBeTruthy();
-    expect(within(cardFor("Read thread")).queryByRole("img", { name: "Unread" })).toBeNull();
+    expect(within(cardFor("Unread thread")).getByText("Unread")).toHaveClass("sr-only");
+    expect(cardFor("Unread thread").querySelector(".unread")).toBeNull();
+    expect(within(cardFor("Read thread")).queryByText("Unread")).toBeNull();
   });
 
   it("renders every Status column by default, including empty ones, and opens a thread", async () => {
@@ -392,6 +393,9 @@ describe("WorkThreadBoard", () => {
     expect(octantCss).toMatch(/\.board-card-title\s*\{[^}]*overflow:\s*hidden[^}]*\}/s);
     expect(octantCss).toMatch(/\.board-card-title\s*\{[^}]*-webkit-line-clamp:\s*2[^}]*\}/s);
     expect(octantCss).toMatch(/\.board-card-facts\s*\{[^}]*flex-wrap:\s*wrap[^}]*\}/s);
+    expect(stylesCss).toMatch(
+      /\.code-board__card-open\s*\{[^}]*justify-content:\s*flex-start[^}]*text-align:\s*left[^}]*\}/s,
+    );
 
     const longTitle = "A very long thread title that would otherwise push metadata out of the card";
     const loadBoard = vi.fn(async () =>
