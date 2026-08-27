@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectThreadRows } from "./ProjectThreadList";
 
@@ -10,6 +10,48 @@ const thread = {
 } as const;
 
 describe("ProjectThreadRows", () => {
+  it("keeps a long thread list bounded to the visible window", async () => {
+    const threads = Array.from({ length: 80 }, (_, index) => ({
+      threadId: `thread-${String(index)}`,
+      title: `Thread ${String(index)}`,
+    }));
+    const container = document.createElement("div");
+    container.style.height = "160px";
+    container.style.overflowY = "auto";
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 160 });
+    Object.defineProperty(container, "offsetHeight", { configurable: true, value: 160 });
+    Object.defineProperty(container, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(0, 0, 320, 160),
+    });
+    document.body.append(container);
+    const offsetHeightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight",
+    );
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return this.hasAttribute("data-index")
+          ? 32
+          : (offsetHeightDescriptor?.get?.call(this) ?? 0);
+      },
+    });
+    try {
+      render(<ProjectThreadRows onSelectThread={vi.fn()} threads={threads} />, { container });
+
+      await waitFor(() => {
+        const rows = screen.getAllByRole("button");
+        expect(rows.length).toBeGreaterThan(0);
+        expect(rows.length).toBeLessThan(threads.length);
+      });
+    } finally {
+      if (offsetHeightDescriptor !== undefined) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
+      }
+    }
+  });
+
   it("names a thread's provider and leaves its model off the row", () => {
     render(
       <ProjectThreadRows

@@ -1,5 +1,5 @@
 import { MoreHorizontal, X } from "lucide-react";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { DockToolIcon } from "./dockToolIcons";
 import { partitionDockTools } from "./dockToolStripModel";
 import { IconButton } from "./IconButton";
@@ -20,7 +20,7 @@ export interface DockToolStripProps {
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 }
 
-export function DockToolStrip(props: DockToolStripProps) {
+export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripProps) {
   const [measuredCapacity, setMeasuredCapacity] = useState(props.tabs.length);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const strip = useRef<HTMLDivElement>(null);
@@ -161,4 +161,4 @@ export function DockToolStrip(props: DockToolStripProps) {
       )}
     </div>
   );
-}
+});

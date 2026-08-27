@@ -1633,10 +1633,14 @@ function LaunchedShell(
       isDockToolLaunchable(surface.id, dockToolCapabilities) &&
       (!bottomPanelOpen || surface.id !== activeBottomSurface?.id),
   );
-  const dockTabs = displayedDockState.tabs.flatMap((surfaceId) => {
-    const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
-    return surface === undefined ? [] : [surface];
-  });
+  const dockTabs = useMemo(
+    () =>
+      displayedDockState.tabs.flatMap((surfaceId) => {
+        const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
+        return surface === undefined ? [] : [surface];
+      }),
+    [displayedDockState.tabs],
+  );
   const dockOpen = dockVisible;
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({

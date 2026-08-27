@@ -1,5 +1,6 @@
-import { useContext, useState } from "react";
-import type { ReactElement, ReactNode } from "react";
+import { memo, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ReactElement } from "react";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { Archive, MoreHorizontal, Pin, PinOff } from "lucide-react";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
@@ -257,6 +258,148 @@ export interface ProjectThreadRowsProps {
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
 }
 
+const THREAD_VIRTUALIZATION_THRESHOLD = 40;
+const THREAD_ROW_ESTIMATE = 32;
+const THREAD_ROW_OVERSCAN = 6;
+
+function nearestScrollableAncestor(element: HTMLElement | null): HTMLElement | null {
+  let ancestor = element?.parentElement ?? null;
+  while (ancestor !== null) {
+    const style = getComputedStyle(ancestor);
+    if (/(auto|overlay|scroll)/.test(`${style.overflow} ${style.overflowY}`)) {
+      return ancestor;
+    }
+    ancestor = ancestor.parentElement;
+  }
+  return null;
+}
+
+function scrollMarginFor(list: HTMLElement, scrollElement: HTMLElement): number {
+  const listRect = list.getBoundingClientRect();
+  const scrollRect = scrollElement.getBoundingClientRect();
+  return listRect.top - scrollRect.top + scrollElement.scrollTop;
+}
+
+interface ProjectThreadRowProps {
+  readonly actions: ThreadRowActions;
+  readonly activeThreadId?: string;
+  readonly isRenaming: boolean;
+  readonly onCancelRename: () => void;
+  readonly onRenameThread?: (threadId: string, title: string) => void;
+  readonly onSelectThread: (threadId: string) => void;
+  readonly projectNameForThread?: (thread: ChatThreadNavigationItem) => string | undefined;
+  readonly thread: ChatThreadNavigationItem;
+}
+
+const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowProps) {
+  const drag = useContext(SidebarThreadDragContext);
+  const rowId = props.thread.navigationId ?? props.thread.threadId;
+  const projectName = props.projectNameForThread?.(props.thread);
+  const hasMenu = !threadRowMenuIsEmpty(props.actions);
+  const inlineActions = hasInlineActions(props.actions);
+  const onSelect = useCallback(() => {
+    if (drag?.consumeThreadClickSuppression(rowId) === true) return;
+    props.onSelectThread(rowId);
+  }, [drag, props.onSelectThread, rowId]);
+  const onRename = useCallback(
+    (title: string) => {
+      props.onCancelRename();
+      props.onRenameThread?.(rowId, title);
+    },
+    [props.onCancelRename, props.onRenameThread, rowId],
+  );
+  const onPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (drag === null) return;
+      drag.beginThreadDrag(event, {
+        rowId,
+        threadId: props.thread.threadId,
+        title: props.thread.title,
+        ...(props.thread.projectId === undefined ? {} : { projectId: props.thread.projectId }),
+      });
+    },
+    [drag, props.thread, rowId],
+  );
+  if (props.isRenaming) {
+    return (
+      <ThreadRenameField
+        onCancel={props.onCancelRename}
+        onRename={onRename}
+        title={props.thread.title}
+      />
+    );
+  }
+  const row = (
+    <OctantButton
+      aria-current={props.activeThreadId === rowId ? "page" : undefined}
+      className="sidebar-navigation__thread project-threads__thread justify-start"
+      data-follow-up={
+        props.thread.followUp === undefined ? undefined : props.thread.followUp ? "true" : "false"
+      }
+      data-pinned={props.thread.pinned === true ? "true" : undefined}
+      data-thread-id={props.thread.threadId}
+      data-unread={
+        props.thread.unread === undefined ? undefined : props.thread.unread ? "true" : "false"
+      }
+      onClick={onSelect}
+      {...(drag === null
+        ? {}
+        : {
+            onPointerCancel: drag.onPointerCancel,
+            onPointerDown,
+            onPointerMove: drag.onPointerMove,
+            onPointerUp: drag.onPointerUp,
+          })}
+      type="button"
+      variant="ghost"
+    >
+      {/* The dot leads the row from a gutter every row reserves, so a
+          busy and an idle title start on the same edge. It is never
+          colour alone: the label says the state in words. */}
+      <ThreadStatusDot activity={activityOf(props.thread)} />
+      {props.thread.provider === undefined ? null : (
+        <span
+          className="sidebar-navigation__thread-provider"
+          title={props.thread.provider.displayName}
+        >
+          <ProviderGlyph
+            displayName={props.thread.provider.displayName}
+            driverKind={props.thread.provider.driverKind}
+            size={14}
+          />
+        </span>
+      )}
+      <span className="sidebar-navigation__thread-copy">
+        <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
+      </span>
+    </OctantButton>
+  );
+  const wrappedRow = (
+    <ThreadRowTooltip projectName={projectName} thread={props.thread}>
+      {row}
+    </ThreadRowTooltip>
+  );
+  if (!hasMenu) {
+    return (
+      <div className="sidebar-navigation__thread-row">
+        {wrappedRow}
+        {inlineActions ? (
+          <ThreadRowActionsGutter actions={props.actions} thread={props.thread} />
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <ThreadRowContextMenu
+      actions={props.actions}
+      inlineActions={inlineActions}
+      projectName={projectName}
+      row={row}
+      thread={props.thread}
+    />
+  );
+});
+
 /**
  * One button per thread. Attention markers are never colour alone: the unread
  * mark is a dot glyph carrying its own label, the way the Recents rows already
@@ -270,112 +413,110 @@ export interface ProjectThreadRowsProps {
  */
 export function ProjectThreadRows(props: ProjectThreadRowsProps) {
   const [renamingThreadId, setRenamingThreadId] = useState<string>();
-  // The workspace's surface drag, when a workspace is present to drop into.
-  // A completed drag ends over a pane, yet the pointer began on this row, so
-  // the click that follows it must not also open the thread.
-  const drag = useContext(SidebarThreadDragContext);
   const renameable = props.onRenameThread !== undefined;
-  const actions: ThreadRowActions = {
-    ...props.actions,
-    ...(renameable ? { onStartRenameThread: setRenamingThreadId } : {}),
-  };
-  const hasMenu = !threadRowMenuIsEmpty(actions);
-  const inlineActions = hasInlineActions(actions);
+  const onStartRenameThread = useCallback((threadId: string) => {
+    setRenamingThreadId(threadId);
+  }, []);
+  const onCancelRename = useCallback(() => {
+    setRenamingThreadId(undefined);
+  }, []);
+  const actions = useMemo<ThreadRowActions>(
+    () => ({
+      ...props.actions,
+      ...(renameable ? { onStartRenameThread } : {}),
+    }),
+    [onStartRenameThread, props.actions, renameable],
+  );
+  const virtualized = props.threads.length > THREAD_VIRTUALIZATION_THRESHOLD;
+  const listRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const virtualizer = useVirtualizer({
+    count: virtualized ? props.threads.length : 0,
+    estimateSize: () => THREAD_ROW_ESTIMATE,
+    getItemKey: (index) => {
+      const thread = props.threads[index];
+      return thread === undefined ? String(index) : (thread.navigationId ?? thread.threadId);
+    },
+    getScrollElement: () => nearestScrollableAncestor(listRef.current),
+    gap: 2,
+    overscan: THREAD_ROW_OVERSCAN,
+    rangeExtractor: (range) => {
+      const indexes = defaultRangeExtractor(range);
+      const renamingIndex =
+        renamingThreadId === undefined
+          ? -1
+          : props.threads.findIndex(
+              (thread) => (thread.navigationId ?? thread.threadId) === renamingThreadId,
+            );
+      if (renamingIndex < 0 || indexes.includes(renamingIndex)) return indexes;
+      return [...indexes, renamingIndex].sort((left, right) => left - right);
+    },
+    scrollMargin,
+    ...(!virtualized ? { enabled: false } : {}),
+  });
+
+  useLayoutEffect(() => {
+    if (!virtualized) return;
+    const list = listRef.current;
+    const scrollElement = nearestScrollableAncestor(list);
+    if (list === null || scrollElement === null) return;
+    const update = () => {
+      setScrollMargin(scrollMarginFor(list, scrollElement));
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(list);
+    observer.observe(scrollElement);
+    return () => observer.disconnect();
+  }, [props.threads.length, virtualized]);
+
+  const row = (thread: ChatThreadNavigationItem, index?: number) => (
+    <ProjectThreadRow
+      actions={actions}
+      {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+      isRenaming={(thread.navigationId ?? thread.threadId) === renamingThreadId}
+      onCancelRename={onCancelRename}
+      {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
+      onSelectThread={props.onSelectThread}
+      {...(props.projectNameForThread === undefined
+        ? {}
+        : { projectNameForThread: props.projectNameForThread })}
+      key={index === undefined ? (thread.navigationId ?? thread.threadId) : index}
+      thread={thread}
+    />
+  );
+
+  if (!virtualized) {
+    return <>{props.threads.map((thread) => row(thread))}</>;
+  }
   return (
-    <>
-      {props.threads.map((thread) => {
-        const rowId = thread.navigationId ?? thread.threadId;
-        const projectName = props.projectNameForThread?.(thread);
-        if (renameable && renamingThreadId === rowId) {
-          return (
-            <ThreadRenameField
-              key={rowId}
-              onCancel={() => setRenamingThreadId(undefined)}
-              onRename={(title) => {
-                setRenamingThreadId(undefined);
-                props.onRenameThread?.(rowId, title);
-              }}
-              title={thread.title}
-            />
-          );
-        }
-        const row = (
-          <OctantButton
-            aria-current={props.activeThreadId === rowId ? "page" : undefined}
-            className="sidebar-navigation__thread project-threads__thread justify-start"
-            data-follow-up={
-              thread.followUp === undefined ? undefined : thread.followUp ? "true" : "false"
-            }
-            data-pinned={thread.pinned === true ? "true" : undefined}
-            data-thread-id={thread.threadId}
-            data-unread={thread.unread === undefined ? undefined : thread.unread ? "true" : "false"}
-            onClick={() => {
-              if (drag?.consumeThreadClickSuppression(rowId) === true) return;
-              props.onSelectThread(rowId);
-            }}
-            {...(drag === null
-              ? {}
-              : {
-                  onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) =>
-                    drag.beginThreadDrag(event, {
-                      rowId,
-                      threadId: thread.threadId,
-                      title: thread.title,
-                      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
-                    }),
-                  onPointerMove: drag.onPointerMove,
-                  onPointerUp: drag.onPointerUp,
-                  onPointerCancel: drag.onPointerCancel,
-                })}
-            type="button"
-            variant="ghost"
-          >
-            {/* The dot leads the row from a gutter every row reserves, so a
-                busy and an idle title start on the same edge. It is never
-                colour alone: the label says the state in words. */}
-            <ThreadStatusDot activity={activityOf(thread)} />
-            {thread.provider === undefined ? null : (
-              <span
-                className="sidebar-navigation__thread-provider"
-                title={thread.provider.displayName}
-              >
-                <ProviderGlyph
-                  displayName={thread.provider.displayName}
-                  driverKind={thread.provider.driverKind}
-                  size={14}
-                />
-              </span>
-            )}
-            <span className="sidebar-navigation__thread-copy">
-              <span className="sidebar-navigation__thread-title">{thread.title}</span>
-            </span>
-          </OctantButton>
-        );
-        const wrappedRow = (
-          <ThreadRowTooltip projectName={projectName} thread={thread}>
-            {row}
-          </ThreadRowTooltip>
-        );
-        if (!hasMenu) {
-          return (
-            <div key={rowId} className="sidebar-navigation__thread-row">
-              {wrappedRow}
-              {inlineActions ? <ThreadRowActionsGutter actions={actions} thread={thread} /> : null}
-            </div>
-          );
-        }
+    <div
+      className="project-threads__virtual-list"
+      ref={listRef}
+      style={{ height: virtualizer.getTotalSize() }}
+    >
+      {virtualizer.getVirtualItems().map((virtualItem) => {
+        const thread = props.threads[virtualItem.index];
+        if (thread === undefined) return null;
         return (
-          <ThreadRowContextMenu
-            actions={actions}
-            inlineActions={inlineActions}
-            key={rowId}
-            projectName={projectName}
-            row={row}
-            thread={thread}
-          />
+          <div
+            data-index={virtualItem.index}
+            key={virtualItem.key}
+            ref={virtualizer.measureElement}
+            style={{
+              left: 0,
+              position: "absolute",
+              top: 0,
+              transform: `translateY(${String(virtualItem.start - scrollMargin)}px)`,
+              width: "100%",
+            }}
+          >
+            {row(thread, virtualItem.index)}
+          </div>
         );
       })}
-    </>
+    </div>
   );
 }
 

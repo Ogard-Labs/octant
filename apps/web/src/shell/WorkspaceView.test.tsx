@@ -911,7 +911,9 @@ describe("WorkspaceView preview tab", () => {
     expect(await screen.findByRole("heading", { name: "report.pdf" })).toBeVisible();
     // An unauthorized outcome surfaces an honest access message, never a
     // guessed file body.
-    expect(screen.getByRole("alert")).toHaveTextContent("You do not have access to this preview.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "You do not have access to this preview.",
+    );
   });
 });
 
