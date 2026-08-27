@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Search } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
@@ -194,9 +195,10 @@ export function SettingsView(props: SettingsViewProps) {
     onDeepLinkApplied?.();
   }, [pendingDeepLink, route, onDeepLinkApplied]);
 
-  const hasQuery = props.search.trim() !== "";
-  const navSections = filterSectionsForNavigator(availableSections, capabilities, props.search);
-  const searchResults = searchSettings(availableSections, capabilities, props.search);
+  const debouncedSearch = useDebouncedValue(props.search, 120);
+  const hasQuery = debouncedSearch.trim() !== "";
+  const navSections = filterSectionsForNavigator(availableSections, capabilities, debouncedSearch);
+  const searchResults = searchSettings(availableSections, capabilities, debouncedSearch);
   const navItems: SettingsNavigationItem[] = navSections.map((section) => ({
     id: section.id,
     label: section.label,
@@ -259,7 +261,7 @@ export function SettingsView(props: SettingsViewProps) {
             </header>
             {hasQuery ? (
               <SettingsSearchResults
-                query={props.search}
+                query={debouncedSearch}
                 results={searchResults}
                 sectionLabels={SECTION_LABELS}
                 onSelect={handleSearchSelect}
