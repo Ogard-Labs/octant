@@ -11,6 +11,8 @@ import { UsageQueryFilter, UsageSummaryTotals } from "./usageRpc";
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
 const StableRequestShape = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
+const StableCacheKey = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
+const Ratio = Schema.Number.pipe(Schema.between(0, 1));
 
 /** Calendar day key in the viewing time zone the host was asked to bucket by. */
 export const UsageDayKey = Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}$/));
@@ -169,6 +171,56 @@ export const UsageHostCoverage = Schema.Struct({
 }).annotations(strict);
 export type UsageHostCoverage = typeof UsageHostCoverage.Type;
 
+/**
+ * Read facts for one server-side cache.
+ *
+ * A cache is only trustworthy to a reader who can see whether it is being used,
+ * how old its contents are, and whether its refresh is currently being paced
+ * after failures. Counts are observations since the host started, so they are
+ * monotonic within a host lifetime and not comparable across restarts.
+ */
+export const UsageCacheStat = Schema.Struct({
+  /** Stable cache id kept across renames of its display label. */
+  key: StableCacheKey,
+  label: Schema.NonEmptyTrimmedString,
+  hitCount: NonNegativeInt,
+  missCount: NonNegativeInt,
+  /** Absent until the cache has been read at least once; a ratio of no reads is not zero. */
+  hitRatio: Schema.optional(Ratio),
+  /** Last refresh that reached the source successfully; absent means never. */
+  lastRefreshAt: Schema.optional(UtcTimestamp),
+  /** Age of the cached contents at query time; absent when nothing is cached. */
+  stalenessMs: Schema.optional(NonNegativeInt),
+  /** Consecutive failed refreshes; a successful refresh clears the streak. */
+  failureStreak: NonNegativeInt,
+  /** While present, an unattended refresh is being held back until this time. */
+  retryAt: Schema.optional(UtcTimestamp),
+}).annotations(strict);
+export type UsageCacheStat = typeof UsageCacheStat.Type;
+
+/**
+ * Prompt-cache efficiency reported by one provider instance. Cache reads are
+ * tokens the provider served from its prompt cache and cache writes are tokens
+ * it had to store, so the ratio of reads to reads-plus-writes says how much of
+ * the cached prompt work was reused rather than paid for again.
+ */
+export const UsageProviderTokenCacheStat = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  requestCount: NonNegativeInt,
+  cacheReadInputTokens: NonNegativeInt,
+  cacheWriteInputTokens: NonNegativeInt,
+  hitRatio: Schema.optional(Ratio),
+}).annotations(strict);
+export type UsageProviderTokenCacheStat = typeof UsageProviderTokenCacheStat.Type;
+
+export const UsageCacheStats = Schema.Struct({
+  caches: Schema.Array(UsageCacheStat),
+  providerTokenCaches: Schema.Array(UsageProviderTokenCacheStat),
+  /** Prompt-cache reuse across every provider instance in range. */
+  tokenCacheHitRatio: Schema.optional(Ratio),
+}).annotations(strict);
+export type UsageCacheStats = typeof UsageCacheStats.Type;
+
 export const UsageDashboardRequest = Schema.Struct({
   filter: Schema.optional(UsageQueryFilter),
   timeZone: Schema.optional(Schema.NonEmptyTrimmedString),
@@ -194,6 +246,13 @@ export const UsageDashboardResponse = Schema.Struct({
   scanTruncated: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   hosts: Schema.Array(UsageHostCoverage),
   dimensionSources: Schema.Array(UsageDimensionSource),
+  /**
+   * Cache efficiency at query time. Defaulted so a host that observes no cache
+   * yet still answers with an empty reading rather than omitting the field.
+   */
+  cacheStats: Schema.optionalWith(UsageCacheStats, {
+    default: () => ({ caches: [], providerTokenCaches: [] }),
+  }),
   timeZone: Schema.NonEmptyTrimmedString,
   queryAt: UtcTimestamp,
 }).annotations(strict);
@@ -204,5 +263,6 @@ export const decodeUsageActivityCell = Schema.decodeUnknownSync(UsageActivityCel
 export const decodeUsageBreakdownGroup = Schema.decodeUnknownSync(UsageBreakdownGroup);
 export const decodeUsageDetailRow = Schema.decodeUnknownSync(UsageDetailRow);
 export const decodeUsageHostCoverage = Schema.decodeUnknownSync(UsageHostCoverage);
+export const decodeUsageCacheStats = Schema.decodeUnknownSync(UsageCacheStats);
 export const decodeUsageDashboardRequest = Schema.decodeUnknownSync(UsageDashboardRequest);
 export const decodeUsageDashboardResponse = Schema.decodeUnknownSync(UsageDashboardResponse);

@@ -381,6 +381,7 @@ import { createWebAssetsHandler } from "./webAssets";
 import { createZenRouteHandler } from "./zenRoutes";
 import { createZenBackgroundRouteHandler } from "./zenBackgroundRoutes";
 import { createUsageRouteHandler } from "./usageRoutes";
+import { CacheStatsProjection } from "./cacheStatsProjection";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
 import { resolveWindowProjectScope, type UsageProjectScope } from "./usageProjectScope";
 import { SideChatSidecarStore } from "./chat/sideChatSidecarStore";
@@ -1753,9 +1754,13 @@ export function startOctantServer(
         if (!readable) revokeProjectPullRequests?.();
       },
     });
+    // One reading for every cache this host keeps, so the usage dashboard can
+    // report them together and a failing external cache paces itself.
+    const cacheStats = new CacheStatsProjection();
     const githubCatalogueService = new GithubCatalogueService({
       port: githubCataloguePort,
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
+      cacheStats,
     });
     const githubReadToolService = new GithubReadToolService({
       catalogue: githubCatalogueService,
@@ -1782,6 +1787,7 @@ export function startOctantServer(
       connection: persistence.connection,
       windowAuthorityStore,
       readWindowProjectScope: readWindowUsageProjectScope,
+      cacheStats,
     });
     const usageRoutes = createUsageRouteHandler({
       connection: persistence.connection,
@@ -2294,6 +2300,7 @@ export function startOctantServer(
       },
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
+      cacheStats,
       threads: {
         list: async (windowId) => {
           const bootstrap = await codeService.bootstrap(windowId);
