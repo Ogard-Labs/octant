@@ -1,5 +1,9 @@
+import { decodeCanvasVersion } from "@octant/contracts/canvas";
+import { decodeCanvasComment } from "@octant/contracts/canvas-board";
+import { decodeCanvasStaticExportRequest } from "@octant/contracts/canvas-share";
 import { describe, expect, it } from "vitest";
 import {
+  buildCanvasStaticExportDocument,
   buildCanvasStaticExportReceipt,
   CanvasSharePolicyRejected,
   CANVAS_SHARE_THREAT_MODEL,
@@ -130,6 +134,28 @@ describe("Canvas share policy", () => {
         label: "Artifact",
       },
     ]);
+  });
+
+  it("excludes board comments from a static export by default", () => {
+    const comment = decodeCanvasComment({
+      commentId: "88888888-8888-4888-8888-888888888888",
+      anchor: { kind: "block", blockId: "heading-1" },
+      author: { kind: "local-user", actorId: ids.actor },
+      body: "Keep this discussion local.",
+      createdAt: "2026-08-04T11:30:00.000Z",
+    });
+    const commentBearingCurrent = {
+      ...decodeCanvasVersion(current),
+      comments: [comment],
+    };
+    expect(commentBearingCurrent.comments).toHaveLength(1);
+
+    const document = buildCanvasStaticExportDocument({
+      request: decodeCanvasStaticExportRequest(request),
+      current: commentBearingCurrent,
+      exportedAt: context.nowIso,
+    });
+    expect("comments" in document).toBe(false);
   });
 
   it("keeps local Canvas usable when sharing is disabled", () => {

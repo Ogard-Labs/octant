@@ -216,7 +216,7 @@ function calculateBudgetUsage(
 function decodeDefinitionOrReject(input: unknown): CanvasDefinition {
   try {
     const definition = decodeCanvasDefinition(input);
-    if (definition.schemaVersion !== 1) {
+    if (definition.schemaVersion !== 1 && definition.schemaVersion !== 2) {
       return reject(
         "unsupported-schema-version",
         `Canvas schema version ${String(definition.schemaVersion)} is unsupported.`,
@@ -234,7 +234,8 @@ function decodeDefinitionOrReject(input: unknown): CanvasDefinition {
       input !== null &&
       "schemaVersion" in input &&
       typeof (input as { schemaVersion?: unknown }).schemaVersion === "number" &&
-      (input as { schemaVersion?: unknown }).schemaVersion !== 1
+      (input as { schemaVersion?: unknown }).schemaVersion !== 1 &&
+      (input as { schemaVersion?: unknown }).schemaVersion !== 2
     ) {
       return reject("unsupported-schema-version", "Canvas schema version is unsupported.");
     }

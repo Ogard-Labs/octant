@@ -82,7 +82,7 @@ export const CanvasRedactedProvenance = Schema.Struct({
   /** Provider/model identity is reduced to non-secret labels only. */
   providerLabel: boundedNonEmptyText(200),
   modelLabel: boundedNonEmptyText(200),
-  actorKind: Schema.Literal("system", "local-user"),
+  actorKind: Schema.Literal("system", "local-user", "agent"),
 }).annotations(strict);
 export type CanvasRedactedProvenance = typeof CanvasRedactedProvenance.Type;
 
