@@ -13,6 +13,7 @@ import {
   type RemoteConnection,
   type RemoteConnectionState,
 } from "./remoteConnection";
+import { localHostDisplayName } from "./localHostDisplayName";
 
 export type RemoteSessionBridgeState =
   | { readonly kind: "idle" }
@@ -271,7 +272,7 @@ export function createRemoteSessionBridge(
       emit({
         kind: "connecting",
         hostId: approval.hostId,
-        displayName: "This Mac",
+        displayName: localHostDisplayName(),
       });
       void establishConnection(approval).catch((error) => {
         activeConnection = undefined;
@@ -324,7 +325,11 @@ export function createRemoteSessionBridge(
           hostId: metadata.hostId,
           deviceId: metadata.deviceId,
         };
-        emit({ kind: "connecting", hostId: metadata.hostId, displayName: "This Mac" });
+        emit({
+          kind: "connecting",
+          hostId: metadata.hostId,
+          displayName: localHostDisplayName(),
+        });
         try {
           await establishConnection(
             {

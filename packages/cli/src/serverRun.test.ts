@@ -13,6 +13,7 @@ describe("runServerRunCommand", () => {
       },
       instanceId: () => "11111111-1111-4111-8111-111111111111",
       bridgeSecret: () => "foreground-bridge-secret",
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: () => () => undefined,
     });
 
@@ -48,6 +49,7 @@ describe("runServerRunCommand", () => {
       },
       instanceId: () => "11111111-1111-4111-8111-111111111111",
       bridgeSecret: () => "foreground-bridge-secret",
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: () => () => undefined,
     });
 
@@ -83,6 +85,7 @@ describe("runServerRunCommand", () => {
       spawn: () => ({ exited: Promise.resolve(7), kill }),
       serverStartCommand: () => ({ command: "server-bin", args: [] }),
       instanceId: () => "11111111-1111-4111-8111-111111111111",
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: (handler) => {
         terminate = handler;
         return () => undefined;
@@ -111,6 +114,7 @@ describe("runServerRunCommand", () => {
       spawn,
       sleep,
       writeNotice,
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: () => () => undefined,
       instanceId: vi
         .fn()
@@ -154,6 +158,7 @@ describe("runServerRunCommand", () => {
       spawn,
       sleep,
       writeNotice: vi.fn(),
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: (handler) => {
         terminate = handler;
         return () => undefined;
@@ -171,6 +176,7 @@ describe("runServerRunCommand", () => {
     const result = await runServerRunCommand({
       env: {},
       spawn,
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: () => () => undefined,
     });
 
@@ -184,6 +190,7 @@ describe("runServerRunCommand", () => {
     const result = await runServerRunCommand({
       env: {},
       spawn,
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: (handler) => {
         terminate = handler;
         return () => undefined;
@@ -203,10 +210,59 @@ describe("runServerRunCommand", () => {
       spawn,
       sleep,
       writeNotice: vi.fn(),
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: () => () => undefined,
     });
 
     expect(result).toBe(11);
     expect(spawn).toHaveBeenCalledTimes(6);
+  });
+
+  it("passes a Linux broker pair to the child and closes it after exit", async () => {
+    if (process.platform !== "linux") return;
+    let captured: ServerRunSpawnSpec | undefined;
+    const close = vi.fn(async () => undefined);
+    const result = await runServerRunCommand({
+      env: {
+        OCTANT_CREDENTIAL_BROKER_URL: "stale",
+        OCTANT_CREDENTIAL_BROKER_TOKEN: "stale",
+      },
+      spawn: (spec) => {
+        captured = spec;
+        return { exited: Promise.resolve(0), kill: vi.fn() };
+      },
+      credentialBrokerFactory: async () => ({
+        url: "http://127.0.0.1:41234/",
+        token: "broker-token",
+        close,
+        fetchForTest: async () => new Response(),
+      }),
+      installSignalHandler: () => () => undefined,
+    });
+
+    expect(result).toBe(0);
+    expect(captured?.env.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41234/");
+    expect(captured?.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-token");
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("passes no broker environment when Linux has no usable secret store", async () => {
+    if (process.platform !== "linux") return;
+    let captured: ServerRunSpawnSpec | undefined;
+    await runServerRunCommand({
+      env: {
+        OCTANT_CREDENTIAL_BROKER_URL: "stale",
+        OCTANT_CREDENTIAL_BROKER_TOKEN: "stale",
+      },
+      spawn: (spec) => {
+        captured = spec;
+        return { exited: Promise.resolve(0), kill: vi.fn() };
+      },
+      credentialBrokerFactory: async () => undefined,
+      installSignalHandler: () => () => undefined,
+    });
+
+    expect(captured?.env).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_URL");
+    expect(captured?.env).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_TOKEN");
   });
 });

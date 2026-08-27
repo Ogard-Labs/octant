@@ -1,6 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { nextRestartBackoff } from "@octant/host-runtime";
+import {
+  makeSecretServiceCredentialStore,
+  nextRestartBackoff,
+  probeSecretService,
+  startCredentialBroker,
+  type CredentialBroker,
+} from "@octant/host-runtime";
 
 export interface ServerRunSpawnSpec {
   readonly command: string;
@@ -23,6 +29,7 @@ export interface ServerRunOptions {
   };
   readonly instanceId?: () => string;
   readonly bridgeSecret?: () => string;
+  readonly credentialBrokerFactory?: () => Promise<CredentialBroker | undefined>;
   readonly installSignalHandler?: (handler: () => void) => () => void;
   readonly afterSpawn?: () => void | Promise<void>;
   readonly sleep?: (delayMs: number) => Promise<void>;
@@ -37,6 +44,9 @@ export async function runServerRunCommand(options: ServerRunOptions = {}): Promi
   const now = options.now ?? Date.now;
   const writeNotice =
     options.writeNotice ?? ((message: string) => process.stderr.write(`${message}\n`));
+  const credentialBroker = await (
+    options.credentialBrokerFactory ?? defaultCredentialBrokerFactory
+  )();
   let currentChild: ServerRunChild | undefined;
   let shutdownRequested = false;
   let settlePendingDelay: (() => void) | undefined;
@@ -77,16 +87,25 @@ export async function runServerRunCommand(options: ServerRunOptions = {}): Promi
   try {
     while (true) {
       const startedAt = now();
+      const childEnv: NodeJS.ProcessEnv = {
+        ...env,
+        OCTANT_DESKTOP_BRIDGE_SECRET: (options.bridgeSecret ?? createBridgeSecret)(),
+        OCTANT_HOST_SERVICE_MODE: env.OCTANT_HOST_SERVICE_MODE ?? "foreground",
+        OCTANT_SERVER_INSTANCE_ID: (options.instanceId ?? randomUUID)(),
+        ...(options.port === undefined ? {} : { OCTANT_SERVER_PORT: String(options.port) }),
+      };
+      if (process.platform === "linux") {
+        delete childEnv.OCTANT_CREDENTIAL_BROKER_URL;
+        delete childEnv.OCTANT_CREDENTIAL_BROKER_TOKEN;
+        if (credentialBroker !== undefined) {
+          childEnv.OCTANT_CREDENTIAL_BROKER_URL = credentialBroker.url;
+          childEnv.OCTANT_CREDENTIAL_BROKER_TOKEN = credentialBroker.token;
+        }
+      }
       currentChild = spawn({
         command: command.command,
         args: command.args,
-        env: {
-          ...env,
-          OCTANT_DESKTOP_BRIDGE_SECRET: (options.bridgeSecret ?? createBridgeSecret)(),
-          OCTANT_HOST_SERVICE_MODE: env.OCTANT_HOST_SERVICE_MODE ?? "foreground",
-          OCTANT_SERVER_INSTANCE_ID: (options.instanceId ?? randomUUID)(),
-          ...(options.port === undefined ? {} : { OCTANT_SERVER_PORT: String(options.port) }),
-        },
+        env: childEnv,
       });
       if (firstSpawn) {
         firstSpawn = false;
@@ -107,7 +126,15 @@ export async function runServerRunCommand(options: ServerRunOptions = {}): Promi
     }
   } finally {
     removeSignalHandler();
+    await credentialBroker?.close();
   }
+}
+
+async function defaultCredentialBrokerFactory(): Promise<CredentialBroker | undefined> {
+  if (process.platform !== "linux") return undefined;
+  const availability = await probeSecretService();
+  if (!availability.available) return undefined;
+  return startCredentialBroker(makeSecretServiceCredentialStore());
 }
 
 export function resolveServerRunOptions(

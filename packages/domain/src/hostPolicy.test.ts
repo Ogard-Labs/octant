@@ -11,7 +11,7 @@ describe("selectHost", () => {
     expect(result.kind).toBe("selected");
     if (result.kind === "selected") {
       expect(result.host.hostId).toBe(LOCAL);
-      expect(result.host.displayName).toBe("This Mac");
+      expect(result.host.displayName).toBe("This computer");
       expect(result.host.health).toBe("healthy");
       expect(result.host.capabilities).toEqual(["chat", "work", "code"]);
     }
@@ -55,7 +55,7 @@ describe("listHosts", () => {
     expect(hosts).toHaveLength(1);
     expect(hosts[0]?.hostId).toBe(LOCAL);
     expect(hosts[0]?.health).toBe("healthy");
-    expect(hosts[0]?.displayName).toBe("This Mac");
+    expect(hosts[0]?.displayName).toBe("This computer");
   });
 });
 

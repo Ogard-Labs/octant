@@ -545,6 +545,7 @@ import {
   findWorkspacePresetTarget,
 } from "@octant/domain";
 import { ZenThreadCatalog } from "./zen/zenThreadCatalog";
+import { localHostDisplayName } from "./localHostDisplayName";
 import { ZenAssistantTools } from "./zen/zenAssistantTools";
 import { createCanvasAgentTools, type CanvasAgentToolPort } from "./canvas/canvasAgentTools";
 import { combineAppManagedToolSets } from "./providers/appManagedToolSet";
@@ -4172,6 +4173,7 @@ export function startOctantServer(
     });
     const zenThreadCatalog = new ZenThreadCatalog({
       localHostId: LOCAL_HOST_ID,
+      localHostDisplayName: localHostDisplayName(),
       readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
       readProjects: (windowId) => projectService.bootstrap(windowId),
       readChatThreads: () => persistence.readChatThreads(),
@@ -5821,7 +5823,7 @@ export function startOctantServer(
                   if (origin !== null && isAllowedRendererOrigin(origin)) {
                     headers.set("access-control-allow-origin", origin);
                   }
-                  return Response.json({ hosts: listHosts() }, { headers });
+                  return Response.json({ hosts: listHosts(localHostDisplayName()) }, { headers });
                 }
                 return (
                   (await privateListenerAdministrationRoutes(request)) ??

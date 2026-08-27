@@ -5,6 +5,7 @@ import {
   type ProjectId,
   type ProjectSummary,
 } from "@octant/contracts/projects";
+import { localHostDisplayName } from "@octant/client-runtime";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type {
   PermissionPersistence,
@@ -12,12 +13,7 @@ import type {
   ProviderInstanceId,
   ProviderModelId,
 } from "@octant/contracts/providers";
-import {
-  LOCAL_HOST_DISPLAY_NAME,
-  LOCAL_HOST_ID,
-  type HostId,
-  type HostIdentity,
-} from "@octant/contracts/host";
+import { LOCAL_HOST_ID, type HostId, type HostIdentity } from "@octant/contracts/host";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type {
@@ -231,7 +227,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   // already-selected Project fixes its repository so the flow fails closed.
   const githubHostName =
     props.hosts?.find((host) => host.hostId === (props.selectedHostId ?? LOCAL_HOST_ID))
-      ?.displayName ?? LOCAL_HOST_DISPLAY_NAME;
+      ?.displayName ?? localHostDisplayName();
   const onCreateProjectForGithub = props.onCreateProject;
   const githubControl =
     props.mode === "code" &&

@@ -1,4 +1,5 @@
 import { probeHostHealth } from "./hostLauncher";
+import { probeHostPlatformCapabilities } from "@octant/host-runtime";
 
 export interface StatusCommandOptions {
   readonly hostname?: string | undefined;
@@ -12,6 +13,7 @@ export interface StatusReport {
   readonly url: URL;
   readonly instanceId?: string;
   readonly version?: string;
+  readonly secretStore: "available" | "unavailable";
 }
 
 export async function runStatusCommand(options: StatusCommandOptions = {}): Promise<StatusReport> {
@@ -21,12 +23,22 @@ export async function runStatusCommand(options: StatusCommandOptions = {}): Prom
   const fetch = options.fetch ?? globalThis.fetch;
   const stdout = options.stdout ?? process.stdout;
 
-  const health = await probeHostHealth({ url, fetch });
+  const [health, capabilities] = await Promise.all([
+    probeHostHealth({ url, fetch }),
+    probeHostPlatformCapabilities({
+      platform: process.platform,
+      uid: process.getuid?.() ?? 0,
+    }),
+  ]);
+  const secretStore = capabilities.capabilities.find(
+    (capability) => capability.name === "secret-store",
+  );
   const report: StatusReport = {
     status: health.status === "timeout" ? "unreachable" : health.status,
     url,
     ...(health.instanceId === undefined ? {} : { instanceId: health.instanceId }),
     ...(health.version === undefined ? {} : { version: health.version }),
+    secretStore: secretStore?.state === "available" ? "available" : "unavailable",
   };
   stdout.write(formatStatusReport(report));
   return report;
@@ -38,6 +50,7 @@ export function formatStatusReport(report: StatusReport): string {
     `Endpoint: ${report.url.toString()}`,
     ...(report.instanceId === undefined ? [] : [`Instance: ${report.instanceId}`]),
     ...(report.version === undefined ? [] : [`Version: ${report.version}`]),
+    `Secret store: ${report.secretStore}`,
   ];
   if (report.status === "unreachable") {
     lines.push(

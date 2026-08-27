@@ -1,13 +1,10 @@
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 // Honest platform capability probing for native host tools. Every probe runs a
 // fixed absolute command with an argument array (never a shell), and every
 // failure mode — missing tool, non-zero exit, timeout, empty output — resolves
-// to a typed `unavailable` state. A capability is reported available only when
-// its probe demonstrably succeeded.
+// to a typed `unavailable` state. `secret-tool --help` is the one probe whose
+// usage output is useful even though libsecret exits with status 2.
 
 export type HostPlatformCapabilityName =
   | "process-inspection"
@@ -52,6 +49,10 @@ interface CapabilityProbe {
   readonly name: HostPlatformCapabilityName;
   readonly command: string;
   readonly args: readonly string[];
+  readonly additional?: ReadonlyArray<{
+    readonly command: string;
+    readonly args: readonly string[];
+  }>;
 }
 
 const ALL_CAPABILITIES: ReadonlyArray<HostPlatformCapabilityName> = [
@@ -86,6 +87,7 @@ function probesFor(platform: "darwin" | "linux", uid: number): ReadonlyArray<Cap
       name: "secret-store",
       command: "/usr/bin/busctl",
       args: ["--user", "--no-pager", "status", "org.freedesktop.secrets"],
+      additional: [{ command: "/usr/bin/secret-tool", args: ["--help"] }],
     },
   ];
 }
@@ -128,6 +130,12 @@ async function runProbe(
     if (result.stdout.trim() === "") {
       return { name: probe.name, state: "unavailable", detail: "empty-probe-output" };
     }
+    for (const check of probe.additional ?? []) {
+      const additional = await runner.run(check.command, check.args);
+      if (additional.stdout.trim() === "") {
+        return { name: probe.name, state: "unavailable", detail: "empty-probe-output" };
+      }
+    }
     return { name: probe.name, state: "available", detail: "probe-succeeded" };
   } catch (error) {
     return {
@@ -139,12 +147,32 @@ async function runProbe(
 }
 
 const defaultProbeRunner: HostPlatformCapabilityProbeRunner = {
-  run: async (command, args) =>
-    execFileAsync(command, [...args], {
-      shell: false,
-      timeout: 2_000,
-      maxBuffer: 16 * 1_024,
-      env: { ...process.env, LC_ALL: "C" },
+  run: (command, args) =>
+    new Promise((resolve, reject) => {
+      execFile(
+        command,
+        [...args],
+        {
+          shell: false,
+          timeout: 2_000,
+          maxBuffer: 16 * 1_024,
+          env: { ...process.env, LC_ALL: "C" },
+        },
+        (error, stdout, stderr) => {
+          if (
+            command === "/usr/bin/secret-tool" &&
+            args.length === 1 &&
+            args[0] === "--help" &&
+            (stdout.trim() !== "" || stderr.trim() !== "")
+          ) {
+            resolve({ stdout: stdout || stderr, stderr });
+          } else if (error !== null) {
+            reject(error);
+          } else {
+            resolve({ stdout, stderr });
+          }
+        },
+      );
     }),
 };
 

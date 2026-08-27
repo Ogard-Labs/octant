@@ -118,7 +118,7 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
       <h2 className="host-settings__heading">Federated hosts</h2>
       <p className="host-settings__note">
         Each host keeps its own connection state. Expiry, revoke, or failure on one host never
-        blocks This Mac or other healthy hosts.
+        blocks the local host or other healthy hosts.
       </p>
       {message !== undefined ? (
         <p className="federated-hosts-lifecycle__message" role="status">

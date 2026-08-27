@@ -27,6 +27,7 @@ describe("runStatusCommand", () => {
     const report = await runStatusCommand({ fetch, stdout });
     expect(report.status).toBe("ready");
     expect(report.instanceId).toBe("instance-1");
+    expect(["available", "unavailable"]).toContain(report.secretStore);
     expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("ready"));
   });
 
@@ -42,6 +43,7 @@ describe("runStatusCommand", () => {
     );
     const report = await runStatusCommand({ fetch });
     expect(report.status).toBe("disabled");
+    expect(["available", "unavailable"]).toContain(report.secretStore);
   });
 
   it("reports unreachable when the host cannot be contacted", async () => {
@@ -50,6 +52,7 @@ describe("runStatusCommand", () => {
     });
     const report = await runStatusCommand({ fetch });
     expect(report.status).toBe("unreachable");
+    expect(["available", "unavailable"]).toContain(report.secretStore);
   });
 });
 
@@ -60,9 +63,11 @@ describe("formatStatusReport", () => {
       url: new URL("http://127.0.0.1:13773"),
       instanceId: "instance-1",
       version: "0.0.0-dev",
+      secretStore: "available",
     });
     expect(text).toContain("Endpoint: http://127.0.0.1:13773");
     expect(text).toContain("Instance: instance-1");
     expect(text).toContain("Version: 0.0.0-dev");
+    expect(text).toContain("Secret store: available");
   });
 });
