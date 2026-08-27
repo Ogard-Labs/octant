@@ -36,7 +36,7 @@
     "dev": "bun scripts/dev-desktop.ts",
     "paths:check": "bun test scripts/check-path-collisions.test.ts && bun scripts/check-path-collisions.ts",
     "wiring:check": "bun test scripts/check-module-wiring.test.ts && bun scripts/check-module-wiring.ts",
-    "ui:check": "bun test scripts/check-ui-component-boundaries.test.ts && bun scripts/check-ui-component-boundaries.ts",
+    "ui:check": "bun test scripts/check-ui-component-boundaries.test.ts && bun scripts/check-ui-component-boundaries.ts && bun scripts/check-ui-color-literals.ts",
     "decisions:check": "bun test scripts/check-decisions.test.ts scripts/check-decision-history.test.ts && bun scripts/check-decisions.ts && bun scripts/check-decision-history.ts",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
