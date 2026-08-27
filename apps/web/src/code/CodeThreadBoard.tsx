@@ -651,10 +651,7 @@ function CodeBoardCardView(props: {
       data-status={card.status}
     >
       <span className={props.layout === "list" ? "issuerow-main" : "board-card-top"}>
-        {/* unread is a presence before the title; the img role is what makes
-            the label real — a generic empty span's aria-label is dropped from
-            the accessibility tree. It is a client overlay, never a server field. */}
-        {props.unread ? <span aria-label="Unread" className="unread" role="img" /> : null}
+        {props.unread ? <span className="sr-only">Unread</span> : null}
         <OctantButton
           className="code-board__card-open"
           onClick={() =>
