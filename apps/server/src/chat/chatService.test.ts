@@ -4948,6 +4948,52 @@ describe("ChatService", () => {
     expect(view.thread.providerInstanceId).toBe(ids.provider);
   });
 
+  it("keeps a researching conversation on its own provider when the fallback has no research backend", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({
+              instanceId: decodeProviderInstanceId(fallbackProvider),
+              capabilities: {
+                ...probeFixture().capabilities,
+                nativeWebResearch: "unsupported",
+                appManagedTools: "unsupported",
+              },
+            })
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Researching thread",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const configured = await service.execute({
+      kind: "change-chat-research",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      researchEnabled: true,
+      researchRouting: "automatic",
+    });
+    if (configured.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: configured.thread.version,
+        prompt: "Research this.",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+  });
+
   it("keeps a conversation on its own provider when the chosen fallback cannot serve the same turn", async () => {
     const fallbackProvider = "84000000-0000-4000-8000-000000000007";
     const { service } = openFixture({

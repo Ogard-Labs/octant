@@ -227,32 +227,33 @@ function threadAsRoutedFor(
   return withoutOptions;
 }
 
-function providerTurnFacts(probe: ProviderProbeResult): ChatProviderTurnFacts {
+/**
+ * What a provider reports about serving one turn, for the selected model.
+ *
+ * `appManagedTools` is the effective support for that model rather than the
+ * provider-wide flag: an endpoint whose deployments are verified one at a time
+ * reports the provider as unsupported while the selected model does accept the
+ * app's tools, and the turn runs against the model.
+ */
+function providerTurnFacts(
+  probe: ProviderProbeResult,
+  appManagedTools: ProviderCapabilitySupport,
+): ChatProviderTurnFacts {
   return {
     readiness: probe.readiness,
     models: probe.models.map((model) => model.id),
-    capabilities: probe.capabilities,
+    capabilities: { ...probe.capabilities, appManagedTools },
   };
 }
 
 /**
- * The capabilities a provider must report to run this thread's turn.
- *
- * A thread that researches through the app's own SearXNG backend needs the
- * provider to accept app-managed tools; provider-native research needs the
- * provider's own web research. Streaming is what a Chat turn is: an instance
- * that does not report it cannot serve the conversation.
+ * Streaming is what a Chat turn is: an instance that does not report it cannot
+ * serve the conversation. Research capability is not listed here because the
+ * research router already decides which backend a thread's routing resolves to
+ * — including `automatic`, which may land on either — so the route decision is
+ * the single check a candidate has to pass.
  */
-function chatTurnRequiredCapabilities(
-  thread: ChatThread,
-): ReadonlyArray<ChatProviderCapabilityName> {
-  if (!thread.researchEnabled) return ["streaming"];
-  return thread.researchRouting === "provider-native"
-    ? ["streaming", "nativeWebResearch"]
-    : thread.researchRouting === "searxng"
-      ? ["streaming", "appManagedTools"]
-      : ["streaming"];
-}
+const CHAT_TURN_REQUIRED_CAPABILITIES: ReadonlyArray<ChatProviderCapabilityName> = ["streaming"];
 
 function poolCandidateKey(candidate: MultiModelPoolCandidate): string {
   return `${candidate.hostId}:${candidate.providerInstanceId}:${candidate.modelId}`;
@@ -2483,14 +2484,20 @@ export class ChatService {
       return { thread, providerInstanceId, driver, probe: probed.probe };
     };
     if (extensionPhase !== "send") return active();
-    const requiredCapabilities = chatTurnRequiredCapabilities(thread);
-    if (
-      probed.kind === "probed" &&
-      chatProviderServesTurn(providerTurnFacts(probed.probe), {
-        modelId: decodeProviderModelId(thread.modelId),
-        requiredCapabilities,
-      }).kind === "serves"
-    ) {
+    const servesTurn = (routed: ChatThread, probe: ProviderProbeResult): boolean => {
+      const modelId = decodeProviderModelId(routed.modelId);
+      const facts = providerTurnFacts(probe, this.#effectiveAppManagedTools(probe, modelId));
+      if (
+        chatProviderServesTurn(facts, {
+          modelId,
+          requiredCapabilities: CHAT_TURN_REQUIRED_CAPABILITIES,
+        }).kind !== "serves"
+      ) {
+        return false;
+      }
+      return this.#resolveResearchRoute(routed, settings, probe).kind !== "unavailable";
+    };
+    if (probed.kind === "probed" && servesTurn(thread, probed.probe)) {
       return { thread, providerInstanceId, driver, probe: probed.probe };
     }
     const preference = settings.providerFallback;
@@ -2501,22 +2508,35 @@ export class ChatService {
         : await this.#probeFallbackProvider(
             decodeProviderInstanceId(preference.providerInstanceId),
           );
+    const candidateFacts =
+      preference === undefined || candidate === undefined
+        ? undefined
+        : providerTurnFacts(
+            candidate.probe,
+            this.#effectiveAppManagedTools(
+              candidate.probe,
+              decodeProviderModelId(preference.modelId),
+            ),
+          );
     const decision = selectChatProviderFallback({
       preference,
       activeProviderInstanceId: providerInstanceId,
-      requiredCapabilities,
-      candidate: candidate === undefined ? undefined : providerTurnFacts(candidate.probe),
+      requiredCapabilities: CHAT_TURN_REQUIRED_CAPABILITIES,
+      candidate: candidateFacts,
     });
     if (decision.kind === "selected" && candidate !== undefined) {
-      return {
-        thread: threadAsRoutedFor(thread, {
-          providerInstanceId: candidate.providerInstanceId,
-          modelId: decision.modelId,
-        }),
+      const routed = threadAsRoutedFor(thread, {
         providerInstanceId: candidate.providerInstanceId,
-        driver: candidate.driver,
-        probe: candidate.probe,
-      };
+        modelId: decision.modelId,
+      });
+      if (servesTurn(routed, candidate.probe)) {
+        return {
+          thread: routed,
+          providerInstanceId: candidate.providerInstanceId,
+          driver: candidate.driver,
+          probe: candidate.probe,
+        };
+      }
     }
     return active();
   }

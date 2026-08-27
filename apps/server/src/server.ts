@@ -2718,10 +2718,6 @@ export function startOctantServer(
         .then((refresh) => reviewedModelManifest.accept(refresh))
         .catch(() => undefined);
     }
-    // Warming keeps one idle runtime per enabled provider so the first turn of a
-    // new thread does not pay provider startup. It is background work: a
-    // provider that refuses to start must not delay or fail server startup.
-    void providerService.warmEnabledProviders().catch(() => undefined);
     const providerRoutes = createProviderRouteHandler({
       service: providerService,
       windowAuthorityStore,
@@ -5812,6 +5808,12 @@ export function startOctantServer(
               }
             },
           });
+          // Warming keeps one idle runtime per enabled provider so the first
+          // turn of a new thread does not pay provider startup. It starts only
+          // once the listener binds, so a server that never serves leaves no
+          // provider process behind, and it is background work: a provider that
+          // refuses to start must not delay or fail startup.
+          void providerService.warmEnabledProviders().catch(() => undefined);
           // Startup auto-enable: when a launch-time private listener config is
           // supplied (test/smoke seam), enable it through the controller after
           // the loopback listener binds. A failure fails closed with a typed

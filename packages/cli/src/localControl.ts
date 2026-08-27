@@ -60,14 +60,16 @@ export async function openLocalControlSession(
     method: "POST",
     headers: { "content-type": "application/json", "x-octant-desktop-secret": secret },
     body: JSON.stringify({ windowId, capability }),
-  });
-  if (registration.status !== 204) {
+  }).catch(() => undefined);
+  if (registration === undefined || registration.status !== 204) {
     return { kind: "refuses", reason: "Octant refused this command's local authority." };
   }
   return {
     kind: "opened",
     windowId,
     send: async (request) => {
+      // A server that stops answering mid-command is a refused request, not a
+      // crash: the caller prints why the command did not run.
       const response = await call(new URL(request.path, info.url).toString(), {
         method: request.method,
         headers: {
@@ -76,8 +78,14 @@ export async function openLocalControlSession(
           "x-octant-window-capability": capability,
         },
         ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
-      });
-      return { status: response.status, body: await readBody(response) };
+      }).catch(() => undefined);
+      if (response === undefined) {
+        return {
+          status: 0,
+          body: { message: "Octant stopped answering on this host before the command finished." },
+        };
+      }
+      return { status: response.status, body: await readBody(response).catch(() => undefined) };
     },
     close: async () => {
       try {
