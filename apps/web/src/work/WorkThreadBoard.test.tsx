@@ -1,13 +1,15 @@
-import type {
-  WorkBoardCard,
-  WorkBoardQuery,
-  WorkBoardStatus,
-  WorkBoardView,
-} from "@octant/contracts";
+import type { WorkBoardCard, WorkBoardStatus, WorkBoardView } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkThreadBoard } from "./WorkThreadBoard";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const stylesCss = readFileSync(resolve(srcDir, "styles.css"), "utf-8");
+const octantCss = readFileSync(resolve(srcDir, "styles/octant.css"), "utf-8");
 
 const projectA = "00000000-0000-4000-8000-0000000060a1" as ProjectId;
 const projectB = "00000000-0000-4000-8000-0000000060a2" as ProjectId;
@@ -121,8 +123,9 @@ describe("WorkThreadBoard", () => {
     );
 
     await screen.findByRole("button", { name: "Unread thread" });
-    expect(within(cardFor("Unread thread")).getByRole("img", { name: "Unread" })).toBeTruthy();
-    expect(within(cardFor("Read thread")).queryByRole("img", { name: "Unread" })).toBeNull();
+    expect(within(cardFor("Unread thread")).getByText("Unread")).toHaveClass("sr-only");
+    expect(cardFor("Unread thread").querySelector(".unread")).toBeNull();
+    expect(within(cardFor("Read thread")).queryByText("Unread")).toBeNull();
   });
 
   it("renders every Status column by default, including empty ones, and opens a thread", async () => {
@@ -346,5 +349,108 @@ describe("WorkThreadBoard", () => {
     render(<WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Work Thread Board is unavailable.");
+  });
+
+  it("renders status columns at a fixed width so they do not stretch to fill the workspace", async () => {
+    expect(stylesCss).toMatch(/\.code-board\s+\.board-col\s*\{[^}]*max-width:\s*320px[^}]*\}/s);
+    expect(stylesCss).toMatch(/\.code-board\s+\.board-col\s*\{[^}]*min-width:\s*220px[^}]*\}/s);
+    expect(octantCss).toMatch(/\.board-col\s*\{[^}]*max-width:\s*320px[^}]*\}/s);
+    expect(octantCss).toMatch(/\.board-col\s*\{[^}]*min-width:\s*220px[^}]*\}/s);
+
+    const loadBoard = vi.fn(async () =>
+      view([
+        card({ id: "01", status: "ready", title: "Ready thread" }),
+        card({ id: "02", status: "done", title: "Done thread" }),
+      ]),
+    );
+    render(<WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
+
+    await screen.findByRole("button", { name: "Ready thread" });
+    const columns = screen.getAllByRole("region", { name: /\(\d+\)$/ });
+    expect(columns).toHaveLength(4);
+    for (const column of columns) {
+      expect(column.className).toContain("board-col");
+    }
+  });
+
+  it("keeps the board body horizontally scrollable instead of overflowing the page", async () => {
+    expect(stylesCss).toMatch(/\.code-board__body\s*\{[^}]*overflow-x:\s*auto[^}]*\}/s);
+    expect(stylesCss).toMatch(/\.code-board__body\s*\{[^}]*overflow-y:\s*hidden[^}]*\}/s);
+    expect(stylesCss).toMatch(/\.code-board \.board\s*\{[^}]*overflow:\s*visible[^}]*\}/s);
+
+    const loadBoard = vi.fn(async () =>
+      view([card({ id: "01", status: "ready", title: "Ready thread" })]),
+    );
+    render(<WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
+
+    const column = await screen.findByRole("region", { name: "Ready (1)" });
+    const body = column.closest(".code-board__body");
+    expect(body).not.toBeNull();
+    if (body === null) throw new Error("Expected board body");
+    expect(body.className).toContain("code-board__body");
+  });
+
+  it("truncates long card titles and wraps facts instead of letting metadata overlap", async () => {
+    expect(octantCss).toMatch(/\.board-card-title\s*\{[^}]*overflow:\s*hidden[^}]*\}/s);
+    expect(octantCss).toMatch(/\.board-card-title\s*\{[^}]*-webkit-line-clamp:\s*2[^}]*\}/s);
+    expect(octantCss).toMatch(/\.board-card-facts\s*\{[^}]*flex-wrap:\s*wrap[^}]*\}/s);
+    expect(stylesCss).toMatch(
+      /\.code-board__card-open\s*\{[^}]*justify-content:\s*flex-start[^}]*text-align:\s*left[^}]*\}/s,
+    );
+
+    const longTitle = "A very long thread title that would otherwise push metadata out of the card";
+    const loadBoard = vi.fn(async () =>
+      view([
+        {
+          ...card({ id: "01", status: "waiting", title: longTitle }),
+          deliveryTarget: "delivery-target",
+        },
+      ]),
+    );
+    render(<WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
+
+    await screen.findByRole("button", { name: longTitle });
+    const article = cardFor(longTitle);
+    expect(article.querySelector(".board-card-title")).not.toBeNull();
+    expect(article.querySelector(".board-card-facts")).not.toBeNull();
+  });
+
+  it("renders empty status columns at the same width as populated columns", async () => {
+    expect(octantCss).toMatch(
+      /\.board-col\[data-empty="true"\]\s*\{[^}]*max-width:\s*320px[^}]*\}/s,
+    );
+    expect(octantCss).toMatch(
+      /\.board-col\[data-empty="true"\]\s*\{[^}]*min-width:\s*220px[^}]*\}/s,
+    );
+
+    const loadBoard = vi.fn(async () =>
+      view([card({ id: "01", status: "ready", title: "Ready thread" })]),
+    );
+    render(<WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
+
+    const ready = await screen.findByRole("region", { name: "Ready (1)" });
+    const waiting = screen.getByRole("region", { name: "Waiting (0)" });
+    expect(ready.className).toContain("board-col");
+    expect(waiting.className).toContain("board-col");
+    expect(waiting.getAttribute("data-empty")).toBe("true");
+  });
+
+  it("renders the narrow view as a vertically stacked list without kanban columns", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([card({ id: "01", status: "ready", title: "Narrow thread" })]),
+    );
+    render(
+      <WorkThreadBoard
+        isNarrow
+        loadBoard={loadBoard}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+
+    await screen.findByText("Narrow thread");
+    const listGroup = screen.getByRole("region", { name: "Ready (1)" });
+    expect(listGroup.className).toContain("code-board__list-group");
+    expect(document.querySelector(".board-col")).toBeNull();
   });
 });
