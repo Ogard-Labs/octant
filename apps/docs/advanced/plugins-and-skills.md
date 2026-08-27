@@ -63,6 +63,51 @@ The same tab also searches **standalone skills** from
 a skill, then **Confirm install**. Installed skill packages still start
 disabled — trust and enable them from **Installed**.
 
+Opening the tab does not contact a registry. Search, inspect, preview, and
+install are explicit buttons. Importing a local Agent Plugins folder uses the
+native folder picker and never reaches a catalog.
+
+### What a marketplace fetch discloses
+
+These are the second kind of HTTPS call Octant makes on its own behalf. They
+are not telemetry: they carry no account, install identifier, Project,
+thread, configuration, or cookie, and they do not use your GitHub or npm
+credentials. They do disclose an IP address, as any network request does, and
+a skill search also discloses the query you typed. See
+[Privacy and security](/advanced/privacy-and-security#host-initiated-network)
+for the companion update-check posture.
+
+**Extension catalog.** **Run search** filters a curated catalog the host
+already holds in memory. That step does not go to the network. **Inspect**
+and **Confirm install** fetch the pinned package from GitHub
+(`api.github.com` for the tree, then `raw.githubusercontent.com` for the
+blobs at the exact commit the catalog named). GitHub sees your IP address,
+the repository path, and the time. Search is local; inspect is the network.
+
+**Standalone skills.** **Search skills** contacts both registries in
+parallel, even if only one will match:
+
+- `https://skills.sh/api/search` with your query as `q` and a page size of 25.
+- `https://registry.npmjs.org/-/v1/search` with your query plus
+  `keywords:agent-skills` and a page size of 25.
+
+Whoever operates those endpoints sees your IP address, the query text, and
+the time. An empty query is not sent. **Preview** and **Confirm install**
+then fetch the package: skills.sh entries from GitHub's API and
+`raw.githubusercontent.com` (User-Agent `octant-skill-marketplace`), npm
+entries as package metadata and a tarball from `registry.npmjs.org` (the
+tarball request uses the same User-Agent).
+
+**Off switch.** There is none in Settings. The only way to keep these calls
+from happening is not to search, inspect, preview, or install from the
+Marketplace tab. Skills already on disk under `.agents/skills/` and plugins
+imported from a local folder never contact a registry.
+
+Skill search, npm metadata, and catalog inspect currently use the runtime's
+default User-Agent rather than the constrained `octant-skill-marketplace`
+string used on GitHub file fetches and npm tarballs. That can disclose more
+about the host runtime than an update check does.
+
 ## Plugins
 
 A plugin is an extension package that can contribute prompt-only skills, MCP
@@ -141,4 +186,4 @@ optional extension.
 
 - [Browser and computer use](/advanced/browser-and-computer-use) for related host-owned surfaces
 - [Apple Development Workbench](/advanced/apple-workbench) for the extension-independent core path
-- [Privacy and security](/advanced/privacy-and-security) for quarantine and provenance
+- [Privacy and security](/advanced/privacy-and-security) for quarantine, provenance, and host-initiated network

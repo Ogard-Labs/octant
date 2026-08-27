@@ -16,7 +16,9 @@ credential references, layouts — stays on the host machine.
 The design rests on a small set of invariants that every package obeys:
 
 - **Local-first.** No Octant cloud account, relay, or telemetry is required.
-  Remote access is host-to-device over the user's own network.
+  Remote access is host-to-device over the user's own network. Two host-initiated
+  HTTPS calls exist in code: desktop update checks against a signed feed, and
+  server marketplace fetches when the person searches or inspects the catalog.
 - **The server is the authority.** Every authority check (mode, Project,
   thread, provider, approval, remote principal) runs in `apps/server` before a
   side effect. The renderer and mobile app render what the server says is
@@ -65,14 +67,14 @@ flowchart LR
 ```
 
 **Desktop (`apps/desktop`).** The Electron main process owns native windows,
-menus, the macOS Keychain, project-root and plugin-folder pickers, and the
-lifecycle of the server child process. It reserves a loopback port, spawns the
-server (`bun run start` from source, or the packaged `dist/main.mjs` under
-`ELECTRON_RUN_AS_NODE`), passes `OCTANT_*` environment (port, instance id,
-broker URLs and tokens, desktop bridge secret), and probes storage readiness
-before showing a window. It also runs two loopback-only brokers the server
-talks back to: the credential broker (Keychain access by opaque reference) and
-the browser runtime broker.
+menus, the macOS Keychain, project-root and plugin-folder pickers, the in-app
+updater, and the lifecycle of the server child process. It reserves a loopback
+port, spawns the server (`bun run start` from source, or the packaged
+`dist/main.mjs` under `ELECTRON_RUN_AS_NODE`), passes `OCTANT_*` environment
+(port, instance id, broker URLs and tokens, desktop bridge secret), and probes
+storage readiness before showing a window. It also runs two loopback-only
+brokers the server talks back to: the credential broker (Keychain access by
+opaque reference) and the browser runtime broker.
 Every app window confines top-level navigation, redirects, and opened windows to
 the exact packaged renderer asset or configured Vite development origin. Native
 IPC also requires that trusted renderer URL, and the packaged renderer ships a
@@ -411,6 +413,10 @@ prompt, schema, tool, or route.
 - Skills are discovered only from valid `.agents/skills/` packages between the
   working directory and the Project or repository root, plus the user-global
   `~/.agents/skills/`.
+- Marketplace network is on user action: curated catalog search is in-memory;
+  inspect/install fetches the pinned GitHub tree; standalone skill search
+  queries skills.sh and npm with the typed text. Opening Settings does not
+  fetch a catalog.
 - A structured mention cannot install, trust, enable, or elevate anything.
 - Core capabilities (browser/computer use, tests, Apple validation, approvals,
   memory, subagents) are app-managed and provider-neutral; no core capability
@@ -501,7 +507,7 @@ mechanisms are:
 | `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads | contracts, domain                                                 |
 | `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                    | contracts, host-runtime                                           |
 | `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway  | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
-| `apps/desktop`            | Electron shell: windows, menus, Keychain, brokers, pickers, server process lifecycle, packaging                    | contracts, domain, host-runtime                                   |
+| `apps/desktop`            | Electron shell: windows, menus, Keychain, brokers, pickers, signed updates, server process lifecycle, packaging    | contracts, domain, host-runtime                                   |
 | `apps/web`                | React renderer for desktop and paired browsers                                                                     | client-runtime, contracts, domain, plugin-host, theme             |
 | `apps/mobile`             | Expo iOS/Android remote-control client                                                                             | client-runtime, contracts, domain                                 |
 

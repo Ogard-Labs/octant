@@ -1,5 +1,5 @@
 ---
-description: Local-first storage, credentials, approvals, confinement, and the security model of the technical preview.
+description: Local-first storage, credentials, approvals, confinement, host-initiated network, and the security model of the technical preview.
 ---
 
 # Privacy and Security
@@ -7,9 +7,14 @@ description: Local-first storage, credentials, approvals, confinement, and the s
 Octant is local-first. Projects, threads, memory, events, credential
 references, and layouts stay on your host. The preview has **no telemetry,
 analytics, crash reporting, or cloud dependency** by default, and no
-credential storage inside the event store. The network traffic Octant
-makes is the traffic you configure: provider API requests for Chat, Work,
-and Code, and remote access when you enable pairing.
+credential storage inside the event store.
+
+Most network traffic is yours to configure: provider API requests for Chat,
+Work, and Code, and remote access when you enable pairing. Two HTTPS calls
+Octant makes on its own behalf are the exception: [update checks](/guide/installation#updates)
+and [marketplace fetches](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
+Neither is a telemetry channel. This page states the posture of those two
+calls; it is not a product-wide privacy notice.
 
 ## Local storage
 
@@ -102,6 +107,35 @@ validation is never disabled, no trust root is silently installed, and there
 is no plaintext fallback. Tailscale is transport reachability only, never
 identity. See [Remote access](/advanced/remote-access) for the full model.
 
+## Host-initiated network
+
+These two calls are the only traffic Octant originates without a provider,
+remote listener, or other integration you turned on.
+
+### Update checks
+
+A signed desktop build may ask a static HTTPS feed whether a newer build
+exists. The request is a GET with the running version, platform, and
+architecture, a User-Agent of `Octant` with no version, and no cookies.
+Automatic checks wait ten minutes after launch, then repeat once a day, and
+start only after the saved preference is loaded. Turn them off in
+**Settings → General → Updates**; off means no request is made. Manual
+**Check for updates** still contacts the feed when you ask. Details, including
+what a server can infer, live under [Installation](/guide/installation#updates)
+and are **provisional** until signed self-updating releases are final.
+
+### Marketplace fetches
+
+Searching or inspecting the plugin and skill catalog can contact third-party
+registries. Opening **Settings → Skills & Extensions** or the Marketplace tab
+does not. Extension catalog **search** is local; **Inspect** and install fetch
+a pinned GitHub tree. Standalone skill **Search skills** queries skills.sh
+and the npm registry with the text you typed; preview and install then fetch
+the package. There is no Settings switch that disables those registries —
+not searching, not inspecting, and not installing is how you keep the calls
+from happening. Details live under
+[Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
+
 ## Boundaries
 
 There is no app-level database encryption in the current preview; Octant
@@ -111,6 +145,9 @@ federation and hosted relay models are post-preview.
 
 ## Next steps
 
+- [Installation](/guide/installation#updates) for what an update check sends
+- [Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses)
+  for what a catalog fetch discloses
 - [Remote access](/advanced/remote-access) for the authenticated transport
 - [Recovery and troubleshooting](/advanced/recovery) for journal-based recovery
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries

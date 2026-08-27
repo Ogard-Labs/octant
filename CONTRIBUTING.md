@@ -86,9 +86,10 @@ docs: consolidate repository documentation
 - Respect the architecture: apps consume packages, contracts stay
   schema-only, domain logic stays pure, provider-specific payloads stop at
   adapters, and authority checks happen on the server before side effects.
-- Keep local-first and privacy defaults: no telemetry, no external calls, and
-  no credential exposure unless the change explicitly requires and documents
-  it.
+- Keep local-first and privacy defaults: no telemetry, no new external calls,
+  and no credential exposure unless the change explicitly requires and
+  documents it. Host-initiated update checks and marketplace fetches already
+  exist; do not widen what they send.
 - New identifiers, env vars, and storage use `@octant/*`, `OCTANT_*`, and
   Octant naming.
 
