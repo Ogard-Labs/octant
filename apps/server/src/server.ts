@@ -3540,6 +3540,7 @@ export function startOctantServer(
           options.extensionToolExecution ?? agentPluginMcpSessionManager.createToolExecutionPort(),
       }),
     });
+    void chatService.reapStaleProviderSessions({ staleAfterMs: 0 }).catch(() => undefined);
     const projectMentionLabel = (projectId: string) =>
       persistence.readProject(projectId as ProjectId)?.name;
     const threadMentionService = new ThreadMentionService({

@@ -92,7 +92,11 @@ import {
   transitionChatAttempt,
   unsupportedModelOptionValues,
 } from "@octant/domain/chat-policy";
-import { defaultShellSettings, THREAD_MENTION_UNREADABLE_CONTEXT } from "@octant/domain";
+import {
+  defaultShellSettings,
+  reapsStaleProviderSession,
+  THREAD_MENTION_UNREADABLE_CONTEXT,
+} from "@octant/domain";
 import { Schema } from "effect";
 import { Effect } from "effect";
 import {
@@ -1114,6 +1118,60 @@ export class ChatService {
         // The durable deleting state keeps the thread inaccessible and retryable on next startup.
       }
     }
+  }
+
+  async reapStaleProviderSessions(input?: {
+    readonly staleAfterMs?: number;
+  }): Promise<{ readonly reaped: number; readonly resumable: number }> {
+    const staleAfterMs = input?.staleAfterMs ?? 10 * 60 * 1_000;
+    const now = Date.parse(this.#clock());
+    let reaped = 0;
+    let resumable = 0;
+    for (const thread of this.#persistence.readChatThreads()) {
+      try {
+        const view = this.#persistence.readChatThreadView(thread.id);
+        if (view === undefined) continue;
+        for (const turn of view.turns) {
+          for (const attempt of turn.attempts) {
+            const disposition = reapsStaleProviderSession({
+              attempt,
+              ownedByThisProcess: this.#activeAttempts.has(String(attempt.id)),
+              now,
+              staleAfterMs,
+            });
+            if (disposition.kind === "retain") continue;
+            try {
+              const interrupted = transitionChatAttempt(attempt, {
+                outcome: "interrupted",
+                updatedAt: decodeTimestamp(this.#clock()),
+              });
+              const version = readAggregateVersion(
+                this.#persistence.connection,
+                "chat-thread",
+                thread.id,
+              );
+              this.#persistence.journal.append({
+                aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+                expectedVersion: version,
+                events: [
+                  this.#pending("chat.attempt-updated@1", {
+                    kind: "attempt-updated",
+                    attempt: interrupted,
+                  }),
+                ],
+              });
+              reaped += 1;
+              if (disposition.resumable) resumable += 1;
+            } catch {
+              // A later sweep can retry an append that lost its thread version race.
+            }
+          }
+        }
+      } catch {
+        // One unreadable or concurrently changing thread must not stop recovery.
+      }
+    }
+    return { reaped, resumable };
   }
 
   async recoverManagedAttachments(): Promise<void> {

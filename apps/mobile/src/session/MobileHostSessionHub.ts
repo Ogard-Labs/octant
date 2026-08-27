@@ -1,5 +1,7 @@
 import {
+  createConnectionSupervisor,
   createRemoteSessionBridge,
+  type ConnectionSupervisor,
   type RemoteDeviceKeyStore,
   type RemoteSessionBridge,
   type RemoteSessionBridgeState,
@@ -26,6 +28,7 @@ export interface MobileHostHealth {
 export interface MobileHostSessionSlot {
   readonly registration: MobileHostRegistration;
   readonly bridge: RemoteSessionBridge;
+  readonly supervisor: ConnectionSupervisor;
   readonly state: RemoteSessionBridgeState;
 }
 
@@ -57,6 +60,7 @@ export interface MobileHostSessionHub {
   readonly health: () => ReadonlyArray<MobileHostHealth>;
   readonly subscribe: (listener: () => void) => () => void;
   readonly bridgeForOrigin: (origin: string) => RemoteSessionBridge | undefined;
+  readonly supervisorForOrigin: (origin: string) => ConnectionSupervisor | undefined;
   readonly disconnectAll: () => void;
 }
 
@@ -71,6 +75,7 @@ export function createMobileHostSessionHub(input: {
 }): MobileHostSessionHub {
   const bridges = new Map<string, RemoteSessionBridge>();
   const unsubscribers = new Map<string, () => void>();
+  const supervisors = new Map<string, ConnectionSupervisor>();
   const registrations = new Map<string, MobileHostRegistration>();
   const listeners = new Set<() => void>();
 
@@ -81,6 +86,8 @@ export function createMobileHostSessionHub(input: {
   const removeBridge = (origin: string): void => {
     unsubscribers.get(origin)?.();
     unsubscribers.delete(origin);
+    supervisors.get(origin)?.stop();
+    supervisors.delete(origin);
     bridges.get(origin)?.disconnect();
     bridges.delete(origin);
   };
@@ -93,14 +100,20 @@ export function createMobileHostSessionHub(input: {
       webBuildVersion: input.webBuildVersion,
       deviceKeyStore: input.deviceKeyStore,
     });
+    const supervisor = createConnectionSupervisor({ bridge, origin: registration.origin });
     bridges.set(registration.origin, bridge);
-    unsubscribers.set(
-      registration.origin,
-      bridge.subscribe(() => {
-        emit();
-      }),
-    );
-    bridge.resume(registration.origin);
+    supervisors.set(registration.origin, supervisor);
+    const unsubscribeBridge = bridge.subscribe(() => {
+      emit();
+    });
+    const unsubscribeSupervisor = supervisor.subscribe(() => {
+      emit();
+    });
+    unsubscribers.set(registration.origin, () => {
+      unsubscribeBridge();
+      unsubscribeSupervisor();
+    });
+    supervisor.start();
     return bridge;
   };
 
@@ -130,7 +143,9 @@ export function createMobileHostSessionHub(input: {
       for (const registration of registrations.values()) {
         const bridge = bridges.get(registration.origin);
         if (bridge === undefined) continue;
-        result.push({ registration, bridge, state: bridge.getState() });
+        const supervisor = supervisors.get(registration.origin);
+        if (supervisor === undefined) continue;
+        result.push({ registration, bridge, supervisor, state: bridge.getState() });
       }
       return result;
     },
@@ -141,12 +156,26 @@ export function createMobileHostSessionHub(input: {
           "reason" in slot.state && typeof slot.state.reason === "string"
             ? slot.state.reason
             : undefined;
+        const supervisorStatus = slot.supervisor.status();
+        const supervisorDetail =
+          supervisorStatus.kind === "waiting-to-retry"
+            ? "Reconnecting to this host."
+            : supervisorStatus.kind === "offline"
+              ? "Waiting for the network."
+              : undefined;
+        const detailParts: ReadonlyArray<string> = [detail, supervisorDetail].filter(
+          (value): value is string => value !== undefined,
+        );
         return {
           hostId: slot.registration.hostId,
           origin: slot.registration.origin,
           label: slot.registration.label,
           kind,
-          ...(detail === undefined ? {} : { detail }),
+          ...(detailParts.length === 0
+            ? {}
+            : {
+                detail: detailParts.join(" · "),
+              }),
         };
       });
     },
@@ -158,6 +187,9 @@ export function createMobileHostSessionHub(input: {
     },
     bridgeForOrigin(origin) {
       return bridges.get(origin);
+    },
+    supervisorForOrigin(origin) {
+      return supervisors.get(origin);
     },
     disconnectAll() {
       for (const origin of unsubscribers.keys()) removeBridge(origin);

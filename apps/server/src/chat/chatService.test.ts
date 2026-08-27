@@ -3,11 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeChatAttachmentId,
+  decodeChatAttempt,
+  decodeChatAttemptId,
+  decodeChatContentId,
+  decodeChatTurnId,
+  decodeContextManifestId,
   decodeContextEntry,
   decodeContextPlan,
   decodeContextSubjectRef,
   decodeContextSummaryId,
   decodeProviderInstanceId,
+  decodeProviderSessionId,
   decodeProviderObservedState,
   decodeProviderServiceLimits,
   type AggregateVersion,
@@ -5834,6 +5840,156 @@ describe("ChatService", () => {
         }),
       ).rejects.toMatchObject({ failure: { category: "stale" } });
       expect(() => service.read(branchThreadId)).toThrow(ChatServiceError);
+    });
+  });
+});
+
+describe("ChatService provider session recovery", () => {
+  it("retains a streaming attempt while this process still owns its provider turn", async () => {
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    let releaseSend!: () => void;
+    const sendGate = new Promise<void>((resolve) => {
+      releaseSend = resolve;
+    });
+    const driver = {
+      acquire: () =>
+        Effect.succeed({
+          events: Stream.fromQueue(queue),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.succeed({ sessionId: input.sessionId }),
+          send: (input: { readonly sessionId: string }) =>
+            Effect.gen(function* () {
+              yield* Queue.offer(queue, {
+                kind: "text-delta",
+                sessionId: input.sessionId,
+                text: "Fixture response",
+              } as never);
+              yield* Effect.promise(() => sendGate);
+            }),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        }),
+    } as unknown as ProviderDriver;
+    const { service } = openFixture({ driver });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Keep active provider session",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    const running = service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Keep this turn active",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "streaming",
+    );
+    const active = service.read(created.thread.id);
+    const turn = active.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) {
+      throw new Error("Expected an active streaming attempt.");
+    }
+
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+      reaped: 0,
+      resumable: 0,
+    });
+    await service.execute({
+      kind: "interrupt-chat-turn",
+      threadId: active.thread.id,
+      expectedVersion: active.thread.version,
+      turnId: turn.id,
+      attemptId: attempt.id,
+    });
+    releaseSend();
+    await expect(running).resolves.toMatchObject({ kind: "turn-created" });
+  });
+
+  it("interrupts a stale streaming attempt while retaining its resume cursor", async () => {
+    const { service, persistence } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Recover provider session",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const thread = created.thread;
+    const turnId = decodeChatTurnId("85000000-0000-4000-8000-000000000001");
+    const attempt = decodeChatAttempt({
+      id: decodeChatAttemptId("85000000-0000-4000-8000-000000000002"),
+      turnId,
+      threadId: thread.id,
+      providerInstanceId: thread.providerInstanceId,
+      providerSessionId: decodeProviderSessionId("85000000-0000-4000-8000-000000000003"),
+      modelId: thread.modelId,
+      contextManifestId: decodeContextManifestId("85000000-0000-4000-8000-000000000004"),
+      outcome: "streaming",
+      responseRefs: [],
+      citationIds: [],
+      resumeCursor: { driverKind: "openai-compatible", value: "resume-me" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const turn = {
+      id: turnId,
+      threadId: thread.id,
+      sequence: 1,
+      userMessageRef: {
+        contentId: decodeChatContentId("85000000-0000-4000-8000-000000000005"),
+        digest: decodeContentSha256("a".repeat(64)),
+        byteLength: 0,
+      },
+      attachmentIds: [],
+      attempts: [attempt],
+      createdAt: now,
+    };
+    persistence.connection
+      .prepare(`
+        INSERT INTO chat_content_store (
+          content_id, thread_id, content_role, body_text, digest, byte_length
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        String(turn.userMessageRef.contentId),
+        String(thread.id),
+        "user",
+        "Recover provider session",
+        "a".repeat(64),
+        0,
+      );
+    persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+      expectedVersion: thread.version,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: "chat.turn-created@1",
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor: { kind: "system", actorId: ids.actor },
+          occurredAt: now,
+          payload: { kind: "turn-created", turn },
+        },
+      ],
+    });
+    expect(persistence.readChatThreadView(thread.id)?.turns).toHaveLength(1);
+
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+      reaped: 1,
+      resumable: 1,
+    });
+    const recovered = service.read(thread.id).turns[0]?.attempts[0];
+    expect(recovered?.outcome).toBe("interrupted");
+    expect(recovered?.resumeCursor).toEqual({
+      driverKind: "openai-compatible",
+      value: "resume-me",
     });
   });
 });

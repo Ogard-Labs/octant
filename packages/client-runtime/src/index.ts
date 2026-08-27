@@ -54,6 +54,7 @@ export * from "./remoteShellHealth";
 export * from "./remoteSurfaceMatrix";
 export * from "./remotePairingClient";
 export * from "./remoteSessionBridge";
+export * from "./connectionSupervisor";
 export * from "./shellClient";
 export * from "./threadMentionClient";
 export * from "./fileMentionClient";
