@@ -152,8 +152,8 @@ describe("layoutCanvasDiagram", () => {
 
     const layout = layoutCanvasDiagram(block);
     const client = layout.nodes.find((node) => node.nodeId === "client");
-    expect(client?.x).not.toBe(400);
-    expect(client?.y).not.toBe(500);
+    expect(client).toBeDefined();
+    expect(client).toMatchObject({ x: 24, y: 24 });
   });
 
   it("keeps authored node positions when the diagram declares manual layout", () => {

@@ -214,7 +214,7 @@ export const CanvasDiagramLayoutReviseCommand = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
   blockId: CanvasBlockId,
-  positions: Schema.Array(CanvasDiagramNodePosition).pipe(Schema.maxItems(512)),
+  positions: Schema.Array(CanvasDiagramNodePosition).pipe(Schema.minItems(1), Schema.maxItems(512)),
   actor: CanvasActor,
   expectedSequence: Schema.Int.pipe(Schema.positive()),
   schemaVersion: CanvasSchemaVersion,
@@ -226,7 +226,7 @@ export const CanvasDiagramLayoutRevised = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
   blockId: CanvasBlockId,
-  positions: Schema.Array(CanvasDiagramNodePosition).pipe(Schema.maxItems(512)),
+  positions: Schema.Array(CanvasDiagramNodePosition).pipe(Schema.minItems(1), Schema.maxItems(512)),
   actor: CanvasActor,
   sequence: Schema.Int.pipe(Schema.positive()),
   revisedAt: UtcTimestamp,
@@ -250,7 +250,7 @@ export const decodeCanvasCommentResolveCommand = Schema.decodeUnknownSync(
 export const decodeCanvasCommentDeleteCommand = Schema.decodeUnknownSync(
   CanvasCommentDeleteCommand,
 );
-export const decodeCanvasCommentCommand = Schema.decodeUnknownSync(CanvasCommentCommand);
+export const decodeCanvasCommentCommand = Schema.decodeUnknownEither(CanvasCommentCommand);
 export const decodeCanvasCommentAdded = Schema.decodeUnknownSync(CanvasCommentAdded);
 export const decodeCanvasCommentReplied = Schema.decodeUnknownSync(CanvasCommentReplied);
 export const decodeCanvasCommentResolved = Schema.decodeUnknownSync(CanvasCommentResolved);

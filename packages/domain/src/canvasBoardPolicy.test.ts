@@ -8,6 +8,7 @@ import {
   CANVAS_COMMENT_BODY_MAX_CHARS,
   CANVAS_MAX_COMMENTS_PER_CANVAS,
   CANVAS_MAX_REPLIES_PER_COMMENT,
+  decodeCanvasCommentReply,
   type CanvasCommentReply,
 } from "@octant/contracts/canvas-board";
 import {
@@ -228,6 +229,30 @@ describe("Canvas comment policy", () => {
     expect(result.kind).toBe("accepted");
     if (result.kind !== "accepted") throw new Error("expected accepted");
     expect("reply" in result.event).toBe(true);
+  });
+
+  it("rejects a duplicate reply id", () => {
+    const existingReply = decodeCanvasCommentReply({
+      replyId: ids.reply,
+      commentId: ids.comment,
+      author: actor,
+      body: "Earlier reply.",
+      createdAt: now,
+    });
+    const result = admitCanvasCommentCommand(
+      {
+        kind: "canvas-comment-reply",
+        canvasId: ids.canvas,
+        commentId: ids.comment,
+        replyId: ids.reply,
+        author: actor,
+        body: "Duplicate reply.",
+        expectedSequence: 2,
+        issuedAt: "2026-08-01T21:00:01.000Z",
+      },
+      { comments: [comment()], replies: [existingReply], sequence: 2 },
+    );
+    expect(result).toMatchObject({ kind: "rejected", code: "duplicate-reply" });
   });
 
   it("rejects a reply to a missing comment", () => {

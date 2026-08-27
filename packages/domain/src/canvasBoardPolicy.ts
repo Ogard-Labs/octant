@@ -1,6 +1,7 @@
 import {
   CANVAS_MAX_DIAGRAM_NODES,
   CanvasDiagramBlock,
+  CanvasDiagramNode,
   CanvasVersion,
   decodeCanvasVersion,
   type CanvasBlock,
@@ -36,6 +37,7 @@ export type CanvasBoardRejectionCode =
   | "comment-budget-exceeded"
   | "unknown-comment"
   | "duplicate-comment"
+  | "duplicate-reply"
   | "reply-budget-exceeded"
   | "unknown-reply-target"
   | "not-a-diagram"
@@ -98,12 +100,11 @@ export function admitCanvasCommentCommand(
   input: unknown,
   state: CanvasCommentState,
 ): CanvasCommentAdmitResult {
-  let command: CanvasCommentCommand;
-  try {
-    command = decodeCanvasCommentCommand(input);
-  } catch {
+  const decodedCommand = decodeCanvasCommentCommand(input);
+  if (decodedCommand._tag === "Left") {
     return reject("malformed-request", "Canvas comment command is malformed.");
   }
+  const command: CanvasCommentCommand = decodedCommand.right;
 
   if (command.expectedSequence !== state.sequence) {
     return reject("stale-version", "Canvas comment command targets a stale board sequence.");
@@ -161,6 +162,9 @@ export function admitCanvasCommentCommand(
           "unknown-reply-target",
           "Canvas reply targets a comment that does not exist.",
         );
+      }
+      if (state.replies.some((reply) => String(reply.replyId) === String(command.replyId))) {
+        return reject("duplicate-reply", "Canvas comment reply id already exists.");
       }
       if (
         countReplies(state.replies, String(command.commentId)) >= CANVAS_MAX_REPLIES_PER_COMMENT
@@ -252,19 +256,19 @@ function applyNodePositions(
   positions: ReadonlyArray<CanvasDiagramNodePosition>,
 ): CanvasDiagramBlock {
   const positionMap = new Map(positions.map((position) => [String(position.nodeId), position]));
-  const updatedNodes = block.nodes.map((node) => {
+  const updatedNodes: CanvasDiagramNode[] = block.nodes.map((node) => {
     const position = positionMap.get(String(node.nodeId));
     if (position === undefined) return node;
     return {
       ...node,
       x: position.x,
       y: position.y,
-      positioned: true as const,
+      positioned: true,
     };
   });
   return {
     ...block,
-    layout: "manual" as const,
+    layout: "manual",
     nodes: updatedNodes,
   };
 }
@@ -310,11 +314,21 @@ export function admitCanvasDiagramLayoutRevision(
     );
   }
 
-  let decodedNextVersionId: string;
+  let decodedNextVersionId: ReturnType<typeof decodeCanvasVersionId>;
   try {
-    decodedNextVersionId = String(decodeCanvasVersionId(nextVersionId));
+    decodedNextVersionId = decodeCanvasVersionId(nextVersionId);
   } catch {
     return reject("malformed-request", "Canvas diagram layout revision version id is invalid.");
+  }
+
+  if (String(command.canvasId) !== String(current.canvasId)) {
+    return reject("malformed-request", "Canvas layout revision targets a different Canvas.");
+  }
+  if (String(command.versionId) !== String(decodedNextVersionId)) {
+    return reject("malformed-request", "Canvas layout revision targets a different new version.");
+  }
+  if (String(decodedNextVersionId) === String(current.versionId)) {
+    return reject("malformed-request", "Canvas layout revision must create a new version id.");
   }
 
   const block = current.definition.blocks.find(
@@ -354,7 +368,7 @@ export function admitCanvasDiagramLayoutRevision(
   const next: CanvasVersion = {
     schemaVersion: current.schemaVersion,
     canvasId: current.canvasId,
-    versionId: decodedNextVersionId as typeof current.versionId,
+    versionId: decodedNextVersionId,
     sequence: current.sequence + 1,
     definition: validatedDefinition,
     createdBy: command.actor,

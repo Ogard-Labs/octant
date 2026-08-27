@@ -84,7 +84,7 @@ describe("Canvas board comment contracts", () => {
       expectedSequence: 5,
       issuedAt: "2026-08-01T21:00:00.000Z",
     });
-    expect(add.kind).toBe("canvas-comment-add");
+    expect(add).toMatchObject({ _tag: "Right", right: { kind: "canvas-comment-add" } });
 
     const reply = decodeCanvasCommentCommand({
       kind: "canvas-comment-reply",
@@ -96,7 +96,7 @@ describe("Canvas board comment contracts", () => {
       expectedSequence: 6,
       issuedAt: "2026-08-01T21:00:00.000Z",
     });
-    expect(reply.kind).toBe("canvas-comment-reply");
+    expect(reply).toMatchObject({ _tag: "Right", right: { kind: "canvas-comment-reply" } });
 
     const resolve = decodeCanvasCommentCommand({
       kind: "canvas-comment-resolve",
@@ -106,7 +106,7 @@ describe("Canvas board comment contracts", () => {
       expectedSequence: 7,
       issuedAt: "2026-08-01T21:00:00.000Z",
     });
-    expect(resolve.kind).toBe("canvas-comment-resolve");
+    expect(resolve).toMatchObject({ _tag: "Right", right: { kind: "canvas-comment-resolve" } });
 
     const deleteCommand = decodeCanvasCommentCommand({
       kind: "canvas-comment-delete",
@@ -116,7 +116,10 @@ describe("Canvas board comment contracts", () => {
       expectedSequence: 8,
       issuedAt: "2026-08-01T21:00:00.000Z",
     });
-    expect(deleteCommand.kind).toBe("canvas-comment-delete");
+    expect(deleteCommand).toMatchObject({
+      _tag: "Right",
+      right: { kind: "canvas-comment-delete" },
+    });
   });
 
   it("decodes comment events", () => {
@@ -184,8 +187,8 @@ describe("Canvas board comment contracts", () => {
     ).toThrow();
   });
 
-  it("rejects an unknown comment command kind", () => {
-    expect(() =>
+  it("returns an unknown comment command kind as a decoding failure", () => {
+    expect(
       decodeCanvasCommentCommand({
         kind: "canvas-comment-edit",
         canvasId: ids.canvas,
@@ -194,8 +197,8 @@ describe("Canvas board comment contracts", () => {
         body: "edit",
         expectedSequence: 1,
         issuedAt: "2026-08-01T21:00:00.000Z",
-      }),
-    ).toThrow();
+      })._tag,
+    ).toBe("Left");
   });
 });
 
@@ -229,6 +232,32 @@ describe("Canvas board diagram layout revision contracts", () => {
       sequence: 4,
       revisedAt: "2026-08-01T21:00:00.000Z",
     });
+  });
+
+  it("rejects empty layout revisions", () => {
+    const command = {
+      kind: "canvas-diagram-layout-revise",
+      canvasId: ids.canvas,
+      versionId: ids.version,
+      blockId: "diagram-block",
+      positions: [],
+      actor,
+      expectedSequence: 3,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      issuedAt: "2026-08-01T21:00:00.000Z",
+    };
+    expect(() => decodeCanvasDiagramLayoutReviseCommand(command)).toThrow();
+    expect(() =>
+      decodeCanvasDiagramLayoutRevised({
+        canvasId: ids.canvas,
+        versionId: ids.version,
+        blockId: "diagram-block",
+        positions: [],
+        actor,
+        sequence: 4,
+        revisedAt: "2026-08-01T21:00:00.000Z",
+      }),
+    ).toThrow();
   });
 
   it("rejects non-finite positions", () => {
