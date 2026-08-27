@@ -6,6 +6,8 @@ import {
 } from "@octant/contracts";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CodeProjectPullRequests } from "./CodeProjectPullRequests";
 
@@ -13,6 +15,14 @@ const projectA = "10000000-0000-4000-8000-000000000001";
 const projectB = "10000000-0000-4000-8000-000000000002";
 const threadId = "20000000-0000-4000-8000-000000000001";
 const generatedAt = "2026-08-22T08:00:00.000Z";
+
+const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
+
+function ruleBody(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, "s"));
+  return match?.[1] ?? "";
+}
 
 function view(overrides: Record<string, unknown> = {}): CodeProjectPullRequestView {
   return decodeCodeProjectPullRequestView({
@@ -269,5 +279,22 @@ describe("CodeProjectPullRequests", () => {
     expect(await screen.findByText("List active pull requests")).toBeVisible();
     expect(load).toHaveBeenCalledTimes(1);
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("keeps pull-request row content from collapsing by separating metadata into its own column", () => {
+    const rowContent = ruleBody(stylesheet, ".code-project-pull-requests__row-content");
+    expect(rowContent).toMatch(/display:\s*grid/);
+    expect(rowContent).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+    expect(rowContent).not.toMatch(/gap:\s*3px/);
+    expect(rowContent).toMatch(/gap:\s*var\(--oct-space-2\)\s+var\(--oct-space-3\)/);
+
+    const meta = ruleBody(stylesheet, ".code-project-pull-requests__meta");
+    expect(meta).toMatch(/grid-column:\s*2/);
+
+    const narrowMeta = ruleBody(
+      stylesheet,
+      '.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__meta',
+    );
+    expect(narrowMeta).toMatch(/grid-column:\s*1/);
   });
 });
