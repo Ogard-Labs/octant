@@ -135,6 +135,11 @@ export interface CodeThreadNavigationItem {
   readonly unread?: boolean;
   /** Whether the user pinned this thread to the top of the list. */
   readonly pinned?: boolean;
+  /**
+   * The visible thread this one was forked from. Absent when the thread
+   * started on its own.
+   */
+  readonly lineageParentThreadId?: string;
 }
 
 function refreshActiveThreadView(
@@ -1334,6 +1339,9 @@ export function useCodeController(options: CodeControllerOptions) {
             (activityByThread.get(String(thread.id)) ?? 0) >
               (readCursors.get(String(thread.id)) ?? 0),
           ...(thread.pinned === true ? { pinned: true } : {}),
+          ...(thread.forkedFrom === undefined
+            ? {}
+            : { lineageParentThreadId: String(thread.forkedFrom.threadId) }),
           updatedAt: thread.updatedAt,
         }))
         // Pinned threads lead, and the order inside each group is the host's.

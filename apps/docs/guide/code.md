@@ -83,10 +83,15 @@ turn's **More actions** menu (the ⋯ control that appears when the turn is
 hovered or focused). The same items are on the turn's context menu.
 
 **Restore from here** starts a second thread at the marked checkpoint and
-leaves this one untouched. **Restore files to this point** overwrites the
-working tree in place: it is named separately, still asks for confirmation,
-and still goes through the thread's approval path. Undo restore stays on the
-thread after a successful overwrite.
+leaves this one untouched. The restored thread's sidebar row — and the Project
+Overview list, which shares those rows — carries a fork mark, as does the
+thread it came from. Open the mark to see the origin chain and any direct
+forks and to switch to one of them. If the origin has been archived or
+deleted, the lineage says the origin is no longer available rather than
+hiding that the thread is a fork. **Restore files to this point** overwrites
+the working tree in place: it is named separately, still asks for
+confirmation, and still goes through the thread's approval path. Undo restore
+stays on the thread after a successful overwrite.
 
 A checkpoint marker stays on the turn only when that point is marked.
 

@@ -1,15 +1,22 @@
 import { memo, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { Archive, MoreHorizontal, Pin, PinOff } from "lucide-react";
+import { Archive, GitBranch, MoreHorizontal, Pin, PinOff } from "lucide-react";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
+import {
+  lineageParentTitle,
+  threadAncestorChain,
+  threadDirectDescendants,
+  threadHasLineage,
+} from "./threadLineage";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantContextMenuRoot, OctantContextMenuTrigger } from "../ui/base/OctantContextMenu";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
+import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 
 /**
@@ -100,6 +107,7 @@ function activityOf(thread: ChatThreadNavigationItem): ThreadRowActivity {
  * unparseable timestamps are omitted rather than rendered as "Invalid Date".
  */
 function threadRowFacts(props: {
+  readonly lineageParentTitle?: string;
   readonly projectName: string | undefined;
   readonly thread: ChatThreadNavigationItem;
 }): string {
@@ -109,6 +117,11 @@ function threadRowFacts(props: {
   if (props.thread.followUp === true) facts.push("Follow-up");
   if (props.thread.provider !== undefined) facts.push(props.thread.provider.displayName);
   if (props.projectName !== undefined) facts.push(props.projectName);
+  if (props.lineageParentTitle !== undefined) {
+    facts.push(`Forked from ${props.lineageParentTitle}`);
+  } else if (props.thread.lineageParentThreadId !== undefined) {
+    facts.push("Forked from origin no longer available");
+  }
   if (props.thread.updatedAt !== undefined) {
     const date = new Date(props.thread.updatedAt);
     if (!Number.isNaN(date.getTime())) {
@@ -124,6 +137,7 @@ function threadRowFacts(props: {
  * turn counts; those are not in the row's contract.
  */
 function ThreadRowInfoCard(props: {
+  readonly lineageParentTitle?: string;
   readonly projectName: string | undefined;
   readonly thread: ChatThreadNavigationItem;
 }) {
@@ -131,7 +145,13 @@ function ThreadRowInfoCard(props: {
     <span className="thread-row-info-card">
       <span className="thread-row-info-card__title">{props.thread.title}</span>
       <span className="thread-row-info-card__facts">
-        {threadRowFacts({ projectName: props.projectName, thread: props.thread })}
+        {threadRowFacts({
+          ...(props.lineageParentTitle === undefined
+            ? {}
+            : { lineageParentTitle: props.lineageParentTitle }),
+          projectName: props.projectName,
+          thread: props.thread,
+        })}
       </span>
     </span>
   );
@@ -143,12 +163,21 @@ function ThreadRowInfoCard(props: {
  */
 function ThreadRowTooltip(props: {
   readonly children: ReactElement;
+  readonly lineageParentTitle?: string;
   readonly projectName: string | undefined;
   readonly thread: ChatThreadNavigationItem;
 }) {
   return (
     <OctantTooltip
-      label={<ThreadRowInfoCard projectName={props.projectName} thread={props.thread} />}
+      label={
+        <ThreadRowInfoCard
+          {...(props.lineageParentTitle === undefined
+            ? {}
+            : { lineageParentTitle: props.lineageParentTitle })}
+          projectName={props.projectName}
+          thread={props.thread}
+        />
+      }
     >
       {props.children}
     </OctantTooltip>
@@ -246,6 +275,101 @@ function hasInlineActions(actions: ThreadRowActions | undefined): boolean {
   return actions.onPinThread !== undefined || actions.onArchiveThread !== undefined;
 }
 
+function selectionIdFor(
+  threadId: string,
+  threads: ReadonlyArray<ChatThreadNavigationItem>,
+): string {
+  const id = String(threadId);
+  for (const thread of threads) {
+    if (String(thread.threadId) === id) return thread.navigationId ?? thread.threadId;
+  }
+  return id;
+}
+
+/**
+ * Fork mark on a thread row. It sits beside the status dot as its own control
+ * so activating it cannot be mistaken for selecting the row, and so a nested
+ * button never lands inside the row's own button.
+ */
+function ThreadLineagePopover(props: {
+  readonly onSelectThread: (threadId: string) => void;
+  readonly thread: ChatThreadNavigationItem;
+  readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
+}) {
+  const [open, setOpen] = useState(false);
+  const ancestors = threadAncestorChain(props.thread.threadId, props.threads);
+  const descendants = threadDirectDescendants(props.thread.threadId, props.threads);
+  const select = (threadId: string) => {
+    props.onSelectThread(selectionIdFor(threadId, props.threads));
+    setOpen(false);
+  };
+  return (
+    <OctantPopover
+      className="thread-lineage"
+      onOpenChange={setOpen}
+      open={open}
+      side="bottom"
+      title="Fork lineage"
+      trigger={<GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />}
+      triggerClassName="sidebar-navigation__thread-lineage"
+      triggerLabel="Fork lineage"
+      triggerVariant="ghost-icon"
+    >
+      <ol className="thread-lineage__chain">
+        {ancestors.map((ancestor) =>
+          ancestor.kind === "origin-unavailable" ? (
+            <li className="thread-lineage__unavailable" key="origin-unavailable">
+              origin no longer available
+            </li>
+          ) : (
+            <li key={ancestor.threadId}>
+              <OctantButton
+                className="thread-lineage__entry justify-start"
+                onClick={() => select(ancestor.threadId)}
+                type="button"
+                variant="ghost"
+              >
+                {ancestor.title}
+              </OctantButton>
+            </li>
+          ),
+        )}
+        <li>
+          <OctantButton
+            aria-current="true"
+            className="thread-lineage__entry justify-start"
+            onClick={() => select(props.thread.threadId)}
+            type="button"
+            variant="ghost"
+          >
+            <span>{props.thread.title}</span>
+            <span>Current</span>
+          </OctantButton>
+        </li>
+      </ol>
+      {descendants.length === 0 ? null : (
+        <div>
+          <h3 className="thread-lineage__heading">Forks</h3>
+          <ul className="thread-lineage__forks">
+            {descendants.map((fork) => (
+              <li key={fork.threadId}>
+                <OctantButton
+                  className="thread-lineage__entry justify-start"
+                  onClick={() => select(fork.threadId)}
+                  type="button"
+                  variant="ghost"
+                >
+                  {fork.title}
+                </OctantButton>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </OctantPopover>
+  );
+}
+
 export interface ProjectThreadRowsProps {
   /** What the row offers on right-click. Absent leaves the rows without a menu. */
   readonly actions?: ThreadRowActions;
@@ -284,6 +408,7 @@ interface ProjectThreadRowProps {
   readonly actions: ThreadRowActions;
   readonly activeThreadId?: string;
   readonly isRenaming: boolean;
+  readonly lineageThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly onCancelRename: () => void;
   readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly onSelectThread: (threadId: string) => void;
@@ -297,6 +422,15 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
   const projectName = props.projectNameForThread?.(props.thread);
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
+  const showLineage = threadHasLineage(props.thread, props.lineageThreads);
+  const parentTitle = lineageParentTitle(props.thread, props.lineageThreads);
+  const lineageMark = showLineage ? (
+    <ThreadLineagePopover
+      onSelectThread={props.onSelectThread}
+      thread={props.thread}
+      threads={props.lineageThreads}
+    />
+  ) : null;
   const onSelect = useCallback(() => {
     if (drag?.consumeThreadClickSuppression(rowId) === true) return;
     props.onSelectThread(rowId);
@@ -375,13 +509,18 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     </OctantButton>
   );
   const wrappedRow = (
-    <ThreadRowTooltip projectName={projectName} thread={props.thread}>
+    <ThreadRowTooltip
+      {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
+      projectName={projectName}
+      thread={props.thread}
+    >
       {row}
     </ThreadRowTooltip>
   );
   if (!hasMenu) {
     return (
       <div className="sidebar-navigation__thread-row">
+        {lineageMark}
         {wrappedRow}
         {inlineActions ? (
           <ThreadRowActionsGutter actions={props.actions} thread={props.thread} />
@@ -393,6 +532,8 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     <ThreadRowContextMenu
       actions={props.actions}
       inlineActions={inlineActions}
+      leading={lineageMark}
+      {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
       projectName={projectName}
       row={row}
       thread={props.thread}
@@ -504,6 +645,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
       onCancelRename={onCancelRename}
       {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
       onSelectThread={props.onSelectThread}
+      lineageThreads={props.threads}
       {...(props.projectNameForThread === undefined
         ? {}
         : { projectNameForThread: props.projectNameForThread })}
@@ -548,6 +690,8 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
 function ThreadRowContextMenu(props: {
   readonly actions: ThreadRowActions;
   readonly inlineActions: boolean;
+  readonly leading?: ReactNode;
+  readonly lineageParentTitle?: string;
   readonly projectName: string | undefined;
   readonly row: ReactElement;
   readonly thread: ChatThreadNavigationItem;
@@ -555,8 +699,15 @@ function ThreadRowContextMenu(props: {
   const [open, setOpen] = useState(false);
   return (
     <div className="sidebar-navigation__thread-row">
+      {props.leading}
       <OctantContextMenuRoot onOpenChange={setOpen}>
-        <ThreadRowTooltip projectName={props.projectName} thread={props.thread}>
+        <ThreadRowTooltip
+          {...(props.lineageParentTitle === undefined
+            ? {}
+            : { lineageParentTitle: props.lineageParentTitle })}
+          projectName={props.projectName}
+          thread={props.thread}
+        >
           <OctantContextMenuTrigger aria-expanded={open} aria-haspopup="menu" render={props.row} />
         </ThreadRowTooltip>
         {props.inlineActions ? (
