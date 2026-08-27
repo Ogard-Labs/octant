@@ -2474,14 +2474,22 @@ export class ChatService {
     readonly probe: ProviderProbeResult;
   }> {
     const providerInstanceId = decodeProviderInstanceId(thread.providerInstanceId);
-    const driver = this.#driver(providerInstanceId);
-    const probed = await this.#probeProvider(driver, providerInstanceId).then(
-      (probe) => ({ kind: "probed" as const, probe }),
-      (error: unknown) => ({ kind: "failed" as const, error }),
-    );
+    // Constructing the driver for a provider whose configuration no driver can
+    // serve throws, so it is part of the same failed active candidate as a
+    // refused probe: a fallback route still gets its chance, and the original
+    // failure is what the turn reports when no fallback is selected.
+    const probed = await (async () => {
+      try {
+        const driver = this.#driver(providerInstanceId);
+        const probe = await this.#probeProvider(driver, providerInstanceId);
+        return { kind: "probed" as const, driver, probe };
+      } catch (error: unknown) {
+        return { kind: "failed" as const, error };
+      }
+    })();
     const active = () => {
       if (probed.kind === "failed") throw probed.error;
-      return { thread, providerInstanceId, driver, probe: probed.probe };
+      return { thread, providerInstanceId, driver: probed.driver, probe: probed.probe };
     };
     if (extensionPhase !== "send") return active();
     const servesTurn = (routed: ChatThread, probe: ProviderProbeResult): boolean => {
@@ -2498,7 +2506,7 @@ export class ChatService {
       return this.#resolveResearchRoute(routed, settings, probe).kind !== "unavailable";
     };
     if (probed.kind === "probed" && servesTurn(thread, probed.probe)) {
-      return { thread, providerInstanceId, driver, probe: probed.probe };
+      return { thread, providerInstanceId, driver: probed.driver, probe: probed.probe };
     }
     const preference = settings.providerFallback;
     const candidate =

@@ -5614,6 +5614,10 @@ export function startOctantServer(
     });
     let remoteListener: PrivateListener | undefined;
     let remoteListenerError: PrivateListenerFailureCode | undefined;
+    // Retained so shutdown can settle warming before the runtime registry
+    // closes: an acquisition that lands after `closeAll()` would leave a warm
+    // runtime alive on its idle lease with nothing left to close it.
+    let warmingProviders: Promise<void> = Promise.resolve();
     // The private listener lifecycle is owned by a server-side controller so
     // the packaged host controls (over the loopback bridge) drive the real
     // dual-listener gateway, not a stub. `currentRemoteGateway` tracks the most
@@ -5813,7 +5817,7 @@ export function startOctantServer(
           // once the listener binds, so a server that never serves leaves no
           // provider process behind, and it is background work: a provider that
           // refuses to start must not delay or fail startup.
-          void providerService.warmEnabledProviders().catch(() => undefined);
+          warmingProviders = providerService.warmEnabledProviders().catch(() => undefined);
           // Startup auto-enable: when a launch-time private listener config is
           // supplied (test/smoke seam), enable it through the controller after
           // the loopback listener binds. A failure fails closed with a typed
@@ -5953,6 +5957,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            await warmingProviders;
             await providerRuntimeRegistry.closeAll();
           } catch (error) {
             shutdownFailure ??= error;

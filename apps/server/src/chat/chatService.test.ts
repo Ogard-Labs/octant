@@ -166,6 +166,8 @@ function openFixture(options?: {
   readonly driver?: ProviderDriver;
   /** Reports distinct provider facts per instance, for cross-provider routing. */
   readonly probeFor?: (providerInstanceId: string) => ProviderProbeResult | undefined;
+  /** Refuses to construct a driver for an instance, as an unusable configuration does. */
+  readonly refuseDriverFor?: (providerInstanceId: string) => Error | undefined;
   readonly settings?: ChatSettings;
   readonly probe?: ProviderProbeResult;
   readonly contextFacts?: ProviderDriver["contextFacts"];
@@ -517,7 +519,11 @@ function openFixture(options?: {
     dataDirectory,
     uuid: () => crypto.randomUUID(),
     clock: () => now,
-    driver: () => driver,
+    driver: (providerInstanceId) => {
+      const refusal = options?.refuseDriverFor?.(String(providerInstanceId));
+      if (refusal !== undefined) throw refusal;
+      return driver;
+    },
     contextHarness,
     capacityScheduler,
     researchRouter,
@@ -4946,6 +4952,42 @@ describe("ChatService", () => {
     const view = service.read(created.thread.id);
     expect(view.turns[0]?.attempts[0]?.providerInstanceId).toBe(fallbackProvider);
     expect(view.thread.providerInstanceId).toBe(ids.provider);
+  });
+
+  it("continues a conversation on the chosen fallback provider when its own driver cannot be built", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined,
+      refuseDriverFor: (providerInstanceId) =>
+        providerInstanceId === ids.provider
+          ? new Error("Provider driver configuration is invalid.")
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unusable configuration",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Keep going on the fallback.",
+      }),
+    ).resolves.toMatchObject({ kind: "turn-created" });
+    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.providerInstanceId).toBe(
+      fallbackProvider,
+    );
   });
 
   it("keeps a researching conversation on its own provider when the fallback has no research backend", async () => {
