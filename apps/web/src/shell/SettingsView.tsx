@@ -196,7 +196,10 @@ export function SettingsView(props: SettingsViewProps) {
   }, [pendingDeepLink, route, onDeepLinkApplied]);
 
   const debouncedSearch = useDebouncedValue(props.search, 120);
-  const hasQuery = debouncedSearch.trim() !== "";
+  // Leave search mode as soon as the input clears. Debounce only the
+  // expensive filter; otherwise selecting a result keeps the results panel
+  // mounted for 120ms and the destination setting never appears.
+  const hasQuery = props.search.trim() !== "";
   const navSections = filterSectionsForNavigator(availableSections, capabilities, debouncedSearch);
   const searchResults = searchSettings(availableSections, capabilities, debouncedSearch);
   const navItems: SettingsNavigationItem[] = navSections.map((section) => ({
@@ -261,7 +264,7 @@ export function SettingsView(props: SettingsViewProps) {
             </header>
             {hasQuery ? (
               <SettingsSearchResults
-                query={debouncedSearch}
+                query={props.search}
                 results={searchResults}
                 sectionLabels={SECTION_LABELS}
                 onSelect={handleSearchSelect}
