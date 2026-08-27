@@ -34,17 +34,42 @@ export async function runServerRunCommand(options: ServerRunOptions = {}): Promi
   const env = options.env ?? process.env;
   const command = options.serverStartCommand?.() ?? defaultServerStartCommand();
   const spawn = options.spawn ?? defaultSpawn;
-  const sleep =
-    options.sleep ??
-    ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
   const now = options.now ?? Date.now;
   const writeNotice =
     options.writeNotice ?? ((message: string) => process.stderr.write(`${message}\n`));
   let currentChild: ServerRunChild | undefined;
   let shutdownRequested = false;
+  let settlePendingDelay: (() => void) | undefined;
+  const sleep = (delayMs: number): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: unknown): void => {
+        if (settled) return;
+        settled = true;
+        settlePendingDelay = undefined;
+        if (error === undefined) resolve();
+        else reject(error);
+      };
+      settlePendingDelay = () => finish();
+      if (options.sleep !== undefined) {
+        void Promise.resolve(options.sleep(delayMs)).then(
+          () => finish(),
+          (error: unknown) => finish(error),
+        );
+        return;
+      }
+      const timer = globalThis.setTimeout(() => finish(), delayMs);
+      settlePendingDelay = () => {
+        globalThis.clearTimeout(timer);
+        finish();
+      };
+    });
   const removeSignalHandler = (options.installSignalHandler ?? defaultInstallSignalHandler)(() => {
     shutdownRequested = true;
     currentChild?.kill("SIGTERM");
+    // After the child has already exited, there is no process to signal.
+    // Settle the backoff so SIGTERM does not wait out the delay.
+    settlePendingDelay?.();
   });
   let failures = 0;
   let firstSpawn = true;

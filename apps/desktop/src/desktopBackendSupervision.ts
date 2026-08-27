@@ -120,19 +120,26 @@ export function createDesktopBackendSupervisor(
   const restart = async (): Promise<void> => {
     try {
       const child = await ports.restart();
-      if (released || status === "gave-up") return;
+      if (status === "gave-up") return;
       if (child === undefined) {
+        // A managed attach release()s on purpose; keep that as a real stop.
+        if (released) return;
         failures += 1;
         scheduleTransientRestart();
         return;
       }
       observe(child);
     } catch (error) {
+      if (status === "gave-up") return;
       if (classifyDesktopBackendFailure(error) === "fatal") {
         gaveUp(error);
         return;
       }
       failures += 1;
+      // Desktop stop()+start() release()s this supervisor while replacing the
+      // child. That is not an intentional shutdown; crash recovery must keep
+      // retrying until observe() or give-up.
+      released = false;
       scheduleTransientRestart();
     }
   };

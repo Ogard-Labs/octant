@@ -53,7 +53,7 @@ afterEach(() => {
 });
 
 describe("startOctantServer", () => {
-  it("recovers managed Chat attachments and pending deletions before accepting requests", async () => {
+  it("recovers Chat sessions, attachments, and pending deletions before accepting requests", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-chat-recovery-"));
     directories.push(directory);
     const reconcile = vi.spyOn(AgentRunPersistenceService.prototype, "reconcileAfterRestart");
@@ -61,6 +61,9 @@ describe("startOctantServer", () => {
     const recoverAttachments = vi
       .spyOn(ChatService.prototype, "recoverManagedAttachments")
       .mockResolvedValue();
+    const reapSessions = vi
+      .spyOn(ChatService.prototype, "reapStaleProviderSessions")
+      .mockResolvedValue({ reaped: 0, resumable: 0 });
 
     await Effect.runPromise(
       Effect.scoped(
@@ -68,6 +71,7 @@ describe("startOctantServer", () => {
           hostname: "127.0.0.1",
           port: 0,
           serve: () => {
+            expect(reapSessions).toHaveBeenCalledOnce();
             expect(recoverAttachments).toHaveBeenCalledOnce();
             expect(recover).toHaveBeenCalledOnce();
             expect(reconcile).toHaveBeenCalledOnce();
@@ -81,6 +85,7 @@ describe("startOctantServer", () => {
     );
     recover.mockRestore();
     recoverAttachments.mockRestore();
+    reapSessions.mockRestore();
     reconcile.mockRestore();
   });
 

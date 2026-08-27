@@ -3540,7 +3540,6 @@ export function startOctantServer(
           options.extensionToolExecution ?? agentPluginMcpSessionManager.createToolExecutionPort(),
       }),
     });
-    void chatService.reapStaleProviderSessions({ staleAfterMs: 0 }).catch(() => undefined);
     const projectMentionLabel = (projectId: string) =>
       persistence.readProject(projectId as ProjectId)?.name;
     const threadMentionService = new ThreadMentionService({
@@ -3605,6 +3604,7 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    yield* Effect.promise(() => chatService.reapStaleProviderSessions({ staleAfterMs: 0 }));
     yield* Effect.promise(() => chatService.recoverManagedAttachments());
     yield* Effect.promise(() => codeAttachments.recover());
     yield* Effect.promise(() => workAttachments.recover());

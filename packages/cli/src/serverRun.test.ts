@@ -136,6 +136,36 @@ describe("runServerRunCommand", () => {
     );
   });
 
+  it("settles backoff delay when shutdown is requested after the child has exited", async () => {
+    let terminate: (() => void) | undefined;
+    let signalSleep: (() => void) | undefined;
+    const inSleep = new Promise<void>((resolve) => {
+      signalSleep = resolve;
+    });
+    const spawn = vi.fn(() => ({ exited: Promise.resolve(9), kill: vi.fn() }));
+    const sleep = vi.fn(
+      () =>
+        new Promise<void>(() => {
+          signalSleep?.();
+        }),
+    );
+    const running = runServerRunCommand({
+      env: {},
+      spawn,
+      sleep,
+      writeNotice: vi.fn(),
+      installSignalHandler: (handler) => {
+        terminate = handler;
+        return () => undefined;
+      },
+    });
+
+    await inSleep;
+    terminate?.();
+    await expect(running).resolves.toBe(9);
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
   it("does not restart a foreground server that exits cleanly", async () => {
     const spawn = vi.fn(() => ({ exited: Promise.resolve(0), kill: vi.fn() }));
     const result = await runServerRunCommand({

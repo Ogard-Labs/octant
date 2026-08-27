@@ -1128,47 +1128,58 @@ export class ChatService {
     let reaped = 0;
     let resumable = 0;
     for (const thread of this.#persistence.readChatThreads()) {
+      let view: ChatThreadView | undefined;
       try {
-        const view = this.#persistence.readChatThreadView(thread.id);
-        if (view === undefined) continue;
-        for (const turn of view.turns) {
-          for (const attempt of turn.attempts) {
-            const disposition = reapsStaleProviderSession({
-              attempt,
-              ownedByThisProcess: this.#activeAttempts.has(String(attempt.id)),
-              now,
-              staleAfterMs,
-            });
-            if (disposition.kind === "retain") continue;
-            try {
-              const interrupted = transitionChatAttempt(attempt, {
-                outcome: "interrupted",
-                updatedAt: decodeTimestamp(this.#clock()),
-              });
-              const version = readAggregateVersion(
-                this.#persistence.connection,
-                "chat-thread",
-                thread.id,
-              );
-              this.#persistence.journal.append({
-                aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
-                expectedVersion: version,
-                events: [
-                  this.#pending("chat.attempt-updated@1", {
-                    kind: "attempt-updated",
-                    attempt: interrupted,
-                  }),
-                ],
-              });
-              reaped += 1;
-              if (disposition.resumable) resumable += 1;
-            } catch {
-              // A later sweep can retry an append that lost its thread version race.
-            }
+        view = this.#persistence.readChatThreadView(thread.id);
+      } catch {
+        // One unreadable thread must not stop recovery of the others.
+        continue;
+      }
+      if (view === undefined) continue;
+      let version = readAggregateVersion(this.#persistence.connection, "chat-thread", thread.id);
+      const reapAttempt = (attempt: ChatAttempt): void => {
+        const disposition = reapsStaleProviderSession({
+          attempt,
+          ownedByThisProcess: this.#activeAttempts.has(String(attempt.id)),
+          now,
+          staleAfterMs,
+        });
+        if (disposition.kind === "retain") return;
+        const interrupted = transitionChatAttempt(attempt, {
+          outcome: "interrupted",
+          updatedAt: decodeTimestamp(this.#clock()),
+        });
+        this.#persistence.journal.append({
+          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+          expectedVersion: version,
+          events: [
+            this.#pending("chat.attempt-updated@1", {
+              kind: "attempt-updated",
+              attempt: interrupted,
+            }),
+          ],
+        });
+        version = readAggregateVersion(this.#persistence.connection, "chat-thread", thread.id);
+        reaped += 1;
+        if (disposition.resumable) resumable += 1;
+      };
+      for (const turn of view.turns) {
+        for (const attempt of turn.attempts) {
+          try {
+            reapAttempt(attempt);
+          } catch (error) {
+            if (!(error instanceof ConcurrencyConflict)) throw error;
+            // Reread once in-process. A leftover streaming attempt otherwise
+            // blocks new sends, and there is no later sweep.
+            version = readAggregateVersion(this.#persistence.connection, "chat-thread", thread.id);
+            const latest = this.#persistence
+              .readChatThreadView(thread.id)
+              ?.turns.flatMap((candidateTurn) => candidateTurn.attempts)
+              .find((candidate) => String(candidate.id) === String(attempt.id));
+            if (latest === undefined) continue;
+            reapAttempt(latest);
           }
         }
-      } catch {
-        // One unreadable or concurrently changing thread must not stop recovery.
       }
     }
     return { reaped, resumable };

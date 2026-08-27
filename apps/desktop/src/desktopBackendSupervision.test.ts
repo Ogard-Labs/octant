@@ -31,9 +31,18 @@ function createSchedule() {
   return {
     runs,
     schedule: (run: () => void, delayMs: number) => {
-      const entry = { delayMs, run };
+      let cancelled = false;
+      const entry = {
+        delayMs,
+        run: () => {
+          if (cancelled) return;
+          run();
+        },
+      };
       runs.push(entry);
-      return () => undefined;
+      return () => {
+        cancelled = true;
+      };
     },
   };
 }
@@ -140,21 +149,65 @@ describe("createDesktopBackendSupervisor", () => {
     expect(schedule.runs).toHaveLength(2);
   });
 
-  it("resets failures after the backend stays healthy", () => {
+  it("resets failures after the replacement backend stays healthy", async () => {
     const schedule = createSchedule();
-    const child = createChild();
+    const first = createChild();
+    const second = createChild();
     const supervisor = createDesktopBackendSupervisor({
-      restart: async () => child,
+      restart: async () => second,
       reportFatal: vi.fn(),
       schedule: schedule.schedule,
+      now: () => 1_000,
     });
 
-    supervisor.observe(child);
-    child.exit();
+    supervisor.observe(first);
+    first.exit();
     expect(supervisor.snapshot().failures).toBe(1);
-    const healthyTimer = schedule.runs[0];
-    healthyTimer?.run();
+    schedule.runs.at(-1)?.run();
+    await Promise.resolve();
+    expect(supervisor.snapshot()).toMatchObject({
+      failures: 1,
+      status: "supervising",
+    });
 
+    const healthyTimer = schedule.runs.at(-1);
+    expect(healthyTimer?.delayMs).toBe(60_000);
+    healthyTimer?.run();
     expect(supervisor.snapshot().failures).toBe(0);
+  });
+
+  it("keeps crash retries after a restart port that releases then fails transiently", async () => {
+    const schedule = createSchedule();
+    const first = createChild();
+    const second = createChild();
+    let attempts = 0;
+    let releaseForRestart = (): void => undefined;
+    const restart = vi.fn(async () => {
+      releaseForRestart();
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" });
+      }
+      return second;
+    });
+    const supervisor = createDesktopBackendSupervisor({
+      restart,
+      reportFatal: vi.fn(),
+      schedule: schedule.schedule,
+      now: () => 1_000,
+    });
+    releaseForRestart = () => supervisor.release();
+
+    supervisor.observe(first);
+    first.exit();
+    schedule.runs.at(-1)?.run();
+    await Promise.resolve();
+    expect(restart).toHaveBeenCalledOnce();
+    expect(supervisor.snapshot().status).toBe("waiting-to-restart");
+
+    schedule.runs.at(-1)?.run();
+    await Promise.resolve();
+    expect(restart).toHaveBeenCalledTimes(2);
+    expect(supervisor.snapshot().status).toBe("supervising");
   });
 });
