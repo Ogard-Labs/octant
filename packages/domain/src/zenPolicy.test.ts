@@ -391,7 +391,8 @@ describe("updateElement", () => {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(ZenPolicyRejected);
-    expect((thrown as ZenPolicyRejected).code).toBe("unsupported-kind");
+    if (!(thrown instanceof ZenPolicyRejected)) throw new Error("Expected a policy refusal.");
+    expect(thrown.code).toBe("unsupported-kind");
   });
 
   it("rejects an unknown element with a policy refusal the service can turn into a value", () => {
