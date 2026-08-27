@@ -63,6 +63,7 @@ distilled successor of the earlier long-form design specifications.
 | [0053](0053-computer-use-destinations.md)                     | Computer-use destinations                                         | Accepted           |
 | [0054](0054-headless-host-credential-store.md)                | The credential broker is a host capability, not a desktop one     | Accepted           |
 | [0055](0055-image-generation-provider-profiles.md)            | Image generation provider profiles                                | Accepted           |
+| [0056](0056-linux-confinement-bubblewrap.md)                  | Linux confinement uses Bubblewrap as a scoped exception to the Seatbelt-only implementation | Accepted           |
 
 ## Adding an ADR
 

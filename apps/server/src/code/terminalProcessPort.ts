@@ -157,6 +157,7 @@ export class TerminalProcessPort {
     readonly processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
     readonly ensurePtyHelperExecutable: () => void;
     readonly confinement: SeatbeltConfinementPort;
+    readonly platform: NodeJS.Platform;
     readonly temporaryDirectory: string;
     readonly shellStateDirectory: string;
     readonly networkEgress: OsNetworkEgress;
@@ -181,6 +182,7 @@ export class TerminalProcessPort {
       gracefulTimeoutMs: dependencies.gracefulTimeoutMs ?? 1_000,
       receiptDirectory: dependencies.receiptDirectory,
       processIdentity: dependencies.processIdentity,
+      platform,
       ensurePtyHelperExecutable:
         dependencies.ensurePtyHelperExecutable ??
         (dependencies.spawn !== undefined || nativeBunPtyAvailable
@@ -265,10 +267,16 @@ export class TerminalProcessPort {
         "Terminal Seatbelt confinement could not be prepared.",
       );
     }
+    const baseEnv = shellStateEnvironment(shellState);
     const pty = this.#dependencies.spawn(launch.command, launch.args, {
       name: "xterm-256color",
       cwd: input.cwd,
-      env: { ...shellStateEnvironment(shellState), ...input.environment },
+      env: {
+        ...baseEnv,
+        ...(this.#dependencies.platform === "darwin" ? {} : { HOME: shellState }),
+        ...input.environment,
+        ...(this.#dependencies.platform === "darwin" ? {} : { HOME: shellState }),
+      },
       cols: input.columns,
       rows: input.rows,
     });
