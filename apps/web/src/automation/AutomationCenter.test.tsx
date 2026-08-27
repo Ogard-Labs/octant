@@ -422,6 +422,10 @@ describe("AutomationCenter creation and editing", () => {
     expect(within(form).getByRole("checkbox", { name: "Fri" })).toBeChecked();
     expect(within(form).getByLabelText("Time of day")).toHaveValue("09:00");
     expect(within(form).getByLabelText("Timezone")).toHaveValue("UTC");
+
+    await userEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("What do you want automated?")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Suggested automations" })).toBeVisible();
   });
 
   it("creates through the editor with expected version zero and refreshes the list", async () => {

@@ -23,6 +23,7 @@ import {
   type AutomationProjectOption,
   type AutomationTriggerFormValue,
 } from "./automationCenterModel";
+import type { RoutineRequestDraft } from "./routineRequestDraft";
 
 /**
  * Create/edit form for one Automation definition. Every choice is an exact
@@ -37,11 +38,7 @@ export interface AutomationDefinitionEditorProps {
   /** Present when editing an existing definition. */
   readonly initial?: AutomationDefinition;
   /** Parsed values carried forward from the routine composer. */
-  readonly initialRequestDraft?: {
-    readonly name: string;
-    readonly prompt: string;
-    readonly trigger?: AutomationTrigger;
-  };
+  readonly initialRequestDraft?: RoutineRequestDraft;
   readonly onCancel: () => void;
   /** Returns a bounded failure message to display, or undefined on success. */
   readonly onSubmit: (draft: AutomationDefinitionDraft) => Promise<string | undefined>;

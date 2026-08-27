@@ -325,6 +325,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                 now={nowInstant}
                 onConfirm={(requestDraft) => {
                   controller.select(undefined);
+                  setDescribeRequest(undefined);
                   setEditor({ kind: "create", requestDraft });
                 }}
                 timeZone={props.displayTimeZone ?? "UTC"}
