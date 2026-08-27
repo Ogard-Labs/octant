@@ -7070,7 +7070,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   gap: 0;
   height: 100%;
   min-height: 0;
-  padding: 16px var(--oct-space-5) 0;
+  padding: 0;
   font-family: var(--oct-font-display);
 }
 
@@ -7079,7 +7079,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   align-items: baseline;
   justify-content: space-between;
   gap: var(--oct-space-3);
-  margin-bottom: 10px;
+  padding: 16px var(--oct-space-4) 10px;
 }
 
 .code-board__identity {
@@ -7110,16 +7110,27 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-bottom: 10px;
+  gap: 8px;
+  padding: 10px var(--oct-space-4);
   border-bottom: 1px solid var(--oct-border);
+  background: var(--oct-surface);
 }
 
 .code-board__primary-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-2);
+}
+
+.code-board__primary-controls > * {
+  flex: 0 0 auto;
+}
+
+.code-board__primary-controls .code-board__search {
+  flex: 1 1 200px;
+  min-width: 160px;
+  max-width: 320px;
 }
 
 .code-board__toolbar fieldset {
@@ -7379,86 +7390,89 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 /*
- * The board body owns scrolling. Status grouping uses a balanced grid on
- * desktop and lets each column end with its content; Project grouping stacks
- * its sections and scrolls vertically as one list.
+ * The board body scrolls horizontally so the fixed-width status columns keep
+ * their shape at every viewport and zoom level; vertical scrolling stays
+ * inside each column.
  */
 .code-board__body {
   flex: 1 1 auto;
   min-height: 0;
-  padding-bottom: var(--oct-space-4);
-  overflow: auto;
+  padding: var(--oct-space-2) var(--oct-space-4) var(--oct-space-4);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .code-board__body[data-grouping="status"] {
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
+  display: block;
 }
 
-/* Keep fixed status groups evenly distributed across the available work
-   surface. auto-fit collapses gracefully when a filter leaves fewer groups. */
-.code-board__body[data-grouping="status"] .board {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  align-items: start;
-  width: 100%;
-  overflow: visible;
-}
-
-.code-board__body[data-grouping="status"] .board-col {
-  width: auto;
-  min-width: 0;
-  max-width: none;
-  align-self: start;
-}
-
-.code-board__body[data-grouping="status"] .board-col-body {
-  flex: 0 0 auto;
-  overflow: visible;
+.code-board__body[data-grouping="project"] {
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* The status board is a reading surface, not four large cards. Keep columns
    flat and give empty groups a small dashed target instead of an empty well. */
 .code-board .board {
-  gap: var(--oct-space-3);
+  gap: 0;
+  align-items: stretch;
+  min-width: min-content;
+  overflow: visible;
+}
+
+/* The status board body is a fixed-height flex item, so the row of columns
+   must fill it to keep vertical scrolling inside each column. */
+.code-board__body[data-grouping="status"] .board {
+  height: 100%;
 }
 
 .code-board .board-col {
+  flex: 0 0 auto;
+  width: clamp(220px, 22vw, 320px);
+  min-width: 220px;
+  max-width: 320px;
+  min-height: 0;
+  max-height: 100%;
   border: 0;
   border-radius: 0;
   background: transparent;
 }
 
-.code-board__body[data-grouping="status"] .board-col + .board-col {
+.code-board .board-col + .board-col {
   padding-left: var(--oct-space-3);
   border-left: 1px solid var(--oct-border-soft);
 }
 
 .code-board .board-col-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   min-height: 28px;
   padding-inline: 0;
+  padding-bottom: var(--oct-space-1);
   border-bottom: 1px solid var(--oct-border-soft);
   border-radius: 0;
-  background: transparent;
+  background: var(--oct-bg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
   color: var(--oct-meta);
 }
 
 .code-board .board-col-body {
-  gap: 5px;
-  padding: 6px 0;
+  gap: var(--oct-space-2);
+  max-height: 100%;
+  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-2) 0;
 }
 
 .code-board .board-col-empty {
   display: grid;
   min-height: 36px;
   place-items: center;
-  padding: 6px 8px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   border: 1px dashed var(--oct-border);
   border-radius: var(--oct-radius-sm);
   color: var(--oct-meta);
@@ -7467,7 +7481,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .code-board .board-card {
-  padding: 7px 10px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   border-color: var(--oct-border-soft);
   border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
@@ -7482,31 +7496,42 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   background: var(--oct-fg-soft);
 }
 
+.code-board .board-card:focus-visible {
+  outline: 2px solid var(--oct-focus);
+  outline-offset: 1px;
+}
+
 .code-board .board-card-top {
-  gap: 4px;
-  margin-bottom: 3px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-bottom: 0;
 }
 
 .code-board .board-card-title {
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: 2;
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   font-weight: 500;
   line-height: var(--oct-leading-snug);
 }
 
 .code-board .board-card-facts {
-  flex-wrap: nowrap;
-  gap: 2px 6px;
-  overflow: hidden;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  overflow: visible;
   font-size: var(--oct-text-xs);
   line-height: 1.3;
-  white-space: nowrap;
+  white-space: normal;
   color: var(--oct-meta);
 }
 
 .code-board .board-card-facts .fact {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Waiting remains a server-derived status, but the board no longer turns
@@ -7518,8 +7543,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .code-board .board-card-blocked {
-  margin-top: 4px;
-  padding: 2px 6px;
+  margin-top: 0;
+  padding: var(--oct-space-1) var(--oct-space-2);
   border-color: var(--oct-border);
   border-radius: var(--oct-radius-sm);
   background: transparent;
@@ -7527,12 +7552,86 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .code-board .code-board__card-details {
-  margin-top: 4px;
+  margin-top: var(--oct-space-1);
 }
 
 .code-board .code-board__card-details summary,
 .code-board .code-board__card-meta {
   font-family: var(--oct-font-display);
+}
+
+.code-board .code-board__card-details summary:focus-visible {
+  outline: 2px solid var(--oct-focus);
+  outline-offset: 1px;
+  border-radius: var(--oct-radius-sm);
+}
+
+/* Pull-request chips inside a card keep the compact facts grammar and
+   truncate so a long PR title never forces the card wider than its column. */
+.board-card-pr-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-card-pr,
+.board-card-pr-more {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  max-width: 100%;
+  padding: 0 var(--oct-space-1);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
+}
+
+.board-card-pr {
+  justify-content: flex-start;
+  text-align: left;
+  cursor: pointer;
+}
+
+.board-card-pr:hover {
+  border-color: var(--oct-border);
+  background: var(--oct-fg-soft);
+}
+
+.board-card-pr:focus-visible {
+  outline: 2px solid var(--oct-focus);
+  outline-offset: 1px;
+}
+
+.board-card-pr .icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.board-card-pr-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-card-pr-meta {
+  flex: 0 0 auto;
+  color: var(--oct-muted);
+}
+
+.board-card-pr-more {
+  justify-content: center;
+  color: var(--oct-muted);
+  font-style: italic;
 }
 
 /* cards render in a semantic list; the system class carries the layout,
@@ -7581,14 +7680,23 @@ p.board-col-empty {
 
 .board[data-grouping="project"] .board-col {
   flex: 0 0 auto;
+  width: 100%;
+  min-width: auto;
+  max-width: none;
   /* a project section is a full-width row of the stack, not a kanban
      column, so the system column's growth ceiling does not apply */
-  max-width: none;
+}
+
+.board[data-grouping="project"] .board-col + .board-col {
+  padding-left: 0;
+  border-left: 0;
 }
 
 .board[data-grouping="project"] .board-col-body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  gap: var(--oct-space-2);
+  padding-right: 0;
   overflow: visible;
 }
 
@@ -7597,6 +7705,7 @@ p.board-col-empty {
 .code-board__card-open {
   flex: 1 1 auto;
   min-width: 0;
+  justify-content: flex-start;
   padding: 0;
   border: 0;
   background: none;
@@ -7725,26 +7834,27 @@ p.board-col-empty {
   font-family: var(--oct-font-display);
 }
 
-.code-board__list .issuerow .unread {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-accent-fg);
-  flex: 0 0 auto;
-}
-
 .code-board__body[data-layout="list"] {
   overflow: auto;
 }
 
+/* Narrow viewports collapse the board into a vertically-scrolled grouped
+   list; wide but zoomed viewports keep the horizontal kanban columns. */
 @media (max-width: 560px) {
-  .code-board {
-    gap: 10px;
-    padding: 14px 14px 0;
+  .code-board__header {
+    padding: 14px 14px 8px;
+  }
+
+  .code-board__toolbar {
+    padding: 8px 14px;
   }
 
   .code-board__subtitle {
     display: none;
+  }
+
+  .code-board__primary-controls > * {
+    flex: 0 0 auto;
   }
 
   .code-board__grouping {
@@ -7753,7 +7863,9 @@ p.board-col-empty {
 
   .code-board__search {
     order: 1;
-    flex-basis: 100%;
+    flex: 1 1 100%;
+    min-width: auto;
+    max-width: none;
   }
 
   .code-board__filters {
@@ -7766,6 +7878,28 @@ p.board-col-empty {
 
   .code-board__filter-fields {
     grid-template-columns: 1fr;
+  }
+
+  .code-board__body {
+    padding: var(--oct-space-2) 14px var(--oct-space-4);
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+}
+
+/* When the user zooms in, the fixed column width may exceed the viewport.
+   Keep the board horizontally scrollable and shrink the minimum column width
+   so a single column is still usable. */
+@media (max-width: 260px) {
+  .code-board .board-col,
+  .board-col {
+    width: 180px;
+    min-width: 180px;
+    max-width: 100%;
+  }
+
+  .code-board .board-card-facts .fact {
+    white-space: normal;
   }
 }
 
@@ -8298,8 +8432,30 @@ p.board-col-empty {
 
 .code-project-pull-requests__row-content {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+  align-items: start;
   min-width: 0;
-  gap: 3px;
+  gap: var(--oct-space-2) var(--oct-space-3);
+}
+
+.code-project-pull-requests__title-line,
+.code-project-pull-requests__byline,
+.code-project-pull-requests__branch,
+.code-project-pull-requests__linked {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.code-project-pull-requests__meta {
+  grid-column: 2;
+  grid-row: 1 / span 4;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
 }
 
 .code-project-pull-requests__title {
@@ -8323,14 +8479,6 @@ p.board-col-empty {
   white-space: nowrap;
 }
 
-.code-project-pull-requests__meta {
-  gap: 5px;
-}
-
-.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__meta {
-  gap: 5px;
-}
-
 .code-project-pull-requests[data-narrow="true"] {
   padding-inline: var(--oct-space-3);
 }
@@ -8342,4 +8490,14 @@ p.board-col-empty {
 
 .code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__count {
   align-self: flex-end;
+}
+
+.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__row-content {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__meta {
+  grid-column: 1;
+  grid-row: auto;
+  justify-content: flex-start;
 }
