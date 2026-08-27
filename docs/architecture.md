@@ -329,7 +329,10 @@ flowchart LR
   of the journal — transcript, evidence, and provenance, named with the
   instant it was taken. Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
-  journal are listed as omissions. See `docs/decisions/0036`.
+  journal are listed as omissions. See `docs/decisions/0036`. User-facing
+  drafts of the privacy notice, sub-processor position, and data-residency
+  statement live in `apps/docs/advanced/` and are marked pending legal
+  review; they describe this behavior rather than changing it.
 - **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
   composer draft in ordinary renderer storage on the client that typed it.
   Drafts are not journaled, not included in diagnostics, and not sent to a
