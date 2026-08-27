@@ -442,14 +442,16 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
     overscan: THREAD_ROW_OVERSCAN,
     rangeExtractor: (range) => {
       const indexes = defaultRangeExtractor(range);
-      const renamingIndex =
-        renamingThreadId === undefined
-          ? -1
-          : props.threads.findIndex(
-              (thread) => (thread.navigationId ?? thread.threadId) === renamingThreadId,
-            );
-      if (renamingIndex < 0 || indexes.includes(renamingIndex)) return indexes;
-      return [...indexes, renamingIndex].sort((left, right) => left - right);
+      const pinned = new Set(indexes);
+      for (const id of [renamingThreadId, props.activeThreadId]) {
+        if (id === undefined) continue;
+        const index = props.threads.findIndex(
+          (thread) => (thread.navigationId ?? thread.threadId) === id,
+        );
+        if (index >= 0) pinned.add(index);
+      }
+      if (pinned.size === indexes.length) return indexes;
+      return [...pinned].sort((left, right) => left - right);
     },
     scrollMargin,
     ...(!virtualized ? { enabled: false } : {}),
@@ -467,14 +469,29 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
       );
     };
     update();
-    // A section above this list can expand without resizing either observed
-    // box, so ResizeObserver alone would leave the list's margin stale.
+    // A sibling project block can grow without resizing this list or the
+    // scroller viewport, and without firing scroll when scrollTop is 0.
     scrollElement.addEventListener("scroll", update, { passive: true });
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(update);
-    observer?.observe(list);
-    observer?.observe(scrollElement);
+    const observeLayout = () => {
+      observer?.observe(list);
+      observer?.observe(scrollElement);
+      for (const child of scrollElement.children) {
+        if (child instanceof Element) observer?.observe(child);
+      }
+    };
+    observeLayout();
+    const mutations =
+      typeof MutationObserver === "undefined"
+        ? undefined
+        : new MutationObserver(() => {
+            observeLayout();
+            update();
+          });
+    mutations?.observe(scrollElement, { childList: true, subtree: true });
     return () => {
       observer?.disconnect();
+      mutations?.disconnect();
       scrollElement.removeEventListener("scroll", update);
     };
   }, [props.threads.length, virtualized]);
