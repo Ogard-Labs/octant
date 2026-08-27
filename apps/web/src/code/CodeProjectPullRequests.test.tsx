@@ -290,11 +290,13 @@ describe("CodeProjectPullRequests", () => {
 
     const meta = ruleBody(stylesheet, ".code-project-pull-requests__meta");
     expect(meta).toMatch(/grid-column:\s*2/);
+    expect(meta).toMatch(/grid-row:\s*1\s*\/\s*span\s+4/);
 
     const narrowMeta = ruleBody(
       stylesheet,
       '.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__meta',
     );
     expect(narrowMeta).toMatch(/grid-column:\s*1/);
+    expect(narrowMeta).toMatch(/grid-row:\s*auto/);
   });
 });

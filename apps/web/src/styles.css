@@ -8315,7 +8315,7 @@ p.board-col-empty {
 
 .code-project-pull-requests__meta {
   grid-column: 2;
-  grid-row: 1 / -1;
+  grid-row: 1 / span 4;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
