@@ -93,6 +93,12 @@ import {
   unsupportedModelOptionValues,
 } from "@octant/domain/chat-policy";
 import {
+  chatProviderServesTurn,
+  selectChatProviderFallback,
+  type ChatProviderCapabilityName,
+  type ChatProviderTurnFacts,
+} from "@octant/domain/chat-provider-fallback-policy";
+import {
   defaultShellSettings,
   reapsStaleProviderSession,
   THREAD_MENTION_UNREADABLE_CONTEXT,
@@ -129,6 +135,7 @@ import {
 } from "../persistence/chatProjection";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { modelEvidenceFromObservedState } from "../providers/providerContextFacts";
+import type { ReviewedModelManifest } from "../providers/reviewedModelManifest";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createDiagnosticsFailureIncidentEvent } from "../diagnosticsExportService";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
@@ -218,6 +225,33 @@ function threadAsRoutedFor(
   }
   const { modelOptionValues: _selectedModelOptions, ...withoutOptions } = routed;
   return withoutOptions;
+}
+
+function providerTurnFacts(probe: ProviderProbeResult): ChatProviderTurnFacts {
+  return {
+    readiness: probe.readiness,
+    models: probe.models.map((model) => model.id),
+    capabilities: probe.capabilities,
+  };
+}
+
+/**
+ * The capabilities a provider must report to run this thread's turn.
+ *
+ * A thread that researches through the app's own SearXNG backend needs the
+ * provider to accept app-managed tools; provider-native research needs the
+ * provider's own web research. Streaming is what a Chat turn is: an instance
+ * that does not report it cannot serve the conversation.
+ */
+function chatTurnRequiredCapabilities(
+  thread: ChatThread,
+): ReadonlyArray<ChatProviderCapabilityName> {
+  if (!thread.researchEnabled) return ["streaming"];
+  return thread.researchRouting === "provider-native"
+    ? ["streaming", "nativeWebResearch"]
+    : thread.researchRouting === "searxng"
+      ? ["streaming", "appManagedTools"]
+      : ["streaming"];
 }
 
 function poolCandidateKey(candidate: MultiModelPoolCandidate): string {
@@ -337,6 +371,12 @@ interface ChatTurnContextPlan {
 }
 
 interface PreparedChatTurn {
+  /**
+   * The thread as this turn actually runs it. Preparation can move a turn onto
+   * the user's fallback route, and the attempt has to record the provider and
+   * model the turn ran on rather than the one the thread selected.
+   */
+  readonly executionThread: ChatThread;
   readonly context: ChatTurnContextPlan;
   readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
   readonly researchRoute: ResearchRouteDecision;
@@ -447,6 +487,11 @@ export interface ChatServiceOptions {
     readonly mode: OctantMode;
     readonly activeHostId: HostId;
   }) => Promise<ReadonlyArray<MultiModelCandidateRuntimeFacts>>;
+  /**
+   * Reviewed context limits for models no provider reports limits for. Absent,
+   * or empty, leaves the conservative built-in limits in place.
+   */
+  readonly reviewedModelManifest?: ReviewedModelManifest;
 }
 
 /**
@@ -534,6 +579,7 @@ export class ChatService {
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
   readonly #resolveThreadMentionContext?: ChatServiceOptions["resolveThreadMentionContext"];
+  readonly #reviewedModelManifest?: ReviewedModelManifest;
   readonly #activeAttempts = new Map<string, AbortController>();
   readonly #activeThreadExecutions = new Set<string>();
   readonly #threadAdmissions = new Map<string, Promise<void>>();
@@ -559,6 +605,9 @@ export class ChatService {
     this.#researchRouter = options.researchRouter;
     if (options.providerRuntimeRegistry !== undefined) {
       this.#providerRuntimeRegistry = options.providerRuntimeRegistry;
+    }
+    if (options.reviewedModelManifest !== undefined) {
+      this.#reviewedModelManifest = options.reviewedModelManifest;
     }
     if (options.resolveAppManagedTools !== undefined) {
       this.#resolveAppManagedTools = options.resolveAppManagedTools;
@@ -1391,6 +1440,9 @@ export class ChatService {
         defaultResearchRouting: command.defaultResearchRouting,
         ...(searxngBaseUrl === undefined ? {} : { searxngBaseUrl }),
         defaultPersonalityInstructions: command.defaultPersonalityInstructions,
+        ...(command.providerFallback === undefined
+          ? {}
+          : { providerFallback: command.providerFallback }),
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       } satisfies ChatSettings;
@@ -1642,7 +1694,7 @@ export class ChatService {
         resolvedExtensions,
       );
       const attachmentIds = command.attachmentIds;
-      const turn = beginChatTurn(executionThread, {
+      const turn = beginChatTurn(prepared.executionThread, {
         turnId,
         ...(command.submissionId === undefined ? {} : { submissionId: command.submissionId }),
         attemptId: this.#uuid() as ChatAttempt["id"],
@@ -1779,7 +1831,7 @@ export class ChatService {
         resolvedExtensions,
         history,
       );
-      const turn = beginChatTurn(executionThread, {
+      const turn = beginChatTurn(prepared.executionThread, {
         turnId,
         attemptId: this.#uuid() as ChatAttempt["id"],
         providerSessionId: decodeProviderSessionId(this.#uuid()),
@@ -2286,7 +2338,7 @@ export class ChatService {
   }
 
   async #prepareTurnExecution(
-    thread: ChatThread,
+    requestedThread: ChatThread,
     prompt: string,
     currentRef: ChatContentReference,
     attachmentIds?: ReadonlyArray<ChatAttachmentId>,
@@ -2315,9 +2367,11 @@ export class ChatService {
     historyTurns?: ReadonlyArray<ChatTurn>,
   ): Promise<PreparedChatTurn> {
     const settings = this.#requireChatSettings();
-    const providerInstanceId = decodeProviderInstanceId(thread.providerInstanceId);
-    const driver = this.#driver(providerInstanceId);
-    const probe = await this.#probeProvider(driver, providerInstanceId);
+    const routed = await this.#resolveTurnProvider(requestedThread, settings, extensionPhase);
+    const thread = routed.thread;
+    const providerInstanceId = routed.providerInstanceId;
+    const driver = routed.driver;
+    const probe = routed.probe;
     const attachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
@@ -2387,6 +2441,7 @@ export class ChatService {
       providerInstanceId,
     );
     return {
+      executionThread: thread,
       context: maintained,
       attachments,
       researchRoute,
@@ -2394,6 +2449,95 @@ export class ChatService {
       ...(tools === undefined ? {} : { appManagedTools: tools }),
       extensionSelections: resolvedExtensions.selections,
     };
+  }
+
+  /**
+   * The provider a turn runs on, together with the facts it reported.
+   *
+   * A fresh turn may move to the user's fallback route when the thread's own
+   * provider can no longer serve it, so a provider that went unavailable or
+   * dropped the thread's model mid-conversation does not end the conversation.
+   * A replay or resume continues an existing provider session and stays on the
+   * route its attempt recorded. Without a fallback preference, or when the
+   * named route cannot honestly serve the same turn, the turn keeps the
+   * thread's provider so the refusal reports the real reason.
+   */
+  async #resolveTurnProvider(
+    thread: ChatThread,
+    settings: ConfiguredChatSettings,
+    extensionPhase: "send" | "replay" | "resume",
+  ): Promise<{
+    readonly thread: ChatThread;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly driver: ProviderDriver;
+    readonly probe: ProviderProbeResult;
+  }> {
+    const providerInstanceId = decodeProviderInstanceId(thread.providerInstanceId);
+    const driver = this.#driver(providerInstanceId);
+    const probed = await this.#probeProvider(driver, providerInstanceId).then(
+      (probe) => ({ kind: "probed" as const, probe }),
+      (error: unknown) => ({ kind: "failed" as const, error }),
+    );
+    const active = () => {
+      if (probed.kind === "failed") throw probed.error;
+      return { thread, providerInstanceId, driver, probe: probed.probe };
+    };
+    if (extensionPhase !== "send") return active();
+    const requiredCapabilities = chatTurnRequiredCapabilities(thread);
+    if (
+      probed.kind === "probed" &&
+      chatProviderServesTurn(providerTurnFacts(probed.probe), {
+        modelId: decodeProviderModelId(thread.modelId),
+        requiredCapabilities,
+      }).kind === "serves"
+    ) {
+      return { thread, providerInstanceId, driver, probe: probed.probe };
+    }
+    const preference = settings.providerFallback;
+    const candidate =
+      preference === undefined ||
+      String(preference.providerInstanceId) === String(providerInstanceId)
+        ? undefined
+        : await this.#probeFallbackProvider(
+            decodeProviderInstanceId(preference.providerInstanceId),
+          );
+    const decision = selectChatProviderFallback({
+      preference,
+      activeProviderInstanceId: providerInstanceId,
+      requiredCapabilities,
+      candidate: candidate === undefined ? undefined : providerTurnFacts(candidate.probe),
+    });
+    if (decision.kind === "selected" && candidate !== undefined) {
+      return {
+        thread: threadAsRoutedFor(thread, {
+          providerInstanceId: candidate.providerInstanceId,
+          modelId: decision.modelId,
+        }),
+        providerInstanceId: candidate.providerInstanceId,
+        driver: candidate.driver,
+        probe: candidate.probe,
+      };
+    }
+    return active();
+  }
+
+  async #probeFallbackProvider(providerInstanceId: ProviderInstanceId): Promise<
+    | undefined
+    | {
+        readonly providerInstanceId: ProviderInstanceId;
+        readonly driver: ProviderDriver;
+        readonly probe: ProviderProbeResult;
+      }
+  > {
+    try {
+      const driver = this.#driver(providerInstanceId);
+      const probe = await this.#probeProvider(driver, providerInstanceId);
+      return { providerInstanceId, driver, probe };
+    } catch {
+      // An unobservable fallback is not a route. The turn reports why the
+      // thread's own provider refused instead of this instance's failure.
+      return undefined;
+    }
   }
 
   /**
@@ -2823,15 +2967,23 @@ export class ChatService {
     });
   }
 
+  /**
+   * Limits for a model no provider reported any for. A reviewed manifest entry
+   * is preferred over the built-in floor because the floor is small enough to
+   * truncate an ordinary thread; both stay low-confidence so provider-reported
+   * evidence still wins.
+   */
   #fallbackModelLimitEvidence(
     probe: ProviderProbeResult,
     modelId: ProviderModelId,
   ): ProviderModelLimitEvidence {
+    const reviewed = this.#reviewedModelManifest?.entry(String(modelId));
     return {
       providerInstanceId: probe.instanceId,
       modelId,
-      contextWindow: FALLBACK_CHAT_CONTEXT_WINDOW,
-      maxOutput: FALLBACK_CHAT_MAX_OUTPUT,
+      contextWindow: reviewed?.contextWindow ?? FALLBACK_CHAT_CONTEXT_WINDOW,
+      maxOutput: reviewed?.maxOutput ?? FALLBACK_CHAT_MAX_OUTPUT,
+      ...(reviewed === undefined ? {} : { reasoning: reviewed.reasoning }),
       source: "reviewed-catalog",
       confidence: "low",
       observedAt: probe.observedAt,

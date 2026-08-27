@@ -6,6 +6,7 @@ export * from "./appleToolchainPolicy";
 export * from "./appleSimulatorLiveFrame";
 export * from "./chatPolicy";
 export * from "./providerSessionReaping";
+export * from "./chatProviderFallbackPolicy";
 export * from "./chatMessageParts";
 export * from "./codePolicy";
 export * from "./threadBoardPolicy";

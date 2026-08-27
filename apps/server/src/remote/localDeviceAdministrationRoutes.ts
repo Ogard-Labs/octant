@@ -2,9 +2,11 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type {
   DeviceRegistrationV1,
   PairingDecisionV1,
+  PairingTicketV1,
   StableHostId,
 } from "@octant/contracts/remote-access";
 import type {
+  CreatePairingTicketResult,
   PairingClaimResult,
   PairingDeviceLifecycleError,
 } from "./pairingDeviceLifecycleService";
@@ -37,6 +39,9 @@ export interface LocalDeviceInventoryEntry {
 }
 
 export interface LocalDeviceAdministrationPort {
+  readonly createPairingTicket: (input: {
+    readonly sourceClass: PairingTicketV1["sourceClass"];
+  }) => CreatePairingTicketResult;
   readonly listPendingPairings: () => ReadonlyArray<PairingClaimResult>;
   readonly approvePairing: (input: { readonly ticketId: string }) => {
     readonly decision: PairingDecisionV1;
@@ -68,6 +73,7 @@ export interface LocalDeviceAdministrationRouteOptions {
 }
 
 const ROUTES = {
+  tickets: "/api/desktop/remote/pairing-tickets",
   pending: "/api/desktop/remote/pairing-requests",
   approve: "/api/desktop/remote/pairing-requests/approve",
   deny: "/api/desktop/remote/pairing-requests/deny",
@@ -132,6 +138,10 @@ export function createLocalDeviceAdministrationRouteHandler(
 
     try {
       switch (route) {
+        case ROUTES.tickets: {
+          const body = decodeTicketRequestBody(decoded.value);
+          return Response.json({ ticket: control.createPairingTicket(body) }, { status: 201 });
+        }
         case ROUTES.approve: {
           const body = decodeTicketBody(decoded.value);
           const result = control.approvePairing(body);
@@ -190,6 +200,19 @@ function toInventory(value: DeviceRegistrationV1): LocalDeviceInventoryEntry {
     ...(value.revokedAt === undefined ? {} : { revokedAt: value.revokedAt }),
     ...(value.revokedReason === undefined ? {} : { revokedReason: value.revokedReason }),
   });
+}
+
+function decodeTicketRequestBody(value: unknown): {
+  readonly sourceClass: PairingTicketV1["sourceClass"];
+} {
+  requireExactKeys(value, ["sourceClass"]);
+  const sourceClass = value.sourceClass;
+  // A ticket names the network class its device may claim it over, and
+  // `unknown` is never a class a caller may ask for.
+  if (sourceClass !== "loopback" && sourceClass !== "lan-private" && sourceClass !== "tailscale") {
+    throw new Error("invalid");
+  }
+  return { sourceClass };
 }
 
 function decodeTicketBody(value: unknown): { readonly ticketId: string } {

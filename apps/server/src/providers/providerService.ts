@@ -202,6 +202,7 @@ export class ProviderService implements ProviderServiceApi {
   async bootstrap(_authenticatedWindowId: WindowId): Promise<ProviderRegistrySnapshot> {
     this.#assertReady();
     try {
+      this.reconcileConfiguredProviders();
       const instances = this.#persistence.readProviderInstances();
       const configuredIds = new Set(instances.map(({ id }) => id));
       const defaults = this.#persistence.readProviderDefaults();
@@ -254,6 +255,48 @@ export class ProviderService implements ProviderServiceApi {
 
   pendingInstanceOperationCount(): number {
     return this.#instanceOperationTails.size;
+  }
+
+  /**
+   * Rebuilds runtime provider state from the persisted provider set so a
+   * configuration change takes effect without restarting the server. A provider
+   * no driver can serve is published as an unusable observation that carries
+   * its reason, so the provider picker can explain it instead of the server
+   * refusing to reconcile.
+   */
+  reconcileConfiguredProviders(): void {
+    const instances = this.#persistence.readProviderInstances();
+    const configured = new Set(instances.map((instance) => String(instance.id)));
+    for (const observed of this.#runtime.observedStates()) {
+      if (!configured.has(String(observed.instanceId))) {
+        this.#runtime.clearObservedState(observed.instanceId);
+      }
+    }
+    for (const instance of instances) {
+      if (!instance.enabled) continue;
+      const unusable = this.#unusableConfigurationObservation(instance);
+      if (unusable !== undefined) this.#runtime.setObservedState(unusable);
+    }
+  }
+
+  /**
+   * Pre-spawns one runtime per enabled provider so the first turn of a new
+   * thread does not pay provider startup. Each runtime then stays warm under
+   * the driver's own idle lease. A provider that refuses to start records its
+   * observation and never fails the warm pass.
+   */
+  async warmEnabledProviders(): Promise<void> {
+    this.reconcileConfiguredProviders();
+    for (const instance of this.#persistence.readProviderInstances()) {
+      if (!instance.enabled) continue;
+      if (this.#runtime.hasRuntime(instance.id)) continue;
+      if (this.#unusableConfigurationObservation(instance) !== undefined) continue;
+      try {
+        await this.#probeConfiguredInstance(instance.id);
+      } catch {
+        // A refused warm start is already visible as a failed observation.
+      }
+    }
   }
 
   async smokeTurn(
@@ -391,7 +434,7 @@ export class ProviderService implements ProviderServiceApi {
         });
       }
 
-      return await this.#withInstanceOperation(command.instanceId, async () => {
+      const result = await this.#withInstanceOperation(command.instanceId, async () => {
         this.#assertReady();
         const current = this.#persistence.readProviderInstance(command.instanceId);
         const instances = this.#persistence.readProviderInstances();
@@ -725,6 +768,8 @@ export class ProviderService implements ProviderServiceApi {
           instance: authoritative,
         });
       });
+      this.reconcileConfiguredProviders();
+      return result;
     } catch (error) {
       throw this.#mapFailure(error);
     }
@@ -737,6 +782,10 @@ export class ProviderService implements ProviderServiceApi {
     } catch {
       throw this.#invalid("Provider instance ID is invalid.");
     }
+    return this.#probeConfiguredInstance(instanceId);
+  }
+
+  #probeConfiguredInstance(instanceId: ProviderInstanceId): Promise<ProviderProbeResult> {
     return this.#withInstanceOperation(instanceId, async () => {
       try {
         this.#assertReady();
@@ -891,6 +940,28 @@ export class ProviderService implements ProviderServiceApi {
         throw this.#mapFailure(error);
       }
     });
+  }
+
+  #unusableConfigurationObservation(instance: ProviderInstance): ProviderObservedState | undefined {
+    if (this.#driverProvider === undefined) return undefined;
+    try {
+      this.#driverProvider(instance);
+      return undefined;
+    } catch (error) {
+      const failure = providerFailureOfError(error) ?? {
+        category: "invalid-configuration",
+        message: "Provider driver configuration is invalid.",
+      };
+      return decodeProviderObservedState({
+        instanceId: instance.id,
+        readiness: probeFailureReadiness(failure.category),
+        processState: "stopped",
+        models: [],
+        capabilities: unavailableCapabilities,
+        message: failure.message,
+        observedAt: decodeTimestamp(this.#clock()),
+      });
+    }
   }
 
   #failedProbeObservation(
@@ -1238,6 +1309,14 @@ export async function runPackagedProviderSmokeTurn(
   } finally {
     await rm(createdProjectRoot, { recursive: true, force: true });
   }
+}
+
+function providerFailureOfError(error: unknown): ProviderFailure | undefined {
+  if (isProviderFailure(error)) return decodeProviderFailure(error);
+  if (error instanceof Error && "failure" in error && isProviderFailure(error.failure)) {
+    return decodeProviderFailure(error.failure);
+  }
+  return undefined;
 }
 
 function isProviderFailure(value: unknown): value is ProviderFailure {

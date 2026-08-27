@@ -36,6 +36,12 @@ function setup(overrides: Partial<LocalDeviceAdministrationPort> = {}) {
   const authority = new WindowAuthorityStore();
   authority.register({ windowId, capability, now: Date.now() });
   const control: LocalDeviceAdministrationPort = {
+    createPairingTicket: vi.fn(() => ({
+      ticketId: "88888888-8888-4888-8888-888888888888" as never,
+      ticketProof: "ticket-proof",
+      expiresAt: Date.parse("2026-08-01T10:05:00.000Z"),
+      sourceClass: "loopback" as const,
+    })),
     listPendingPairings: vi.fn(() => []),
     approvePairing: vi.fn(() => ({
       decision: {
@@ -108,6 +114,33 @@ describe("local device administration routes", () => {
     expect(body).toMatchObject({ devices: [{ deviceId, deviceKeyFingerprint: "a".repeat(64) }] });
     expect(JSON.stringify(body)).not.toContain("BEGIN PUBLIC KEY");
     expect(control.listDevices).toHaveBeenCalledOnce();
+  });
+
+  it("mints a pairing token for the network class the local caller names", async () => {
+    const { handle, control } = setup();
+    const response = await handle(
+      request("/api/desktop/remote/pairing-tickets", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sourceClass: "lan-private" }),
+      }),
+    );
+    expect(response?.status).toBe(201);
+    expect(await response?.json()).toMatchObject({ ticket: { ticketProof: "ticket-proof" } });
+    expect(control.createPairingTicket).toHaveBeenCalledWith({ sourceClass: "lan-private" });
+  });
+
+  it("refuses to mint a pairing token for a network class it cannot pair over", async () => {
+    const { handle, control } = setup();
+    const response = await handle(
+      request("/api/desktop/remote/pairing-tickets", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sourceClass: "unknown" }),
+      }),
+    );
+    expect(response?.status).toBe(400);
+    expect(control.createPairingTicket).not.toHaveBeenCalled();
   });
 
   it("maps approve, deny, rename, revoke, revoke-all, and expiry to fixed local actions", async () => {

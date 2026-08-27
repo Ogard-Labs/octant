@@ -366,6 +366,11 @@ import { createProviderFromDiscoveryCandidate } from "./providers/discoveryProvi
 import { makeDiscoveryService } from "./providers/discoveryService";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import { ProviderService } from "./providers/providerService";
+import {
+  CANONICAL_REVIEWED_MODEL_MANIFEST,
+  refreshReviewedModelManifest,
+  ReviewedModelManifest,
+} from "./providers/reviewedModelManifest";
 import { ProviderUsageLimitsService } from "./providers/providerUsageLimitsService";
 import { createProviderUsageLimitsRouteHandler } from "./providers/providerUsageLimitsRoutes";
 import { ProviderRuntimeUsageLimitsStore } from "./providers/providerRuntimeUsageLimitsStore";
@@ -2703,6 +2708,20 @@ export function startOctantServer(
     });
     probeProviderForThreads = (providerInstanceId) =>
       providerService.probe(LOCAL_HOST_ID as never, providerInstanceId);
+    const reviewedModelManifest = new ReviewedModelManifest();
+    // Model classification tracks the canonical manifest branch by commit
+    // rather than by app release. It is opt-in so the local-first default
+    // reaches no remote, and background so a refused refresh only leaves the
+    // built-in conservative limits in place.
+    if (process.env.OCTANT_REVIEWED_MODEL_MANIFEST === "1") {
+      void refreshReviewedModelManifest({ reference: CANONICAL_REVIEWED_MODEL_MANIFEST })
+        .then((refresh) => reviewedModelManifest.accept(refresh))
+        .catch(() => undefined);
+    }
+    // Warming keeps one idle runtime per enabled provider so the first turn of a
+    // new thread does not pay provider startup. It is background work: a
+    // provider that refuses to start must not delay or fail server startup.
+    void providerService.warmEnabledProviders().catch(() => undefined);
     const providerRoutes = createProviderRouteHandler({
       service: providerService,
       windowAuthorityStore,
@@ -3452,6 +3471,7 @@ export function startOctantServer(
     });
     const chatService = new ChatService({
       persistence,
+      reviewedModelManifest,
       hiddenThreadIds: () => {
         const hidden = new Set(sideChatSidecars.hiddenThreadIds());
         for (const threadId of navigatorAssistantBindings.hiddenThreadIds()) hidden.add(threadId);
