@@ -9,6 +9,7 @@ import {
   type HostLifecycleOutcome,
   type HostRestoreOutcome,
 } from "@octant/contracts/host-control";
+import { decodeHostDataMap, type HostDataMap } from "@octant/contracts/host-data-map";
 import {
   decodePurgeThreadsOutcome,
   decodeSetThreadRetentionOutcome,
@@ -35,6 +36,7 @@ export interface HostControlClientOptions {
 
 export interface HostControlClient {
   status(): Promise<HostControlStatus>;
+  readDataMap(): Promise<HostDataMap>;
   lifecycle(action: HostLifecycleAction): Promise<HostLifecycleOutcome>;
   backup(label?: string): Promise<HostBackupOutcome>;
   restore(): Promise<HostRestoreOutcome>;
@@ -106,6 +108,10 @@ export function createHostControlClient(options: HostControlClientOptions): Host
     async status() {
       const body = await call({ path: "/api/host-control/status", method: "GET" });
       return decodeOrThrow(decodeHostControlStatus, body);
+    },
+    async readDataMap() {
+      const body = await call({ path: "/api/host-control/data-map", method: "GET" });
+      return decodeOrThrow(decodeHostDataMap, body);
     },
     async lifecycle(action) {
       const body = await call({

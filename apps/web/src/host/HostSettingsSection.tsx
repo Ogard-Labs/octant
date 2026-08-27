@@ -25,6 +25,8 @@ import {
 } from "./AutomationNotificationSettings";
 import { FederatedHostsLifecyclePanel } from "./FederatedHostsLifecyclePanel";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
+import type { HostDataMap } from "@octant/contracts/host-data-map";
+import { HostDataMapView } from "./HostDataMap";
 
 /**
  * The Settings host card for one local or headless
@@ -50,6 +52,11 @@ type StatusState =
   | { readonly kind: "loading" }
   | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "ready"; readonly status: HostControlStatus };
+
+type DataMapState =
+  | { readonly kind: "loading" }
+  | { readonly kind: "error"; readonly message: string }
+  | { readonly kind: "ready"; readonly report: HostDataMap };
 
 type LifecycleMessage =
   | { readonly kind: "accepted"; readonly text: string }
@@ -78,6 +85,7 @@ export function HostSettingsSection({
   const policyStateId = useId();
   const backupLabelId = useId();
   const [statusState, setStatusState] = useState<StatusState>({ kind: "loading" });
+  const [dataMapState, setDataMapState] = useState<DataMapState>({ kind: "loading" });
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [lifecycleMessage, setLifecycleMessage] = useState<LifecycleMessage>();
   const [backupLabel, setBackupLabel] = useState("");
@@ -95,10 +103,20 @@ export function HostSettingsSection({
           error instanceof Error ? error.message : "The host control service is unreachable.",
       });
     }
+    try {
+      const report = await client.readDataMap();
+      setDataMapState({ kind: "ready", report });
+    } catch (error) {
+      setDataMapState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "The host data map is unreachable.",
+      });
+    }
   }, [client]);
 
   useEffect(() => {
     setStatusState({ kind: "loading" });
+    setDataMapState({ kind: "loading" });
     void refresh();
   }, [refresh]);
 
@@ -351,6 +369,8 @@ export function HostSettingsSection({
         </div>
       </SettingsPanel>
 
+      <DataMapPanel state={dataMapState} />
+
       <ThreadRetentionPanel client={client} />
 
       {automationNotifications === undefined ? null : (
@@ -362,6 +382,24 @@ export function HostSettingsSection({
       )}
     </section>
   );
+}
+
+function DataMapPanel({ state }: { readonly state: DataMapState }) {
+  if (state.kind === "loading") {
+    return (
+      <SettingsPanel title="Data map" description="What this host stores, and where.">
+        <SettingsState kind="loading">Loading data map…</SettingsState>
+      </SettingsPanel>
+    );
+  }
+  if (state.kind === "error") {
+    return (
+      <SettingsPanel title="Data map" description="What this host stores, and where.">
+        <SettingsState kind="error">{state.message}</SettingsState>
+      </SettingsPanel>
+    );
+  }
+  return <HostDataMapView report={state.report} />;
 }
 
 function formatRetentionWindow(state: ThreadRetentionState | undefined): string {

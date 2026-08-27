@@ -250,8 +250,15 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Host",
       scope: "host",
       keywords:
-        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities backup recovery restore snapshot diagnostics headless automation notifications push waiting approval failure completion apns fcm retention purge thread journal",
+        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities backup recovery restore snapshot diagnostics headless automation notifications push waiting approval failure completion apns fcm retention purge thread journal data map privacy location projections artifacts credentials keychain caches",
       settings: [
+        {
+          id: settingId("data-map"),
+          label: "Data map",
+          scope: "host",
+          keywords:
+            "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
+        },
         {
           id: settingId("automation-notifications"),
           label: "Automation notifications",

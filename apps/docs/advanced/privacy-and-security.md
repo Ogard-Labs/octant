@@ -28,6 +28,13 @@ and derived projections so a rebuild cannot resurrect the transcript. See
 [Recovery and troubleshooting](/advanced/recovery) for how the journal backs
 recovery.
 
+Settings → Host includes a read-only data map of what this host stores and
+where — journal, projections, artifacts, named Keychain or secret-service
+entries (never values), caches, and the categories that leave the machine
+(provider calls, update checks, marketplace fetches). A category the host
+cannot verify is shown as unknown. The map does not purge or export; those
+actions stay on thread retention and the thread export menu.
+
 An unsent composer draft is ordinary local client storage on the machine
 where it was typed. It never enters the journal, diagnostics, or a provider
 request until you send it. Deleting or purging the thread removes that
