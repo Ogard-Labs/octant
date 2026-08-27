@@ -261,11 +261,23 @@ describe("App", () => {
     expect(document.querySelector(".rail-placeholder")).toBeNull();
   });
 
-  it("opens the global Archive from the profile menu", async () => {
+  it("uses the resolved Chat client when the global Archive opens", async () => {
     const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/chat/search")) {
+        return new Response(JSON.stringify([archivedChatThread()]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const canvasResponse = canvasFetchPassthrough(url);
+      if (canvasResponse !== undefined) return canvasResponse;
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
     render(
       <App
-        chatClient={chats()}
         codeClient={codes()}
         launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
         projectClient={projects()}
@@ -283,6 +295,12 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { name: "Archive" })).toBeVisible();
     expect(screen.getByLabelText("Filter archive by Project")).toBeVisible();
+    expect(await screen.findByText("Retired chat")).toBeVisible();
+    expect(screen.getByText("Chat")).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/chat/search?q="),
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
   it("authenticates a browser session by exchanging a launch token from the URL fragment", async () => {

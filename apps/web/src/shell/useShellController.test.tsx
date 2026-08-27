@@ -533,7 +533,7 @@ describe("useShellController", () => {
     );
   });
 
-  it("adds a fresh Terminal in a split beside the current Code tab", async () => {
+  it("gives split Terminals unique titles without changing their thread", async () => {
     const initial = codeBootstrap();
     const server = statefulClient({
       ...initial,
@@ -558,18 +558,25 @@ describe("useShellController", () => {
     await act(async () => result.current.openCodeThread(threadId, "Terminal QA"));
     const sourcePane = firstPane(result.current.workspace!.layouts.code);
     await act(async () => result.current.openSurfaceInSplit("terminal", sourcePane.paneId));
+    await act(async () => result.current.openSurfaceInSplit("terminal", sourcePane.paneId));
 
-    const terminalPane = panes(result.current.workspace!.layouts.code).find(
+    const terminalPanes = panes(result.current.workspace!.layouts.code).filter(
       (pane) => pane.surface.kind === "code-terminal",
     );
-    expect(terminalPane?.surface).toMatchObject({
-      kind: "code-terminal",
-      threadId,
-      title: "Terminal",
-    });
+    expect(terminalPanes.map((pane) => pane.surface.title).sort()).toEqual([
+      "Terminal",
+      "Terminal 2",
+    ]);
     expect(
-      terminalPane?.surface.kind === "code-terminal" ? terminalPane.surface.terminalId : undefined,
-    ).toBeDefined();
+      terminalPanes.map((pane) =>
+        pane.surface.kind === "code-terminal" ? pane.surface.threadId : undefined,
+      ),
+    ).toEqual([threadId, threadId]);
+    expect(
+      terminalPanes.every(
+        (pane) => pane.surface.kind === "code-terminal" && pane.surface.terminalId !== undefined,
+      ),
+    ).toBe(true);
     expect(server.client.execute).toHaveBeenLastCalledWith(
       expect.objectContaining({
         operation: expect.objectContaining({ kind: "split-pane", mode: "code" }),

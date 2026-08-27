@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useEffect, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
@@ -72,7 +72,8 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
   const [snapshot, setSnapshot] = useState<BrowserAutomationSnapshot>();
   const [message, setMessage] = useState<string>();
   const [starting, setStarting] = useState(false);
-  const [nativeSupported, setNativeSupported] = useState(false);
+  const [nativeSupported, setNativeSupported] = useState<boolean>();
+  const fallbackStop = useRef<Promise<void> | undefined>(undefined);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [drag, setDrag] = useState<ResearchDrag>();
   const context = snapshot?.context;
@@ -102,7 +103,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
     ...(context === undefined ? {} : { contextId: String(context.contextId) }),
     threadId,
-    enabled: nativeSupported && active && !props.dock.collapsed,
+    enabled: nativeSupported === true && active && !props.dock.collapsed,
     overlaySelector: RENDERER_OVERLAY_SELECTOR,
   });
   const state = surface.state;
@@ -198,8 +199,34 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
     }
   }
 
+  const stopFallbackBrowser = useCallback((): Promise<void> => {
+    if (fallbackStop.current !== undefined) return fallbackStop.current;
+    const operation = props.client
+      .inspectThread({ threadId: browserThreadId })
+      .then(async (current) => {
+        if (current.context === undefined || current.context.state !== "active") return;
+        await props.client.stop({
+          contextId: current.context.contextId,
+          threadId: browserThreadId,
+        });
+      })
+      .catch(() => undefined);
+    fallbackStop.current = operation;
+    return operation;
+  }, [browserThreadId, props.client]);
+
+  useEffect(() => {
+    if (nativeSupported !== false) return;
+    return () => {
+      void stopFallbackBrowser();
+    };
+  }, [nativeSupported, stopFallbackBrowser]);
+
   async function close(): Promise<void> {
-    if (context === undefined) return;
+    if (context === undefined) {
+      if (nativeSupported === false) await stopFallbackBrowser();
+      return;
+    }
     try {
       setSnapshot(
         await props.client.stop({
@@ -291,7 +318,11 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
           <X aria-hidden="true" size={14} />
         </OctantButton>
       </header>
-      {!nativeSupported ? (
+      {nativeSupported === undefined ? (
+        <p className="zen-research__notice" role="status">
+          Preparing the research browser…
+        </p>
+      ) : nativeSupported === false ? (
         <div className="zen-research__web-browser">
           <BrowserWorkspace
             client={props.client}

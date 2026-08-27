@@ -160,6 +160,24 @@ describe("HostSettingsSection", () => {
     expect(screen.getByText(/The service policy could not be read/)).toBeInTheDocument();
   });
 
+  it("ignores invalid thread retention scope and mode select values", async () => {
+    render(<HostSettingsSection client={makeClient()} />);
+    await screen.findByText("host-1");
+
+    const scope = screen.getByLabelText<HTMLSelectElement>("Scope");
+    scope.add(new Option("Invalid scope", "invalid-scope"));
+    fireEvent.change(scope, { target: { value: "invalid-scope" } });
+    fireEvent.change(screen.getByLabelText("Retention window"), { target: { value: "7" } });
+    expect(scope).toHaveValue("host");
+
+    fireEvent.change(scope, { target: { value: "thread" } });
+    const mode = screen.getByLabelText<HTMLSelectElement>("Mode");
+    mode.add(new Option("Invalid mode", "invalid-mode"));
+    fireEvent.change(mode, { target: { value: "invalid-mode" } });
+    fireEvent.change(screen.getByLabelText("Retention window"), { target: { value: "30" } });
+    expect(mode).toHaveValue("chat");
+  });
+
   it("sends a stop request and renders the accepted outcome", async () => {
     const lifecycle = vi.fn(
       async (action: HostLifecycleAction): Promise<HostLifecycleOutcome> => ({

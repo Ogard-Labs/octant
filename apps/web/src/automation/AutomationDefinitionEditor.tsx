@@ -3,6 +3,7 @@ import type {
   AutomationDefinitionDraft,
   AutomationMissedRunPolicy,
   AutomationMode,
+  AutomationTrigger,
 } from "@octant/contracts";
 import { environmentLabel } from "@octant/client-runtime/environment-selection";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -35,6 +36,12 @@ export interface AutomationDefinitionEditorProps {
   readonly localHostId?: string;
   /** Present when editing an existing definition. */
   readonly initial?: AutomationDefinition;
+  /** Parsed values carried forward from the routine composer. */
+  readonly initialRequestDraft?: {
+    readonly name: string;
+    readonly prompt: string;
+    readonly trigger?: AutomationTrigger;
+  };
   readonly onCancel: () => void;
   /** Returns a bounded failure message to display, or undefined on success. */
   readonly onSubmit: (draft: AutomationDefinitionDraft) => Promise<string | undefined>;
@@ -113,7 +120,7 @@ interface TriggerFormState {
   readonly timeZone: string;
 }
 
-function initialTriggerState(initial: AutomationDefinition | undefined): TriggerFormState {
+function initialTriggerState(initial: AutomationTrigger | undefined): TriggerFormState {
   const base: TriggerFormState = {
     kind: "once",
     onceLocal: "",
@@ -124,27 +131,27 @@ function initialTriggerState(initial: AutomationDefinition | undefined): Trigger
     timeZone: "",
   };
   if (initial === undefined) return base;
-  switch (initial.trigger.kind) {
+  switch (initial.kind) {
     case "once":
       return {
         ...base,
         kind: "once",
-        onceLocal: localInputFromUtcInstant(initial.trigger.scheduledAt),
+        onceLocal: localInputFromUtcInstant(initial.scheduledAt),
       };
     case "interval":
       return {
         ...base,
         kind: "interval",
-        anchorLocal: localInputFromUtcInstant(initial.trigger.anchorAt),
-        intervalMinutes: String(initial.trigger.intervalMinutes),
+        anchorLocal: localInputFromUtcInstant(initial.anchorAt),
+        intervalMinutes: String(initial.intervalMinutes),
       };
     case "weekly-local":
       return {
         ...base,
         kind: "weekly-local",
-        weekdays: new Set(initial.trigger.weekdays),
-        localTime: initial.trigger.localTime,
-        timeZone: initial.trigger.timeZone,
+        weekdays: new Set(initial.weekdays),
+        localTime: initial.localTime,
+        timeZone: initial.timeZone,
       };
   }
 }
@@ -170,8 +177,12 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
     confirm: useId(),
   };
 
-  const [displayName, setDisplayName] = useState(initial?.displayName ?? "");
-  const [taskPrompt, setTaskPrompt] = useState(initial?.taskPrompt ?? "");
+  const [displayName, setDisplayName] = useState(
+    initial?.displayName ?? props.initialRequestDraft?.name ?? "",
+  );
+  const [taskPrompt, setTaskPrompt] = useState(
+    initial?.taskPrompt ?? props.initialRequestDraft?.prompt ?? "",
+  );
   const [hostId, setHostId] = useState(
     initial === undefined
       ? catalog.hosts.length === 1
@@ -189,7 +200,9 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   const [authorityProfileId, setAuthorityProfileId] = useState(
     initial === undefined ? "" : String(initial.authorityProfile.profileId),
   );
-  const [trigger, setTrigger] = useState<TriggerFormState>(() => initialTriggerState(initial));
+  const [trigger, setTrigger] = useState<TriggerFormState>(() =>
+    initialTriggerState(initial?.trigger ?? props.initialRequestDraft?.trigger),
+  );
   const [missedRunPolicy, setMissedRunPolicy] = useState<AutomationMissedRunPolicy>(
     initial?.missedRunPolicy ?? "skip",
   );

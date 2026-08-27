@@ -1525,7 +1525,14 @@ function createWorkspaceMutation(
       };
     }
     case "split-pane": {
-      const surface = intent.surface ?? workspaceWelcomeSurface(mode, newTabId());
+      const requestedSurface = intent.surface ?? workspaceWelcomeSurface(mode, newTabId());
+      const surface =
+        requestedSurface.kind === "code-terminal"
+          ? {
+              ...requestedSurface,
+              title: unusedCodeTerminalTitle(layout, requestedSurface.threadId),
+            }
+          : requestedSurface;
       refuseCrossAuthority(latest.workspace, mode, surface, intent.projectId);
       const existing = findVisibleSurfacePane(layout, surface);
       return {

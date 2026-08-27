@@ -167,10 +167,11 @@ describe("ZenResearchDock", () => {
     );
   });
 
-  it("renders the shared headless Browser on authenticated web", async () => {
-    render(
+  it("renders the shared headless Browser on authenticated web and stops it on unmount", async () => {
+    const browser = client();
+    const { unmount } = render(
       <ZenResearchDock
-        client={client()}
+        client={browser}
         dock={dock}
         hostBridge={hostBridge({
           getHostCapabilities: () => ({
@@ -189,5 +190,8 @@ describe("ZenResearchDock", () => {
     expect(
       screen.queryByText("A research page needs the Octant desktop app on this host."),
     ).not.toBeInTheDocument();
+
+    unmount();
+    await waitFor(() => expect(browser.stop).toHaveBeenCalledOnce());
   });
 });

@@ -41,7 +41,7 @@
   border-radius: 0;
 }
 
-.extensions-settings__cards > li:last-child .extcard {
+.extensions-settings__cards > li.extcard:last-child {
   border-bottom: 0;
 }
 

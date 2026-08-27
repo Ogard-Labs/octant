@@ -379,6 +379,14 @@ const WINDOW_OPTIONS: ReadonlyArray<{ readonly value: string; readonly window: R
     { value: "365", window: { kind: "duration-days", days: 365 } },
   ];
 
+function isRetentionScopeKind(value: string): value is RetentionScope["kind"] {
+  return value === "host" || value === "project" || value === "thread";
+}
+
+function isThreadMode(value: string): value is "chat" | "work" | "code" {
+  return value === "chat" || value === "work" || value === "code";
+}
+
 function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }) {
   const [state, setState] = useState<ThreadRetentionState | undefined>();
   const [scopeKind, setScopeKind] = useState<RetentionScope["kind"]>("host");
@@ -431,7 +439,10 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
           <label htmlFor="thread-retention-scope">Scope</label>
           <OctantNativeSelect
             id="thread-retention-scope"
-            onChange={(event) => setScopeKind(event.currentTarget.value as RetentionScope["kind"])}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              if (isRetentionScopeKind(value)) setScopeKind(value);
+            }}
             value={scopeKind}
           >
             <option value="host">This host</option>
@@ -455,7 +466,10 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
               <label htmlFor="thread-retention-mode">Mode</label>
               <OctantNativeSelect
                 id="thread-retention-mode"
-                onChange={(event) => setMode(event.currentTarget.value as "chat" | "work" | "code")}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  if (isThreadMode(value)) setMode(value);
+                }}
                 value={mode}
               >
                 <option value="chat">Chat</option>

@@ -681,7 +681,7 @@
 
 .github-onboarding__trigger {
   max-width: 220px;
-  min-height: 26px;
+  min-height: var(--oct-touch-min);
   gap: 5px;
   padding: 0 5px;
   color: var(--oct-muted);

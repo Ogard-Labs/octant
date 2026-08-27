@@ -19,7 +19,7 @@ import {
 import { ChevronDown, Pencil, Plus, Search, Sparkles } from "lucide-react";
 import { RoutineCalendar } from "./RoutineCalendar";
 import { RoutineComposer } from "./RoutineComposer";
-import { ROUTINE_REQUEST_SUGGESTIONS } from "./routineRequestDraft";
+import { ROUTINE_REQUEST_SUGGESTIONS, type RoutineRequestDraft } from "./routineRequestDraft";
 import {
   routineCadence,
   routineCadenceLabel,
@@ -88,7 +88,7 @@ export interface AutomationCenterProps {
 
 type EditorState =
   | { readonly kind: "closed" }
-  | { readonly kind: "create" }
+  | { readonly kind: "create"; readonly requestDraft?: RoutineRequestDraft }
   | { readonly kind: "edit" };
 
 const ACTIVE_RUN_LIFECYCLES = new Set([
@@ -323,9 +323,9 @@ export function AutomationCenter(props: AutomationCenterProps) {
                 initialRequest={describeRequest}
                 key={describeRequest}
                 now={nowInstant}
-                onConfirm={() => {
+                onConfirm={(requestDraft) => {
                   controller.select(undefined);
-                  setEditor({ kind: "create" });
+                  setEditor({ kind: "create", requestDraft });
                 }}
                 timeZone={props.displayTimeZone ?? "UTC"}
               />
@@ -477,6 +477,9 @@ export function AutomationCenter(props: AutomationCenterProps) {
           <div className="automation-center__detail-pane">
             <AutomationDefinitionEditor
               catalog={props.catalog}
+              {...(editor.requestDraft === undefined
+                ? {}
+                : { initialRequestDraft: editor.requestDraft })}
               {...(props.localHostId === undefined ? {} : { localHostId: props.localHostId })}
               onCancel={() => setEditor({ kind: "closed" })}
               onSubmit={submitEditor}

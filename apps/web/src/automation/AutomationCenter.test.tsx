@@ -400,6 +400,30 @@ describe("AutomationCenter detail disclosure", () => {
 });
 
 describe("AutomationCenter creation and editing", () => {
+  it("carries a confirmed routine request into the editor", async () => {
+    const client = fakeClient({
+      list: vi.fn(async () => ({ kind: "automation-list" as const, items: [] })),
+    });
+    renderCenter({ client });
+
+    await screen.findByRole("heading", { name: "Suggested automations" });
+    await userEvent.click(screen.getByRole("button", { name: /Every weekday morning/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Review this routine" }));
+
+    const form = await screen.findByRole("form", { name: "New automation" });
+    expect(within(form).getByLabelText("Name")).toHaveValue(
+      "Summarise what changed in this Project overnight",
+    );
+    expect(within(form).getByLabelText("Task for each run")).toHaveValue(
+      "summarise what changed in this Project overnight",
+    );
+    expect(within(form).getByLabelText("Schedule")).toHaveValue("weekly-local");
+    expect(within(form).getByRole("checkbox", { name: "Mon" })).toBeChecked();
+    expect(within(form).getByRole("checkbox", { name: "Fri" })).toBeChecked();
+    expect(within(form).getByLabelText("Time of day")).toHaveValue("09:00");
+    expect(within(form).getByLabelText("Timezone")).toHaveValue("UTC");
+  });
+
   it("creates through the editor with expected version zero and refreshes the list", async () => {
     const client = fakeClient({
       execute: vi.fn(async () => ({

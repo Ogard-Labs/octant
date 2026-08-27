@@ -4213,7 +4213,7 @@ function LaunchedShell(
                   );
                 }}
                 archiveOpen={archiveOpen}
-                {...(props.chatClient === undefined ? {} : { archiveChatClient: props.chatClient })}
+                archiveChatClient={chatClient}
                 archiveEntries={archiveEntries}
                 archiveProjects={archiveProjects}
                 onCloseArchive={() => setArchiveOpen(false)}
