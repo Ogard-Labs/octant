@@ -54,6 +54,22 @@ describe("LatencyStatsProjection", () => {
       slowCount: 0,
     });
   });
+
+  it("counts toolchain observations at the slow threshold", () => {
+    const projection = new LatencyStatsProjection();
+    projection.record("rpc-toolchain", 120_000);
+
+    expect(projection.read().measurements).toContainEqual({
+      key: "rpc-toolchain",
+      label: "Toolchain request handling",
+      observationCount: 1,
+      p50Ms: 120_000,
+      p95Ms: 120_000,
+      maxMs: 120_000,
+      slowThresholdMs: 120_000,
+      slowCount: 1,
+    });
+  });
 });
 
 describe("observedRpcLatency", () => {

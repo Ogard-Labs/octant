@@ -271,9 +271,8 @@ export function UsageDashboard(props: UsageDashboardProps) {
       </div>
       <LatencyStatsSection
         className="usage-dashboard__section"
-        compact
         connectionLatencyMs={connectionLatencyMs}
-        latencyStats={data.latencyStats ?? { measurements: [] }}
+        latencyStats={data.latencyStats}
       />
 
       <div className="usage-dashboard__quality" role="group" aria-label="Data quality">

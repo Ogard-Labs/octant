@@ -198,7 +198,7 @@ export function UsageWorkspace(props: UsageWorkspaceProps) {
           <LatencyStatsSection
             className="usage-workspace__section"
             connectionLatencyMs={controller.connectionLatencyMs}
-            latencyStats={dashboard.latencyStats ?? { measurements: [] }}
+            latencyStats={dashboard.latencyStats}
           />
           <p className="usage-workspace__footer">
             Read from this host at {new Date(dashboard.queryAt).toLocaleString()}. Retention,

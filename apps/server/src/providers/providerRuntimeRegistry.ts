@@ -166,8 +166,10 @@ export class ProviderRuntimeRegistry {
     const acquire = Effect.tryPromise({
       try: async () => {
         const startedAt = performance.now();
+        let createdRuntimeEntry = false;
         let entry = this.#runtimes.get(instanceId) as RuntimeEntry<T> | undefined;
         if (entry === undefined) {
+          createdRuntimeEntry = true;
           entry = {
             refs: 0,
             resource: options
@@ -197,10 +199,12 @@ export class ProviderRuntimeRegistry {
         entry.refs += 1;
         acquired = entry;
         const value = (await entry.resource).value;
-        try {
-          this.#observeAcquireMs?.(performance.now() - startedAt);
-        } catch {
-          // Operational observations must not change a successful acquire.
+        if (createdRuntimeEntry) {
+          try {
+            this.#observeAcquireMs?.(performance.now() - startedAt);
+          } catch {
+            // Operational observations must not change a successful acquire.
+          }
         }
         return value;
       },

@@ -18,14 +18,22 @@ const TOOLCHAIN_PREFIXES: ReadonlyArray<string> = [
   "/api/diagnostics/export",
 ];
 
-const MEASUREMENTS = [
+type MeasurementKey = "rpc" | "rpc-toolchain" | "provider-runtime-acquire" | "projection-catch-up";
+
+interface Measurement {
+  readonly key: MeasurementKey;
+  readonly label: string;
+  readonly slowThresholdMs: number | undefined;
+}
+
+const MEASUREMENTS: ReadonlyArray<Measurement> = [
   { key: "rpc", label: "Request handling", slowThresholdMs: 15_000 },
   { key: "rpc-toolchain", label: "Toolchain request handling", slowThresholdMs: 120_000 },
-  { key: "provider-runtime-acquire", label: "Provider runtime start" },
-  { key: "projection-catch-up", label: "Projection catch-up" },
-] as const;
+  { key: "provider-runtime-acquire", label: "Provider runtime start", slowThresholdMs: undefined },
+  { key: "projection-catch-up", label: "Projection catch-up", slowThresholdMs: undefined },
+];
 
-export type ObservedLatency = (typeof MEASUREMENTS)[number]["key"];
+export type ObservedLatency = MeasurementKey;
 
 interface LatencyReading {
   observationCount: number;

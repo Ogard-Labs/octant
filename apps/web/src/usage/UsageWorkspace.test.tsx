@@ -149,6 +149,7 @@ function dashboard(overrides: Partial<UsageDashboardResponse> = {}): UsageDashbo
       ],
       tokenCacheHitRatio: 0.75,
     },
+    latencyStats: { measurements: [] },
     ...overrides,
   } as unknown as UsageDashboardResponse;
 }
