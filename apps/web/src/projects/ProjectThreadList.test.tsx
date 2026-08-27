@@ -29,15 +29,15 @@ describe("ProjectThreadRows", () => {
       HTMLElement.prototype,
       "offsetHeight",
     );
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      get() {
-        return this.hasAttribute("data-index")
-          ? 32
-          : (offsetHeightDescriptor?.get?.call(this) ?? 0);
-      },
-    });
     try {
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          return this.hasAttribute("data-index")
+            ? 32
+            : (offsetHeightDescriptor?.get?.call(this) ?? 0);
+        },
+      });
       render(<ProjectThreadRows onSelectThread={vi.fn()} threads={threads} />, { container });
 
       await waitFor(() => {
@@ -46,9 +46,12 @@ describe("ProjectThreadRows", () => {
         expect(rows.length).toBeLessThan(threads.length);
       });
     } finally {
-      if (offsetHeightDescriptor !== undefined) {
+      if (offsetHeightDescriptor === undefined) {
+        Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+      } else {
         Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
       }
+      container.remove();
     }
   });
 

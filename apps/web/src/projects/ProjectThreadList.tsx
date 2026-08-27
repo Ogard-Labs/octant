@@ -461,28 +461,36 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
     const scrollElement = nearestScrollableAncestor(list);
     if (list === null || scrollElement === null) return;
     const update = () => {
-      setScrollMargin(scrollMarginFor(list, scrollElement));
+      const nextScrollMargin = scrollMarginFor(list, scrollElement);
+      setScrollMargin((currentScrollMargin) =>
+        currentScrollMargin === nextScrollMargin ? currentScrollMargin : nextScrollMargin,
+      );
     };
     update();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(update);
-    observer.observe(list);
-    observer.observe(scrollElement);
-    return () => observer.disconnect();
+    // A section above this list can expand without resizing either observed
+    // box, so ResizeObserver alone would leave the list's margin stale.
+    scrollElement.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(update);
+    observer?.observe(list);
+    observer?.observe(scrollElement);
+    return () => {
+      observer?.disconnect();
+      scrollElement.removeEventListener("scroll", update);
+    };
   }, [props.threads.length, virtualized]);
 
-  const row = (thread: ChatThreadNavigationItem, index?: number) => (
+  const row = (thread: ChatThreadNavigationItem) => (
     <ProjectThreadRow
       actions={actions}
       {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
-      isRenaming={(thread.navigationId ?? thread.threadId) === renamingThreadId}
+      isRenaming={renameable && (thread.navigationId ?? thread.threadId) === renamingThreadId}
       onCancelRename={onCancelRename}
       {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
       onSelectThread={props.onSelectThread}
       {...(props.projectNameForThread === undefined
         ? {}
         : { projectNameForThread: props.projectNameForThread })}
-      key={index === undefined ? (thread.navigationId ?? thread.threadId) : index}
+      key={thread.navigationId ?? thread.threadId}
       thread={thread}
     />
   );
@@ -512,7 +520,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
               width: "100%",
             }}
           >
-            {row(thread, virtualItem.index)}
+            {row(thread)}
           </div>
         );
       })}
