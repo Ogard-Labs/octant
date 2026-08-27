@@ -417,4 +417,22 @@ describe("ProjectThreadRows", () => {
     await userEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
     expect(onArchiveThread).toHaveBeenCalledWith("thread-one");
   });
+
+  it("omits an unparseable updated timestamp from the hover info card", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        projectNameForThread={() => "Core Project"}
+        threads={[{ ...thread, updatedAt: "not-a-date" }]}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    await user.hover(row);
+
+    const card = await screen.findByRole("tooltip");
+    expect(card).not.toHaveTextContent("Updated");
+    expect(card).not.toHaveTextContent("Invalid Date");
+  });
 });

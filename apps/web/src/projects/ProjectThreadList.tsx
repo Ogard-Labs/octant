@@ -93,6 +93,11 @@ function activityOf(thread: ChatThreadNavigationItem): ThreadRowActivity {
   return "idle";
 }
 
+/**
+ * Builds a compact, screen-reader-friendly fact line for a thread row tooltip.
+ * Only uses values already present in the navigation item and Project context;
+ * unparseable timestamps are omitted rather than rendered as "Invalid Date".
+ */
 function threadRowFacts(props: {
   readonly projectName: string | undefined;
   readonly thread: ChatThreadNavigationItem;
@@ -105,7 +110,9 @@ function threadRowFacts(props: {
   if (props.projectName !== undefined) facts.push(props.projectName);
   if (props.thread.updatedAt !== undefined) {
     const date = new Date(props.thread.updatedAt);
-    facts.push(`Updated ${date.toLocaleDateString()}`);
+    if (!Number.isNaN(date.getTime())) {
+      facts.push(`Updated ${date.toLocaleDateString()}`);
+    }
   }
   return facts.join(" · ");
 }
@@ -147,6 +154,11 @@ function ThreadRowTooltip(props: {
   );
 }
 
+/**
+ * The stable trailing action gutter for a thread row. Renders inline Pin/Unpin
+ * and Archive buttons when the caller provides callbacks, plus an overflow menu
+ * that carries the same actions for coarse pointers or narrow viewports.
+ */
 function ThreadRowActionsGutter(props: {
   readonly actions: ThreadRowActions;
   readonly thread: ChatThreadNavigationItem;
@@ -224,6 +236,10 @@ function ThreadRowActionsGutter(props: {
   );
 }
 
+/**
+ * Whether the caller has supplied any action that should be rendered as an
+ * inline thread-row button. Renaming alone does not count as an inline action.
+ */
 function hasInlineActions(actions: ThreadRowActions | undefined): boolean {
   if (actions === undefined) return false;
   return actions.onPinThread !== undefined || actions.onArchiveThread !== undefined;

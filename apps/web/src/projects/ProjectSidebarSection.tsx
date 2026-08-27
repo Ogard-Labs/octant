@@ -270,6 +270,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     thread.projectId === undefined
       ? unfiledLabel
       : (projectNames.get(thread.projectId) ?? unfiledLabel);
+  /** Resolves the Project name shown in a thread row's hover info card. */
   const projectNameForThread = (thread: ChatThreadNavigationItem): string =>
     thread.projectId === undefined
       ? unfiledLabel
