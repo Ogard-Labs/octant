@@ -74,9 +74,12 @@ describe("LatencyStatsProjection", () => {
 
 describe("observedRpcLatency", () => {
   it("classifies product RPCs and excludes non-RPC paths", () => {
-    expect(observedRpcLatency("/api/chat/commands")).toBe("rpc");
+    expect(observedRpcLatency("/api/chat/commands")).toBeUndefined();
+    expect(observedRpcLatency("/api/code/commands")).toBe("rpc");
     expect(observedRpcLatency("/api/chat/attachments/file")).toBe("rpc-toolchain");
     expect(observedRpcLatency("/api/usage/export")).toBe("rpc-toolchain");
+    expect(observedRpcLatency("/api/extensions/import-local")).toBe("rpc-toolchain");
+    expect(observedRpcLatency("/api/extensions/import-local-receipts")).toBe("rpc");
     expect(observedRpcLatency("/health")).toBeUndefined();
     expect(observedRpcLatency("/assets/app.js")).toBeUndefined();
   });

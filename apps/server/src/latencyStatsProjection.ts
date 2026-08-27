@@ -2,7 +2,7 @@ import type { UsageLatencyStats } from "@octant/contracts";
 
 const SAMPLE_LIMIT = 256;
 const TOOLCHAIN_PREFIXES: ReadonlyArray<string> = [
-  "/api/github/clone/",
+  "/api/github/clone",
   "/api/scaffolds",
   "/api/extensions/import-local",
   "/api/apple/toolchain",
@@ -114,7 +114,15 @@ export class LatencyStatsProjection {
 
 export function observedRpcLatency(pathname: string): ObservedLatency | undefined {
   if (!pathname.startsWith("/api/")) return undefined;
-  return TOOLCHAIN_PREFIXES.some((prefix) => pathname.startsWith(prefix)) ? "rpc-toolchain" : "rpc";
+  // Chat send, edit, retry, and resume await the provider attempt before the
+  // HTTP response. Measuring that duration as host RPC mixes model time into
+  // Request handling and fires the 15s slow-request warning on ordinary turns.
+  if (pathname === "/api/chat/commands") return undefined;
+  return TOOLCHAIN_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  )
+    ? "rpc-toolchain"
+    : "rpc";
 }
 
 const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
