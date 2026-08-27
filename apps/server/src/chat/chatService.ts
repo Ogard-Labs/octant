@@ -1432,6 +1432,35 @@ export class ChatService {
           );
         }
       }
+      const providerFallback = command.providerFallback;
+      if (providerFallback !== undefined) {
+        const fallbackInstance = this.#persistence.readProviderInstance(
+          providerFallback.providerInstanceId,
+        );
+        if (fallbackInstance === undefined || !fallbackInstance.enabled) {
+          throw new ChatServiceError({
+            category: "unavailable",
+            message: "The Chat fallback provider is unavailable.",
+          });
+        }
+        // Reuse a probe already taken for this instance (the default provider)
+        // rather than constructing a second driver. Exists and enabled is the
+        // required gate; model presence is only checked when those facts are
+        // already in hand.
+        if (
+          selectedProbe !== undefined &&
+          selectedProviderInstanceId !== undefined &&
+          String(selectedProviderInstanceId) === String(providerFallback.providerInstanceId) &&
+          !selectedProbe.models.some(
+            (model) => String(model.id) === String(providerFallback.modelId),
+          )
+        ) {
+          throw new ChatServiceError({
+            category: "invalid",
+            message: "The Chat fallback model is unavailable.",
+          });
+        }
+      }
       const settings = {
         ...(command.defaultProviderInstanceId === undefined
           ? {}
@@ -1441,9 +1470,7 @@ export class ChatService {
         defaultResearchRouting: command.defaultResearchRouting,
         ...(searxngBaseUrl === undefined ? {} : { searxngBaseUrl }),
         defaultPersonalityInstructions: command.defaultPersonalityInstructions,
-        ...(command.providerFallback === undefined
-          ? {}
-          : { providerFallback: command.providerFallback }),
+        ...(providerFallback === undefined ? {} : { providerFallback }),
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       } satisfies ChatSettings;
@@ -2557,6 +2584,14 @@ export class ChatService {
         readonly probe: ProviderProbeResult;
       }
   > {
+    const instance = this.#persistence.readProviderInstance(providerInstanceId);
+    if (instance === undefined || instance.enabled !== true) {
+      // A disabled or missing fallback is not a route. Never construct its
+      // driver or invoke probe(), which could spawn a CLI, touch credentials,
+      // or make network requests. The turn reports the thread's own provider
+      // refusal instead.
+      return undefined;
+    }
     try {
       const driver = this.#driver(providerInstanceId);
       const probe = await this.#probeProvider(driver, providerInstanceId);

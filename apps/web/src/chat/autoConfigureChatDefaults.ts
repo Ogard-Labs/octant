@@ -9,7 +9,8 @@ type UpdateChatSettingsCommand = Extract<ChatCommand, { kind: "update-chat-setti
  *
  * The update command replaces the whole settings record, so anything omitted
  * here would be silently reset. Building it in one place is what keeps a model
- * choice from clearing a research endpoint the user configured elsewhere.
+ * choice from clearing a research endpoint or fallback route the user
+ * configured elsewhere.
  */
 export function chatDefaultModelCommand(
   settings: ChatSettings,
@@ -24,6 +25,9 @@ export function chatDefaultModelCommand(
     defaultResearchRouting: settings.defaultResearchRouting,
     defaultPersonalityInstructions: settings.defaultPersonalityInstructions,
     ...(settings.searxngBaseUrl === undefined ? {} : { searxngBaseUrl: settings.searxngBaseUrl }),
+    ...(settings.providerFallback === undefined
+      ? {}
+      : { providerFallback: settings.providerFallback }),
   };
 }
 

@@ -173,6 +173,9 @@ function openFixture(options?: {
   readonly contextFacts?: ProviderDriver["contextFacts"];
   readonly seedSettings?: boolean;
   readonly providerEnabled?: boolean;
+  /** Per-instance enablement; overrides `providerEnabled` when provided. */
+  readonly providerEnabledFor?: (providerInstanceId: string) => boolean;
+  readonly missingProviderInstanceIds?: ReadonlyArray<string>;
   readonly agentEligibleDefaults?: ReadonlyArray<{
     readonly providerInstanceId: string;
     readonly modelId: string;
@@ -327,16 +330,20 @@ function openFixture(options?: {
             history: [],
           }
         : { active: [], history: [] },
-    readProviderInstance: () => ({
-      id: decodeProviderInstanceId(ids.provider),
-      displayName: "Fixture provider",
-      driverKind: "openai-compatible",
-      enabled: options?.providerEnabled ?? true,
-      configuration: {},
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-    }),
+    readProviderInstance: (instanceId) => {
+      const id = String(instanceId);
+      if (options?.missingProviderInstanceIds?.includes(id)) return undefined;
+      return {
+        id: decodeProviderInstanceId(id),
+        displayName: "Fixture provider",
+        driverKind: "openai-compatible",
+        enabled: options?.providerEnabledFor?.(id) ?? options?.providerEnabled ?? true,
+        configuration: {},
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
     readProviderInstances: () => [],
     readProviderDefaults: () => ({
       defaultProviderInstanceId: ids.provider,
@@ -1580,6 +1587,69 @@ describe("ChatService", () => {
       kind: "settings-updated",
       settings: { searxngBaseUrl: "https://search.example.test/base/" },
     });
+  });
+
+  it("clears a stored fallback when an update omits it, and refuses one that is missing or disabled", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const fallback = { providerInstanceId: fallbackProvider, modelId: "model-a" };
+    const seeded = openFixture({
+      settings: { ...settings(), providerFallback: fallback } as ChatSettings,
+    });
+    const omitted = await seeded.service.execute({
+      kind: "update-chat-settings",
+      expectedVersion: 1,
+      defaultProviderInstanceId: ids.provider,
+      defaultModelId: "model-a",
+      defaultResearchEnabled: false,
+      defaultResearchRouting: "automatic",
+      defaultPersonalityInstructions: "Be calm.",
+    });
+    expect(omitted).toMatchObject({ kind: "settings-updated" });
+    if (omitted.kind !== "settings-updated") throw new Error("Expected settings-updated result.");
+    expect(omitted.settings.providerFallback).toBeUndefined();
+
+    const preserved = await openFixture().service.execute({
+      kind: "update-chat-settings",
+      expectedVersion: 1,
+      defaultProviderInstanceId: ids.provider,
+      defaultModelId: "model-a",
+      defaultResearchEnabled: false,
+      defaultResearchRouting: "automatic",
+      defaultPersonalityInstructions: "Be calm.",
+      providerFallback: fallback,
+    });
+    expect(preserved).toMatchObject({
+      kind: "settings-updated",
+      settings: { providerFallback: fallback },
+    });
+
+    await expect(
+      openFixture({
+        providerEnabledFor: (providerInstanceId) => providerInstanceId !== fallbackProvider,
+      }).service.execute({
+        kind: "update-chat-settings",
+        expectedVersion: 1,
+        defaultProviderInstanceId: ids.provider,
+        defaultModelId: "model-a",
+        defaultResearchEnabled: false,
+        defaultResearchRouting: "automatic",
+        defaultPersonalityInstructions: "Be calm.",
+        providerFallback: fallback,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+
+    await expect(
+      openFixture({ missingProviderInstanceIds: [fallbackProvider] }).service.execute({
+        kind: "update-chat-settings",
+        expectedVersion: 1,
+        defaultProviderInstanceId: ids.provider,
+        defaultModelId: "model-a",
+        defaultResearchEnabled: false,
+        defaultResearchRouting: "automatic",
+        defaultPersonalityInstructions: "Be calm.",
+        providerFallback: fallback,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
   });
 
   it("copies authoritative Chat Settings into each new thread", async () => {
@@ -5067,6 +5137,48 @@ describe("ChatService", () => {
         prompt: "Report the real reason.",
       }),
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+  });
+
+  it("does not probe a disabled fallback and reports the original provider's refusal", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const constructed: string[] = [];
+    const probed: string[] = [];
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) => {
+        probed.push(providerInstanceId);
+        return providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined;
+      },
+      refuseDriverFor: (providerInstanceId) => {
+        constructed.push(providerInstanceId);
+        return undefined;
+      },
+      providerEnabledFor: (providerInstanceId) => providerInstanceId !== fallbackProvider,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Disabled fallback",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Do not spawn the disabled runtime.",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(constructed).not.toContain(fallbackProvider);
+    expect(probed).not.toContain(fallbackProvider);
     expect(service.read(created.thread.id).turns).toHaveLength(0);
   });
 
