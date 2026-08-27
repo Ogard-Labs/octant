@@ -264,4 +264,175 @@ describe("ProjectThreadRows", () => {
 
     expect(screen.queryByRole("menuitem")).toBeNull();
   });
+
+  it("exposes a pin action in the thread row's trailing gutter without selecting the thread", async () => {
+    const onPinThread = vi.fn();
+    const onSelectThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread }}
+        onSelectThread={onSelectThread}
+        threads={[thread]}
+      />,
+    );
+
+    const pin = screen.getByRole("button", { name: "Pin thread" });
+    expect(pin).toBeInTheDocument();
+    await userEvent.click(pin);
+
+    expect(onPinThread).toHaveBeenCalledWith("thread-one", true);
+    expect(onSelectThread).not.toHaveBeenCalled();
+  });
+
+  it("exposes an unpin action when the thread is already pinned", async () => {
+    const onPinThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, pinned: true }]}
+      />,
+    );
+
+    const unpin = screen.getByRole("button", { name: "Unpin thread" });
+    await userEvent.click(unpin);
+
+    expect(onPinThread).toHaveBeenCalledWith("thread-one", false);
+  });
+
+  it("exposes an archive action in the thread row's trailing gutter without selecting the thread", async () => {
+    const onArchiveThread = vi.fn();
+    const onSelectThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onArchiveThread }}
+        onSelectThread={onSelectThread}
+        threads={[thread]}
+      />,
+    );
+
+    const archive = screen.getByRole("button", { name: "Archive thread" });
+    await userEvent.click(archive);
+
+    expect(onArchiveThread).toHaveBeenCalledWith("thread-one");
+    expect(onSelectThread).not.toHaveBeenCalled();
+  });
+
+  it("keeps the inline action gutter after the thread title so the row does not jump", () => {
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread: vi.fn(), onArchiveThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    const gutter = row.parentElement;
+    expect(gutter).toHaveClass("sidebar-navigation__thread-row");
+    expect(row.compareDocumentPosition(screen.getByRole("button", { name: "Pin thread" }))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it("shows a delayed info card with thread facts on hover", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        projectNameForThread={() => "Core Project"}
+        threads={[{ ...thread, pinned: true, unread: true }]}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    await user.hover(row);
+
+    const card = await screen.findByRole("tooltip");
+    expect(card).toHaveTextContent("Controller foundation");
+    expect(card).toHaveTextContent("Core Project");
+    expect(card).toHaveTextContent("Pinned");
+    expect(card).toHaveTextContent("Unread");
+  });
+
+  it("lets keyboard users reach and activate the pin action", async () => {
+    const onPinThread = vi.fn();
+    render(
+      <ProjectThreadRows actions={{ onPinThread }} onSelectThread={vi.fn()} threads={[thread]} />,
+    );
+
+    const pin = screen.getByRole("button", { name: "Pin thread" });
+    pin.focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(onPinThread).toHaveBeenCalledWith("thread-one", true);
+  });
+
+  it("exposes an overflow action that carries the same pin and archive actions", async () => {
+    const onPinThread = vi.fn();
+    const onArchiveThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread, onArchiveThread }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    const overflow = screen.getByRole("button", { name: "Thread actions" });
+    expect(overflow).toBeInTheDocument();
+    await userEvent.click(overflow);
+
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Pin thread" }));
+    expect(onPinThread).toHaveBeenCalledWith("thread-one", true);
+
+    await userEvent.click(overflow);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Archive thread" }));
+    expect(onArchiveThread).toHaveBeenCalledWith("thread-one");
+  });
+
+  it("keeps pin and archive reachable from the right-click menu as secondary actions", async () => {
+    const onPinThread = vi.fn();
+    const onArchiveThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread, onArchiveThread }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Pin" }));
+    expect(onPinThread).toHaveBeenCalledWith("thread-one", true);
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    expect(onArchiveThread).toHaveBeenCalledWith("thread-one");
+  });
+
+  it("omits an unparseable updated timestamp from the hover info card", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        projectNameForThread={() => "Core Project"}
+        threads={[{ ...thread, updatedAt: "not-a-date" }]}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    await user.hover(row);
+
+    const card = await screen.findByRole("tooltip");
+    expect(card).not.toHaveTextContent("Updated");
+    expect(card).not.toHaveTextContent("Invalid Date");
+  });
 });

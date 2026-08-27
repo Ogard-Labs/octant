@@ -270,6 +270,11 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     thread.projectId === undefined
       ? unfiledLabel
       : (projectNames.get(thread.projectId) ?? unfiledLabel);
+  /** Resolves the Project name shown in a thread row's hover info card. */
+  const projectNameForThread = (thread: ChatThreadNavigationItem): string =>
+    thread.projectId === undefined
+      ? unfiledLabel
+      : (projectNames.get(thread.projectId) ?? unfiledLabel);
   const currentFilters =
     projectViewState === undefined || allProjectsPreferences === undefined
       ? undefined
@@ -473,6 +478,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         {...(props.onSelectThread === undefined ? {} : { onSelectThread: props.onSelectThread })}
         {...(props.threadActions === undefined ? {} : { threadActions: props.threadActions })}
         {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
+        projectNameForThread={projectNameForThread}
         projects={projects}
         revealThreads={searching}
         sort={projectSort}
@@ -571,6 +577,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                     ? {}
                     : { onRenameThread: props.onRenameThread })}
                   onSelectThread={props.onSelectThread}
+                  projectNameForThread={projectNameForThread}
                   threads={unfiled}
                 />
               </div>
@@ -635,6 +642,7 @@ function ProjectGroup(props: {
   readonly threadActions?: ThreadRowActions;
   readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly onToggleProject: (projectId: ProjectId) => void;
+  readonly projectNameForThread?: (thread: ChatThreadNavigationItem) => string | undefined;
   readonly projects: ReadonlyArray<ProjectSummary>;
   readonly revealThreads?: boolean;
   readonly sort?: ProjectSort;
@@ -781,6 +789,9 @@ function ProjectGroup(props: {
                 id={projectThreadListId(project.id)}
                 label={`Threads in ${project.name}`}
                 onSelectThread={props.onSelectThread!}
+                {...(props.projectNameForThread === undefined
+                  ? {}
+                  : { projectNameForThread: props.projectNameForThread })}
                 threads={nestedThreads}
               />
             ) : null}
