@@ -36,7 +36,10 @@ describe("createIntegrationClient", () => {
       .fn()
       .mockResolvedValue(jsonResponse({ state: "unauthorized", capabilities: [] }));
     await client(fetch).executeAuthenticationCommand({ kind: "setup" });
-    const [, init] = fetch.mock.calls[0]!;
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(String(url)).toBe(
+      "http://127.0.0.1:4317/api/integrations/linear/authentication/commands",
+    );
     expect(JSON.parse(init.body)).toEqual({ kind: "setup" });
     expect(init.body).not.toMatch(/access_token|refresh_token|lin_api_/);
   });

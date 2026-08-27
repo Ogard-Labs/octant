@@ -43,7 +43,9 @@ export function createIntegrationClient(options: IntegrationClientOptions): Inte
   const headers = {
     "x-octant-window-capability": options.windowCapability,
   } as const;
-  const root = `/api/integrations/${encodeURIComponent(options.slug)}`;
+  const snapshotPath = linearAuthenticationPath(options.slug);
+  const commandsPath = linearAuthenticationCommandsPath(options.slug);
+  const secretsPath = `/api/integrations/${encodeURIComponent(options.slug)}/secrets`;
 
   async function send(path: string, init: RequestInit): Promise<unknown> {
     let response: Response;
@@ -76,23 +78,23 @@ export function createIntegrationClient(options: IntegrationClientOptions): Inte
 
   return {
     async authenticationSnapshot() {
-      const body = await send(`${root}/authentication`, { method: "GET", headers });
+      const body = await send(snapshotPath, { method: "GET", headers });
       return decodeResponse(body, decodeIntegrationAuthenticationSnapshot);
     },
     async executeAuthenticationCommand(command) {
       const validated = decodeRequest(command, decodeIntegrationAuthenticationCommand);
-      const body = await post(`${root}/authentication/commands`, validated);
+      const body = await post(commandsPath, validated);
       return decodeResponse(body, decodeIntegrationAuthenticationSnapshot);
     },
     async storePersonalCredential(credential) {
-      await post(`${root}/secrets`, {
+      await post(secretsPath, {
         kind: "put",
         scope: "personal-api-key",
         credential,
       });
     },
     async deletePersonalCredential() {
-      await post(`${root}/secrets`, { kind: "delete", scope: "personal-api-key" });
+      await post(secretsPath, { kind: "delete", scope: "personal-api-key" });
     },
   };
 }
@@ -111,6 +113,23 @@ function decodeResponse<T>(value: unknown, decode: (input: unknown) => T): T {
   } catch {
     throw new IntegrationClientFailure("The integration returned an invalid response.", 0);
   }
+}
+
+/**
+ * Linear is the shipped Integration plugin. The wiring check only sees quoted
+ * `/api/...` literals, so this slug must construct the same strings the server
+ * serves. Other slugs stay interpolated.
+ */
+function linearAuthenticationPath(slug: string): string {
+  return slug === "linear"
+    ? "/api/integrations/linear/authentication"
+    : `/api/integrations/${encodeURIComponent(slug)}/authentication`;
+}
+
+function linearAuthenticationCommandsPath(slug: string): string {
+  return slug === "linear"
+    ? "/api/integrations/linear/authentication/commands"
+    : `/api/integrations/${encodeURIComponent(slug)}/authentication/commands`;
 }
 
 function validateLoopbackBaseUrl(baseUrl: string): void {
