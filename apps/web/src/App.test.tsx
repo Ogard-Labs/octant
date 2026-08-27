@@ -3205,7 +3205,9 @@ describe("App", () => {
 
     // Search "providers" and deep-link to the Providers & Models section.
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "providers");
-    const providersListbox = await screen.findByRole("listbox", { name: "Settings search results" });
+    const providersListbox = await screen.findByRole("listbox", {
+      name: "Settings search results",
+    });
     providersListbox.focus();
     fireEvent.keyDown(providersListbox, { key: "ArrowDown" });
     fireEvent.keyDown(providersListbox, { key: "Enter" });
