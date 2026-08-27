@@ -70,7 +70,10 @@ function fixture(profile: AcpProviderProfile, mode = "ready") {
   const sandboxPath = join(root, "sandbox-exec");
   writeFileSync(sandboxPath, '#!/bin/sh\nshift 3\nexec "$@"\n', { mode: 0o700 });
   chmodSync(sandboxPath, 0o700);
-  return { binaryPath, root, sandboxPath, canonicalRoot: realpathSync(root) };
+  const bwrapPath = join(root, "bwrap");
+  writeFileSync(bwrapPath, '#!/bin/sh\nexec "$@"\n', { mode: 0o700 });
+  chmodSync(bwrapPath, 0o700);
+  return { binaryPath, root, sandboxPath, bwrapPath, canonicalRoot: realpathSync(root) };
 }
 
 function records(root: string): readonly Record<string, unknown>[] {
@@ -476,7 +479,7 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
     expect(existsSync(managedHome)).toBe(true);
   });
 
-  it("keeps Plan read-only and fails closed off macOS", async () => {
+  it("keeps Plan read-only on macOS and uses Bubblewrap on Linux", async () => {
     const target = fixture(profile);
     const managedHome = join(target.canonicalRoot, "managed-home");
     const plan = await Effect.runPromise(
@@ -493,8 +496,21 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
     expect(plan.args[1]).not.toContain(`(allow file-write* (subpath "${target.canonicalRoot}"))`);
     expect(plan.args[1]).toContain(`(allow file-read* (subpath "${target.canonicalRoot}"))`);
 
-    const unsupported = await failureOf(
-      makeAcpConfinementLive({ platform: "linux" }).prepare({
+    const hostAuth = join(target.canonicalRoot, "host-auth");
+    if (profile.process.hostAuthentication?.kind === "directory") {
+      mkdirSync(hostAuth, { recursive: true });
+    } else if (profile.process.hostAuthentication?.kind === "credential-file") {
+      writeFileSync(hostAuth, "", { mode: 0o600 });
+    }
+    const linux = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "linux",
+        sandboxPath: target.bwrapPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        ...(profile.process.hostAuthentication === undefined
+          ? {}
+          : { hostAuthenticationPath: hostAuth }),
+      }).prepare({
         profile,
         binaryPath: target.binaryPath,
         root: target.canonicalRoot,
@@ -504,7 +520,10 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
         environment: {},
       }),
     );
-    expect(unsupported.category).toBe("incompatible");
+    expect(linux.command).toBe(target.bwrapPath);
+    expect(linux.args).toContain("--unshare-all");
+    expect(linux.args).toContain("--");
+    expect(linux.args).toContain(target.binaryPath);
   });
 });
 
