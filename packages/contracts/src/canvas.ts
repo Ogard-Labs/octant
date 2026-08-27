@@ -3,6 +3,7 @@ import { UtcTimestamp } from "./events";
 import {
   CanvasActor,
   CanvasBlockId,
+  CanvasEdgeId,
   CanvasId,
   CanvasNodeId,
   CanvasSchemaVersion,
@@ -380,17 +381,25 @@ export const CanvasTimelineBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasTimelineBlock = typeof CanvasTimelineBlock.Type;
 
+// Diagram v2 fields: a node may carry an explicit user or agent placement, and
+// a diagram may declare whether its layout is authoritative (manual) or
+// generated (auto). Layout revisions mint a new immutable Canvas version with
+// the authoring actor recorded in provenance.
 export const CanvasDiagramNode = Schema.Struct({
   nodeId: CanvasNodeId,
   label: CanvasLabel,
   role: Schema.optional(boundedToken("CanvasNodeRole")),
   x: Schema.optional(FiniteNumber),
   y: Schema.optional(FiniteNumber),
+  positioned: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type CanvasDiagramNode = typeof CanvasDiagramNode.Type;
 
+export const CanvasDiagramLayoutKind = Schema.Literal("auto", "manual");
+export type CanvasDiagramLayoutKind = typeof CanvasDiagramLayoutKind.Type;
+
 export const CanvasDiagramEdge = Schema.Struct({
-  edgeId: boundedToken("CanvasEdgeId"),
+  edgeId: CanvasEdgeId,
   source: CanvasNodeId,
   target: CanvasNodeId,
   label: Schema.optional(CanvasLabel),
@@ -425,6 +434,7 @@ export const CanvasDiagramBlock = Schema.Struct({
     Schema.Array(CanvasDiagramGroup).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_GROUPS)),
   ),
   flow: Schema.optional(CanvasDiagramFlow),
+  layout: Schema.optional(CanvasDiagramLayoutKind),
 }).annotations(strict);
 export type CanvasDiagramBlock = typeof CanvasDiagramBlock.Type;
 
@@ -627,6 +637,7 @@ export const decodeCanvasBlockKind = Schema.decodeUnknownSync(CanvasBlockKind);
 export const decodeCanvasBlock = Schema.decodeUnknownSync(CanvasBlock);
 export const decodeCanvasDefinition = Schema.decodeUnknownSync(CanvasDefinition);
 export const decodeCanvasVersion = Schema.decodeUnknownSync(CanvasVersion);
+export const decodeCanvasDiagramLayoutKind = Schema.decodeUnknownSync(CanvasDiagramLayoutKind);
 
 // ── Journaled lifecycle events ──────────────────────────────────────────────
 //

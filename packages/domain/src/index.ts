@@ -105,5 +105,6 @@ export * from "./codeProjectPullRequestPolicy";
 export * from "./managedRepositoryPolicy";
 export * from "./canvasShareSnapshotPolicy";
 export * from "./canvasShareAccessLogPolicy";
+export * from "./canvasBoardPolicy";
 export * from "./workspacePresetPolicy";
 export * from "./appUpdatePolicy";

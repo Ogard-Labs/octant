@@ -200,7 +200,7 @@ export function projectVersionHistoryEntry(
   const entry = {
     versionId: version.versionId,
     sequence: version.sequence,
-    schemaVersion: CANVAS_SCHEMA_VERSION,
+    schemaVersion: version.schemaVersion,
     title: version.definition.title,
     createdAt: version.createdAt,
     createdBy: version.createdBy,

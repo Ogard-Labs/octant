@@ -139,4 +139,36 @@ describe("layoutCanvasDiagram", () => {
 
     expect(layoutCanvasDiagram(block)).toEqual(layoutCanvasDiagram(block));
   });
+
+  it("ignores authored node positions when the diagram declares auto layout", () => {
+    const block = diagram({
+      layout: "auto" as const,
+      nodes: [
+        { nodeId: "client" as never, label: "Client", x: 400, y: 500 },
+        { nodeId: "server" as never, label: "Server" },
+        { nodeId: "store" as never, label: "Store" },
+      ],
+    });
+
+    const layout = layoutCanvasDiagram(block);
+    const client = layout.nodes.find((node) => node.nodeId === "client");
+    expect(client).toBeDefined();
+    expect(client).toMatchObject({ x: 24, y: 24 });
+  });
+
+  it("keeps authored node positions when the diagram declares manual layout", () => {
+    const block = diagram({
+      layout: "manual" as const,
+      nodes: [
+        { nodeId: "client" as never, label: "Client", x: 400, y: 500 },
+        { nodeId: "server" as never, label: "Server" },
+        { nodeId: "store" as never, label: "Store" },
+      ],
+    });
+
+    const layout = layoutCanvasDiagram(block);
+    const client = layout.nodes.find((node) => node.nodeId === "client");
+    expect(client?.x).toBe(400);
+    expect(client?.y).toBe(500);
+  });
 });

@@ -157,7 +157,7 @@ describe("Canvas validation policy", () => {
 
   it("fails closed for unknown schema versions", () => {
     expectPolicyCode(
-      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 2 }),
+      () => validateCanvasDefinition({ ...baseDefinition, schemaVersion: 3 }),
       "unsupported-schema-version",
     );
     expectPolicyCode(

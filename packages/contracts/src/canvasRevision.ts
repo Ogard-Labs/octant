@@ -3,9 +3,9 @@ import { AgentRunAuthority } from "./agentRun";
 import {
   CanvasActor,
   CanvasId,
+  CanvasSchemaVersion,
   CanvasVersion,
   CanvasVersionId,
-  CANVAS_SCHEMA_VERSION,
 } from "./canvas";
 import {
   CANVAS_CREATE_PROMPT_MAX_CHARS,
@@ -113,7 +113,7 @@ export type CanvasReviseResult = typeof CanvasReviseResult.Type;
 export const CanvasVersionHistoryEntry = Schema.Struct({
   versionId: CanvasVersionId,
   sequence: Schema.Int.pipe(Schema.positive()),
-  schemaVersion: Schema.Literal(CANVAS_SCHEMA_VERSION),
+  schemaVersion: CanvasSchemaVersion,
   title: boundedNonEmptyText(256),
   createdAt: UtcTimestamp,
   createdBy: CanvasActor,
