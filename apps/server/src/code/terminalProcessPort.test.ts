@@ -25,6 +25,7 @@ function confinedOptions(overrides: ConstructorParameters<typeof TerminalProcess
   return {
     confinement: fake.confinement,
     temporaryDirectory: fake.temporaryDirectory,
+    platform: "darwin" as const,
     ...overrides,
   };
 }
@@ -93,6 +94,7 @@ describe("TerminalProcessPort", () => {
       temporaryDirectory: fake.temporaryDirectory,
       shellStateDirectory,
       networkEgress: "none",
+      platform: "darwin",
     });
 
     port.start({
@@ -150,6 +152,7 @@ describe("TerminalProcessPort", () => {
         confinement: fake.confinement,
         temporaryDirectory: fake.temporaryDirectory,
         shellStateDirectory,
+        platform: "darwin",
       }).start({ shell: "/bin/zsh", cwd, stateScope, environment: {}, columns: 80, rows: 24 });
       return {
         stateDirectory: launchedStateDirectory(spawn),
@@ -219,6 +222,7 @@ describe("TerminalProcessPort", () => {
     expect(() =>
       new TerminalProcessPort({
         platform: "linux",
+        sandboxPath: join(tmpdir(), "missing-bwrap"),
         spawn: vi.fn(),
       }).start({
         shell: "/bin/sh",
