@@ -1,7 +1,10 @@
 import { execFile, spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
+import { promisify } from "node:util";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
+import { isExecutable } from "./executableCheck";
 
+const execFileAsync = promisify(execFile);
 export const SECRET_TOOL_PATH = "/usr/bin/secret-tool";
 export const SECRET_SERVICE_BUSCTL_PATH = "/usr/bin/busctl";
 export const SECRET_SERVICE_ATTRIBUTE = "octant";
@@ -46,6 +49,7 @@ export interface SecretServiceAvailability {
 
 export async function probeSecretService(
   runner: SecretServiceProbeRunner = defaultProbeRunner,
+  executable: (path: string) => Promise<boolean> = isExecutable,
 ): Promise<SecretServiceAvailability> {
   const service = await probeCommand(runner, SECRET_SERVICE_BUSCTL_PATH, [
     "--user",
@@ -53,7 +57,7 @@ export async function probeSecretService(
     "status",
     "org.freedesktop.secrets",
   ]);
-  const tool = await probeCommand(runner, SECRET_TOOL_PATH, ["--help"]);
+  const tool = await executable(SECRET_TOOL_PATH);
   return {
     available: service && tool,
     service: service ? "available" : "unavailable",
@@ -174,7 +178,7 @@ async function probeCommand(
 ): Promise<boolean> {
   try {
     const result = await runner.run(command, args);
-    return result.stdout.trim() !== "" || result.stderr.trim() !== "";
+    return result.stdout.trim() !== "" && result.stderr.trim() === "";
   } catch {
     return false;
   }
@@ -196,32 +200,12 @@ function isSecretStoreUnavailable(stderr: string): boolean {
 }
 
 const defaultProbeRunner: SecretServiceProbeRunner = {
-  run: (command, args) =>
-    new Promise((resolve, reject) => {
-      execFile(
-        command,
-        [...args],
-        {
-          shell: false,
-          timeout: DEFAULT_TIMEOUT_MS,
-          maxBuffer: MAX_OUTPUT_BYTES,
-          env: { ...process.env, LC_ALL: "C" },
-        },
-        (error, stdout, stderr) => {
-          if (
-            command === SECRET_TOOL_PATH &&
-            args.length === 1 &&
-            args[0] === "--help" &&
-            (stdout.trim() !== "" || stderr.trim() !== "")
-          ) {
-            resolve({ stdout: stdout || stderr, stderr });
-          } else if (error !== null) {
-            reject(error);
-          } else {
-            resolve({ stdout, stderr });
-          }
-        },
-      );
+  run: async (command, args) =>
+    execFileAsync(command, [...args], {
+      shell: false,
+      timeout: DEFAULT_TIMEOUT_MS,
+      maxBuffer: MAX_OUTPUT_BYTES,
+      env: { ...process.env, LC_ALL: "C" },
     }),
 };
 

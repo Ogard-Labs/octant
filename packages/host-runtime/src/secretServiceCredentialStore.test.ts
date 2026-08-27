@@ -112,21 +112,46 @@ describe("Secret Service credential store", () => {
 
   it("requires both a responding Secret Service and the client tool", async () => {
     const commands: string[] = [];
-    const available = await probeSecretService({
-      run: async (command) => {
-        commands.push(command);
-        return { stdout: "available\n", stderr: "" };
+    const available = await probeSecretService(
+      {
+        run: async (command) => {
+          commands.push(command);
+          return { stdout: "available\n", stderr: "" };
+        },
       },
-    });
+      async () => true,
+    );
     expect(available).toEqual({ available: true, service: "available", tool: "available" });
-    expect(commands).toEqual([SECRET_SERVICE_BUSCTL_PATH, SECRET_TOOL_PATH]);
+    expect(commands).toEqual([SECRET_SERVICE_BUSCTL_PATH]);
 
-    const missingTool = await probeSecretService({
-      run: async (command) => {
-        if (command === SECRET_TOOL_PATH) throw new Error("spawn ENOENT");
-        return { stdout: "available\n", stderr: "" };
+    const missingTool = await probeSecretService(
+      {
+        run: async () => {
+          return { stdout: "available\n", stderr: "" };
+        },
       },
-    });
+      async () => false,
+    );
     expect(missingTool).toEqual({ available: false, service: "available", tool: "unavailable" });
+  });
+
+  it("treats Secret Service diagnostics on stderr as unavailable", async () => {
+    const result = await probeSecretService(
+      {
+        run: async () => ({ stdout: "", stderr: "service unavailable" }),
+      },
+      async () => true,
+    );
+    expect(result).toEqual({ available: false, service: "unavailable", tool: "available" });
+  });
+
+  it("treats a bus response with diagnostics on stderr as unavailable", async () => {
+    const result = await probeSecretService(
+      {
+        run: async () => ({ stdout: "service present", stderr: "diagnostic" }),
+      },
+      async () => true,
+    );
+    expect(result).toEqual({ available: false, service: "unavailable", tool: "available" });
   });
 });

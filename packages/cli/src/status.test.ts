@@ -27,8 +27,8 @@ describe("runStatusCommand", () => {
     const report = await runStatusCommand({ fetch, stdout });
     expect(report.status).toBe("ready");
     expect(report.instanceId).toBe("instance-1");
-    expect(["available", "unavailable"]).toContain(report.secretStore);
-    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("ready"));
+    expect(report.secretStore).toBeDefined();
+    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("Secret store:"));
   });
 
   it("reports disabled when storage is not ready", async () => {
@@ -41,18 +41,40 @@ describe("runStatusCommand", () => {
         instanceId: "instance-2",
       }),
     );
-    const report = await runStatusCommand({ fetch });
+    const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const report = await runStatusCommand({ fetch, stdout });
     expect(report.status).toBe("disabled");
-    expect(["available", "unavailable"]).toContain(report.secretStore);
+    expect(report.secretStore).toBeDefined();
   });
 
   it("reports unreachable when the host cannot be contacted", async () => {
     const fetch = mockFetch(async () => {
       throw new Error("ECONNREFUSED");
     });
-    const report = await runStatusCommand({ fetch });
+    const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const report = await runStatusCommand({ fetch, stdout });
     expect(report.status).toBe("unreachable");
-    expect(["available", "unavailable"]).toContain(report.secretStore);
+    expect(report.secretStore).toBeDefined();
+  });
+
+  it("omits local secret-store status when inspecting a remote host", async () => {
+    const fetch = mockFetch(async () =>
+      jsonResponse({
+        product: "Octant",
+        status: "ok",
+        storage: "ready",
+        version: "0.0.0-dev",
+        instanceId: "remote-instance",
+      }),
+    );
+    const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const report = await runStatusCommand({
+      hostname: "station.example",
+      fetch,
+      stdout,
+    });
+    expect(report.secretStore).toBeUndefined();
+    expect(stdout.write).toHaveBeenCalledWith(expect.not.stringContaining("Secret store:"));
   });
 });
 

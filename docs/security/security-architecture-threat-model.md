@@ -285,10 +285,12 @@ window, or approves an action class the host policy reserves for the local user.
   `sandbox-exec` with `PATH=/usr/bin:/bin`, an explicit ready-handshake, bounded handshake bytes,
   durable process receipts, and stop/drain semantics
   (`apps/server/src/extensions/nodeExtensionProcessPort.ts`, `extensionSupervisor.ts`).
-- **Keychain credential broker.** Provider credentials live in the macOS Keychain
-  (`apps/desktop/src/keychainCredentialStore.ts`). The desktop exposes them only through a
-  loopback-only HTTP broker with a random bearer token, a closed route set (has/resolve/purge),
-  bounded bodies, and UUID-only credential references (`packages/host-runtime/src/credentialBroker.ts`).
+- **Host credential broker.** Provider credentials live in the host's OS secret store:
+  macOS Keychain (`apps/desktop/src/keychainCredentialStore.ts`) or Linux Secret Service through
+  `secret-tool`. The desktop or CLI host exposes them only through a loopback-only HTTP broker
+  with a random bearer token, a closed route set (has/resolve/purge), bounded bodies, and
+  UUID-only credential references (`packages/host-runtime/src/credentialBroker.ts`). The CLI
+  starts the broker only when Secret Service is available; otherwise the broker is absent.
   Tools and renderers see indirect references only; broker coordinates are stripped from child
   environments.
 - **Worktree and workspace isolation.** Code children require a verified isolated worktree receipt

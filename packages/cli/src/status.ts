@@ -13,7 +13,7 @@ export interface StatusReport {
   readonly url: URL;
   readonly instanceId?: string;
   readonly version?: string;
-  readonly secretStore: "available" | "unavailable";
+  readonly secretStore?: "available" | "unavailable";
 }
 
 export async function runStatusCommand(options: StatusCommandOptions = {}): Promise<StatusReport> {
@@ -23,14 +23,17 @@ export async function runStatusCommand(options: StatusCommandOptions = {}): Prom
   const fetch = options.fetch ?? globalThis.fetch;
   const stdout = options.stdout ?? process.stdout;
 
+  const isLocalTarget = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
   const [health, capabilities] = await Promise.all([
     probeHostHealth({ url, fetch }),
-    probeHostPlatformCapabilities({
-      platform: process.platform,
-      uid: process.getuid?.() ?? 0,
-    }),
+    isLocalTarget
+      ? probeHostPlatformCapabilities({
+          platform: process.platform,
+          uid: process.getuid?.() ?? 0,
+        })
+      : Promise.resolve(undefined),
   ]);
-  const secretStore = capabilities.capabilities.find(
+  const secretStore = capabilities?.capabilities.find(
     (capability) => capability.name === "secret-store",
   );
   const report: StatusReport = {
@@ -38,7 +41,9 @@ export async function runStatusCommand(options: StatusCommandOptions = {}): Prom
     url,
     ...(health.instanceId === undefined ? {} : { instanceId: health.instanceId }),
     ...(health.version === undefined ? {} : { version: health.version }),
-    secretStore: secretStore?.state === "available" ? "available" : "unavailable",
+    ...(isLocalTarget
+      ? { secretStore: secretStore?.state === "available" ? "available" : "unavailable" }
+      : {}),
   };
   stdout.write(formatStatusReport(report));
   return report;
@@ -50,7 +55,7 @@ export function formatStatusReport(report: StatusReport): string {
     `Endpoint: ${report.url.toString()}`,
     ...(report.instanceId === undefined ? [] : [`Instance: ${report.instanceId}`]),
     ...(report.version === undefined ? [] : [`Version: ${report.version}`]),
-    `Secret store: ${report.secretStore}`,
+    ...(report.secretStore === undefined ? [] : [`Secret store: ${report.secretStore}`]),
   ];
   if (report.status === "unreachable") {
     lines.push(

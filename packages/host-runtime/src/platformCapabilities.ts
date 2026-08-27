@@ -1,10 +1,14 @@
 import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { isExecutable } from "./executableCheck";
+
+const execFileAsync = promisify(execFile);
 
 // Honest platform capability probing for native host tools. Every probe runs a
 // fixed absolute command with an argument array (never a shell), and every
 // failure mode — missing tool, non-zero exit, timeout, empty output — resolves
-// to a typed `unavailable` state. `secret-tool --help` is the one probe whose
-// usage output is useful even though libsecret exits with status 2.
+// to a typed `unavailable` state. A capability is reported available only when
+// its probe demonstrably succeeded.
 
 export type HostPlatformCapabilityName =
   | "process-inspection"
@@ -43,16 +47,14 @@ export interface ProbeHostPlatformCapabilitiesOptions {
   readonly platform: string;
   readonly uid: number;
   readonly runner?: HostPlatformCapabilityProbeRunner;
+  readonly executable?: (path: string) => Promise<boolean>;
 }
 
 interface CapabilityProbe {
   readonly name: HostPlatformCapabilityName;
   readonly command: string;
   readonly args: readonly string[];
-  readonly additional?: ReadonlyArray<{
-    readonly command: string;
-    readonly args: readonly string[];
-  }>;
+  readonly additionalExecutablePaths?: readonly string[];
 }
 
 const ALL_CAPABILITIES: ReadonlyArray<HostPlatformCapabilityName> = [
@@ -87,7 +89,7 @@ function probesFor(platform: "darwin" | "linux", uid: number): ReadonlyArray<Cap
       name: "secret-store",
       command: "/usr/bin/busctl",
       args: ["--user", "--no-pager", "status", "org.freedesktop.secrets"],
-      additional: [{ command: "/usr/bin/secret-tool", args: ["--help"] }],
+      additionalExecutablePaths: ["/usr/bin/secret-tool"],
     },
   ];
 }
@@ -106,8 +108,9 @@ export async function probeHostPlatformCapabilities(
     };
   }
   const runner = options.runner ?? defaultProbeRunner;
+  const executable = options.executable ?? isExecutable;
   const capabilities = await Promise.all(
-    probesFor(options.platform, options.uid).map((probe) => runProbe(runner, probe)),
+    probesFor(options.platform, options.uid).map((probe) => runProbe(runner, probe, executable)),
   );
   return { platform: options.platform, capabilities };
 }
@@ -124,16 +127,16 @@ export function availablePlatformCapabilityNames(
 async function runProbe(
   runner: HostPlatformCapabilityProbeRunner,
   probe: CapabilityProbe,
+  executable: (path: string) => Promise<boolean>,
 ): Promise<HostPlatformCapability> {
   try {
     const result = await runner.run(probe.command, probe.args);
     if (result.stdout.trim() === "") {
       return { name: probe.name, state: "unavailable", detail: "empty-probe-output" };
     }
-    for (const check of probe.additional ?? []) {
-      const additional = await runner.run(check.command, check.args);
-      if (additional.stdout.trim() === "") {
-        return { name: probe.name, state: "unavailable", detail: "empty-probe-output" };
+    for (const path of probe.additionalExecutablePaths ?? []) {
+      if (!(await executable(path))) {
+        return { name: probe.name, state: "unavailable", detail: "tool-unavailable" };
       }
     }
     return { name: probe.name, state: "available", detail: "probe-succeeded" };
@@ -147,32 +150,12 @@ async function runProbe(
 }
 
 const defaultProbeRunner: HostPlatformCapabilityProbeRunner = {
-  run: (command, args) =>
-    new Promise((resolve, reject) => {
-      execFile(
-        command,
-        [...args],
-        {
-          shell: false,
-          timeout: 2_000,
-          maxBuffer: 16 * 1_024,
-          env: { ...process.env, LC_ALL: "C" },
-        },
-        (error, stdout, stderr) => {
-          if (
-            command === "/usr/bin/secret-tool" &&
-            args.length === 1 &&
-            args[0] === "--help" &&
-            (stdout.trim() !== "" || stderr.trim() !== "")
-          ) {
-            resolve({ stdout: stdout || stderr, stderr });
-          } else if (error !== null) {
-            reject(error);
-          } else {
-            resolve({ stdout, stderr });
-          }
-        },
-      );
+  run: async (command, args) =>
+    execFileAsync(command, [...args], {
+      shell: false,
+      timeout: 2_000,
+      maxBuffer: 16 * 1_024,
+      env: { ...process.env, LC_ALL: "C" },
     }),
 };
 

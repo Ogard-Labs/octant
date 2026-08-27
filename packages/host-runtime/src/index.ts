@@ -88,6 +88,7 @@ export {
   type SecretToolCommandResult,
   type SecretToolCommandSpec,
 } from "./secretServiceCredentialStore";
+export { isExecutable } from "./executableCheck";
 export {
   deriveHostServiceState,
   nextRestartBackoff,

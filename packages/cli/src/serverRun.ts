@@ -94,13 +94,11 @@ export async function runServerRunCommand(options: ServerRunOptions = {}): Promi
         OCTANT_SERVER_INSTANCE_ID: (options.instanceId ?? randomUUID)(),
         ...(options.port === undefined ? {} : { OCTANT_SERVER_PORT: String(options.port) }),
       };
-      if (process.platform === "linux") {
-        delete childEnv.OCTANT_CREDENTIAL_BROKER_URL;
-        delete childEnv.OCTANT_CREDENTIAL_BROKER_TOKEN;
-        if (credentialBroker !== undefined) {
-          childEnv.OCTANT_CREDENTIAL_BROKER_URL = credentialBroker.url;
-          childEnv.OCTANT_CREDENTIAL_BROKER_TOKEN = credentialBroker.token;
-        }
+      delete childEnv.OCTANT_CREDENTIAL_BROKER_URL;
+      delete childEnv.OCTANT_CREDENTIAL_BROKER_TOKEN;
+      if (credentialBroker !== undefined) {
+        childEnv.OCTANT_CREDENTIAL_BROKER_URL = credentialBroker.url;
+        childEnv.OCTANT_CREDENTIAL_BROKER_TOKEN = credentialBroker.token;
       }
       currentChild = spawn({
         command: command.command,
