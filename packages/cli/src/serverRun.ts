@@ -42,12 +42,10 @@ export async function runServerRunCommand(options: ServerRunOptions = {}): Promi
     options.writeNotice ?? ((message: string) => process.stderr.write(`${message}\n`));
   let currentChild: ServerRunChild | undefined;
   let shutdownRequested = false;
-  const removeSignalHandler = (options.installSignalHandler ?? defaultInstallSignalHandler)(() =>
-    (() => {
-      shutdownRequested = true;
-      currentChild?.kill("SIGTERM");
-    })(),
-  );
+  const removeSignalHandler = (options.installSignalHandler ?? defaultInstallSignalHandler)(() => {
+    shutdownRequested = true;
+    currentChild?.kill("SIGTERM");
+  });
   let failures = 0;
   let firstSpawn = true;
   let lastExitCode = 0;
