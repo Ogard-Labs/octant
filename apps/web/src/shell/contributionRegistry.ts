@@ -102,6 +102,19 @@ export function isSettingsSectionAvailable(
   return resolveSettingsSectionContributions(effective).has(sectionId);
 }
 
+/**
+ * Looks up the contribution metadata for a plugin-contributed settings section.
+ * Returns undefined for host-owned sections that do not come from the catalog.
+ */
+export function resolveSettingsSectionContribution(
+  sectionId: string,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean> = FIRST_PARTY_PLUGINS_EFFECTIVE,
+): ExtensionSettingsSectionContribution | undefined {
+  return contributionsOf<ExtensionSettingsSectionContribution>("settings.section", effective).find(
+    (contribution) => contribution.sectionId === sectionId,
+  );
+}
+
 export function resolveWorkspaceTabContributions(
   mode: OctantMode,
   effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
