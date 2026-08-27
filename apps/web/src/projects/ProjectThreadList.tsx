@@ -266,7 +266,7 @@ function nearestScrollableAncestor(element: HTMLElement | null): HTMLElement | n
   let ancestor = element?.parentElement ?? null;
   while (ancestor !== null) {
     const style = getComputedStyle(ancestor);
-    if (/(auto|overlay|scroll)/.test(`${style.overflow} ${style.overflowY}`)) {
+    if (/^(auto|overlay|scroll)$/.test(style.overflowY)) {
       return ancestor;
     }
     ancestor = ancestor.parentElement;
