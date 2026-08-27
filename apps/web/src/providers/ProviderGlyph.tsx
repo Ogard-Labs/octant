@@ -129,7 +129,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   "openai-image": {
-    color: "var(--octant-text-secondary)",
     mark: (
       <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
         <rect height="9.5" rx="1.4" width="11.5" x="2.25" y="3.25" />
@@ -139,7 +138,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   "gemini-native-image": {
-    color: "#5b8def",
     mark: (
       <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
         <rect height="9.5" rx="1.4" width="11.5" x="2.25" y="3.25" />
