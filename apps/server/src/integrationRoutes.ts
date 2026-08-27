@@ -10,7 +10,6 @@ import type { WindowAuthorityStore } from "./windowAuthorityStore";
 const BODY_LIMIT = 16 * 1024;
 const SECRET_BODY_LIMIT = 12 * 1_024;
 const AUTH_PREFIX = "/api/integrations/";
-const CALLBACK_PREFIX = "/oauth/integrations/";
 
 export function createIntegrationRouteHandler(dependencies: {
   readonly service: IntegrationService;
@@ -20,10 +19,6 @@ export function createIntegrationRouteHandler(dependencies: {
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    const callback = matchCallback(url.pathname);
-    if (callback !== undefined) {
-      return handleCallback(request, url, callback.slug, dependencies.service);
-    }
     const api = matchApi(url.pathname);
     if (api === undefined) return undefined;
     const origin = request.headers.get("origin");
@@ -67,7 +62,11 @@ export function createIntegrationRouteHandler(dependencies: {
     } catch {
       return failure("unauthorized", 401, origin);
     }
-    if (context.principal.kind !== "local-window" && context.principal.kind !== "remote-device") {
+    if (snapshotRoute) {
+      if (context.principal.kind !== "local-window" && context.principal.kind !== "remote-device") {
+        return failure("unauthorized", 403, origin);
+      }
+    } else if (context.principal.kind !== "local-window") {
       return failure("unauthorized", 403, origin);
     }
     try {
@@ -106,29 +105,6 @@ export function createIntegrationRouteHandler(dependencies: {
   };
 }
 
-async function handleCallback(
-  request: Request,
-  url: URL,
-  slug: string,
-  service: IntegrationService,
-): Promise<Response> {
-  if (!isLoopbackHostname(url.hostname) || request.method !== "GET") {
-    return htmlCallback("Linear connection failed.", 400);
-  }
-  const error = url.searchParams.get("error");
-  if (error !== null) return htmlCallback("Linear connection was cancelled.", 200);
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-  if (code === null || state === null || code.length === 0 || state.length === 0) {
-    return htmlCallback("Linear connection failed.", 400);
-  }
-  const completed = await service.completeAuthorization(slug, { code, state });
-  if (completed.kind !== "stored") {
-    return htmlCallback("Linear connection failed.", 400);
-  }
-  return htmlCallback("Linear is connected. You can close this window and return to Octant.", 200);
-}
-
 function matchApi(pathname: string): { readonly slug: string; readonly rest: string } | undefined {
   if (!pathname.startsWith(AUTH_PREFIX)) return undefined;
   const rest = pathname.slice(AUTH_PREFIX.length);
@@ -137,14 +113,6 @@ function matchApi(pathname: string): { readonly slug: string; readonly rest: str
   const slug = rest.slice(0, slash);
   if (!/^[a-z][a-z0-9-]{0,31}$/.test(slug)) return undefined;
   return { slug, rest: rest.slice(slash + 1) };
-}
-
-function matchCallback(pathname: string): { readonly slug: string } | undefined {
-  if (!pathname.startsWith(CALLBACK_PREFIX)) return undefined;
-  const rest = pathname.slice(CALLBACK_PREFIX.length);
-  const match = /^([a-z][a-z0-9-]{0,31})\/callback$/.exec(rest);
-  if (match === null || match[1] === undefined) return undefined;
-  return { slug: match[1] };
 }
 
 function decodeSecretCommand(
@@ -180,17 +148,6 @@ async function readJson(
   } catch {
     return { kind: "invalid" };
   }
-}
-
-function htmlCallback(message: string, status: number): Response {
-  const safe = message.replace(/[<>&]/g, "");
-  return new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Octant</title></head><body><p>${safe}</p></body></html>`,
-    {
-      status,
-      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-    },
-  );
 }
 
 function response(body: unknown, status: number, origin: string | null) {

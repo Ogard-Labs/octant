@@ -8,6 +8,7 @@ import { createIntegrationHostPort } from "./integrationHostPort";
 import { constructIntegrationRuntime } from "./integrationLoader";
 import { createIntegrationOAuthHost, type IntegrationOAuthHost } from "./integrationOAuth";
 import type { IntegrationConnectionStore } from "./integrationConnectionStore";
+import { startLinearOAuthCallbackListener } from "./linearOAuthCallbackListener";
 import type { IntegrationSecretVault } from "./integrationCredentialVault";
 import { LINEAR_CREDENTIAL_IDS } from "./linearCredentialIds";
 import {
@@ -45,6 +46,7 @@ export function createLinearIntegrationService(options: {
   readonly fetch?: (input: Request) => Promise<Response>;
   readonly now?: () => number;
   readonly connectionStore?: IntegrationConnectionStore;
+  readonly startCallbackListener?: boolean;
 }): IntegrationService {
   const oauth = createIntegrationOAuthHost({
     vault: options.vault,
@@ -52,6 +54,12 @@ export function createLinearIntegrationService(options: {
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.connectionStore === undefined ? {} : { connectionStore: options.connectionStore }),
+    ...(options.startCallbackListener === false
+      ? {}
+      : {
+          startCallbackListener: ({ onAuthorize }) =>
+            startLinearOAuthCallbackListener({ onAuthorize }),
+        }),
   });
   const hostPort = createIntegrationHostPort({
     fetch: oauth.authorizedFetch,

@@ -7,7 +7,7 @@ import {
   LINEAR_REVOKE_URL,
 } from "./linearIntegration";
 
-const redirectUri = "http://127.0.0.1:13773/oauth/integrations/linear/callback";
+const redirectUri = "http://127.0.0.1:52693/oauth/linear/callback";
 const clientId = "linear-public-client";
 const accessToken = "00a21d8b0c4e2375114e49c067dfb81eb0d2076f48354714cd5df984d87b67cc";
 

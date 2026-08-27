@@ -73,7 +73,7 @@ export default function createLinearIntegrationRuntime(
   hostPort: IntegrationHostPort,
 ): IntegrationRuntime {
   return createLinearIntegration(hostPort, {
-    redirectUri: "http://127.0.0.1/oauth/integrations/linear/callback",
+    redirectUri: "http://127.0.0.1:52693/oauth/linear/callback",
   });
 }
 

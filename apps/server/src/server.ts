@@ -1808,8 +1808,7 @@ export function startOctantServer(
             }),
           ));
     const linearRedirectUri =
-      options.linearOAuthRedirectUri ??
-      `http://127.0.0.1:${options.port}/oauth/integrations/linear/callback`;
+      options.linearOAuthRedirectUri ?? "http://127.0.0.1:52693/oauth/linear/callback";
     const integrationService = createLinearIntegrationService({
       vault: integrationVault,
       connectionStore: createFileConnectionStore(

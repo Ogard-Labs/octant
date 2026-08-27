@@ -43,20 +43,28 @@ describe("integration authentication routes", () => {
     expect(service.snapshot).toHaveBeenCalledWith("linear", expect.anything());
   });
 
-  it("completes a loopback OAuth callback without echoing the code in later API responses", async () => {
+  it("refuses authentication commands from a remote device", async () => {
     const handler = createHandler();
-    const value = new Request(
-      "http://127.0.0.1/oauth/integrations/linear/callback?code=secret-code&state=csrf-state",
-    );
-    const response = await handler(value);
-    expect(response?.status).toBe(200);
-    expect(service.completeAuthorization).toHaveBeenCalledWith("linear", {
-      code: "secret-code",
-      state: "csrf-state",
+    const value = new Request("http://127.0.0.1/api/integrations/linear/authentication/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://127.0.0.1" },
+      body: JSON.stringify({ kind: "setup" }),
     });
-    const text = (await response?.text()) ?? "";
-    expect(text).toContain("Linear is connected");
-    expect(text).not.toContain("secret-code");
+    bindPrincipalRouteContext(value, {
+      principal: {
+        kind: "remote-device",
+        hostId: "host",
+        deviceId: "device",
+        credentialGeneration: 1,
+        origin: "https://remote.test",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "session",
+      } as never,
+      scopeId: "scope" as never,
+    });
+    expect((await handler(value))?.status).toBe(403);
+    expect(service.execute).not.toHaveBeenCalled();
   });
 
   it("stores a personal API key without returning it", async () => {

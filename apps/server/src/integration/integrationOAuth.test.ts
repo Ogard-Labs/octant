@@ -36,7 +36,7 @@ describe("integration OAuth host", () => {
       authorizationEndpoint: "https://linear.app/oauth/authorize",
       tokenEndpoint: "https://api.linear.app/oauth/token",
       clientId: "public-client",
-      redirectUri: "http://127.0.0.1:13773/oauth/integrations/linear/callback",
+      redirectUri: "http://127.0.0.1:52693/oauth/linear/callback",
       scopes: ["read"],
     });
     expect(began.kind).toBe("redirect");

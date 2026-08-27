@@ -91,6 +91,14 @@ export function createIntegrationOAuthHost(options: {
     readonly read: () => IntegrationConnectionState | undefined;
     readonly write: (state: IntegrationConnectionState | undefined) => void;
   };
+  readonly startCallbackListener?: (input: {
+    readonly onAuthorize: (request: {
+      readonly state: string;
+      readonly code: string;
+    }) => Promise<
+      { readonly kind: "stored" } | { readonly kind: "refused"; readonly reason: string }
+    >;
+  }) => Promise<{ readonly redirectUri: string; readonly close: () => Promise<void> }>;
 }): IntegrationOAuthHost {
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const now = options.now ?? Date.now;
@@ -131,25 +139,7 @@ export function createIntegrationOAuthHost(options: {
     await options.vault.delete(oauthId);
   };
 
-  const beginPkceAuthorization = async (
-    request: IntegrationPkceAuthorizationRequest,
-  ): Promise<IntegrationPkceBeginResult> => {
-    prunePending();
-    const verifier = base64Url(randomBytes(32));
-    const challenge = base64Url(createHash("sha256").update(verifier).digest());
-    const state = base64Url(randomBytes(24));
-    const authorizationUrl = buildAuthorizationUrl(request, challenge, state);
-    pending.set(state, {
-      state,
-      verifier,
-      clientId: request.clientId,
-      redirectUri: request.redirectUri,
-      tokenEndpoint: request.tokenEndpoint,
-      scope: request.scopes.join(","),
-      createdAt: now(),
-    });
-    return { kind: "redirect", authorizationUrl };
-  };
+  let callbackListener: { readonly close: () => Promise<void> } | undefined;
 
   const completePkceAuthorization = async (request: {
     readonly state: string;
@@ -190,6 +180,46 @@ export function createIntegrationOAuthHost(options: {
       reconnectRequired: false,
     });
     return { kind: "stored" };
+  };
+
+  const beginPkceAuthorization = async (
+    request: IntegrationPkceAuthorizationRequest,
+  ): Promise<IntegrationPkceBeginResult> => {
+    prunePending();
+    if (callbackListener !== undefined) {
+      await callbackListener.close();
+      callbackListener = undefined;
+    }
+    let redirectUri = request.redirectUri;
+    if (options.startCallbackListener !== undefined) {
+      try {
+        const listener = await options.startCallbackListener({
+          onAuthorize: completePkceAuthorization,
+        });
+        callbackListener = listener;
+        redirectUri = listener.redirectUri;
+      } catch {
+        return {
+          kind: "refused",
+          reason: "The Linear authorization listener could not be started.",
+        };
+      }
+    }
+    const verifier = base64Url(randomBytes(32));
+    const challenge = base64Url(createHash("sha256").update(verifier).digest());
+    const state = base64Url(randomBytes(24));
+    const prepared = { ...request, redirectUri };
+    const authorizationUrl = buildAuthorizationUrl(prepared, challenge, state);
+    pending.set(state, {
+      state,
+      verifier,
+      clientId: request.clientId,
+      redirectUri,
+      tokenEndpoint: request.tokenEndpoint,
+      scope: request.scopes.join(","),
+      createdAt: now(),
+    });
+    return { kind: "redirect", authorizationUrl };
   };
 
   const refreshPkceAuthorization = async (request: {

@@ -397,8 +397,10 @@ modelId }`, and the model picker is provider-first. Discovery can find
   every child environment. Linear is the first bundled-off Integration plugin:
   it contributes a Settings card through `settings.section`, connects with
   authorization-code + PKCE, and stores access and refresh tokens only in that
-  host credential service. Connect fails closed when the public client id
-  (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
+  host credential service. Connect opens a short-lived loopback listener on
+  `127.0.0.1:52693` (`/oauth/linear/callback`, fallbacks 52694 and 52695) for
+  the consent redirect, then closes it. Connect fails closed when the public
+  client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
 
 ## Extensions and skills
 
