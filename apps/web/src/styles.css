@@ -7418,6 +7418,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   gap: 0;
   align-items: stretch;
   min-width: min-content;
+  overflow: visible;
 }
 
 /* The status board body is a fixed-height flex item, so the row of columns
