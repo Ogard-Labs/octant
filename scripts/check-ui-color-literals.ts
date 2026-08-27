@@ -17,9 +17,9 @@ const EXEMPT_PREFIXES = [
 ];
 const EXEMPT_SUFFIXES = [".test.ts", ".test.tsx"];
 
-// Match a CSS color literal: hex, rgb, rgba, hsl, hsla.
+// Match a CSS color literal: #RGB, #RGBA, #RRGGBB, #RRGGBBAA, rgb, rgba, hsl, hsla.
 const COLOR_LITERAL =
-  /(?:#(?:[0-9a-fA-F]{3}){1,2}\b(?:[0-9a-fA-F]{2})?\b|\b(?:rgb|hsl)a?\([^)]*\))/g;
+  /(?:#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|\b(?:rgb|hsl)a?\([^)]*\))/g;
 
 function isExempt(normalized: string): boolean {
   for (const prefix of EXEMPT_PREFIXES) {
