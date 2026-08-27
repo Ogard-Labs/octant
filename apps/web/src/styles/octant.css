@@ -2750,13 +2750,15 @@ input.switch:checked::after {
 }
 
 /* ─── kanban ──────────────────────────────────────────────────────────
-   Status boards are a balanced grid on desktop. The board body owns the
-   vertical scroll, so columns stop after their content instead of becoming
-   four tall empty wells. */
+   Boards scroll horizontally at a fixed column width so the four status
+   columns keep their shape instead of stretching to fill the workspace.
+   Columns share the same min/max width whether empty or full, so a sparse
+   board does not accordion. */
 .board {
   display: flex;
   gap: var(--oct-space-3);
-  align-items: stretch;
+  align-items: flex-start;
+  min-width: min-content;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   padding-bottom: var(--oct-space-2);
@@ -2765,20 +2767,26 @@ input.switch:checked::after {
 .board-col {
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  flex: 1 1 220px;
+  flex: 0 0 auto;
+  width: clamp(220px, 22vw, 320px);
   min-width: 220px;
-  max-width: 360px;
+  max-width: 320px;
+  min-height: 0;
+  max-height: 100%;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-lg);
   background: var(--oct-surface);
 }
 .board-col[data-empty="true"] {
-  /* Empty groups remain legible without narrowing the grid or creating a
-     visually separate rail. */
-  flex: 1 1 220px;
-  min-width: 0;
-  max-width: none;
+  /* Empty groups keep the same width as populated columns so the grid does
+     not collapse or stretch; their body only needs room for the placeholder. */
+  flex: 0 0 auto;
+  width: clamp(220px, 22vw, 320px);
+  min-width: 220px;
+  max-width: 320px;
+}
+.board-col[data-empty="true"] .board-col-body {
+  min-height: 52px;
 }
 .board-col[data-empty="true"] .board-col-empty {
   padding: var(--oct-space-3) var(--oct-space-2) var(--oct-space-4);
@@ -2795,8 +2803,8 @@ input.switch:checked::after {
   background: var(--oct-surface-warm);
   border-radius: var(--oct-radius-lg) var(--oct-radius-lg) 0 0;
   font-family: var(--oct-font-display);
-  font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
-  letter-spacing: normal;
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
   color: var(--oct-muted);
 }
@@ -2806,8 +2814,9 @@ input.switch:checked::after {
   font-variant-numeric: tabular-nums;
 }
 .board-col-body {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
+  max-height: calc(100vh - 220px);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -2818,6 +2827,7 @@ input.switch:checked::after {
 /* an empty column still shows, so the workflow stays legible, without
    padding that makes four empty columns fill the window */
 .board-col-empty {
+  margin: 0;
   padding: var(--oct-space-2) var(--oct-space-3);
   text-align: center;
   color: var(--oct-meta);
@@ -2825,12 +2835,16 @@ input.switch:checked::after {
 }
 
 /* ─── board card ──────────────────────────────────────────────────────
-   Title first, facts second. The facts row is mono so a column of cards
-   scans as a table even though each is its own object. */
+   Title first, then activity, then compact facts, then blocked/plan
+   reason. Every layer is readable on its own line so long text does not
+   push into neighbours. */
 .board-card {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
   width: 100%;
-  padding: var(--oct-space-3);
+  min-width: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
@@ -2842,23 +2856,33 @@ input.switch:checked::after {
   border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
   background: var(--oct-surface-warm);
 }
+.board-card:focus-visible {
+  outline: 2px solid var(--oct-focus);
+  outline-offset: 1px;
+}
 .board-card-top {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
-  margin-bottom: var(--oct-space-2);
+  min-width: 0;
+}
+.board-card-top > .unread {
+  align-self: center;
+  margin-top: 0;
 }
 .board-card-title {
-  /* two lines, then ellipsis — a long title must not make one card tower
-     over its column; the element carries the full title in its title
-     attribute */
+  /* Two lines, then ellipsis — a long title must not make one card tower
+     over its column. The element carries the full title in its title
+     attribute so the clamped text is still discoverable. */
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+  min-width: 0;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
+  font-weight: 500;
   line-height: var(--oct-leading-snug);
   overflow-wrap: anywhere;
 }
@@ -2866,6 +2890,7 @@ input.switch:checked::after {
 .board-card .unread {
   width: 6px;
   height: 6px;
+  margin-top: 0.4em;
   border-radius: var(--oct-radius-pill);
   background: var(--oct-accent-fg);
   flex: 0 0 auto;
@@ -2875,18 +2900,26 @@ input.switch:checked::after {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--oct-space-1) var(--oct-space-2);
+  min-width: 0;
   font-family: var(--oct-font-display);
-  font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
   color: var(--oct-meta);
 }
 .board-card-facts .fact {
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-1);
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .board-card-facts .fact .icon {
   width: 12px;
   height: 12px;
+  flex: 0 0 auto;
 }
 .board-card-facts .fact.ok {
   color: var(--oct-success-fg);
@@ -2904,7 +2937,7 @@ input.switch:checked::after {
 .board-card-activity {
   display: block;
   overflow: hidden;
-  margin-top: var(--oct-space-1);
+  min-width: 0;
   color: var(--oct-meta);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-xs);
@@ -2914,10 +2947,9 @@ input.switch:checked::after {
 }
 /* why a card cannot move — the one thing a triager needs and boards hide */
 .board-card-blocked {
-  display: inline-flex;
-  align-items: center;
+  display: block;
   max-width: 100%;
-  margin-top: var(--oct-space-2);
+  min-width: 0;
   padding: var(--oct-space-1) var(--oct-space-2);
   border: 1px solid color-mix(in oklab, var(--oct-warn-fg) 32%, transparent);
   border-radius: var(--oct-radius-sm);
@@ -2926,7 +2958,9 @@ input.switch:checked::after {
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-xs);
   line-height: 1.3;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ─── issue list ──────────────────────────────────────────────────────
@@ -2942,6 +2976,7 @@ input.switch:checked::after {
   align-items: center;
   gap: var(--oct-space-3);
   width: 100%;
+  min-width: 0;
   padding: var(--oct-space-3) var(--oct-space-4);
   border: 0;
   border-top: 1px solid var(--oct-border-soft);
@@ -2956,9 +2991,16 @@ input.switch:checked::after {
 .issuerow:hover {
   background: var(--oct-fg-soft);
 }
+.issuerow:focus-visible {
+  outline: 2px solid var(--oct-focus);
+  outline-offset: -1px;
+}
 .issuerow .issuerow-main {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
 }
 .issuerow .issuerow-title {
   display: block;
@@ -2974,10 +3016,16 @@ input.switch:checked::after {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--oct-space-1) var(--oct-space-3);
-  margin-top: 2px;
+  min-width: 0;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);
+}
+.issuerow .issuerow-meta > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .issuerow .issuerow-right {
   display: flex;
