@@ -84,7 +84,6 @@ import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchai
 import { WorkPromotionFlow } from "../work/WorkPromotionFlow";
 import type { WorkPromotionController } from "../work/useWorkPromotionController";
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
-import { PreviewWorkspaceTab } from "../preview/PreviewWorkspaceTab";
 import { CanvasWorkspaceTab } from "../canvas/CanvasWorkspaceTab";
 import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
@@ -96,6 +95,11 @@ import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivity
 import type { ThreadProviderIdentity } from "./navigationModel";
 
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
+const PreviewWorkspaceTab = lazy(() =>
+  import("../preview/PreviewWorkspaceTab").then((module) => ({
+    default: module.PreviewWorkspaceTab,
+  })),
+);
 type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 
 export interface WorkspaceViewProps {
@@ -999,7 +1003,13 @@ function renderNonCodeTab(
     );
   }
   if (tab.kind === "preview") {
-    return <PreviewWorkspaceTab key={tab.id} tab={tab} client={props.previewClient} />;
+    return (
+      <Suspense
+        fallback={<ShellState message="Loading preview." state="loading" title="Loading Preview" />}
+      >
+        <PreviewWorkspaceTab key={tab.id} tab={tab} client={props.previewClient} />
+      </Suspense>
+    );
   }
   if (tab.kind === "canvas") {
     return (
