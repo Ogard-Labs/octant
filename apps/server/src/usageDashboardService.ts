@@ -2,6 +2,7 @@ import type {
   UsageAttributionEntry,
   UsageDashboardRequest,
   UsageDashboardResponse,
+  UsageLatencyStats,
 } from "@octant/contracts";
 import type { CacheStatsProjection, CacheStatsRecorder } from "./cacheStatsProjection";
 import { buildUsageDashboard, type UsageDashboardSourceRow } from "./usageDashboardModel";
@@ -30,6 +31,7 @@ export interface UsageDashboardServiceOptions {
   readonly maxScannedRows?: number;
   /** Cache readings this query both reports and contributes its own to. */
   readonly cacheStats?: CacheStatsProjection;
+  readonly latencyStats?: UsageLatencyStats;
 }
 
 /**
@@ -108,6 +110,7 @@ export function readUsageDashboard(
     unreadableRecordCount,
     scanTruncated: truncated,
     ...(options.cacheStats === undefined ? {} : { cacheStats: options.cacheStats.read() }),
+    ...(options.latencyStats === undefined ? {} : { latencyStats: options.latencyStats }),
   });
 }
 

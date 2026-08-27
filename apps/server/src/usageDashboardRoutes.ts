@@ -1,6 +1,7 @@
 import {
   decodeUsageDashboardRequest,
   type UsageDashboardRequest,
+  type UsageLatencyStats,
   type WindowId,
 } from "@octant/contracts";
 import type { CacheStatsProjection } from "./cacheStatsProjection";
@@ -37,6 +38,8 @@ export interface UsageDashboardRouteDependencies {
   readonly maxScannedRows?: number;
   /** Host cache readings reported with the dashboard; absent means none observed. */
   readonly cacheStats?: CacheStatsProjection;
+  /** Host-process latency observations reported with the dashboard. */
+  readonly latencyStats?: () => UsageLatencyStats;
 }
 
 /**
@@ -126,6 +129,9 @@ export function createUsageDashboardRouteHandler(dependencies: UsageDashboardRou
         queryAt: clock(),
         projectScope,
         ...(dependencies.cacheStats === undefined ? {} : { cacheStats: dependencies.cacheStats }),
+        ...(dependencies.latencyStats === undefined
+          ? {}
+          : { latencyStats: dependencies.latencyStats() }),
       });
       return json(response, 200, origin);
     } catch {

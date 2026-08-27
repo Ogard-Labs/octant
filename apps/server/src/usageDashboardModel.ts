@@ -12,6 +12,7 @@ import type {
   UsageDetailRow,
   UsageDimensionSource,
   UsageHostCoverage,
+  UsageLatencyStats,
   UsageProviderTokenCacheStat,
   UsageQuality,
 } from "@octant/contracts";
@@ -56,6 +57,7 @@ export interface BuildUsageDashboardOptions {
   readonly staleThresholdMs?: number;
   /** Read facts observed by the host's own caches since it started. */
   readonly cacheStats?: ReadonlyArray<UsageCacheStat>;
+  readonly latencyStats?: UsageLatencyStats;
 }
 
 /** Matches `classifyUsageQuality`, so a host and a record age out together. */
@@ -267,6 +269,7 @@ export function buildUsageDashboard(
     cacheStats: buildCacheStats(providerTokenCaches, options.cacheStats ?? []),
     timeZone: options.timeZone,
     queryAt: options.queryAt as UsageDashboardResponse["queryAt"],
+    latencyStats: options.latencyStats ?? { measurements: [] },
   };
 }
 

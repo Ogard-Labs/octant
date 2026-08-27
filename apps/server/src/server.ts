@@ -365,6 +365,11 @@ import { createDiscoveryRouteHandler } from "./providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "./providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "./providers/discoveryService";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
+import {
+  LatencyStatsProjection,
+  observedRpcLatency,
+  slowRequestRoute,
+} from "./latencyStatsProjection";
 import { ProviderService } from "./providers/providerService";
 import {
   CANONICAL_REVIEWED_MODEL_MANIFEST,
@@ -1321,6 +1326,10 @@ export function startOctantServer(
         }),
       );
     }
+    const latencyStats = new LatencyStatsProjection();
+    for (const fact of persistence.projectionCatchUp) {
+      latencyStats.record("projection-catch-up", fact.durationMs);
+    }
 
     const serve = options.serve;
     if (serve === undefined) {
@@ -1793,12 +1802,14 @@ export function startOctantServer(
       windowAuthorityStore,
       readWindowProjectScope: readWindowUsageProjectScope,
       cacheStats,
+      latencyStats: () => latencyStats.read(),
     });
     const usageRoutes = createUsageRouteHandler({
       connection: persistence.connection,
       windowAuthorityStore,
       readWindowProjectScope: readWindowUsageProjectScope,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+      latencyStats: () => latencyStats.read(),
     });
     const diagnosticsExportRoutes = createDiagnosticsExportRouteHandler({
       connection: persistence.connection,
@@ -2349,6 +2360,8 @@ export function startOctantServer(
       options.providerRuntimeRegistry ??
       new ProviderRuntimeRegistry({
         receiptDirectory: join(providerDataDirectory, "providers", "runtime-receipts"),
+        observeAcquireMs: (durationMs) =>
+          latencyStats.record("provider-runtime-acquire", durationMs),
       });
     const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
     const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive();
@@ -5603,6 +5616,28 @@ export function startOctantServer(
       (await workResearchRoutes(request)) ??
       (await themeRoutes(request));
 
+    const dispatchMeasuredProductRoutes = async (
+      request: Request,
+    ): Promise<Response | undefined> => {
+      const url = new URL(request.url);
+      const measurement = observedRpcLatency(url.pathname);
+      if (measurement === undefined) return dispatchProductRoutes(request);
+      const startedAt = performance.now();
+      const response = await dispatchProductRoutes(request);
+      if (response === undefined) return undefined;
+      // This measures time to produce the response; a streaming route that
+      // promptly returns its stream is not considered slow.
+      const durationMs = Math.max(0, performance.now() - startedAt);
+      latencyStats.record(measurement, durationMs);
+      const thresholdMs = latencyStats.slowThresholdMs(measurement);
+      if (thresholdMs !== undefined && durationMs >= thresholdMs) {
+        console.warn(
+          `Octant request handling took ${(durationMs / 1_000).toFixed(1)}s for ${request.method} ${slowRequestRoute(url.pathname)}, past ${(thresholdMs / 1_000).toFixed(0)}s slow request threshold.`,
+        );
+      }
+      return response;
+    };
+
     const forwardListDrift = compareRemoteForwardListToClassifier();
     if (forwardListDrift.length > 0) {
       throw new Error(
@@ -5610,7 +5645,7 @@ export function startOctantServer(
       );
     }
     const authenticatedProductDispatch = createAuthenticatedProductDispatch({
-      dispatch: dispatchProductRoutes,
+      dispatch: dispatchMeasuredProductRoutes,
     });
     let remoteListener: PrivateListener | undefined;
     let remoteListenerError: PrivateListenerFailureCode | undefined;
@@ -5791,7 +5826,7 @@ export function startOctantServer(
                   (await privateListenerAdministrationRoutes(request)) ??
                   (await localDeviceAdministrationRoutes(request)) ??
                   (await hostControlRoutes(request)) ??
-                  (await dispatchProductRoutes(request)) ??
+                  (await dispatchMeasuredProductRoutes(request)) ??
                   (await webAssets(request)) ??
                   new Response("Not Found", { status: 404 })
                 );
