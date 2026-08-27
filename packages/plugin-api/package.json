@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./manifest": "./src/manifest.ts",
-    "./contributions": "./src/contributions.ts"
+    "./contributions": "./src/contributions.ts",
+    "./integration": "./src/integration.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { ArrowLeft, Search } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
@@ -27,9 +27,11 @@ import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggl
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
   isSettingsSectionAvailable,
+  resolveSettingsSectionContribution,
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
 import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
+import { PluginSettingsSection } from "./PluginSettingsSection";
 import { ChatSettingsView } from "../chat/ChatSettingsView";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -45,7 +47,6 @@ import type { HostFederationLifecycle } from "@octant/client-runtime/host-federa
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import { HostSettingsSection } from "../host/HostSettingsSection";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
-import { GitHubConnectionSettings } from "../settings/GitHubConnectionSettings";
 import {
   type SettingsNativeCapabilities,
   type SettingsSectionEntry,
@@ -156,13 +157,20 @@ export function SettingsView(props: SettingsViewProps) {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
     sidebarVibrancySupported: props.sidebarVibrancySupported,
   };
+  const effectivePlugins = props.effectivePlugins ?? FIRST_PARTY_PLUGINS_EFFECTIVE;
   const availableSections = listAvailableSections(octantSettingsRegistry, capabilities).filter(
-    (section) =>
-      isSettingsSectionAvailable(
-        section.id,
-        props.effectivePlugins ?? FIRST_PARTY_PLUGINS_EFFECTIVE,
-      ),
+    (section) => isSettingsSectionAvailable(section.id, effectivePlugins),
   );
+  const pluginSettingsEntryPoints = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const section of availableSections) {
+      const contribution = resolveSettingsSectionContribution(section.id, effectivePlugins);
+      if (contribution?.entryPoint !== undefined) {
+        map.set(section.id, contribution.entryPoint);
+      }
+    }
+    return map;
+  }, [availableSections, effectivePlugins]);
   const route = useSettingsRoute({
     availableSections,
     capabilities,
@@ -262,6 +270,7 @@ export function SettingsView(props: SettingsViewProps) {
                 activeSection={route.activeSection}
                 capabilities={capabilities}
                 focusedSetting={route.focusedSetting}
+                pluginSettingsEntryPoints={pluginSettingsEntryPoints}
                 props={props}
               />
             )}
@@ -280,6 +289,7 @@ export function SettingsView(props: SettingsViewProps) {
 interface ActiveSectionContentProps {
   readonly activeSection: SettingsSectionId;
   readonly focusedSetting: SettingsSettingId | undefined;
+  readonly pluginSettingsEntryPoints: ReadonlyMap<string, string>;
   readonly props: SettingsViewProps;
   readonly capabilities: SettingsNativeCapabilities;
 }
@@ -287,9 +297,16 @@ interface ActiveSectionContentProps {
 function ActiveSectionContent({
   activeSection,
   focusedSetting,
+  pluginSettingsEntryPoints,
   props,
   capabilities,
 }: ActiveSectionContentProps) {
+  const pluginEntryPoint = pluginSettingsEntryPoints.get(activeSection);
+  if (pluginEntryPoint !== undefined) {
+    return (
+      <PluginSettingsSection entryPoint={pluginEntryPoint} githubClient={props.githubClient} />
+    );
+  }
   switch (activeSection) {
     case "general":
       return <GeneralSection focusedSetting={focusedSetting} props={props} />;
@@ -407,17 +424,6 @@ function ActiveSectionContent({
         <section aria-label="Host" id="settings-host">
           <p>
             Host lifecycle, backup, and recovery controls are available on the host machine only.
-          </p>
-        </section>
-      );
-    case "github":
-      return props.githubClient !== undefined ? (
-        <GitHubConnectionSettings client={props.githubClient} />
-      ) : (
-        <section aria-label="GitHub" id="settings-github">
-          <p>
-            The GitHub connection is managed on the owning host. Open Settings on that host to set
-            up or inspect the account.
           </p>
         </section>
       );

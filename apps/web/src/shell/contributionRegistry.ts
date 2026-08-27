@@ -73,6 +73,28 @@ export function resolveSidebarContributions(
   );
 }
 
+/** Returns the full contribution records for effective sidebar destinations. */
+export function resolveSidebarDestinationContributions(
+  mode: OctantMode,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean> = FIRST_PARTY_PLUGINS_EFFECTIVE,
+): ReadonlyArray<ExtensionSidebarDestinationContribution> {
+  return contributionsOf<ExtensionSidebarDestinationContribution>(
+    "sidebar.destination",
+    effective,
+  ).filter((contribution) => contribution.modes.includes(mode));
+}
+
+/** Looks up the full contribution record for an effective sidebar destination. */
+export function resolveSidebarDestinationContribution(
+  destinationId: string,
+  mode: OctantMode,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean> = FIRST_PARTY_PLUGINS_EFFECTIVE,
+): ExtensionSidebarDestinationContribution | undefined {
+  return resolveSidebarDestinationContributions(mode, effective).find(
+    (contribution) => contribution.destinationId === destinationId,
+  );
+}
+
 /** Which settings section ids the effective first-party plugins contribute. */
 export function resolveSettingsSectionContributions(
   effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
@@ -100,6 +122,19 @@ export function isSettingsSectionAvailable(
     .map((contribution) => contribution.sectionId);
   if (!contributed.includes(sectionId)) return true;
   return resolveSettingsSectionContributions(effective).has(sectionId);
+}
+
+/**
+ * Looks up the contribution metadata for a plugin-contributed settings section.
+ * Returns undefined for host-owned sections that do not come from the catalog.
+ */
+export function resolveSettingsSectionContribution(
+  sectionId: string,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean> = FIRST_PARTY_PLUGINS_EFFECTIVE,
+): ExtensionSettingsSectionContribution | undefined {
+  return contributionsOf<ExtensionSettingsSectionContribution>("settings.section", effective).find(
+    (contribution) => contribution.sectionId === sectionId,
+  );
 }
 
 export function resolveWorkspaceTabContributions(

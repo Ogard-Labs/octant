@@ -18,6 +18,10 @@ const opaqueReference = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(256),
   Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
 );
+const entryPointReference = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(256),
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/),
+);
 
 export const ExtensionPackageId = brandedUuid("ExtensionPackageId");
 export type ExtensionPackageId = typeof ExtensionPackageId.Type;
@@ -278,7 +282,7 @@ export const ExtensionComponent = Schema.Struct({
   displayName: boundedText(128),
   description: Schema.optional(boundedText(2048)),
   declaredCapabilities: Schema.Array(ExtensionCapability).pipe(Schema.maxItems(32)),
-  entryPoint: Schema.optional(opaqueReference),
+  entryPoint: Schema.optional(entryPointReference),
   configurationReference: Schema.optional(opaqueReference),
   contentReference: Schema.optional(opaqueReference),
   skillName: Schema.optional(ExtensionSkillName),
@@ -329,6 +333,8 @@ export const ExtensionSidebarDestinationContribution = Schema.Struct({
   destinationId: boundedToken(64),
   label: boundedText(64),
   modes: Schema.Array(OctantMode).pipe(Schema.minItems(1), Schema.maxItems(3)),
+  /** Optional module entry point the renderer loads to render or handle the destination. */
+  entryPoint: Schema.optional(entryPointReference),
 }).annotations(strict);
 export type ExtensionSidebarDestinationContribution =
   typeof ExtensionSidebarDestinationContribution.Type;
@@ -340,6 +346,9 @@ export const ExtensionSettingsSectionContribution = Schema.Struct({
   label: boundedText(64),
   scope: Schema.Literal("app", "host", "mode", "project", "thread"),
   keywords: boundedText(512),
+  /** Optional module entry point the renderer loads for the section's panel. */
+  entryPoint: Schema.optional(entryPointReference),
+  description: Schema.optional(boundedText(2048)),
 }).annotations(strict);
 export type ExtensionSettingsSectionContribution = typeof ExtensionSettingsSectionContribution.Type;
 
