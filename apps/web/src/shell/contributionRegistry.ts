@@ -73,6 +73,28 @@ export function resolveSidebarContributions(
   );
 }
 
+/** Returns the full contribution records for effective sidebar destinations. */
+export function resolveSidebarDestinationContributions(
+  mode: OctantMode,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean> = FIRST_PARTY_PLUGINS_EFFECTIVE,
+): ReadonlyArray<ExtensionSidebarDestinationContribution> {
+  return contributionsOf<ExtensionSidebarDestinationContribution>(
+    "sidebar.destination",
+    effective,
+  ).filter((contribution) => contribution.modes.includes(mode));
+}
+
+/** Looks up the full contribution record for an effective sidebar destination. */
+export function resolveSidebarDestinationContribution(
+  destinationId: string,
+  mode: OctantMode,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean> = FIRST_PARTY_PLUGINS_EFFECTIVE,
+): ExtensionSidebarDestinationContribution | undefined {
+  return resolveSidebarDestinationContributions(mode, effective).find(
+    (contribution) => contribution.destinationId === destinationId,
+  );
+}
+
 /** Which settings section ids the effective first-party plugins contribute. */
 export function resolveSettingsSectionContributions(
   effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,

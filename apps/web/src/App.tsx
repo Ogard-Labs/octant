@@ -135,6 +135,12 @@ import "./styles/dock.css";
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
 import { ShellSidebar } from "./shell/ShellSidebar";
+import {
+  FIRST_PARTY_PLUGINS_EFFECTIVE,
+  resolveSidebarDestinationContributions,
+} from "./shell/contributionRegistry";
+import { loadPluginSidebarDestinationAction } from "./shell/pluginSidebarDestinationRegistry";
+import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDestinationRegistry";
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
@@ -2912,6 +2918,33 @@ function LaunchedShell(
     }
   }
 
+  const pluginSidebarDestinationActionContext: SidebarDestinationActionContext = {
+    closeOverlays: () => {
+      setRailPlaceholder(undefined);
+      setAutomationCenterOpen(false);
+      setAgentsCenterOpen(false);
+      setArtifactLibraryOpen(false);
+      setWorkBoardOpen(false);
+      setCodeBoardOpen(false);
+      setCodePullRequestsOpen(false);
+    },
+    openThreadBoard:
+      activeMode === "code" ? () => setCodeBoardOpen(true) : () => setWorkBoardOpen(true),
+    openPullRequests: () => setCodePullRequestsOpen(true),
+  };
+
+  const pluginSidebarDestinationActions: Record<string, () => void> = {};
+  for (const contribution of resolveSidebarDestinationContributions(
+    activeMode,
+    FIRST_PARTY_PLUGINS_EFFECTIVE,
+  )) {
+    if (contribution.entryPoint === undefined) continue;
+    const action = loadPluginSidebarDestinationAction(contribution.entryPoint);
+    if (action === undefined) continue;
+    pluginSidebarDestinationActions[contribution.destinationId] = () =>
+      action(pluginSidebarDestinationActionContext);
+  }
+
   async function handleCreateWorkThread(
     projectId: ProjectId,
     prompt: string,
@@ -3933,24 +3966,7 @@ function LaunchedShell(
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
-                      "thread-board": () => {
-                        setRailPlaceholder(undefined);
-                        setAutomationCenterOpen(false);
-                        setAgentsCenterOpen(false);
-                        setArtifactLibraryOpen(false);
-                        setWorkBoardOpen(false);
-                        setCodePullRequestsOpen(false);
-                        setCodeBoardOpen(true);
-                      },
-                      "pull-requests": () => {
-                        setRailPlaceholder(undefined);
-                        setAutomationCenterOpen(false);
-                        setAgentsCenterOpen(false);
-                        setArtifactLibraryOpen(false);
-                        setWorkBoardOpen(false);
-                        setCodeBoardOpen(false);
-                        setCodePullRequestsOpen(true);
-                      },
+                      ...pluginSidebarDestinationActions,
                     },
                   },
                 }
@@ -3964,15 +3980,7 @@ function LaunchedShell(
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
-                      "thread-board": () => {
-                        setRailPlaceholder(undefined);
-                        setAutomationCenterOpen(false);
-                        setAgentsCenterOpen(false);
-                        setArtifactLibraryOpen(false);
-                        setCodeBoardOpen(false);
-                        setCodePullRequestsOpen(false);
-                        setWorkBoardOpen(true);
-                      },
+                      ...pluginSidebarDestinationActions,
                     },
                   },
                 }
