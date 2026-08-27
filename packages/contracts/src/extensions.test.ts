@@ -253,6 +253,42 @@ describe("extension package contracts", () => {
     ]);
   });
 
+  it("accepts an executable provider-driver and rejects one without an entry point", () => {
+    const decoded = decodeExtensionPackageManifest({
+      ...manifest(),
+      slug: "codex",
+      declaredCapabilities: [],
+      primaryComponentId: "provider-driver",
+      components: [
+        {
+          id: "provider-driver",
+          kind: "provider-driver",
+          displayName: "Codex CLI",
+          declaredCapabilities: [],
+          entryPoint: "builtin:provider-driver/codex",
+        },
+      ],
+    });
+    expect(decoded.components[0]?.kind).toBe("provider-driver");
+
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...manifest(),
+        slug: "codex",
+        declaredCapabilities: [],
+        primaryComponentId: "provider-driver",
+        components: [
+          {
+            id: "provider-driver",
+            kind: "provider-driver",
+            displayName: "Codex CLI",
+            declaredCapabilities: [],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("rejects an appearance-pack that claims an executable entry point", () => {
     expect(() =>
       decodeExtensionPackageManifest({

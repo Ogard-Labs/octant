@@ -1,11 +1,10 @@
 import { execFile } from "node:child_process";
 import { access, constants, lstat, realpath } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
-import type { DiscoveryCandidate, DiscoverySnapshot } from "@octant/contracts";
-import {
-  discoverableDescriptors,
-  type ProviderDiscoveryDescriptor,
-} from "@octant/provider-sdk/discovery";
+import type { DiscoveryCandidate, DiscoverySnapshot, ProviderDriverKind } from "@octant/contracts";
+import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
+import type { ProviderDiscoveryDescriptor } from "@octant/provider-sdk/discovery";
+import { discoverableDescriptorsForAdmittedDrivers } from "@octant/provider-sdk/driver-plugins";
 
 // ── Budgets ─────────────────────────────────────────────────────────────────
 
@@ -64,6 +63,7 @@ export interface DiscoveryServiceOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly now?: () => number;
   readonly hostId?: string;
+  readonly admittedDriverKinds?: ReadonlySet<ProviderDriverKind>;
 }
 
 // ── Service ─────────────────────────────────────────────────────────────────
@@ -80,6 +80,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
   const now = options.now ?? Date.now;
   const hostId = options.hostId ?? "local";
   const environment = options.environment ?? process.env;
+  const admittedDriverKinds = options.admittedDriverKinds ?? admittedBundledProviderDriverKinds();
 
   let lastScanCandidates: DiscoveryCandidate[] = [];
 
@@ -89,7 +90,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
     },
     async scan(signal?: AbortSignal): Promise<DiscoverySnapshot> {
       const startTime = now();
-      const descriptors = discoverableDescriptors();
+      const descriptors = discoverableDescriptorsForAdmittedDrivers(admittedDriverKinds);
       const candidates: DiscoveryCandidate[] = [];
       let status: DiscoverySnapshot["status"] = "completed";
       let message: string | undefined;

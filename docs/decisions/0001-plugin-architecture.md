@@ -273,7 +273,15 @@ list: it is added as a bundled-off plugin through the Integration kind after
 those host seams exist. Packaging remaining zen/appearance assets and every
 viewer as separable `@octant/*` plugins remains step 6. Marketplace/host stays
 in the host. Connector/OAuth marketplace stays Later; a first-party Linear
-plugin is not that marketplace.
+plugin is not that marketplace. Step 3 landed: each in-tree vendor driver is a
+bundled, enabled-by-default `provider-driver` plugin. The host admits a driver
+only when that component is effective, so a disabled or incompatible plugin
+contributes no models, tools, or capabilities. Honest capability reporting and
+fail-closed unsupported modes stay host-enforced through `provider-sdk`; plugins
+do not declare provider capabilities of their own. The generic ACP stack remains
+a host capability that ACP vendor plugins configure — there is no second ACP
+runtime. Provider Settings rows remain host-compiled; this step does not open a
+Settings-section plugin seam.
 
 ## Consequences
 
@@ -309,4 +317,5 @@ plugin is not that marketplace.
    data?
 4. Where does the generic ACP stack live: as a host capability that provider
    plugins configure, or as itself a plugin that other provider plugins depend
-   on?
+   on? **Resolved:** it stays a host capability. ACP vendor plugins configure the
+   existing generic stack; they do not ship a second ACP runtime.

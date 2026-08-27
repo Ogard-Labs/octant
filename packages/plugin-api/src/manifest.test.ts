@@ -108,6 +108,40 @@ describe("plugin-api manifest re-exports", () => {
     ).toThrow();
   });
 
+  it("accepts a provider-driver component and requires an entry point", () => {
+    const decoded = decodeExtensionPackageManifest(
+      manifest({
+        slug: "codex",
+        components: [
+          {
+            id: "provider-driver",
+            kind: "provider-driver",
+            displayName: "Codex CLI",
+            declaredCapabilities: [],
+            entryPoint: "builtin:provider-driver/codex",
+          },
+        ],
+      }),
+    );
+    expect(decoded.components[0]?.kind).toBe("provider-driver");
+
+    expect(() =>
+      decodeExtensionPackageManifest(
+        manifest({
+          slug: "codex",
+          components: [
+            {
+              id: "provider-driver",
+              kind: "provider-driver",
+              displayName: "Codex CLI",
+              declaredCapabilities: [],
+            },
+          ],
+        }),
+      ),
+    ).toThrow();
+  });
+
   it("accepts appearance-pack and preview-viewer kinds without an entry point", () => {
     const decoded = decodeExtensionPackageManifest(
       manifest({

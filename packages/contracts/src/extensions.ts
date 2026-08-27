@@ -268,6 +268,7 @@ export const ExtensionComponentKind = Schema.Literal(
   "ui-surface",
   "appearance-pack",
   "preview-viewer",
+  "provider-driver",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
@@ -298,6 +299,7 @@ const executableKinds = new Set<ExtensionComponentKind>([
   "apple-development-adapter",
   "board",
   "integration",
+  "provider-driver",
 ]);
 const mcpChildKinds = new Set<ExtensionComponentKind>(["mcp-tool", "mcp-prompt", "mcp-resource"]);
 
