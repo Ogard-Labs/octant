@@ -1,6 +1,11 @@
 import type { IntegrationHostPort, IntegrationRuntime } from "@octant/plugin-api/integration";
 
-export type IntegrationLoaderFailureCode = "module-missing" | "factory-missing" | "runtime-invalid";
+export type IntegrationLoaderFailureCode =
+  | "module-missing"
+  | "factory-missing"
+  | "factory-not-callable"
+  | "runtime-invalid"
+  | "runtime-factory-threw";
 
 export type IntegrationLoaderResult =
   | { readonly kind: "loaded"; readonly runtime: IntegrationRuntime }
@@ -14,6 +19,7 @@ type IntegrationModule =
   | { readonly default: (hostPort: IntegrationHostPort) => IntegrationRuntime }
   | { readonly createIntegrationRuntime: (hostPort: IntegrationHostPort) => IntegrationRuntime };
 
+/** Type guard for an integration module that exposes a factory export. */
 function isIntegrationModule(value: unknown): value is IntegrationModule {
   return (
     typeof value === "object" &&
@@ -22,13 +28,18 @@ function isIntegrationModule(value: unknown): value is IntegrationModule {
   );
 }
 
+/** Reads a named method from a candidate runtime object without coercing it. */
+function integrationRuntimeMethod(value: unknown, name: string): unknown {
+  return Reflect.get(value as object, name);
+}
+
+/** Type guard for an object that implements the IntegrationRuntime interface. */
 function isIntegrationRuntime(value: unknown): value is IntegrationRuntime {
   if (typeof value !== "object" || value === null) return false;
-  const runtime = value as Record<string, unknown>;
   return (
-    typeof runtime.observe === "function" &&
-    typeof runtime.execute === "function" &&
-    typeof runtime.close === "function"
+    typeof integrationRuntimeMethod(value, "observe") === "function" &&
+    typeof integrationRuntimeMethod(value, "execute") === "function" &&
+    typeof integrationRuntimeMethod(value, "close") === "function"
   );
 }
 
@@ -61,7 +72,26 @@ export async function loadIntegrationModule(
     };
   }
   const factory = "default" in imported ? imported.default : imported.createIntegrationRuntime;
-  const runtime = factory(hostPort);
+  if (typeof factory !== "function") {
+    return {
+      kind: "failed",
+      code: "factory-not-callable",
+      message: `Integration export from ${modulePath} is not a callable factory.`,
+    };
+  }
+  let runtime: unknown;
+  try {
+    runtime = factory(hostPort);
+  } catch (cause) {
+    return {
+      kind: "failed",
+      code: "runtime-factory-threw",
+      message:
+        cause instanceof Error
+          ? cause.message
+          : `Integration factory from ${modulePath} threw while constructing the runtime.`,
+    };
+  }
   if (!isIntegrationRuntime(runtime)) {
     return {
       kind: "failed",

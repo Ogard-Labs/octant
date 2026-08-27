@@ -98,6 +98,47 @@ export const IntegrationCommand = Schema.Union(
 export type IntegrationCommand = typeof IntegrationCommand.Type;
 
 /**
+ * Result of an integration operation. The plugin is responsible for deciding
+ * whether a failure is retryable; the host only surfaces the outcome.
+ */
+export const IntegrationExecutionResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("ok"),
+    value: Schema.Unknown,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    reason: safeText(512),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("failed"),
+    reason: safeText(512),
+    retryable: Schema.Boolean,
+  }).annotations(strict),
+).annotations(strict);
+export type IntegrationExecutionResult = typeof IntegrationExecutionResult.Type;
+
+/**
+ * Result of requesting a credential from the host. The host may grant an opaque
+ * reference, refuse the scope, or report that no broker is available.
+ */
+export const IntegrationCredentialRequestResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("granted"),
+    reference: safeText(256),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    reason: safeText(512),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unavailable"),
+    reason: safeText(512),
+  }).annotations(strict),
+).annotations(strict);
+export type IntegrationCredentialRequestResult = typeof IntegrationCredentialRequestResult.Type;
+
+/**
  * Observations emitted by an integration plugin. The host decodes only the
  * authentication snapshot; operation results are forwarded to the caller that
  * issued the operation command.
@@ -110,16 +151,33 @@ export const IntegrationObservation = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("operation"),
     operationId: safeText(64),
-    result: Schema.Unknown,
+    result: IntegrationExecutionResult,
   }).annotations(strict),
 ).annotations(strict);
 export type IntegrationObservation = typeof IntegrationObservation.Type;
 
+/** Decodes an unknown value as an integration authentication snapshot. */
 export const decodeIntegrationAuthenticationSnapshot = Schema.decodeUnknownSync(
   IntegrationAuthenticationSnapshot,
 );
+
+/** Decodes an unknown value as an integration authentication command. */
 export const decodeIntegrationAuthenticationCommand = Schema.decodeUnknownSync(
   IntegrationAuthenticationCommand,
 );
+
+/** Decodes an unknown value as an integration command. */
 export const decodeIntegrationCommand = Schema.decodeUnknownSync(IntegrationCommand);
+
+/** Decodes an unknown value as an integration observation. */
 export const decodeIntegrationObservation = Schema.decodeUnknownSync(IntegrationObservation);
+
+/** Decodes an unknown value as an integration execution result. */
+export const decodeIntegrationExecutionResult = Schema.decodeUnknownSync(
+  IntegrationExecutionResult,
+);
+
+/** Decodes an unknown value as an integration credential-request result. */
+export const decodeIntegrationCredentialRequestResult = Schema.decodeUnknownSync(
+  IntegrationCredentialRequestResult,
+);

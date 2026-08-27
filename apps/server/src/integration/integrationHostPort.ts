@@ -1,14 +1,17 @@
-import type { IntegrationHostPort } from "@octant/plugin-api/integration";
+import type {
+  IntegrationCredentialRequestResult,
+  IntegrationHostPort,
+} from "@octant/plugin-api/integration";
 
 export interface IntegrationHostPortDependencies {
   readonly fetch?: (input: Request) => Promise<Response>;
-  readonly requestCredential?: (scope: string) => Promise<{ readonly reference: string }>;
+  readonly requestCredential?: (scope: string) => Promise<IntegrationCredentialRequestResult>;
 }
 
 /**
  * Creates the typed host port handed to an Integration plugin. Only the
- * declared capabilities are wired; the default implementation rejects
- * credential requests until the host injects a credential broker.
+ * declared capabilities are wired; the default implementation reports that no
+ * credential broker is available until the host injects one.
  */
 export function createIntegrationHostPort(
   dependencies: IntegrationHostPortDependencies = {},
@@ -17,8 +20,9 @@ export function createIntegrationHostPort(
     fetch: dependencies.fetch ?? globalThis.fetch.bind(globalThis),
     requestCredential:
       dependencies.requestCredential ??
-      (async () => {
-        throw new Error("Credential broker is not configured for this integration host.");
-      }),
+      (async () => ({
+        kind: "unavailable",
+        reason: "Credential broker is not configured for this integration host.",
+      })),
   };
 }

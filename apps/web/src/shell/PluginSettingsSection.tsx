@@ -12,17 +12,21 @@ type LoadState =
   | { readonly kind: "ready"; readonly Module: React.ComponentType<PluginSettingsSectionProps> }
   | { readonly kind: "error"; readonly message: string };
 
+/**
+ * Renders a plugin-contributed settings section by entry point. The registry
+ * lookup returns a discriminated result, so an unknown entry point renders an
+ * explicit error state instead of throwing.
+ */
 export function PluginSettingsSection(props: PluginSettingsSectionPropsWithEntryPoint) {
   const [state] = useState<LoadState>(() => {
-    try {
-      const Module = loadPluginSettingsSectionModule(props.entryPoint);
-      return { kind: "ready", Module } as const;
-    } catch (error) {
+    const result = loadPluginSettingsSectionModule(props.entryPoint);
+    if (result.kind === "unknown") {
       return {
         kind: "error",
-        message: error instanceof Error ? error.message : "Failed to load settings section.",
+        message: `Unknown plugin settings-section entry point: ${result.entryPoint}`,
       } as const;
     }
+    return { kind: "ready", Module: result.module } as const;
   });
 
   if (state.kind === "error") {

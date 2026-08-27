@@ -12,23 +12,33 @@ export interface PluginSettingsSectionProps {
 
 export type PluginSettingsSectionModule = ComponentType<PluginSettingsSectionProps>;
 
-const builtInSettingsSectionModules: Readonly<Record<string, PluginSettingsSectionModule>> = {
-  "builtin:github/settings": GitHubSettingsSectionModule,
-};
+export type PluginSettingsSectionModuleResult =
+  | { readonly kind: "ready"; readonly module: PluginSettingsSectionModule }
+  | { readonly kind: "unknown"; readonly entryPoint: string };
+
+const builtInSettingsSectionModules: ReadonlyMap<string, PluginSettingsSectionModule> = new Map([
+  ["builtin:github/settings", GitHubSettingsSectionModule],
+]);
 
 /**
- * Returns a plugin settings-section module by its entry point. Throws for
- * unknown entry points so the renderer can render an error boundary rather
- * than a blank panel.
+ * Returns a plugin settings-section module by its entry point. Unknown entry
+ * points are reported as a discriminated result so the renderer can show an
+ * error state rather than a blank panel.
  */
-export function loadPluginSettingsSectionModule(entryPoint: string): PluginSettingsSectionModule {
-  const module = builtInSettingsSectionModules[entryPoint];
+export function loadPluginSettingsSectionModule(
+  entryPoint: string,
+): PluginSettingsSectionModuleResult {
+  const module = builtInSettingsSectionModules.get(entryPoint);
   if (module === undefined) {
-    throw new Error(`Unknown plugin settings-section entry point: ${entryPoint}`);
+    return { kind: "unknown", entryPoint };
   }
-  return module;
+  return { kind: "ready", module };
 }
 
+/**
+ * Returns whether the given string is a registered plugin settings-section
+ * entry point. Only own keys of the registry are considered.
+ */
 export function isPluginSettingsSectionEntryPoint(entryPoint: string): boolean {
-  return entryPoint in builtInSettingsSectionModules;
+  return builtInSettingsSectionModules.has(entryPoint);
 }

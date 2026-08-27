@@ -2939,10 +2939,10 @@ function LaunchedShell(
     FIRST_PARTY_PLUGINS_EFFECTIVE,
   )) {
     if (contribution.entryPoint === undefined) continue;
-    const action = loadPluginSidebarDestinationAction(contribution.entryPoint);
-    if (action === undefined) continue;
+    const result = loadPluginSidebarDestinationAction(contribution.entryPoint);
+    if (result.kind !== "ready") continue;
     pluginSidebarDestinationActions[contribution.destinationId] = () =>
-      action(pluginSidebarDestinationActionContext);
+      result.action(pluginSidebarDestinationActionContext);
   }
 
   async function handleCreateWorkThread(

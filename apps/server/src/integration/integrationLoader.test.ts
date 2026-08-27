@@ -34,4 +34,24 @@ describe("integration loader", () => {
     if (result.kind !== "loaded") return;
     expect(hostPort.fetch).toBe(injectedFetch);
   });
+
+  it("returns a failure when the factory export is not callable", async () => {
+    const hostPort = createIntegrationHostPort();
+    const result = await loadIntegrationModule("data:text/javascript,export default 42", hostPort);
+    expect(result.kind).toBe("failed");
+    if (result.kind !== "failed") return;
+    expect(result.code).toBe("factory-not-callable");
+  });
+
+  it("returns a failure when the factory throws", async () => {
+    const hostPort = createIntegrationHostPort();
+    const result = await loadIntegrationModule(
+      "data:text/javascript,export default function createRuntime() { throw new Error('boom'); }",
+      hostPort,
+    );
+    expect(result.kind).toBe("failed");
+    if (result.kind !== "failed") return;
+    expect(result.code).toBe("runtime-factory-threw");
+    expect(result.message).toContain("boom");
+  });
 });

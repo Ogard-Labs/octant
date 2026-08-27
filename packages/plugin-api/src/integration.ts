@@ -1,4 +1,8 @@
-import type { IntegrationCommand, IntegrationObservation } from "@octant/contracts/integration";
+import type {
+  IntegrationCommand,
+  IntegrationCredentialRequestResult,
+  IntegrationObservation,
+} from "@octant/contracts/integration";
 
 /**
  * Typed server port for the Integration plugin kind.
@@ -17,7 +21,7 @@ export * from "@octant/contracts/integration";
  */
 export interface IntegrationHostPort {
   readonly fetch: (input: Request) => Promise<Response>;
-  readonly requestCredential: (scope: string) => Promise<{ readonly reference: string }>;
+  readonly requestCredential: (scope: string) => Promise<IntegrationCredentialRequestResult>;
 }
 
 /**

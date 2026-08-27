@@ -6,13 +6,13 @@ import {
 
 describe("plugin sidebar destination registry", () => {
   it("returns the built-in thread-board destination action", () => {
-    const action = loadPluginSidebarDestinationAction("builtin:board/destination");
-    expect(action).toBeDefined();
+    const result = loadPluginSidebarDestinationAction("builtin:board/destination");
+    expect(result.kind).toBe("ready");
   });
 
   it("returns the built-in pull-requests destination action", () => {
-    const action = loadPluginSidebarDestinationAction("builtin:github/sidebar-destination");
-    expect(action).toBeDefined();
+    const result = loadPluginSidebarDestinationAction("builtin:github/sidebar-destination");
+    expect(result.kind).toBe("ready");
   });
 
   it("reports built-in entry points as registered", () => {
@@ -20,8 +20,18 @@ describe("plugin sidebar destination registry", () => {
     expect(isPluginSidebarDestinationEntryPoint("builtin:github/sidebar-destination")).toBe(true);
   });
 
-  it("returns undefined for unknown entry points", () => {
-    expect(loadPluginSidebarDestinationAction("unknown:plugin/destination")).toBeUndefined();
+  it("returns an unknown result for unknown entry points", () => {
+    expect(loadPluginSidebarDestinationAction("unknown:plugin/destination")).toEqual({
+      kind: "unknown",
+      entryPoint: "unknown:plugin/destination",
+    });
     expect(isPluginSidebarDestinationEntryPoint("unknown:plugin/destination")).toBe(false);
+  });
+
+  it("does not resolve inherited Object.prototype names", () => {
+    expect(isPluginSidebarDestinationEntryPoint("constructor")).toBe(false);
+    expect(isPluginSidebarDestinationEntryPoint("toString")).toBe(false);
+    expect(loadPluginSidebarDestinationAction("constructor").kind).toBe("unknown");
+    expect(loadPluginSidebarDestinationAction("toString").kind).toBe("unknown");
   });
 });
