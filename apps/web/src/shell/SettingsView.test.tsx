@@ -746,6 +746,7 @@ describe("SettingsView", () => {
         topConsumers: [],
         hasMore: false,
         queryAt: "2026-07-24T12:00:00.000Z",
+        latencyStats: { measurements: [] },
       })),
       export: vi.fn(),
       reset: vi.fn(),
