@@ -19,11 +19,15 @@ export interface StatusReport {
 export async function runStatusCommand(options: StatusCommandOptions = {}): Promise<StatusReport> {
   const hostname = options.hostname ?? "127.0.0.1";
   const port = options.port ?? 13_773;
-  const url = new URL(`http://${hostname}:${port}`);
+  const url = new URL(`http://${formatUrlHostname(hostname)}:${port}`);
   const fetch = options.fetch ?? globalThis.fetch;
   const stdout = options.stdout ?? process.stdout;
 
-  const isLocalTarget = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+  const isLocalTarget =
+    hostname === "127.0.0.1" ||
+    hostname === "localhost" ||
+    hostname === "::1" ||
+    hostname === "[::1]";
   const [health, capabilities] = await Promise.all([
     probeHostHealth({ url, fetch }),
     isLocalTarget
@@ -67,4 +71,9 @@ export function formatStatusReport(report: StatusReport): string {
     );
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** An IPv6 host is only a valid URL authority in brackets. */
+function formatUrlHostname(hostname: string): string {
+  return hostname.includes(":") && !hostname.startsWith("[") ? `[${hostname}]` : hostname;
 }

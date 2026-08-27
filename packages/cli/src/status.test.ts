@@ -57,6 +57,28 @@ describe("runStatusCommand", () => {
     expect(report.secretStore).toBeDefined();
   });
 
+  it("treats IPv6 loopback as a local target without throwing", async () => {
+    const fetch = mockFetch(async () =>
+      jsonResponse({
+        product: "Octant",
+        status: "ok",
+        storage: "ready",
+        version: "0.0.0-dev",
+        instanceId: "ipv6-instance",
+      }),
+    );
+    const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const report = await runStatusCommand({
+      hostname: "::1",
+      fetch,
+      stdout,
+    });
+    expect(report.status).toBe("ready");
+    expect(report.url.toString()).toBe("http://[::1]:13773/");
+    expect(report.secretStore).toBeDefined();
+    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("Secret store:"));
+  });
+
   it("omits local secret-store status when inspecting a remote host", async () => {
     const fetch = mockFetch(async () =>
       jsonResponse({
