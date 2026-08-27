@@ -219,9 +219,11 @@ import {
 import { createCodeOperationApprovalRouteHandler } from "./codeOperationApprovalRoutes";
 import {
   createComputerUseRuntime,
+  reportComputerUseDestination,
   type ComputerUseNativeAdapter,
   type ComputerUseRuntime,
 } from "./computerUse/computerUseRuntime";
+import { detectMacOsScreen } from "./computerUse/computerUseDestination";
 import { createMacOsComputerUseAdapter } from "./computerUse/macOsComputerUseAdapter";
 import { createNodeComputerUseProcessPort } from "./computerUse/nodeComputerUseProcessPort";
 import { createComputerUseValidationEvidenceRecorder } from "./computerUse/computerUseValidationEvidence";
@@ -1818,12 +1820,23 @@ export function startOctantServer(
     const computerUseProcess = createNodeComputerUseProcessPort({
       receiptDirectory: join(persistence.dataDirectory, "computer-use", "runtime-receipts"),
     });
+    const computerUseDestination =
+      options.computerUseAdapter === undefined
+        ? reportComputerUseDestination({
+            platform: process.platform,
+            ...(process.platform === "darwin" ? { hasScreen: detectMacOsScreen() } : {}),
+          })
+        : { status: "available" as const, kind: "macos-host" as const };
+    const computerUseAdapter =
+      options.computerUseAdapter ??
+      (computerUseDestination.status === "available"
+        ? createMacOsComputerUseAdapter({ process: computerUseProcess })
+        : undefined);
     const computerUseRuntime =
       options.computerUseRuntime ??
       createComputerUseRuntime({
-        adapter:
-          options.computerUseAdapter ??
-          createMacOsComputerUseAdapter({ process: computerUseProcess }),
+        ...(computerUseAdapter === undefined ? {} : { adapter: computerUseAdapter }),
+        destination: computerUseDestination,
         evidence: createComputerUseValidationEvidenceRecorder({
           eventStore: validationEventStore,
           uuid: randomUUID,
@@ -3195,6 +3208,7 @@ export function startOctantServer(
       execute: (input, signal) => appleProcess.execute(input, signal),
       realpath,
       writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
+      readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),
       persistReceipts: (receipts) => appleRuntimeStore.persistReceipts(receipts),
       now: () => new Date().toISOString(),
       newId: randomUUID,

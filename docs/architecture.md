@@ -208,7 +208,10 @@ and iOS Simulator, as mode and capability allow. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
-tool does not stop its server-owned lifecycle. At narrow widths the dock
+tool does not stop its server-owned lifecycle. The iOS Simulator dock tab
+shows a thread-bound live frame from host-held screenshot evidence, with
+honest setup, unavailable, booting, live, interrupted, and stale-after-restart
+states; closing the tab does not shut down the destination. At narrow widths the dock
 becomes an overlay drawer. Environment belongs to a thread as a compact header
 summary with a transient disclosure whose open state is renderer-only. It may
 summarize the active thread's server-authored child AgentRuns, including their
@@ -411,7 +414,11 @@ prompt, schema, tool, or route.
 - A structured mention cannot install, trust, enable, or elevate anything.
 - Core capabilities (browser/computer use, tests, Apple validation, approvals,
   memory, subagents) are app-managed and provider-neutral; no core capability
-  depends on an optional extension.
+  depends on an optional extension. Computer use is destination-shaped: the
+  host reports whether a screen exists, and an adapter performs
+  observe/execute/cleanup. A host with no destination reports the capability
+  absent and refuses actions as a value rather than throwing. See
+  [decisions/0053-computer-use-destinations.md](decisions/0053-computer-use-destinations.md).
 
 The path from this extensions model to a general plugin host — first-party
 features as toggleable plugins, renderer contribution points, integration and

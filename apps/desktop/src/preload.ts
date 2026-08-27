@@ -65,6 +65,7 @@ type SidebarVibrancyMode = "off" | "subtle" | "strong";
 export interface HostCapabilities {
   readonly sidebarVibrancySupported: boolean;
   readonly liveBrowserSupported: boolean;
+  readonly liveSimulatorFrameSupported: boolean;
 }
 
 export interface AppUpdateRelease {
@@ -521,13 +522,15 @@ export function createHostBridge(
       if (
         !isRecord(value) ||
         typeof value.sidebarVibrancySupported !== "boolean" ||
-        typeof value.liveBrowserSupported !== "boolean"
+        typeof value.liveBrowserSupported !== "boolean" ||
+        typeof value.liveSimulatorFrameSupported !== "boolean"
       ) {
         throw new Error("Octant received invalid host capabilities.");
       }
       return Object.freeze({
         sidebarVibrancySupported: value.sidebarVibrancySupported,
         liveBrowserSupported: value.liveBrowserSupported,
+        liveSimulatorFrameSupported: value.liveSimulatorFrameSupported,
       });
     },
     // Mirrors the window this host actually creates: `resolveWindowPresentation`

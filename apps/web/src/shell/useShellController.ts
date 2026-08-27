@@ -875,8 +875,11 @@ export function useShellController(options: ShellControllerOptions) {
     if (pane === undefined || pane.surface.kind === "welcome") return;
     if (String(shell.workspace.activePaneIds[mode]) === String(paneId)) return;
     markInteraction("renderer", "pane-activation-requested");
-    await enqueueMutation({ kind: "workspace", intent: { kind: "activate-pane", paneId } });
-    markInteractionAfterPaint("pane-activation");
+    const committed = await enqueueMutation({
+      kind: "workspace",
+      intent: { kind: "activate-pane", paneId },
+    });
+    if (committed) markInteractionAfterPaint("pane-activation");
   }
 
   /**

@@ -3,6 +3,7 @@ import {
   AppleActionRequest,
   AppleBuildEvidence,
   AppleDiscoveryRequest,
+  AppleEvidenceReference,
   AppleRuntimeSnapshot,
   AppleSimulatorRecord,
   AppleToolchainDiscovery,
@@ -36,6 +37,15 @@ export const AppleSnapshotRequest = Schema.Struct({
   checkoutId: CodeCheckoutId,
 }).annotations(strict);
 export type AppleSnapshotRequest = typeof AppleSnapshotRequest.Type;
+
+export const AppleArtifactRequest = Schema.Struct({
+  kind: Schema.Literal("apple-artifact-request"),
+  authority: ToolActionAuthority,
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  reference: AppleEvidenceReference,
+}).annotations(strict);
+export type AppleArtifactRequest = typeof AppleArtifactRequest.Type;
 
 export const AppleDiscoverySnapshot = Schema.Struct({
   toolchain: AppleToolchainDiscovery,
@@ -83,5 +93,6 @@ export const decodeAppleAuthorityScopeRequest = Schema.decodeUnknownSync(
 );
 export const decodeAppleCancelRequest = Schema.decodeUnknownSync(AppleCancelRequest);
 export const decodeAppleSnapshotRequest = Schema.decodeUnknownSync(AppleSnapshotRequest);
+export const decodeAppleArtifactRequest = Schema.decodeUnknownSync(AppleArtifactRequest);
 export const decodeAppleDiscoverySnapshot = Schema.decodeUnknownSync(AppleDiscoverySnapshot);
 export const decodeAppleRpcEnvelope = Schema.decodeUnknownSync(AppleRpcEnvelope);

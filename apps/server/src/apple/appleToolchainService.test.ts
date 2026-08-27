@@ -20,6 +20,14 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
     receipts: ReadonlyArray<Record<string, unknown>>,
     context: ExecutionContext,
   ): Promise<ReadonlyArray<any>>;
+  readScreenshotArtifact(
+    reference: string,
+    context: ExecutionContext,
+  ): Promise<
+    | { readonly kind: "found"; readonly bytes: Uint8Array }
+    | { readonly kind: "unavailable"; readonly message: string }
+    | { readonly kind: "unauthorized"; readonly message: string }
+  >;
 };
 
 let AppleToolchainService: ServiceConstructor;
@@ -649,6 +657,7 @@ describe("AppleToolchainService lifecycle", () => {
     const service = new AppleToolchainService({
       execute,
       writeArtifact,
+      readArtifact: async (reference: string) => artifacts.get(reference),
       realpath: async (path: string) => path,
       now: () => "2026-07-27T20:00:00.000Z",
       newId: () => "30000000-0000-4000-8000-000000000012",
@@ -693,6 +702,15 @@ describe("AppleToolchainService lifecycle", () => {
       (artifact: { readonly kind: string }) => artifact.kind === "log",
     );
     expect(artifacts.get(log!.reference)).toEqual(new Uint8Array());
+
+    const readBack = await service.readScreenshotArtifact(screenshot!.reference, context);
+    expect(readBack).toEqual({ kind: "found", bytes: png });
+    await expect(
+      service.readScreenshotArtifact("apple-screenshot-other", context),
+    ).resolves.toEqual({
+      kind: "unauthorized",
+      message: "Apple screenshot evidence is not available for this thread.",
+    });
   });
 
   it("records a failed capture without inventing a screenshot artifact", async () => {

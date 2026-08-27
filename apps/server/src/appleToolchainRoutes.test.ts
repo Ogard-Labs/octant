@@ -84,6 +84,7 @@ describe("Apple toolchain routes", () => {
       execute: vi.fn(),
       cancel: vi.fn(),
       snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
     };
     const resolveContext = vi.fn(async () => context);
     const handler = createAppleToolchainRouteHandler({
@@ -118,7 +119,13 @@ describe("Apple toolchain routes", () => {
   });
 
   it("fails closed before service access for invalid window authority", async () => {
-    const service = { discover: vi.fn(), execute: vi.fn(), cancel: vi.fn(), snapshot: vi.fn() };
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
+    };
     const handler = createAppleToolchainRouteHandler({
       windowAuthorityStore: authorityStore(),
       resolveContext: vi.fn(),
@@ -134,7 +141,13 @@ describe("Apple toolchain routes", () => {
 
   it("does not leak a denied root or unrelated log detail", async () => {
     const privatePath = "/private/other-project/secret";
-    const service = { discover: vi.fn(), execute: vi.fn(), cancel: vi.fn(), snapshot: vi.fn() };
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
+    };
     const handler = createAppleToolchainRouteHandler({
       windowAuthorityStore: authorityStore(),
       resolveContext: vi.fn(async () => undefined),
@@ -147,5 +160,82 @@ describe("Apple toolchain routes", () => {
     expect(response?.status).toBe(400);
     expect(await response?.text()).not.toContain(privatePath);
     expect(service.snapshot).not.toHaveBeenCalled();
+  });
+
+  it("refuses screenshot bytes outside the window's authorized thread scope", async () => {
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(),
+    };
+    const resolveContext = vi.fn(async () => undefined);
+    const handler = createAppleToolchainRouteHandler({
+      windowAuthorityStore: authorityStore(),
+      resolveContext,
+      service,
+      now: () => 2,
+    });
+    const response = await handler(
+      new Request("http://127.0.0.1:13773/api/apple/artifacts", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+          origin: "http://127.0.0.1:5173",
+        },
+        body: JSON.stringify({
+          kind: "apple-artifact-request",
+          authority,
+          ...scope,
+          reference: "apple-screenshot-other-thread",
+        }),
+      }),
+    );
+    expect(response?.status).toBe(403);
+    expect(resolveContext).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining(scope),
+      expect.any(Object),
+    );
+    expect(service.readScreenshotArtifact).not.toHaveBeenCalled();
+  });
+
+  it("returns host-held screenshot bytes without putting them in the JSON envelope", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const service = {
+      discover: vi.fn(),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      snapshot: vi.fn(),
+      readScreenshotArtifact: vi.fn(async () => ({ kind: "found" as const, bytes: png })),
+    };
+    const handler = createAppleToolchainRouteHandler({
+      windowAuthorityStore: authorityStore(),
+      resolveContext: vi.fn(async () => context),
+      service,
+      now: () => 2,
+    });
+    const response = await handler(
+      new Request("http://127.0.0.1:13773/api/apple/artifacts", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+          origin: "http://127.0.0.1:5173",
+        },
+        body: JSON.stringify({
+          kind: "apple-artifact-request",
+          authority,
+          ...scope,
+          reference: "apple-screenshot-1",
+        }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await response!.arrayBuffer())).toEqual(png);
+    expect(service.readScreenshotArtifact).toHaveBeenCalledWith("apple-screenshot-1", context);
   });
 });

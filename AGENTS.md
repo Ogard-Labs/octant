@@ -44,11 +44,13 @@ Read the record that owns your change before editing, not all of them:
 | Context limits, capacity, scheduling                | `docs/decisions/0008`                                              |
 | Sandbox, approvals, Plan mode, access postures      | `docs/decisions/0009`, `docs/decisions/0018`                       |
 | File preview and canvas artifacts                   | `docs/decisions/0010`                                              |
+| Canvas boards, comments, and layout revisions       | `docs/decisions/0052`                                              |
 | Extensions, skills, plugin host                     | `docs/decisions/0011`, `docs/decisions/0001`                       |
 | Subagents and agent runs                            | `docs/decisions/0012`                                              |
 | Remote clients and mobile                           | `docs/decisions/0013`                                              |
 | Collaboration, shared host, git-mediated sharing    | `docs/decisions/0040`                                              |
 | Apple build and validation                          | `docs/decisions/0014`                                              |
+| Computer-use destinations                           | `docs/decisions/0053`                                              |
 | Shell, navigation, workspace layout                 | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045` |
 | Components and theme                                | `docs/decisions/0016`, `docs/decisions/0046`                       |
 

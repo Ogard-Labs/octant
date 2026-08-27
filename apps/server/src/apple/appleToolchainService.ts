@@ -21,6 +21,7 @@ import {
   type ToolActionCancellation,
 } from "@octant/contracts";
 import {
+  APPLE_HOST_RESTART_RECONCILIATION_NOTE,
   evaluateAppleBuildRequest,
   evaluateAppleSimulatorRequest,
   type AppleExecutionScope,
@@ -74,6 +75,7 @@ export interface AppleToolchainServiceOptions {
   ) => Promise<AppleProcessResult>;
   readonly realpath: (path: string) => Promise<string>;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;
+  readonly readArtifact?: (reference: string) => Promise<Uint8Array | undefined>;
   readonly persistReceipts?: (receipts: ReadonlyArray<AppleRuntimeReceipt>) => Promise<void>;
   readonly now: () => string;
   readonly newId: () => string;
@@ -271,6 +273,37 @@ export class AppleToolchainService {
     return true;
   }
 
+  async readScreenshotArtifact(
+    reference: string,
+    context: AppleExecutionContext,
+  ): Promise<
+    | { readonly kind: "found"; readonly bytes: Uint8Array }
+    | { readonly kind: "unavailable"; readonly message: string }
+    | { readonly kind: "unauthorized"; readonly message: string }
+  > {
+    const allowed = this.#recent.some(
+      (entry) =>
+        recentEvidenceMatches(entry, context) &&
+        entry.evidence.artifacts.some(
+          (artifact) => artifact.kind === "screenshot" && artifact.reference === reference,
+        ),
+    );
+    if (!allowed) {
+      return {
+        kind: "unauthorized",
+        message: "Apple screenshot evidence is not available for this thread.",
+      };
+    }
+    const bytes = await this.#options.readArtifact?.(reference);
+    if (bytes === undefined) {
+      return {
+        kind: "unavailable",
+        message: "Apple screenshot evidence is no longer available on this host.",
+      };
+    }
+    return { kind: "found", bytes };
+  }
+
   snapshot(context: AppleExecutionContext): AppleRuntimeSnapshot {
     return decodeAppleRuntimeSnapshot({
       sequence: this.#sequence,
@@ -326,8 +359,7 @@ export class AppleToolchainService {
         diagnostics: [
           {
             severity: "note",
-            message:
-              "Apple action was interrupted by a host restart and reconciled without claiming success.",
+            message: APPLE_HOST_RESTART_RECONCILIATION_NOTE,
           },
         ],
         artifacts: [],

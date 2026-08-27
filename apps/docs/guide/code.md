@@ -142,7 +142,10 @@ when open. It can host Side Chat, Browser, Files, Canvas, Plan when this thread
 has a current plan artifact, Delivery when a target is enabled, Changes,
 Terminal, Tests, or iOS Simulator instead of replacing the Code thread. iOS
 Simulator is absent until Octant has found an Xcode project and Apple
-toolchain. Hiding Browser or Terminal does not stop the server-owned session.
+toolchain. When it is open it shows a live frame for that thread's destination,
+or an honest unavailable or stale-after-restart state when the host cannot
+attach one. Hiding Browser, Terminal, or Simulator does not stop the
+server-owned session.
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.
 

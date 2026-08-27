@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 let AppleRuntimeStore: new (root: string) => {
   writeArtifact(reference: string, bytes: Uint8Array): Promise<void>;
+  readArtifact(reference: string): Promise<Uint8Array | undefined>;
   persistReceipts(receipts: ReadonlyArray<Record<string, unknown>>): Promise<void>;
   loadReceipts(): Promise<ReadonlyArray<Record<string, unknown>>>;
 };
@@ -23,6 +24,11 @@ describe("AppleRuntimeStore", () => {
     try {
       const store = new AppleRuntimeStore(root);
       await store.writeArtifact("apple-log-safe", new TextEncoder().encode("bounded log"));
+      await expect(store.readArtifact("apple-log-safe")).resolves.toEqual(
+        new TextEncoder().encode("bounded log"),
+      );
+      await expect(store.readArtifact("../escape")).resolves.toBeUndefined();
+      await expect(store.readArtifact("apple-missing")).resolves.toBeUndefined();
       const receipts = [
         {
           actionId: "70000000-0000-4000-8000-000000000001",

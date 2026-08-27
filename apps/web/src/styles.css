@@ -12,6 +12,7 @@
 @import "./styles/shadcn-theme.css";
 @import "./styles/chat.css";
 @import "./styles/code.css";
+@import "./styles/apple.css";
 @import "./styles/preview.css";
 @import "./styles/zen.css";
 @import "./styles/canvas.css";
@@ -1286,7 +1287,7 @@ button:focus-visible {
 .workspace-layer--bottom-panel-open {
   grid-template-rows:
     minmax(320px, 1fr)
-    min(var(--octant-bottom-panel-height, 260px), 38vh);
+    min(var(--octant-bottom-panel-height, 260px), 38vh, max(0px, calc(100% - 320px)));
 }
 
 .workspace-layer > .primary-workspace-layer {
