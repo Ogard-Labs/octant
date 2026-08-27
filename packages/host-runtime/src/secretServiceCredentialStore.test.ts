@@ -26,7 +26,7 @@ describe("Secret Service credential store", () => {
       commands.push(spec);
       const account = spec.args.at(-1);
       if (spec.args[0] === "store" && account !== undefined) {
-        values.set(account, spec.stdin?.trimEnd() ?? "");
+        values.set(account, spec.stdin ?? "");
         return result();
       }
       if (spec.args[0] === "lookup" && account !== undefined) {
@@ -59,12 +59,10 @@ describe("Secret Service credential store", () => {
         "account",
         providerInstanceId,
       ],
-      stdin: `${credential}\n`,
+      stdin: credential,
     });
     expect(commands.every(({ command }) => command === SECRET_TOOL_PATH)).toBe(true);
-    expect(
-      commands.every(({ args, stdin }) => !args.includes(credential) && stdin !== credential),
-    ).toBe(true);
+    expect(commands.every(({ args }) => !args.includes(credential))).toBe(true);
   });
 
   it("maps missing tools, locked stores, nonzero exits, and empty output to typed failures", async () => {

@@ -88,33 +88,36 @@ export function makeSecretServiceCredentialStore(
     credential?: string,
   ): Promise<SecretToolCommandResult> => {
     const normalizedId = normalizeProviderInstanceId(providerInstanceId);
-    if (operation === "set" && (credential === undefined || credential.length === 0)) {
-      throw new CredentialStoreFailure("invalid");
+    let spec: SecretToolCommandSpec;
+    if (operation === "set") {
+      if (credential === undefined || credential.length === 0) {
+        throw new CredentialStoreFailure("invalid");
+      }
+      spec = {
+        command: SECRET_TOOL_PATH,
+        args: [
+          "store",
+          "--label=Octant provider credential",
+          "service",
+          SECRET_SERVICE_ATTRIBUTE,
+          "account",
+          normalizedId,
+        ],
+        // secret-tool store reads until EOF; a trailing newline would be stored.
+        stdin: credential,
+      };
+    } else {
+      spec = {
+        command: SECRET_TOOL_PATH,
+        args: [
+          operation === "delete" ? "clear" : "lookup",
+          "service",
+          SECRET_SERVICE_ATTRIBUTE,
+          "account",
+          normalizedId,
+        ],
+      };
     }
-    const spec: SecretToolCommandSpec =
-      operation === "set"
-        ? {
-            command: SECRET_TOOL_PATH,
-            args: [
-              "store",
-              "--label=Octant provider credential",
-              "service",
-              SECRET_SERVICE_ATTRIBUTE,
-              "account",
-              normalizedId,
-            ],
-            stdin: `${credential}\n`,
-          }
-        : {
-            command: SECRET_TOOL_PATH,
-            args: [
-              operation === "delete" ? "clear" : "lookup",
-              "service",
-              SECRET_SERVICE_ATTRIBUTE,
-              "account",
-              normalizedId,
-            ],
-          };
     try {
       return await execute(spec, limits);
     } catch {
@@ -149,6 +152,7 @@ export function makeSecretServiceCredentialStore(
         throw commandFailure(result);
       }
       if (result.stderr !== "") throw new CredentialStoreFailure("failed");
+      // secret-tool lookup prints the secret plus a newline; stored bytes do not include it.
       const credential = result.stdout.endsWith("\n") ? result.stdout.slice(0, -1) : result.stdout;
       if (credential.length === 0) throw new CredentialStoreFailure("failed");
       return credential;
