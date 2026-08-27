@@ -55,6 +55,7 @@ export interface ShellSidebarProps {
     readonly actions: SidebarNavigationProps["actions"];
   };
   readonly onAddFolder: () => void;
+  readonly onOpenArchive?: () => void;
   readonly onOpenNavigator: () => void;
   /** Absent until Navigator has a model, so the profile menu does not advertise it. */
   readonly navigatorAvailable?: boolean;
@@ -170,21 +171,23 @@ export function ShellSidebar(props: ShellSidebarProps) {
         <ModeSwitcher
           actions={
             <>
-              <IconButton
-                data-navigation-id="search"
-                icon={Search}
-                label="Search"
-                onClick={props.onOpenSearch}
-              />
-              {props.nativeHost === true || props.onCollapseSidebar === undefined ? null : (
-                <IconButton
-                  className="sidebar__browser-collapse"
-                  icon={PanelLeftClose}
-                  label="Hide sidebar"
-                  onClick={props.onCollapseSidebar}
-                />
-              )}
               <span className="sidebar__chrome-activity" data-octant-sidebar-chrome-actions />
+              <span className="sidebar__primary-actions">
+                <IconButton
+                  data-navigation-id="search"
+                  icon={Search}
+                  label="Search"
+                  onClick={props.onOpenSearch}
+                />
+                {props.nativeHost === true || props.onCollapseSidebar === undefined ? null : (
+                  <IconButton
+                    className="sidebar__browser-collapse"
+                    icon={PanelLeftClose}
+                    label="Hide sidebar"
+                    onClick={props.onCollapseSidebar}
+                  />
+                )}
+              </span>
             </>
           }
           activeMode={props.workspace.activeMode}
@@ -218,6 +221,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
         )}
         <SidebarProfile
           navigatorAvailable={props.navigatorAvailable === true}
+          {...(props.onOpenArchive === undefined ? {} : { onOpenArchive: props.onOpenArchive })}
           onOpenNavigator={props.onOpenNavigator}
           onOpenSettings={props.onOpenSettings}
           {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}

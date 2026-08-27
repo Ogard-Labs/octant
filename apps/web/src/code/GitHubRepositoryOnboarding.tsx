@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FolderGit2 } from "lucide-react";
+import { ChevronDown, FolderGit2 } from "lucide-react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type {
@@ -9,7 +9,7 @@ import type {
   GithubRepositoryRow,
 } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantPopover } from "../ui/base/OctantPopover";
 import { GITHUB_VISIBILITY_LABELS, GitHubRepositoryPicker } from "./GitHubRepositoryPicker";
 
 /**
@@ -247,24 +247,25 @@ export function GitHubRepositoryOnboarding(props: GitHubRepositoryOnboardingProp
 
   return (
     <span className="github-onboarding">
-      <OctantButton
-        aria-label="GitHub repository"
-        className="github-onboarding__trigger"
-        disabled={props.disabled}
-        onClick={() => setOpen(true)}
-        size="sm"
-        type="button"
-        variant="ghost"
-      >
-        <FolderGit2 aria-hidden="true" size={12} strokeWidth={1.8} />
-        <span>{triggerText}</span>
-      </OctantButton>
-      <OctantDialog
+      <OctantPopover
+        align="start"
         className="github-onboarding__dialog"
-        label="GitHub repository"
-        onClose={() => setOpen(false)}
+        onOpenChange={setOpen}
         open={open}
-        popupId="github-repository-onboarding-dialog"
+        side="bottom"
+        sideOffset={6}
+        title="GitHub repository"
+        trigger={
+          <>
+            <FolderGit2 aria-hidden="true" size={12} strokeWidth={1.5} />
+            <span>{triggerText}</span>
+            <ChevronDown aria-hidden="true" size={12} strokeWidth={1.5} />
+          </>
+        }
+        triggerClassName="github-onboarding__trigger"
+        {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
+        triggerLabel="GitHub repository"
+        triggerVariant="ghost"
       >
         {props.fixedProjectName !== undefined && !settled ? (
           mismatch ? (
@@ -340,7 +341,7 @@ export function GitHubRepositoryOnboarding(props: GitHubRepositoryOnboardingProp
             onDone={() => setOpen(false)}
           />
         )}
-      </OctantDialog>
+      </OctantPopover>
     </span>
   );
 }

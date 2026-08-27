@@ -1,12 +1,11 @@
 import {
-  Blocks,
-  Bot,
-  Code2,
+  Columns3,
+  FileStack,
+  GitFork,
   GitPullRequest,
-  Kanban,
-  Library,
-  MessageSquarePlus,
-  Users,
+  Puzzle,
+  SquarePen,
+  Workflow,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -65,21 +64,19 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
 function navigationIcon(id: SidebarNavigationDescriptorId) {
   switch (id) {
     case "new-chat":
-      return MessageSquarePlus;
     case "new-code-thread":
-      return Code2;
     case "new-work-thread":
-      return MessageSquarePlus;
+      return SquarePen;
     case "automations":
-      return Bot;
+      return Workflow;
     case "agents":
-      return Users;
+      return GitFork;
     case "plugins":
-      return Blocks;
+      return Puzzle;
     case "artifact-library":
-      return Library;
+      return FileStack;
     case "thread-board":
-      return Kanban;
+      return Columns3;
     case "pull-requests":
       return GitPullRequest;
     default:

@@ -1,6 +1,7 @@
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
+import { decodeWorkspaceTabId, type WorkspaceTab } from "@octant/contracts/shell";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
 import type { ZenResearchDock as ZenResearchDockBinding } from "@octant/contracts/zen";
 import {
@@ -13,10 +14,11 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useEffect, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
+  BrowserWorkspace,
   makeBrowserToolAction,
   normalizeBrowserUrl,
   RENDERER_OVERLAY_SELECTOR,
@@ -24,9 +26,13 @@ import {
 import { useNativeBrowserSurface } from "../browser/useNativeBrowserSurface";
 import type { OctantHostBridge } from "../shell/hostBridge";
 
+const ZEN_RESEARCH_BROWSER_TAB_ID = decodeWorkspaceTabId("90000000-0000-4000-8000-000000000008");
+
 export interface ZenResearchDockProps {
   readonly client: BrowserAutomationClient;
   readonly hostBridge?: OctantHostBridge;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
   /**
    * The dock as the space holds it. The bound source context is the thread the
    * page belongs to; the dock shows that thread's browsing context and works
@@ -66,7 +72,8 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
   const [snapshot, setSnapshot] = useState<BrowserAutomationSnapshot>();
   const [message, setMessage] = useState<string>();
   const [starting, setStarting] = useState(false);
-  const [nativeSupported, setNativeSupported] = useState(false);
+  const [nativeSupported, setNativeSupported] = useState<boolean>();
+  const fallbackStop = useRef<Promise<void> | undefined>(undefined);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [drag, setDrag] = useState<ResearchDrag>();
   const context = snapshot?.context;
@@ -76,6 +83,13 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
   // context names the same thread under its own brand. Decoding rather than
   // casting keeps that one identity honest at the seam.
   const browserThreadId = decodeBrowserThreadId(threadId);
+  const browserTab: Extract<WorkspaceTab, { kind: "browser" }> = {
+    kind: "browser",
+    id: ZEN_RESEARCH_BROWSER_TAB_ID,
+    mode: props.dock.sourceContext.threadKind === "work" ? "work" : "code",
+    title: "Research",
+    threadId: browserThreadId,
+  };
   useEffect(() => {
     let active = true;
     void Promise.resolve(props.hostBridge?.getHostCapabilities?.()).then((capabilities) => {
@@ -89,7 +103,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
     ...(context === undefined ? {} : { contextId: String(context.contextId) }),
     threadId,
-    enabled: nativeSupported && active && !props.dock.collapsed,
+    enabled: nativeSupported === true && active && !props.dock.collapsed,
     overlaySelector: RENDERER_OVERLAY_SELECTOR,
   });
   const state = surface.state;
@@ -185,8 +199,34 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
     }
   }
 
+  const stopFallbackBrowser = useCallback((): Promise<void> => {
+    if (fallbackStop.current !== undefined) return fallbackStop.current;
+    const operation = props.client
+      .inspectThread({ threadId: browserThreadId })
+      .then(async (current) => {
+        if (current.context === undefined || current.context.state !== "active") return;
+        await props.client.stop({
+          contextId: current.context.contextId,
+          threadId: browserThreadId,
+        });
+      })
+      .catch(() => undefined);
+    fallbackStop.current = operation;
+    return operation;
+  }, [browserThreadId, props.client]);
+
+  useEffect(() => {
+    if (nativeSupported !== false) return;
+    return () => {
+      void stopFallbackBrowser();
+    };
+  }, [nativeSupported, stopFallbackBrowser]);
+
   async function close(): Promise<void> {
-    if (context === undefined) return;
+    if (context === undefined) {
+      if (nativeSupported === false) await stopFallbackBrowser();
+      return;
+    }
     try {
       setSnapshot(
         await props.client.stop({
@@ -278,10 +318,22 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
           <X aria-hidden="true" size={14} />
         </OctantButton>
       </header>
-      {!nativeSupported ? (
+      {nativeSupported === undefined ? (
         <p className="zen-research__notice" role="status">
-          A research page needs the Octant desktop app on this host.
+          Preparing the research browser…
         </p>
+      ) : nativeSupported === false ? (
+        <div className="zen-research__web-browser">
+          <BrowserWorkspace
+            client={props.client}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+            {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+            tab={browserTab}
+            {...(props.windowCapability === undefined
+              ? {}
+              : { windowCapability: props.windowCapability })}
+          />
+        </div>
       ) : !active ? (
         <div className="zen-research__empty">
           <ShieldCheck aria-hidden="true" size={16} />

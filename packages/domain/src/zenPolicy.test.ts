@@ -361,6 +361,34 @@ describe("updateElement", () => {
     ).toThrow(/typed widget command/i);
   });
 
+  it("resizes a thread without allowing its source authority to change", () => {
+    const thread = makeThreadElement();
+    if (thread.kind !== "thread") throw new Error("Expected thread fixture.");
+    const space = makeSpace(0, [thread]);
+    const resized = updateElement(
+      space,
+      { ...thread, geometry: { ...thread.geometry, width: 420, height: 280 } },
+      0,
+      localHostId,
+    );
+    expect(resized.elements[0]?.geometry).toMatchObject({ width: 420, height: 280 });
+
+    expect(() =>
+      updateElement(
+        space,
+        {
+          ...thread,
+          sourceContext: {
+            ...thread.sourceContext,
+            threadId: makeId("99999999") as never,
+          },
+        },
+        0,
+        localHostId,
+      ),
+    ).toThrow(/source context cannot change/i);
+  });
+
   it("rejects unknown element", () => {
     const space = makeSpace();
     expect(() => updateElement(space, makeNotesElement(), 0, localHostId)).toThrow(

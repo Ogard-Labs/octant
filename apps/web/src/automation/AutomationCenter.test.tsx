@@ -174,13 +174,22 @@ describe("AutomationCenter default surface", () => {
     expect(await screen.findByRole("list", { name: "Automations" })).toBeVisible();
   });
 
-  it("explains an empty list without implying deletion", async () => {
+  it("turns an empty list into creation paths and working suggestions", async () => {
     const client = fakeClient({
       list: vi.fn(async () => ({ kind: "automation-list" as const, items: [] })),
     });
     renderCenter({ client });
-    const empty = await screen.findByText("No automations match the current filters.");
-    expect(empty.closest("[role='status']")).not.toBeNull();
+
+    expect(await screen.findByRole("heading", { name: "Create an automation" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Describe with Octant/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Create manually/ })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Suggested automations" })).toBeVisible();
+    expect(screen.queryByText("No automations match the current filters.")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Every weekday morning/ }));
+    expect(screen.getByLabelText("What do you want automated?")).toHaveValue(
+      "Every weekday at 9:00, summarise what changed in this Project overnight",
+    );
   });
 });
 
@@ -391,6 +400,34 @@ describe("AutomationCenter detail disclosure", () => {
 });
 
 describe("AutomationCenter creation and editing", () => {
+  it("carries a confirmed routine request into the editor", async () => {
+    const client = fakeClient({
+      list: vi.fn(async () => ({ kind: "automation-list" as const, items: [] })),
+    });
+    renderCenter({ client });
+
+    await screen.findByRole("heading", { name: "Suggested automations" });
+    await userEvent.click(screen.getByRole("button", { name: /Every weekday morning/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Review this routine" }));
+
+    const form = await screen.findByRole("form", { name: "New automation" });
+    expect(within(form).getByLabelText("Name")).toHaveValue(
+      "Summarise what changed in this Project overnight",
+    );
+    expect(within(form).getByLabelText("Task for each run")).toHaveValue(
+      "summarise what changed in this Project overnight",
+    );
+    expect(within(form).getByLabelText("Schedule")).toHaveValue("weekly-local");
+    expect(within(form).getByRole("checkbox", { name: "Mon" })).toBeChecked();
+    expect(within(form).getByRole("checkbox", { name: "Fri" })).toBeChecked();
+    expect(within(form).getByLabelText("Time of day")).toHaveValue("09:00");
+    expect(within(form).getByLabelText("Timezone")).toHaveValue("UTC");
+
+    await userEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("What do you want automated?")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Suggested automations" })).toBeVisible();
+  });
+
   it("creates through the editor with expected version zero and refreshes the list", async () => {
     const client = fakeClient({
       execute: vi.fn(async () => ({

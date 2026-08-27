@@ -110,7 +110,7 @@ export function draftThreadModePresentation(mode: OctantMode): DraftThreadModePr
         heading: "What should we build?",
         description:
           "Start a Code thread in this repository. The thread inherits the current checkout and approval policy.",
-        composerPlaceholder: "Describe the change…",
+        composerPlaceholder: "What should we build?",
         intentCards: [
           {
             id: "implement",

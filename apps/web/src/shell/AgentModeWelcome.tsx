@@ -1,5 +1,5 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { FolderPlus, Sparkles } from "lucide-react";
+import { Aperture, FolderPlus, Sparkles } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface AgentModeWelcomeProps {
@@ -37,7 +37,13 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
     >
       <div className="draft-thread__canvas">
         <div className="draft-thread__welcome">
-          <p className="draft-thread__eyebrow">{presentation.eyebrow}</p>
+          <Aperture
+            aria-hidden="true"
+            className="new-thread-welcome__mark"
+            size={24}
+            strokeWidth={1.4}
+          />
+          <p className="draft-thread__eyebrow">Octant {presentation.eyebrow}</p>
           <h1 className="draft-thread__heading">{presentation.heading}</h1>
           <p className="draft-thread__description">{presentation.description}</p>
         </div>

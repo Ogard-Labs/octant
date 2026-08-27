@@ -67,6 +67,23 @@ describe("SidebarProfile", () => {
     expect(onOpenZen).toHaveBeenCalledOnce();
   });
 
+  it("opens the global Archive destination from the Octant group", async () => {
+    const user = userEvent.setup();
+    const onOpenArchive = vi.fn();
+    render(
+      <SidebarProfile
+        onOpenArchive={onOpenArchive}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        profile={{ ...profile, displayName: "Henrik" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Henrik" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    expect(onOpenArchive).toHaveBeenCalledOnce();
+  });
+
   it("groups secondary workspace destinations in the app menu", async () => {
     const user = userEvent.setup();
     const agents = vi.fn();

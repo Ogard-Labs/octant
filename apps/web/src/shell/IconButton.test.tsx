@@ -21,7 +21,7 @@ describe("IconButton", () => {
     expect(button).toHaveClass("shell-icon-button", "window-no-drag");
     expect(screen.getByTestId("test-icon")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByTestId("test-icon")).toHaveAttribute("width", "16");
-    expect(screen.getByTestId("test-icon")).toHaveAttribute("stroke-width", "1.7");
+    expect(screen.getByTestId("test-icon")).toHaveAttribute("stroke-width", "1.5");
 
     await user.click(button);
     expect(onClick).toHaveBeenCalledOnce();

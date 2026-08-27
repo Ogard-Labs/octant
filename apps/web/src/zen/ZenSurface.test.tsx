@@ -812,6 +812,51 @@ describe("ZenSurface", () => {
     expect(onRemoveElement).toHaveBeenCalledWith(elementId);
   });
 
+  it("keeps the resized geometry visible until the host mutation settles", async () => {
+    let settle!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const onUpdateElement = vi.fn(() => pending);
+    const space = makeSpace([
+      {
+        elementId,
+        kind: "notes",
+        widgetVersion: 0 as AggregateVersion,
+        content: "Resize without snapping",
+        geometry: { x: 40, y: 40, width: 240, height: 160 },
+        zIndex: 1,
+        minimized: false,
+        locked: false,
+        title: "Resize without snapping",
+      },
+    ]);
+
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={onUpdateElement}
+        onUpdateViewport={() => undefined}
+        onExpandBar={() => undefined}
+        space={space}
+      />,
+    );
+
+    const card = screen.getByRole("group", { name: "Resize without snapping" });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Resize Resize without snapping" }), {
+      clientX: 280,
+      clientY: 200,
+    });
+    fireEvent.pointerMove(card, { clientX: 320, clientY: 220 });
+    fireEvent.pointerUp(card, { clientX: 320, clientY: 220 });
+
+    expect(card).toHaveStyle({ width: "280px", height: "180px" });
+    await act(async () => settle());
+    expect(card).toHaveStyle({ width: "240px", height: "160px" });
+  });
+
   it("resizes a focused element with Alt plus arrow keys and can minimize it", () => {
     const onUpdateElement = vi.fn();
     const space = makeSpace([

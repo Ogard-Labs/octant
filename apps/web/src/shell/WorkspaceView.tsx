@@ -209,6 +209,7 @@ export interface WorkspaceViewProps {
     readonly mode: "work" | "code";
   }) => void;
   readonly onOpenAgents?: () => void;
+  readonly onAddSurface?: (paneId: PaneId, surface: WorkspaceSurfaceDescriptor["kind"]) => void;
   readonly onOpenSurface?: (
     surface: WorkspaceSurfaceDescriptor["kind"],
     paneId: PaneId,
@@ -437,6 +438,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           layout={props.layout}
           mode={props.mode}
           onActivatePane={props.onActivatePane}
+          {...(props.onAddSurface === undefined ? {} : { onAddSurface: props.onAddSurface })}
           onClearFocus={props.onClearFocus}
           onClosePane={(paneId) => void closePane(paneId)}
           onCommitResize={props.onCommitResize}

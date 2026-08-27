@@ -2,6 +2,7 @@ import type { AutomationClient } from "@octant/client-runtime";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { CodeProjectPullRequestRow, ThreadBoardPullRequestIdentity } from "@octant/contracts";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
+import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
@@ -16,8 +17,12 @@ import type { CodeThreadOpenTarget } from "../code/CodeThreadBoard";
 import type { CodeBoardProjectRef } from "../code/codeBoardGrouping";
 import type { ThreadBoardProjectRef } from "../threadBoard/threadBoardGrouping";
 import type { WorkThreadOpenTarget } from "../work/WorkThreadBoard";
+import type { ArchivedThreadEntry, ArchiveProject } from "./ArchiveView";
 import { ShellState } from "./ShellState";
 
+const ArchiveView = lazy(() =>
+  import("./ArchiveView").then((module) => ({ default: module.ArchiveView })),
+);
 const ArtifactLibrarySurface = lazy(() =>
   import("../artifacts/ArtifactLibrarySurface").then((module) => ({
     default: module.ArtifactLibrarySurface,
@@ -64,6 +69,12 @@ export interface WorkspaceRailLayersProps {
   readonly selectedProjectPullRequestKey?: string;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly providerLabels?: ReadonlyMap<string, string>;
+  readonly archiveOpen?: boolean;
+  readonly archiveChatClient?: ChatClient;
+  readonly archiveEntries?: ReadonlyArray<ArchivedThreadEntry>;
+  readonly archiveProjects?: ReadonlyArray<ArchiveProject>;
+  readonly onCloseArchive?: () => void;
+  readonly onOpenArchivedThread?: (entry: ArchivedThreadEntry) => void;
   readonly artifactLibraryOpen: boolean;
   readonly onCloseArtifactLibrary: () => void;
   readonly onCreateArtifact: () => void;
@@ -165,6 +176,25 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               {...(props.providerLabels === undefined
                 ? {}
                 : { providerLabels: props.providerLabels })}
+            />
+          </LazyRailSurface>
+        </div>
+      ) : null}
+      {props.archiveOpen === true &&
+      props.archiveEntries !== undefined &&
+      props.archiveProjects !== undefined &&
+      props.onCloseArchive !== undefined &&
+      props.onOpenArchivedThread !== undefined ? (
+        <div className="archive-layer">
+          <LazyRailSurface label="Archive">
+            <ArchiveView
+              {...(props.archiveChatClient === undefined
+                ? {}
+                : { chatClient: props.archiveChatClient })}
+              entries={props.archiveEntries}
+              onClose={props.onCloseArchive}
+              onOpenThread={props.onOpenArchivedThread}
+              projects={props.archiveProjects}
             />
           </LazyRailSurface>
         </div>

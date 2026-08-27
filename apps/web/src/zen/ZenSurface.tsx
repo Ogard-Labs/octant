@@ -111,7 +111,7 @@ export interface ZenSurfaceProps {
     expectedWidgetVersion: number,
   ) => Promise<void>;
   readonly onRemoveElement?: (elementId: ZenElementPayload["elementId"]) => void;
-  readonly onUpdateElement: (element: ZenElementPayload) => void;
+  readonly onUpdateElement: (element: ZenElementPayload) => void | Promise<void>;
   readonly onUpdateViewport: (viewport: ZenViewport) => void;
   readonly assistant?: ZenAssistantSnapshot | null;
   readonly assistantOpen?: boolean;
@@ -439,9 +439,20 @@ export function ZenSurface(props: ZenSurfaceProps) {
       previewGeometry?.elementId === interaction.element.elementId
         ? previewGeometry.geometry
         : interaction.element.geometry;
-    props.onUpdateElement({ ...interaction.element, geometry });
-    setPreviewGeometry(undefined);
+    const elementId = interaction.element.elementId;
+    const completion = props.onUpdateElement({ ...interaction.element, geometry });
     setInteraction(null);
+    if (completion === undefined) {
+      setPreviewGeometry(undefined);
+      return;
+    }
+    void completion.finally(() => {
+      setPreviewGeometry((current) =>
+        current?.elementId === elementId && sameGeometry(current.geometry, geometry)
+          ? undefined
+          : current,
+      );
+    });
   }
 
   function handleElementKeyDown(
@@ -885,7 +896,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     </p>
                   ) : focusedThreadContext.threadKind === "code" ? (
                     <p className="zen-add-picker__hint" role="status">
-                      Add terminal pins the existing Code terminal. Start one from Code first.
+                      Add terminal starts a dedicated shell for this Code thread.
                     </p>
                   ) : null}
                 </div>
@@ -1121,6 +1132,15 @@ function resolveZenBackgroundStyle(
     style: mediaBackgroundStyle(uploadedImageUrl, background.fill ?? "cover"),
     systemGround: false,
   };
+}
+
+function sameGeometry(left: ZenGeometry, right: ZenGeometry): boolean {
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height
+  );
 }
 
 function mediaBackgroundStyle(src: string, fill: "cover" | "contain" | "tile"): CSSProperties {

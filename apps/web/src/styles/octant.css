@@ -200,10 +200,10 @@
   --oct-control-height-sm: 34px;
   --oct-disabled-opacity: 0.45;
 
-  --oct-icon-sm: 16px;
-  --oct-icon-md: 19px;
-  --oct-icon-lg: 22px;
-  --oct-icon-mark: 38px;
+  --oct-icon-sm: 14px;
+  --oct-icon-md: 16px;
+  --oct-icon-lg: 20px;
+  --oct-icon-mark: 32px;
 
   --oct-avatar-sm: 24px;
   --oct-avatar-md: 32px;
@@ -813,17 +813,16 @@ h4 {
 }
 .tag {
   display: inline-flex;
+  min-height: 20px;
   align-items: center;
-  gap: var(--oct-space-2);
-  padding: 5px 12px;
-  background: var(--oct-border-soft);
+  gap: 5px;
+  padding: 2px 7px;
+  background: transparent;
   color: var(--oct-fg-2);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
-  font-family: var(--oct-font-mono);
+  border-radius: var(--oct-radius-sm);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wider);
-  text-transform: uppercase;
 }
 .tag .dot {
   width: 5px;
@@ -833,32 +832,32 @@ h4 {
 }
 .badge {
   display: inline-flex;
+  min-height: 18px;
   align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
+  gap: 5px;
+  padding: 1px 6px;
+  color: var(--oct-meta);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--oct-radius-sm);
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-  background: var(--oct-fg-soft);
-  color: var(--oct-fg-2);
 }
 .badge-ok {
-  background: var(--oct-success-soft);
   color: var(--oct-success-fg);
+  border-color: color-mix(in oklab, var(--oct-success-fg) 30%, transparent);
 }
 .badge-warn {
-  background: var(--oct-warn-soft);
   color: var(--oct-warn-fg);
+  border-color: color-mix(in oklab, var(--oct-warn-fg) 30%, transparent);
 }
 .badge-danger {
-  background: var(--oct-danger-soft);
   color: var(--oct-danger-fg);
+  border-color: color-mix(in oklab, var(--oct-danger-fg) 30%, transparent);
 }
 .badge-accent {
-  background: var(--oct-accent-soft);
   color: var(--oct-accent-fg);
+  border-color: color-mix(in oklab, var(--oct-accent-fg) 30%, transparent);
 }
 
 /* ─── callout ───────────────────────────────────────────────────────── */
@@ -1739,18 +1738,14 @@ input.switch:checked::after {
   width: var(--oct-icon-lg);
   height: var(--oct-icon-lg);
 }
-/* The bordered box an icon sits in — feature cells, empty states, anywhere a
-   single icon has to hold its own visual weight. One definition, because
-   three near-identical boxes with slightly different radii is exactly the
-   drift a design system exists to prevent. */
+/* A quiet alignment slot for standalone marks. The icon carries identity;
+   a decorative tile around every mark would add another card layer. */
 .icon-mark {
   display: grid;
   place-items: center;
   width: var(--oct-icon-mark);
   height: var(--oct-icon-mark);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-fg);
+  color: var(--oct-muted);
 }
 /* deliberate override, and it shows up in the cascade audit: .icon carries a
    baseline nudge for text runs, and the mark centres with place-items, so the
@@ -4098,9 +4093,9 @@ input.switch:checked::after {
 .composer-input {
   display: block;
   width: 100%;
-  min-height: 60px;
-  max-height: 240px;
-  padding: var(--oct-space-3) var(--oct-space-4);
+  min-height: 48px;
+  max-height: 180px;
+  padding: 12px 14px 10px;
   border: 0;
   background: none;
   color: var(--oct-fg);
@@ -4126,8 +4121,9 @@ input.switch:checked::after {
 .composer-row {
   display: flex;
   align-items: center;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-2) var(--oct-space-2) var(--oct-space-2) var(--oct-space-3);
+  min-height: 40px;
+  gap: 6px;
+  padding: 4px 8px 4px 12px;
   border-top: 1px solid var(--oct-border-soft);
 }
 .composer-row .composer-gap {
@@ -4140,7 +4136,7 @@ input.switch:checked::after {
 .composer-row [role="combobox"] {
   width: auto;
   max-width: 190px;
-  min-height: 27px;
+  min-height: 30px;
   padding-inline: 7px 24px;
   color: var(--oct-muted);
   background: transparent;
@@ -4156,7 +4152,7 @@ input.switch:checked::after {
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-2);
-  min-height: var(--oct-control-height-sm);
+  min-height: 30px;
   padding-block: 0;
   padding-inline: var(--oct-space-3);
   border: 1px solid var(--oct-border);
@@ -6586,9 +6582,9 @@ input.switch:checked::after {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: var(--oct-space-1) var(--oct-space-3);
-  padding: var(--oct-space-4);
+  padding: var(--oct-space-3);
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
 }
 .extcard > .icon-mark {

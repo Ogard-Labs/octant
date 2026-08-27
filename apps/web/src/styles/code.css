@@ -17,18 +17,18 @@
   font-size: var(--oct-text-xs);
 }
 
-/* Pane heads share the dock-head treatment: a warm strip, a mono-uppercase
-   eyebrow naming the surface, and the title underneath. Controls in the head
-   are the system's small recipes, never repainted here. */
+/* Pane heads share one compact surface strip with the dock. Controls in the
+   head are the system's small recipes, never repainted here. */
 .code-delivery-pane__toolbar {
   display: flex;
   min-width: 0;
+  min-height: 44px;
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-3);
-  padding: var(--oct-space-3) var(--oct-space-4);
+  padding: 7px 12px;
   border-bottom: 1px solid var(--oct-border);
-  background: var(--oct-surface-warm);
+  background: var(--oct-surface);
 }
 
 .code-delivery-pane__toolbar > div {
@@ -39,10 +39,8 @@
 
 .code-delivery-pane__toolbar span {
   color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
 }
 
 .code-delivery-pane__toolbar h1,
@@ -147,10 +145,16 @@
 .code-git-pane__status,
 .code-review-pane__findings {
   display: grid;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.code-git-pane__status {
   gap: 2px;
   padding: var(--oct-space-2);
-  margin: 0;
-  list-style: none;
 }
 
 .code-git-pane__status li {
@@ -165,8 +169,13 @@
 .code-review-pane__findings li {
   display: grid;
   gap: 5px;
-  padding: var(--oct-space-2);
+  min-height: 54px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--oct-border);
+}
+
+.code-review-pane__findings li:hover {
+  background: var(--oct-fg-soft);
 }
 
 .code-review-pane__findings span {
@@ -672,6 +681,16 @@
 
 .github-onboarding__trigger {
   max-width: 220px;
+  min-height: var(--oct-touch-min);
+  gap: 5px;
+  padding: 0 5px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.github-onboarding__dialog {
+  width: min(420px, calc(100vw - 24px));
+  padding: 10px;
 }
 
 .github-onboarding__trigger span {

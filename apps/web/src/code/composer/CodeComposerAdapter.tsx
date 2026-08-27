@@ -24,7 +24,7 @@ import {
   suggestCodeDeliveryOutcome,
 } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { ShieldCheck, ChevronDown, ChevronUp, FolderOpen, Paperclip } from "lucide-react";
+import { Aperture, ShieldCheck, ChevronDown, ChevronUp, FolderOpen, Paperclip } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -395,6 +395,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="code-composer-adapter__canvas">
         <div className="code-composer-adapter__welcome">
+          <Aperture
+            aria-hidden="true"
+            className="new-thread-welcome__mark"
+            size={24}
+            strokeWidth={1.4}
+          />
           <p className="code-composer-adapter__eyebrow">Octant Code</p>
           <h1 className="code-composer-adapter__heading">What should we build?</h1>
           <p className="code-composer-adapter__description">
@@ -442,7 +448,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   if (props.creating === true) return;
                   if (attachFromTransfer(event.clipboardData)) event.preventDefault();
                 }}
-                placeholder="Describe the change…"
+                placeholder="What should we build?"
                 ref={textareaRef}
                 rows={3}
                 value={prompt}

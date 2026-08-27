@@ -187,15 +187,15 @@ describe("Zen routes", () => {
     );
   });
 
-  it("rejects caller-supplied thread source context on updates", async () => {
+  it("routes thread presentation updates through server-owned binding sanitization", async () => {
     const windowAuthorityStore = new WindowAuthorityStore();
     windowAuthorityStore.register({ windowId, capability, now: 0 });
-    const handleCommand = vi.fn(() => ({ result: "update-element" as const }));
+    const updateBoundElementPresentation = vi.fn(() => ({ result: "update-element" as const }));
     const handler = createZenRouteHandler({
       windowAuthorityStore,
       zenService: {
         bootstrap: vi.fn(() => ({ space: null, windowId })),
-        handleCommand,
+        updateBoundElementPresentation,
       } as never,
       now: () => 0,
     });
@@ -227,8 +227,11 @@ describe("Zen routes", () => {
       }),
     );
 
-    expect(response?.status).toBe(400);
-    expect(handleCommand).not.toHaveBeenCalled();
+    expect(response?.status).toBe(200);
+    expect(updateBoundElementPresentation).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "update-element" }),
+      windowId,
+    );
   });
 
   it("rejects caller-supplied Navigator bindings", async () => {

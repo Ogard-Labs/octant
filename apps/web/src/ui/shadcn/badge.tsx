@@ -3,18 +3,18 @@ import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
 const badgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 [&>svg]:pointer-events-none [&>svg]:size-3",
+  "inline-flex min-h-4 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-[4px] border px-1.5 py-px text-[10px] leading-4 font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[2px] focus-visible:ring-ring/50 [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
       variant: {
-        default: "border-transparent bg-primary text-primary-foreground",
-        secondary: "border-transparent bg-secondary text-secondary-foreground",
-        destructive: "border-transparent bg-destructive text-white",
-        outline: "border-border text-foreground",
+        default: "border-border bg-transparent text-foreground",
+        secondary: "border-transparent bg-transparent text-muted-foreground",
+        destructive: "border-destructive/30 bg-transparent text-destructive",
+        outline: "border-border bg-transparent text-foreground",
         success:
-          "border-transparent bg-[var(--octant-success-surface)] text-[var(--octant-success-text)]",
+          "border-[var(--octant-success-border)] bg-transparent text-[var(--octant-success-text)]",
         warning:
-          "border-transparent bg-[var(--octant-warning-surface)] text-[var(--octant-warning-text)]",
+          "border-[var(--octant-warning-border)] bg-transparent text-[var(--octant-warning-text)]",
       },
     },
     defaultVariants: { variant: "secondary" },

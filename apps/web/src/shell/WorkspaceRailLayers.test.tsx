@@ -130,7 +130,7 @@ describe("WorkspaceRailLayers", () => {
     await user.click(screen.getByRole("button", { name: "Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Automations" }));
 
-    expect(await screen.findByRole("heading", { name: "Automation Center" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Automations" })).toBeVisible();
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
     expect(await screen.findByRole("button", { name: "Nightly build check" })).toBeVisible();
 

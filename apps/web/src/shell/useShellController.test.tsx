@@ -533,6 +533,57 @@ describe("useShellController", () => {
     );
   });
 
+  it("gives split Terminals unique titles without changing their thread", async () => {
+    const initial = codeBootstrap();
+    const server = statefulClient({
+      ...initial,
+      workspace: {
+        ...initial.workspace,
+        contextByMode: {
+          ...initial.workspace.contextByMode,
+          code: {
+            ...initial.workspace.contextByMode.code,
+            projectId: decodeProjectId("00000000-0000-4000-8000-000000000896"),
+            boundRoot: "/repo",
+          },
+        },
+      },
+    });
+    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000895");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openCodeThread(threadId, "Terminal QA"));
+    const sourcePane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () => result.current.openSurfaceInSplit("terminal", sourcePane.paneId));
+    await act(async () => result.current.openSurfaceInSplit("terminal", sourcePane.paneId));
+
+    const terminalPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "code-terminal",
+    );
+    expect(terminalPanes.map((pane) => pane.surface.title).sort()).toEqual([
+      "Terminal",
+      "Terminal 2",
+    ]);
+    expect(
+      terminalPanes.map((pane) =>
+        pane.surface.kind === "code-terminal" ? pane.surface.threadId : undefined,
+      ),
+    ).toEqual([threadId, threadId]);
+    expect(
+      terminalPanes.every(
+        (pane) => pane.surface.kind === "code-terminal" && pane.surface.terminalId !== undefined,
+      ),
+    ).toBe(true);
+    expect(server.client.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        operation: expect.objectContaining({ kind: "split-pane", mode: "code" }),
+      }),
+    );
+  });
+
   it("offers a real Project window when a thread selection crosses workspace authority", async () => {
     const currentProjectId = decodeProjectId("00000000-0000-4000-8000-000000000898");
     const nextProjectId = decodeProjectId("00000000-0000-4000-8000-000000000899");

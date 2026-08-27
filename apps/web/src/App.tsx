@@ -65,11 +65,13 @@ import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
+  decodeCodeTerminalId,
   decodeCodeThread,
   decodeCodeRelativePath,
   decodeCodeThreadId,
   type CodeDeliveryOutcomeKind,
 } from "@octant/contracts/code";
+import { decodeCodeOperationId } from "@octant/contracts/code-operations";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
 import { decodeContextSubjectRef, type ContextHealth } from "@octant/contracts/context";
 import {
@@ -152,6 +154,7 @@ import {
   type SidebarThreadDragRow,
   type SidebarThreadDragTargets,
 } from "./shell/useWorkspaceTabDrag";
+import type { ArchivedThreadEntry } from "./shell/ArchiveView";
 import { WorkspaceRailLayers } from "./shell/WorkspaceRailLayers";
 import { BottomUtilityPanel } from "./shell/BottomUtilityPanel";
 import { ShellDialogHost } from "./shell/ShellDialogHost";
@@ -615,6 +618,7 @@ function LaunchedShell(
   const [workBoardOpen, setWorkBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] =
     useState<import("@octant/contracts/providers").ProviderInstanceId>();
@@ -2477,6 +2481,30 @@ function LaunchedShell(
         controller.workspace.layouts[activeMode],
         controller.workspace.activePaneIds[activeMode],
       );
+  const archiveEntries: ReadonlyArray<ArchivedThreadEntry> = [
+    ...(workNavigation.bootstrap?.threads ?? [])
+      .filter((thread) => thread.lifecycle === "archived")
+      .map((thread) => ({
+        mode: "work" as const,
+        threadId: String(thread.id),
+        title: thread.title,
+        ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
+        updatedAt: thread.updatedAt,
+      })),
+    ...(codeController.bootstrap?.threads ?? [])
+      .filter((thread) => thread.lifecycle === "archived")
+      .map((thread) => ({
+        mode: "code" as const,
+        threadId: String(thread.id),
+        title: thread.title,
+        projectId: String(thread.projectId),
+        updatedAt: thread.updatedAt,
+      })),
+  ];
+  const archiveProjects = projectController.allProjects.map((project) => ({
+    id: String(project.id),
+    name: project.name,
+  }));
   const automationCenterVisible =
     automationCenterOpen && (activeMode === "code" || activeMode === "work");
   const agentsCenterVisible = agentsCenterOpen;
@@ -2487,6 +2515,7 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     workBoardOpen ||
+    archiveOpen ||
     automationCenterVisible ||
     agentsCenterVisible
       ? new Map<string, ReadonlySet<string>>()
@@ -2703,6 +2732,33 @@ function LaunchedShell(
     );
   }
 
+  function openArchivedThread(entry: ArchivedThreadEntry) {
+    setArchiveOpen(false);
+    markInteraction("renderer", "thread-open-requested");
+    markInteractionAfterPaint("thread-open");
+    const projectId = entry.projectId === undefined ? undefined : decodeProjectId(entry.projectId);
+    if (entry.mode === "chat") {
+      void controller.openChatThread(decodeChatThreadId(entry.threadId), entry.title, projectId);
+      return;
+    }
+    if (entry.mode === "work") {
+      void controller.openWorkThread(
+        decodeWorkThreadId(entry.threadId),
+        entry.title,
+        undefined,
+        projectId,
+      );
+      return;
+    }
+    if (projectId === undefined) return;
+    void controller.openCodeThread(
+      decodeCodeThreadId(entry.threadId),
+      entry.title,
+      undefined,
+      projectId,
+    );
+  }
+
   // The Project Overview sits below surfaces this file does not own, so the
   // active mode's thread navigation reaches it through a provider rather than
   // through props. It carries the same list the sidebar nests, so neither can
@@ -2794,6 +2850,7 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setWorkBoardOpen(false);
+    setArchiveOpen(false);
     setArtifactLibraryOpen(false);
     setAgentsCenterOpen(false);
     setAutomationCenterOpen(true);
@@ -2804,6 +2861,7 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setWorkBoardOpen(false);
+    setArchiveOpen(false);
     setArtifactLibraryOpen(false);
     setAutomationCenterOpen(false);
     setAgentsCenterOpen(true);
@@ -2817,9 +2875,21 @@ function LaunchedShell(
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
     setWorkBoardOpen(false);
+    setArchiveOpen(false);
     setAutomationCenterOpen(false);
     setAgentsCenterOpen(false);
     setArtifactLibraryOpen(true);
+  }
+
+  function openArchive() {
+    setRailPlaceholder(undefined);
+    setCodeBoardOpen(false);
+    setCodePullRequestsOpen(false);
+    setWorkBoardOpen(false);
+    setAutomationCenterOpen(false);
+    setAgentsCenterOpen(false);
+    setArtifactLibraryOpen(false);
+    setArchiveOpen(true);
   }
 
   function handleSelectMode(mode: OctantMode) {
@@ -3423,7 +3493,6 @@ function LaunchedShell(
     void openSelectedProject(project);
   }
 
-  /** Pin the Code thread's existing default terminal without starting one. */
   async function addZenTerminal(
     sourceContext: import("@octant/contracts/zen").ZenSourceContext,
   ): Promise<void> {
@@ -3432,7 +3501,19 @@ function LaunchedShell(
       codeController.bootstrap?.threads ?? [],
     );
     if (target === undefined) return;
-    await zen.pinTerminal(target);
+    const terminalId = decodeCodeTerminalId(crypto.randomUUID());
+    const started = await codeController.client.executeOperation({
+      kind: "start-terminal",
+      operationId: decodeCodeOperationId(crypto.randomUUID()),
+      threadId: target.threadId,
+      checkoutId: target.checkoutId,
+      terminalId,
+      columns: 100,
+      rows: 30,
+      credentialRefs: [],
+    });
+    if (started.kind !== "terminal-state" || started.state !== "running") return;
+    await zen.pinTerminal({ ...target, terminalId });
   }
 
   function canAddZenTerminal(
@@ -3679,6 +3760,10 @@ function LaunchedShell(
                   client={browserAutomationClient}
                   dock={dock}
                   {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                  serverUrl={props.launch.serverUrl}
+                  {...(props.projectWindowCapability === undefined
+                    ? {}
+                    : { windowCapability: props.projectWindowCapability })}
                   onCollapse={(collapsed) =>
                     void zen.dockResearch({
                       thread: {
@@ -3749,7 +3834,7 @@ function LaunchedShell(
             onRefreshTimers={() => void zen.refreshTimers()}
             onSetChecklistItemCompleted={zen.setChecklistItemCompleted}
             onUpdateAppearance={(appearance) => void zen.updateAppearance(appearance)}
-            onUpdateElement={(element) => void zen.updateElement(element)}
+            onUpdateElement={(element) => zen.updateElement(element)}
             onUpdateViewport={(viewport) => void zen.updateViewport(viewport)}
             space={zen.space}
           />
@@ -3893,6 +3978,7 @@ function LaunchedShell(
                 }
               : {})}
             onAddFolder={() => openProjectCreate()}
+            onOpenArchive={openArchive}
             nativeHost={hostReservesTitlebarInset}
             navigatorAvailable={navigatorAssistant.state.kind === "ready"}
             onOpenSearch={openThreadSearch}
@@ -4126,6 +4212,12 @@ function LaunchedShell(
                     target.projectId,
                   );
                 }}
+                archiveOpen={archiveOpen}
+                archiveChatClient={chatClient}
+                archiveEntries={archiveEntries}
+                archiveProjects={archiveProjects}
+                onCloseArchive={() => setArchiveOpen(false)}
+                onOpenArchivedThread={openArchivedThread}
                 artifactLibraryOpen={artifactLibraryOpen}
                 onCloseArtifactLibrary={() => setArtifactLibraryOpen(false)}
                 onCreateArtifact={() => {
@@ -4276,6 +4368,7 @@ function LaunchedShell(
                       codeBoardOpen ||
                       codePullRequestsOpen ||
                       workBoardOpen ||
+                      archiveOpen ||
                       automationCenterVisible ||
                       agentsCenterVisible
                     }
@@ -4361,6 +4454,9 @@ function LaunchedShell(
                       void controller.openCodeThread(threadId, title, undefined, projectId)
                     }
                     onOpenReview={(threadId) => openReviewForThread(String(threadId))}
+                    onAddSurface={(paneId, surface) =>
+                      void controller.openSurfaceInSplit(surface, paneId)
+                    }
                     onOpenCodeSurface={(kind, threadId, title, terminalId) =>
                       void controller.openCodeSurface(
                         kind === "code-terminal"

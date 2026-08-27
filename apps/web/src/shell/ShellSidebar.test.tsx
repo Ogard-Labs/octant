@@ -39,6 +39,7 @@ describe("ShellSidebar", () => {
         onAddFolder={vi.fn()}
         onCollapseSidebar={vi.fn()}
         onOpenNavigator={vi.fn()}
+        onOpenSearch={vi.fn()}
         onOpenSettings={vi.fn()}
         onSelectMode={vi.fn()}
         projectSection={null}
@@ -49,9 +50,12 @@ describe("ShellSidebar", () => {
 
     expect(container.querySelector(".sidebar__native-leading")).not.toBeInTheDocument();
     expect(container.querySelector("[data-traffic-light-safe-space]")).not.toBeInTheDocument();
-    expect(container.querySelector(".sidebar__chrome-actions")).toContainElement(
-      screen.getByRole("button", { name: "Hide sidebar" }),
-    );
+    const cluster = container.querySelector(".sidebar__primary-actions");
+    const search = screen.getByRole("button", { name: "Search" });
+    const collapse = screen.getByRole("button", { name: "Hide sidebar" });
+    expect(cluster).toContainElement(search);
+    expect(cluster).toContainElement(collapse);
+    expect(search.compareDocumentPosition(collapse)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("exposes Work destinations backed by exact actions, including the Thread board", async () => {
@@ -326,6 +330,7 @@ describe("ShellSidebar", () => {
     expect(chrome).not.toBeNull();
     expect(chrome).toContainElement(search);
     expect(chrome).toContainElement(activity);
+    expect(activity.compareDocumentPosition(search)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(search).toHaveClass("shell-icon-button");
     expect(search).not.toHaveTextContent("Search");
     expect(search.querySelector("svg")).toHaveAttribute("width", "16");

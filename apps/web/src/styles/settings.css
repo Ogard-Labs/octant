@@ -228,6 +228,120 @@
 
 /* --- Settings primitives: app-side residue over .setrow/.setgroup --- */
 
+.settings-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-panel__header {
+  display: grid;
+  gap: 3px;
+  padding-inline: 2px;
+}
+
+.settings-panel__header h2,
+.settings-panel__header p {
+  margin: 0;
+}
+
+.settings-panel__header h2 {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.settings-panel__header p {
+  max-width: 68ch;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
+.settings-panel__body {
+  overflow: hidden;
+  background: var(--octant-surface-muted);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.settings-panel--danger .settings-panel__body {
+  border-color: color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
+}
+
+.settings-panel__stack {
+  display: grid;
+  gap: var(--oct-space-3);
+  padding: 12px 14px;
+}
+
+.settings-fact-list {
+  display: grid;
+  margin: 0;
+}
+
+.settings-fact-list__row {
+  display: grid;
+  min-height: 38px;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
+  align-items: center;
+  gap: var(--oct-space-4);
+  padding: 8px 14px;
+}
+
+.settings-fact-list__row + .settings-fact-list__row {
+  border-top: 1px solid var(--octant-border);
+}
+
+.settings-fact-list dt,
+.settings-fact-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-fact-list dt {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.settings-fact-list dd {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+}
+
+.settings-state {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--octant-text-secondary);
+  background: var(--octant-surface-muted);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  font-size: var(--oct-text-sm);
+}
+
+.settings-panel__body .settings-state {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.settings-state--error {
+  color: var(--octant-danger-text);
+}
+
+.settings-state--success {
+  color: var(--octant-success-text);
+}
+
+@media (max-width: 720px) {
+  .settings-fact-list__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
 .setrow[data-focused="true"] {
   scroll-margin-top: 16px;
 }
@@ -269,7 +383,8 @@
 .setrow[data-setting-id="vision-reviewer"],
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
-.setrow[data-setting-id="app-updates"] {
+.setrow[data-setting-id="app-updates"],
+.setrow[data-setting-id="export-diagnostics"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -279,7 +394,8 @@
 .setrow[data-setting-id="vision-reviewer"] > .setrow-control,
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
-.setrow[data-setting-id="app-updates"] > .setrow-control {
+.setrow[data-setting-id="app-updates"] > .setrow-control,
+.setrow[data-setting-id="export-diagnostics"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;
@@ -377,8 +493,8 @@
 }
 
 .settings-view__content-inner {
-  width: min(calc(100% - 48px), 760px);
-  padding: 36px 0 80px;
+  width: min(calc(100% - 48px), 840px);
+  padding: 28px 0 72px;
   margin: 0 auto;
 }
 
@@ -401,12 +517,12 @@
 
 .settings-section-stack {
   display: grid;
-  gap: 28px;
+  gap: 20px;
 }
 
 .settings-card-section {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 /* One section heading treatment for the whole surface. The Appearance blocks
@@ -414,6 +530,7 @@
    also its trigger and a fieldset's heading must be its legend; before this
    they each carried their own inline-card head, which is why Appearance and
    General did not read as the same page. */
+.settings-view__content-inner .provider-settings__intro h2,
 .settings-card-section > h2,
 .settings-card-section > summary,
 .settings-card-section > legend {
@@ -463,7 +580,7 @@
   overflow: hidden;
   background: var(--octant-surface-muted);
   border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-lg);
+  border-radius: var(--oct-radius-md);
   box-shadow: none;
 }
 
@@ -496,8 +613,8 @@
 }
 
 .setrow {
-  column-gap: 24px;
-  padding: 12px 16px;
+  column-gap: 20px;
+  padding: 10px 14px;
   font-family: var(--oct-font-display);
 }
 
@@ -642,7 +759,7 @@
    the same rhythm between them rather than a tighter one of their own. */
 .settings-theme-editor {
   display: grid;
-  gap: 28px;
+  gap: 20px;
   padding: 0;
   margin: 0;
 }
@@ -1177,6 +1294,11 @@
   overflow-wrap: anywhere;
 }
 
+.host-settings > .host-settings__controls:first-child {
+  justify-content: flex-end;
+  margin-bottom: -8px;
+}
+
 .host-settings__controls {
   display: flex;
   flex-wrap: wrap;
@@ -1331,6 +1453,54 @@
   }
 }
 
+/* Host and GitHub expose different operations, but their facts, sections, and
+   states use one Settings rhythm. */
+.host-settings,
+.github-settings {
+  gap: 20px;
+}
+
+.host-settings__heading,
+.github-settings__heading {
+  margin: 20px 0 8px;
+  padding-top: 20px;
+  color: var(--octant-text-secondary);
+  border-top: 1px solid var(--octant-border);
+  font-size: var(--oct-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.host-settings > .host-settings__controls:first-child + .host-settings__heading,
+.github-settings > .github-settings__controls:first-child + .github-settings__heading {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.host-settings__facts,
+.github-settings__facts {
+  gap: 6px 20px;
+  padding: 2px 4px 8px;
+}
+
+.host-settings__facts dt,
+.github-settings__facts dt {
+  font-size: var(--oct-text-xs);
+}
+
+.host-settings__facts dd,
+.github-settings__facts dd {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+}
+
+.host-settings__note,
+.github-settings__note {
+  max-width: 68ch;
+}
+
 /*
  * The update surface. The disclosure list sits with the switch rather than in a
  * policy document, because the person deciding whether to leave automatic
@@ -1446,4 +1616,41 @@
   height: 28px;
   min-height: 28px;
   padding: 0;
+}
+
+.code-settings {
+  gap: 0;
+  padding-block: 0;
+  background: var(--octant-surface-muted);
+  border-color: var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  box-shadow: none;
+}
+
+.code-settings > [data-slot="card-content"] {
+  padding: 16px;
+}
+
+.code-settings__note {
+  margin: 0 0 16px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.code-settings [data-slot="field-group"] {
+  gap: 16px;
+}
+
+.code-settings [data-slot="field"] {
+  gap: 5px;
+}
+
+.code-settings [data-slot="field-label"] {
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.code-settings [data-slot="field-description"] {
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
 }

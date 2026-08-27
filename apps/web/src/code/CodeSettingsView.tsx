@@ -1,13 +1,7 @@
 import type { CodeSettings } from "@octant/contracts/code";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import {
-  OctantCard,
-  OctantCardContent,
-  OctantCardDescription,
-  OctantCardHeader,
-  OctantCardTitle,
-} from "../ui/base/OctantCard";
+import { OctantCard, OctantCardContent } from "../ui/base/OctantCard";
 import {
   OctantField,
   OctantFieldDescription,
@@ -71,14 +65,12 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   }
 
   return (
-    <OctantCard aria-labelledby="settings-code-heading">
-      <OctantCardHeader>
-        <OctantCardTitle id="settings-code-heading">Code defaults</OctantCardTitle>
-        <OctantCardDescription>
-          These defaults apply only to new Code threads. Existing threads keep their access.
-        </OctantCardDescription>
-      </OctantCardHeader>
+    <OctantCard aria-label="Code defaults" className="code-settings">
+      <h2 className="sr-only">Code defaults</h2>
       <OctantCardContent>
+        <p className="code-settings__note">
+          These defaults apply only to new Code threads. Existing threads keep their access.
+        </p>
         <OctantFieldGroup>
           <OctantField>
             <OctantFieldLabel>Default Code access</OctantFieldLabel>
@@ -146,7 +138,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             </OctantFieldDescription>
           </OctantField>
           <div className="flex items-center gap-3">
-            <OctantButton onClick={() => void save()} type="button">
+            <OctantButton onClick={() => void save()} type="button" variant="secondary">
               Save Code defaults
             </OctantButton>
             {message === undefined ? null : message === "Code defaults saved." ? (

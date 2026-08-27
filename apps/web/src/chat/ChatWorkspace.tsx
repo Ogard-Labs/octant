@@ -54,6 +54,7 @@ import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { OctantButton } from "../ui/base/OctantButton";
+import { ShellState } from "../shell/ShellState";
 import { samePollingData } from "../polling/samePollingData";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 
@@ -279,15 +280,22 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           <header className="chat-workspace__header thread-column">{props.childRunStatus}</header>
         )}
         <div className="chat-workspace__load-state">
-          <p role={props.controller.status === "disconnected" ? "alert" : "status"}>
-            {props.controller.errorMessage ??
+          <ShellState
+            action={{ label: "Retry chat", onClick: props.controller.retry }}
+            message={
+              props.controller.errorMessage ??
               (props.controller.status === "disconnected"
-                ? "Chat is disconnected."
-                : "Loading conversation…")}
-          </p>
-          <OctantButton onClick={props.controller.retry} type="button" variant="secondary">
-            Retry chat
-          </OctantButton>
+                ? "The host connection is unavailable."
+                : "Reading this thread from the host.")
+            }
+            role={props.controller.status === "disconnected" ? "alert" : "status"}
+            state={props.controller.status === "disconnected" ? "disconnected" : "loading"}
+            title={
+              props.controller.status === "disconnected"
+                ? "Chat is disconnected"
+                : "Loading conversation"
+            }
+          />
         </div>
       </section>
     );

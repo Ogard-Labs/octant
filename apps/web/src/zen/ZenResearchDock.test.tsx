@@ -167,10 +167,11 @@ describe("ZenResearchDock", () => {
     );
   });
 
-  it("offers no tab rail on a host that cannot show a real page", async () => {
-    render(
+  it("renders the shared headless Browser on authenticated web and stops it on unmount", async () => {
+    const browser = client();
+    const { unmount } = render(
       <ZenResearchDock
-        client={client()}
+        client={browser}
         dock={dock}
         hostBridge={hostBridge({
           getHostCapabilities: () => ({
@@ -180,12 +181,17 @@ describe("ZenResearchDock", () => {
         })}
         onCollapse={vi.fn()}
         onUndock={vi.fn()}
+        serverUrl="http://127.0.0.1:13773"
+        windowCapability="fixture-capability"
       />,
     );
 
+    expect(await screen.findByLabelText("Browser URL")).toBeVisible();
     expect(
-      await screen.findByText("A research page needs the Octant desktop app on this host."),
-    ).toBeTruthy();
-    expect(screen.queryByRole("tablist")).toBeNull();
+      screen.queryByText("A research page needs the Octant desktop app on this host."),
+    ).not.toBeInTheDocument();
+
+    unmount();
+    await waitFor(() => expect(browser.stop).toHaveBeenCalledOnce());
   });
 });

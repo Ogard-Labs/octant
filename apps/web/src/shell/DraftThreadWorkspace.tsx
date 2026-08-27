@@ -32,7 +32,7 @@ import {
   type CreateHostViewScope,
   type PickerGroup,
 } from "@octant/domain";
-import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
+import { Aperture, FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   CodeComposerAdapter,
@@ -401,6 +401,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     <section aria-label={`New ${presentation.eyebrow} thread`} className="draft-thread">
       <div className="draft-thread__canvas">
         <div className="draft-thread__welcome">
+          <Aperture
+            aria-hidden="true"
+            className="new-thread-welcome__mark"
+            size={24}
+            strokeWidth={1.4}
+          />
           <p className="draft-thread__eyebrow">{presentation.eyebrow}</p>
           <h1 className="draft-thread__heading">{presentation.heading}</h1>
           <p className="draft-thread__description">{presentation.description}</p>

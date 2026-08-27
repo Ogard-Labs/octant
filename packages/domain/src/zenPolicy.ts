@@ -153,6 +153,17 @@ export function validateGeometry(geo: ZenGeometry): void {
 /**
  * Validate that a source context is for the local host (first-slice invariant).
  */
+function sameSourceContext(left: ZenSourceContext, right: ZenSourceContext): boolean {
+  return (
+    String(left.hostId) === String(right.hostId) &&
+    left.mode === right.mode &&
+    String(left.projectId) === String(right.projectId) &&
+    left.threadKind === right.threadKind &&
+    String(left.threadId) === String(right.threadId) &&
+    left.worktreeId === right.worktreeId
+  );
+}
+
 export function validateLocalHostSource(ctx: ZenSourceContext, localHostId: HostId): void {
   if (ctx.hostId !== localHostId) {
     reject(
@@ -390,6 +401,22 @@ export function updateElement(
     (existing.content !== element.content || existing.widgetVersion !== element.widgetVersion)
   ) {
     reject("unsupported-kind", "Notes data must use a typed widget command");
+  }
+  if (
+    existing.kind === "thread" &&
+    element.kind === "thread" &&
+    !sameSourceContext(existing.sourceContext, element.sourceContext)
+  ) {
+    reject("unsupported-kind", "Thread source context cannot change during an update");
+  }
+  if (
+    existing.kind === "terminal" &&
+    element.kind === "terminal" &&
+    (!sameSourceContext(existing.sourceContext, element.sourceContext) ||
+      String(existing.checkoutId) !== String(element.checkoutId) ||
+      String(existing.terminalId) !== String(element.terminalId))
+  ) {
+    reject("unsupported-kind", "Terminal authority cannot change during an update");
   }
   if (
     existing.kind === "checklist" &&

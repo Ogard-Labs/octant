@@ -153,14 +153,21 @@
  */
 .execution-context-picker__option {
   display: grid;
-  gap: var(--oct-space-1) var(--oct-space-2);
   width: 100%;
-  padding: var(--oct-space-2) var(--oct-space-3);
+  height: auto;
+  min-height: 48px;
+  justify-content: stretch;
+  align-content: center;
+  gap: 4px;
+  padding: 7px 9px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
   background: transparent;
   color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
   text-align: start;
+  white-space: normal;
 }
 
 .execution-context-picker__option:hover:not(:disabled),
