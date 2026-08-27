@@ -88,10 +88,10 @@ describe("Canvas contracts", () => {
   });
 
   it("rejects unknown or malformed schema versions", () => {
-    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 2 })).toThrow();
+    expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: 3 })).toThrow();
     expect(() => decodeCanvasDefinition({ ...definition, schemaVersion: "1" })).toThrow();
     expect(() =>
-      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 2 }] }),
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...heading, schemaVersion: 3 }] }),
     ).toThrow();
   });
 

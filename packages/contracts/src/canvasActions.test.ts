@@ -165,7 +165,7 @@ describe("Canvas action block contract", () => {
     expect(() =>
       decodeCanvasActionBlock({
         ...actionBlock({ command: "canvas.request-refresh" }),
-        schemaVersion: 2,
+        schemaVersion: 3,
       }),
     ).toThrow();
   });

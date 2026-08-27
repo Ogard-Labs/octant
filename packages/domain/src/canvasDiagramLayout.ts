@@ -103,6 +103,7 @@ function rankNodes(block: CanvasDiagramBlock): Map<string, number> {
  */
 export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLayout {
   const flow = block.flow ?? "down";
+  const autoLayout = block.layout === "auto";
   const ranks = rankNodes(block);
   const withinRank = new Map<number, number>();
   const boxes = block.nodes.map((node) => {
@@ -112,12 +113,14 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
     withinRank.set(rank, slot + 1);
     const alongFlow = MARGIN + rank * (rankExtent(flow) + RANK_GAP);
     const acrossFlow = MARGIN + slot * (siblingExtent(flow) + SIBLING_GAP);
+    const authoredX = autoLayout ? undefined : node.x;
+    const authoredY = autoLayout ? undefined : node.y;
     return {
       nodeId,
       label: node.label,
       ...(node.role === undefined ? {} : { role: node.role }),
-      x: node.x ?? (flow === "down" ? acrossFlow : alongFlow),
-      y: node.y ?? (flow === "down" ? alongFlow : acrossFlow),
+      x: authoredX ?? (flow === "down" ? acrossFlow : alongFlow),
+      y: authoredY ?? (flow === "down" ? alongFlow : acrossFlow),
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
     };

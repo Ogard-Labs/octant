@@ -133,8 +133,8 @@ describe("Canvas lifecycle policy", () => {
   it("rejects a version append whose schema version differs from the current version", () => {
     const current = version();
     const next = version({ versionId: ids.version2, sequence: 2 });
-    // Tamper with the schema version after decode to simulate a future envelope.
-    const incompatible = { ...next, schemaVersion: 2 as unknown as typeof next.schemaVersion };
+    // Tamper with the schema version after decode to simulate an older envelope.
+    const incompatible = { ...next, schemaVersion: 1 as unknown as typeof next.schemaVersion };
     expect(() => assertCanvasVersionAppend(canvasId, current, incompatible)).toThrow();
   });
 

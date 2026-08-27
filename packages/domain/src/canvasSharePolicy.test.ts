@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCanvasStaticExportDocument,
   buildCanvasStaticExportReceipt,
   CanvasSharePolicyRejected,
   CANVAS_SHARE_THREAT_MODEL,
@@ -130,6 +131,15 @@ describe("Canvas share policy", () => {
         label: "Artifact",
       },
     ]);
+  });
+
+  it("excludes board comments from a static export by default", () => {
+    const document = buildCanvasStaticExportDocument({
+      request,
+      current: current as never,
+      exportedAt: context.nowIso,
+    });
+    expect("comments" in document).toBe(false);
   });
 
   it("keeps local Canvas usable when sharing is disabled", () => {

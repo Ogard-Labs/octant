@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CANVAS_COMMAND_IDS, decodeCanvasActionCommand } from "@octant/contracts";
+import {
+  CANVAS_COMMAND_IDS,
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasActionCommand,
+} from "@octant/contracts";
 import {
   CANVAS_COMMAND_ALLOWLIST,
   admitCanvasActionBlock,
@@ -13,7 +17,7 @@ const ids = {
 
 const block = (command: unknown, overrides: Record<string, unknown> = {}) => ({
   blockId: "action-1",
-  schemaVersion: 1,
+  schemaVersion: CANVAS_SCHEMA_VERSION,
   kind: "action",
   label: "Do a thing",
   command,
@@ -73,7 +77,7 @@ describe("admitCanvasActionBlock", () => {
 
   it("denies an unsupported block schema version", () => {
     expect(
-      admitCanvasActionBlock(block({ command: "canvas.request-refresh" }, { schemaVersion: 2 })),
+      admitCanvasActionBlock(block({ command: "canvas.request-refresh" }, { schemaVersion: 3 })),
     ).toMatchObject({ kind: "denied", denialCode: "unsupported-schema" });
   });
 
