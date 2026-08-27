@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdtempSync,
   realpathSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -85,13 +86,16 @@ export function buildLinuxConfinementLaunch(
   const baseSystemDirs = ["/bin", "/sbin", "/usr", "/lib", "/lib64", "/etc", "/opt", "/sys"];
   const mounts = new Map<string, Mount>();
 
-  function addMount(kind: "ro-bind" | "bind", source: string, target: string) {
+  function addMount(kind: "ro-bind" | "bind" | "tmpfs", source: string, target: string) {
     const normalizedTarget = normalize(target);
     const existing = mounts.get(normalizedTarget);
     if (existing !== undefined) {
       if (kind === "bind") {
         existing.kind = "bind";
         existing.source = source;
+      } else if (existing.kind !== "bind" && kind === "tmpfs") {
+        existing.kind = "tmpfs";
+        existing.source = "";
       }
       return;
     }
@@ -113,8 +117,14 @@ export function buildLinuxConfinementLaunch(
   }
 
   for (const dir of baseSystemDirs) {
-    if (existsSync(dir) && lstatSync(dir).isDirectory()) {
-      tryBindReadOnly(dir);
+    if (existsSync(dir)) {
+      try {
+        if (statSync(dir).isDirectory()) {
+          tryBindReadOnly(dir);
+        }
+      } catch {
+        // ignore broken symlinks
+      }
     }
   }
 
@@ -141,19 +151,69 @@ export function buildLinuxConfinementLaunch(
     ...(input.additionalWriteRoots ?? []),
   ].map((path) => normalize(path));
 
+  function bindAdditionalDenyPath(path: string, _kind: "read" | "write"): void {
+    if (!isAbsolute(path)) {
+      throw new SeatbeltConfinementError(
+        "invalid-configuration",
+        `Linux confinement additional deny ${_kind} path "${path}" must be absolute.`,
+      );
+    }
+    const normalized = normalize(path);
+
+    // Deny paths are only meaningful when they overlap a writable mount.
+    // Otherwise the read-only root already blocks access.
+    if (
+      !isStrictAncestorOfAny(normalized, writeTargets) &&
+      !isAnyStrictAncestorOf(normalized, writeTargets)
+    ) {
+      return;
+    }
+
+    const existing = mounts.get(normalized);
+    if (existing !== undefined && existing.kind === "bind") {
+      // A writable mount at the exact same path must win; do not overwrite it
+      // with a denial.
+      return;
+    }
+
+    // A writable child bound under this path must be able to create its
+    // mountpoint, and a read-only bind of an empty directory would block that.
+    // Create a fresh tmpfs at the deny path instead; it is remounted read-only
+    // after the child binds are applied, leaving the child writable.
+    if (isDirectoryForDeny(path)) {
+      addMount("tmpfs", "", normalized);
+      return;
+    }
+
+    const source = createEmptySourceForPath(path);
+    if (source !== undefined) {
+      addMount("ro-bind", source, normalized);
+    }
+  }
+
   for (const path of input.additionalDenyWritePaths ?? []) {
-    bindAdditionalDenyPath(path, writeTargets, mounts, "write");
+    bindAdditionalDenyPath(path, "write");
   }
 
   for (const path of input.additionalDenyReadPaths ?? []) {
-    bindAdditionalDenyPath(path, writeTargets, mounts, "read");
+    bindAdditionalDenyPath(path, "read");
   }
 
   const sorted = [...mounts.values()].sort(
     (left, right) => depth(left.target) - depth(right.target),
   );
   for (const mount of sorted) {
-    args.push(mount.kind === "bind" ? "--bind" : "--ro-bind", mount.source, mount.target);
+    if (mount.kind === "tmpfs") {
+      args.push("--tmpfs", mount.target);
+    } else {
+      args.push(mount.kind === "bind" ? "--bind" : "--ro-bind", mount.source, mount.target);
+    }
+  }
+
+  for (const mount of sorted) {
+    if (mount.kind === "tmpfs") {
+      args.push("--remount-ro", mount.target);
+    }
   }
 
   args.push("--remount-ro", "/");
@@ -165,51 +225,13 @@ export function buildLinuxConfinementLaunch(
 }
 
 interface Mount {
-  kind: "ro-bind" | "bind";
+  kind: "ro-bind" | "bind" | "tmpfs";
   source: string;
   target: string;
 }
 
 function depth(path: string): number {
   return path.split(sep).filter((segment) => segment.length > 0).length;
-}
-
-function bindAdditionalDenyPath(
-  path: string,
-  writeTargets: ReadonlyArray<string>,
-  mounts: Map<string, Mount>,
-  _kind: "read" | "write",
-): void {
-  if (!isAbsolute(path)) {
-    throw new SeatbeltConfinementError(
-      "invalid-configuration",
-      `Linux confinement additional deny ${_kind} path "${path}" must be absolute.`,
-    );
-  }
-  const normalized = normalize(path);
-
-  // Deny paths are only meaningful when they overlap a writable mount.
-  // Otherwise the read-only root already blocks access.
-  if (
-    !isStrictAncestorOfAny(normalized, writeTargets) &&
-    !isAnyStrictAncestorOf(normalized, writeTargets)
-  ) {
-    return;
-  }
-
-  // Replace the denied path with an empty source. If the path is an ancestor
-  // of a writable target, the writable child is bound later and overlays the
-  // empty parent for that subtree.
-  const source = createEmptySourceForPath(path);
-  if (source !== undefined) {
-    const existing = mounts.get(normalized);
-    if (existing !== undefined && existing.kind === "bind") {
-      // A writable mount at the exact same path must win; do not overwrite it
-      // with a denial.
-      return;
-    }
-    mounts.set(normalized, { kind: "ro-bind", source, target: normalized });
-  }
 }
 
 function isStrictAncestorOfAny(path: string, candidates: ReadonlyArray<string>): boolean {
@@ -234,6 +256,16 @@ function safeRealpathSync(path: string): string | undefined {
   }
 }
 
+function isDirectoryForDeny(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    // Deny paths are typically directories, and a nonexistent directory is
+    // hidden the same way by mounting an empty tmpfs at the target.
+    return true;
+  }
+}
+
 const emptySourcePaths = new Map<string, string>();
 
 function createEmptySourceForPath(path: string): string | undefined {
@@ -242,11 +274,6 @@ function createEmptySourceForPath(path: string): string | undefined {
 
   try {
     const stats = lstatSync(path);
-    if (stats.isDirectory()) {
-      const source = mkdtempSync(join(tmpdir(), "octant-deny-"));
-      emptySourcePaths.set(path, source);
-      return source;
-    }
     if (stats.isFile() || stats.isSymbolicLink()) {
       const source = mkdtempSync(join(tmpdir(), "octant-deny-"));
       const file = join(source, "file");
