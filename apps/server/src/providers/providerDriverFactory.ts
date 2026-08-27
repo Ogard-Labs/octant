@@ -3,6 +3,7 @@ import {
   type ProviderFailure,
   type ProviderInstance,
 } from "@octant/contracts";
+import { isImageProfileDriverKind } from "@octant/domain";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
@@ -60,6 +61,9 @@ export function makeProviderDriver(
   instance: ProviderInstance,
   options: ProviderDriverFactoryOptions,
 ): ProviderDriver {
+  if (isImageProfileDriverKind(instance.driverKind)) {
+    throw new ProviderDriverConfigurationError();
+  }
   switch (instance.driverKind) {
     case "opencode":
       return makeOpenCodeDriver({

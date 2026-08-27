@@ -57,6 +57,8 @@ describe("provider registry contracts", () => {
     "openai-compatible",
     "anthropic-compatible",
     "azure-foundry",
+    "openai-image",
+    "gemini-native-image",
   ] as const)("decodes the %s driver kind", (driverKind) => {
     expect(Schema.decodeUnknownSync(ProviderDriverKind)(driverKind)).toBe(driverKind);
   });
@@ -268,6 +270,91 @@ describe("provider registry contracts", () => {
     ).toThrow();
     expect(decodeProviderInstanceConfigurationChanged({ instance })).toEqual({ instance });
     expect(() => decodeProviderInstanceBinaryChanged({ instance })).toThrow();
+  });
+
+  it("decodes an OpenAI image profile without a base URL or secret", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000431",
+      displayName: "GPT Image",
+      driverKind: "openai-image",
+      configuration: {
+        kind: "openai-image-http",
+        modelAllowlist: ["gpt-image-2", "gpt-image-1"],
+        defaultModel: "gpt-image-2",
+        quality: "high",
+        size: "1024x1024",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-08-28T10:00:00.000Z",
+      updatedAt: "2026-08-28T10:00:00.000Z",
+    });
+
+    expect(instance.driverKind).toBe("openai-image");
+    expect(JSON.stringify(instance)).not.toMatch(/api.?key|credential|token|baseUrl/i);
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: { ...instance.configuration, baseUrl: "https://api.openai.com" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: { ...instance.configuration, defaultModel: "gpt-image-1-mini" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: {
+          ...instance.configuration,
+          modelAllowlist: ["gpt-image-2", "gpt-image-2"],
+        },
+      }),
+    ).toThrow();
+    expect(decodeProviderInstanceConfigurationChanged({ instance })).toEqual({ instance });
+    expect(() => decodeProviderInstanceBinaryChanged({ instance })).toThrow();
+  });
+
+  it("decodes a Gemini image profile without a base URL or secret", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000432",
+      displayName: "Gemini Image",
+      driverKind: "gemini-native-image",
+      configuration: {
+        kind: "gemini-native-image-http",
+        modelAllowlist: ["gemini-3.1-flash-image", "gemini-2.5-flash-image"],
+        defaultModel: "gemini-3.1-flash-image",
+        aspectRatio: "16:9",
+        resolution: "2K",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-08-28T10:00:00.000Z",
+      updatedAt: "2026-08-28T10:00:00.000Z",
+    });
+
+    expect(instance.driverKind).toBe("gemini-native-image");
+    expect(JSON.stringify(instance)).not.toMatch(/api.?key|credential|token|baseUrl/i);
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: {
+          ...instance.configuration,
+          baseUrl: "https://generativelanguage.googleapis.com",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: { ...instance.configuration, defaultModel: "gemini-3-pro-image" },
+      }),
+    ).toThrow();
+    expect(decodeProviderInstanceConfigurationChanged({ instance })).toEqual({ instance });
   });
 
   it("decodes a strict non-secret Codex instance and creation command", () => {
@@ -1069,6 +1156,88 @@ describe("provider registry contracts", () => {
         expectedVersion: 0,
         displayName: "Azure Foundry Work",
         configuration: { ...foundryConfiguration, authentication: "bearer" as never },
+      }),
+    ).toThrow();
+
+    const openAiImageConfiguration = {
+      kind: "openai-image-http",
+      modelAllowlist: ["gpt-image-2"],
+      defaultModel: "gpt-image-2",
+    } as const;
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-openai-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "GPT Image",
+        configuration: openAiImageConfiguration,
+      }),
+    ).toMatchObject({
+      kind: "create-openai-image-provider",
+      configuration: openAiImageConfiguration,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "change-openai-image-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: { ...openAiImageConfiguration, quality: "high" },
+      }),
+    ).toMatchObject({ kind: "change-openai-image-configuration" });
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-openai-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "GPT Image",
+        configuration: { ...openAiImageConfiguration, baseUrl: "https://api.openai.com" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-openai-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "GPT Image",
+        configuration: { ...openAiImageConfiguration, defaultModel: "gpt-image-1" },
+      }),
+    ).toThrow();
+
+    const geminiImageConfiguration = {
+      kind: "gemini-native-image-http",
+      modelAllowlist: ["gemini-3.1-flash-image"],
+      defaultModel: "gemini-3.1-flash-image",
+    } as const;
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-gemini-native-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Gemini Image",
+        configuration: geminiImageConfiguration,
+      }),
+    ).toMatchObject({
+      kind: "create-gemini-native-image-provider",
+      configuration: geminiImageConfiguration,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "change-gemini-native-image-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: { ...geminiImageConfiguration, aspectRatio: "1:1" },
+      }),
+    ).toMatchObject({ kind: "change-gemini-native-image-configuration" });
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-gemini-native-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Gemini Image",
+        configuration: {
+          ...geminiImageConfiguration,
+          baseUrl: "https://generativelanguage.googleapis.com",
+        },
       }),
     ).toThrow();
 

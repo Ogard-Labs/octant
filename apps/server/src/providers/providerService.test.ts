@@ -683,6 +683,121 @@ describe("ProviderService", () => {
     );
   });
 
+  it("creates and updates an OpenAI image profile through the journal", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-openai-image-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "GPT Image",
+        configuration: {
+          kind: "openai-image-http",
+          modelAllowlist: ["gpt-image-2", "gpt-image-1"],
+          defaultModel: "gpt-image-2",
+          quality: "high",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-created",
+      instance: {
+        displayName: "GPT Image",
+        driverKind: "openai-image",
+        configuration: {
+          kind: "openai-image-http",
+          modelAllowlist: ["gpt-image-2", "gpt-image-1"],
+          defaultModel: "gpt-image-2",
+          quality: "high",
+        },
+        version: 1,
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-openai-image-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "openai-image-http",
+          modelAllowlist: ["gpt-image-1"],
+          defaultModel: "gpt-image-1",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        driverKind: "openai-image",
+        configuration: {
+          modelAllowlist: ["gpt-image-1"],
+          defaultModel: "gpt-image-1",
+        },
+        version: 2,
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId,
+        expectedVersion: 2,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-removed", instanceId, version: 3 });
+  });
+
+  it("creates and updates a Gemini image profile through the journal", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-gemini-native-image-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Gemini Image",
+        configuration: {
+          kind: "gemini-native-image-http",
+          modelAllowlist: ["gemini-3.1-flash-image"],
+          defaultModel: "gemini-3.1-flash-image",
+          aspectRatio: "1:1",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-created",
+      instance: {
+        displayName: "Gemini Image",
+        driverKind: "gemini-native-image",
+        configuration: {
+          kind: "gemini-native-image-http",
+          modelAllowlist: ["gemini-3.1-flash-image"],
+          defaultModel: "gemini-3.1-flash-image",
+          aspectRatio: "1:1",
+        },
+        version: 1,
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-gemini-native-image-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "gemini-native-image-http",
+          modelAllowlist: ["gemini-3-pro-image"],
+          defaultModel: "gemini-3-pro-image",
+          resolution: "4K",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        driverKind: "gemini-native-image",
+        configuration: {
+          modelAllowlist: ["gemini-3-pro-image"],
+          defaultModel: "gemini-3-pro-image",
+          resolution: "4K",
+        },
+        version: 2,
+      },
+    });
+  });
+
   it("creates and returns the authoritative strict Codex provider instance", async () => {
     const fixture = serviceFixture();
     const expected = decodeProviderInstance({

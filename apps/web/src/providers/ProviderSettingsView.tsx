@@ -8,7 +8,9 @@ import type {
   GrokProviderConfiguration,
   KiloProviderConfiguration,
   MistralVibeProviderConfiguration,
+  GeminiImageProviderConfiguration,
   OpenAiCompatibleProviderConfiguration,
+  OpenAiImageProviderConfiguration,
   OllamaProviderConfiguration,
   OhMyPiProviderConfiguration,
   PiProviderConfiguration,
@@ -59,6 +61,16 @@ export interface ProviderSettingsViewProps {
     configuration: AzureFoundryProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
+  readonly onCreateOpenAiImage: (
+    displayName: string,
+    configuration: OpenAiImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onCreateGeminiImage: (
+    displayName: string,
+    configuration: GeminiImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
   readonly onCreateClaude: (
     displayName: string,
     configuration: ClaudeProviderConfiguration,
@@ -93,6 +105,16 @@ export interface ProviderSettingsViewProps {
   readonly onChangeAzureFoundryConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: AzureFoundryProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeOpenAiImageConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: OpenAiImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeGeminiImageConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: GeminiImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeClaudeConfiguration: (
@@ -195,6 +217,8 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             onCreateMistralVibe={props.onCreateMistralVibe}
             onCreateOllama={props.onCreateOllama}
             onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
+            onCreateOpenAiImage={props.onCreateOpenAiImage}
+            onCreateGeminiImage={props.onCreateGeminiImage}
           />
         }
         credentialManagementAvailable={props.credentialManagementAvailable}
@@ -217,6 +241,8 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}
         onChangeOllamaConfiguration={props.onChangeOllamaConfiguration}
         onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
+        onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
+        onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}

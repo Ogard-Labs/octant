@@ -6,6 +6,7 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
+import { isImageProfileDriverKind } from "@octant/domain";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -18,8 +19,10 @@ import {
   ClaudeConfigurationForm,
   DevinConfigurationForm,
   FoundryConfigurationForm,
+  GeminiImageConfigurationForm,
   GrokConfigurationForm,
   HttpConfigurationForm,
+  OpenAiImageConfigurationForm,
   KiloConfigurationForm,
   OhMyPiConfigurationForm,
   OllamaConfigurationForm,
@@ -60,6 +63,8 @@ export type ProviderSettingsListProps = Pick<
   | "onChangeOpenAiCompatibleConfiguration"
   | "onChangeAnthropicCompatibleConfiguration"
   | "onChangeAzureFoundryConfiguration"
+  | "onChangeOpenAiImageConfiguration"
+  | "onChangeGeminiImageConfiguration"
   | "onProviderCredentialStatus"
   | "onClearProviderCredential"
   | "onBeginProviderAuthentication"
@@ -141,6 +146,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                   props.onChangeAnthropicCompatibleConfiguration
                 }
                 onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
+                onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
+                onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
                 onClearProviderCredential={props.onClearProviderCredential}
                 onBeginProviderAuthentication={props.onBeginProviderAuthentication}
                 onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
@@ -209,7 +216,7 @@ function AgentEligibleModelsControls(props: {
       readonly modelName: string;
     }> = [];
     for (const instance of props.instances) {
-      if (!instance.enabled) continue;
+      if (!instance.enabled || isImageProfileDriverKind(instance.driverKind)) continue;
       const observed = props.observedByInstance.get(instance.id);
       if (observed === undefined || observed.readiness !== "ready") continue;
       for (const model of observed.models) {
@@ -348,6 +355,8 @@ interface ProviderRowProps {
   readonly onChangeOpenAiCompatibleConfiguration: ProviderSettingsViewProps["onChangeOpenAiCompatibleConfiguration"];
   readonly onChangeAnthropicCompatibleConfiguration: ProviderSettingsViewProps["onChangeAnthropicCompatibleConfiguration"];
   readonly onChangeAzureFoundryConfiguration: ProviderSettingsViewProps["onChangeAzureFoundryConfiguration"];
+  readonly onChangeOpenAiImageConfiguration: ProviderSettingsViewProps["onChangeOpenAiImageConfiguration"];
+  readonly onChangeGeminiImageConfiguration: ProviderSettingsViewProps["onChangeGeminiImageConfiguration"];
   readonly onProviderCredentialStatus: ProviderSettingsViewProps["onProviderCredentialStatus"];
   readonly onClearProviderCredential: ProviderSettingsViewProps["onClearProviderCredential"];
   readonly onBeginProviderAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
@@ -382,10 +391,14 @@ function ProviderRow(props: ProviderRowProps) {
   const isHttp = props.instance.driverKind === "openai-compatible";
   const isAnthropicHttp = props.instance.driverKind === "anthropic-compatible";
   const isFoundry = props.instance.driverKind === "azure-foundry";
+  const isOpenAiImage = props.instance.driverKind === "openai-image";
+  const isGeminiImage = props.instance.driverKind === "gemini-native-image";
+  const isImageProfile = isOpenAiImage || isGeminiImage;
   const usesCredential =
     isHttp ||
     isAnthropicHttp ||
     isFoundry ||
+    isImageProfile ||
     ((isClaude || isVibe || isGrok) && props.instance.configuration.authentication === "api-key");
   const credential = useCredentialStatus(props, !usesCredential);
   const label = driverLabel(props.instance.driverKind);
@@ -397,7 +410,9 @@ function ProviderRow(props: ProviderRowProps) {
         ? "RPC"
         : isCli
           ? "CLI"
-          : "HTTP";
+          : isImageProfile
+            ? "Image"
+            : "HTTP";
   const toggleEnabled = async () => {
     const nextEnabled = !props.instance.enabled;
     const updated = await props.onSetEnabled(props.instance.id, nextEnabled);
@@ -647,6 +662,36 @@ function ProviderRow(props: ProviderRowProps) {
               <span>Service lifecycle: user-managed</span>
             </div>
           )}
+          {!isOpenAiImage ? null : (
+            <div className="provider-card__facts provider-card__facts--image">
+              <span>Default model: {props.instance.configuration.defaultModel}</span>
+              <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
+              {props.instance.configuration.quality === undefined ? null : (
+                <span>Quality: {props.instance.configuration.quality}</span>
+              )}
+              {props.instance.configuration.size === undefined ? null : (
+                <span>Size: {props.instance.configuration.size}</span>
+              )}
+              <span>
+                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+              </span>
+            </div>
+          )}
+          {!isGeminiImage ? null : (
+            <div className="provider-card__facts provider-card__facts--image">
+              <span>Default model: {props.instance.configuration.defaultModel}</span>
+              <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
+              {props.instance.configuration.aspectRatio === undefined ? null : (
+                <span>Aspect ratio: {props.instance.configuration.aspectRatio}</span>
+              )}
+              {props.instance.configuration.resolution === undefined ? null : (
+                <span>Resolution: {props.instance.configuration.resolution}</span>
+              )}
+              <span>
+                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+              </span>
+            </div>
+          )}
           {autoRegisteredDisabled ? (
             <p className="provider-card__guidance">Detected on this host — enable to use</p>
           ) : null}
@@ -673,15 +718,17 @@ function ProviderRow(props: ProviderRowProps) {
             </p>
           ) : null}
           <div className="provider-card__actions">
-            <OctantButton
-              disabled={disabled || !props.instance.enabled}
-              onClick={() => void props.onProbe(props.instance.id)}
-              type="button"
-            >
-              {props.probing
-                ? "Checking connection…"
-                : `Check connection for ${props.instance.displayName}`}
-            </OctantButton>
+            {isImageProfile ? null : (
+              <OctantButton
+                disabled={disabled || !props.instance.enabled}
+                onClick={() => void props.onProbe(props.instance.id)}
+                type="button"
+              >
+                {props.probing
+                  ? "Checking connection…"
+                  : `Check connection for ${props.instance.displayName}`}
+              </OctantButton>
+            )}
             <OctantButton
               aria-controls={`provider-configuration-${props.instance.id}`}
               aria-expanded={configurationOpen}
@@ -848,7 +895,27 @@ function ProviderRow(props: ProviderRowProps) {
                   onChange={props.onChangeAzureFoundryConfiguration}
                   onClearCredential={props.onClearProviderCredential}
                 />
-              ) : (
+              ) : isOpenAiImage ? (
+                <OpenAiImageConfigurationForm
+                  credential={credential}
+                  credentialManagementAvailable={props.credentialManagementAvailable}
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`openai-image:${props.instance.version}`}
+                  onChange={props.onChangeOpenAiImageConfiguration}
+                  onClearCredential={props.onClearProviderCredential}
+                />
+              ) : isGeminiImage ? (
+                <GeminiImageConfigurationForm
+                  credential={credential}
+                  credentialManagementAvailable={props.credentialManagementAvailable}
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`gemini-image:${props.instance.version}`}
+                  onChange={props.onChangeGeminiImageConfiguration}
+                  onClearCredential={props.onClearProviderCredential}
+                />
+              ) : isHttp ? (
                 <HttpConfigurationForm
                   credential={credential}
                   credentialManagementAvailable={props.credentialManagementAvailable}
@@ -858,7 +925,7 @@ function ProviderRow(props: ProviderRowProps) {
                   onChange={props.onChangeOpenAiCompatibleConfiguration}
                   onClearCredential={props.onClearProviderCredential}
                 />
-              )}
+              ) : null}
               {props.observed === undefined ? null : (
                 <div className="provider-card__discovery">
                   <section aria-labelledby={`models-${props.instance.id}`}>

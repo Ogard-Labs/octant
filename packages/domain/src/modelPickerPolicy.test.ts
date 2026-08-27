@@ -60,6 +60,42 @@ function codexInstance(id: string, displayName: string, enabled = true): Provide
   });
 }
 
+function openAiImageInstance(id: string, displayName: string): ProviderInstance {
+  return decodeProviderInstance({
+    id,
+    displayName,
+    driverKind: "openai-image",
+    configuration: {
+      kind: "openai-image-http",
+      modelAllowlist: ["gpt-image-2"],
+      defaultModel: "gpt-image-2",
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+function geminiImageInstance(id: string, displayName: string): ProviderInstance {
+  return decodeProviderInstance({
+    id,
+    displayName,
+    driverKind: "gemini-native-image",
+    configuration: {
+      kind: "gemini-native-image-http",
+      modelAllowlist: ["gemini-3.1-flash-image"],
+      defaultModel: "gemini-3.1-flash-image",
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 function foundryInstance(id: string, displayName: string): ProviderInstance {
   return decodeProviderInstance({
     id,
@@ -161,6 +197,8 @@ describe("model picker policy", () => {
       expect(driverLabel("openai-compatible")).toBe("OpenAI-compatible HTTP");
       expect(driverLabel("anthropic-compatible")).toBe("Anthropic-compatible HTTP");
       expect(driverLabel("azure-foundry")).toBe("Azure AI Foundry");
+      expect(driverLabel("openai-image")).toBe("OpenAI Image");
+      expect(driverLabel("gemini-native-image")).toBe("Gemini Image");
       expect(driverLabel("ollama")).toBe("Ollama");
       expect(driverLabel("opencode")).toBe("OpenCode CLI");
       expect(driverLabel("kimi-code")).toBe("Kimi Code ACP");
@@ -264,6 +302,41 @@ describe("model picker policy", () => {
         input({ instances: [zulu, alpha], observedByInstance }),
       );
       expect(groups.map((g) => g.instance.displayName)).toEqual(["Alpha gateway", "Zulu gateway"]);
+    });
+
+    it("omits image profiles from every Chat, Work, and Code picker", () => {
+      const chat = openAiInstance({
+        id: "00000000-0000-4000-8000-000000000201",
+        displayName: "Chat gateway",
+      });
+      const openAiImage = openAiImageInstance("00000000-0000-4000-8000-000000000202", "GPT Image");
+      const geminiImage = geminiImageInstance(
+        "00000000-0000-4000-8000-000000000203",
+        "Gemini Image",
+      );
+      const imageModel = model({ id: "gpt-image-2", displayName: "GPT Image 2" });
+      const geminiModel = model({
+        id: "gemini-3.1-flash-image",
+        displayName: "Gemini 3.1 Flash Image",
+      });
+      const observedByInstance = new Map([
+        [chat.id, observed(chat.id, [model({ id: "chat-1", displayName: "Chat 1" })])],
+        [openAiImage.id, observed(openAiImage.id, [imageModel])],
+        [geminiImage.id, observed(geminiImage.id, [geminiModel])],
+      ]);
+      const pickerInput = {
+        instances: [chat, openAiImage, geminiImage],
+        observedByInstance,
+      };
+
+      for (const mode of ["chat", "work", "code"] as const) {
+        const groups = buildModelPickerGroups(input({ ...pickerInput, mode }));
+        expect(groups.map((group) => group.instance.driverKind)).toEqual(["openai-compatible"]);
+        expect(groups.some((group) => group.instance.driverKind === "openai-image")).toBe(false);
+        expect(groups.some((group) => group.instance.driverKind === "gemini-native-image")).toBe(
+          false,
+        );
+      }
     });
 
     it("keeps duplicate model IDs distinct by provider instance", () => {

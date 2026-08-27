@@ -33,20 +33,24 @@ import {
   changeAzureFoundryConfiguration,
   changeClaudeConfiguration,
   changeDevinConfiguration,
+  changeGeminiImageConfiguration,
   changeGrokConfiguration,
   changeKiloConfiguration,
   changeMistralVibeConfiguration,
   changeOllamaConfiguration,
   changePiConfiguration,
   changeOpenAiCompatibleConfiguration,
+  changeOpenAiImageConfiguration,
   changeProviderBinary,
   createAnthropicCompatibleProvider,
   createAzureFoundryProvider,
   createClaudeProvider,
   createDevinProvider,
+  createGeminiImageProvider,
   createGrokProvider,
   createKiloProvider,
   createOpenAiCompatibleProvider,
+  createOpenAiImageProvider,
   createCodexProvider,
   createKimiCodeProvider,
   createMistralVibeProvider,
@@ -486,7 +490,9 @@ export class ProviderService implements ProviderServiceApi {
           command.kind === "create-grok-provider" ||
           command.kind === "create-openai-compatible-provider" ||
           command.kind === "create-anthropic-compatible-provider" ||
-          command.kind === "create-azure-foundry-provider"
+          command.kind === "create-azure-foundry-provider" ||
+          command.kind === "create-openai-image-provider" ||
+          command.kind === "create-gemini-native-image-provider"
         ) {
           if (current !== undefined || command.expectedVersion !== 0) {
             throw this.#invalid("Provider configuration changed; reload and retry.");
@@ -573,6 +579,18 @@ export class ProviderService implements ProviderServiceApi {
               break;
             case "create-azure-foundry-provider":
               instance = createAzureFoundryProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
+            case "create-openai-image-provider":
+              instance = createOpenAiImageProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
+            case "create-gemini-native-image-provider":
+              instance = createGeminiImageProvider({
                 ...common,
                 configuration: command.configuration,
               });
@@ -672,6 +690,20 @@ export class ProviderService implements ProviderServiceApi {
             throw this.#unsupported("This provider does not use Azure AI Foundry configuration.");
           }
           instance = changeAzureFoundryConfiguration(current, command.configuration, updatedAt);
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-openai-image-configuration") {
+          if (current.driverKind !== "openai-image") {
+            throw this.#unsupported("This provider does not use OpenAI image configuration.");
+          }
+          instance = changeOpenAiImageConfiguration(current, command.configuration, updatedAt);
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-gemini-native-image-configuration") {
+          if (current.driverKind !== "gemini-native-image") {
+            throw this.#unsupported("This provider does not use Gemini image configuration.");
+          }
+          instance = changeGeminiImageConfiguration(current, command.configuration, updatedAt);
           await this.#runtime.invalidateRuntime(current.id);
           eventName = "provider.instance-configuration-changed@1";
         } else if (command.kind === "change-claude-configuration") {

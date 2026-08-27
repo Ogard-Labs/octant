@@ -5,7 +5,9 @@ import {
   decodeProviderModelId,
   type AnthropicCompatibleProviderInstance,
   type AzureFoundryProviderInstance,
+  type GeminiImageProviderInstance,
   type OpenAiCompatibleProviderInstance,
+  type OpenAiImageProviderInstance,
   type OpenCodeProviderInstance,
   type ProviderDefaults,
   type ProviderInstance,
@@ -16,16 +18,21 @@ import {
   changeAnthropicCompatibleConfiguration,
   changeAzureFoundryConfiguration,
   changeClaudeConfiguration,
+  changeGeminiImageConfiguration,
   changeOpenAiCompatibleConfiguration,
+  changeOpenAiImageConfiguration,
   changeProviderBinary,
   createAnthropicCompatibleProvider,
   createAzureFoundryProvider,
   createClaudeProvider,
+  createGeminiImageProvider,
   createOpenAiCompatibleProvider,
+  createOpenAiImageProvider,
   createCodexProvider,
   createKimiCodeProvider,
   createOpenCodeProvider,
   effectiveProviderAuthority,
+  isImageProfileDriverKind,
   removeProvider,
   renameProvider,
   setProviderEnabled,
@@ -133,6 +140,52 @@ function foundryProvider(overrides: Record<string, unknown> = {}): AzureFoundryP
   });
   if (instance.driverKind !== "azure-foundry") {
     throw new Error("expected Azure Foundry provider fixture");
+  }
+  return instance;
+}
+
+function openAiImageProvider(overrides: Record<string, unknown> = {}): OpenAiImageProviderInstance {
+  const instance = decodeProviderInstance({
+    id: ids.local,
+    displayName: "GPT Image",
+    driverKind: "openai-image",
+    configuration: {
+      kind: "openai-image-http",
+      modelAllowlist: ["gpt-image-2", "gpt-image-1"],
+      defaultModel: "gpt-image-2",
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt,
+    updatedAt: createdAt,
+    ...overrides,
+  });
+  if (instance.driverKind !== "openai-image") {
+    throw new Error("expected OpenAI image provider fixture");
+  }
+  return instance;
+}
+
+function geminiImageProvider(overrides: Record<string, unknown> = {}): GeminiImageProviderInstance {
+  const instance = decodeProviderInstance({
+    id: ids.local,
+    displayName: "Gemini Image",
+    driverKind: "gemini-native-image",
+    configuration: {
+      kind: "gemini-native-image-http",
+      modelAllowlist: ["gemini-3.1-flash-image", "gemini-2.5-flash-image"],
+      defaultModel: "gemini-3.1-flash-image",
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt,
+    updatedAt: createdAt,
+    ...overrides,
+  });
+  if (instance.driverKind !== "gemini-native-image") {
+    throw new Error("expected Gemini image provider fixture");
   }
   return instance;
 }
@@ -601,6 +654,193 @@ describe("provider instance policy", () => {
       updatedAt,
     });
     expect(original).toEqual(foundryProvider());
+  });
+
+  it("creates an OpenAI image profile with a normalized allowlist and default model", () => {
+    expect(
+      createOpenAiImageProvider({
+        id: ids.local,
+        displayName: "  GPT Image  ",
+        configuration: {
+          kind: "openai-image-http",
+          modelAllowlist: [" gpt-image-2 ", "gpt-image-2", " gpt-image-1 "],
+          defaultModel: " gpt-image-2 ",
+          quality: "high",
+          size: "1024x1024",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toEqual(
+      openAiImageProvider({
+        displayName: "GPT Image",
+        configuration: {
+          kind: "openai-image-http",
+          modelAllowlist: ["gpt-image-2", "gpt-image-1"],
+          defaultModel: "gpt-image-2",
+          quality: "high",
+          size: "1024x1024",
+        },
+      }),
+    );
+  });
+
+  it("rejects an OpenAI image profile whose default model is not in the allowlist", () => {
+    expect(() =>
+      createOpenAiImageProvider({
+        id: ids.local,
+        displayName: "GPT Image",
+        configuration: {
+          kind: "openai-image-http",
+          modelAllowlist: ["gpt-image-2"],
+          defaultModel: "gpt-image-1",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Default model must be a member of the model allowlist.");
+  });
+
+  it("rejects an OpenAI image profile with no model IDs", () => {
+    expect(() =>
+      createOpenAiImageProvider({
+        id: ids.local,
+        displayName: "GPT Image",
+        configuration: {
+          kind: "openai-image-http",
+          modelAllowlist: [],
+          defaultModel: "gpt-image-2",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Image profiles require at least one model ID.");
+  });
+
+  it("returns a complete immutable OpenAI image configuration update", () => {
+    const original = openAiImageProvider();
+    const changed = changeOpenAiImageConfiguration(
+      original,
+      {
+        kind: "openai-image-http",
+        modelAllowlist: [" gpt-image-1 ", "gpt-image-1"],
+        defaultModel: " gpt-image-1 ",
+        quality: "low",
+      },
+      updatedAt,
+    );
+
+    expect(changed).toEqual({
+      ...original,
+      configuration: {
+        kind: "openai-image-http",
+        modelAllowlist: ["gpt-image-1"],
+        defaultModel: "gpt-image-1",
+        quality: "low",
+      },
+      version: 2,
+      updatedAt,
+    });
+    expect(original).toEqual(openAiImageProvider());
+  });
+
+  it("creates a Gemini image profile with a normalized allowlist and default model", () => {
+    expect(
+      createGeminiImageProvider({
+        id: ids.local,
+        displayName: "  Gemini Image  ",
+        configuration: {
+          kind: "gemini-native-image-http",
+          modelAllowlist: [
+            " gemini-3.1-flash-image ",
+            "gemini-3.1-flash-image",
+            " gemini-2.5-flash-image ",
+          ],
+          defaultModel: " gemini-3.1-flash-image ",
+          aspectRatio: "16:9",
+          resolution: "2K",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toEqual(
+      geminiImageProvider({
+        displayName: "Gemini Image",
+        configuration: {
+          kind: "gemini-native-image-http",
+          modelAllowlist: ["gemini-3.1-flash-image", "gemini-2.5-flash-image"],
+          defaultModel: "gemini-3.1-flash-image",
+          aspectRatio: "16:9",
+          resolution: "2K",
+        },
+      }),
+    );
+  });
+
+  it("rejects a Gemini image profile whose default model is not in the allowlist", () => {
+    expect(() =>
+      createGeminiImageProvider({
+        id: ids.local,
+        displayName: "Gemini Image",
+        configuration: {
+          kind: "gemini-native-image-http",
+          modelAllowlist: ["gemini-3.1-flash-image"],
+          defaultModel: "gemini-3-pro-image",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Default model must be a member of the model allowlist.");
+  });
+
+  it("returns a complete immutable Gemini image configuration update", () => {
+    const original = geminiImageProvider();
+    const changed = changeGeminiImageConfiguration(
+      original,
+      {
+        kind: "gemini-native-image-http",
+        modelAllowlist: [" gemini-3-pro-image ", "gemini-3-pro-image"],
+        defaultModel: " gemini-3-pro-image ",
+        resolution: "4K",
+      },
+      updatedAt,
+    );
+
+    expect(changed).toEqual({
+      ...original,
+      configuration: {
+        kind: "gemini-native-image-http",
+        modelAllowlist: ["gemini-3-pro-image"],
+        defaultModel: "gemini-3-pro-image",
+        resolution: "4K",
+      },
+      version: 2,
+      updatedAt,
+    });
+    expect(original).toEqual(geminiImageProvider());
+  });
+
+  it("classifies image profiles separately from chat drivers", () => {
+    expect(isImageProfileDriverKind("openai-image")).toBe(true);
+    expect(isImageProfileDriverKind("gemini-native-image")).toBe(true);
+    expect(isImageProfileDriverKind("openai-compatible")).toBe(false);
+  });
+
+  it("removes an image profile when it has no active sessions", () => {
+    const original = openAiImageProvider();
+    expect(removeProvider(original, { activeSessionCount: 0, updatedAt })).toEqual({
+      ...original,
+      version: 2,
+      updatedAt,
+    });
+    expect(() => removeProvider(original, { activeSessionCount: 1 })).toThrow(
+      "Stop active sessions before removing this provider.",
+    );
   });
 
   it("creates a complete OpenCode instance with normalized input", () => {

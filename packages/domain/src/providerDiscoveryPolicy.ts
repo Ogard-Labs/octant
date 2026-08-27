@@ -4,6 +4,7 @@ import type {
   DiscoverySnapshot,
   ProviderDriverKind,
 } from "@octant/contracts";
+import { isImageProfileDriverKind } from "./providerPolicy";
 
 export type DiscoveryPolicyDecision =
   | { readonly kind: "allowed" }
@@ -85,7 +86,11 @@ export function requiresManualEndpoint(driverKind: ProviderDriverKind): boolean 
 }
 
 export function isUnclassifiedDriverKind(driverKind: ProviderDriverKind): boolean {
-  return !canAutoDetectDriverKind(driverKind) && !requiresManualEndpoint(driverKind);
+  return (
+    !canAutoDetectDriverKind(driverKind) &&
+    !requiresManualEndpoint(driverKind) &&
+    !isImageProfileDriverKind(driverKind)
+  );
 }
 
 export function isConnectCommand(

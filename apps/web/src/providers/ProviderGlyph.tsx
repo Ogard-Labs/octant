@@ -128,6 +128,25 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
       </g>
     ),
   },
+  "openai-image": {
+    color: "var(--octant-text-secondary)",
+    mark: (
+      <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
+        <rect height="9.5" rx="1.4" width="11.5" x="2.25" y="3.25" />
+        <path d="M4.2 10.2l2.1-2.4 1.6 1.5 2.4-2.8 1.5 1.6" />
+        <circle cx="5.6" cy="6.2" r="0.8" fill="currentColor" stroke="none" />
+      </g>
+    ),
+  },
+  "gemini-native-image": {
+    color: "#5b8def",
+    mark: (
+      <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
+        <rect height="9.5" rx="1.4" width="11.5" x="2.25" y="3.25" />
+        <path d="M8 5.2l1.1 2.2 2.4.2-1.8 1.6.5 2.3L8 10.4l-2.2 1.1.5-2.3-1.8-1.6 2.4-.2z" />
+      </g>
+    ),
+  },
 };
 
 export function providerGlyphColor(driverKind: string): string {

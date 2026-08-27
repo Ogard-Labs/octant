@@ -45,6 +45,18 @@ profiles:
   `/openai/v1/`; API-key only)
 - **Ollama** local HTTP (loopback origin only)
 
+Image generation profiles are also provider instances, added from the same
+manual form:
+
+- **OpenAI Image** (`gpt-image-2` and related GPT Image models as suggestions)
+- **Gemini Image** (Gemini 3.1 image models as suggestions, with
+  `gemini-2.5-flash-image` as a legacy suggestion)
+
+Allowlists are manual-entry; suggested IDs are not the only values Octant
+accepts. Image profiles have no editable base URL. GPT Image models require
+OpenAI Organization Verification. They never appear in the Chat, Work, or Code
+model picker — they are not thread drivers.
+
 Provider-specific setup guidance is documented in Settings, including the
 Amazon Bedrock Mantle regional endpoint and API-key credential.
 

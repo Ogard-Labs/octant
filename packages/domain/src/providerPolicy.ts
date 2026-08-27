@@ -10,6 +10,10 @@ import type {
   CodexProviderInstance,
   DevinProviderConfiguration,
   DevinProviderInstance,
+  GeminiImageAspectRatio,
+  GeminiImageProviderConfiguration,
+  GeminiImageProviderInstance,
+  GeminiImageResolution,
   GrokAuthentication,
   GrokProviderConfiguration,
   GrokProviderInstance,
@@ -21,6 +25,10 @@ import type {
   MistralVibeProviderInstance,
   OllamaProviderConfiguration,
   OllamaProviderInstance,
+  OpenAiImageProviderConfiguration,
+  OpenAiImageProviderInstance,
+  OpenAiImageQuality,
+  OpenAiImageSize,
   PermissionPersistence,
   PiProviderConfiguration,
   PiProviderInstance,
@@ -29,9 +37,11 @@ import type {
   OpenAiCompatibleProviderConfiguration,
   OpenAiCompatibleProviderInstance,
   ProviderDefaults,
+  ProviderDriverKind,
   ProviderExecutionPolicy,
   ProviderInstance,
   ProviderInstanceId,
+  ProviderModelId,
   OpenCodeProviderInstance,
 } from "@octant/contracts/providers";
 
@@ -61,6 +71,12 @@ export class ProviderPolicyRejected extends Error {
 
 function reject(code: ProviderPolicyRejectionCode, message: string): never {
   throw new ProviderPolicyRejected(code, message);
+}
+
+export function isImageProfileDriverKind(
+  driverKind: ProviderDriverKind,
+): driverKind is "openai-image" | "gemini-native-image" {
+  return driverKind === "openai-image" || driverKind === "gemini-native-image";
 }
 
 function nextVersion(version: AggregateVersion): AggregateVersion {
@@ -821,6 +837,130 @@ export function createAzureFoundryProvider(
   };
 }
 
+export interface OpenAiImageConfigurationInput {
+  readonly kind: OpenAiImageProviderConfiguration["kind"];
+  readonly modelAllowlist: ReadonlyArray<string>;
+  readonly defaultModel: string;
+  readonly quality?: OpenAiImageQuality | undefined;
+  readonly size?: OpenAiImageSize | undefined;
+}
+
+function normalizeImageModelSelection(
+  modelAllowlist: ReadonlyArray<string>,
+  defaultModel: string,
+): {
+  readonly modelAllowlist: OpenAiImageProviderConfiguration["modelAllowlist"];
+  readonly defaultModel: ProviderModelId;
+} {
+  const allowlist = normalizeManualModelIds(modelAllowlist);
+  if (allowlist.length === 0) {
+    reject("invalid-model-ids", "Image profiles require at least one model ID.");
+  }
+  const normalizedDefault = defaultModel.trim();
+  if (normalizedDefault.length === 0) {
+    reject("invalid-model-id", "Default model cannot be empty.");
+  }
+  if (!allowlist.some((id) => id === normalizedDefault)) {
+    reject("invalid-model-id", "Default model must be a member of the model allowlist.");
+  }
+  return {
+    modelAllowlist: allowlist as OpenAiImageProviderConfiguration["modelAllowlist"],
+    defaultModel: normalizedDefault as ProviderModelId,
+  };
+}
+
+function normalizeOpenAiImageConfiguration(
+  configuration: OpenAiImageConfigurationInput,
+): OpenAiImageProviderConfiguration {
+  const { modelAllowlist, defaultModel } = normalizeImageModelSelection(
+    configuration.modelAllowlist,
+    configuration.defaultModel,
+  );
+  return {
+    kind: "openai-image-http",
+    modelAllowlist,
+    defaultModel,
+    ...(configuration.quality === undefined ? {} : { quality: configuration.quality }),
+    ...(configuration.size === undefined ? {} : { size: configuration.size }),
+  };
+}
+
+export interface GeminiImageConfigurationInput {
+  readonly kind: GeminiImageProviderConfiguration["kind"];
+  readonly modelAllowlist: ReadonlyArray<string>;
+  readonly defaultModel: string;
+  readonly aspectRatio?: GeminiImageAspectRatio | undefined;
+  readonly resolution?: GeminiImageResolution | undefined;
+}
+
+function normalizeGeminiImageConfiguration(
+  configuration: GeminiImageConfigurationInput,
+): GeminiImageProviderConfiguration {
+  const { modelAllowlist, defaultModel } = normalizeImageModelSelection(
+    configuration.modelAllowlist,
+    configuration.defaultModel,
+  );
+  return {
+    kind: "gemini-native-image-http",
+    modelAllowlist,
+    defaultModel,
+    ...(configuration.aspectRatio === undefined ? {} : { aspectRatio: configuration.aspectRatio }),
+    ...(configuration.resolution === undefined ? {} : { resolution: configuration.resolution }),
+  };
+}
+
+interface CreateOpenAiImageProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: OpenAiImageConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createOpenAiImageProvider(
+  input: CreateOpenAiImageProviderInput,
+): OpenAiImageProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "openai-image",
+    configuration: normalizeOpenAiImageConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+interface CreateGeminiImageProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: GeminiImageConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createGeminiImageProvider(
+  input: CreateGeminiImageProviderInput,
+): GeminiImageProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "gemini-native-image",
+    configuration: normalizeGeminiImageConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
 export function createOpenCodeProvider(input: CreateProviderInput): ProviderInstance {
   const { binaryPath, ...normalized } = normalizeProviderCreation(input);
   return {
@@ -948,6 +1088,32 @@ export function changeAzureFoundryConfiguration(
   return {
     ...current,
     configuration: normalizeAzureFoundryConfiguration(input),
+    version: nextVersion(current.version),
+    updatedAt,
+  };
+}
+
+export function changeOpenAiImageConfiguration(
+  current: OpenAiImageProviderInstance,
+  input: OpenAiImageConfigurationInput,
+  updatedAt: UtcTimestamp,
+): OpenAiImageProviderInstance {
+  return {
+    ...current,
+    configuration: normalizeOpenAiImageConfiguration(input),
+    version: nextVersion(current.version),
+    updatedAt,
+  };
+}
+
+export function changeGeminiImageConfiguration(
+  current: GeminiImageProviderInstance,
+  input: GeminiImageConfigurationInput,
+  updatedAt: UtcTimestamp,
+): GeminiImageProviderInstance {
+  return {
+    ...current,
+    configuration: normalizeGeminiImageConfiguration(input),
     version: nextVersion(current.version),
     updatedAt,
   };

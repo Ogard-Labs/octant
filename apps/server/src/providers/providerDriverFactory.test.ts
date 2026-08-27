@@ -127,6 +127,41 @@ describe("makeProviderDriver", () => {
     expect(fixture.piStart).not.toHaveBeenCalled();
   });
 
+  it.each(["openai-image", "gemini-native-image"] as const)(
+    "refuses to construct a chat driver for an %s image profile",
+    (driverKind) => {
+      const fixture = factoryFixture();
+      const instance = decodeProviderInstance({
+        id: instanceId,
+        displayName: driverKind === "openai-image" ? "GPT Image" : "Gemini Image",
+        driverKind,
+        configuration:
+          driverKind === "openai-image"
+            ? {
+                kind: "openai-image-http",
+                modelAllowlist: ["gpt-image-2"],
+                defaultModel: "gpt-image-2",
+              }
+            : {
+                kind: "gemini-native-image-http",
+                modelAllowlist: ["gemini-3.1-flash-image"],
+                defaultModel: "gemini-3.1-flash-image",
+              },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+
+      expect(() => makeProviderDriver(instance, fixture.options)).toThrowError(
+        ProviderDriverConfigurationError,
+      );
+      expect(fixture.openCodeStart).not.toHaveBeenCalled();
+      expect(fixture.codexStart).not.toHaveBeenCalled();
+    },
+  );
+
   it("fails closed for an impossible provider kind", () => {
     const fixture = factoryFixture();
     const impossible = {

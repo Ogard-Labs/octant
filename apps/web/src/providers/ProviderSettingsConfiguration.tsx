@@ -1,21 +1,29 @@
-import type {
-  AnthropicCompatibleAuthentication,
-  AnthropicCompatibleProtocol,
-  AnthropicCompatibleProviderConfiguration,
-  AzureFoundryProviderConfiguration,
-  ClaudeAuthentication,
-  ClaudeProviderConfiguration,
-  GrokAuthentication,
-  GrokProviderConfiguration,
-  MistralVibeAuthentication,
-  MistralVibeProviderConfiguration,
-  OpenAiCompatibleProtocol,
-  OpenAiCompatibleProviderConfiguration,
-  ProviderAuthenticationAttempt,
-  ProviderInstance,
+import {
+  GEMINI_IMAGE_MODEL_PRESETS,
+  OPENAI_IMAGE_MODEL_PRESETS,
+  type AnthropicCompatibleAuthentication,
+  type AnthropicCompatibleProtocol,
+  type AnthropicCompatibleProviderConfiguration,
+  type AzureFoundryProviderConfiguration,
+  type ClaudeAuthentication,
+  type ClaudeProviderConfiguration,
+  type GeminiImageAspectRatio,
+  type GeminiImageProviderConfiguration,
+  type GeminiImageResolution,
+  type GrokAuthentication,
+  type GrokProviderConfiguration,
+  type MistralVibeAuthentication,
+  type MistralVibeProviderConfiguration,
+  type OpenAiCompatibleProtocol,
+  type OpenAiCompatibleProviderConfiguration,
+  type OpenAiImageProviderConfiguration,
+  type OpenAiImageQuality,
+  type OpenAiImageSize,
+  type ProviderAuthenticationAttempt,
+  type ProviderInstance,
 } from "@octant/contracts";
 import { ChevronDown } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
@@ -40,6 +48,8 @@ export type ProviderCreateFormProps = Pick<
   | "onCreateOpenAiCompatible"
   | "onCreateAnthropicCompatible"
   | "onCreateAzureFoundry"
+  | "onCreateOpenAiImage"
+  | "onCreateGeminiImage"
   | "onCreateClaude"
   | "onCreateMistralVibe"
   | "onCreateGrok"
@@ -64,6 +74,8 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
     | "openai-compatible"
     | "anthropic-compatible"
     | "azure-foundry"
+    | "openai-image"
+    | "gemini-native-image"
   >("opencode");
   const [claudeAuthentication, setClaudeAuthentication] =
     useState<ClaudeAuthentication>("subscription");
@@ -107,15 +119,19 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                   ? "Add Anthropic-compatible provider"
                   : providerType === "azure-foundry"
                     ? "Add Azure AI Foundry provider"
-                    : providerType === "ollama"
-                      ? "Add Ollama provider"
-                      : providerType === "claude"
-                        ? "Add Claude provider"
-                        : providerType === "mistral-vibe"
-                          ? "Add Mistral Vibe provider"
-                          : providerType === "grok"
-                            ? "Add Grok Build provider"
-                            : "Add provider"
+                    : providerType === "openai-image"
+                      ? "Add OpenAI image profile"
+                      : providerType === "gemini-native-image"
+                        ? "Add Gemini image profile"
+                        : providerType === "ollama"
+                          ? "Add Ollama provider"
+                          : providerType === "claude"
+                            ? "Add Claude provider"
+                            : providerType === "mistral-vibe"
+                              ? "Add Mistral Vibe provider"
+                              : providerType === "grok"
+                                ? "Add Grok Build provider"
+                                : "Add provider"
             }
             className={`provider-settings__create provider-settings__create--${providerType}`}
             onSubmit={(event) => {
@@ -203,6 +219,22 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                   configuration,
                   enteredCredential,
                 );
+              } else if (providerType === "openai-image") {
+                const configuration = openAiImageConfigurationFrom(data);
+                const enteredCredential = transientCredential(credentialInput.current);
+                operation = props.onCreateOpenAiImage(
+                  String(data.get("displayName") ?? ""),
+                  configuration,
+                  enteredCredential,
+                );
+              } else if (providerType === "gemini-native-image") {
+                const configuration = geminiImageConfigurationFrom(data);
+                const enteredCredential = transientCredential(credentialInput.current);
+                operation = props.onCreateGeminiImage(
+                  String(data.get("displayName") ?? ""),
+                  configuration,
+                  enteredCredential,
+                );
               } else {
                 const configuration = configurationFrom(data);
                 const enteredCredential = transientCredential(credentialInput.current);
@@ -246,6 +278,8 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                 <option value="openai-compatible">OpenAI-compatible HTTP</option>
                 <option value="anthropic-compatible">Anthropic-compatible HTTP</option>
                 <option value="azure-foundry">Azure AI Foundry</option>
+                <option value="openai-image">OpenAI Image</option>
+                <option value="gemini-native-image">Gemini Image</option>
               </OctantNativeSelect>
             </label>
             <label>
@@ -260,6 +294,8 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
             {providerType !== "openai-compatible" &&
             providerType !== "anthropic-compatible" &&
             providerType !== "azure-foundry" &&
+            providerType !== "openai-image" &&
+            providerType !== "gemini-native-image" &&
             providerType !== "ollama" ? (
               <label>
                 <span>
@@ -427,6 +463,16 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                   </p>
                 ) : null}
               </>
+            ) : providerType === "openai-image" ? (
+              <OpenAiImageFields
+                credentialInput={credentialInput}
+                credentialManagementAvailable={props.credentialManagementAvailable}
+              />
+            ) : providerType === "gemini-native-image" ? (
+              <GeminiImageFields
+                credentialInput={credentialInput}
+                credentialManagementAvailable={props.credentialManagementAvailable}
+              />
             ) : (
               <>
                 <label>
@@ -564,6 +610,8 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                   !props.credentialManagementAvailable) ||
                 (providerType === "grok" &&
                   grokAuthentication === "api-key" &&
+                  !props.credentialManagementAvailable) ||
+                ((providerType === "openai-image" || providerType === "gemini-native-image") &&
                   !props.credentialManagementAvailable)
               }
               type="submit"
@@ -576,7 +624,11 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                     ? "Add Anthropic-compatible provider"
                     : providerType === "azure-foundry"
                       ? "Add Azure AI Foundry provider"
-                      : `Add ${selectedDriverLabel}`}
+                      : providerType === "openai-image"
+                        ? "Add OpenAI image profile"
+                        : providerType === "gemini-native-image"
+                          ? "Add Gemini image profile"
+                          : `Add ${selectedDriverLabel}`}
             </OctantButton>
           </form>
           {providerType === "openai-compatible" ? <BedrockMantleGuide /> : null}
@@ -1473,6 +1525,355 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
   );
 }
 
+function OpenAiImageFields(props: {
+  readonly credentialInput: RefObject<HTMLInputElement | null>;
+  readonly credentialManagementAvailable: boolean;
+  readonly instance?: Extract<ProviderInstance, { driverKind: "openai-image" }>;
+}) {
+  const configuration = props.instance?.configuration;
+  return (
+    <>
+      <label className="provider-settings__models-field">
+        <span>Model allowlist</span>
+        <OctantTextarea
+          aria-label={
+            props.instance === undefined
+              ? "Model allowlist"
+              : `Model allowlist for ${props.instance.displayName}`
+          }
+          className="settings-view__text-input window-no-drag"
+          defaultValue={configuration?.modelAllowlist.join(", ")}
+          name="modelAllowlist"
+          placeholder={OPENAI_IMAGE_MODEL_PRESETS.join(", ")}
+          required
+          rows={2}
+        />
+      </label>
+      <label>
+        <span>Default model</span>
+        <OctantInput
+          aria-label={
+            props.instance === undefined
+              ? "Default model"
+              : `Default model for ${props.instance.displayName}`
+          }
+          className="settings-view__text-input window-no-drag"
+          defaultValue={configuration?.defaultModel}
+          name="defaultModel"
+          placeholder="gpt-image-2"
+          required
+        />
+      </label>
+      <label>
+        <span>Quality</span>
+        <OctantNativeSelect
+          aria-label={
+            props.instance === undefined ? "Quality" : `Quality for ${props.instance.displayName}`
+          }
+          className="settings-view__select window-no-drag"
+          defaultValue={configuration?.quality ?? ""}
+          name="quality"
+        >
+          <option value="">Provider default</option>
+          <option value="auto">auto</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+        </OctantNativeSelect>
+      </label>
+      <label>
+        <span>Size</span>
+        <OctantNativeSelect
+          aria-label={
+            props.instance === undefined ? "Size" : `Size for ${props.instance.displayName}`
+          }
+          className="settings-view__select window-no-drag"
+          defaultValue={configuration?.size ?? ""}
+          name="size"
+        >
+          <option value="">Provider default</option>
+          <option value="auto">auto</option>
+          <option value="1024x1024">1024x1024</option>
+          <option value="1536x1024">1536x1024</option>
+          <option value="1024x1536">1024x1536</option>
+        </OctantNativeSelect>
+      </label>
+      <label>
+        <span>
+          {props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
+        </span>
+        <OctantInput
+          aria-label={
+            props.instance === undefined ? "API key" : `API key for ${props.instance.displayName}`
+          }
+          autoComplete="new-password"
+          className="settings-view__text-input window-no-drag"
+          disabled={!props.credentialManagementAvailable}
+          name="credential"
+          ref={props.credentialInput}
+          spellCheck={false}
+          type="password"
+        />
+      </label>
+      <p className="provider-settings__field-guidance">
+        Suggested models are data, not a catalog Octant maintains:{" "}
+        {OPENAI_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. GPT Image models require
+        OpenAI Organization Verification. The API key is stored write-only in Keychain. This profile
+        has no editable base URL.
+      </p>
+      {!props.credentialManagementAvailable ? (
+        <p className="provider-settings__field-guidance">
+          Manage credentials in the Octant host app. Credential changes are unavailable in this
+          browser.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+function GeminiImageFields(props: {
+  readonly credentialInput: RefObject<HTMLInputElement | null>;
+  readonly credentialManagementAvailable: boolean;
+  readonly instance?: Extract<ProviderInstance, { driverKind: "gemini-native-image" }>;
+}) {
+  const configuration = props.instance?.configuration;
+  return (
+    <>
+      <label className="provider-settings__models-field">
+        <span>Model allowlist</span>
+        <OctantTextarea
+          aria-label={
+            props.instance === undefined
+              ? "Model allowlist"
+              : `Model allowlist for ${props.instance.displayName}`
+          }
+          className="settings-view__text-input window-no-drag"
+          defaultValue={configuration?.modelAllowlist.join(", ")}
+          name="modelAllowlist"
+          placeholder={GEMINI_IMAGE_MODEL_PRESETS.join(", ")}
+          required
+          rows={2}
+        />
+      </label>
+      <label>
+        <span>Default model</span>
+        <OctantInput
+          aria-label={
+            props.instance === undefined
+              ? "Default model"
+              : `Default model for ${props.instance.displayName}`
+          }
+          className="settings-view__text-input window-no-drag"
+          defaultValue={configuration?.defaultModel}
+          name="defaultModel"
+          placeholder="gemini-3.1-flash-image"
+          required
+        />
+      </label>
+      <label>
+        <span>Aspect ratio</span>
+        <OctantNativeSelect
+          aria-label={
+            props.instance === undefined
+              ? "Aspect ratio"
+              : `Aspect ratio for ${props.instance.displayName}`
+          }
+          className="settings-view__select window-no-drag"
+          defaultValue={configuration?.aspectRatio ?? ""}
+          name="aspectRatio"
+        >
+          <option value="">Provider default</option>
+          <option value="1:1">1:1</option>
+          <option value="2:3">2:3</option>
+          <option value="3:2">3:2</option>
+          <option value="3:4">3:4</option>
+          <option value="4:3">4:3</option>
+          <option value="4:5">4:5</option>
+          <option value="5:4">5:4</option>
+          <option value="9:16">9:16</option>
+          <option value="16:9">16:9</option>
+          <option value="21:9">21:9</option>
+        </OctantNativeSelect>
+      </label>
+      <label>
+        <span>Resolution</span>
+        <OctantNativeSelect
+          aria-label={
+            props.instance === undefined
+              ? "Resolution"
+              : `Resolution for ${props.instance.displayName}`
+          }
+          className="settings-view__select window-no-drag"
+          defaultValue={configuration?.resolution ?? ""}
+          name="resolution"
+        >
+          <option value="">Provider default</option>
+          <option value="1K">1K</option>
+          <option value="2K">2K</option>
+          <option value="4K">4K</option>
+        </OctantNativeSelect>
+      </label>
+      <label>
+        <span>
+          {props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
+        </span>
+        <OctantInput
+          aria-label={
+            props.instance === undefined ? "API key" : `API key for ${props.instance.displayName}`
+          }
+          autoComplete="new-password"
+          className="settings-view__text-input window-no-drag"
+          disabled={!props.credentialManagementAvailable}
+          name="credential"
+          ref={props.credentialInput}
+          spellCheck={false}
+          type="password"
+        />
+      </label>
+      <p className="provider-settings__field-guidance">
+        Suggested models are data, not a catalog Octant maintains:{" "}
+        {GEMINI_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. gemini-2.5-flash-image is a
+        legacy suggestion. The API key is stored write-only in Keychain. This profile has no
+        editable base URL.
+      </p>
+      {!props.credentialManagementAvailable ? (
+        <p className="provider-settings__field-guidance">
+          Manage credentials in the Octant host app. Credential changes are unavailable in this
+          browser.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+interface OpenAiImageConfigurationFormProps {
+  readonly instance: Extract<ProviderInstance, { driverKind: "openai-image" }>;
+  readonly disabled: boolean;
+  readonly credentialManagementAvailable: boolean;
+  readonly credential: CredentialStatusController;
+  readonly onChange: ProviderSettingsViewProps["onChangeOpenAiImageConfiguration"];
+  readonly onClearCredential: ProviderSettingsViewProps["onClearProviderCredential"];
+}
+
+export function OpenAiImageConfigurationForm(props: OpenAiImageConfigurationFormProps) {
+  const credentialInput = useRef<HTMLInputElement>(null);
+  return (
+    <form
+      className="provider-card__edit provider-card__edit--image"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const configuration = openAiImageConfigurationFrom(new FormData(event.currentTarget));
+        const enteredCredential = transientCredential(credentialInput.current);
+        const generation =
+          enteredCredential.value.length > 0 ? props.credential.beginMutation() : undefined;
+        void props.onChange(props.instance.id, configuration, enteredCredential).then(
+          (updated) => {
+            if (generation !== undefined)
+              props.credential.finishMutation(generation, updated, "stored");
+          },
+          () => {
+            if (generation !== undefined)
+              props.credential.finishMutation(generation, false, "stored");
+          },
+        );
+      }}
+    >
+      <OpenAiImageFields
+        credentialInput={credentialInput}
+        credentialManagementAvailable={props.credentialManagementAvailable}
+        instance={props.instance}
+      />
+      <div className="provider-card__credential-actions">
+        <OctantButton disabled={props.disabled} type="submit">
+          Save OpenAI image settings for {props.instance.displayName}
+        </OctantButton>
+        {props.credentialManagementAvailable ? (
+          <OctantButton
+            disabled={props.disabled || props.credential.status !== "stored"}
+            onClick={() => {
+              const generation = props.credential.beginMutation();
+              void props.onClearCredential(props.instance.id).then(
+                (cleared) => {
+                  props.credential.finishMutation(generation, cleared, "missing");
+                },
+                () => props.credential.finishMutation(generation, false, "missing"),
+              );
+            }}
+            type="button"
+            variant="destructive"
+          >
+            Clear stored API key for {props.instance.displayName}
+          </OctantButton>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+interface GeminiImageConfigurationFormProps {
+  readonly instance: Extract<ProviderInstance, { driverKind: "gemini-native-image" }>;
+  readonly disabled: boolean;
+  readonly credentialManagementAvailable: boolean;
+  readonly credential: CredentialStatusController;
+  readonly onChange: ProviderSettingsViewProps["onChangeGeminiImageConfiguration"];
+  readonly onClearCredential: ProviderSettingsViewProps["onClearProviderCredential"];
+}
+
+export function GeminiImageConfigurationForm(props: GeminiImageConfigurationFormProps) {
+  const credentialInput = useRef<HTMLInputElement>(null);
+  return (
+    <form
+      className="provider-card__edit provider-card__edit--image"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const configuration = geminiImageConfigurationFrom(new FormData(event.currentTarget));
+        const enteredCredential = transientCredential(credentialInput.current);
+        const generation =
+          enteredCredential.value.length > 0 ? props.credential.beginMutation() : undefined;
+        void props.onChange(props.instance.id, configuration, enteredCredential).then(
+          (updated) => {
+            if (generation !== undefined)
+              props.credential.finishMutation(generation, updated, "stored");
+          },
+          () => {
+            if (generation !== undefined)
+              props.credential.finishMutation(generation, false, "stored");
+          },
+        );
+      }}
+    >
+      <GeminiImageFields
+        credentialInput={credentialInput}
+        credentialManagementAvailable={props.credentialManagementAvailable}
+        instance={props.instance}
+      />
+      <div className="provider-card__credential-actions">
+        <OctantButton disabled={props.disabled} type="submit">
+          Save Gemini image settings for {props.instance.displayName}
+        </OctantButton>
+        {props.credentialManagementAvailable ? (
+          <OctantButton
+            disabled={props.disabled || props.credential.status !== "stored"}
+            onClick={() => {
+              const generation = props.credential.beginMutation();
+              void props.onClearCredential(props.instance.id).then(
+                (cleared) => {
+                  props.credential.finishMutation(generation, cleared, "missing");
+                },
+                () => props.credential.finishMutation(generation, false, "missing"),
+              );
+            }}
+            type="button"
+            variant="destructive"
+          >
+            Clear stored API key for {props.instance.displayName}
+          </OctantButton>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
 function configurationFrom(data: FormData): OpenAiCompatibleProviderConfiguration {
   return {
     kind: "openai-compatible-http",
@@ -1517,4 +1918,45 @@ function parseManualModelIds(
         .filter(Boolean),
     ),
   ] as unknown as OpenAiCompatibleProviderConfiguration["manualModelIds"];
+}
+
+function optionalSelectValue(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
+function openAiImageConfigurationFrom(data: FormData): OpenAiImageProviderConfiguration {
+  const modelAllowlist = parseManualModelIds(String(data.get("modelAllowlist") ?? ""));
+  const enteredDefault = String(data.get("defaultModel") ?? "").trim();
+  const defaultModel = enteredDefault.length > 0 ? enteredDefault : (modelAllowlist[0] ?? "");
+  const quality = optionalSelectValue(String(data.get("quality") ?? "")) as
+    | OpenAiImageQuality
+    | undefined;
+  const size = optionalSelectValue(String(data.get("size") ?? "")) as OpenAiImageSize | undefined;
+  return {
+    kind: "openai-image-http",
+    modelAllowlist: modelAllowlist as unknown as OpenAiImageProviderConfiguration["modelAllowlist"],
+    defaultModel: defaultModel as OpenAiImageProviderConfiguration["defaultModel"],
+    ...(quality === undefined ? {} : { quality }),
+    ...(size === undefined ? {} : { size }),
+  };
+}
+
+function geminiImageConfigurationFrom(data: FormData): GeminiImageProviderConfiguration {
+  const modelAllowlist = parseManualModelIds(String(data.get("modelAllowlist") ?? ""));
+  const enteredDefault = String(data.get("defaultModel") ?? "").trim();
+  const defaultModel = enteredDefault.length > 0 ? enteredDefault : (modelAllowlist[0] ?? "");
+  const aspectRatio = optionalSelectValue(String(data.get("aspectRatio") ?? "")) as
+    | GeminiImageAspectRatio
+    | undefined;
+  const resolution = optionalSelectValue(String(data.get("resolution") ?? "")) as
+    | GeminiImageResolution
+    | undefined;
+  return {
+    kind: "gemini-native-image-http",
+    modelAllowlist: modelAllowlist as unknown as GeminiImageProviderConfiguration["modelAllowlist"],
+    defaultModel: defaultModel as GeminiImageProviderConfiguration["defaultModel"],
+    ...(aspectRatio === undefined ? {} : { aspectRatio }),
+    ...(resolution === undefined ? {} : { resolution }),
+  };
 }
