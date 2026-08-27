@@ -1,7 +1,6 @@
 import type { HostHealth, HostIdentity } from "@octant/contracts/host";
 import { decodeHostId } from "@octant/contracts/host";
 import type { RemoteSessionBridgeState } from "./remoteSessionBridge";
-import { localHostDisplayName } from "./localHostDisplayName";
 
 /** Maps the remote session bridge state to the shared HostHealth vocabulary. */
 export function mapBridgeStateToHostHealth(state: RemoteSessionBridgeState): HostHealth {
@@ -35,8 +34,7 @@ export function buildRemoteHostObservation(input: {
   return [
     {
       hostId: decodeHostId(hostId),
-      displayName:
-        input.displayName ?? hostDisplayNameFromState(input.state) ?? localHostDisplayName(),
+      displayName: input.displayName ?? hostDisplayNameFromState(input.state) ?? "Remote host",
       health: mapBridgeStateToHostHealth(input.state),
       capabilities: ["chat", "work", "code"],
     },
