@@ -64,6 +64,7 @@
     "./github-capability-policy": "./src/githubCapabilityPolicy.ts",
     "./github-repository-read-policy": "./src/githubRepositoryReadPolicy.ts",
     "./github-remote-identity": "./src/githubRemoteIdentity.ts",
+    "./tracker-reference-policy": "./src/trackerReferencePolicy.ts",
     "./code-project-pull-request-policy": "./src/codeProjectPullRequestPolicy.ts",
     "./canvas-share-snapshot-policy": "./src/canvasShareSnapshotPolicy.ts",
     "./canvas-share-access-log-policy": "./src/canvasShareAccessLogPolicy.ts",
