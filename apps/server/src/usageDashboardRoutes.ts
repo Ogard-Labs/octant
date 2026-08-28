@@ -3,6 +3,7 @@ import {
   type UsageDashboardRequest,
   type WindowId,
 } from "@octant/contracts";
+import type { CacheStatsProjection } from "./cacheStatsProjection";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { readUsageDashboard } from "./usageDashboardService";
@@ -34,6 +35,8 @@ export interface UsageDashboardRouteDependencies {
   readonly now?: () => number;
   readonly clock?: () => string;
   readonly maxScannedRows?: number;
+  /** Host cache readings reported with the dashboard; absent means none observed. */
+  readonly cacheStats?: CacheStatsProjection;
 }
 
 /**
@@ -122,6 +125,7 @@ export function createUsageDashboardRouteHandler(dependencies: UsageDashboardRou
       const response = readUsageDashboard(dependencies.connection, decoded, {
         queryAt: clock(),
         projectScope,
+        ...(dependencies.cacheStats === undefined ? {} : { cacheStats: dependencies.cacheStats }),
       });
       return json(response, 200, origin);
     } catch {

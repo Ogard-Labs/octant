@@ -305,3 +305,57 @@ describe("buildUsageDashboard dimension sources", () => {
     }
   });
 });
+
+describe("buildUsageDashboard cache statistics", () => {
+  it("reports prompt-cache reuse per provider instance and across them", () => {
+    const dashboard = build([
+      row({ cacheReadInputTokens: 300, cacheWriteInputTokens: 100 }),
+      row({
+        reconciliationId: "b",
+        providerInstanceId: ids.otherProvider,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 100,
+      }),
+    ]);
+    expect(dashboard.cacheStats.providerTokenCaches).toEqual([
+      {
+        providerInstanceId: ids.provider,
+        requestCount: 1,
+        cacheReadInputTokens: 300,
+        cacheWriteInputTokens: 100,
+        hitRatio: 0.75,
+      },
+      {
+        providerInstanceId: ids.otherProvider,
+        requestCount: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 100,
+        hitRatio: 0,
+      },
+    ]);
+    expect(dashboard.cacheStats.tokenCacheHitRatio).toBe(0.6);
+  });
+
+  it("leaves reuse unavailable rather than zero when no provider reported cache tokens", () => {
+    const dashboard = build([row()]);
+    expect(dashboard.cacheStats.providerTokenCaches).toEqual([]);
+    expect(dashboard.cacheStats.tokenCacheHitRatio).toBeUndefined();
+  });
+
+  it("passes the host's own cache readings through to the renderer", () => {
+    const dashboard = build([row()], {
+      cacheStats: [
+        {
+          key: "github-catalogue",
+          label: "GitHub catalogue",
+          hitCount: 4,
+          missCount: 1,
+          hitRatio: 0.8,
+          failureStreak: 0,
+        },
+      ],
+    });
+    expect(() => decodeUsageDashboardResponse(dashboard)).not.toThrow();
+    expect(dashboard.cacheStats.caches[0]?.hitCount).toBe(4);
+  });
+});

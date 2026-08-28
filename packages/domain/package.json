@@ -28,6 +28,7 @@
     "./canvas-refresh-policy": "./src/canvasRefreshPolicy.ts",
     "./canvas-skill-policy": "./src/canvasSkillPolicy.ts",
     "./canvas-share-policy": "./src/canvasSharePolicy.ts",
+    "./cache-backoff-policy": "./src/cacheBackoffPolicy.ts",
     "./context-compaction": "./src/contextCompaction.ts",
     "./context-policy": "./src/contextPolicy.ts",
     "./diagnostics-policy": "./src/diagnosticsPolicy.ts",

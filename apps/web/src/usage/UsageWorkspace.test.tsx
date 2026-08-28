@@ -125,6 +125,30 @@ function dashboard(overrides: Partial<UsageDashboardResponse> = {}): UsageDashbo
     ],
     timeZone: "UTC",
     queryAt,
+    cacheStats: {
+      caches: [
+        {
+          key: "pull-request-list",
+          label: "Project pull requests",
+          hitCount: 8,
+          missCount: 2,
+          hitRatio: 0.8,
+          lastRefreshAt: queryAt,
+          stalenessMs: 60_000,
+          failureStreak: 0,
+        },
+      ],
+      providerTokenCaches: [
+        {
+          providerInstanceId: provider,
+          requestCount: 3,
+          cacheReadInputTokens: 300,
+          cacheWriteInputTokens: 100,
+          hitRatio: 0.75,
+        },
+      ],
+      tokenCacheHitRatio: 0.75,
+    },
     ...overrides,
   } as unknown as UsageDashboardResponse;
 }
@@ -444,5 +468,84 @@ describe("UsageWorkspace", () => {
     expect(screen.getByRole("table", { name: "Usage by provider instance" })).toHaveClass(
       "usage-table--narrow",
     );
+  });
+
+  it("shows cache hit and miss rates for the host's own caches", async () => {
+    const { client } = clientReturning(dashboard());
+    render(<UsageWorkspace client={client} />);
+
+    const section = await screen.findByRole("region", { name: "Cache efficiency" });
+    expect(
+      within(section).getByRole("meter", { name: "Project pull requests hit rate" }),
+    ).toHaveValue(0.8);
+    expect(
+      within(section).getByRole("meter", { name: "Project pull requests miss rate" }),
+    ).toHaveValue(1 - 0.8);
+    expect(within(section).getByText("20%")).toBeVisible();
+    expect(within(section).getByRole("meter", { name: "Token cache hit ratio" })).toHaveValue(0.75);
+  });
+
+  it("does not promise an automatic retry for a cache that never holds unattended refreshes", async () => {
+    const paced = dashboard({
+      cacheStats: {
+        caches: [
+          {
+            key: "pull-request-list",
+            label: "Project pull requests",
+            hitCount: 8,
+            missCount: 2,
+            hitRatio: 0.8,
+            lastRefreshAt: queryAt,
+            stalenessMs: 60_000,
+            failureStreak: 2,
+          },
+        ],
+        providerTokenCaches: [],
+      },
+    } as unknown as Partial<UsageDashboardResponse>);
+    const { client } = clientReturning(paced);
+    render(<UsageWorkspace client={client} />);
+
+    const section = await screen.findByRole("region", { name: "Cache efficiency" });
+    expect(within(section).getByText(/2 failures in a row/)).toBeVisible();
+    expect(within(section).getByText(/next read may retry/)).toBeVisible();
+    expect(within(section).queryByText(/automatic retry/)).toBeNull();
+  });
+
+  it("says a cache being paced after failures can still be refreshed by hand", async () => {
+    const paced = dashboard({
+      cacheStats: {
+        caches: [
+          {
+            key: "github-catalogue",
+            label: "GitHub catalogue",
+            hitCount: 1,
+            missCount: 4,
+            hitRatio: 0.2,
+            failureStreak: 3,
+            retryAt: new Date(Date.now() + 900_000).toISOString(),
+          },
+        ],
+        providerTokenCaches: [],
+      },
+    } as unknown as Partial<UsageDashboardResponse>);
+    const { client } = clientReturning(paced);
+    render(<UsageWorkspace client={client} />);
+
+    const section = await screen.findByRole("region", { name: "Cache efficiency" });
+    expect(within(section).getByText(/3 failures in a row/)).toBeVisible();
+    expect(within(section).getByText(/refresh still works/)).toBeVisible();
+    expect(within(section).getByText("Never refreshed")).toBeVisible();
+  });
+
+  it("does not claim prompt-cache reuse is zero when no provider reported it", async () => {
+    const noReuse = dashboard({
+      cacheStats: { caches: [], providerTokenCaches: [] },
+    } as unknown as Partial<UsageDashboardResponse>);
+    const { client } = clientReturning(noReuse);
+    render(<UsageWorkspace client={client} />);
+
+    await screen.findByRole("region", { name: "Summary" });
+    expect(screen.queryByRole("region", { name: "Cache efficiency" })).toBeNull();
   });
 });
