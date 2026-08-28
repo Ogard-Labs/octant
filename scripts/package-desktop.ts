@@ -868,7 +868,7 @@ export function createLinuxAppRunScript(executableName: string): string {
     // userns; only pass --no-sandbox when that probe fails (fail closed for
     // launch). Residual Ubuntu 24.04 AppArmor profile gaps are documented in
     // packaging docs rather than weakening sandbox globally.
-    'if unshare -Ur true >/dev/null 2>&1; then',
+    "if unshare -Ur true >/dev/null 2>&1; then",
     `  exec "\${HERE}/${executableName}" "$@"`,
     "else",
     `  exec "\${HERE}/${executableName}" --no-sandbox "$@"`,
