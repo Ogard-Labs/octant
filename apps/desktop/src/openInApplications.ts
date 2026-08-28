@@ -1,5 +1,5 @@
 import type { SpawnOptions } from "node:child_process";
-import { delimiter, isAbsolute, join } from "node:path";
+import { basename, delimiter, isAbsolute, join } from "node:path";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 
 export interface OpenInApplicationDescriptor {
@@ -92,6 +92,7 @@ export function detectOpenInApplications(options: {
   readonly exists: (path: string) => boolean;
   readonly homeDirectory: string;
   readonly platform?: NodeJS.Platform;
+  readonly pathEnv?: string;
 }): ReadonlyArray<OpenInApplicationDescriptor> {
   const platform = options.platform ?? "darwin";
   return OPEN_IN_APPLICATIONS.map((entry) => ({
@@ -99,7 +100,7 @@ export function detectOpenInApplications(options: {
     label: platform === "linux" && entry.id === "finder" ? "Files" : entry.label,
     available:
       platform === "linux" && entry.id === "finder"
-        ? true
+        ? resolveExecutableOnPath("xdg-open", options.exists, options.pathEnv) !== undefined
         : resolveApplicationPath(entry, options, platform) !== undefined,
   }));
 }
@@ -138,7 +139,8 @@ export async function launchOpenInApplication(options: {
     throw new Error(OPEN_FAILURE);
   }
   if (platform === "linux") {
-    await spawnDetachedApplication(options.spawn, applicationPath, [options.checkoutRoot]);
+    const launch = linuxApplicationLaunch(entry.id, applicationPath, options.checkoutRoot);
+    await spawnDetachedApplication(options.spawn, applicationPath, launch.arguments_, launch.cwd);
     return;
   }
   await spawnDetachedApplication(options.spawn, "/usr/bin/open", [
@@ -194,10 +196,36 @@ export async function openCodeCheckoutInApplicationFromServer(options: {
   }
 }
 
+/**
+ * Terminals treat a bare path as a command to run; editors take it as a folder.
+ * Prefer each terminal's working-directory flag, and fall back to spawn cwd.
+ */
+function linuxApplicationLaunch(
+  applicationId: OpenInApplicationId,
+  applicationPath: string,
+  checkoutRoot: string,
+): { readonly arguments_: ReadonlyArray<string>; readonly cwd?: string } {
+  if (applicationId === "ghostty") {
+    return { arguments_: [`--working-directory=${checkoutRoot}`] };
+  }
+  if (applicationId === "terminal") {
+    const binary = basename(applicationPath);
+    if (binary === "gnome-terminal") {
+      return { arguments_: [`--working-directory=${checkoutRoot}`] };
+    }
+    if (binary === "konsole") {
+      return { arguments_: ["--workdir", checkoutRoot] };
+    }
+    return { arguments_: [], cwd: checkoutRoot };
+  }
+  return { arguments_: [checkoutRoot] };
+}
+
 async function spawnDetachedApplication(
   spawn: SpawnApplication,
   executable: string,
   arguments_: ReadonlyArray<string>,
+  cwd?: string,
 ): Promise<void> {
   let child: SpawnedApplication;
   try {
@@ -205,6 +233,7 @@ async function spawnDetachedApplication(
       detached: true,
       shell: false,
       stdio: "ignore",
+      ...(cwd === undefined ? {} : { cwd }),
     });
   } catch {
     throw new Error(OPEN_FAILURE);
