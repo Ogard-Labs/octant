@@ -135,9 +135,12 @@ starts.
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths.
 - **Remote SSH development environments**, **live guest sharing**, **thread
-  retention and purge**, **usage spend ceilings**, **agent-to-agent
-  messaging**, and **in-app changelog** — each waits on the
-  foundation named in its own design note.
+  retention and purge**, **agent-to-agent messaging**, and **in-app
+  changelog** — each waits on the foundation named in its own design note.
+- **Usage spend ceilings** — Project and thread caps on provider usage,
+  reusing the usage ledger and goal-budget shape; design in
+  [0059](decisions/0060-usage-spend-ceilings.md). Enforcement waits until that
+  record is Accepted.
 
 ## Not planned
 
