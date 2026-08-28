@@ -4,6 +4,7 @@ import {
   constants,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -28,7 +29,10 @@ function fixture(): {
   readonly temporaryDirectory: string;
   readonly bwrapPath: string;
 } {
-  const root = mkdtempSync(join(tmpdir(), "octant-linux-confinement-"));
+  // The launch builder resolves bind sources through symlinks; macOS's tmpdir
+  // sits behind /var → /private/var, so the fixture must hand out resolved
+  // paths or every bind-pair expectation fails on a Mac host.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-linux-confinement-")));
   directories.push(root);
   const boundRoot = join(root, "project");
   const temporaryDirectory = join(root, "tmp");
