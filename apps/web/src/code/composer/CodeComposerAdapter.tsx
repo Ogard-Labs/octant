@@ -60,7 +60,11 @@ import {
   useThreadMentionTypeahead,
 } from "../../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../../chat/useThreadMentions";
-import type { GithubIssueContextRequest, MentionableThreadId } from "@octant/contracts";
+import type {
+  GithubIssueContextRequest,
+  LinearIssueContextRequest,
+  MentionableThreadId,
+} from "@octant/contracts";
 import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/contracts/code";
 
 export const CODE_DELIVERY_OUTCOME_LABELS: Record<CodeDeliveryOutcomeKind, string> = {
@@ -168,6 +172,7 @@ export interface CodeComposerSubmitInput {
   readonly images?: ReadonlyArray<File>;
   readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
   readonly issueContext?: GithubIssueContextRequest;
+  readonly linearIssueContext?: LinearIssueContextRequest;
 }
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {

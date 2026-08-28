@@ -239,6 +239,7 @@ function openFixture(options?: {
   readonly contextMaintenanceTimeoutMs?: number;
   readonly contextMaintenanceShutdownTimeoutMs?: number;
   readonly issueContext?: ConstructorParameters<typeof ChatService>[0]["issueContext"];
+  readonly linearIssueContext?: ConstructorParameters<typeof ChatService>[0]["linearIssueContext"];
 }): {
   readonly dataDirectory: string;
   readonly persistence: PersistenceService;
@@ -561,6 +562,9 @@ function openFixture(options?: {
       ? {}
       : { gatherMultiModelRuntimeFacts: options.gatherMultiModelRuntimeFacts }),
     ...(options?.issueContext === undefined ? {} : { issueContext: options.issueContext }),
+    ...(options?.linearIssueContext === undefined
+      ? {}
+      : { linearIssueContext: options.linearIssueContext }),
   });
 
   return {
@@ -1005,6 +1009,37 @@ describe("ChatService", () => {
       failure: {
         category: "unauthorized",
         message: "The selected GitHub issue could not be loaded. The thread was not created.",
+      },
+    });
+    expect(persistence.readChatThreads()).toEqual([]);
+  });
+
+  it("refuses to create a thread when promised Linear issue context cannot be loaded", async () => {
+    const { service, persistence } = openFixture({
+      linearIssueContext: {
+        prepare: async () => ({
+          status: "refused" as const,
+          reason: "unauthorized" as const,
+          message: "The selected Linear issue could not be loaded. The thread was not created.",
+        }),
+        bindCreatedThread: vi.fn(),
+        peekFramedForFirstTurn: vi.fn(),
+        consumeFramedForFirstTurn: vi.fn(),
+        takeFramedForFirstTurn: vi.fn(),
+      },
+    });
+
+    await expect(
+      service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "From a Linear issue",
+        linearIssueContext: { id: "11111111-1111-4111-8111-111111111111" },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message: "The selected Linear issue could not be loaded. The thread was not created.",
       },
     });
     expect(persistence.readChatThreads()).toEqual([]);

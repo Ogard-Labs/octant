@@ -270,8 +270,16 @@ and description bytes. Issue bodies are a live projection, not Octant source of
 truth; credentials and raw API payloads never enter prompts or tool output.
 Open in Linear is an external `linear.app` URL. Disabled, untrusted,
 unauthorized, expired, or rate-limited Linear contributes no sidebar item,
-catalogue rows, or thread context. Create-from-issue, writes, and Chat/Work
-browse are not this surface.
+catalogue rows, or thread context. Chat/Work browse and Linear writes are not
+this surface.
+
+Composer `Create from…` also exposes a Linear tab when the Settings-owned
+connection reports `list-issues` available and the Linear plugin is effective.
+Selecting a row attaches only `{ id }`. At creation the server reauthorizes
+through the Integration port, frames redacted issue text
+(`identifier`, status, description, comments, links) via
+`externalContentFraming.ts`, and appends `thread.external-content-ingested@1`.
+Refusal fails creation visibly. No Linear write-back path exists.
 
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown

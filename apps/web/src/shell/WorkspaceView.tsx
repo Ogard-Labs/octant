@@ -310,8 +310,11 @@ export interface WorkspaceViewProps {
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
     issueContext?: import("@octant/contracts").GithubIssueContextRequest,
+    linearIssueContext?: import("@octant/contracts").LinearIssueContextRequest,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
+  readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
+  readonly linearPluginEnabled?: boolean;
   readonly draftCodeExecute?: (
     command: import("@octant/contracts/code").CodeCommand,
     signal?: AbortSignal,
@@ -822,6 +825,10 @@ function renderNonCodeTab(
         {...(props.githubPluginEnabled === undefined
           ? {}
           : { githubPluginEnabled: props.githubPluginEnabled })}
+        {...(props.linearClient === undefined ? {} : { linearClient: props.linearClient })}
+        {...(props.linearPluginEnabled === undefined
+          ? {}
+          : { linearPluginEnabled: props.linearPluginEnabled })}
         {...(tab.projectId === undefined ? {} : { projectId: tab.projectId })}
         {...(props.draftProjectName === undefined ? {} : { projectName: props.draftProjectName })}
         {...(props.draftProjectRoot === undefined ? {} : { projectRoot: props.draftProjectRoot })}
@@ -858,6 +865,7 @@ function renderNonCodeTab(
           images,
           threadMentionIds,
           issueContext,
+          linearIssueContext,
         ) => {
           if (props.onDraftCreateThread === undefined) return;
           return props.onDraftCreateThread(
@@ -868,6 +876,7 @@ function renderNonCodeTab(
             images,
             threadMentionIds,
             issueContext,
+            linearIssueContext,
           );
         }}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}

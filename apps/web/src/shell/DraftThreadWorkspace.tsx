@@ -21,11 +21,20 @@ import type {
   CodeCommandResult,
   CodeDeliveryOutcomeKind,
 } from "@octant/contracts/code";
-import type { GithubIssueContextRequest, MentionableThreadId } from "@octant/contracts";
+import type {
+  GithubIssueContextRequest,
+  LinearIssueContextRequest,
+  MentionableThreadId,
+} from "@octant/contracts";
+import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import {
   CreateFromIssuePicker,
   useGithubIssuesCreateAvailable,
 } from "../github/CreateFromIssuePicker";
+import {
+  CreateFromLinearIssuePicker,
+  useLinearIssuesCreateAvailable,
+} from "../linear/CreateFromLinearIssuePicker";
 import { draftThreadModePresentation, type DraftIntentCard } from "@octant/contracts/thread-draft";
 import {
   resolveCodeNewThreadWorkspace,
@@ -33,7 +42,7 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { Aperture, FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   CodeComposerAdapter,
   type CodeComposerSubmitInput,
@@ -83,6 +92,9 @@ export interface DraftThreadWorkspaceProps {
   readonly githubCloneClient?: GithubCloneClient;
   /** False when the GitHub first-party plugin is not effective. */
   readonly githubPluginEnabled?: boolean;
+  readonly linearClient?: IntegrationClient;
+  /** False when the Linear first-party plugin is not effective. */
+  readonly linearPluginEnabled?: boolean;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
@@ -97,6 +109,7 @@ export interface DraftThreadWorkspaceProps {
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
     issueContext?: GithubIssueContextRequest,
+    linearIssueContext?: LinearIssueContextRequest,
   ) => boolean | void | Promise<boolean | void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
@@ -133,27 +146,78 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | undefined>(
     props.projectId,
   );
-  const [issueContext, setIssueContext] = useState<GithubIssueContextRequest>();
+  type CreateFromSelection =
+    | {
+        readonly kind: "github";
+        readonly request: GithubIssueContextRequest;
+        readonly label: string;
+      }
+    | {
+        readonly kind: "linear";
+        readonly request: LinearIssueContextRequest;
+        readonly label: string;
+      };
+  const [createFromSelection, setCreateFromSelection] = useState<CreateFromSelection>();
   const [createFromOpen, setCreateFromOpen] = useState(false);
+  const [createFromTab, setCreateFromTab] = useState<"github" | "linear">("github");
   const issuesCreateAvailable = useGithubIssuesCreateAvailable(
     props.githubClient,
     props.githubPluginEnabled !== false,
   );
+  const linearCreateAvailable = useLinearIssuesCreateAvailable(
+    props.linearClient,
+    props.linearPluginEnabled === true,
+  );
+  useEffect(() => {
+    if (!issuesCreateAvailable && linearCreateAvailable) setCreateFromTab("linear");
+    if (issuesCreateAvailable && !linearCreateAvailable) setCreateFromTab("github");
+  }, [issuesCreateAvailable, linearCreateAvailable]);
   const createFromControl =
-    issuesCreateAvailable && props.githubClient !== undefined ? (
+    (issuesCreateAvailable && props.githubClient !== undefined) ||
+    (linearCreateAvailable && props.linearClient !== undefined) ? (
       <CreateFromIssueControl
-        client={props.githubClient}
+        {...(props.githubClient === undefined || !issuesCreateAvailable
+          ? {}
+          : { githubClient: props.githubClient })}
+        {...(props.linearClient === undefined || !linearCreateAvailable
+          ? {}
+          : { linearClient: props.linearClient })}
         creating={props.creating === true}
-        onClear={() => setIssueContext(undefined)}
-        onSelect={(selected) => {
-          setIssueContext(selected);
+        onClear={() => setCreateFromSelection(undefined)}
+        onSelectGithub={(selected) => {
+          setCreateFromSelection({
+            kind: "github",
+            request: selected,
+            label: `${selected.owner}/${selected.name}#${String(selected.number)}`,
+          });
+          setCreateFromOpen(false);
+        }}
+        onSelectLinear={(selected) => {
+          setCreateFromSelection({
+            kind: "linear",
+            request: { id: selected.id },
+            label: selected.identifier,
+          });
           setCreateFromOpen(false);
         }}
         open={createFromOpen}
         onToggle={() => setCreateFromOpen((open) => !open)}
-        {...(issueContext === undefined ? {} : { selected: issueContext })}
+        tab={createFromTab}
+        onTabChange={setCreateFromTab}
+        {...(createFromSelection === undefined
+          ? {}
+          : {
+              selectedLabel: createFromSelection.label,
+              ...(createFromSelection.kind === "github"
+                ? { selectedGithub: createFromSelection.request }
+                : { selectedLinear: createFromSelection.request }),
+            })}
       />
     ) : null;
+  const issueContext =
+    createFromSelection?.kind === "github" ? createFromSelection.request : undefined;
+  const linearIssueContext =
+    createFromSelection?.kind === "linear" ? createFromSelection.request : undefined;
   const [selectedProjectLabel, setSelectedProjectLabel] = useState(
     props.projectId === undefined ? undefined : props.projectName,
   );
@@ -342,13 +406,17 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { profileControl: props.executionProfile })}
           onCreateThread={(input) => {
-            const submitted = issueContext === undefined ? input : { ...input, issueContext };
+            const submitted = {
+              ...input,
+              ...(issueContext === undefined ? {} : { issueContext }),
+              ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
+            };
             if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
               return props.onCreateCodeThread(submitted, selectedProjectId);
             }
             // Carry the outcome the user confirmed in the composer so the
             // fallback path never re-derives or auto-confirms a suggestion.
-            return submitted.issueContext === undefined
+            return issueContext === undefined && linearIssueContext === undefined
               ? props.onCreateThread(
                   submitted.prompt,
                   selectedProjectId,
@@ -360,7 +428,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   submitted.deliveryTarget.outcomeKind,
                   submitted.images,
                   submitted.threadMentionIds,
-                  submitted.issueContext,
+                  issueContext,
+                  linearIssueContext,
                 );
           }}
           onCancel={props.onCancel}
@@ -402,16 +471,15 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { imageGeneration: props.imageGeneration })}
           onCreateThread={(prompt, images, threadMentionIds) =>
-            issueContext === undefined
-              ? props.onCreateThread(prompt, selectedProjectId, undefined, images, threadMentionIds)
-              : props.onCreateThread(
-                  prompt,
-                  selectedProjectId,
-                  undefined,
-                  images,
-                  threadMentionIds,
-                  issueContext,
-                )
+            props.onCreateThread(
+              prompt,
+              selectedProjectId,
+              undefined,
+              images,
+              threadMentionIds,
+              issueContext,
+              linearIssueContext,
+            )
           }
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined
@@ -434,12 +502,20 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    if (issueContext === undefined) {
+    if (issueContext === undefined && linearIssueContext === undefined) {
       void props.onCreateThread(trimmed);
       return;
     }
-    void props.onCreateThread(trimmed, undefined, undefined, undefined, undefined, issueContext);
-  }, [canSubmit, issueContext, props, trimmed]);
+    void props.onCreateThread(
+      trimmed,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      issueContext,
+      linearIssueContext,
+    );
+  }, [canSubmit, issueContext, linearIssueContext, props, trimmed]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -543,18 +619,32 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 }
 
 function CreateFromIssueControl(props: {
-  readonly client: GithubClient;
+  readonly githubClient?: GithubClient;
+  readonly linearClient?: IntegrationClient;
   readonly creating: boolean;
   readonly open: boolean;
-  readonly selected?: GithubIssueContextRequest;
-  readonly onSelect: (issue: GithubIssueContextRequest) => void;
+  readonly tab: "github" | "linear";
+  readonly onTabChange: (tab: "github" | "linear") => void;
+  readonly selectedGithub?: GithubIssueContextRequest;
+  readonly selectedLinear?: LinearIssueContextRequest;
+  readonly selectedLabel?: string;
+  readonly onSelectGithub: (issue: GithubIssueContextRequest) => void;
+  readonly onSelectLinear: (
+    issue: LinearIssueContextRequest & { readonly identifier: string },
+  ) => void;
   readonly onClear: () => void;
   readonly onToggle: () => void;
 }) {
-  const selectedLabel =
-    props.selected === undefined
-      ? undefined
-      : `${props.selected.owner}/${props.selected.name}#${String(props.selected.number)}`;
+  const showGithub = props.githubClient !== undefined;
+  const showLinear = props.linearClient !== undefined;
+  const activeTab =
+    props.tab === "linear" && showLinear
+      ? "linear"
+      : props.tab === "github" && showGithub
+        ? "github"
+        : showGithub
+          ? "github"
+          : "linear";
   return (
     <div className="create-from-issue-control">
       <div className="create-from-issue-control__bar">
@@ -568,9 +658,9 @@ function CreateFromIssueControl(props: {
         >
           Create from…
         </OctantButton>
-        {selectedLabel === undefined ? null : (
+        {props.selectedLabel === undefined ? null : (
           <span className="create-from-issue-control__selection">
-            <span>{selectedLabel}</span>
+            <span>{props.selectedLabel}</span>
             <OctantButton
               aria-label="Remove selected issue"
               disabled={props.creating}
@@ -585,18 +675,53 @@ function CreateFromIssueControl(props: {
         )}
       </div>
       {props.open ? (
-        <div className="create-from-issue-control__panel" role="tablist" aria-label="Create from">
-          <OctantButton aria-selected role="tab" size="sm" type="button" variant="ghost">
-            Issues
-          </OctantButton>
-          <div role="tabpanel">
-            <CreateFromIssuePicker
-              client={props.client}
-              disabled={props.creating}
-              onSelect={props.onSelect}
-              {...(props.selected === undefined ? {} : { selected: props.selected })}
-            />
+        <div className="create-from-issue-control__panel">
+          <div role="tablist" aria-label="Create from">
+            {showGithub ? (
+              <OctantButton
+                aria-selected={activeTab === "github"}
+                onClick={() => props.onTabChange("github")}
+                role="tab"
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Issues
+              </OctantButton>
+            ) : null}
+            {showLinear ? (
+              <OctantButton
+                aria-selected={activeTab === "linear"}
+                onClick={() => props.onTabChange("linear")}
+                role="tab"
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Linear
+              </OctantButton>
+            ) : null}
           </div>
+          {activeTab === "github" && props.githubClient !== undefined ? (
+            <div role="tabpanel">
+              <CreateFromIssuePicker
+                client={props.githubClient}
+                disabled={props.creating}
+                onSelect={props.onSelectGithub}
+                {...(props.selectedGithub === undefined ? {} : { selected: props.selectedGithub })}
+              />
+            </div>
+          ) : null}
+          {activeTab === "linear" && props.linearClient !== undefined ? (
+            <div role="tabpanel">
+              <CreateFromLinearIssuePicker
+                client={props.linearClient}
+                disabled={props.creating}
+                onSelect={props.onSelectLinear}
+                {...(props.selectedLinear === undefined ? {} : { selected: props.selectedLinear })}
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
