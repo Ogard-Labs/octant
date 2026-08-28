@@ -186,6 +186,15 @@ not rewritten.
 Boards for Work and Code remain server-authoritative; Chat gets no board.
 Moving the board into a plugin does not create a general task Kanban.
 
+GitHub issue browse and create-from-issue, when implemented, stay on the
+existing first-party GitHub plugin: a second `sidebar.destination`
+(`github-issues`), catalogue reads gated by `issues-read` through
+`/api/github/catalogue/reads`, and create-from-issue framing that never writes
+back. That work must not take a shortcut a later GitHub plugin could not take,
+and it does not wait for step 5 extraction. Disabled GitHub contributes no
+Issues row. See
+[github-repository-onboarding-threat-model.md](../security/github-repository-onboarding-threat-model.md).
+
 ### 4. Migration sequence
 
 Once the seams exist, order the moves by how often a surface expands, not by how
