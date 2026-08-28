@@ -282,7 +282,6 @@ export class TerminalProcessPort {
       cwd: input.cwd,
       env: {
         ...baseEnv,
-        ...(this.#dependencies.platform === "darwin" ? {} : { HOME: shellState }),
         ...input.environment,
         ...(this.#dependencies.platform === "darwin" ? {} : { HOME: shellState }),
       },

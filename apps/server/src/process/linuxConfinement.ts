@@ -86,15 +86,17 @@ export function buildLinuxConfinementLaunch(
   const baseSystemDirs = ["/bin", "/sbin", "/usr", "/lib", "/lib64", "/etc", "/opt", "/sys"];
   const mounts = new Map<string, Mount>();
 
-  function addMount(kind: "ro-bind" | "bind" | "tmpfs", source: string, target: string) {
+  function addMount(kind: Mount["kind"], source: string, target: string) {
     const normalizedTarget = normalize(target);
     const existing = mounts.get(normalizedTarget);
     if (existing !== undefined) {
       if (kind === "bind") {
         existing.kind = "bind";
         existing.source = source;
-      } else if (existing.kind !== "bind" && kind === "tmpfs") {
-        existing.kind = "tmpfs";
+        return;
+      }
+      if (existing.kind === "ro-bind" && (kind === "tmpfs" || kind === "tmpfs-rw")) {
+        existing.kind = kind;
         existing.source = "";
       }
       return;
@@ -140,37 +142,52 @@ export function buildLinuxConfinementLaunch(
   } else {
     tryBindReadOnly(input.boundRoot);
   }
-  tryBindWritable(input.temporaryDirectory);
+  // Shared host temp roots stay private tmpfs. Binding /tmp (or /var/tmp)
+  // would let confined code read and write every other process's files there.
+  // `--remount-ro /` does not remount those writable binds.
+  addMount("tmpfs-rw", "", "/tmp");
+  if (existsSync("/var/tmp") || isSharedHostTemporaryRoot(input.temporaryDirectory)) {
+    addMount("tmpfs-rw", "", "/var/tmp");
+  }
+  if (!isSharedHostTemporaryRoot(input.temporaryDirectory)) {
+    tryBindWritable(input.temporaryDirectory);
+  }
   for (const path of input.additionalWriteRoots ?? []) {
     tryBindWritable(path);
   }
 
   const writeTargets = [
     ...(input.writeBoundRoot !== false ? [input.boundRoot] : []),
-    input.temporaryDirectory,
+    ...(isSharedHostTemporaryRoot(input.temporaryDirectory) ? [] : [input.temporaryDirectory]),
     ...(input.additionalWriteRoots ?? []),
+    "/tmp",
+    ...(existsSync("/var/tmp") || isSharedHostTemporaryRoot(input.temporaryDirectory)
+      ? ["/var/tmp"]
+      : []),
   ].map((path) => normalize(path));
 
-  function bindAdditionalDenyPath(path: string, _kind: "read" | "write"): void {
+  function bindAdditionalDenyPath(path: string, kind: "read" | "write"): void {
     if (!isAbsolute(path)) {
       throw new SeatbeltConfinementError(
         "invalid-configuration",
-        `Linux confinement additional deny ${_kind} path "${path}" must be absolute.`,
+        `Linux confinement additional deny ${kind} path "${path}" must be absolute.`,
       );
     }
     const normalized = normalize(path);
-
-    // Deny paths are only meaningful when they overlap a writable mount.
-    // Otherwise the read-only root already blocks access.
+    // Write denials only matter on writable mounts. Read denials must also
+    // cover read-only binds: a `--ro-bind` of a parent still exposes the
+    // denied child unless we overlay it.
+    const overlapTargets = kind === "write" ? writeTargets : [...mounts.keys()];
     if (
-      !isStrictAncestorOfAny(normalized, writeTargets) &&
-      !isAnyStrictAncestorOf(normalized, writeTargets)
+      !overlapTargets.includes(normalized) &&
+      !isStrictAncestorOfAny(normalized, overlapTargets) &&
+      !isAnyStrictAncestorOf(normalized, overlapTargets)
     ) {
       return;
     }
 
     const existing = mounts.get(normalized);
-    if (existing !== undefined && existing.kind === "bind") {
+    if (existing !== undefined && (existing.kind === "bind" || existing.kind === "tmpfs-rw")) {
       // A writable mount at the exact same path must win; do not overwrite it
       // with a denial.
       return;
@@ -203,7 +220,7 @@ export function buildLinuxConfinementLaunch(
     (left, right) => depth(left.target) - depth(right.target),
   );
   for (const mount of sorted) {
-    if (mount.kind === "tmpfs") {
+    if (mount.kind === "tmpfs" || mount.kind === "tmpfs-rw") {
       args.push("--tmpfs", mount.target);
     } else {
       args.push(mount.kind === "bind" ? "--bind" : "--ro-bind", mount.source, mount.target);
@@ -225,9 +242,14 @@ export function buildLinuxConfinementLaunch(
 }
 
 interface Mount {
-  kind: "ro-bind" | "bind" | "tmpfs";
+  kind: "ro-bind" | "bind" | "tmpfs" | "tmpfs-rw";
   source: string;
   target: string;
+}
+
+function isSharedHostTemporaryRoot(path: string): boolean {
+  const normalized = normalize(path);
+  return normalized === "/tmp" || normalized === "/var/tmp";
 }
 
 function depth(path: string): number {

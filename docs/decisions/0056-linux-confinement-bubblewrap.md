@@ -38,8 +38,13 @@ expressed with those primitives, but the _mechanism_ is different.
     other host directories required by the runtime but not writable;
   - writable binds for the bound root, the provider home/runtime directory, and
     any additional write roots declared by the caller;
-  - a private `--tmpfs /tmp` and a per-shell `HOME` set to the provider's
-    runtime directory, so the real home directory never needs to be writable;
+  - a private writable `--tmpfs /tmp` (and `/var/tmp` when present) so a caller
+    that passes `/tmp` as its temporary directory never binds the host temp.
+    A dedicated temporary directory is still bound, after that tmpfs, so only
+    that path comes from the host. Deny-path tmpfs overlays are remounted
+    read-only; the private `/tmp` tmpfs is not;
+  - a per-shell `HOME` set to the provider's runtime directory, so the real
+    home directory never needs to be writable;
   - mounts sorted by target depth before emission, so a parent bind does not
     shadow a child writable bind;
   - `--remount-ro /` after the writable binds, which makes the synthetic root
@@ -47,24 +52,22 @@ expressed with those primitives, but the _mechanism_ is different.
     underneath it;
   - `--share-net` only when the resolved network egress policy is not `none`;
   - deny paths overlaid with an empty source (directory or file) when they
-    overlap a writable mount, preserving the deny semantics even where the mount
-    layout would otherwise expose the underlying path;
+    overlap any mount, including read-only binds from `readRoots` or
+    `privateHomeAllowPaths`;
   - missing or unusable `bwrap` fails closed as `incompatible`, exactly like a
     missing `sandbox-exec`; there is no unconfined fallback.
 - The `SeatbeltConfinementPort` name is historical; it is the shared choke point
   and dispatches to the platform-specific backend. No caller bypasses it.
 - `AcpConfinementPort` and `PiConfinementPort` route `deny-default` / bounded
-  confinement through the same shared builder on Linux, so Devin, Claude Code,
-  Codex, OpenCode, Kilo, Kimi Code, Grok, Mistral Vibe, and the bounded `pi`
-  path are confined consistently with Work and Code.
+  confinement through the same shared builder on Linux, so Devin, Codex,
+  OpenCode, Kilo, Grok, Mistral Vibe, and the bounded `pi` path are confined
+  consistently with Work and Code.
 - `immutable-managed-profile` (Kimi Code's managed profile mode) remains
   macOS-only and fails closed on Linux; it is not replaced by an unconfined
   alternative.
-- This is an interim Linux confinement backend. ADR 0048's execution capsules
-  remain the stronger, long-term Linux boundary (independent clones, gVisor,
-  Podman, per-capsule VFS). When that work lands, the Bubblewrap path stays
-  responsible for ordinary per-process Work/Code/Git confinement; capsules own
-  the heavier Code isolation layer described in 0048.
+- 0054's consequence that Work and Code remain incompatible on Linux is
+  superseded for this Seatbelt-equivalent path. This backend is interim:
+  0048 capsules remain the stronger Station isolation layer and stay unwired.
 
 ## Consequences
 

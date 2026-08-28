@@ -486,14 +486,14 @@ mechanisms are:
   request a narrower posture; the server clamps it to the thread's grant
   and records the posture the turn ran under.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
-  executables launch under `sandbox-exec` with deny-default Seatbelt profiles
-  scoped to the bound root, allowlisted environments, and no broker
-  coordinates. Sensitive system roots (`/etc/ssh`, `/var/root`,
-  `/Library/Keychains`, `/private`, `/Volumes`, and `/Network`) remain denied
-  even where runtime compatibility requires a broad file-read rule; each
-  launch's exact roots are re-allowed after those denials. Path checks alone
-  are never the boundary. Confined reads open a handle and verify identity
-  against what containment resolved.
+  executables launch through one shared confinement port. On macOS that is
+  `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
+  (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback.
+  Sensitive system roots remain denied even where runtime compatibility
+  requires a broad file-read rule; each launch's exact roots are re-allowed
+  after those denials. Path checks alone are never the boundary. Confined
+  reads open a handle and verify identity against what containment resolved.
+  Missing `sandbox-exec` or `bwrap` fails closed.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent
@@ -565,9 +565,11 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
 - A headless Linux station: `octant server run`, then `octant web` (or
-  `octant web --dev` for Vite). Linux requires an unlocked freedesktop Secret
-  Service session and the `secret-tool` client; without both, the host fails
-  closed and provider credentials remain unavailable.
+  `octant web --dev` for Vite). Linux requires `bubblewrap`, an unlocked
+  freedesktop Secret Service session, and the `secret-tool` client. Without
+  those, the host fails closed. Provider CLIs are ordinary host binaries:
+  install one to a user-writable path such as `~/.local/bin` and point the
+  provider instance at that absolute path.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.
 - Formatting is `oxfmt`, linting is `oxlint`; Turbo runs the per-package
