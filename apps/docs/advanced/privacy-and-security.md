@@ -15,9 +15,12 @@ Octant makes on its own behalf are the exception: [update checks](/guide/install
 and [marketplace fetches](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 Neither is a telemetry channel. This page states the posture of those two
 calls. Drafts of the [privacy notice](/advanced/privacy-notice),
-[sub-processor position](/advanced/sub-processors), and
-[data residency](/advanced/data-residency) statements describe the broader
-boundary for legal review; they are not published notices.
+[sub-processor position](/advanced/sub-processors),
+[data residency](/advanced/data-residency),
+[DPA template](/advanced/dpa-template),
+[SCC position](/advanced/scc-position), and
+[EULA placeholders](/advanced/eula-placeholders) describe the broader
+boundary for legal review; they are not published notices or contracts.
 
 ## Local storage
 
