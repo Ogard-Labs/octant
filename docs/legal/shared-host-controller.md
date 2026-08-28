@@ -29,7 +29,8 @@ When a shared host holds several principals' personal data in one journal:
 
 1. **The host owner is the controller** of personal data in that host's
    event journal, projections, host logs, diagnostics packets, and audit
-   export surfaces that cut from those stores.
+   export surfaces that cut from those stores, unless a recorded controller
+   fact names another controller for that processing (see below).
 2. **Ogard Labs is not the controller** of that store. Octant does not sync
    the journal to an Octant cloud, does not operate a multi-tenant SaaS of
    team workspaces, and does not receive teammate transcripts in order to
@@ -161,8 +162,8 @@ truth.
    published notices.
 2. Decide how joint-controller and processor templates should look when a
    team records a controller fact that is not the machine owner.
-3. Align published language with the DPA / SCC / EULA drafts once those
-   exist beside the privacy notice set.
+3. Align published language with the DPA / SCC / EULA drafts as those
+   drafts evolve and counsel reviews them beside the privacy notice set.
 4. Gate any customer-facing publication on the parent GDPR compliance
    package review.
 
