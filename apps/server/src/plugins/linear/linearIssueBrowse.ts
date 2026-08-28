@@ -206,7 +206,7 @@ function readIssueDetail(body: unknown): LinearIssueDetail | undefined {
 function readIssueRow(value: unknown): LinearIssueRow | undefined {
   if (!isRecord(value)) return undefined;
   const id = readName(value.id, 128);
-  const identifier = readName(value.identifier, 16);
+  const identifier = readIssueIdentifier(value.identifier);
   const title = readName(value.title, 256);
   const url = readLinearUrl(value.url);
   const stateValue = isRecord(value.state) ? value.state : undefined;
@@ -222,7 +222,6 @@ function readIssueRow(value: unknown): LinearIssueRow | undefined {
   ) {
     return undefined;
   }
-  if (!/^[A-Z][A-Z0-9]{0,9}-\d{1,9}$/.test(identifier)) return undefined;
   const assigneeRecord = isRecord(value.assignee) ? value.assignee : undefined;
   const assignee = readName(assigneeRecord?.name, 128);
   return {
@@ -238,16 +237,15 @@ function readIssueRow(value: unknown): LinearIssueRow | undefined {
 function readFilterOptions(body: unknown): LinearIssueFilterOptions | undefined {
   if (!isRecord(body) || !isRecord(body.data)) return undefined;
   const teams = readNamedNodes(body.data.teams, 50, (node) => {
-    const key = readName(node.key, 16);
     const name = readName(node.name, 128);
     if (name === undefined) return undefined;
-    return key === undefined ? name : `${name} (${key})`;
+    return composedFilterLabel(name, readName(node.key, 16));
   });
   const states = readNamedNodes(body.data.workflowStates, 100, (node) => {
     const name = readName(node.name, 64);
     if (name === undefined) return undefined;
     const team = isRecord(node.team) ? readName(node.team.key, 16) : undefined;
-    return team === undefined ? name : `${name} (${team})`;
+    return composedFilterLabel(name, team);
   });
   const users = readNamedNodes(body.data.users, 49, (node) => readName(node.name, 128));
   const projects = readNamedNodes(body.data.projects, 50, (node) => readName(node.name, 128));
@@ -318,6 +316,16 @@ function readConnection(
 function readNodes(value: unknown): ReadonlyArray<unknown> | undefined {
   if (!isRecord(value) || !Array.isArray(value.nodes)) return undefined;
   return value.nodes;
+}
+
+function readIssueIdentifier(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const identifier = value.trim();
+  return IDENTIFIER_PATTERN.test(identifier) ? identifier : undefined;
+}
+
+function composedFilterLabel(name: string, key: string | undefined): string | undefined {
+  return readName(key === undefined ? name : `${name} (${key})`, 128);
 }
 
 function readLinearUrl(value: unknown): string | undefined {

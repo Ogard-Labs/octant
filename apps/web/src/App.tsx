@@ -108,7 +108,6 @@ import {
   defaultShellSettings,
 } from "@octant/domain/shell-policy";
 import type { UserProfile } from "@octant/contracts/user-profile";
-import { linearIssueBrowseAvailable } from "@octant/contracts/linear-issues";
 import {
   enforceAccessibilitySettings,
   enforceSidebarBackgroundAccessibility,
@@ -167,6 +166,10 @@ import {
   githubIssuesReadAvailable as snapshotAllowsGithubIssuesRead,
   withGithubIssuesReadSync,
 } from "./github/githubIssuesReadAvailable";
+import {
+  linearIssuesReadAvailable,
+  withLinearIssuesReadSync,
+} from "./linear/linearIssuesReadAvailable";
 import { WorkspaceRailLayers } from "./shell/WorkspaceRailLayers";
 import { BottomUtilityPanel } from "./shell/BottomUtilityPanel";
 import { ShellDialogHost } from "./shell/ShellDialogHost";
@@ -1133,7 +1136,7 @@ function LaunchedShell(
     () => withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable),
     [githubTransport],
   );
-  const linearClient = useMemo(
+  const linearTransport = useMemo(
     () =>
       createIntegrationClient({
         baseUrl: props.launch.serverUrl,
@@ -1142,6 +1145,14 @@ function LaunchedShell(
         slug: "linear",
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
+  );
+  const linearClient = useMemo(
+    () =>
+      withLinearIssuesReadSync(linearTransport, (available) => {
+        setLinearIssuesRead(available);
+        if (!available) setLinearIssuesOpen(false);
+      }),
+    [linearTransport],
   );
   useEffect(() => {
     let cancelled = false;
@@ -1167,10 +1178,10 @@ function LaunchedShell(
       return;
     }
     let cancelled = false;
-    void linearClient.authenticationSnapshot().then(
+    void linearTransport.authenticationSnapshot().then(
       (snapshot) => {
         if (cancelled) return;
-        const available = linearIssueBrowseAvailable(snapshot.capabilities);
+        const available = linearIssuesReadAvailable(snapshot);
         setLinearIssuesRead(available);
         if (!available) setLinearIssuesOpen(false);
       },
@@ -1183,7 +1194,7 @@ function LaunchedShell(
     return () => {
       cancelled = true;
     };
-  }, [linearPluginEffective, activeMode, linearClient]);
+  }, [linearPluginEffective, activeMode, linearTransport]);
   const githubCloneClient = useMemo(
     () =>
       createGithubCloneClient({

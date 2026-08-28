@@ -66,7 +66,7 @@ describe("Linear issue contracts", () => {
     expect(() =>
       decodeLinearIssueDetail({
         ...row,
-        description: "bearer abcdef",
+        description: "bearer abcdefghijklmnopqrst",
         descriptionTruncated: false,
       }),
     ).toThrow();
@@ -80,6 +80,23 @@ describe("Linear issue contracts", () => {
       }).rows[0]?.title,
     ).toBe("Fix authorization for the settings card");
     expect(decodeLinearIssueListInput({ search: "authorization" }).search).toBe("authorization");
+  });
+
+  it("accepts ordinary titles and searches that mention a bearer token", () => {
+    expect(
+      decodeLinearIssueListPage({
+        rows: [{ ...row, title: "Rotate the bearer token before the next cutover" }],
+        hasNextPage: false,
+      }).rows[0]?.title,
+    ).toBe("Rotate the bearer token before the next cutover");
+    expect(decodeLinearIssueListInput({ search: "bearer token" }).search).toBe("bearer token");
+    expect(
+      decodeLinearIssueDetail({
+        ...row,
+        description: "bearer abcdef",
+        descriptionTruncated: false,
+      }).description,
+    ).toBe("bearer abcdef");
   });
 
   it("accepts a bounded issue detail and filter options", () => {

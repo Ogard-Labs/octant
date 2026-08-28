@@ -60,6 +60,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
   const getIssueRef = useRef(props.getIssue);
   const listIssueFiltersRef = useRef(props.listIssueFilters);
   const lastValidQueryRef = useRef<LinearIssueListInput>({});
+  const listGenerationRef = useRef(0);
   const detailGenerationRef = useRef(0);
   useEffect(() => {
     listIssuesRef.current = props.listIssues;
@@ -94,15 +95,18 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
 
   useEffect(() => {
     let active = true;
+    const generation = ++listGenerationRef.current;
     detailGenerationRef.current += 1;
     setList({ status: "loading" });
     setDetail({ status: "idle" });
     listIssuesRef.current(query).then(
       (page) => {
-        if (active) setList({ status: "ready", page });
+        if (!active || generation !== listGenerationRef.current) return;
+        setList({ status: "ready", page });
       },
       (error: unknown) => {
-        if (active) setList({ status: "error", message: failureMessage(error) });
+        if (!active || generation !== listGenerationRef.current) return;
+        setList({ status: "error", message: failureMessage(error) });
       },
     );
     return () => {
@@ -113,9 +117,11 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
   async function loadMore(): Promise<void> {
     const page = list.status === "ready" || list.status === "loading-more" ? list.page : undefined;
     if (page === undefined || !page.hasNextPage || page.endCursor === undefined) return;
+    const generation = listGenerationRef.current;
     setList({ status: "loading-more", page });
     try {
       const next = await listIssuesRef.current({ ...query, cursor: page.endCursor });
+      if (generation !== listGenerationRef.current) return;
       setList({
         status: "ready",
         page: {
@@ -125,6 +131,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
         },
       });
     } catch (error: unknown) {
+      if (generation !== listGenerationRef.current) return;
       setList({ status: "error", message: failureMessage(error), page });
     }
   }
@@ -247,10 +254,17 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
           action={{
             label: "Retry",
             onClick: () => {
+              const generation = listGenerationRef.current;
               setList({ status: "loading" });
               void listIssuesRef.current(query).then(
-                (next) => setList({ status: "ready", page: next }),
-                (error: unknown) => setList({ status: "error", message: failureMessage(error) }),
+                (next) => {
+                  if (generation !== listGenerationRef.current) return;
+                  setList({ status: "ready", page: next });
+                },
+                (error: unknown) => {
+                  if (generation !== listGenerationRef.current) return;
+                  setList({ status: "error", message: failureMessage(error) });
+                },
               );
             },
           }}

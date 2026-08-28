@@ -319,6 +319,65 @@ describe("Linear integration plugin", () => {
     expect(serialized(observation)).not.toContain("Reconnect");
   });
 
+  it("keeps a page when a title is clipped onto trailing whitespace", async () => {
+    const title = `${"Browse issues in the workspace".padEnd(256, " ")}more`;
+    const fetch = vi.fn(async () =>
+      graphqlResponse({
+        data: {
+          issues: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{ ...issueNode(), title }],
+          },
+        },
+      }),
+    );
+    const runtime = connectedRuntime(fetch);
+    const observation = await runtime.execute({
+      kind: "operation",
+      operationId: "list-issues",
+      input: {},
+    });
+    expect(observation).toMatchObject({
+      kind: "operation",
+      result: {
+        kind: "ok",
+        value: {
+          rows: [{ title: "Browse issues in the workspace" }],
+        },
+      },
+    });
+  });
+
+  it("keeps a 20-character identifier instead of clipping it before the pattern", async () => {
+    const identifier = "ABCDEFGHIJ-123456789";
+    const fetch = vi.fn(async () =>
+      graphqlResponse({
+        data: {
+          issues: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                ...issueNode(),
+                identifier,
+                url: "https://linear.app/ogard-labs/issue/ABCDEFGHIJ-123456789",
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const runtime = connectedRuntime(fetch);
+    const observation = await runtime.execute({
+      kind: "operation",
+      operationId: "list-issues",
+      input: {},
+    });
+    expect(observation).toMatchObject({
+      kind: "operation",
+      result: { kind: "ok", value: { rows: [{ identifier }] } },
+    });
+  });
+
   it("returns filter options including an unassigned choice", async () => {
     const fetch = vi.fn(async (_input: Request) =>
       graphqlResponse({
@@ -368,6 +427,49 @@ describe("Linear integration plugin", () => {
     expect(input).toBeInstanceOf(Request);
     if (!(input instanceof Request)) return;
     expect(await input.text()).toContain("users(first: 49)");
+  });
+
+  it("bounds a composed team label so the filters payload stays valid", async () => {
+    const name = "Engineering".padEnd(128, "x");
+    const fetch = vi.fn(async () =>
+      graphqlResponse({
+        data: {
+          teams: {
+            nodes: [
+              {
+                id: "22222222-2222-4222-8222-222222222222",
+                name,
+                key: "ENG",
+              },
+            ],
+          },
+          users: { nodes: [] },
+          workflowStates: { nodes: [] },
+          projects: { nodes: [] },
+        },
+      }),
+    );
+    const runtime = connectedRuntime(fetch);
+    const observation = await runtime.execute({
+      kind: "operation",
+      operationId: "list-issue-filters",
+      input: {},
+    });
+    expect(observation.kind).toBe("operation");
+    if (observation.kind !== "operation") return;
+    expect(observation.result.kind).toBe("ok");
+    if (observation.result.kind !== "ok") return;
+    const value = observation.result.value;
+    const label =
+      typeof value === "object" &&
+      value !== null &&
+      "teams" in value &&
+      Array.isArray(value.teams) &&
+      typeof value.teams[0]?.label === "string"
+        ? value.teams[0].label
+        : undefined;
+    expect(label?.length).toBeLessThanOrEqual(128);
+    expect(label?.endsWith(" ")).toBe(false);
   });
 });
 

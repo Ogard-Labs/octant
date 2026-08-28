@@ -101,9 +101,9 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function readName(value: unknown, limit = 128): string | undefined {
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim().slice(0, limit)
-    : undefined;
+  if (typeof value !== "string") return undefined;
+  const next = value.trim().slice(0, limit).trimEnd();
+  return next.length > 0 ? next : undefined;
 }
 
 export function boundUtf8(
