@@ -8,7 +8,7 @@ Welcome to the Octant guide. Use these pages to install the app, configure provi
 
 ## Getting started
 
-- [Installation](/guide/installation) — system requirements, source build, and packaging
+- [Installation](/guide/installation) — system requirements, source build, packaging, and what an update check sends
 - [First Run](/guide/first-run) — configure a provider, create a Project, start a thread
 
 ## Working with modes
