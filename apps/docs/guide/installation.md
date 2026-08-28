@@ -63,21 +63,31 @@ The foreground command drains on SIGINT/SIGTERM and reports an existing owner in
 The packaged desktop app is macOS-only. A Linux host can run the same server and browser client to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the macOS system requirements above), then:
 
 ```sh
-sudo apt-get install -y bubblewrap libsecret-tools gnome-keyring dbus-user-session zsh
+bash scripts/ade/install-linux-host-deps.sh
+bash scripts/ade/start-secret-service-session.sh
+# Load the bus address into this shell; new login shells also pick it up via bashrc.
+. "${HOME}/.config/octant-host/session.env"
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 bun --cwd packages/cli src/bin.ts server run
 bun --cwd packages/cli src/bin.ts web
 ```
 
-`bwrap` is the confinement runtime. Provider credentials need an unlocked user D-Bus session and Secret Service before `secret-tool` works. On a graphical login that is usually already true. On a headless host, start a user session bus (for example via `dbus-user-session` / `systemd --user`), start `gnome-keyring-daemon` so the secrets component is available, and confirm with `secret-tool store --label=octant-probe service octant key probe <<<probe` then `secret-tool lookup service octant key probe`. On a host with no login keyring, point the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a prompt:
+`install-linux-host-deps.sh` installs `bubblewrap`, `libsecret-tools`, `gnome-keyring`, `dbus-x11`, and `dbus-user-session` when missing, and wires a shell hook that loads the live session bus address from `~/.config/octant-host/session.env`. `start-secret-service-session.sh` must run on every host boot: it probes a live D-Bus (and rejects a snapshotted socket path), starts `gnome-keyring-daemon` for the secrets component when needed, points the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a GUI prompt, writes `session.env`, and proves a store/lookup round-trip. Running the start script as a subprocess cannot export into the parent shell, so source `session.env` before `server run` in the same shell (or open a new login shell after install has wired bashrc).
 
-```sh
-busctl --user call org.freedesktop.secrets /org/freedesktop/secrets \
-  org.freedesktop.Secret.Service SetAlias so default \
-  /org/freedesktop/secrets/collection/session
+The start script is the intended Cloud Agent environment `start` boot hook. Until a Saved environment persists and executes `start` on each agent boot, run `scripts/ade/start-secret-service-session.sh` manually after install (then source `session.env` as above). When configuring a Saved environment that does run `start`, keep install and start separate:
+
+```text
+install:
+  bash scripts/ade/install-linux-host-deps.sh
+  bun install --frozen-lockfile
+
+start:
+  bash scripts/ade/start-secret-service-session.sh
 ```
 
-Provider CLIs are ordinary host binaries. Keep `~/.local/bin` on `PATH`, install a CLI there (this host used the official Codex installer), and point the provider instance at that absolute path. Kimi Code's managed-profile confinement stays macOS-only and reports `incompatible`.
+If that Saved environment runs `start` in a separate process from `server run`, start-script exports do not cross the subprocess boundary. Operators (or the server-launch shell) must source `${HOME}/.config/octant-host/session.env` in the same shell immediately before `server run` so the host inherits `DBUS_SESSION_BUS_ADDRESS`. A login shell that already ran the install bashrc hook also loads a live address from that file.
+
+`bwrap` is the confinement runtime. On a graphical login the session bus and keyring are usually already present; the start script is then a no-op once Secret Service answers. Provider CLIs are ordinary host binaries. Keep `~/.local/bin` on `PATH`, install a CLI there (this host used the official Codex installer), and point the provider instance at that absolute path. Kimi Code's managed-profile confinement stays macOS-only and reports `incompatible`.
 
 Do not remove or corrupt the default directory. Removing the native window-state file changes the window ID, while removing the SQLite file discards all local journal and shell data.
 
