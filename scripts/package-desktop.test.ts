@@ -496,6 +496,7 @@ describe("desktop packaging boundary", () => {
         () => null,
         {},
         (path) => path === "/exec-daemon/node",
+        "/not-node",
       ),
     ).toBe("/exec-daemon/node");
     expect(
@@ -503,6 +504,7 @@ describe("desktop packaging boundary", () => {
         () => "/custom/node",
         {},
         () => false,
+        "/not-node",
       ),
     ).toBe("/custom/node");
     expect(
@@ -510,8 +512,25 @@ describe("desktop packaging boundary", () => {
         () => null,
         { OCTANT_NODE_BINARY: "/opt/node" },
         () => false,
+        "/not-node",
       ),
     ).toBe("/opt/node");
+    expect(
+      resolveNodeExecutable(
+        () => null,
+        {},
+        (path) => path === "/Users/runner/hostedtoolcache/node/24.0.0/x64/bin/node",
+        "/Users/runner/hostedtoolcache/node/24.0.0/x64/bin/node",
+      ),
+    ).toBe("/Users/runner/hostedtoolcache/node/24.0.0/x64/bin/node");
+    expect(
+      resolveNodeExecutable(
+        () => null,
+        {},
+        (path) => path === "/usr/local/bin/node",
+        "/home/ubuntu/.bun/bin/bun",
+      ),
+    ).toBe("/usr/local/bin/node");
   });
 
   it("resolves the pinned Agent SDK JavaScript with Node rather than Bun", async () => {

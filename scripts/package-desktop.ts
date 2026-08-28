@@ -639,28 +639,44 @@ export async function validatePackagedRuntimeImports(
  * only as `/exec-daemon/node`, so a hard-coded `/usr/bin/env node` with a
  * macOS-centric PATH fails closed before staging finishes.
  *
- * Default `which` uses Bun when the packaging script runs under Bun, and
- * otherwise falls through to the fixed candidates so vitest-under-Node (macOS
- * CI) does not throw `Bun is not defined` while evaluating defaults.
+ * Default `which` uses Bun when the packaging script runs under Bun. Under
+ * vitest (Node workers on macOS CI) Bun is absent, so fall through to the
+ * current Node `process.execPath` and then fixed install locations — never
+ * evaluate bare `Bun.which` as a default argument.
  */
 export function resolveNodeExecutable(
   which: (command: string) => string | null = resolveNodeWhich,
   environment: Record<string, string | undefined> = process.env,
   exists: (path: string) => boolean = existsSync,
+  execPath: string = process.execPath,
 ): string {
   const configured = (environment.OCTANT_NODE_BINARY ?? "").trim();
   if (configured !== "") return configured;
   const fromPath = which("node");
   if (fromPath !== null) return fromPath;
-  for (const candidate of ["/usr/bin/node", "/bin/node", "/exec-daemon/node"] as const) {
+  if (isNodeExecutablePath(execPath) && exists(execPath)) return execPath;
+  for (const candidate of NODE_EXECUTABLE_CANDIDATES) {
     if (exists(candidate)) return candidate;
   }
   throw new Error("Packaged runtime import probe requires Node on PATH (or OCTANT_NODE_BINARY).");
 }
 
+const NODE_EXECUTABLE_CANDIDATES = [
+  "/usr/bin/node",
+  "/bin/node",
+  "/usr/local/bin/node",
+  "/opt/homebrew/bin/node",
+  "/exec-daemon/node",
+] as const;
+
 function resolveNodeWhich(command: string): string | null {
   const bunGlobal = (globalThis as { Bun?: { which?: (name: string) => string | null } }).Bun;
   return bunGlobal?.which?.(command) ?? null;
+}
+
+function isNodeExecutablePath(path: string): boolean {
+  const base = basename(path);
+  return base === "node" || base === "node.exe";
 }
 
 async function packageDesktop(repositoryRoot: string): Promise<{
