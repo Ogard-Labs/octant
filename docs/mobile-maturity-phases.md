@@ -28,7 +28,7 @@ phone.
 
 Internal and TestFlight / Play internal tracks for the **same** Expo remote
 client. Still not a public store listing. Signing and CI live with maintainer
-credentials; the release boundary for *public* store distribution stays closed
+credentials; the release boundary for _public_ store distribution stays closed
 (see [mobile-store-v1-hold](mobile-store-v1-hold.md) when that note lands).
 
 Exit: testers install without a laptop sideload ritual.
