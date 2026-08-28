@@ -7,3 +7,5 @@ export * from "./export";
 export * from "./backgrounds";
 export * from "./typography";
 export * from "./presets";
+export * from "./provider-glyph-colors";
+export * from "./chart-palette";

@@ -285,6 +285,7 @@ describe("UsageDashboardResponse", () => {
     expect(decoded.activity).toHaveLength(1);
     expect(decoded.detail).toHaveLength(1);
     expect(decoded.hosts[0]!.status).toBe("contributing");
+    expect(decoded.latencyStats).toEqual({ measurements: [] });
   });
 
   it("rejects a response carrying fields outside the contract", () => {

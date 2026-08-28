@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { createInMemoryDeviceKeyStore } from "./remotePairingClient";
 import { createRemoteSessionBridge } from "./remoteSessionBridge";
+import { localHostDisplayName } from "./localHostDisplayName";
 import {
   createFakeRemoteServer,
   fingerprintFromPem,
@@ -74,6 +75,13 @@ describe("RemoteSessionBridge", () => {
       deviceKeyId,
       origin: ORIGIN,
     });
+
+    expect(bridge.getState()).toMatchObject({
+      kind: "connecting",
+      hostId,
+      displayName: "Remote host",
+    });
+    expect(bridge.getState()).not.toMatchObject({ displayName: localHostDisplayName() });
 
     await waitUntil(() => bridge.getState().kind === "ready");
     expect(bridge.connection()?.session()).toBeDefined();
@@ -169,6 +177,8 @@ describe("RemoteSessionBridge", () => {
       deviceKeyStore: pairingStore,
     });
 
+    const states: ReturnType<typeof bridge.getState>[] = [];
+    bridge.subscribe((state) => states.push(state));
     bridge.resume(ORIGIN);
 
     await waitUntil(() => bridge.getState().kind === "ready");
@@ -176,6 +186,14 @@ describe("RemoteSessionBridge", () => {
       "https://mac.example.test/api/remote/pairing",
       expect.anything(),
     );
+    expect(
+      states.some((state) => state.kind === "connecting" && state.displayName === "Remote host"),
+    ).toBe(true);
+    expect(
+      states.every(
+        (state) => !("displayName" in state) || state.displayName !== localHostDisplayName(),
+      ),
+    ).toBe(true);
     expect(bridge.getState()).toMatchObject({ kind: "ready", hostId: HOST_ID });
     expect(deviceId).toBeDefined();
   });

@@ -1,9 +1,5 @@
-import {
-  LOCAL_HOST_DISPLAY_NAME,
-  LOCAL_HOST_ID,
-  decodeHostId,
-  type HostId,
-} from "@octant/contracts/host";
+import { LOCAL_HOST_ID, decodeHostId, type HostId } from "@octant/contracts/host";
+import { localHostDisplayName } from "./localHostDisplayName";
 
 /**
  * Client-local multi-host registry for Post-preview B.
@@ -35,7 +31,7 @@ export interface ClientHostRegistration {
   readonly origin?: string;
   readonly enabled: boolean;
   /**
-   * Present for paired remote hosts. Local/`This Mac` uses launch-session /
+   * Present for paired remote hosts. Local uses launch-session /
    * bridge authority instead of a remote device key and therefore has no handle.
    */
   readonly credential?: ClientHostCredentialHandle;
@@ -59,7 +55,7 @@ export interface ClientHostRegistry {
   readonly get: (hostId: HostId | string) => Promise<ClientHostRegistration | undefined>;
   readonly upsertRemote: (registration: ClientHostRegistration) => Promise<void>;
   /**
-   * Removes a remote host registration. Never removes `This Mac` / local.
+   * Removes a remote host registration. Never removes the local host.
    * Returns the removed registration so callers can forget that host's
    * device key independently.
    */
@@ -80,7 +76,7 @@ function localHostRegistration(): ClientHostRegistration {
   return {
     hostId: LOCAL_HOST_ID,
     kind: "local",
-    displayName: LOCAL_HOST_DISPLAY_NAME,
+    displayName: localHostDisplayName(),
     enabled: true,
   };
 }
@@ -186,7 +182,7 @@ function parseStored(raw: string): ClientHostRegistration[] {
 }
 
 /**
- * Ensure `This Mac` is always first and present. Remote entries keep their
+ * Ensure the local host is always first and present. Remote entries keep their
  * order. Local credential handles are never synthesized.
  */
 function withLocalHost(hosts: ReadonlyArray<ClientHostRegistration>): ClientHostRegistration[] {
@@ -199,9 +195,7 @@ function withLocalHost(hosts: ReadonlyArray<ClientHostRegistration>): ClientHost
         hostId: LOCAL_HOST_ID,
         kind: "local",
         displayName:
-          existingLocal.displayName.length > 0
-            ? existingLocal.displayName
-            : LOCAL_HOST_DISPLAY_NAME,
+          existingLocal.displayName.length > 0 ? existingLocal.displayName : localHostDisplayName(),
         enabled: existingLocal.enabled,
         ...(existingLocal.lastKnownCapabilities !== undefined
           ? { lastKnownCapabilities: existingLocal.lastKnownCapabilities }
@@ -276,7 +270,7 @@ export function createClientHostRegistry(storage: ClientHostRegistryStorage): Cl
       if (index >= 0) {
         const existing = hosts[index];
         if (existing?.kind === "local") {
-          throw new Error("Cannot replace the local This Mac host with a remote registration.");
+          throw new Error("Cannot replace the local host with a remote registration.");
         }
         hosts[index] = nextRemote;
       } else {
@@ -288,7 +282,7 @@ export function createClientHostRegistry(storage: ClientHostRegistryStorage): Cl
     async removeRemote(hostId) {
       const id = decodeHostId(hostId);
       if (id === LOCAL_HOST_ID) {
-        throw new Error("Cannot remove the local This Mac host from the federation registry.");
+        throw new Error("Cannot remove the local host from the federation registry.");
       }
       const hosts = await readAll();
       const removed = hosts.find((host) => host.hostId === id && host.kind === "remote");
@@ -306,7 +300,7 @@ export function createClientHostRegistry(storage: ClientHostRegistryStorage): Cl
       }
       const current = hosts[index]!;
       if (current.kind === "local" && patch.credential !== undefined) {
-        throw new Error("Local This Mac host cannot carry a remote device credential handle.");
+        throw new Error("The local host cannot carry a remote device credential handle.");
       }
       if (patch.credential !== undefined) {
         const conflicting = hosts.find(

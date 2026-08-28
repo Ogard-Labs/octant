@@ -176,6 +176,33 @@
   border-top: 1px solid var(--oct-border);
 }
 
+.usage-latency {
+  gap: var(--oct-space-2);
+}
+
+.usage-latency__measurements {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usage-latency__measurements li {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+}
+
+.usage-latency__measurements span,
+.usage-latency__empty,
+.usage-latency__round-trip {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .usage-dashboard__section h3 {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);

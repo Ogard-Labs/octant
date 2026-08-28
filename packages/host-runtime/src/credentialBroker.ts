@@ -1,8 +1,11 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { CredentialStore } from "./credentialStore";
-import { CredentialPurgeFailure, type CredentialPurgeStore } from "./keychainCredentialStore";
+import {
+  CredentialPurgeFailure,
+  type CredentialPurgeStore,
+  type CredentialStore,
+} from "./credentialStore";
 
 // A purge request may carry the bounded set of 128 canonical UUIDs accepted by
 // the native helper. Keep the broker limit aligned with that helper protocol;

@@ -20,6 +20,7 @@ export interface UseUsageDashboardControllerOptions {
 
 export interface UsageDashboardController {
   readonly dashboard: UsageDashboardResponse | undefined;
+  readonly connectionLatencyMs: number | undefined;
   readonly status: UsageDashboardStatus;
   readonly errorMessage: string | undefined;
   /**
@@ -54,6 +55,7 @@ export function useUsageDashboardController(
   options: UseUsageDashboardControllerOptions,
 ): UsageDashboardController {
   const [dashboard, setDashboard] = useState<UsageDashboardResponse>();
+  const [connectionLatencyMs, setConnectionLatencyMs] = useState<number>();
   const [status, setStatus] = useState<UsageDashboardStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string>();
   const [stale, setStale] = useState(false);
@@ -79,6 +81,7 @@ export function useUsageDashboardController(
       setDashboard(undefined);
       setErrorMessage(undefined);
       setStale(false);
+      setConnectionLatencyMs(undefined);
       loadedKey.current = undefined;
       return;
     }
@@ -90,10 +93,12 @@ export function useUsageDashboardController(
     // retry and no other. Carrying it onto a changed request would label the
     // previous query's figures as this one's older answer.
     setStale((current) => current && loadedKey.current === requestKey);
+    const startedAt = performance.now();
     void client
       .load(JSON.parse(requestKey) as UsageDashboardRequest, controller.signal)
       .then((response) => {
         if (generation.current !== operation) return;
+        setConnectionLatencyMs(Math.max(0, performance.now() - startedAt));
         loadedKey.current = requestKey;
         setDashboard(response);
         setStale(false);
@@ -126,5 +131,5 @@ export function useUsageDashboardController(
     };
   }, [client, enabled, requestKey, reloadToken]);
 
-  return { dashboard, status, errorMessage, stale, reload };
+  return { dashboard, connectionLatencyMs, status, errorMessage, stale, reload };
 }

@@ -28,10 +28,10 @@ const laptopStale = {
 };
 
 describe("HostSelector", () => {
-  it("renders the default This Mac host with a neutral dot when hosts are not loaded", () => {
+  it("renders the default neutral host with a neutral dot when hosts are not loaded", () => {
     render(<HostSelector />);
     expect(screen.getByRole("status")).toBeInTheDocument();
-    expect(screen.getByText("This Mac")).toBeInTheDocument();
+    expect(screen.getByText("This computer")).toBeInTheDocument();
     const dot = document.querySelector(".host-selector__dot");
     expect(dot).not.toHaveClass("host-selector__dot--healthy");
   });

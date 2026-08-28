@@ -2,9 +2,8 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { CredentialStoreFailure } from "./credentialStore";
+import { CredentialPurgeFailure, CredentialStoreFailure } from "@octant/host-runtime";
 import {
-  CredentialPurgeFailure,
   KEYCHAIN_HELPER_MAX_BYTES,
   keychainHelperSpec,
   keychainPurgeHelperSpec,

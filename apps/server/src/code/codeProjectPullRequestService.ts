@@ -32,6 +32,7 @@ import {
   type CodeProjectLinkedThreadFact,
 } from "@octant/domain/code-project-pull-request-policy";
 import { Schema } from "effect";
+import type { CacheStatsRecorder } from "../cacheStatsProjection";
 import { resolveConnectedGitHubRepository } from "./connectedRepository";
 import type {
   GhActivePullRequestListResult,
@@ -117,6 +118,7 @@ export class CodeProjectPullRequestService {
   readonly #detail: CodeProjectPullRequestDetailPort;
   readonly #threads: CodeProjectLinkedThreadSource;
   readonly #clock: () => string;
+  readonly #cacheStats: CacheStatsRecorder | undefined;
   #cache: CachedSnapshot | undefined;
   readonly #projectFreshness = new Map<string, CodeProjectPullRequestFreshness>();
   readonly #detailCache = new Map<string, CachedDetail>();
@@ -131,6 +133,7 @@ export class CodeProjectPullRequestService {
     readonly detail: CodeProjectPullRequestDetailPort;
     readonly threads: CodeProjectLinkedThreadSource;
     readonly clock?: () => string;
+    readonly cacheStats?: CacheStatsRecorder;
   }) {
     this.#projects = options.projects;
     this.#remotes = options.remotes;
@@ -138,6 +141,7 @@ export class CodeProjectPullRequestService {
     this.#detail = options.detail;
     this.#threads = options.threads;
     this.#clock = options.clock ?? (() => new Date().toISOString());
+    this.#cacheStats = options.cacheStats;
   }
 
   revokeGithub(): void {
@@ -153,6 +157,7 @@ export class CodeProjectPullRequestService {
     query: CodeProjectPullRequestQuery,
   ): Promise<CodeProjectPullRequestView> {
     const projects = await this.#resolveProjects(windowId);
+    this.#observeListRead();
     const rows = this.#authorizedActiveRows(projects);
     return this.#view({
       query,
@@ -178,6 +183,7 @@ export class CodeProjectPullRequestService {
       this.#resolveProjects(windowId),
       this.#threads.list(windowId),
     ]);
+    this.#observeListRead();
     const cachedRows = this.#authorizedRows(projects);
     const rows = boundPullRequestRows(
       mergePullRequestRows(cachedRows, this.#knownRows(projects, threads)),
@@ -223,6 +229,7 @@ export class CodeProjectPullRequestService {
     }
     const cached = this.#detailCache.get(detailKey(query));
     if (cached === undefined) {
+      this.#cacheStats?.recordMiss("pull-request-detail");
       return this.#detailView({
         query,
         detail: { state: "empty" },
@@ -230,6 +237,7 @@ export class CodeProjectPullRequestService {
         linkedThreads: [],
       });
     }
+    this.#cacheStats?.recordHit("pull-request-detail");
     const threads = await this.#threads.list(windowId);
     return this.#detailView({
       query,
@@ -261,6 +269,7 @@ export class CodeProjectPullRequestService {
       signal,
     );
     if (observed.status !== "observed" || observed.freshness !== "fresh" || observed.ambiguous) {
+      this.#cacheStats?.recordRefreshFailed("pull-request-detail");
       return this.#staleDetailView({
         query: command,
         authorized,
@@ -270,6 +279,7 @@ export class CodeProjectPullRequestService {
     }
 
     const detail = this.#observedDetail(observed);
+    this.#cacheStats?.recordRefreshSucceeded("pull-request-detail");
     const now = decodeUtcTimestamp(this.#clock());
     this.#detailCache.set(key, { detail, lastSuccessfulRefreshAt: now });
     this.#detailFreshness.set(key, { status: "fresh", lastSuccessfulRefreshAt: now });
@@ -345,6 +355,7 @@ export class CodeProjectPullRequestService {
     // sequential refresh.
     for (const { repository, listed } of listedResults) {
       if (listed.status !== "ok") {
+        this.#cacheStats?.recordRefreshFailed("pull-request-list");
         if (listed.status === "unauthorized") this.revokeGithub();
         const retryAfter =
           listed.status === "rate-limited" ? retryAfterTimestamp(listed, this.#clock) : undefined;
@@ -424,6 +435,11 @@ export class CodeProjectPullRequestService {
     }
 
     this.#githubRevoked = false;
+    // Known-identity recovery that left rows stale is not a completed list
+    // refresh; lastRefreshAt stays at the last fully fresh list.
+    if (knownIdentityRefreshFailed.size === 0) {
+      this.#cacheStats?.recordRefreshSucceeded("pull-request-list");
+    }
     const now = decodeUtcTimestamp(this.#clock());
     const refreshedRows =
       command.kind === "refresh-project"
@@ -500,6 +516,19 @@ export class CodeProjectPullRequestService {
     return resolved.filter(
       (connection): connection is CodeProjectPullRequestConnection => connection !== undefined,
     );
+  }
+
+  /**
+   * A read is a hit when it can answer from the refresh snapshot. A revoked
+   * connection is a miss, not a hit: the snapshot is gone and the reader is
+   * being told to reconnect rather than being served cached rows.
+   */
+  #observeListRead(): void {
+    if (this.#cache !== undefined && !this.#githubRevoked) {
+      this.#cacheStats?.recordHit("pull-request-list");
+      return;
+    }
+    this.#cacheStats?.recordMiss("pull-request-list");
   }
 
   #authorizedRows(

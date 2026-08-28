@@ -19,7 +19,7 @@ import { createGoalClient } from "@octant/client-runtime/goal-client";
 import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import { createShipClient, type ShipClient } from "@octant/client-runtime/ship-client";
 import { createPlanClient, type PlanClient } from "@octant/client-runtime/plan-client";
-import { createUsageDashboardClient } from "@octant/client-runtime";
+import { createUsageDashboardClient, localHostDisplayName } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { createWorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import { createWorkRequestClient } from "@octant/client-runtime/work-request-client";
@@ -1633,10 +1633,14 @@ function LaunchedShell(
       isDockToolLaunchable(surface.id, dockToolCapabilities) &&
       (!bottomPanelOpen || surface.id !== activeBottomSurface?.id),
   );
-  const dockTabs = displayedDockState.tabs.flatMap((surfaceId) => {
-    const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
-    return surface === undefined ? [] : [surface];
-  });
+  const dockTabs = useMemo(
+    () =>
+      displayedDockState.tabs.flatMap((surfaceId) => {
+        const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
+        return surface === undefined ? [] : [surface];
+      }),
+    [displayedDockState.tabs],
+  );
   const dockOpen = dockVisible;
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
@@ -1954,7 +1958,7 @@ function LaunchedShell(
     client: agentProfileClient,
     ...(localHost === undefined ? {} : { hostHealth: localHost.health }),
     hostId: LOCAL_HOST_ID,
-    hostLabel: localHost?.displayName ?? "This Mac",
+    hostLabel: localHost?.displayName ?? localHostDisplayName(),
     mode: activeMode,
     onSelectProvider: (selection) => {
       setDraftProviderInstanceId(selection.providerInstanceId);
@@ -2023,7 +2027,7 @@ function LaunchedShell(
     () =>
       buildAutomationEditorCatalog({
         hostId: String(LOCAL_HOST_ID),
-        hostLabel: localHost?.displayName ?? "This computer",
+        hostLabel: localHost?.displayName ?? localHostDisplayName(),
         actorId: String(props.launch.windowId),
         projects: automationCatalogProjects,
         profiles: automationCatalogProfiles,
