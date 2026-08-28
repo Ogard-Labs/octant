@@ -76,6 +76,17 @@ streaming video input, and computer-use takeover of the Simulator pane.
   still stands; this record only names the control-plane transport for
   Simulator input. 0043's placement and fail-closed attach rules are
   unchanged.
+- **Typed text never lands in durable evidence verbatim.** Input requests may
+  carry text for execution; journaled `ValidationEvidenceRecord.detail` and
+  diagnostic mirrors must exclude typed content and secure-field values, or
+  store only redacted length/class markers with `redacted: true`. Screenshot
+  and assertion evidence remain the durable proof of effect.
+- **Completed input actions are not re-executed on retry.** A finished
+  `actionId` returns the recorded evidence without repeating the tap, type, or
+  hardware-key effect. Interrupted or unknown-after-restart actions refuse
+  with a distinct status so callers must re-issue a new `actionId`. Tests must
+  cover timeout and host-restart cases that would otherwise duplicate
+  Simulator effects.
 
 ## Related
 
