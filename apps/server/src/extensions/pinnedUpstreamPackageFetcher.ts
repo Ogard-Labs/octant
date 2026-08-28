@@ -1,5 +1,6 @@
 import type { ExtensionSource } from "@octant/contracts/extensions";
 import { readBoundedResponseBody } from "./boundedResponseBody";
+import { MARKETPLACE_FETCH_USER_AGENT, type MarketplaceFetch } from "./marketplaceHttps";
 import type { ExtensionArchiveEntry } from "./packageInspector";
 
 /**
@@ -55,7 +56,7 @@ export interface PinnedUpstreamFetchInput {
   readonly source: ExtensionSource;
   readonly appVersion: string;
   readonly platform: NodeJS.Platform;
-  readonly fetch?: typeof globalThis.fetch;
+  readonly fetch?: MarketplaceFetch;
   readonly limits?: Partial<PinnedUpstreamFetchLimits>;
   readonly signal?: AbortSignal;
 }
@@ -88,7 +89,14 @@ export async function fetchPinnedUpstreamPackage(
   validateReference(reference);
 
   const treeUrl = `https://api.github.com/repos/${reference.owner}/${reference.repository}/git/trees/${reference.commit}?recursive=1`;
-  const treeResponse = await fetchImpl(treeUrl, ...(signal ? [{ signal }] : []));
+  const treeResponse = await fetchImpl(treeUrl, {
+    headers: {
+      accept: "application/vnd.github+json",
+      "user-agent": MARKETPLACE_FETCH_USER_AGENT,
+    },
+    redirect: "error",
+    ...(signal === undefined ? {} : { signal }),
+  });
   if (!treeResponse.ok) {
     throw new PinnedUpstreamFetchError("unavailable", "Upstream tree is unavailable.");
   }
@@ -158,10 +166,11 @@ export async function fetchPinnedUpstreamPackage(
     const batch = candidates.slice(index, index + limits.concurrency);
     const settled = await Promise.all(
       batch.map(async (candidate) => {
-        const response = await fetchImpl(
-          `${rawPrefix}${candidate.fullPath}`,
-          ...(signal ? [{ signal }] : []),
-        );
+        const response = await fetchImpl(`${rawPrefix}${candidate.fullPath}`, {
+          headers: { "user-agent": MARKETPLACE_FETCH_USER_AGENT },
+          redirect: "error",
+          ...(signal === undefined ? {} : { signal }),
+        });
         if (!response.ok) {
           throw new PinnedUpstreamFetchError("unavailable", "Upstream blob is unavailable.");
         }

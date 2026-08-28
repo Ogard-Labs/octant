@@ -384,6 +384,7 @@
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
 .setrow[data-setting-id="app-updates"],
+.setrow[data-setting-id="marketplace-fetches"],
 .setrow[data-setting-id="export-diagnostics"] {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -395,6 +396,7 @@
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
 .setrow[data-setting-id="app-updates"] > .setrow-control,
+.setrow[data-setting-id="marketplace-fetches"] > .setrow-control,
 .setrow[data-setting-id="export-diagnostics"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
@@ -1595,6 +1597,30 @@
   font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-muted);
 }
+
+.marketplace-fetch-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.marketplace-fetch-settings__automatic {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.marketplace-fetch-settings__disclosure,
+.marketplace-fetch-settings__list {
+  margin: 0;
+  font-size: calc(12 * var(--oct-text-step));
+  color: var(--oct-muted);
+}
+
+.marketplace-fetch-settings__list {
+  padding-left: 18px;
+}
+
 .settings-code-stack {
   display: grid;
   gap: var(--oct-space-6);

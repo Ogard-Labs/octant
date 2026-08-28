@@ -174,6 +174,7 @@ describe("shell settings policy", () => {
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       firstRunOnboarding: "pending",
       automaticUpdateChecks: true,
+      marketplaceFetchesEnabled: true,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
       // The host has not been told who is using it, so the profile carries no
