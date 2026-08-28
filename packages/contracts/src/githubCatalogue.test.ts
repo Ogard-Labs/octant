@@ -365,4 +365,171 @@ describe("GitHub catalogue contracts", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts bounded issue search terms and rejects raw query syntax fields", () => {
+    expect(
+      decodeGithubCatalogueReadRequest({
+        kind: "issues",
+        owner: "octant",
+        name: "octant",
+        pageSize: 10,
+        search: "crash #42 author:octocat",
+      }),
+    ).toMatchObject({ kind: "issues", search: "crash #42 author:octocat" });
+    expect(() =>
+      decodeGithubCatalogueReadRequest({
+        kind: "issues",
+        owner: "octant",
+        name: "octant",
+        pageSize: 10,
+        search: "x".repeat(161),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeGithubCatalogueReadRequest({
+        kind: "issues",
+        owner: "octant",
+        name: "octant",
+        pageSize: 10,
+        q: "repo:octant/octant type:issue",
+      }),
+    ).toThrow();
+  });
+
+  it("accepts a bounded issue detail request and response", () => {
+    expect(
+      decodeGithubCatalogueReadRequest({
+        kind: "issue",
+        owner: "octant",
+        name: "octant",
+        number: 42,
+      }),
+    ).toMatchObject({ kind: "issue", number: 42 });
+    expect(() =>
+      decodeGithubCatalogueReadRequest({
+        kind: "issue",
+        owner: "octant",
+        name: "octant",
+        number: 0,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeGithubCatalogueReadRequest({
+        kind: "issue",
+        owner: "octant",
+        name: "octant",
+        number: 42,
+        fields: ["body"],
+      }),
+    ).toThrow();
+    expect(
+      decodeGithubCatalogueReadResponse({
+        kind: "issue",
+        issue: {
+          number: 42,
+          title: "Crash on save",
+          state: "open",
+          author: "octocat",
+          createdAt: "2026-08-01T12:00:00Z",
+          updatedAt: "2026-08-11T12:00:00Z",
+          url: "https://github.com/octant/octant/issues/42",
+          labels: ["bug"],
+          body: "Steps to reproduce",
+          bodyTruncated: false,
+          comments: [
+            {
+              author: "hubot",
+              createdAt: "2026-08-02T09:00:00Z",
+              body: "Still happening",
+              truncated: false,
+            },
+          ],
+        },
+        freshness: { status: "fresh" },
+      }),
+    ).toMatchObject({ kind: "issue", issue: { number: 42, bodyTruncated: false } });
+  });
+
+  it("bounds GithubIssueDetail labels, comments, and UTF-8 body size", () => {
+    const issue = {
+      number: 1,
+      title: "t",
+      state: "open" as const,
+      author: "a",
+      createdAt: "2026-08-01T12:00:00Z",
+      updatedAt: "2026-08-11T12:00:00Z",
+      url: "https://github.com/octant/octant/issues/1",
+      labels: [] as string[],
+      body: "",
+      bodyTruncated: false,
+      comments: [] as const,
+    };
+    expect(
+      decodeGithubCatalogueReadResponse({
+        kind: "issue",
+        issue: { ...issue, body: "x".repeat(8 * 1024) },
+        freshness: { status: "fresh" },
+      }),
+    ).toMatchObject({ kind: "issue" });
+    expect(() =>
+      decodeGithubCatalogueReadResponse({
+        kind: "issue",
+        issue: { ...issue, body: "x".repeat(8 * 1024 + 1) },
+        freshness: { status: "fresh" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeGithubCatalogueReadResponse({
+        kind: "issue",
+        issue: { ...issue, labels: Array.from({ length: 21 }, (_, index) => `label-${index}`) },
+        freshness: { status: "fresh" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeGithubCatalogueReadResponse({
+        kind: "issue",
+        issue: { ...issue, labels: ["x".repeat(51)] },
+        freshness: { status: "fresh" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeGithubCatalogueReadResponse({
+        kind: "issue",
+        issue: {
+          ...issue,
+          comments: Array.from({ length: 11 }, () => ({
+            author: "a",
+            createdAt: "2026-08-02T09:00:00Z",
+            body: "c",
+            truncated: false,
+          })),
+        },
+        freshness: { status: "fresh" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeGithubCatalogueReadResponse({
+        kind: "issue",
+        issue: {
+          ...issue,
+          comments: [
+            {
+              author: "a",
+              createdAt: "2026-08-02T09:00:00Z",
+              body: "x".repeat(2 * 1024 + 1),
+              truncated: false,
+            },
+          ],
+        },
+        freshness: { status: "fresh" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeGithubCatalogueReadResponse({
+        kind: "issue",
+        issue: { ...issue, body: "Authorization: bearer ghp_abcdefghijklmnopqrstuv" },
+        freshness: { status: "fresh" },
+      }),
+    ).toThrow();
+  });
 });

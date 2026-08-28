@@ -10,6 +10,19 @@ const safeText = (limit: number) =>
     Schema.filter((value) => !SECRETISH.test(value) && !value.includes("\0")),
   );
 
+const utf8ByteLength = (value: string) => new TextEncoder().encode(value).byteLength;
+const ISSUE_BODY_MAX_BYTES = 8 * 1024;
+const COMMENT_BODY_MAX_BYTES = 2 * 1024;
+
+/** Empty bodies are valid; bound UTF-8 bytes rather than characters. */
+const boundedBody = (maxBytes: number) =>
+  Schema.String.pipe(
+    Schema.filter(
+      (value) =>
+        !SECRETISH.test(value) && !value.includes("\0") && utf8ByteLength(value) <= maxBytes,
+    ),
+  );
+
 /** GitHub login: 1–39 alphanumerics with single interior hyphens. */
 export const GithubRepositoryOwner = Schema.String.pipe(
   Schema.filter((value) => /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(value)),
@@ -102,6 +115,29 @@ export const GithubIssueRow = Schema.Struct({
 }).annotations(strict);
 export type GithubIssueRow = typeof GithubIssueRow.Type;
 
+export const GithubIssueComment = Schema.Struct({
+  author: safeText(128),
+  createdAt: isoTimestamp,
+  body: boundedBody(COMMENT_BODY_MAX_BYTES),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type GithubIssueComment = typeof GithubIssueComment.Type;
+
+export const GithubIssueDetail = Schema.Struct({
+  number: Schema.Int.pipe(Schema.positive()),
+  title: safeText(256),
+  state: Schema.Literal("open", "closed"),
+  author: safeText(128),
+  createdAt: isoTimestamp,
+  updatedAt: isoTimestamp,
+  url: githubUrl,
+  labels: Schema.Array(safeText(50)).pipe(Schema.maxItems(20)),
+  body: boundedBody(ISSUE_BODY_MAX_BYTES),
+  bodyTruncated: Schema.Boolean,
+  comments: Schema.Array(GithubIssueComment).pipe(Schema.maxItems(10)),
+}).annotations(strict);
+export type GithubIssueDetail = typeof GithubIssueDetail.Type;
+
 export const GithubPullRequestRow = Schema.Struct({
   number: Schema.Int.pipe(Schema.positive()),
   title: safeText(256),
@@ -182,6 +218,13 @@ export const GithubCatalogueReadRequest = Schema.Union(
     pageSize: GithubCataloguePageSize,
     cursor: Schema.optional(GithubCatalogueCursor),
     state: Schema.optional(GithubIssueStateFilter),
+    search: Schema.optional(safeText(160)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("issue"),
+    owner: GithubRepositoryOwner,
+    name: GithubRepositoryName,
+    number: Schema.Int.pipe(Schema.positive()),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-requests"),
@@ -233,6 +276,11 @@ export const GithubCatalogueReadResponse = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("issues"),
     page: GithubIssuePage,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("issue"),
+    issue: GithubIssueDetail,
+    freshness: GithubCatalogueFreshness,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-requests"),
