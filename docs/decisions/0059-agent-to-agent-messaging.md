@@ -50,10 +50,30 @@ policy bypass dressed as convenience.
 - **Journal before side effect.** Planned event names (contracts sketch, not
   shipped): `agent.message-sent@1`, `agent.message-delivered@1`,
   `agent.message-refused@1`, `agent.message-acknowledged@1` on an
-  `agent-message` aggregate. Payloads name sender/recipient ids, correlation,
-  opaque body reference, size class, and refuse reason
-  (`unauthorized`, `depth-exceeded`, `recipient-terminal`, `oversize`,
-  `policy`). Duplicate or out-of-order provider events apply idempotently.
+  `agent-message` aggregate. Every event requires a durable `messageId`.
+  Required payload fields by event:
+  - sent: `messageId`, `correlationId`, `senderThreadId`, optional
+    `senderRunId`, `recipientThreadId`, optional `recipientRunId`,
+    `bodyReference`, `byteLength`, `occurredAt`
+  - delivered: `messageId`, `correlationId`, `recipientThreadId`, optional
+    `recipientRunId`, `bodyReference`, `byteLength`, `occurredAt`
+  - refused: `messageId`, `correlationId`, `refuseReason`
+    (`unauthorized`, `depth-exceeded`, `recipient-terminal`, `oversize`,
+    `policy`), `occurredAt`
+  - acknowledged: `messageId`, `correlationId`, `occurredAt`
+  Duplicate or out-of-order provider events apply idempotently.
+- **Target matrix vs 0049.** 0049 remains Chat-only for
+  `octant_thread_message` and does not admit Work or Code write hops.
+  This record adds a separate tool family that may target Chat threads, Work
+  threads, Code threads, and AgentRuns when the admitting principal's Open
+  scope covers both endpoints. It does not supersede 0049's Chat-only rule
+  for the mention tool; Work and Code still refuse that path.
+- **Delivery-time authorization.** `agent.message-sent@1` is admission only.
+  Before `agent.message-delivered@1`, the server rechecks the sender's live
+  grant and the recipient's lifecycle. Grant revocation, recipient closure,
+  or purge between the two events refuses delivery (`unauthorized` /
+  `recipient-terminal`); admission never creates an irrevocable delivery
+  right.
 - **Implementation stays out** until this record is Accepted and the threat
   model acceptance below is signed off. Until then the only cross-thread
   write path remains 0049's Chat coordination tool.

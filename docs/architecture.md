@@ -189,7 +189,7 @@ and
 It is Proposed only: the host would admit, clamp, journal, and deliver; bodies
 would taint the recipient as untrusted external content; messaging must never
 bypass sandbox, approvals, or mode authority. Implementation waits on
-acceptance of that record.
+acceptance of that record **and** sign-off of the companion threat model.
 
 ## Workspace shell
 

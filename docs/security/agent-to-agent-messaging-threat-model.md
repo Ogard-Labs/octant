@@ -53,7 +53,10 @@ power in another.
 
 - 0009 untrusted-content rules and thread-lifetime taint remain in force.
 - 0012 hierarchy, depth, and concurrency ceilings remain in force.
-- 0049 Chat coordination stays a separate, mention-gated path.
+- 0049 Chat coordination stays a separate, mention-gated path. Broader
+  messaging (this design) may target Chat, Work, Code, and AgentRuns under
+  Open-scope intersection; it does not widen `octant_thread_message` beyond
+  Chat.
 - Full compromise of the host user is outside containment; messaging must not
   amplify that compromise across Projects or hosts.
 
@@ -69,6 +72,7 @@ power in another.
 | T6  | Unauthorized target (foreign Project, purged thread, closed run)    | Open check + lifecycle gate; refuse `unauthorized` / `recipient-terminal` with no title leak beyond opaque ids       |
 | T7  | Provider-native side channel bypasses Octant events                 | No peer pipe; only host-delivered messages count; native subagent chat is not this channel                           |
 | T8  | Replay or duplicate delivery double-applies side effects            | Idempotent event application; acknowledge is explicit and journaled                                                  |
+| T11 | Grant revoked or recipient closed between send and deliver          | Recheck live sender grant and recipient lifecycle before `agent.message-delivered@1`; refuse rather than deliver     |
 | T9  | Remote client forges a send                                         | Authenticated principal + host-side admission; remote cannot mint workspace or authority receipts                    |
 | T10 | Swarm UI invents team authority above parents                       | Hierarchy remains the product; no rooms, roles, or shared wallets                                                    |
 
