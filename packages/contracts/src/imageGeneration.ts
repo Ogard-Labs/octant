@@ -1,6 +1,14 @@
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
-import { ProviderFailure, ProviderInstanceId, ProviderModelId } from "./providers";
+import {
+  GeminiImageAspectRatio,
+  GeminiImageResolution,
+  OpenAiImageQuality,
+  OpenAiImageSize,
+  ProviderFailure,
+  ProviderInstanceId,
+  ProviderModelId,
+} from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -166,3 +174,99 @@ export const ImageUsageUnits = Schema.Struct({
 }).annotations(strict);
 export type ImageUsageUnits = typeof ImageUsageUnits.Type;
 export const decodeImageUsageUnits = Schema.decodeUnknownSync(ImageUsageUnits);
+
+/**
+ * An enabled image profile the renderer may name. Credentials never appear:
+ * only the identity, allowlist, and generation defaults the sheet can honor.
+ */
+export const ImageGenerationProfileView = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
+  driverKind: Schema.Literal("openai-image", "gemini-native-image"),
+  modelAllowlist: Schema.Array(ProviderModelId).pipe(Schema.minItems(1)),
+  defaultModel: ProviderModelId,
+  quality: Schema.optional(OpenAiImageQuality),
+  size: Schema.optional(OpenAiImageSize),
+  aspectRatio: Schema.optional(GeminiImageAspectRatio),
+  resolution: Schema.optional(GeminiImageResolution),
+}).annotations(strict);
+export type ImageGenerationProfileView = typeof ImageGenerationProfileView.Type;
+
+export const ImageGenerationProfilesResponse = Schema.Struct({
+  profiles: Schema.Array(ImageGenerationProfileView),
+}).annotations(strict);
+export type ImageGenerationProfilesResponse = typeof ImageGenerationProfilesResponse.Type;
+
+/**
+ * Reference images ride the HTTP request, never the journal. Base64 is the
+ * renderer-facing form; the route decodes to bytes before enqueue.
+ */
+export const ImageGenerationReferenceInput = Schema.Struct({
+  mediaType: ImageArtifactMediaType,
+  base64: Schema.NonEmptyString.pipe(
+    Schema.maxLength(Math.ceil((MAX_GENERATED_IMAGE_BYTES * 4) / 3) + 8),
+  ),
+}).annotations(strict);
+export type ImageGenerationReferenceInput = typeof ImageGenerationReferenceInput.Type;
+
+export const ImageGenerationEnqueueRequest = Schema.Struct({
+  threadKind: ImageJobThreadKind,
+  scopeId: ImageGenerationScopeId,
+  profileInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_IMAGE_PROMPT_CHARACTERS)),
+  variantCount: Schema.optional(PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_IMAGE_VARIANTS))),
+  quality: Schema.optional(OpenAiImageQuality),
+  size: Schema.optional(OpenAiImageSize),
+  aspectRatio: Schema.optional(GeminiImageAspectRatio),
+  resolution: Schema.optional(GeminiImageResolution),
+  parentArtifactRef: Schema.optional(ImageArtifactRef),
+  references: Schema.optional(Schema.Array(ImageGenerationReferenceInput).pipe(Schema.maxItems(4))),
+}).annotations(strict);
+export type ImageGenerationEnqueueRequest = typeof ImageGenerationEnqueueRequest.Type;
+
+export const ImageGenerationJobsResponse = Schema.Struct({
+  jobs: Schema.Array(ImageJob),
+}).annotations(strict);
+export type ImageGenerationJobsResponse = typeof ImageGenerationJobsResponse.Type;
+
+export const ImageGenerationSaveRequest = Schema.Struct({
+  relativePath: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+}).annotations(strict);
+export type ImageGenerationSaveRequest = typeof ImageGenerationSaveRequest.Type;
+
+export const ImageGenerationSaveResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("saved"),
+    relativePath: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("failed"),
+    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
+  }).annotations(strict),
+);
+export type ImageGenerationSaveResult = typeof ImageGenerationSaveResult.Type;
+
+export const decodeImageGenerationProfileView = Schema.decodeUnknownSync(
+  ImageGenerationProfileView,
+);
+export const decodeImageGenerationProfilesResponse = Schema.decodeUnknownSync(
+  ImageGenerationProfilesResponse,
+);
+export const decodeImageGenerationReferenceInput = Schema.decodeUnknownSync(
+  ImageGenerationReferenceInput,
+);
+export const decodeImageGenerationEnqueueRequest = Schema.decodeUnknownSync(
+  ImageGenerationEnqueueRequest,
+);
+export const decodeImageGenerationJobsResponse = Schema.decodeUnknownSync(
+  ImageGenerationJobsResponse,
+);
+export const decodeImageGenerationSaveRequest = Schema.decodeUnknownSync(
+  ImageGenerationSaveRequest,
+);
+export const decodeImageGenerationSaveResult = Schema.decodeUnknownSync(ImageGenerationSaveResult);

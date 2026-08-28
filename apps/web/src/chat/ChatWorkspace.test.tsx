@@ -2286,6 +2286,127 @@ describe("ChatWorkspace", () => {
     expect(screen.queryByText(/Conversation copied as Markdown\./)).toBeNull();
     vi.unstubAllGlobals();
   });
+
+  it("does not show Create image until the provider snapshot is ready", () => {
+    render(<ChatWorkspace controller={controllerFixture()} onOpenSettings={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
+  });
+
+  it("does not show Create image when the image client is missing", () => {
+    // An eligible profile must be present, or this would pass for the wrong
+    // reason: with no profile the action stays hidden even with a client.
+    const snapshot = providerSnapshot();
+    const withEligibleImageProfile = {
+      ...snapshot,
+      instances: [
+        ...snapshot.instances,
+        {
+          id: "image-profile-1" as never,
+          displayName: "Studio images",
+          enabled: true,
+          environmentPolicy: "inherit-host" as const,
+          version: 1 as never,
+          createdAt: now as never,
+          updatedAt: now as never,
+          driverKind: "openai-image" as never,
+          configuration: {
+            kind: "openai-image-http",
+            modelAllowlist: ["gpt-image-2"],
+            defaultModel: "gpt-image-2",
+          } as never,
+        },
+      ],
+    };
+    render(
+      <ChatWorkspace
+        controller={controllerFixture()}
+        onOpenSettings={vi.fn()}
+        providerSnapshot={withEligibleImageProfile}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
+  });
+
+  it("does not attach a generated image after the thread has changed", async () => {
+    const user = userEvent.setup();
+    let finishUpload!: () => void;
+    const upload = vi.fn<ChatController["upload"]>(
+      () =>
+        new Promise((resolve) => {
+          finishUpload = () =>
+            resolve({
+              id: "00000000-0000-4000-8000-000000000941" as never,
+              threadId: threadId as never,
+              displayName: "generated.png",
+              mediaType: "image/png",
+              byteLength: 5,
+              digest: "a".repeat(64) as never,
+              status: "finalized",
+              createdAt: now as never,
+            });
+        }),
+    );
+    const discard = vi.fn(async (input) => ({
+      id: input.attachmentId,
+      threadId: input.threadId,
+      displayName: "discarded",
+      mediaType: "image/png" as const,
+      byteLength: 0,
+      digest: "a".repeat(64) as never,
+      status: "purged" as const,
+      createdAt: now as never,
+    }));
+    const jobId = "a3000000-0000-4000-8000-000000000003";
+    const attachmentId = "a3000000-0000-4000-8000-000000000010";
+    const { unmount } = render(
+      <ChatWorkspace
+        controller={controllerFixture({ upload, discard })}
+        imageGenerationClient={
+          {
+            list: async () => ({
+              jobs: [
+                {
+                  id: jobId,
+                  status: "completed",
+                  threadKind: "chat-thread",
+                  scopeId: threadId,
+                  profileInstanceId: providerId,
+                  modelId: "gpt-image-2",
+                  promptHash: "a".repeat(64),
+                  artifacts: [
+                    {
+                      attachmentId,
+                      hash: "b".repeat(64),
+                      size: 5,
+                      mime: "image/png",
+                      evidence: {
+                        profileInstanceId: providerId,
+                        modelId: "gpt-image-2",
+                        promptHash: "a".repeat(64),
+                        jobId,
+                      },
+                    },
+                  ],
+                  version: 3,
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ],
+            }),
+            artifact: async () =>
+              new Blob([Uint8Array.from([1, 2, 3, 4, 5])], { type: "image/png" }),
+          } as never
+        }
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Attach" }));
+    await waitFor(() => expect(upload).toHaveBeenCalled());
+    unmount();
+    finishUpload();
+    await Promise.resolve();
+    expect(discard).toHaveBeenCalled();
+  });
 });
 
 function pooledProviderSnapshot(): ProviderRegistrySnapshot {

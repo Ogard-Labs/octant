@@ -7,6 +7,7 @@ import {
   IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE,
   IMAGE_JOB_STATUS_CHANGED,
   decodeImageArtifactId,
+  decodeImageGenerationEnqueueRequest,
   decodeImageGenerationEvidence,
   decodeImageGenerationScopeId,
   decodeImageJob,
@@ -186,5 +187,33 @@ describe("ImageUsageUnits", () => {
 
   it("rejects a zero image count", () => {
     expect(() => decodeImageUsageUnits({ count: 0, quality: "exact" })).toThrow();
+  });
+});
+
+describe("image generation invocation requests", () => {
+  it("accepts an enqueue request without image bytes in the prompt fields", () => {
+    expect(
+      decodeImageGenerationEnqueueRequest({
+        threadKind: "chat-thread",
+        scopeId: ids.scope,
+        profileInstanceId: ids.profile,
+        modelId: "gpt-image-2",
+        prompt: "a red cube",
+        variantCount: 2,
+        quality: "high",
+      }),
+    ).toMatchObject({ prompt: "a red cube", variantCount: 2, quality: "high" });
+  });
+
+  it("rejects an enqueue request that names a filesystem path", () => {
+    expect(() =>
+      decodeImageGenerationEnqueueRequest({
+        threadKind: "chat-thread",
+        scopeId: "../escape",
+        profileInstanceId: ids.profile,
+        modelId: "gpt-image-2",
+        prompt: "a red cube",
+      }),
+    ).toThrow();
   });
 });

@@ -70,6 +70,9 @@ function filesystem(
     openWriteFile: async () => {
       throw new Error("write is not used during research source observation");
     },
+    openDirectory: async () => {
+      throw new Error("directory is not used during research source observation");
+    },
     writeFile: async () => undefined,
     mkdir: async () => undefined,
     unlink: async () => undefined,

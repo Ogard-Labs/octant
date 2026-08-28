@@ -10,6 +10,7 @@ import {
   mkdir,
   unlink,
   rename,
+  type FileHandle,
 } from "node:fs/promises";
 
 /**
@@ -75,6 +76,29 @@ export interface WorkOpenWriteFile {
 }
 
 /**
+ * One open directory, held so child creates stay bound to this object.
+ *
+ * `O_NOFOLLOW` on a path-based create only refuses a symlinked final name. A
+ * parent swapped for an escaping symlink after resolveForCreate would still be
+ * followed. Child opens go through this handle so that swap cannot redirect
+ * the write.
+ */
+export interface WorkOpenDirectory {
+  stat(): Promise<{
+    readonly isDirectory: boolean;
+    readonly device: string;
+    readonly inode: string;
+  }>;
+  openDirectory(name: string): Promise<WorkOpenDirectory>;
+  mkdir(name: string): Promise<void>;
+  openWriteFile(
+    name: string,
+    options: { readonly exclusiveCreate: boolean },
+  ): Promise<WorkOpenWriteFile>;
+  close(): Promise<void>;
+}
+
+/**
  * Testable filesystem port for Work resolution and mutation. The live
  * implementation delegates to `node:fs/promises`; tests supply an in-memory
  * implementation so confinement, symlink, moved-root, and cancellation paths
@@ -101,6 +125,7 @@ export interface WorkFilesystemPort {
     path: string,
     options: { readonly exclusiveCreate: boolean },
   ): Promise<WorkOpenWriteFile>;
+  openDirectory(path: string): Promise<WorkOpenDirectory>;
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, bytes: Uint8Array): Promise<void>;
   mkdir(path: string, options: { readonly recursive: true }): Promise<void>;
@@ -159,39 +184,12 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
       close: () => handle.close(),
     };
   },
-  openWriteFile: async (path, options) => {
-    const flags = options.exclusiveCreate
-      ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW
-      : constants.O_WRONLY | constants.O_NOFOLLOW;
-    const handle = await open(path, flags, 0o600);
-    return {
-      stat: async () => {
-        const info = await handle.stat({ bigint: true });
-        return {
-          isFile: info.isFile(),
-          size: Number(info.size),
-          device: String(info.dev),
-          inode: String(info.ino),
-        };
-      },
-      write: async (bytes) => {
-        await handle.truncate(0);
-        const buffer = Buffer.from(bytes);
-        let offset = 0;
-        while (offset < buffer.byteLength) {
-          const { bytesWritten } = await handle.write(
-            buffer,
-            offset,
-            buffer.byteLength - offset,
-            offset,
-          );
-          if (bytesWritten === 0) throw new Error("short write");
-          offset += bytesWritten;
-        }
-      },
-      close: () => handle.close(),
-    };
-  },
+  openWriteFile: async (path, options) => openLiveWriteFile(path, options),
+  openDirectory: async (path) =>
+    liveDirectory(
+      await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW),
+      path,
+    ),
   readFile: async (path) => await readFile(path),
   writeFile: async (path, bytes) => {
     await writeFile(path, bytes);
@@ -202,3 +200,127 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
   unlink,
   rename,
 };
+
+function confinedEntryName(name: string): string {
+  if (
+    name.length === 0 ||
+    name === "." ||
+    name === ".." ||
+    name.includes("/") ||
+    name.includes("\0")
+  ) {
+    throw new Error(`invalid directory entry ${name}`);
+  }
+  return name;
+}
+
+// macOS has no fd-relative path surface: /dev/fd/N names the duplicated
+// descriptor itself, so appending a child (`/dev/fd/N/name`) fails ENOENT
+// (observed on Darwin: openDirectory, mkdir, and exclusive create all refuse).
+// Children are opened by the directory's tracked canonical path instead, with
+// O_NOFOLLOW_ANY (fcntl.h, macOS 11+) refusing a symlink in any component
+// atomically in-kernel. Resolution hands this port canonical paths, so the
+// flag only fires on a component swapped in after the containment proof — the
+// escape the Linux fd-relative walk refuses by construction. The two walks
+// diverge only on a raced parent rename: the Linux write keeps landing on the
+// held object, while macOS refuses and the caller reports the write as
+// refused.
+const darwinNoFollowAny = 0x20000000;
+
+// O_NOFOLLOW_ANY subsumes O_NOFOLLOW, and macOS refuses the pair with EINVAL
+// (observed), so the darwin child guard replaces the final-component flag
+// rather than adding to it.
+const childNoFollow = process.platform === "linux" ? constants.O_NOFOLLOW : darwinNoFollowAny;
+
+function childOpenPath(handle: FileHandle, directoryPath: string, name: string): string {
+  const entry = confinedEntryName(name);
+  if (process.platform === "linux") return `/proc/self/fd/${handle.fd}/${entry}`;
+  return `${directoryPath}/${entry}`;
+}
+
+function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirectory {
+  return {
+    stat: async () => {
+      const info = await handle.stat({ bigint: true });
+      return {
+        isDirectory: info.isDirectory(),
+        device: String(info.dev),
+        inode: String(info.ino),
+      };
+    },
+    openDirectory: async (name) =>
+      liveDirectory(
+        await open(
+          childOpenPath(handle, directoryPath, name),
+          constants.O_RDONLY | constants.O_DIRECTORY | childNoFollow,
+        ),
+        `${directoryPath}/${confinedEntryName(name)}`,
+      ),
+    mkdir: async (name) => {
+      const path = childOpenPath(handle, directoryPath, name);
+      if (process.platform === "linux") {
+        await mkdir(path);
+        return;
+      }
+      // mkdir(2) accepts no O_NOFOLLOW_ANY and the runtime exposes no mkdirat,
+      // so a symlink swapped over the tracked path could route this create
+      // outside the proven parent — a mutation confinement must not emit even
+      // when empty. Refuse while the path no longer names the held object.
+      // There is deliberately no rmdir cleanup on failure: a path-based
+      // deletion follows a swapped component the same way and would hand the
+      // race an unconfined delete, which is strictly worse than the one empty
+      // directory a lost check-to-mkdir race can leave. Nothing can ever be
+      // written through that race, because every byte-carrying open stays
+      // guarded.
+      const named = await lstat(directoryPath, { bigint: true });
+      const held = await handle.stat({ bigint: true });
+      if (!named.isDirectory() || named.dev !== held.dev || named.ino !== held.ino) {
+        throw new Error(`directory entry ${name} cannot be created under a moved parent`);
+      }
+      await mkdir(path);
+      const created = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | childNoFollow);
+      await created.close();
+    },
+    openWriteFile: async (name, options) =>
+      openLiveWriteFile(childOpenPath(handle, directoryPath, name), options, childNoFollow),
+    close: () => handle.close(),
+  };
+}
+
+async function openLiveWriteFile(
+  path: string,
+  options: { readonly exclusiveCreate: boolean },
+  noFollow: number = constants.O_NOFOLLOW,
+): Promise<WorkOpenWriteFile> {
+  const flags = options.exclusiveCreate
+    ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow
+    : constants.O_WRONLY | noFollow;
+  const handle = await open(path, flags, 0o600);
+  return {
+    stat: async () => {
+      const info = await handle.stat({ bigint: true });
+      return {
+        isFile: info.isFile(),
+        size: Number(info.size),
+        device: String(info.dev),
+        inode: String(info.ino),
+      };
+    },
+    write: async (bytes) => {
+      await handle.truncate(0);
+      const buffer = Buffer.from(bytes);
+      let offset = 0;
+      while (offset < buffer.byteLength) {
+        const { bytesWritten } = await handle.write(
+          buffer,
+          offset,
+          buffer.byteLength - offset,
+          offset,
+        );
+        if (bytesWritten === 0) throw new Error("short write");
+        offset += bytesWritten;
+      }
+    },
+    close: () => handle.close(),
+  };
+}

@@ -43,6 +43,8 @@ import type {
 } from "@octant/contracts/apple-toolchain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
+import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type { ImageGenerationProfileView } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
 import type { CodeTerminalId } from "@octant/contracts/code";
@@ -121,6 +123,9 @@ export interface CodeWorkspaceProps {
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly tab: CodeTab;
   readonly canvasClient?: CanvasClient;
+  readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
+  readonly onOpenSettings?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /**
@@ -166,6 +171,13 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         controller={props.controller}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+        {...(props.imageGenerationClient === undefined
+          ? {}
+          : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.imageGenerationProfiles === undefined
+          ? {}
+          : { imageGenerationProfiles: props.imageGenerationProfiles })}
+        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
         {...(props.onOpenCodeThread === undefined

@@ -86,6 +86,7 @@ export * from "./threadMentionPolicy";
 export * from "./fileMentionPolicy";
 export * from "./usagePolicy";
 export * from "./imageJobPolicy";
+export * from "./imageGenerationInvocationPolicy";
 export * from "./userProfilePolicy";
 export * from "./agentProfilePolicy";
 export * from "./agentRunPolicy";

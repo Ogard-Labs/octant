@@ -115,6 +115,9 @@ function filesystem(
     openWriteFile: async () => {
       throw new Error("write is not used during resolution");
     },
+    openDirectory: async () => {
+      throw new Error("directory is not used during resolution");
+    },
     // `readFile` follows a symlink, which is exactly the escape a confined read
     // must not be able to make on the strength of a name checked earlier.
     readFile: async (path) => {
@@ -130,6 +133,7 @@ function filesystem(
 }
 
 const file = (bytes: number): EntrySpec => ({ kind: "file", bytes: new Uint8Array(bytes) });
+const directory = (): EntrySpec => ({ kind: "directory" });
 const symlink = (target: string): EntrySpec => ({ kind: "symlink", target });
 
 const availableBinding: WorkRootBinding = {
@@ -376,7 +380,7 @@ describe("WorkResolutionService", () => {
   });
 
   it("skips stale detection for a create (no known version)", async () => {
-    const service = new WorkResolutionService(filesystem([]));
+    const service = new WorkResolutionService(filesystem([["/work", directory()]]));
     const result = await service.resolveForCreate({
       binding: availableBinding,
       relativePath: "new.md",
@@ -384,6 +388,8 @@ describe("WorkResolutionService", () => {
     expect(result.status).toBe("resolved-for-create");
     if (result.status !== "resolved-for-create") return;
     expect(result.absolutePath).toBe("/work/new.md");
+    expect(result.parentAbsolute).toBe("/work");
+    expect(result.remaining).toEqual(["new.md"]);
   });
 
   it("fails closed as escapes-root for a create with a traversal path", async () => {
@@ -393,5 +399,37 @@ describe("WorkResolutionService", () => {
       relativePath: "../secret.md",
     });
     expect(result).toEqual({ status: "escapes-root" });
+  });
+
+  it("refuses a create whose parent directory is an escaping symlink", async () => {
+    const service = new WorkResolutionService(
+      filesystem([
+        ["/work", directory()],
+        ["/work/assets", symlink("/secret")],
+      ]),
+    );
+    const result = await service.resolveForCreate({
+      binding: availableBinding,
+      relativePath: "assets/shared/x.png",
+    });
+    expect(result).toEqual({ status: "symlink-escape" });
+  });
+
+  it("creates under a contained parent directory after resolving it", async () => {
+    const service = new WorkResolutionService(
+      filesystem([
+        ["/work", directory()],
+        ["/work/assets", directory()],
+      ]),
+    );
+    const result = await service.resolveForCreate({
+      binding: availableBinding,
+      relativePath: "assets/x.png",
+    });
+    expect(result.status).toBe("resolved-for-create");
+    if (result.status !== "resolved-for-create") return;
+    expect(result.absolutePath).toBe("/work/assets/x.png");
+    expect(result.parentAbsolute).toBe("/work/assets");
+    expect(result.remaining).toEqual(["x.png"]);
   });
 });

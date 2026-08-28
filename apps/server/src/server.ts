@@ -154,6 +154,10 @@ import { ThemeService } from "./theme/themeService";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { GeneratedImageStore } from "./image/generatedImageStore";
 import { ImageJobService } from "./image/imageJobService";
+import { createImageAgentTools } from "./image/imageAgentTools";
+import { createImageRouteHandler } from "./image/imageRoutes";
+import { chatImageScopeAllowedForWindow } from "./image/imageScopeAuthority";
+import { writeConfinedWorkFile } from "./work/workConfinedWrite";
 import { CodeContentStore } from "./code/codeContentStore";
 import { CodeEvidenceStore } from "./code/codeEvidenceStore";
 import { CodeAttachmentStore } from "./code/codeAttachmentStore";
@@ -530,9 +534,11 @@ import {
   LOCAL_HOST_ID,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
+  decodeImageGenerationScopeId,
   decodeMultiModelRoutingVendorId,
   type ChatThreadView,
   type CodeWorktreeRemoteFacts,
+  type ImageGenerationSaveResult,
   type MentionableThreadId,
   type MultiModelPoolCandidate,
   type ProviderContextBlock,
@@ -550,6 +556,7 @@ import {
   activeChatTurns,
   assertHostRoutable,
   authorizeCanvasInventoryAccess,
+  canonicalizeWorkRelativePath,
   chatAttemptAnswered,
   decidesCodeEffectsByApproval,
   defaultAgentRunAuthorityCeilingForMode,
@@ -3549,6 +3556,7 @@ export function startOctantServer(
       journal: persistence.journal,
       uuid: randomUUID,
     });
+    let imageJobService!: ImageJobService;
     const chatService = new ChatService({
       persistence,
       issueContext: githubIssueContextService,
@@ -3626,6 +3634,15 @@ export function startOctantServer(
                 thread,
                 port: canvasAgentToolPort,
               }),
+          createImageAgentTools({
+            threadKind: "chat-thread",
+            scopeId: decodeImageGenerationScopeId(String(thread.id)),
+            port: {
+              listInstances: () => persistence.readProviderInstances(),
+              enqueue: (input) => imageJobService.enqueue(input),
+              listJobs: (scopeId) => imageJobService.listByScope(scopeId),
+            },
+          }),
         ),
       resolveExtensionSelectionContext: createExtensionChatResolver({
         snapshot: () => extensionApiService.snapshot(),
@@ -3723,7 +3740,7 @@ export function startOctantServer(
           persistence.imageJobProjection.isFinalizedAttachmentReferenced(scopeId, attachmentId),
       }),
     );
-    const imageJobService = new ImageJobService({
+    imageJobService = new ImageJobService({
       journal: persistence.journal,
       projection: persistence.imageJobProjection,
       attachments: generatedImageStore,
@@ -4107,6 +4124,9 @@ export function startOctantServer(
         },
       },
       canvases: persistence.canvasProjection,
+      generatedImages: {
+        listByScope: (scopeId) => imageJobService.listByScope(scopeId),
+      },
     });
     const threadExportRoutes = createThreadExportRouteHandler({
       service: threadExportService,
@@ -4502,6 +4522,147 @@ export function startOctantServer(
       projects: projectService,
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    });
+    const imageRoutes = createImageRouteHandler({
+      jobs: imageJobService,
+      listInstances: () => persistence.readProviderInstances(),
+      authorizeScope: async (windowId, threadKind, scopeId) => {
+        const threadId = String(scopeId);
+        try {
+          if (threadKind === "chat-thread") {
+            const view = chatService.read(decodeChatThreadId(threadId));
+            const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+            return chatImageScopeAllowedForWindow({
+              chatContext: workspace?.contextByMode.chat,
+              thread: view?.thread,
+            });
+          }
+          if (threadKind === "work-thread") {
+            const bootstrap = await workThreadService.bootstrap(windowId);
+            return bootstrap.threads.some((thread) => String(thread.id) === threadId);
+          }
+          const view = await routeCodeService.read(windowId, decodeCodeThreadId(threadId));
+          return view !== undefined;
+        } catch {
+          return false;
+        }
+      },
+      saveToProject: async (input) => {
+        if (input.threadKind === "chat-thread") {
+          return {
+            status: "refused",
+            reason: "Chat artifacts grant no filesystem authority.",
+          } satisfies ImageGenerationSaveResult;
+        }
+        try {
+          let canonicalRoot: string | undefined;
+          if (input.threadKind === "work-thread") {
+            const bootstrap = await workThreadService.bootstrap(input.windowId);
+            const thread = bootstrap.threads.find(
+              (candidate) => String(candidate.id) === String(input.scopeId),
+            );
+            const project =
+              thread === undefined ? undefined : persistence.readProject(thread.projectId);
+            if (
+              project === undefined ||
+              project.type !== "work" ||
+              project.lifecycle !== "active"
+            ) {
+              return {
+                status: "refused",
+                reason: "The Work Project is unavailable.",
+              } satisfies ImageGenerationSaveResult;
+            }
+            canonicalRoot = project.binding.canonicalRoot;
+            const relativePath = canonicalizeWorkRelativePath(input.relativePath);
+            const resolution = await workResolutionService.resolveForCreate({
+              binding: {
+                canonicalRoot,
+                knownCanonicalRoot: canonicalRoot,
+                availability: "available",
+                bindingSuperseded: false,
+              },
+              relativePath,
+            });
+            if (resolution.status !== "resolved-for-create") {
+              return {
+                status: "refused",
+                reason: "The save path is outside the Project.",
+              } satisfies ImageGenerationSaveResult;
+            }
+            const written = await writeConfinedWorkFile({
+              filesystem: liveWorkFilesystem,
+              canonicalPath: resolution.absolutePath,
+              allowCreate: true,
+              parent: {
+                absolutePath: resolution.parentAbsolute,
+                identity: resolution.parentIdentity,
+                remaining: resolution.remaining,
+              },
+              bytes: input.bytes,
+            });
+            if (!written) {
+              return {
+                status: "failed",
+                reason: "The image could not be saved.",
+              } satisfies ImageGenerationSaveResult;
+            }
+            return { status: "saved", relativePath: resolution.relativePath };
+          }
+          const view = await routeCodeService.read(
+            input.windowId,
+            decodeCodeThreadId(String(input.scopeId)),
+          );
+          const project = persistence.readProject(view.thread.projectId);
+          if (project === undefined || project.type !== "code" || project.lifecycle !== "active") {
+            return {
+              status: "refused",
+              reason: "The Code Project is unavailable.",
+            } satisfies ImageGenerationSaveResult;
+          }
+          canonicalRoot = project.binding.canonicalRoot;
+          const relativePath = canonicalizeWorkRelativePath(input.relativePath);
+          const resolution = await workResolutionService.resolveForCreate({
+            binding: {
+              canonicalRoot,
+              knownCanonicalRoot: canonicalRoot,
+              availability: "available",
+              bindingSuperseded: false,
+            },
+            relativePath,
+          });
+          if (resolution.status !== "resolved-for-create") {
+            return {
+              status: "refused",
+              reason: "The save path is outside the Project.",
+            } satisfies ImageGenerationSaveResult;
+          }
+          const written = await writeConfinedWorkFile({
+            filesystem: liveWorkFilesystem,
+            canonicalPath: resolution.absolutePath,
+            allowCreate: true,
+            parent: {
+              absolutePath: resolution.parentAbsolute,
+              identity: resolution.parentIdentity,
+              remaining: resolution.remaining,
+            },
+            bytes: input.bytes,
+          });
+          if (!written) {
+            return {
+              status: "failed",
+              reason: "The image could not be saved.",
+            } satisfies ImageGenerationSaveResult;
+          }
+          return { status: "saved", relativePath: resolution.relativePath };
+        } catch {
+          return {
+            status: "failed",
+            reason: "The image could not be saved.",
+          } satisfies ImageGenerationSaveResult;
+        }
+      },
+      windowAuthorityStore,
     });
     // Work research. Sources are observed read-only through the
     // confined filesystem port, so a brief can only cite files inside the
@@ -5689,6 +5850,7 @@ export function startOctantServer(
       (await workMutationRoutes(request)) ??
       (await previewRoutes(request)) ??
       (await canvasRoutes(request)) ??
+      (await imageRoutes(request)) ??
       (await artifactLibraryRoutes(request)) ??
       (await artifactMirrorRoutes(request)) ??
       (await automationRoutes(request)) ??
@@ -5872,6 +6034,11 @@ export function startOctantServer(
       },
       purgeThreadArtifacts: async ({ mode, threadId }) => {
         if (mode === "chat") await chatAttachmentStore.purgeThread(threadId as never);
+        try {
+          await generatedImageStore.purgeScope(decodeImageGenerationScopeId(String(threadId)));
+        } catch {
+          // A thread id that is not a generated-image scope is not an image basin.
+        }
       },
     });
     const hostRuntimePlatform =
