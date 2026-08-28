@@ -1,4 +1,7 @@
 import { Fragment, type ReactNode } from "react";
+import type { TrackerReferenceResolution } from "@octant/contracts";
+import { useTrackerReferenceResolutions } from "../tracker/TrackerReferenceContext";
+import { splitPlainTextWithTrackerReferences } from "../tracker/TrackerReferenceText";
 
 export interface ChatRichTextProps {
   readonly body: string;
@@ -12,16 +15,20 @@ type RichBlock =
   | { readonly kind: "quote"; readonly text: string };
 
 export function ChatRichText(props: ChatRichTextProps) {
+  const { byIdentity } = useTrackerReferenceResolutions(props.body);
   return (
     <div className="chat-rich-text">
       {parseBlocks(props.body).map((block, index) => (
-        <RichBlockView block={block} key={`${block.kind}-${index}`} />
+        <RichBlockView block={block} byIdentity={byIdentity} key={`${block.kind}-${index}`} />
       ))}
     </div>
   );
 }
 
-function RichBlockView(props: { readonly block: RichBlock }) {
+function RichBlockView(props: {
+  readonly block: RichBlock;
+  readonly byIdentity: ReadonlyMap<string, TrackerReferenceResolution>;
+}) {
   const block = props.block;
   switch (block.kind) {
     case "code":
@@ -35,22 +42,22 @@ function RichBlockView(props: { readonly block: RichBlock }) {
       );
     case "heading": {
       const Heading = `h${block.level}` as "h2" | "h3" | "h4";
-      return <Heading>{inlineContent(block.text)}</Heading>;
+      return <Heading>{inlineContent(block.text, props.byIdentity)}</Heading>;
     }
     case "list": {
       const List = block.ordered ? "ol" : "ul";
       return (
         <List>
           {block.items.map((item, index) => (
-            <li key={`${item}-${index}`}>{inlineContent(item)}</li>
+            <li key={`${item}-${index}`}>{inlineContent(item, props.byIdentity)}</li>
           ))}
         </List>
       );
     }
     case "quote":
-      return <blockquote>{inlineContent(block.text)}</blockquote>;
+      return <blockquote>{inlineContent(block.text, props.byIdentity)}</blockquote>;
     case "paragraph":
-      return <p>{inlineContent(block.text)}</p>;
+      return <p>{inlineContent(block.text, props.byIdentity)}</p>;
   }
 }
 
@@ -135,7 +142,10 @@ function startsBlock(line: string): boolean {
   );
 }
 
-function inlineContent(text: string): ReactNode {
+function inlineContent(
+  text: string,
+  byIdentity: ReadonlyMap<string, TrackerReferenceResolution>,
+): ReactNode {
   const tokens = text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\n]+\)|\n)/g);
   return tokens.map((token, index) => {
     if (token === "\n") return <br key={index} />;
@@ -156,7 +166,9 @@ function inlineContent(text: string): ReactNode {
         </a>
       );
     }
-    return <Fragment key={index}>{token}</Fragment>;
+    return (
+      <Fragment key={index}>{splitPlainTextWithTrackerReferences(token, byIdentity)}</Fragment>
+    );
   });
 }
 

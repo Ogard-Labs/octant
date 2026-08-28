@@ -28,6 +28,7 @@ import {
   useThreadMentionTypeahead,
 } from "../../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../../chat/useThreadMentions";
+import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type { MentionableThreadId } from "@octant/contracts";
 
 export interface WorkComposerAdapterProps {
@@ -181,6 +182,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                   chips={threadMentions.chips}
                   onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
                 />
+                <TrackerReferenceComposerHints draft={prompt} />
                 <WorkImageAttachmentChips images={images} />
               </>
             }
