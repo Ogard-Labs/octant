@@ -420,8 +420,8 @@ modelId }`, and the model picker is provider-first. Discovery can find
   app-managed tools, images, resume, approvals, and subagents are supported.
   The server disables what is unsupported instead of emulating it. Bounded
   provider subprocesses run under a deny-default profile: Seatbelt via
-  `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing either
-  backend fails closed as incompatible.
+  `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing the backend
+  selected for the host platform fails closed as incompatible.
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
@@ -518,7 +518,8 @@ mechanisms are:
   requires a broad file-read rule; each launch's exact roots are re-allowed
   after those denials. Path checks alone are never the boundary. Confined
   reads open a handle and verify identity against what containment resolved.
-  Missing `sandbox-exec` or `bwrap` fails closed.
+  Missing the platform-selected backend (`sandbox-exec` on macOS, `bwrap` on
+  Linux) fails closed.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent
