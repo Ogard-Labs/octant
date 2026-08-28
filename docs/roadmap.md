@@ -128,7 +128,8 @@ starts.
   handoff remain primary; a full IDE would run as a separately launched
   companion.
 - **Apple devices and distribution** — physical devices, provisioning,
-  TestFlight, and App Store submission on top of the Simulator loop.
+  TestFlight, and App Store submission on top of the Simulator loop. Design:
+  [apple-devices-distribution.md](apple-devices-distribution.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths.
 - **Remote SSH development environments**, **live guest sharing**, **thread
