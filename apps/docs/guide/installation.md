@@ -69,7 +69,15 @@ bun --cwd packages/cli src/bin.ts server run
 bun --cwd packages/cli src/bin.ts web
 ```
 
-`bwrap` is the confinement runtime. An unlocked Secret Service plus `secret-tool` holds provider credentials. Point each CLI provider at the absolute path of the binary you installed. Kimi Code's managed-profile confinement stays macOS-only and reports `incompatible`.
+`bwrap` is the confinement runtime. An unlocked Secret Service plus `secret-tool` holds provider credentials. On a headless host with no login keyring, point the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a prompt:
+
+```sh
+busctl --user call org.freedesktop.secrets /org/freedesktop/secrets \
+  org.freedesktop.Secret.Service SetAlias so default \
+  /org/freedesktop/secrets/collection/session
+```
+
+Provider CLIs are ordinary host binaries. Keep `~/.local/bin` on `PATH`, install a CLI there (this host used the official Codex installer), and point the provider instance at that absolute path. Kimi Code's managed-profile confinement stays macOS-only and reports `incompatible`.
 
 Do not remove or corrupt the default directory. Removing the native window-state file changes the window ID, while removing the SQLite file discards all local journal and shell data.
 
