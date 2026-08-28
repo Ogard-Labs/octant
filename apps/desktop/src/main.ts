@@ -2127,6 +2127,7 @@ function installIpcHandlers(): void {
       exists: existsSync,
       homeDirectory: homedir(),
       platform: process.platform,
+      ...(process.env.PATH === undefined ? {} : { pathEnv: process.env.PATH }),
     }),
   );
   ipcMain.handle(IPC_CHANNELS.openCodeCheckoutInApplication, async (event, request: unknown) => {
