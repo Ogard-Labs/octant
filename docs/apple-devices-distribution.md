@@ -10,11 +10,11 @@ superseding surface of [0014](decisions/0014-apple-development-capability.md)).
 Three layers sit on the same app-managed Apple workbench. They must not collapse
 into one "devices" flag.
 
-| Layer | What it is | Preview |
-| --- | --- | --- |
-| Simulator | Host-owned Simulator destinations, live frame, build/run/test, evidence | In scope (0043) |
-| Physical device | `devicectl` / paired hardware destinations, provisioning profiles, device logs and screenshots | Later design; not preview |
-| Distribution | Signing for release, TestFlight, App Store Connect submission | Later; outside Current Release Boundary |
+| Layer           | What it is                                                                                     | Preview                                 |
+| --------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------- |
+| Simulator       | Host-owned Simulator destinations, live frame, build/run/test, evidence                        | In scope (0043)                         |
+| Physical device | `devicectl` / paired hardware destinations, provisioning profiles, device logs and screenshots | Later design; not preview               |
+| Distribution    | Signing for release, TestFlight, App Store Connect submission                                  | Later; outside Current Release Boundary |
 
 Physical device support reuses Simulator rules where they fit: stable
 destination identity, leases so threads cannot steal each other's device,
