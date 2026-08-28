@@ -41,8 +41,9 @@ than only that it is small.
   packaging pipeline that can produce a signed build but no updater is fine —
   that is this deliverable half-built. An updater that runs against unsigned
   builds is not, and the code refuses to be configured that way rather than
-  trusting a release process to remember. Intel, Windows and Linux packaging,
-  mobile store distribution, and hosted relay stay outside the boundary.
+  trusting a release process to remember. Mobile store distribution and hosted
+  relay stay outside the boundary. Desktop packaging beyond the first Apple
+  Silicon surface is opened by 0058 under the same signing and updater rules.
 - **Trust comes from the signature, never from the host.** A feed served from
   the expected domain over a valid certificate proves only that somebody
   controls that domain today, which is not a claim about a release. Octant
