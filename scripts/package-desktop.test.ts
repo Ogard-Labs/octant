@@ -27,6 +27,7 @@ import {
   validatePackagedRendererPolicy,
   stripNativeDebugMetadata,
   validatePackagedPayload,
+  resolveReleaseVersion,
   validateBundledInternalRuntime,
   validatePackagedRuntimeImports,
   validateCodeWebAssets,
@@ -41,7 +42,7 @@ describe("desktop packaging boundary", () => {
     // The version is not cosmetic: the updater compares it against the feed,
     // and a build that cannot say which version it is cannot refuse a
     // downgrade.
-    expect(createPackagerOptions("/tmp/octant-stage", "/tmp/octant-out")).toEqual({
+    expect(createPackagerOptions("/tmp/octant-stage", "/tmp/octant-out", "0.1.0")).toEqual({
       appBundleId: "app.octant.desktop",
       appVersion: "0.1.0",
       arch: "arm64",
@@ -437,7 +438,7 @@ describe("desktop packaging boundary", () => {
     ).toThrow("forbidden product identity");
   });
 
-  it("keeps output ignored and exposes no release automation", async () => {
+  it("keeps output ignored and packages without third-party release tooling", async () => {
     const [gitignore, rootPackage, desktopPackage] = await Promise.all([
       readFile(resolve(repositoryRoot, ".gitignore"), "utf8"),
       readFile(resolve(repositoryRoot, "package.json"), "utf8"),
@@ -445,10 +446,29 @@ describe("desktop packaging boundary", () => {
     ]);
 
     expect(gitignore.split("\n")).toContain("out/");
+    // Signing, notarizing, and feed signing are this repository's own scripts,
+    // whose ordering and refusals are tested here. A packaging framework that
+    // owned any of those steps would move the decisions somewhere these tests
+    // cannot see, which is the thing to keep out — not the words.
     const serializedConfiguration = `${rootPackage}\n${desktopPackage}`.toLowerCase();
     expect(serializedConfiguration).not.toMatch(
-      /notari|publish|updater|update-feed|electron-builder|osxsign|signingidentity/,
+      /electron-builder|electron-updater|@electron\/osx-sign|@electron\/notarize/,
     );
+  });
+
+  it("refuses a release version that is not the one this repository declares", () => {
+    // A build free to name any version can publish 9.0.0 from a branch, and
+    // every install that saw it would then refuse the real release as older.
+    expect(resolveReleaseVersion({}, "0.2.0")).toBe("0.2.0");
+    expect(
+      resolveReleaseVersion({ OCTANT_RELEASE_VERSION: "0.2.0-preview.20260828.4" }, "0.2.0"),
+    ).toBe("0.2.0-preview.20260828.4");
+    expect(() => resolveReleaseVersion({ OCTANT_RELEASE_VERSION: "9.0.0" }, "0.2.0")).toThrow(
+      /declares 0\.2\.0/,
+    );
+    expect(() =>
+      resolveReleaseVersion({ OCTANT_RELEASE_VERSION: "not-a-version" }, "0.2.0"),
+    ).toThrow(/MAJOR\.MINOR\.PATCH/);
   });
 
   it("observes a child that exits while its exit listener is being installed", async () => {

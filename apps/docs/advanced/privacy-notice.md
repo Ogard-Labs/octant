@@ -90,10 +90,12 @@ version, platform, and architecture, and uses the user agent `Octant` with
 no version. It sends no account, install identifier, Project, thread,
 configuration, counter, or cookie.
 
-Whoever serves the feed — `https://octant.sh/updates/darwin-arm64.json` by
-default, or an HTTPS URL you set with `OCTANT_UPDATE_FEED_URL` — can infer
-that someone at that IP address runs Octant, which version, and roughly how
-often it is open. That is more than an IP alone.
+Whoever serves the feed — under `https://octant.sh/updates` by default, or an
+HTTPS base you set with `OCTANT_UPDATE_FEED_BASE_URL` — can infer that someone
+at that IP address runs Octant, which version, on which release ring, and
+roughly how often it is open. The ring is part of the address rather than a
+parameter, so the path itself says whether you follow stable or preview. That
+is more than an IP alone.
 
 Automatic checking is a switch in **Settings → General → Updates**. Off
 means no request is made at all. The desktop process starts with checking

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AppReleaseRing } from "./appUpdates";
 import { AppleProjectPath } from "./appleToolchain";
 import { ChatThreadId } from "./chat";
 import { CodeRelativePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
@@ -311,6 +312,16 @@ export const ShellSettings = Schema.Struct({
    * release notes describe.
    */
   automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * The release ring to follow, once someone has chosen one.
+   *
+   * Deliberately without a default. A build already knows its own ring from
+   * its version, and a default here would overrule it — a preview build would
+   * quietly move itself to stable the first time these settings loaded. Absent
+   * means "nobody has chosen", which the host reads as "follow the ring you
+   * were built for" (`docs/decisions/0034`).
+   */
+  releaseRing: Schema.optional(AppReleaseRing),
   /** Enabled Open in applications, in the order shown by the native shell. */
   openInApplications: Schema.optionalWith(OpenInApplicationOrder, {
     default: () => [...DEFAULT_OPEN_IN_APPLICATIONS],

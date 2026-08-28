@@ -1,0 +1,157 @@
+# Stable ring.
+#
+# Fires on a `vMAJOR.MINOR.PATCH` tag and publishes a signed feed at
+# `<base>/stable/darwin-arm64.json`. The same one-deliverable rule as the
+# preview ring applies (`docs/decisions/0034`): signed, notarized, and updatable
+# or not published at all.
+#
+# The `stable` environment carries a required reviewer, so pushing a tag
+# proposes a release and a person approves it. Everything before the approval is
+# checks; nothing reaches the signing key or the feed until someone says yes.
+name: Release (stable)
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+concurrency:
+  group: release-stable-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify the tag names this release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          declared=$(grep -oE 'version: "[^"]+"' scripts/package-desktop.ts | head -1 | cut -d'"' -f2)
+          # The tag and the version compiled into the app have to be the same
+          # string. If they drift, the app announces one version and the feed
+          # offers another, and every install compares the wrong pair.
+          if [ "$version" != "$declared" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match the declared version ${declared}." >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Build, sign, notarize, and publish
+    needs: verify
+    # Required reviewers live on this environment. A tag proposes a release;
+    # a person approves it before any secret is readable.
+    environment: stable
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
+      - run: bun run --cwd apps/desktop build
+
+      # Values that are not credentials are repository variables rather than
+      # secrets: the team id and the identity appear in the signature, the
+      # known-hosts entry is a public key, and a path is a path. Keeping them
+      # out of the secret store means the secrets that remain are all things
+      # whose disclosure would actually matter.
+      - name: Import the Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.OCTANT_SIGNING_CERTIFICATE_P12 }}
+          p12-password: ${{ secrets.OCTANT_SIGNING_CERTIFICATE_PASSWORD }}
+
+      - name: Store the notary credentials
+        env:
+          NOTARY_KEY: ${{ secrets.OCTANT_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ vars.OCTANT_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ vars.OCTANT_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$NOTARY_KEY" > "${RUNNER_TEMP}/notary.p8"
+          xcrun notarytool store-credentials octant-notary \
+            --key "${RUNNER_TEMP}/notary.p8" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID"
+          rm -f "${RUNNER_TEMP}/notary.p8"
+
+      - name: Package, sign, and notarize
+        env:
+          OCTANT_RELEASE_BUILD: "1"
+          OCTANT_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          OCTANT_SIGNING_IDENTITY: ${{ vars.OCTANT_SIGNING_IDENTITY }}
+          OCTANT_SIGNING_TEAM_ID: ${{ vars.OCTANT_SIGNING_TEAM_ID }}
+          OCTANT_NOTARY_PROFILE: octant-notary
+        run: bun run package:desktop
+
+      - name: Publish the release archive
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          archive=$(ls out/Octant-*-darwin-arm64.zip)
+          gh release create "${GITHUB_REF_NAME}" "$archive" \
+            --title "Octant ${VERSION}" \
+            --generate-notes
+          # Constructed rather than read back from the API: the download URL of
+          # a release asset is determined by the tag and the file name, and
+          # deriving it means the feed cannot end up pointing at whichever
+          # asset a list query happened to return first.
+          echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$archive")" >> "$GITHUB_OUTPUT"
+          echo "archive=${archive}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign the feed
+        env:
+          OCTANT_UPDATE_FEED_PRIVATE_KEY: ${{ secrets.OCTANT_UPDATE_FEED_PRIVATE_KEY }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          ARTIFACT_URL: ${{ steps.release.outputs.url }}
+          ARCHIVE: ${{ steps.release.outputs.archive }}
+        run: |
+          set -euo pipefail
+          bun scripts/sign-update-feed.ts \
+            --version "$VERSION" \
+            --ring stable \
+            --platform darwin \
+            --arch arm64 \
+            --url "$ARTIFACT_URL" \
+            --artifact "$ARCHIVE" \
+            --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --out "${RUNNER_TEMP}/feed/stable/darwin-arm64.json"
+
+      - name: Publish the feed
+        env:
+          SSH_KEY: ${{ secrets.OCTANT_FEED_SSH_KEY }}
+          SSH_HOST: ${{ vars.OCTANT_FEED_SSH_HOST }}
+          SSH_USER: ${{ vars.OCTANT_FEED_SSH_USER }}
+          SSH_KNOWN_HOSTS: ${{ vars.OCTANT_FEED_SSH_KNOWN_HOSTS }}
+          REMOTE_PATH: ${{ vars.OCTANT_FEED_REMOTE_PATH }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/octant_feed
+          # Pinned rather than accepted on first use: a feed pushed to whatever
+          # answers on that address is a feed published to an unknown host.
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/octant_feed ~/.ssh/known_hosts
+          rsync --archive --compress --chmod=D755,F644 \
+            --rsh "ssh -i ~/.ssh/octant_feed -o IdentitiesOnly=yes" \
+            "${RUNNER_TEMP}/feed/stable" \
+            "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}/"

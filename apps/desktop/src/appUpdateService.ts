@@ -1,9 +1,15 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { AppUpdateRelease, AppUpdateState, AppVersion } from "@octant/contracts/app-updates";
+import type {
+  AppReleaseRing,
+  AppUpdateRelease,
+  AppUpdateState,
+  AppVersion,
+} from "@octant/contracts/app-updates";
 import {
   resolveUpdateInstallReadiness,
   resolveUpdateOffer,
+  ringForVersion,
   type UpdateWorkInFlight,
 } from "@octant/domain";
 import {
@@ -11,6 +17,7 @@ import {
   fetchUpdateFeed,
   fetchVerifiedArtifact,
   type FeedVerifier,
+  updateFeedUrl,
 } from "./appUpdateFeed";
 
 /**
@@ -32,7 +39,11 @@ export interface AppUpdaterPort {
 
 export interface AppUpdateServiceOptions {
   readonly updater: AppUpdaterPort;
-  readonly feedUrl: string;
+  /**
+   * The base every feed address is built from. Not a single URL: the ring can
+   * change while the app runs, and each ring is its own feed.
+   */
+  readonly feedBaseUrl: string;
   /**
    * The largest release Octant will read into memory to verify. A release is a
    * known size; a body far past it is not one.
@@ -40,6 +51,12 @@ export interface AppUpdateServiceOptions {
   readonly maxArtifactBytes?: number;
   readonly app: { readonly version: AppVersion; readonly platform: string; readonly arch: string };
   readonly automaticChecks: boolean;
+  /**
+   * The ring to follow before the persisted preference arrives. Defaults to
+   * the ring this build belongs to, which is read from its own version — a
+   * preview build follows previews unless it is told otherwise.
+   */
+  readonly ring?: AppReleaseRing;
   readonly verifier?: FeedVerifier;
   readonly fetchImpl?: typeof globalThis.fetch;
   readonly clock?: () => string;
@@ -77,16 +94,18 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
       return () => clearTimeout(timer);
     });
   let automaticChecks = options.automaticChecks;
+  let ring: AppReleaseRing = options.ring ?? ringForVersion(options.app.version);
   let state: AppUpdateState = {
     status: "idle",
     currentVersion: options.app.version,
     automaticChecks,
+    ring,
   };
   let staged: { readonly feedUrl: string; readonly close: () => void } | undefined;
   let cancelScheduled: (() => void) | undefined;
 
   const publish = (next: Partial<AppUpdateState>): AppUpdateState => {
-    state = { ...state, ...next, currentVersion: options.app.version, automaticChecks };
+    state = { ...state, ...next, currentVersion: options.app.version, automaticChecks, ring };
     options.onState?.(state);
     return state;
   };
@@ -102,7 +121,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
    */
   const publishWithoutOffer = (next: Partial<AppUpdateState>): AppUpdateState => {
     const { available: _withdrawn, ...rest } = state;
-    state = { ...rest, ...next, currentVersion: options.app.version, automaticChecks };
+    state = { ...rest, ...next, currentVersion: options.app.version, automaticChecks, ring };
     options.onState?.(state);
     return state;
   };
@@ -135,6 +154,21 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
   const service = Object.freeze({
     state: (): AppUpdateState => state,
 
+    /**
+     * Follow a different ring from now on.
+     *
+     * Any release this service had verified is dropped: it was verified
+     * against the ring that was being followed then, and carrying it across
+     * would let a preview offer install after someone chose stable. The next
+     * check answers for the new ring from scratch.
+     */
+    setRing(next: AppReleaseRing): AppUpdateState {
+      if (next === ring) return state;
+      ring = next;
+      releaseLoopback();
+      return publishWithoutOffer({ status: "idle" });
+    },
+
     setAutomaticChecks(enabled: boolean): AppUpdateState {
       // Off means no request is made at all, not a quiet check whose answer is
       // withheld: the point of the switch is what leaves the machine. So the
@@ -162,7 +196,11 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
         });
       }
       const fetched = await fetchUpdateFeed(
-        options.feedUrl,
+        updateFeedUrl(options.feedBaseUrl, {
+          ring,
+          platform: options.app.platform,
+          arch: options.app.arch,
+        }),
         {
           version: String(options.app.version),
           platform: options.app.platform,
@@ -184,7 +222,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
       }
       const offer = resolveUpdateOffer({
         document: fetched.document,
-        app: options.app,
+        app: { ...options.app, ring },
         verifySignature: verifier.verify,
       });
       if (offer.kind === "refuse") {
@@ -296,6 +334,8 @@ function refusalMessage(refusal: string): string {
       return "The update service answered with something Octant could not read.";
     case "wrong-platform":
       return "That update is for a different kind of Mac.";
+    case "wrong-ring":
+      return "That update belongs to a different release ring, so it was refused.";
     default:
       return "The update service could not be reached.";
   }
