@@ -79,8 +79,10 @@ streaming video input, and computer-use takeover of the Simulator pane.
 - **Typed text never lands in durable evidence verbatim.** Input requests may
   carry text for execution; journaled `ValidationEvidenceRecord.detail` and
   diagnostic mirrors must exclude typed content and secure-field values, or
-  store only redacted length/class markers with `redacted: true`. Screenshot
-  and assertion evidence remain the durable proof of effect.
+  store only redacted length/class markers with `redacted: true`. Post-input
+  screenshots and assertion payloads that would show typed or secure-field
+  values must mask, crop, or omit those regions before persistence — raw PNG
+  bytes are not an exception to the redaction rule.
 - **Completed input actions are not re-executed on retry.** A finished
   `actionId` returns the recorded evidence without repeating the tap, type, or
   hardware-key effect. Interrupted or unknown-after-restart actions refuse
