@@ -60,7 +60,7 @@ The foreground command drains on SIGINT/SIGTERM and reports an existing owner in
 
 ### Headless Linux for ADE testing
 
-The packaged desktop app is macOS-only. A Linux host can run the same server and browser client to exercise Chat, Work, and Code:
+The packaged desktop app is macOS-only. A Linux host can run the same server and browser client to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the macOS system requirements above), then:
 
 ```sh
 sudo apt-get install -y bubblewrap libsecret-tools gnome-keyring dbus-user-session zsh
@@ -69,7 +69,7 @@ bun --cwd packages/cli src/bin.ts server run
 bun --cwd packages/cli src/bin.ts web
 ```
 
-`bwrap` is the confinement runtime. An unlocked Secret Service plus `secret-tool` holds provider credentials. On a headless host with no login keyring, point the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a prompt:
+`bwrap` is the confinement runtime. Provider credentials need an unlocked user D-Bus session and Secret Service before `secret-tool` works. On a graphical login that is usually already true. On a headless host, start a user session bus (for example via `dbus-user-session` / `systemd --user`), start `gnome-keyring-daemon` so the secrets component is available, and confirm with `secret-tool store --label=octant-probe service octant key probe <<<probe` then `secret-tool lookup service octant key probe`. On a host with no login keyring, point the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a prompt:
 
 ```sh
 busctl --user call org.freedesktop.secrets /org/freedesktop/secrets \

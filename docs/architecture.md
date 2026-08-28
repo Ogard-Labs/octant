@@ -397,14 +397,16 @@ modelId }`, and the model picker is provider-first. Discovery can find
 - **Honest capability.** Each driver reports, per mode and per model, whether
   app-managed tools, images, resume, approvals, and subagents are supported.
   The server disables what is unsupported instead of emulating it. Bounded
-  provider subprocesses run under a deny-default Seatbelt profile; a missing
-  `sandbox-exec` fails closed as incompatible.
-- **Credentials.** API keys live in the macOS Keychain and are reached only
-  through the desktop's loopback credential broker by opaque UUID reference.
+  provider subprocesses run under a deny-default profile: Seatbelt via
+  `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing either
+  backend fails closed as incompatible.
+- **Credentials.** API keys live in the host credential store — macOS Keychain
+  on macOS, freedesktop Secret Service on Linux — and are reached only
+  through the host's loopback credential broker by opaque UUID reference.
   Provider OAuth and subscription login are delegated to the provider's own
   runtime; Octant never stores, refreshes, or journals those tokens. Secrets
-  Octant holds for an integration use the same Keychain path: the host keeps
-  an opaque reference; plugins, the renderer, the journal, and diagnostics
+  Octant holds for an integration use the same host credential path: the host
+  keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
   never receive raw token material. Broker URLs and tokens are stripped from
   every child environment. Linear is the first bundled-off Integration plugin:
   it contributes a Settings card through `settings.section`, connects with
