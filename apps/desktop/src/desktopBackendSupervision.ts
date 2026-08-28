@@ -155,6 +155,9 @@ export function createDesktopBackendSupervisor(
   const onExit = (child: ManagedChildProcess): void => {
     if (released || observedChild !== child) return;
     clearChild();
+    // hostLifecycle.restart() stops the process we are replacing. That
+    // expected exit must not count as a crash or start a second restart.
+    if (status === "restarting") return;
     const backoff = nextRestartBackoff({ failures, now: now() });
     if (backoff.crashLoop) {
       gaveUp(new Error("The managed server kept exiting and could not be restarted."));

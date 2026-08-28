@@ -256,6 +256,34 @@ describe("createDesktopBackendSupervisor", () => {
     expect(supervisor.snapshot().status).toBe("idle");
   });
 
+  it("does not schedule a second restart when the old child exits during replacement", async () => {
+    const schedule = createSchedule();
+    const first = createChild();
+    const second = createChild();
+    const pending = createDeferred<FakeChild | undefined>();
+    const restart = vi.fn(() => pending.promise);
+    const supervisor = createDesktopBackendSupervisor({
+      restart,
+      reportFatal: vi.fn(),
+      schedule: schedule.schedule,
+      now: () => 1_000,
+    });
+
+    supervisor.observe(first);
+    first.exit();
+    schedule.runs.at(-1)?.run();
+    expect(supervisor.snapshot().status).toBe("restarting");
+    expect(restart).toHaveBeenCalledOnce();
+
+    first.exit();
+    expect(restart).toHaveBeenCalledOnce();
+    expect(supervisor.snapshot().status).toBe("restarting");
+
+    pending.resolve(second);
+    await Promise.resolve();
+    expect(supervisor.snapshot().status).toBe("supervising");
+  });
+
   it("does not retry a rejected restart after release", async () => {
     const schedule = createSchedule();
     const first = createChild();
