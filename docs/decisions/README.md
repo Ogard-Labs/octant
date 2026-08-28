@@ -62,6 +62,7 @@ distilled successor of the earlier long-form design specifications.
 | [0052](0052-canvas-boards.md)                                 | Canvas boards are the diagram block                               | Proposed           |
 | [0053](0053-computer-use-destinations.md)                     | Computer-use destinations                                         | Accepted           |
 | [0054](0054-headless-host-credential-store.md)                | The credential broker is a host capability, not a desktop one     | Accepted           |
+| [0055](0055-image-generation-provider-profiles.md)            | Image generation provider profiles                                | Accepted           |
 
 ## Adding an ADR
 

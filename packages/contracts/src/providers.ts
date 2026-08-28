@@ -38,6 +38,8 @@ export const ProviderDriverKind = Schema.Literal(
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
+  "openai-image",
+  "gemini-native-image",
 );
 export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 
@@ -334,6 +336,73 @@ export const AzureFoundryProviderConfiguration = Schema.Struct({
   manualModelIds: UniqueManualModelIds,
 }).annotations(strict);
 export type AzureFoundryProviderConfiguration = typeof AzureFoundryProviderConfiguration.Type;
+
+/**
+ * Suggested GPT Image model IDs for Settings. Image allowlists are
+ * manual-entry; these names are not the only values Octant accepts and are
+ * never rewritten on save.
+ */
+export const OPENAI_IMAGE_MODEL_PRESETS = [
+  "gpt-image-2",
+  "gpt-image-1.5",
+  "gpt-image-1",
+  "gpt-image-1-mini",
+] as const;
+export const OpenAiImageQuality = Schema.Literal("auto", "low", "medium", "high");
+export type OpenAiImageQuality = typeof OpenAiImageQuality.Type;
+export const OpenAiImageSize = Schema.Literal("auto", "1024x1024", "1536x1024", "1024x1536");
+export type OpenAiImageSize = typeof OpenAiImageSize.Type;
+const imageAllowlistContainsDefault = (configuration: {
+  readonly modelAllowlist: ReadonlyArray<string>;
+  readonly defaultModel: string;
+}): boolean =>
+  configuration.modelAllowlist.some((id) => String(id) === String(configuration.defaultModel));
+export const OpenAiImageProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("openai-image-http"),
+  modelAllowlist: UniqueManualModelIds,
+  defaultModel: ProviderModelId,
+  quality: Schema.optional(OpenAiImageQuality),
+  size: Schema.optional(OpenAiImageSize),
+})
+  .pipe(Schema.filter(imageAllowlistContainsDefault))
+  .annotations(strict);
+export type OpenAiImageProviderConfiguration = typeof OpenAiImageProviderConfiguration.Type;
+
+/**
+ * Suggested Gemini image model IDs for Settings. `gemini-2.5-flash-image` is
+ * legacy; allowlists stay manual-entry and are never rewritten on save.
+ */
+export const GEMINI_IMAGE_MODEL_PRESETS = [
+  "gemini-3.1-flash-image",
+  "gemini-3.1-flash-lite-image",
+  "gemini-3-pro-image",
+  "gemini-2.5-flash-image",
+] as const;
+export const GeminiImageAspectRatio = Schema.Literal(
+  "1:1",
+  "2:3",
+  "3:2",
+  "3:4",
+  "4:3",
+  "4:5",
+  "5:4",
+  "9:16",
+  "16:9",
+  "21:9",
+);
+export type GeminiImageAspectRatio = typeof GeminiImageAspectRatio.Type;
+export const GeminiImageResolution = Schema.Literal("1K", "2K", "4K");
+export type GeminiImageResolution = typeof GeminiImageResolution.Type;
+export const GeminiImageProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("gemini-native-image-http"),
+  modelAllowlist: UniqueManualModelIds,
+  defaultModel: ProviderModelId,
+  aspectRatio: Schema.optional(GeminiImageAspectRatio),
+  resolution: Schema.optional(GeminiImageResolution),
+})
+  .pipe(Schema.filter(imageAllowlistContainsDefault))
+  .annotations(strict);
+export type GeminiImageProviderConfiguration = typeof GeminiImageProviderConfiguration.Type;
 export const CodexProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("codex-cli"),
   binaryPath: Schema.NonEmptyTrimmedString,
@@ -453,6 +522,20 @@ export const AzureFoundryProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type AzureFoundryProviderInstance = typeof AzureFoundryProviderInstance.Type;
 
+export const OpenAiImageProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("openai-image"),
+  configuration: OpenAiImageProviderConfiguration,
+}).annotations(strict);
+export type OpenAiImageProviderInstance = typeof OpenAiImageProviderInstance.Type;
+
+export const GeminiImageProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("gemini-native-image"),
+  configuration: GeminiImageProviderConfiguration,
+}).annotations(strict);
+export type GeminiImageProviderInstance = typeof GeminiImageProviderInstance.Type;
+
 export const ProviderInstance = Schema.Union(
   OpenCodeProviderInstance,
   CodexProviderInstance,
@@ -468,6 +551,8 @@ export const ProviderInstance = Schema.Union(
   OpenAiCompatibleProviderInstance,
   AnthropicCompatibleProviderInstance,
   AzureFoundryProviderInstance,
+  OpenAiImageProviderInstance,
+  GeminiImageProviderInstance,
 );
 export type ProviderInstance = typeof ProviderInstance.Type;
 
@@ -528,6 +613,8 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     OpenAiCompatibleProviderInstance,
     AnthropicCompatibleProviderInstance,
     AzureFoundryProviderInstance,
+    OpenAiImageProviderInstance,
+    GeminiImageProviderInstance,
     ClaudeProviderInstance,
     MistralVibeProviderInstance,
     GrokProviderInstance,
@@ -873,6 +960,18 @@ export const ProviderRegistryCommand = Schema.Union(
     configuration: AzureFoundryProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("create-openai-image-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: OpenAiImageProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("create-gemini-native-image-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: GeminiImageProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-codex-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
@@ -956,6 +1055,16 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-azure-foundry-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: AzureFoundryProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-openai-image-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: OpenAiImageProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-gemini-native-image-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: GeminiImageProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-claude-configuration"),
