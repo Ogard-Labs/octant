@@ -14,6 +14,7 @@ const unavailableCapabilities = {
   projects: "unavailable",
   threadBoard: "unavailable",
   pullRequests: "unavailable",
+  githubIssues: "unavailable",
   plugins: "unavailable",
   automationsEnabled: false,
   agentsCenterEnabled: false,
@@ -40,6 +41,7 @@ describe("buildSidebarNavigation", () => {
       ...availableBaseCapabilities,
       threadBoard: "available" as const,
       pullRequests: "available" as const,
+      githubIssues: "available" as const,
       plugins: "available" as const,
       automationsEnabled: true,
       artifactLibrary: "unavailable" as const,
@@ -57,6 +59,7 @@ describe("buildSidebarNavigation", () => {
     expect(descriptorIds({ activeMode: "code", ...capabilities })).toEqual([
       "new-code-thread",
       "thread-board",
+      "github-issues",
       "pull-requests",
       "projects",
     ]);
@@ -85,6 +88,7 @@ describe("buildSidebarNavigation", () => {
           projects: availability,
           threadBoard: availability,
           pullRequests: availability,
+          githubIssues: availability,
           plugins: availability,
           automationsEnabled: false,
           agentsCenterEnabled: false,
@@ -101,6 +105,7 @@ describe("buildSidebarNavigation", () => {
     ["work", "projects", "projects"],
     ["code", "createThread", "new-code-thread"],
     ["code", "projects", "projects"],
+    ["code", "githubIssues", "github-issues"],
   ] as const)("gates %s %s independently", (activeMode, capability, expectedId) => {
     expect(
       descriptorIds({
@@ -291,6 +296,7 @@ describe("buildSidebarNavigation", () => {
         "new-code-thread",
         "agents",
         "thread-board",
+        "github-issues",
         "pull-requests",
         "projects",
         "automations",
@@ -302,27 +308,30 @@ describe("buildSidebarNavigation", () => {
     for (const activeMode of modes) {
       for (const threadBoard of availability) {
         for (const pullRequests of availability) {
-          for (const plugins of availability) {
-            for (const artifactLibrary of availability) {
-              for (const automationsEnabled of [false, true]) {
-                for (const agentsCenterEnabled of [false, true]) {
-                  const ids = descriptorIds({
-                    activeMode,
-                    createThread: "available",
-                    projects: "available",
-                    threadBoard,
-                    pullRequests,
-                    plugins,
-                    artifactLibrary,
-                    automationsEnabled,
-                    agentsCenterEnabled,
-                  });
-                  expect(new Set(ids).size).toBe(ids.length);
-                  for (const id of ids) {
-                    expect(allowedByMode[activeMode].has(id)).toBe(true);
+          for (const githubIssues of availability) {
+            for (const plugins of availability) {
+              for (const artifactLibrary of availability) {
+                for (const automationsEnabled of [false, true]) {
+                  for (const agentsCenterEnabled of [false, true]) {
+                    const ids = descriptorIds({
+                      activeMode,
+                      createThread: "available",
+                      projects: "available",
+                      threadBoard,
+                      pullRequests,
+                      githubIssues,
+                      plugins,
+                      artifactLibrary,
+                      automationsEnabled,
+                      agentsCenterEnabled,
+                    });
+                    expect(new Set(ids).size).toBe(ids.length);
+                    for (const id of ids) {
+                      expect(allowedByMode[activeMode].has(id)).toBe(true);
+                    }
+                    expect(ids.includes("artifact-library")).toBe(false);
+                    expect(ids.includes("agents")).toBe(false);
                   }
-                  expect(ids.includes("artifact-library")).toBe(false);
-                  expect(ids.includes("agents")).toBe(false);
                 }
               }
             }

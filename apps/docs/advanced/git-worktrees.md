@@ -124,6 +124,18 @@ card can show an identity as **Unknown** and stale until a user refreshes.
 Thread-scoped create and observe remain on the thread. This workspace does
 not merge, approve, comment, close, or force-push.
 
+## Issues browser
+
+The GitHub plugin's **Issues** destination is a host-scoped, read-only browser
+of issues from any accessible repository. It is not a Project-bound Code
+surface: it does not replace Pull requests, Thread Boards, or git worktrees.
+
+The row appears only when the GitHub plugin is enabled, its destination action
+is wired, and the authentication snapshot reports issue-read available.
+Disabled GitHub or a missing capability hides the row entirely. Search, state
+filter, and pagination use the existing GitHub catalogue reads. Detail is
+plain text; URLs stay inert.
+
 ## Next steps
 
 - [Code Thread Board](/advanced/code-board) for runtime-derived thread status

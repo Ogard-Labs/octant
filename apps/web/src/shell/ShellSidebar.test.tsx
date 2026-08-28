@@ -124,8 +124,100 @@ describe("ShellSidebar", () => {
     expect(actions.plugins).toHaveBeenCalledOnce();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(actions["pull-requests"]).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Issues" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Automations" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Threads" })).not.toBeInTheDocument();
+  });
+
+  it("shows Issues only when the contribution, action, and issues-read capability are all present", async () => {
+    const user = userEvent.setup();
+    const openIssues = vi.fn();
+    render(
+      <ShellSidebar
+        automationsEnabled={false}
+        codeNavigation={{
+          actions: {
+            "new-code-thread": vi.fn(),
+            "github-issues": openIssues,
+            "pull-requests": vi.fn(),
+            "thread-board": vi.fn(),
+          },
+        }}
+        githubIssuesReadAvailable
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Issues" }));
+    expect(openIssues).toHaveBeenCalledOnce();
+  });
+
+  it("hides Issues when the GitHub plugin is not effective", () => {
+    render(
+      <ShellSidebar
+        automationsEnabled={false}
+        codeNavigation={{
+          actions: {
+            "new-code-thread": vi.fn(),
+            "github-issues": vi.fn(),
+            "pull-requests": vi.fn(),
+            "thread-board": vi.fn(),
+          },
+        }}
+        firstPartyPluginsEffective={
+          new Map([
+            ["board", true],
+            ["github-integration", false],
+            ["appearance-pack", true],
+            ["preview-viewers", true],
+          ])
+        }
+        githubIssuesReadAvailable
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Issues" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
+  });
+
+  it("hides Issues when issues-read is not available", () => {
+    render(
+      <ShellSidebar
+        automationsEnabled={false}
+        codeNavigation={{
+          actions: {
+            "new-code-thread": vi.fn(),
+            "github-issues": vi.fn(),
+            "pull-requests": vi.fn(),
+            "thread-board": vi.fn(),
+          },
+        }}
+        githubIssuesReadAvailable={false}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Issues" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pull requests" })).toBeInTheDocument();
   });
 
   it("keeps Automations hidden when the gate prop is off and reveals it when the gate flips", async () => {

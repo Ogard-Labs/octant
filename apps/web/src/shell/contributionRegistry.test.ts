@@ -52,6 +52,18 @@ describe("resolveSidebarContributions", () => {
     expect(resolveSidebarContributions("work", effective).has("pull-requests")).toBe(false);
   });
 
+  it("includes github-issues only in code mode when github is effective", () => {
+    const effective = effectiveMap({ "github-integration": true });
+    expect(resolveSidebarContributions("code", effective).has("github-issues")).toBe(true);
+    expect(resolveSidebarContributions("work", effective).has("github-issues")).toBe(false);
+    expect(resolveSidebarContributions("chat", effective).has("github-issues")).toBe(false);
+  });
+
+  it("omits github-issues when the github plugin is not effective", () => {
+    const effective = effectiveMap({ "github-integration": false });
+    expect(resolveSidebarContributions("code", effective).has("github-issues")).toBe(false);
+  });
+
   it("treats an unlisted component as not effective", () => {
     expect(resolveSidebarContributions("code", effectiveMap({})).size).toBe(0);
   });

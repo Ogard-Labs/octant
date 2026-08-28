@@ -1,4 +1,5 @@
 import {
+  CircleDot,
   Columns3,
   FileStack,
   GitFork,
@@ -79,6 +80,8 @@ function navigationIcon(id: SidebarNavigationDescriptorId) {
       return Columns3;
     case "pull-requests":
       return GitPullRequest;
+    case "github-issues":
+      return CircleDot;
     default:
       return undefined;
   }

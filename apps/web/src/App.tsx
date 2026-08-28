@@ -619,6 +619,8 @@ function LaunchedShell(
   }>();
   const [codeBoardOpen, setCodeBoardOpen] = useState(false);
   const [codePullRequestsOpen, setCodePullRequestsOpen] = useState(false);
+  const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
+  const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [selectedProjectPullRequest, setSelectedProjectPullRequest] = useState<
     CodeProjectPullRequestDetailQuery | undefined
   >();
@@ -1130,6 +1132,25 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
+  useEffect(() => {
+    let cancelled = false;
+    void githubClient
+      .authenticationSnapshot()
+      .then((snapshot) => {
+        if (cancelled) return;
+        setGithubIssuesReadAvailable(
+          snapshot.capabilities.some(
+            (capability) => capability.kind === "issues-read" && capability.available,
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setGithubIssuesReadAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [githubClient]);
   const githubCloneClient = useMemo(
     () =>
       createGithubCloneClient({
@@ -2535,6 +2556,7 @@ function LaunchedShell(
     railPlaceholder !== undefined ||
     codeBoardOpen ||
     codePullRequestsOpen ||
+    githubIssuesOpen ||
     workBoardOpen ||
     archiveOpen ||
     automationCenterVisible ||
@@ -2873,6 +2895,7 @@ function LaunchedShell(
     setRailPlaceholder(undefined);
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
+    setGithubIssuesOpen(false);
     setWorkBoardOpen(false);
     setArchiveOpen(false);
     setArtifactLibraryOpen(false);
@@ -2884,6 +2907,7 @@ function LaunchedShell(
     setRailPlaceholder(undefined);
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
+    setGithubIssuesOpen(false);
     setWorkBoardOpen(false);
     setArchiveOpen(false);
     setArtifactLibraryOpen(false);
@@ -2898,6 +2922,7 @@ function LaunchedShell(
     setRailPlaceholder(undefined);
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
+    setGithubIssuesOpen(false);
     setWorkBoardOpen(false);
     setArchiveOpen(false);
     setAutomationCenterOpen(false);
@@ -2909,6 +2934,7 @@ function LaunchedShell(
     setRailPlaceholder(undefined);
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
+    setGithubIssuesOpen(false);
     setWorkBoardOpen(false);
     setAutomationCenterOpen(false);
     setAgentsCenterOpen(false);
@@ -2923,6 +2949,7 @@ function LaunchedShell(
     controller.setMode(mode);
     if (mode !== "code") setCodeBoardOpen(false);
     if (mode !== "code") setCodePullRequestsOpen(false);
+    if (mode !== "code") setGithubIssuesOpen(false);
     if (mode !== "work") setWorkBoardOpen(false);
     // The Automation Center is one shared Work/Code surface; leaving both
     // work modes dismisses it.
@@ -2945,10 +2972,12 @@ function LaunchedShell(
       setWorkBoardOpen(false);
       setCodeBoardOpen(false);
       setCodePullRequestsOpen(false);
+      setGithubIssuesOpen(false);
     },
     openThreadBoard:
       activeMode === "code" ? () => setCodeBoardOpen(true) : () => setWorkBoardOpen(true),
     openPullRequests: () => setCodePullRequestsOpen(true),
+    openGithubIssues: () => setGithubIssuesOpen(true),
   };
 
   const pluginSidebarDestinationActions: Record<string, () => void> = {};
@@ -4023,6 +4052,7 @@ function LaunchedShell(
             onOpenZen={() => void zen.enterZen()}
             onRetryChat={() => void chatController.retry()}
             onSelectMode={handleSelectMode}
+            {...(githubIssuesReadAvailable ? { githubIssuesReadAvailable: true } : {})}
             settings={presentedShellSettings ?? controller.settings}
             workspace={controller.workspace}
             resolvedSidebarBackground={resolvedSidebarBackground}
@@ -4184,6 +4214,8 @@ function LaunchedShell(
                 onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
                 codeBoardOpen={codeBoardOpen}
                 codePullRequestsOpen={codePullRequestsOpen}
+                githubIssuesOpen={githubIssuesOpen}
+                githubClient={githubClient}
                 workBoardOpen={workBoardOpen}
                 activeMode={activeMode}
                 codeClient={codeClient}
@@ -4195,6 +4227,7 @@ function LaunchedShell(
                   setCodePullRequestsOpen(false);
                   setSelectedProjectPullRequest(undefined);
                 }}
+                onCloseGithubIssues={() => setGithubIssuesOpen(false)}
                 onSelectProjectPullRequest={selectProjectPullRequest}
                 onSelectBoardPullRequest={selectProjectPullRequestIdentity}
                 {...(selectedProjectPullRequest === undefined
@@ -4223,6 +4256,7 @@ function LaunchedShell(
                   );
                   setCodeBoardOpen(false);
                   setCodePullRequestsOpen(false);
+                  setGithubIssuesOpen(false);
                   void controller.openCodeThread(
                     target.threadId,
                     thread?.title ?? "Code thread",
@@ -4397,6 +4431,7 @@ function LaunchedShell(
                       railPlaceholder !== undefined ||
                       codeBoardOpen ||
                       codePullRequestsOpen ||
+                      githubIssuesOpen ||
                       workBoardOpen ||
                       archiveOpen ||
                       automationCenterVisible ||
