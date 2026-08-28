@@ -8,6 +8,12 @@ const READ_TIMEOUT_MS = 20_000;
 /** Upstream REST fetches allowed while assembling one bounded page. */
 const MAX_UPSTREAM_FETCHES = 10;
 const UPSTREAM_PAGE_SIZE = 100;
+const ISSUE_BODY_MAX_BYTES = 8 * 1024;
+const COMMENT_BODY_MAX_BYTES = 2 * 1024;
+const MAX_ISSUE_COMMENTS = 10;
+const MAX_ISSUE_LABELS = 20;
+const LABEL_MAX_CHARS = 50;
+const MAX_SEARCH_QUERY_CHARS = 256;
 const SECRETISH =
   /(?:gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|bearer\s+|token=|authorization)/gi;
 const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
@@ -46,6 +52,27 @@ export interface GhIssueObservationRow {
   readonly author: string;
   readonly updatedAt: string;
   readonly url: string;
+}
+
+export interface GhIssueCommentObservation {
+  readonly author: string;
+  readonly createdAt: string;
+  readonly body: string;
+  readonly truncated: boolean;
+}
+
+export interface GhIssueDetailObservation {
+  readonly number: number;
+  readonly title: string;
+  readonly state: "open" | "closed";
+  readonly author: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly url: string;
+  readonly labels: readonly string[];
+  readonly body: string;
+  readonly bodyTruncated: boolean;
+  readonly comments: readonly GhIssueCommentObservation[];
 }
 
 export interface GhPullRequestObservationRow {
@@ -159,11 +186,35 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       readonly pageSize: number;
       readonly cursor?: string | undefined;
       readonly state: "open" | "closed" | "all";
+      readonly search?: string | undefined;
     },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhIssueObservationRow>>> {
     const repository = validatedRepositoryPath(request.owner, request.name);
     if (repository === undefined) return { kind: "unavailable" };
+    const search = (request.search ?? "").trim();
+    if (search !== "") {
+      const query = composeIssueSearchQuery({
+        owner: request.owner,
+        name: request.name,
+        state: request.state,
+        search,
+      });
+      if (query === undefined) return ok([], false);
+      return this.#paginateRest({
+        kind: "issues",
+        discriminator: `${repository}|${request.state}|${search}`,
+        pageSize: request.pageSize,
+        cursor: request.cursor,
+        pathFor: (page) =>
+          `search/issues?q=${encodeURIComponent(query)}` +
+          `&sort=updated&order=desc&per_page=${UPSTREAM_PAGE_SIZE}&page=${page}`,
+        decodeItem: decodeIssueItem,
+        matches: () => true,
+        extractItems: extractSearchIssueItems,
+        signal,
+      });
+    }
     return this.#paginateRest({
       kind: "issues",
       discriminator: `${repository}|${request.state}`,
@@ -176,6 +227,31 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       matches: () => true,
       signal,
     });
+  }
+
+  async readIssue(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly number: number;
+    },
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<GhIssueDetailObservation>> {
+    const repository = validatedRepositoryPath(request.owner, request.name);
+    if (repository === undefined) return { kind: "unavailable" };
+    if (!Number.isSafeInteger(request.number) || request.number <= 0) {
+      return { kind: "unavailable" };
+    }
+    const issueResult = await this.#run(
+      ["api", `repos/${repository}/issues/${request.number}`],
+      signal,
+    );
+    if (issueResult.kind !== "ok") return issueResult;
+    const issue = decodeIssueDetail(issueResult.stdout);
+    if (issue === undefined) return { kind: "unavailable" };
+    const comments = await this.#readIssueComments(repository, request.number, signal);
+    if (comments.kind !== "ok") return comments;
+    return { kind: "ok", value: { ...issue, comments: comments.value } };
   }
 
   async listPullRequests(
@@ -284,6 +360,36 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
     );
   }
 
+  async #readIssueComments(
+    repository: string,
+    number: number,
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<readonly GhIssueCommentObservation[]>> {
+    const comments: GhIssueCommentObservation[] = [];
+    for (let page = 1; page <= MAX_UPSTREAM_FETCHES; page += 1) {
+      const result = await this.#run(
+        [
+          "api",
+          `repos/${repository}/issues/${number}/comments` +
+            `?per_page=${UPSTREAM_PAGE_SIZE}&page=${page}`,
+        ],
+        signal,
+      );
+      if (result.kind !== "ok") return result;
+      const items = tryParseJson(result.stdout);
+      if (!Array.isArray(items) || items.length > UPSTREAM_PAGE_SIZE) {
+        return { kind: "unavailable" };
+      }
+      for (const item of items) {
+        const comment = decodeIssueComment(item);
+        if (comment === undefined) return { kind: "unavailable" };
+        comments.push(comment);
+      }
+      if (items.length < UPSTREAM_PAGE_SIZE) break;
+    }
+    return { kind: "ok", value: comments.slice(-MAX_ISSUE_COMMENTS) };
+  }
+
   async #paginateRest<Row>(options: {
     readonly kind: string;
     readonly discriminator: string;
@@ -292,6 +398,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
     readonly pathFor: (page: number) => string;
     readonly decodeItem: (item: unknown) => Row | "skip" | undefined;
     readonly matches: (row: Row) => boolean;
+    readonly extractItems?: (stdout: string) => readonly unknown[] | undefined;
     readonly signal: AbortSignal;
   }): Promise<GhCatalogueResult<GhCataloguePageObservation<Row>>> {
     let page = 1;
@@ -322,8 +429,11 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
     for (let fetches = 0; fetches < MAX_UPSTREAM_FETCHES; fetches += 1) {
       const result = await this.#run(["api", options.pathFor(page)], options.signal);
       if (result.kind !== "ok") return result;
-      const items = tryParseJson(result.stdout);
-      if (!Array.isArray(items) || items.length > UPSTREAM_PAGE_SIZE) {
+      const items =
+        options.extractItems === undefined
+          ? extractRestListItems(result.stdout)
+          : options.extractItems(result.stdout);
+      if (items === undefined || items.length > UPSTREAM_PAGE_SIZE) {
         return { kind: "unavailable" };
       }
       const decoded: Row[] = [];
@@ -519,6 +629,119 @@ function decodeIssueItem(item: unknown): GhIssueObservationRow | "skip" | undefi
   return { ...shared, state: item.state };
 }
 
+function decodeIssueDetail(stdout: string): Omit<GhIssueDetailObservation, "comments"> | undefined {
+  const item = tryParseJson(stdout);
+  if (!isRecord(item) || item.pull_request !== undefined) return undefined;
+  const shared = decodeSharedItemFacts(item);
+  if (shared === undefined) return undefined;
+  if (item.state !== "open" && item.state !== "closed") return undefined;
+  if (typeof item.created_at !== "string" || !ISO_PATTERN.test(item.created_at)) return undefined;
+  const body = boundUtf8(item.body, ISSUE_BODY_MAX_BYTES);
+  return {
+    ...shared,
+    state: item.state,
+    createdAt: item.created_at,
+    labels: decodeLabels(item.labels),
+    body: body.text,
+    bodyTruncated: body.truncated,
+  };
+}
+
+function decodeIssueComment(item: unknown): GhIssueCommentObservation | undefined {
+  if (!isRecord(item)) return undefined;
+  if (typeof item.created_at !== "string" || !ISO_PATTERN.test(item.created_at)) return undefined;
+  const author = isRecord(item.user) && typeof item.user.login === "string" ? item.user.login : "";
+  const body = boundUtf8(item.body, COMMENT_BODY_MAX_BYTES);
+  return {
+    author: normalizeText(author, 128, "unknown"),
+    createdAt: item.created_at,
+    body: body.text,
+    truncated: body.truncated,
+  };
+}
+
+function decodeLabels(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  const labels: string[] = [];
+  for (const item of value) {
+    if (labels.length >= MAX_ISSUE_LABELS) break;
+    const name = isRecord(item) && typeof item.name === "string" ? item.name : undefined;
+    if (name === undefined) continue;
+    const normalized = normalizeText(name, LABEL_MAX_CHARS, "");
+    if (normalized.length === 0) continue;
+    labels.push(normalized);
+  }
+  return labels;
+}
+
+function extractRestListItems(stdout: string): readonly unknown[] | undefined {
+  const parsed = tryParseJson(stdout);
+  return Array.isArray(parsed) ? parsed : undefined;
+}
+
+function extractSearchIssueItems(stdout: string): readonly unknown[] | undefined {
+  const parsed = tryParseJson(stdout);
+  if (!isRecord(parsed) || !Array.isArray(parsed.items)) return undefined;
+  return parsed.items;
+}
+
+const AUTHOR_SEARCH_TERM = /^author:([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})$/i;
+const NUMBER_SEARCH_TERM = /^#([1-9][0-9]{0,8})$/;
+
+/**
+ * Compose the GitHub search query from bounded client terms. Unknown
+ * `qualifier:` tokens are dropped so the client can never inject repo,
+ * type, or other search syntax.
+ */
+function composeIssueSearchQuery(input: {
+  readonly owner: string;
+  readonly name: string;
+  readonly state: "open" | "closed" | "all";
+  readonly search: string;
+}): string | undefined {
+  const authors: string[] = [];
+  const numbers: string[] = [];
+  const titleParts: string[] = [];
+  for (const token of input.search.trim().split(/\s+/)) {
+    if (token.length === 0) continue;
+    const author = AUTHOR_SEARCH_TERM.exec(token);
+    if (author !== null && author[1] !== undefined) {
+      authors.push(author[1]);
+      continue;
+    }
+    const numbered = NUMBER_SEARCH_TERM.exec(token);
+    if (numbered !== null && numbered[1] !== undefined) {
+      numbers.push(numbered[1]);
+      continue;
+    }
+    if (token.includes(":")) continue;
+    const cleaned = token.replaceAll(/["\\]/g, "");
+    if (cleaned.length > 0) titleParts.push(cleaned);
+  }
+  if (authors.length === 0 && numbers.length === 0 && titleParts.length === 0) {
+    return undefined;
+  }
+  const prefix = [`repo:${input.owner}/${input.name}`, "type:issue"];
+  if (input.state === "open") prefix.push("is:open");
+  if (input.state === "closed") prefix.push("is:closed");
+  const userTerms: string[] = [];
+  for (const author of authors) userTerms.push(`author:${author}`);
+  for (const number of numbers) userTerms.push(number);
+  if (titleParts.length > 0) {
+    userTerms.push(`"${titleParts.join(" ")}"`, "in:title");
+  }
+  const parts = [...prefix];
+  let addedUserTerm = false;
+  for (const term of userTerms) {
+    const candidate = `${parts.join(" ")} ${term}`;
+    if (candidate.length > MAX_SEARCH_QUERY_CHARS) break;
+    parts.push(term);
+    addedUserTerm = true;
+  }
+  if (!addedUserTerm) return undefined;
+  return parts.join(" ");
+}
+
 function decodePullRequestItem(item: unknown): GhPullRequestObservationRow | "skip" | undefined {
   if (!isRecord(item)) return undefined;
   const shared = decodeSharedItemFacts(item);
@@ -700,16 +923,37 @@ function validatedRepositoryPath(owner: string, name: string): string | undefine
  * characters, redact anything credential-shaped, and clamp before it can
  * reach contracts, events, or providers.
  */
-function normalizeText(value: unknown, limit: number, fallback: string): string {
-  if (typeof value !== "string") return fallback;
+function redactText(value: string): string {
   // oxlint-disable-next-line no-control-regex
   let normalized = value.replaceAll(/[\u0000-\u001f\u007f]/g, " ");
   for (let pass = 0; pass < 5 && SECRETISH.test(normalized); pass += 1) {
     normalized = normalized.replaceAll(SECRETISH, "[redacted]");
   }
-  normalized = normalized.trim();
+  return normalized;
+}
+
+function normalizeText(value: unknown, limit: number, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  let normalized = redactText(value).trim();
   if (normalized.length > limit) normalized = normalized.slice(0, limit).trim();
   return normalized.length === 0 ? fallback : normalized;
+}
+
+function boundUtf8(
+  value: unknown,
+  maxBytes: number,
+): { readonly text: string; readonly truncated: boolean } {
+  if (typeof value !== "string") return { text: "", truncated: false };
+  const redacted = redactText(value);
+  const encoded = Buffer.from(redacted, "utf8");
+  if (encoded.byteLength <= maxBytes) {
+    return { text: redacted.trim(), truncated: false };
+  }
+  let end = maxBytes;
+  while (end > 0 && ((encoded[end] ?? 0) & 0b1100_0000) === 0b1000_0000) {
+    end -= 1;
+  }
+  return { text: encoded.subarray(0, end).toString("utf8").trim(), truncated: true };
 }
 
 function isValidBranch(value: string): boolean {
