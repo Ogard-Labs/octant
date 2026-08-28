@@ -177,6 +177,12 @@ export interface ExtensionsSettingsViewProps {
   readonly client: ExtensionClient;
   readonly showHeading?: boolean;
   /**
+   * Host preference for skills.sh / npm / GitHub catalog fetches. When false,
+   * Search / Inspect / install do not contact registries; opening Marketplace
+   * still does not fetch.
+   */
+  readonly marketplaceFetchesEnabled?: boolean;
+  /**
    * Scope used to project the authoritative effective state. Settings is a
    * host-scoped surface with no active thread, so a neutral Project-less scope
    * is used by default; callers may override it when a mode/provider context is
@@ -205,6 +211,7 @@ const COMMAND_VERSION = 1 as never;
 
 export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const scope = props.scope ?? DEFAULT_EXTENSION_SETTINGS_SCOPE;
+  const marketplaceFetchesEnabled = props.marketplaceFetchesEnabled ?? true;
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [snapshot, setSnapshot] = useState<ExtensionSnapshot | undefined>();
   const [effective, setEffective] = useState<ExtensionEffectiveSnapshot | undefined>();
@@ -358,6 +365,14 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       setPreview(undefined);
       setLocalPreview(undefined);
       setFailure(undefined);
+      if (!marketplaceFetchesEnabled && entry.source.kind === "catalog") {
+        setFailure({
+          category: "blocked",
+          message: "Marketplace fetches are turned off in Settings.",
+        });
+        setInspectingEntryId(undefined);
+        return;
+      }
       try {
         const inspection = await props.client.execute({
           kind: "inspect-package",
@@ -383,7 +398,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         setInspectingEntryId(undefined);
       }
     },
-    [props.client],
+    [props.client, marketplaceFetchesEnabled],
   );
 
   const confirmInstall = useCallback(
@@ -422,10 +437,18 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   );
 
   const runSkillSearch = useCallback(async () => {
-    setSkillStatus("searching");
-    setFailure(undefined);
     setSkillEntries([]);
     setSkillPreview(undefined);
+    if (!marketplaceFetchesEnabled) {
+      setSkillStatus("idle");
+      setFailure({
+        category: "blocked",
+        message: "Marketplace fetches are turned off in Settings.",
+      });
+      return;
+    }
+    setSkillStatus("searching");
+    setFailure(undefined);
     try {
       const result = await props.client.execute({
         kind: "search-skills",
@@ -443,7 +466,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     } catch {
       setSkillStatus("failed");
     }
-  }, [props.client, skillQuery]);
+  }, [props.client, skillQuery, marketplaceFetchesEnabled]);
 
   const previewSkillEntry = useCallback(
     async (entry: SkillMarketplaceEntry) => {
@@ -451,6 +474,14 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       setInspectingSkillId(entryKey);
       setSkillPreview(undefined);
       setFailure(undefined);
+      if (!marketplaceFetchesEnabled) {
+        setFailure({
+          category: "blocked",
+          message: "Marketplace fetches are turned off in Settings.",
+        });
+        setInspectingSkillId(undefined);
+        return;
+      }
       try {
         const result = await props.client.execute({
           kind: "preview-skill",
@@ -475,7 +506,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         setInspectingSkillId(undefined);
       }
     },
-    [props.client],
+    [props.client, marketplaceFetchesEnabled],
   );
 
   const confirmSkillInstall = useCallback(
@@ -690,6 +721,12 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         </OctantTabsPanel>
 
         <OctantTabsPanel value="marketplace">
+          {!marketplaceFetchesEnabled ? (
+            <p className="extensions-settings__state" role="status">
+              Marketplace fetches are off in Settings → General → Marketplace. Catalog search stays
+              local; Inspect, Search skills, preview, and install will not contact registries.
+            </p>
+          ) : null}
           <section aria-labelledby="extension-catalog-heading" className="setgroup">
             <h3 className="setgroup-head" id="extension-catalog-heading">
               Extension catalog
@@ -777,7 +814,11 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                           <OctantButton
                             aria-label={`Inspect ${entry.displayName}`}
                             className="btn btn-secondary btn-sm"
-                            disabled={inspectingEntryId === entryKey || installing}
+                            disabled={
+                              !marketplaceFetchesEnabled ||
+                              inspectingEntryId === entryKey ||
+                              installing
+                            }
                             onClick={() => void inspectEntry(entry)}
                             type="button"
                           >
@@ -1004,6 +1045,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                 <OctantInput
                   aria-label="Search skills.sh and npm"
                   className="extensions-settings__search-input"
+                  disabled={!marketplaceFetchesEnabled}
                   onChange={(event) => setSkillQuery(event.currentTarget.value)}
                   placeholder="Search skills.sh and npm"
                   type="search"
@@ -1011,7 +1053,11 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                 />
                 <OctantButton
                   className="btn btn-secondary"
-                  disabled={skillQuery.trim() === "" || skillStatus === "searching"}
+                  disabled={
+                    !marketplaceFetchesEnabled ||
+                    skillQuery.trim() === "" ||
+                    skillStatus === "searching"
+                  }
                   onClick={() => void runSkillSearch()}
                   type="button"
                 >
@@ -1050,7 +1096,11 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                           <OctantButton
                             aria-label={`Preview ${entry.displayName}`}
                             className="btn btn-secondary btn-sm"
-                            disabled={inspectingSkillId === entryKey || installingSkill}
+                            disabled={
+                              !marketplaceFetchesEnabled ||
+                              inspectingSkillId === entryKey ||
+                              installingSkill
+                            }
                             onClick={() => void previewSkillEntry(entry)}
                             type="button"
                           >

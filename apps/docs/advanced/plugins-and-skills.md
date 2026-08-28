@@ -96,17 +96,18 @@ the time. An empty query is not sent. **Preview** and **Confirm install**
 then fetch the package: skills.sh entries from GitHub's API and
 `raw.githubusercontent.com` (User-Agent `octant-skill-marketplace`), npm
 entries as package metadata and a tarball from `registry.npmjs.org` (the
-tarball request uses the same User-Agent).
+same User-Agent on every marketplace request).
 
-**Off switch.** There is none in Settings. The only way to keep these calls
-from happening is not to search, inspect, preview, or install from the
-Marketplace tab. Skills already on disk under `.agents/skills/` and plugins
-imported from a local folder never contact a registry.
+**Off switch.** Turn marketplace fetches off in
+**Settings → General → Marketplace**. Off means no request is made: Search
+skills, Inspect, preview, and catalog install refuse rather than calling out.
+Opening the Marketplace tab still does not fetch on its own. Skills already on
+disk under `.agents/skills/` and plugins imported from a local folder never
+contact a registry.
 
-Skill search, npm metadata, and catalog inspect currently use the runtime's
-default User-Agent rather than the constrained `octant-skill-marketplace`
-string used on GitHub file fetches and npm tarballs. That can disclose more
-about the host runtime than an update check does.
+Every marketplace and catalog HTTPS request uses User-Agent
+`octant-skill-marketplace` with no app or runtime version — the same
+minimum-necessary style as an update check's `Octant` User-Agent.
 
 ## Plugins
 

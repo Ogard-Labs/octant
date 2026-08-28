@@ -153,6 +153,7 @@ export function defaultShellSettings(): ShellSettings {
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),
     firstRunOnboarding: "pending",
     automaticUpdateChecks: true,
+    marketplaceFetchesEnabled: true,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     transcriptTextSize: "medium",
     transcriptWidth: "narrow",
