@@ -2499,8 +2499,8 @@ export class CodeService {
   }
 
   async #requireCreateIssueContexts(command: {
-    readonly issueContext?: GithubIssueContextRequest;
-    readonly linearIssueContext?: LinearIssueContextRequest;
+    readonly issueContext?: GithubIssueContextRequest | undefined;
+    readonly linearIssueContext?: LinearIssueContextRequest | undefined;
   }): Promise<{
     readonly github: GithubIssueContextResult | { readonly status: "absent" };
     readonly linear: LinearIssueContextResult | { readonly status: "absent" };
@@ -2537,8 +2537,8 @@ export class CodeService {
       readonly linear: LinearIssueContextResult | { readonly status: "absent" };
     },
     command: {
-      readonly issueContext?: GithubIssueContextRequest;
-      readonly linearIssueContext?: LinearIssueContextRequest;
+      readonly issueContext?: GithubIssueContextRequest | undefined;
+      readonly linearIssueContext?: LinearIssueContextRequest | undefined;
     },
   ): void {
     if (prepared.github.status === "ready" && command.issueContext !== undefined) {
