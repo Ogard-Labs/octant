@@ -352,9 +352,6 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
         const confinement = makeSeatbeltConfinementLive({
           platform,
           sandboxPath,
-          ...(options.temporaryDirectory === undefined
-            ? {}
-            : { temporaryDirectory: options.temporaryDirectory }),
         });
         const launch = yield* Effect.try({
           try: () =>
