@@ -492,7 +492,8 @@ mechanisms are:
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
-  (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback.
+  (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
+  recorded in [decisions/0056-linux-confinement-bubblewrap.md](decisions/0056-linux-confinement-bubblewrap.md).
   Sensitive system roots remain denied even where runtime compatibility
   requires a broad file-read rule; each launch's exact roots are re-allowed
   after those denials. Path checks alone are never the boundary. Confined
