@@ -211,10 +211,10 @@ describe("skills.sh marketplace", () => {
   it("keeps search request headers on the marketplace allowlist", async () => {
     let seen: HeadersInit | undefined;
     const marketplace = new SkillsShMarketplace({
-      fetch: (async (_input, init) => {
+      fetch: async (_input, init) => {
         seen = init?.headers;
         return Response.json({ skills: [] });
-      }) as unknown as typeof fetch,
+      },
       platform: "darwin",
     });
     await marketplace.search("review");

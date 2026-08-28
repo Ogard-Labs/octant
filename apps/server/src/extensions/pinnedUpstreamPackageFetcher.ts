@@ -1,6 +1,6 @@
 import type { ExtensionSource } from "@octant/contracts/extensions";
 import { readBoundedResponseBody } from "./boundedResponseBody";
-import { MARKETPLACE_FETCH_USER_AGENT } from "./marketplaceHttps";
+import { MARKETPLACE_FETCH_USER_AGENT, type MarketplaceFetch } from "./marketplaceHttps";
 import type { ExtensionArchiveEntry } from "./packageInspector";
 
 /**
@@ -56,7 +56,7 @@ export interface PinnedUpstreamFetchInput {
   readonly source: ExtensionSource;
   readonly appVersion: string;
   readonly platform: NodeJS.Platform;
-  readonly fetch?: typeof globalThis.fetch;
+  readonly fetch?: MarketplaceFetch;
   readonly limits?: Partial<PinnedUpstreamFetchLimits>;
   readonly signal?: AbortSignal;
 }

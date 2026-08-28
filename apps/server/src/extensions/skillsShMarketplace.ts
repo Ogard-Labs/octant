@@ -3,7 +3,11 @@ import type { SkillMarketplaceEntry } from "@octant/contracts/extension-rpc";
 import type { ResolvedExtensionPackage } from "./packageInspector";
 import type { SkillMarketplacePort } from "./standaloneSkillService";
 import { readBoundedResponseBody } from "./boundedResponseBody";
-import { MARKETPLACE_FETCH_USER_AGENT, withMarketplaceRequest } from "./marketplaceRequestSignal";
+import {
+  MARKETPLACE_FETCH_USER_AGENT,
+  withMarketplaceRequest,
+  type MarketplaceFetch,
+} from "./marketplaceRequestSignal";
 import {
   SKILLS_SH_CATALOG_ID,
   buildStandaloneSkillPackage,
@@ -37,7 +41,7 @@ interface SkillsShSearchHit {
 }
 
 export interface SkillsShMarketplaceOptions {
-  readonly fetch?: typeof globalThis.fetch;
+  readonly fetch?: MarketplaceFetch;
   readonly searchUrl?: string;
   readonly appVersion?: string;
   readonly platform?: NodeJS.Platform;
@@ -51,7 +55,7 @@ export interface SkillsShMarketplaceOptions {
  * for the skill's declared repository. Repo-root walks are not attempted.
  */
 export class SkillsShMarketplace implements SkillMarketplacePort {
-  readonly #fetch: typeof globalThis.fetch;
+  readonly #fetch: MarketplaceFetch;
   readonly #searchUrl: string;
   readonly #appVersion: string;
   readonly #platform: NodeJS.Platform;

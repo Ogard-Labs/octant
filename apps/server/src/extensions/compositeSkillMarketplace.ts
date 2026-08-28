@@ -2,11 +2,15 @@ import type { SkillMarketplacePort } from "./standaloneSkillService";
 import { NPM_SKILLS_CATALOG_ID, SKILLS_SH_CATALOG_ID } from "./skillPackageBuilder";
 import { NpmSkillMarketplace } from "./npmSkillMarketplace";
 import { SkillsShMarketplace } from "./skillsShMarketplace";
-import { createMarketplaceFetch, MarketplaceFetchesDisabledError } from "./marketplaceHttps";
+import {
+  createMarketplaceFetch,
+  MarketplaceFetchesDisabledError,
+  type MarketplaceFetch,
+} from "./marketplaceHttps";
 
 export function createCompositeSkillMarketplace(
   options: {
-    readonly fetch?: typeof globalThis.fetch;
+    readonly fetch?: MarketplaceFetch;
     readonly appVersion?: string;
     readonly platform?: NodeJS.Platform;
     readonly skillsSh?: SkillMarketplacePort;

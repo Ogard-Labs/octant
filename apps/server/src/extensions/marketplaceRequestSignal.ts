@@ -4,6 +4,7 @@ export {
   MarketplaceFetchesDisabledError,
   createMarketplaceFetch,
   marketplaceRequestHeaders,
+  type MarketplaceFetch,
 } from "./marketplaceHttps";
 
 const DEFAULT_MARKETPLACE_REQUEST_TIMEOUT_MS = 30_000;

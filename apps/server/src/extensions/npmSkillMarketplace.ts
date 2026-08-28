@@ -5,7 +5,11 @@ import type { SkillMarketplaceEntry } from "@octant/contracts/extension-rpc";
 import type { ResolvedExtensionPackage } from "./packageInspector";
 import type { SkillMarketplacePort } from "./standaloneSkillService";
 import { readBoundedResponseBody } from "./boundedResponseBody";
-import { MARKETPLACE_FETCH_USER_AGENT, withMarketplaceRequest } from "./marketplaceRequestSignal";
+import {
+  MARKETPLACE_FETCH_USER_AGENT,
+  withMarketplaceRequest,
+  type MarketplaceFetch,
+} from "./marketplaceRequestSignal";
 import {
   NPM_SKILLS_CATALOG_ID,
   buildStandaloneSkillPackage,
@@ -27,7 +31,7 @@ const NPM_VERSION_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 export interface NpmSkillMarketplaceOptions {
-  readonly fetch?: typeof globalThis.fetch;
+  readonly fetch?: MarketplaceFetch;
   readonly registryUrl?: string;
   readonly appVersion?: string;
   readonly platform?: NodeJS.Platform;
@@ -45,7 +49,7 @@ type ExtractedSkill = {
  * the package tarball into the shared standalone skill package model.
  */
 export class NpmSkillMarketplace implements SkillMarketplacePort {
-  readonly #fetch: typeof globalThis.fetch;
+  readonly #fetch: MarketplaceFetch;
   readonly #registryUrl: string;
   readonly #appVersion: string;
   readonly #platform: NodeJS.Platform;

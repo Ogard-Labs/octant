@@ -24,8 +24,15 @@ export class MarketplaceFetchesDisabledError extends Error {
   }
 }
 
+/**
+ * Callable used for marketplace/catalog HTTPS. Narrower than `typeof fetch`
+ * so Bun's `fetch.preconnect` (and similar function-object members) are not
+ * required on wrappers or test doubles.
+ */
+export type MarketplaceFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
 export interface MarketplaceFetchOptions {
-  readonly fetch?: typeof globalThis.fetch;
+  readonly fetch?: MarketplaceFetch;
   /** When false, no request leaves the host. Defaults to allowed. */
   readonly isAllowed?: () => boolean;
 }
@@ -34,9 +41,7 @@ export interface MarketplaceFetchOptions {
  * Wrap `fetch` so marketplace callers cannot omit the constrained User-Agent
  * or contact a registry when the host preference is off.
  */
-export function createMarketplaceFetch(
-  options: MarketplaceFetchOptions = {},
-): typeof globalThis.fetch {
+export function createMarketplaceFetch(options: MarketplaceFetchOptions = {}): MarketplaceFetch {
   const base = options.fetch ?? globalThis.fetch;
   const isAllowed = options.isAllowed ?? (() => true);
   return async (input, init) => {
