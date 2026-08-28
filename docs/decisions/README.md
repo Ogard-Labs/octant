@@ -69,6 +69,7 @@ distilled successor of the earlier long-form design specifications.
 | [0059](0059-multi-host-federation.md)                         | Multi-host federation completes without new host authority                                  | Proposed           |
 | [0060](0060-usage-spend-ceilings.md)                          | Usage spend ceilings                                                                        | Proposed           |
 | [0061](0061-in-app-changelog.md)                              | In-app changelog rides the update path                                                      | Proposed           |
+| [0062](0062-simulator-frame-input-transport.md)               | Simulator frame input rides the Apple workbench channel                                     | Proposed           |
 
 ## Adding an ADR
 

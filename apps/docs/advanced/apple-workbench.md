@@ -69,8 +69,10 @@ say the native frame is not attachable instead of hanging or inventing a
 picture. Closing the tab unmounts the view only; it does not shut down,
 erase, or transfer the destination.
 
-Orientation, accessibility hierarchy, recording, logs, and typed input are
-not part of this surface yet. Destination actions remain on the workbench
+Orientation, accessibility hierarchy, recording, and logs are not part of this
+surface yet. Typed input, tap, and hardware keys are planned to ride the same
+workbench control channel as Boot and Capture screen, not a parallel desktop
+injector; they are not built yet. Destination actions remain on the workbench
 list: each Simulator offers only what its reported state can perform.
 
 States also include loading the toolchain, waiting for Apple evidence,
