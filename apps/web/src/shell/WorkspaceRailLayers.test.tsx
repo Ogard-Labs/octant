@@ -90,7 +90,10 @@ describe("WorkspaceRailLayers", () => {
     await user.click(screen.getByRole("button", { name: "Pull requests" }));
     expect(await screen.findByRole("region", { name: "Pull requests" })).toBeVisible();
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
-    expect(codeApi.queryProjectPullRequests).toHaveBeenCalledWith({ version: 1 });
+    // LazyRailSurface exposes the region before CodeProjectPullRequests's effect runs load.
+    await waitFor(() => {
+      expect(codeApi.queryProjectPullRequests).toHaveBeenCalledWith({ version: 1 });
+    });
     expect(codeApi.refreshProjectPullRequests).not.toHaveBeenCalled();
   });
 
