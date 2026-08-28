@@ -201,6 +201,8 @@ cleanup as not integrated rather than writing secrets to disk.
 
 - [Sub-processors](/advanced/sub-processors) for BYO-key and BYO-subscription
 - [Data residency](/advanced/data-residency) for "your machine, your region"
+- Shared-host controller footing (repository draft at
+  `docs/legal/shared-host-controller.md`) when a team shares one host
 - [DPA template](/advanced/dpa-template) for processor clauses if a hosted component ships
 - [SCC position](/advanced/scc-position) for transfer posture on BYO vs hosted surfaces
 - [Privacy and security](/advanced/privacy-and-security) for approvals and confinement

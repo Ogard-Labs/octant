@@ -94,7 +94,10 @@ they are not on the BYO inference path.
 A later collaboration model would let a team run one host they control.
 That design is not the current preview. If it ships, the host owner — not
 Ogard Labs — would be the controller of that store. It would not make
-BYO providers into Octant sub-processors.
+BYO providers into Octant sub-processors. The draft controller footing for
+journal, logs, and audit export lives in the repository at
+`docs/legal/shared-host-controller.md` (pending counsel; not a published
+notice).
 
 Hosted relay is outside the preview.
 
