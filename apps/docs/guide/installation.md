@@ -70,7 +70,7 @@ Produces:
 - `out/Octant-<version>-linux-x64.AppImage` — portable dogfood artifact
 - `out/Octant-linux-x64/` — electron-packager directory kept beside it for inspection
 
-The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. It is **unsigned**. There is no Linux signed update feed yet, so the desktop updater refuses to install updates on Linux rather than treating an unsigned AppImage as an auto-update channel. Signed Linux artifacts and feed matrix work land separately.
+The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. It is an **unsigned dogfood** artifact. Packaging it (locally or from the release matrix) is not the same as shipping signed auto-update: there is no in-app Linux update channel until a maintainer publishes a signed `<ring>/linux-x64.json` feed. Until then the desktop updater refuses Linux installs rather than treating an AppImage as an auto-update channel.
 
 Launch:
 
@@ -240,7 +240,7 @@ with no version, so it cannot reconstruct one. Cookies and stored credentials
 are omitted. It sends:
 
 - The Octant version you are running, so the service can say whether anything is newer.
-- Your platform and processor architecture, so it offers a build that runs on this Mac.
+- Your platform and processor architecture, so it offers a build that runs on this machine.
 - The IP address the request comes from, as any network request discloses.
 - The time of the request.
 
