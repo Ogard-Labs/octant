@@ -19,10 +19,16 @@ enter without widening a seam for one vendor.
 
 ## Seam: extend vs reuse
 
-**Reuse the credential broker.** Secrets and short-lived material still live in
-the host secret store and cross only as opaque refs. Drivers never hold durable
-tokens in process state that outlives a request. Server still resolves through
-`OCTANT_CREDENTIAL_BROKER_*` only.
+**Reuse the credential broker host, not the raw-string resolve shape.**
+Secrets and short-lived material still live in the host secret store. Server
+still reaches the broker only through `OCTANT_CREDENTIAL_BROKER_*`. Cloud-IAM
+must not reuse `CredentialStore.resolve` / `/v1/credentials/resolve` as-is:
+that path returns a raw `credential` string suitable for opaque API-key refs,
+not for reusable cloud credentials. The IAM extension defines its own caller,
+response type, scope, and lifetime — prefer a broker-side signer or an opaque,
+scoped handle that never places reusable cloud credentials in a provider child
+process. Drivers never hold durable tokens in process state that outlives a
+request.
 
 **Extend the provider SDK, not a vendor shortcut.** New auth kinds are
 provider-neutral capability and readiness vocabulary on the existing driver
@@ -52,7 +58,7 @@ and the credential rules in 0005 / 0054:
 | E2  | IAM signing material could be copied into provider child processes | Prefer per-request broker resolve or scoped signer; refuse durable cloud keys in managed-process env unless the driver proves the runtime cannot separate auth storage (then `incompatible`) |
 | E3  | Enterprise auth could become a vendor-shaped host API              | All new kinds land in `@octant/provider-sdk` first; conformance harness covers them; no server import of a single-cloud SDK for identity                                                     |
 | E4  | Confused-deputy: a thread or remote principal triggers cloud spend | Existing mode, Project, and approval gates stay in front; remote stays local-host-required for credential changes (0013)                                                                     |
-| E5  | Mis-set registry endpoint talks to the wrong tenant                | Instance config is explicit; readiness probes must fail closed on audience/tenant mismatch the driver can detect                                                                             |
+| E5  | Mis-set registry endpoint talks to the wrong tenant                | Instance config carries expected tenant/audience; enterprise-auth `ProviderDriver.probe` validates observed binding and reports `incompatible` when it cannot; `ProviderObservedState` records the binding the probe checked |
 
 No new trust boundary moves credentials into `apps/server` or the renderer.
 
@@ -65,7 +71,7 @@ Implementation may leave Backlog only when:
    provider-native OAuth tokens" rule for CLI subscription flows that stay
    provider-owned.
 2. Conformance harness cases exist for the new kinds (ready, unauthenticated,
-   incompatible).
+   incompatible), including tenant/audience mismatch → `incompatible`.
 3. Threat model controls E1–E5 have owners in an implementation child.
 4. An explicit maintainer request authorizes scoped work against that ADR.
 
