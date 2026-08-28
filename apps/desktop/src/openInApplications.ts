@@ -1,5 +1,5 @@
 import type { SpawnOptions } from "node:child_process";
-import { isAbsolute, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 
 export interface OpenInApplicationDescriptor {
@@ -15,6 +15,7 @@ export interface OpenInApplicationRequest {
 
 interface SpawnedApplication {
   readonly unref?: () => void;
+  readonly once?: (event: "error" | "spawn", listener: (error?: Error) => void) => void;
 }
 
 type SpawnApplication = (
@@ -26,97 +27,125 @@ type SpawnApplication = (
 interface CatalogueEntry {
   readonly id: OpenInApplicationId;
   readonly label: string;
-  readonly systemPaths: ReadonlyArray<string>;
-  readonly userApplicationName?: string;
+  readonly darwinSystemPaths: ReadonlyArray<string>;
+  readonly darwinUserApplicationName?: string;
+  readonly linuxSystemPaths: ReadonlyArray<string>;
 }
 
 const OPEN_IN_APPLICATIONS: ReadonlyArray<CatalogueEntry> = [
   {
     id: "vscode",
     label: "VS Code",
-    systemPaths: ["/Applications/Visual Studio Code.app"],
-    userApplicationName: "Visual Studio Code.app",
+    darwinSystemPaths: ["/Applications/Visual Studio Code.app"],
+    darwinUserApplicationName: "Visual Studio Code.app",
+    linuxSystemPaths: ["/usr/share/code/code", "/usr/bin/code", "/snap/bin/code"],
   },
   {
     id: "cursor",
     label: "Cursor",
-    systemPaths: ["/Applications/Cursor.app"],
-    userApplicationName: "Cursor.app",
+    darwinSystemPaths: ["/Applications/Cursor.app"],
+    darwinUserApplicationName: "Cursor.app",
+    linuxSystemPaths: ["/usr/bin/cursor", "/usr/share/cursor/cursor", "/snap/bin/cursor"],
   },
   {
     id: "zed",
     label: "Zed",
-    systemPaths: ["/Applications/Zed.app", "/Applications/Zed Preview.app"],
-    userApplicationName: "Zed.app",
+    darwinSystemPaths: ["/Applications/Zed.app", "/Applications/Zed Preview.app"],
+    darwinUserApplicationName: "Zed.app",
+    linuxSystemPaths: ["/usr/bin/zed", "/usr/lib/zed/zed-editor"],
   },
   {
     id: "finder",
     label: "Finder",
-    systemPaths: ["/System/Library/CoreServices/Finder.app"],
+    darwinSystemPaths: ["/System/Library/CoreServices/Finder.app"],
+    linuxSystemPaths: [],
   },
   {
     id: "terminal",
     label: "Terminal",
-    systemPaths: ["/System/Applications/Utilities/Terminal.app"],
+    darwinSystemPaths: ["/System/Applications/Utilities/Terminal.app"],
+    linuxSystemPaths: [
+      "/usr/bin/x-terminal-emulator",
+      "/usr/bin/gnome-terminal",
+      "/usr/bin/konsole",
+    ],
   },
   {
     id: "ghostty",
     label: "Ghostty",
-    systemPaths: ["/Applications/Ghostty.app"],
-    userApplicationName: "Ghostty.app",
+    darwinSystemPaths: ["/Applications/Ghostty.app"],
+    darwinUserApplicationName: "Ghostty.app",
+    linuxSystemPaths: ["/usr/bin/ghostty"],
   },
   {
     id: "xcode",
     label: "Xcode",
-    systemPaths: ["/Applications/Xcode.app"],
-    userApplicationName: "Xcode.app",
+    darwinSystemPaths: ["/Applications/Xcode.app"],
+    darwinUserApplicationName: "Xcode.app",
+    linuxSystemPaths: [],
   },
 ];
+
+const OPEN_FAILURE = "Octant could not open the selected application.";
 
 export function detectOpenInApplications(options: {
   readonly exists: (path: string) => boolean;
   readonly homeDirectory: string;
+  readonly platform?: NodeJS.Platform;
 }): ReadonlyArray<OpenInApplicationDescriptor> {
+  const platform = options.platform ?? "darwin";
   return OPEN_IN_APPLICATIONS.map((entry) => ({
     id: entry.id,
-    label: entry.label,
-    available: resolveApplicationPath(entry, options) !== undefined,
+    label: platform === "linux" && entry.id === "finder" ? "Files" : entry.label,
+    available:
+      platform === "linux" && entry.id === "finder"
+        ? true
+        : resolveApplicationPath(entry, options, platform) !== undefined,
   }));
 }
 
-export function launchOpenInApplication(options: {
+export async function launchOpenInApplication(options: {
   readonly applicationId: OpenInApplicationId;
   readonly checkoutRoot: string;
   readonly exists: (path: string) => boolean;
   readonly homeDirectory: string;
+  readonly platform?: NodeJS.Platform;
+  readonly pathEnv?: string;
   readonly shell: { readonly showItemInFolder: (path: string) => void };
   readonly spawn: SpawnApplication;
-}): void {
+}): Promise<void> {
+  const platform = options.platform ?? "darwin";
   const entry = OPEN_IN_APPLICATIONS.find((candidate) => candidate.id === options.applicationId);
-  const applicationPath = entry === undefined ? undefined : resolveApplicationPath(entry, options);
   if (
     entry === undefined ||
     !isAbsolute(options.checkoutRoot) ||
-    options.checkoutRoot.includes("\0") ||
-    applicationPath === undefined
+    options.checkoutRoot.includes("\0")
   ) {
-    throw new Error("Octant could not open the selected application.");
+    throw new Error(OPEN_FAILURE);
   }
   if (entry.id === "finder") {
+    if (platform === "linux") {
+      const xdgOpen = resolveExecutableOnPath("xdg-open", options.exists, options.pathEnv);
+      if (xdgOpen === undefined) throw new Error(OPEN_FAILURE);
+      await spawnDetachedApplication(options.spawn, xdgOpen, [options.checkoutRoot]);
+      return;
+    }
     options.shell.showItemInFolder(options.checkoutRoot);
     return;
   }
-  try {
-    options
-      .spawn("/usr/bin/open", ["-a", applicationPath, options.checkoutRoot], {
-        detached: true,
-        shell: false,
-        stdio: "ignore",
-      })
-      .unref?.();
-  } catch {
-    throw new Error("Octant could not open the selected application.");
+  const applicationPath = resolveApplicationPath(entry, options, platform);
+  if (applicationPath === undefined) {
+    throw new Error(OPEN_FAILURE);
   }
+  if (platform === "linux") {
+    await spawnDetachedApplication(options.spawn, applicationPath, [options.checkoutRoot]);
+    return;
+  }
+  await spawnDetachedApplication(options.spawn, "/usr/bin/open", [
+    "-a",
+    applicationPath,
+    options.checkoutRoot,
+  ]);
 }
 
 export async function openCodeCheckoutInApplicationFromServer(options: {
@@ -128,7 +157,7 @@ export async function openCodeCheckoutInApplicationFromServer(options: {
   readonly launch: (input: {
     readonly applicationId: OpenInApplicationId;
     readonly checkoutRoot: string;
-  }) => void;
+  }) => void | Promise<void>;
 }): Promise<void> {
   try {
     const response = await options.fetch(
@@ -156,24 +185,95 @@ export async function openCodeCheckoutInApplicationFromServer(options: {
     ) {
       throw new Error("invalid");
     }
-    options.launch({
+    await options.launch({
       applicationId: options.request.applicationId,
       checkoutRoot: value.checkoutRoot,
     });
   } catch {
-    throw new Error("Octant could not open the selected application.");
+    throw new Error(OPEN_FAILURE);
   }
+}
+
+async function spawnDetachedApplication(
+  spawn: SpawnApplication,
+  executable: string,
+  arguments_: ReadonlyArray<string>,
+): Promise<void> {
+  let child: SpawnedApplication;
+  try {
+    child = spawn(executable, arguments_, {
+      detached: true,
+      shell: false,
+      stdio: "ignore",
+    });
+  } catch {
+    throw new Error(OPEN_FAILURE);
+  }
+  await awaitSpawnOutcome(child, OPEN_FAILURE);
+}
+
+/**
+ * Wait for the child to finish spawning. Missing executables emit `error`
+ * asynchronously (ENOENT); a bare try/catch around spawn never sees that.
+ */
+async function awaitSpawnOutcome(
+  child: {
+    readonly unref?: () => void;
+    readonly once?: (event: "error" | "spawn", listener: (error?: Error) => void) => void;
+  },
+  failureMessage: string,
+): Promise<void> {
+  if (child.once === undefined) {
+    child.unref?.();
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      child.unref?.();
+      resolve();
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(failureMessage));
+    };
+    child.once!("error", fail);
+    child.once!("spawn", succeed);
+  });
+}
+
+function resolveExecutableOnPath(
+  command: string,
+  exists: (path: string) => boolean,
+  pathEnv: string | undefined = process.env.PATH,
+): string | undefined {
+  if (command.includes("\0") || command.includes("/") || command.includes("\\")) {
+    return undefined;
+  }
+  for (const directory of (pathEnv ?? "").split(delimiter)) {
+    if (directory === "") continue;
+    const candidate = join(directory, command);
+    if (isAbsolute(candidate) && exists(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 function resolveApplicationPath(
   entry: CatalogueEntry,
   options: { readonly exists: (path: string) => boolean; readonly homeDirectory: string },
+  platform: NodeJS.Platform,
 ): string | undefined {
+  if (platform === "linux") {
+    return entry.linuxSystemPaths.find((path) => options.exists(path));
+  }
   const candidates = [
-    ...entry.systemPaths,
-    ...(entry.userApplicationName === undefined
+    ...entry.darwinSystemPaths,
+    ...(entry.darwinUserApplicationName === undefined
       ? []
-      : [join(options.homeDirectory, "Applications", entry.userApplicationName)]),
+      : [join(options.homeDirectory, "Applications", entry.darwinUserApplicationName)]),
   ];
   return candidates.find((path) => options.exists(path));
 }

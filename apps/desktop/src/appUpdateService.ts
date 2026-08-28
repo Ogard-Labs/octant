@@ -21,6 +21,17 @@ import {
 } from "./appUpdateFeed";
 
 /**
+ * Platforms that publish a signed desktop update feed today.
+ *
+ * Linux unpackaged builds must fail closed: an updater on an unsigned artifact
+ * is an unauthenticated code-delivery channel. Packaging and the Linux feed
+ * matrix land separately.
+ */
+export function supportsSignedDesktopUpdateChannel(platform: string): boolean {
+  return platform === "darwin";
+}
+
+/**
  * The slice of Electron's `autoUpdater` this service drives.
  *
  * A port rather than the module itself, so the ordering below — verify, then
@@ -185,6 +196,15 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
 
     async check(signal?: AbortSignal): Promise<AppUpdateState> {
       publish({ status: "checking" });
+      if (!supportsSignedDesktopUpdateChannel(options.app.platform)) {
+        return publishWithoutOffer({
+          status: "refused",
+          refusal: "untrusted-signature",
+          checkedAt: clock() as AppUpdateState["checkedAt"],
+          message:
+            "This platform has no signed update channel yet, so Octant will not install an update.",
+        });
+      }
       if (!verifier.configured) {
         // No release key compiled in means nothing can be proven, so nothing is
         // offered. A build in this state is not a build that updates quietly.

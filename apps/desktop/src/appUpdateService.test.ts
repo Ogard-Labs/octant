@@ -473,6 +473,23 @@ describe("applying an update", () => {
     });
     expect(port.calls.quitAndInstall).toBe(0);
   });
+
+  it("refuses update checks on Linux until a signed channel exists", async () => {
+    const fetchImpl = vi.fn() as unknown as typeof globalThis.fetch;
+    const updates = createAppUpdateService({
+      updater: updater(),
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "linux", arch: "x64" },
+      automaticChecks: false,
+      fetchImpl,
+    });
+    const state = await updates.check();
+    expect(state).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });
 
 describe("automatic checking", () => {

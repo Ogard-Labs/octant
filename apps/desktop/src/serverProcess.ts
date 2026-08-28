@@ -24,9 +24,9 @@ export async function assertAutomaticHostStartupEnabled(
 interface ServerSpawnSpecOptions {
   readonly browserBrokerToken: string;
   readonly browserBrokerUrl: string;
-  readonly codeFileHelperPath: string;
-  readonly credentialBrokerToken: string;
-  readonly credentialBrokerUrl: string;
+  readonly codeFileHelperPath?: string;
+  readonly credentialBrokerToken?: string;
+  readonly credentialBrokerUrl?: string;
   readonly desktopBridgeSecret: string;
   readonly root: string;
   readonly port: number;
@@ -73,9 +73,15 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
     ...inheritedEnv,
     OCTANT_BROWSER_BROKER_TOKEN: options.browserBrokerToken,
     OCTANT_BROWSER_BROKER_URL: options.browserBrokerUrl,
-    OCTANT_CODE_FILE_HELPER_PATH: options.codeFileHelperPath,
-    OCTANT_CREDENTIAL_BROKER_TOKEN: options.credentialBrokerToken,
-    OCTANT_CREDENTIAL_BROKER_URL: options.credentialBrokerUrl,
+    ...(options.codeFileHelperPath === undefined
+      ? {}
+      : { OCTANT_CODE_FILE_HELPER_PATH: options.codeFileHelperPath }),
+    ...(options.credentialBrokerToken === undefined || options.credentialBrokerUrl === undefined
+      ? {}
+      : {
+          OCTANT_CREDENTIAL_BROKER_TOKEN: options.credentialBrokerToken,
+          OCTANT_CREDENTIAL_BROKER_URL: options.credentialBrokerUrl,
+        }),
     OCTANT_DESKTOP_BRIDGE_SECRET: options.desktopBridgeSecret,
     OCTANT_DESKTOP_PARENT_WATCH: "1",
     OCTANT_SERVER_INSTANCE_ID: options.instanceId,

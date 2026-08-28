@@ -281,6 +281,24 @@ describe("resolveStableHostAttachment", () => {
 });
 
 describe("serverSpawnSpec", () => {
+  it("omits credential broker and Code file helper env when unset", () => {
+    const spec = serverSpawnSpec({
+      browserBrokerToken: "browser-token",
+      browserBrokerUrl: "http://127.0.0.1:42000/",
+      desktopBridgeSecret: "desktop-secret",
+      root: "/repo",
+      port: 13_773,
+      instanceId: "managed-instance",
+      packaged: false,
+      execPath: "/usr/bin/octant",
+      env: { PATH: "/usr/bin" },
+    });
+    expect(spec.env.OCTANT_CREDENTIAL_BROKER_URL).toBeUndefined();
+    expect(spec.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBeUndefined();
+    expect(spec.env.OCTANT_CODE_FILE_HELPER_PATH).toBeUndefined();
+    expect(spec.env.OCTANT_BROWSER_BROKER_URL).toBe("http://127.0.0.1:42000/");
+  });
+
   it("adds trusted macOS package-manager paths for packaged servers", () => {
     expect(
       resolvePackagedServerPath(
@@ -329,6 +347,10 @@ describe("serverSpawnSpec", () => {
   });
 
   it("uses the packaged Electron executable in Node mode without Bun", () => {
+    const packagedPath =
+      process.platform === "darwin"
+        ? "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin"
+        : "/usr/bin:/bin";
     expect(
       serverSpawnSpec({
         browserBrokerToken: "browser-token",
@@ -349,7 +371,7 @@ describe("serverSpawnSpec", () => {
       command: "/Applications/Octant.app/Contents/MacOS/Octant",
       args: ["/repo/apps/server/dist/main.mjs"],
       env: {
-        PATH: "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin",
+        PATH: packagedPath,
         ELECTRON_RUN_AS_NODE: "1",
         OCTANT_BROWSER_BROKER_TOKEN: "browser-token",
         OCTANT_BROWSER_BROKER_URL: "http://127.0.0.1:42000/",
