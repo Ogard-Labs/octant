@@ -14,6 +14,7 @@ import {
   type SidebarVibrancyMode,
 } from "@octant/contracts/theme";
 import { SIDEBAR_BACKGROUND_PRESETS } from "@octant/theme/backgrounds";
+import { isImageProfileDriverKind } from "@octant/domain";
 import type { ImplementedSettingId } from "./useShellController";
 import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController } from "../providers/useDiscoveryController";
@@ -462,7 +463,7 @@ function ProvidersSection(props: {
     // untouched until the user explicitly enables them.
     const enabledInstanceIds = props.providerController
       .readInstances()
-      .filter((instance) => instance.enabled)
+      .filter((instance) => instance.enabled && !isImageProfileDriverKind(instance.driverKind))
       .map((instance) => instance.id);
     await Promise.all(
       enabledInstanceIds.map((instanceId) => props.providerController.probe(instanceId)),
