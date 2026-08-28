@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectThreadRows } from "./ProjectThreadList";
 
@@ -461,6 +461,196 @@ describe("ProjectThreadRows", () => {
     });
     await userEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
     expect(onArchiveThread).toHaveBeenCalledWith("thread-one");
+  });
+
+  it("marks a forked thread with a fork glyph next to the status dot", () => {
+    const origin = { threadId: "thread-origin", title: "Original direction" };
+    const forked = {
+      threadId: "thread-fork",
+      title: "Second direction",
+      lineageParentThreadId: "thread-origin",
+    };
+    render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[origin, forked, thread]} />);
+
+    const forkRow = screen.getByRole("button", { name: /Second direction/ });
+    const lineage = screen.getAllByRole("button", { name: "Fork lineage" });
+    expect(lineage).toHaveLength(2);
+    const forkMark = lineage.find((mark) => mark.parentElement === forkRow.parentElement);
+    expect(forkMark).toBeDefined();
+    expect(forkMark === undefined ? 0 : forkRow.compareDocumentPosition(forkMark)).toBe(
+      Node.DOCUMENT_POSITION_PRECEDING,
+    );
+    expect(
+      screen
+        .getByRole("button", { name: /Controller foundation/ })
+        .parentElement?.querySelector('[aria-label="Fork lineage"]'),
+    ).toBeNull();
+  });
+
+  it("opens a lineage list of origin and forks from the fork mark", async () => {
+    const origin = { threadId: "thread-origin", title: "Original direction" };
+    const forked = {
+      threadId: "thread-fork",
+      title: "Second direction",
+      lineageParentThreadId: "thread-origin",
+    };
+    const otherFork = {
+      threadId: "thread-other",
+      title: "Another try",
+      lineageParentThreadId: "thread-origin",
+    };
+    render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[origin, forked, otherFork]} />);
+
+    const forkRow = screen.getByRole("button", { name: /Second direction/ });
+    const originRow = screen.getByRole("button", { name: /Original direction/ });
+    const forkMark = screen
+      .getAllByRole("button", { name: "Fork lineage" })
+      .find((mark) => mark.parentElement === forkRow.parentElement);
+    const originMark = screen
+      .getAllByRole("button", { name: "Fork lineage" })
+      .find((mark) => mark.parentElement === originRow.parentElement);
+    expect(forkMark).toBeDefined();
+    expect(originMark).toBeDefined();
+    if (forkMark === undefined || originMark === undefined) return;
+
+    await userEvent.click(forkMark);
+    const forkPopover = await screen.findByRole("dialog", { name: "Fork lineage" });
+    expect(forkPopover).toHaveTextContent("Original direction");
+    expect(forkPopover).toHaveTextContent("Second direction");
+    expect(forkPopover).toHaveTextContent("Current");
+    await userEvent.keyboard("{Escape}");
+
+    await userEvent.click(originMark);
+    const originPopover = await screen.findByRole("dialog", { name: "Fork lineage" });
+    expect(originPopover).toHaveTextContent("Original direction");
+    expect(originPopover).toHaveTextContent("Current");
+    expect(originPopover).toHaveTextContent("Forks");
+    expect(originPopover).toHaveTextContent("Another try");
+    expect(originPopover).toHaveTextContent("Second direction");
+  });
+
+  it("activates a lineage entry through the row's selection path", async () => {
+    const onSelectThread = vi.fn();
+    const origin = { threadId: "thread-origin", title: "Original direction" };
+    const forked = {
+      threadId: "thread-fork",
+      title: "Second direction",
+      lineageParentThreadId: "thread-origin",
+    };
+    render(<ProjectThreadRows onSelectThread={onSelectThread} threads={[origin, forked]} />);
+
+    const forkRow = screen.getByRole("button", { name: /Second direction/ });
+    const forkMark = screen
+      .getAllByRole("button", { name: "Fork lineage" })
+      .find((mark) => mark.parentElement === forkRow.parentElement);
+    expect(forkMark).toBeDefined();
+    if (forkMark === undefined) return;
+    await userEvent.click(forkMark);
+    const popover = await screen.findByRole("dialog", { name: "Fork lineage" });
+    await userEvent.click(within(popover).getByRole("button", { name: "Original direction" }));
+
+    expect(onSelectThread).toHaveBeenCalledWith("thread-origin");
+    expect(onSelectThread).toHaveBeenCalledTimes(1);
+  });
+
+  it("says when a fork's origin is no longer available", async () => {
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            threadId: "thread-fork",
+            title: "Second direction",
+            lineageParentThreadId: "thread-gone",
+          },
+        ]}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Fork lineage" }));
+    const popover = await screen.findByRole("dialog", { name: "Fork lineage" });
+    expect(popover).toHaveTextContent("origin no longer available");
+    expect(popover).toHaveTextContent("Second direction");
+    expect(popover).toHaveTextContent("Current");
+  });
+
+  it("marks a fork source that has descendants and no parent", () => {
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[
+          { threadId: "thread-origin", title: "Original direction" },
+          {
+            threadId: "thread-fork",
+            title: "Second direction",
+            lineageParentThreadId: "thread-origin",
+          },
+        ]}
+      />,
+    );
+
+    const originRow = screen.getByRole("button", { name: /Original direction/ });
+    const originMark = screen
+      .getAllByRole("button", { name: "Fork lineage" })
+      .find((mark) => mark.parentElement === originRow.parentElement);
+    expect(originMark).toBeDefined();
+    expect(originRow.parentElement).toContainElement(originMark ?? originRow);
+  });
+
+  it("leaves a thread with no provenance and no forks without a lineage control", () => {
+    render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[thread]} />);
+
+    expect(screen.queryByRole("button", { name: "Fork lineage" })).toBeNull();
+  });
+
+  it("names the fork origin on the forked row's hover info card", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[
+          { threadId: "thread-origin", title: "Original direction" },
+          {
+            threadId: "thread-fork",
+            title: "Second direction",
+            lineageParentThreadId: "thread-origin",
+          },
+        ]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Second direction/ }));
+    const card = await screen.findByRole("tooltip");
+    expect(card).toHaveTextContent("Forked from Original direction");
+  });
+
+  it("lets keyboard users reach the fork mark without selecting the thread", async () => {
+    const onSelectThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        onSelectThread={onSelectThread}
+        threads={[
+          { threadId: "thread-origin", title: "Original direction" },
+          {
+            threadId: "thread-fork",
+            title: "Second direction",
+            lineageParentThreadId: "thread-origin",
+          },
+        ]}
+      />,
+    );
+
+    const forkRow = screen.getByRole("button", { name: /Second direction/ });
+    const mark = screen
+      .getAllByRole("button", { name: "Fork lineage" })
+      .find((candidate) => candidate.parentElement === forkRow.parentElement);
+    expect(mark).toBeInstanceOf(HTMLElement);
+    if (!(mark instanceof HTMLElement)) return;
+    mark.focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(await screen.findByRole("dialog", { name: "Fork lineage" })).toBeVisible();
+    expect(onSelectThread).not.toHaveBeenCalled();
   });
 
   it("omits an unparseable updated timestamp from the hover info card", async () => {

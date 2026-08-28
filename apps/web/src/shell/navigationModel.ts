@@ -46,6 +46,12 @@ export interface SidebarNavigationInput {
 export interface ChatThreadNavigationSource {
   readonly followUpOpen?: boolean;
   readonly lastSequence?: number;
+  /**
+   * The visible thread this one was forked or branched from. Absent when the
+   * thread started on its own. The id is the host's thread id, not a pane or
+   * navigation identity.
+   */
+  readonly lineageParentThreadId?: string;
   readonly projectId?: string;
   /** Provider identity carried from the host navigation projection. */
   readonly providerInstanceId?: string;
@@ -81,6 +87,12 @@ export interface ChatThreadNavigationItem {
   /** Absent leaves the row's dot idle rather than inventing a state. */
   readonly activity?: ThreadRowActivity;
   readonly followUp?: boolean;
+  /**
+   * The visible thread this one was forked or branched from. Absent when the
+   * thread started on its own. Work threads never carry this: they have no
+   * fork provenance.
+   */
+  readonly lineageParentThreadId?: string;
   readonly meta?: string;
   readonly provider?: ThreadProviderIdentity;
   /** The provider instance the thread runs on, before it is resolved to a mark. */
@@ -100,6 +112,9 @@ export function buildChatThreadNavigation(
 ): ReadonlyArray<ChatThreadNavigationItem> {
   return threads.map((thread) => ({
     ...(thread.followUpOpen === undefined ? {} : { followUp: thread.followUpOpen }),
+    ...(thread.lineageParentThreadId === undefined
+      ? {}
+      : { lineageParentThreadId: thread.lineageParentThreadId }),
     ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
     ...(thread.providerInstanceId === undefined
       ? {}
