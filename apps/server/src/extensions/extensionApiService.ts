@@ -20,6 +20,7 @@ import {
   ExtensionLifecycleServiceError,
   type ExtensionLifecycleService,
 } from "./extensionLifecycleService";
+import { MarketplaceFetchesDisabledError } from "./marketplaceHttps";
 import { StandaloneSkillService } from "./standaloneSkillService";
 
 export interface ExtensionPackageResolverPort {
@@ -144,6 +145,9 @@ export class ExtensionApiService {
     } catch (error) {
       if (isAbortError(error)) {
         return failure("interrupted", "Extension inspection was interrupted.");
+      }
+      if (error instanceof MarketplaceFetchesDisabledError) {
+        return failure("blocked", error.message);
       }
       if (
         error instanceof ExtensionInspectionError ||

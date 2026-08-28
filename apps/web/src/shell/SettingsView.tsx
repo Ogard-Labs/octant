@@ -75,6 +75,7 @@ import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
+import { MarketplaceFetchSettings } from "../settings/MarketplaceFetchSettings";
 import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings";
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import type { OctantHostBridge } from "./hostBridge";
@@ -443,6 +444,7 @@ function ActiveSectionContent({
       return props.extensionClient !== undefined ? (
         <ExtensionsSettingsView
           client={props.extensionClient}
+          marketplaceFetchesEnabled={props.settings.marketplaceFetchesEnabled}
           showHeading={false}
           {...(props.pickLocalPluginFolder === undefined
             ? {}
@@ -650,6 +652,26 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
                 props.onSettingsChange({ automaticUpdateChecks: enabled })
               }
               onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
+            />
+          </SettingRow>
+        </div>
+      </div>
+      <div className="settings-card-section">
+        <h2>Marketplace</h2>
+        <div className="setgroup">
+          <SettingRow
+            description="Skill and extension catalog search contacts third-party registries only when you ask."
+            focused={focusedSetting === settingId("marketplace-fetches")}
+            label="Marketplace fetches"
+            labelledBySection
+            scope="host"
+            settingId="marketplace-fetches"
+          >
+            <MarketplaceFetchSettings
+              enabled={props.settings.marketplaceFetchesEnabled}
+              onEnabledChange={(enabled) =>
+                props.onSettingsChange({ marketplaceFetchesEnabled: enabled })
+              }
             />
           </SettingRow>
         </div>

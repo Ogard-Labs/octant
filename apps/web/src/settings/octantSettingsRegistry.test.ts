@@ -68,6 +68,18 @@ describe("octantSettingsRegistry", () => {
     expect(ids).not.toContain("work");
   });
 
+  it("registers marketplace fetches next to Updates under General", () => {
+    const general = octantSettingsRegistry.sections.find((s) => s.id === "general");
+    const marketplace = general?.settings.find((s) => s.id === "marketplace-fetches");
+    expect(marketplace).toEqual({
+      id: "marketplace-fetches",
+      label: "Marketplace fetches",
+      scope: "host",
+      keywords:
+        "marketplace fetches skills npm github registry catalog search inspect install privacy off",
+    });
+  });
+
   it("registers the Skills & Extensions section with marketplace/installed keywords", () => {
     const skills = octantSettingsRegistry.sections.find((s) => s.id === "skills");
     expect(skills?.label).toBe("Skills & Extensions");
