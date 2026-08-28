@@ -63,21 +63,27 @@ The foreground command drains on SIGINT/SIGTERM and reports an existing owner in
 The packaged desktop app is macOS-only. A Linux host can run the same server and browser client to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the macOS system requirements above), then:
 
 ```sh
-sudo apt-get install -y bubblewrap libsecret-tools gnome-keyring dbus-user-session zsh
+bash scripts/ade/install-linux-host-deps.sh
+bash scripts/ade/start-secret-service-session.sh
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 bun --cwd packages/cli src/bin.ts server run
 bun --cwd packages/cli src/bin.ts web
 ```
 
-`bwrap` is the confinement runtime. Provider credentials need an unlocked user D-Bus session and Secret Service before `secret-tool` works. On a graphical login that is usually already true. On a headless host, start a user session bus (for example via `dbus-user-session` / `systemd --user`), start `gnome-keyring-daemon` so the secrets component is available, and confirm with `secret-tool store --label=octant-probe service octant key probe <<<probe` then `secret-tool lookup service octant key probe`. On a host with no login keyring, point the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a prompt:
+`install-linux-host-deps.sh` installs `bubblewrap`, `libsecret-tools`, `gnome-keyring`, `dbus-x11`, and `dbus-user-session` when missing, and wires a shell hook that loads the live session bus address. `start-secret-service-session.sh` must run on every host boot: it probes a live D-Bus (and rejects a snapshotted socket path), starts `gnome-keyring-daemon` for the secrets component when needed, points the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a GUI prompt, and proves a store/lookup round-trip.
 
-```sh
-busctl --user call org.freedesktop.secrets /org/freedesktop/secrets \
-  org.freedesktop.Secret.Service SetAlias so default \
-  /org/freedesktop/secrets/collection/session
+On a Cloud Agent Saved environment, put the install script in `install` and the start script in `start` so new agents get Secret Service without a manual step:
+
+```text
+install:
+  bash scripts/ade/install-linux-host-deps.sh
+  bun install --frozen-lockfile
+
+start:
+  bash scripts/ade/start-secret-service-session.sh
 ```
 
-Provider CLIs are ordinary host binaries. Keep `~/.local/bin` on `PATH`, install a CLI there (this host used the official Codex installer), and point the provider instance at that absolute path. Kimi Code's managed-profile confinement stays macOS-only and reports `incompatible`.
+`bwrap` is the confinement runtime. On a graphical login the session bus and keyring are usually already present; the start script is then a no-op once Secret Service answers. Provider CLIs are ordinary host binaries. Keep `~/.local/bin` on `PATH`, install a CLI there (this host used the official Codex installer), and point the provider instance at that absolute path. Kimi Code's managed-profile confinement stays macOS-only and reports `incompatible`.
 
 Do not remove or corrupt the default directory. Removing the native window-state file changes the window ID, while removing the SQLite file discards all local journal and shell data.
 

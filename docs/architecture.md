@@ -599,9 +599,11 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
 - A headless Linux station: `octant server run`, then `octant web` (or
   `octant web --dev` for Vite). Linux requires `bubblewrap`, an unlocked
   freedesktop Secret Service session, and the `secret-tool` client. Without
-  those, the host fails closed. Provider CLIs are ordinary host binaries:
-  install one to a user-writable path such as `~/.local/bin` and point the
-  provider instance at that absolute path.
+  those, the host fails closed. ADE and other boot-managed hosts run
+  `scripts/ade/start-secret-service-session.sh` on each start so the session
+  bus and keyring are live (never a snapshotted socket path alone). Provider
+  CLIs are ordinary host binaries: install one to a user-writable path such
+  as `~/.local/bin` and point the provider instance at that absolute path.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.
 - Formatting is `oxfmt`, linting is `oxlint`; Turbo runs the per-package
