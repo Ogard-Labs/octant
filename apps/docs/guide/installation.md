@@ -85,6 +85,8 @@ start:
   bash scripts/ade/start-secret-service-session.sh
 ```
 
+If that Saved environment runs `start` in a separate process from `server run`, start-script exports do not cross the subprocess boundary. Operators (or the server-launch shell) must source `${HOME}/.config/octant-host/session.env` in the same shell immediately before `server run` so the host inherits `DBUS_SESSION_BUS_ADDRESS`. A login shell that already ran the install bashrc hook also loads a live address from that file.
+
 `bwrap` is the confinement runtime. On a graphical login the session bus and keyring are usually already present; the start script is then a no-op once Secret Service answers. Provider CLIs are ordinary host binaries. Keep `~/.local/bin` on `PATH`, install a CLI there (this host used the official Codex installer), and point the provider instance at that absolute path. Kimi Code's managed-profile confinement stays macOS-only and reports `incompatible`.
 
 Do not remove or corrupt the default directory. Removing the native window-state file changes the window ID, while removing the SQLite file discards all local journal and shell data.

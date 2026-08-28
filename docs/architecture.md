@@ -601,10 +601,12 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   freedesktop Secret Service session, and the `secret-tool` client. Without
   those, the host fails closed. ADE and other boot-managed hosts should run
   `scripts/ade/start-secret-service-session.sh` on each start so the session
-  bus and keyring are live (never a snapshotted socket path alone); until a
-  Cloud Agent Saved environment executes that `start` hook, run the script
-  manually and source `~/.config/octant-host/session.env` before the host.
-  Provider
+  bus and keyring are live (never a snapshotted socket path alone). The start
+  script writes `~/.config/octant-host/session.env`; when `start` and
+  `server run` are separate processes, source that file in the server-launch
+  shell before the host — start-script exports do not cross the subprocess
+  boundary. Until a Cloud Agent Saved environment executes the `start` hook,
+  run the script manually and source `session.env` the same way. Provider
   CLIs are ordinary host binaries: install one to a user-writable path such
   as `~/.local/bin` and point the provider instance at that absolute path.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
