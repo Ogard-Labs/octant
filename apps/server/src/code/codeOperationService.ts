@@ -682,6 +682,8 @@ export interface CodeOperationServiceOptions {
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
   }>;
   readonly takeIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
+  readonly peekIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
+  readonly consumeIssueContextFramed?: (threadId: string) => void;
   /**
    * Reads the conversation a forked thread inherits, for its first turn only.
    *
@@ -2093,7 +2095,9 @@ export class CodeOperationService {
       })
       .catch(() => undefined);
     const profileContext = await this.#resolveProfileContext(thread);
-    const issueContext = this.#options.takeIssueContextFramed?.(String(thread.id));
+    const issueContext =
+      this.#options.peekIssueContextFramed?.(String(thread.id)) ??
+      this.#options.takeIssueContextFramed?.(String(thread.id));
     const context = [
       ...profileContext,
       ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
@@ -2133,6 +2137,7 @@ export class CodeOperationService {
       ...(context.length === 0 ? {} : { context }),
       ...(attachments.length === 0 ? {} : { attachments }),
     });
+    this.#options.consumeIssueContextFramed?.(String(thread.id));
     return this.#providerResult(command.operationId, turn);
   }
 

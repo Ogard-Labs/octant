@@ -3104,8 +3104,10 @@ export function startOctantServer(
         takeProductFeedbackForTurn: createProductFeedbackTurnPort({
           service: productFeedbackService,
         }),
-        takeIssueContextFramed: (threadId) =>
-          githubIssueContextService.takeFramedForFirstTurn(threadId),
+        peekIssueContextFramed: (threadId) =>
+          githubIssueContextService.peekFramedForFirstTurn(threadId),
+        consumeIssueContextFramed: (threadId) =>
+          githubIssueContextService.consumeFramedForFirstTurn(threadId),
         // Where a run comes home to: the directory the thread's Project binds.
         // A run on a managed worktree works in a sibling tree; the merge lands
         // in the person's own checkout, and only the Project knows where that
@@ -3844,8 +3846,10 @@ export function startOctantServer(
     const workTurnService = new WorkTurnService({
       persistence,
       threads: workThreadService,
-      takeIssueContextFramed: (threadId) =>
-        githubIssueContextService.takeFramedForFirstTurn(threadId),
+      peekIssueContextFramed: (threadId) =>
+        githubIssueContextService.peekFramedForFirstTurn(threadId),
+      consumeIssueContextFramed: (threadId) =>
+        githubIssueContextService.consumeFramedForFirstTurn(threadId),
       projects: projectService,
       projection: workTurnProjection,
       workingDirectories: { resolve: resolveThreadWorkingDirectory },

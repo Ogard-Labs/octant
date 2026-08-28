@@ -31,7 +31,11 @@ import {
 
 type GithubIssueContextPort = Pick<
   GithubIssueContextService,
-  "prepare" | "bindCreatedThread" | "takeFramedForFirstTurn"
+  | "prepare"
+  | "bindCreatedThread"
+  | "peekFramedForFirstTurn"
+  | "consumeFramedForFirstTurn"
+  | "takeFramedForFirstTurn"
 >;
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
@@ -216,11 +220,15 @@ export class WorkThreadService {
         });
         this.#projection.apply({ kind: "thread-created", thread: created });
         if (preparedIssue.status === "ready" && command.issueContext !== undefined) {
-          this.#issueContext?.bindCreatedThread({
-            threadId: String(created.id),
-            framed: preparedIssue.framed,
-            request: command.issueContext,
-          });
+          try {
+            this.#issueContext?.bindCreatedThread({
+              threadId: String(created.id),
+              framed: preparedIssue.framed,
+              request: command.issueContext,
+            });
+          } catch {
+            // The thread is already journaled; taint recording must not invert create.
+          }
         }
         return { kind: "thread-created", thread: created };
       }

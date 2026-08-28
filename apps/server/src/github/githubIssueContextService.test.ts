@@ -160,9 +160,13 @@ describe("GitHub issue context", () => {
     expect(composed).not.toMatch(/token=/i);
     expect(composed).not.toMatch(/bearer/i);
     expect(composed).not.toMatch(/authorization/i);
+    expect(composed).not.toContain("supersecret");
+    expect(composed).not.toContain("ABC");
     expect(composed).not.toContain("\u0000");
     expect(composed).not.toContain("\u001b");
     expect(composed).toContain("[redacted]");
+    expect(redactIssueContextText("token=supersecret")).toBe("[redacted]");
+    expect(redactIssueContextText("bearer ABC")).toBe("[redacted]");
     expect(redactIssueContextText("ghp_abcdefghijklmnopqrstuvwxyz")).toBe("[redacted]");
   });
 
@@ -257,7 +261,10 @@ describe("GitHub issue context", () => {
           .prepare(`SELECT event_name FROM event_journal WHERE event_name = ?`)
           .all(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested),
       ).toHaveLength(1);
+      expect(context.peekFramedForFirstTurn(ids.thread)?.text).toBe(framed.text);
+      expect(context.peekFramedForFirstTurn(ids.thread)?.text).toBe(framed.text);
       expect(context.takeFramedForFirstTurn(ids.thread)?.text).toBe(framed.text);
+      expect(context.peekFramedForFirstTurn(ids.thread)).toBeUndefined();
       expect(context.takeFramedForFirstTurn(ids.thread)).toBeUndefined();
     } finally {
       connection.close();

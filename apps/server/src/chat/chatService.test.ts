@@ -988,6 +988,8 @@ describe("ChatService", () => {
           message: "The selected GitHub issue could not be loaded. The thread was not created.",
         }),
         bindCreatedThread: vi.fn(),
+        peekFramedForFirstTurn: vi.fn(),
+        consumeFramedForFirstTurn: vi.fn(),
         takeFramedForFirstTurn: vi.fn(),
       },
     });
@@ -1006,6 +1008,32 @@ describe("ChatService", () => {
       },
     });
     expect(persistence.readChatThreads()).toEqual([]);
+  });
+
+  it("still creates a thread when recording issue-context taint throws", async () => {
+    const { service, persistence } = openFixture({
+      issueContext: {
+        prepare: async () => ({
+          status: "ready" as const,
+          framed: { section: "workspace-context" as const, text: "framed" },
+        }),
+        bindCreatedThread: () => {
+          throw new Error("taint journal failed");
+        },
+        peekFramedForFirstTurn: vi.fn(),
+        consumeFramedForFirstTurn: vi.fn(),
+        takeFramedForFirstTurn: vi.fn(),
+      },
+    });
+
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "From an issue",
+      issueContext: { owner: "octant", name: "octant", number: 7 },
+    });
+    expect(created.kind).toBe("thread-created");
+    expect(persistence.readChatThreads()).toHaveLength(1);
   });
 
   it("hides Side Chat sidecar threads from bootstrap and search while keeping them readable", async () => {

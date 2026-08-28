@@ -138,6 +138,87 @@ describe("Create from issue picker", () => {
     expect(await screen.findByText("issues-create-hidden")).toBeVisible();
   });
 
+  it("ignores a late issues response after the repository changes", async () => {
+    const user = userEvent.setup();
+    let releaseFirst: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const issuePage = (
+      number: number,
+      title: string,
+      name: string,
+    ): GithubCatalogueReadResponse => ({
+      kind: "issues",
+      page: {
+        rows: [
+          {
+            number,
+            title,
+            state: "open",
+            author: "octocat",
+            updatedAt: "2026-08-11T10:00:00Z",
+            url: `https://github.com/octant/${name}/issues/${String(number)}`,
+          },
+        ],
+        sort: "updated-desc",
+        hasNextPage: false,
+        freshness: { status: "fresh" },
+      },
+    });
+    const client = makeClient(readySnapshot, {
+      readCatalogue: async (request) => {
+        if (request.kind === "recent-repositories") {
+          return { kind: "recent-repositories", rows: [] };
+        }
+        if (request.kind === "repositories") {
+          return {
+            kind: "repositories",
+            page: {
+              rows: [
+                {
+                  nodeId: "R_node1",
+                  owner: "octant",
+                  name: "octant",
+                  visibility: "private",
+                  defaultBranch: "development",
+                  viewerPermission: "admin",
+                  capabilities: [{ kind: "issues-read", available: true }],
+                },
+                {
+                  nodeId: "R_node2",
+                  owner: "octant",
+                  name: "atlas",
+                  visibility: "private",
+                  defaultBranch: "development",
+                  viewerPermission: "admin",
+                  capabilities: [{ kind: "issues-read", available: true }],
+                },
+              ],
+              sort: "pushed-desc",
+              hasNextPage: false,
+              freshness: { status: "fresh" },
+            },
+          };
+        }
+        if (request.kind === "issues") {
+          if (request.name === "octant") {
+            await firstGate;
+            return issuePage(7, "Old repo issue", "octant");
+          }
+          return issuePage(9, "New repo issue", "atlas");
+        }
+        return { kind: "unavailable", capability: "issues-read", reason: "unavailable" };
+      },
+    });
+    render(<CreateFromIssuePicker client={client} onSelect={vi.fn()} />);
+    await user.click(await screen.findByText("octant/octant"));
+    await user.click(await screen.findByText("octant/atlas"));
+    releaseFirst?.();
+    expect(await screen.findByRole("button", { name: /#9 New repo issue/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /#7 Old repo issue/ })).toBeNull();
+  });
+
   it("does not throw when catalogue reads are missing from the picker", () => {
     const stub = {
       authenticationSnapshot: async () => readySnapshot,

@@ -165,6 +165,8 @@ export interface WorkTurnServiceDependencies {
     readonly threadId: WorkThreadId;
   }) => Promise<ReadonlyArray<ProviderContextBlock>>;
   readonly takeIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
+  readonly peekIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
+  readonly consumeIssueContextFramed?: (threadId: string) => void;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly expectedHostId?: string;
@@ -189,6 +191,8 @@ export class WorkTurnService {
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
   readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
   readonly #takeIssueContextFramed: WorkTurnServiceDependencies["takeIssueContextFramed"];
+  readonly #peekIssueContextFramed: WorkTurnServiceDependencies["peekIssueContextFramed"];
+  readonly #consumeIssueContextFramed: WorkTurnServiceDependencies["consumeIssueContextFramed"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #expectedHostId: string;
@@ -211,6 +215,12 @@ export class WorkTurnService {
     this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
     if (dependencies.takeIssueContextFramed !== undefined) {
       this.#takeIssueContextFramed = dependencies.takeIssueContextFramed;
+    }
+    if (dependencies.peekIssueContextFramed !== undefined) {
+      this.#peekIssueContextFramed = dependencies.peekIssueContextFramed;
+    }
+    if (dependencies.consumeIssueContextFramed !== undefined) {
+      this.#consumeIssueContextFramed = dependencies.consumeIssueContextFramed;
     }
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
@@ -373,6 +383,7 @@ export class WorkTurnService {
       }
       throw this.#mapFailure(error);
     }
+    this.#consumeIssueContextFramed?.(String(command.threadId));
 
     const accepted = this.#projection.lookup(command.requestId);
     if (accepted === undefined) {
@@ -529,7 +540,9 @@ export class WorkTurnService {
   }
 
   #issueContextContribution(threadId: WorkThreadId): ReadonlyArray<WorkTurnContextContribution> {
-    const framed = this.#takeIssueContextFramed?.(String(threadId));
+    const framed =
+      this.#peekIssueContextFramed?.(String(threadId)) ??
+      this.#takeIssueContextFramed?.(String(threadId));
     if (framed === undefined) return [];
     return [
       {

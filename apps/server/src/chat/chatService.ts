@@ -74,7 +74,11 @@ import {
 
 type GithubIssueContextPort = Pick<
   GithubIssueContextService,
-  "prepare" | "bindCreatedThread" | "takeFramedForFirstTurn"
+  | "prepare"
+  | "bindCreatedThread"
+  | "peekFramedForFirstTurn"
+  | "consumeFramedForFirstTurn"
+  | "takeFramedForFirstTurn"
 >;
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
@@ -1372,11 +1376,15 @@ export class ChatService {
       events: [this.#pending("chat.thread-created@1", { kind: "thread-created", thread })],
     });
     if (preparedIssue.status === "ready" && command.issueContext !== undefined) {
-      this.#issueContext?.bindCreatedThread({
-        threadId: String(thread.id),
-        framed: preparedIssue.framed,
-        request: command.issueContext,
-      });
+      try {
+        this.#issueContext?.bindCreatedThread({
+          threadId: String(thread.id),
+          framed: preparedIssue.framed,
+          request: command.issueContext,
+        });
+      } catch {
+        // The thread is already journaled; taint recording must not invert create.
+      }
     }
     return { kind: "thread-created", thread };
   }
@@ -3586,7 +3594,12 @@ export class ChatService {
         { kind: "user-message", text: mention.text },
       ),
     );
-    const issueContextFramed = this.#issueContext?.takeFramedForFirstTurn(String(thread.id));
+    const priorTurns = this.#persistence.readChatThreadView(thread.id)?.turns ?? [];
+    const stillFirstTurn = priorTurns.every((turn) => turn.sequence === 1);
+    if (!stillFirstTurn) this.#issueContext?.consumeFramedForFirstTurn(String(thread.id));
+    const issueContextFramed = stillFirstTurn
+      ? this.#issueContext?.peekFramedForFirstTurn(String(thread.id))
+      : undefined;
     const issueContextEntries =
       issueContextFramed === undefined
         ? []

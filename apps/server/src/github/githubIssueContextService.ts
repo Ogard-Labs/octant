@@ -14,7 +14,7 @@ import type {
 } from "../context/externalContentIngestionStore";
 
 const SECRETISH =
-  /(?:gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|bearer\s+|token=|authorization)/gi;
+  /(?:gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|bearer\s+\S+|token=[^\s&]+|authorization\s*:\s*\S+)/gi;
 const TITLE_MAX_CHARS = 256;
 const AUTHOR_MAX_CHARS = 128;
 const LABEL_MAX_CHARS = 50;
@@ -162,10 +162,18 @@ export class GithubIssueContextService {
     return recorded;
   }
 
-  takeFramedForFirstTurn(threadId: string): FramedExternalContent | undefined {
-    const framed = this.#pendingFramed.get(threadId);
-    if (framed === undefined) return undefined;
+  peekFramedForFirstTurn(threadId: string): FramedExternalContent | undefined {
+    return this.#pendingFramed.get(threadId);
+  }
+
+  consumeFramedForFirstTurn(threadId: string): void {
     this.#pendingFramed.delete(threadId);
+  }
+
+  takeFramedForFirstTurn(threadId: string): FramedExternalContent | undefined {
+    const framed = this.peekFramedForFirstTurn(threadId);
+    if (framed === undefined) return undefined;
+    this.consumeFramedForFirstTurn(threadId);
     return framed;
   }
 }

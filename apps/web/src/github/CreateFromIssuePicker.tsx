@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   GithubAuthenticationSnapshot,
@@ -95,6 +95,7 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
   const [query, setQuery] = useState("");
   const [issues, setIssues] = useState<IssueListState>({ kind: "idle" });
   const [loadingMore, setLoadingMore] = useState(false);
+  const issuesGeneration = useRef(0);
 
   const loadIssues = useCallback(
     async (owner: string, name: string, search: string) => {
@@ -103,6 +104,7 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
         setIssues({ kind: "unavailable", message: "GitHub issues are unavailable." });
         return;
       }
+      const operation = ++issuesGeneration.current;
       setIssues({ kind: "loading" });
       try {
         const response = await readCatalogue({
@@ -112,6 +114,7 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
           pageSize: 30 as never,
           ...(search === "" ? {} : { search }),
         });
+        if (operation !== issuesGeneration.current) return;
         if (response.kind === "unavailable") {
           setIssues({
             kind: "unavailable",
@@ -130,6 +133,7 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
           ...(response.page.endCursor === undefined ? {} : { endCursor: response.page.endCursor }),
         });
       } catch (error) {
+        if (operation !== issuesGeneration.current) return;
         setIssues({
           kind: "error",
           message: error instanceof Error ? error.message : "GitHub issues are unavailable.",
@@ -153,19 +157,28 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
     }
     const readCatalogue = client.readCatalogue;
     if (typeof readCatalogue !== "function") return;
+    const operation = issuesGeneration.current;
+    const owner = repository.owner;
+    const name = repository.name;
+    const search = query.trim();
+    const cursor = issues.endCursor;
     setLoadingMore(true);
     try {
       const response = await readCatalogue({
         kind: "issues",
-        owner: repository.owner,
-        name: repository.name,
+        owner,
+        name,
         pageSize: 30 as never,
-        cursor: issues.endCursor as never,
-        ...(query.trim() === "" ? {} : { search: query.trim() }),
+        cursor: cursor as never,
+        ...(search === "" ? {} : { search }),
       });
+      if (operation !== issuesGeneration.current) return;
+      if (repository.owner !== owner || repository.name !== name || query.trim() !== search) {
+        return;
+      }
       if (response.kind !== "issues") return;
       setIssues((current) => {
-        if (current.kind !== "ready") return current;
+        if (current.kind !== "ready" || current.endCursor !== cursor) return current;
         return {
           kind: "ready",
           rows: [...current.rows, ...response.page.rows],

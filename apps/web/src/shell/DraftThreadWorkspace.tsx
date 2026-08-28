@@ -350,7 +350,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   submitted.prompt,
                   selectedProjectId,
                   submitted.deliveryTarget.outcomeKind,
-                  undefined,
+                  submitted.images,
                   submitted.threadMentionIds,
                   submitted.issueContext,
                 );

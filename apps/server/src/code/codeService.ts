@@ -94,7 +94,11 @@ import {
 
 type GithubIssueContextPort = Pick<
   GithubIssueContextService,
-  "prepare" | "bindCreatedThread" | "takeFramedForFirstTurn"
+  | "prepare"
+  | "bindCreatedThread"
+  | "peekFramedForFirstTurn"
+  | "consumeFramedForFirstTurn"
+  | "takeFramedForFirstTurn"
 >;
 import {
   CodeContentStore,
@@ -2494,11 +2498,15 @@ export class CodeService {
     request: GithubIssueContextRequest | undefined,
   ): void {
     if (prepared.status !== "ready" || request === undefined) return;
-    this.#issueContext?.bindCreatedThread({
-      threadId,
-      framed: prepared.framed,
-      request,
-    });
+    try {
+      this.#issueContext?.bindCreatedThread({
+        threadId,
+        framed: prepared.framed,
+        request,
+      });
+    } catch {
+      // The thread is already journaled; taint recording must not invert create.
+    }
   }
 
   #failure(category: CodeFailure["category"], message: string): CodeServiceError {
