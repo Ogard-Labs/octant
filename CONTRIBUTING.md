@@ -110,19 +110,23 @@ docs: consolidate repository documentation
 
 ## Releases
 
-Two rings, both built by GitHub Actions, both signed with a Developer ID and
-notarized. The rules they follow live in
-[decision 0034](docs/decisions/0034-signed-updates.md); this is the operating
-procedure.
+Two rings, both built by GitHub Actions. Apple Silicon (`darwin-arm64`) is
+Developer ID signed and notarized; Linux x64 ships an unsigned AppImage dogfood
+artifact on the same matrix. Feed documents use the rings layout from
+[decision 0034](docs/decisions/0034-signed-updates.md):
+`<base>/<ring>/<platform>-<arch>.json`. A dogfood AppImage is not signed
+auto-update — the in-app Linux channel stays refuse-closed until a
+maintainer-published signed feed exists.
 
 - **Preview** — `.github/workflows/release-preview.yml` runs nightly, builds
-  `main`, and publishes to `<base>/preview/darwin-arm64.json`. It skips itself
-  when `main` has not moved since the last preview. Force one with
-  `gh workflow run 'Release (preview)' -f force=true`.
+  `main`, and publishes feeds under `<base>/preview/` for each matrix arch
+  (`darwin-arm64.json`, and `linux-x64.json` when feed signing material is
+  present). It skips itself when `main` has not moved since the last preview.
+  Force one with `gh workflow run 'Release (preview)' -f force=true`.
 - **Stable** — `.github/workflows/release-stable.yml` runs on a
-  `vMAJOR.MINOR.PATCH` tag and publishes to `<base>/stable/darwin-arm64.json`.
-  The `stable` environment requires an approval, so pushing the tag proposes
-  the release and a maintainer approves it before anything is signed.
+  `vMAJOR.MINOR.PATCH` tag and publishes under `<base>/stable/` for the same
+  matrix. The `stable` environment requires an approval, so pushing the tag
+  proposes the release and a maintainer approves it before anything is signed.
 
 Cutting a stable release is two steps: set
 `DESKTOP_PACKAGE_IDENTITY.version` in `scripts/package-desktop.ts` to the
@@ -135,9 +139,10 @@ toward; previews are prereleases of it.
 Credentials — the Developer ID certificate, the notary key, the Ed25519 feed
 signing key, and the deploy key that publishes the feed — are environment
 secrets, never repository secrets, so a workflow on a side branch cannot read
-them. `scripts/setup-release-credentials.sh` walks a maintainer through
-creating and installing all of them; run it once, and again when a key is
-rotated.
+them. Linux matrix rows may dry-run the feed path without that key; darwin-arm64
+still requires it. `scripts/setup-release-credentials.sh` walks a maintainer
+through creating and installing all of them; run it once, and again when a key
+is rotated.
 
 ## AI-assisted contributions
 

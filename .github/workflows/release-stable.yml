@@ -1,9 +1,10 @@
 # Stable ring.
 #
-# Fires on a `vMAJOR.MINOR.PATCH` tag and publishes a signed feed at
-# `<base>/stable/darwin-arm64.json`. The same one-deliverable rule as the
-# preview ring applies (`docs/decisions/0034`): signed, notarized, and updatable
-# or not published at all.
+# Fires on a `vMAJOR.MINOR.PATCH` tag and publishes signed feeds at
+# `<base>/stable/<platform>-<arch>.json` for the release matrix (darwin-arm64
+# plus linux-x64 AppImage dogfood). The same one-deliverable rule as the
+# preview ring applies (`docs/decisions/0034`): a live feed is signed or not
+# published at all.
 #
 # The `stable` environment carries a required reviewer, so pushing a tag
 # proposes a release and a person approves it. Everything before the approval is
@@ -46,12 +47,28 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   publish:
-    name: Build, sign, notarize, and publish
+    name: Build and publish (${{ matrix.target }})
     needs: verify
     # Required reviewers live on this environment. A tag proposes a release;
     # a person approves it before any secret is readable.
     environment: stable
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+            platform: darwin
+            arch: arm64
+            apple_signing: true
+            artifact_glob: "out/Octant-*-darwin-arm64.zip"
+          - target: linux-x64
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            apple_signing: false
+            artifact_glob: "out/Octant-*-linux-x64.AppImage"
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
       contents: write
@@ -70,12 +87,14 @@ jobs:
       # out of the secret store means the secrets that remain are all things
       # whose disclosure would actually matter.
       - name: Import the Developer ID certificate
+        if: matrix.apple_signing
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.OCTANT_SIGNING_CERTIFICATE_P12 }}
           p12-password: ${{ secrets.OCTANT_SIGNING_CERTIFICATE_PASSWORD }}
 
       - name: Store the notary credentials
+        if: matrix.apple_signing
         env:
           NOTARY_KEY: ${{ secrets.OCTANT_NOTARY_KEY }}
           NOTARY_KEY_ID: ${{ vars.OCTANT_NOTARY_KEY_ID }}
@@ -90,13 +109,23 @@ jobs:
             --issuer "$NOTARY_ISSUER_ID"
           rm -f "${RUNNER_TEMP}/notary.p8"
 
-      - name: Package, sign, and notarize
+      - name: Package Apple Silicon (sign and notarize)
+        if: matrix.apple_signing
         env:
           OCTANT_RELEASE_BUILD: "1"
           OCTANT_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          OCTANT_PACKAGE_TARGET: ${{ matrix.target }}
           OCTANT_SIGNING_IDENTITY: ${{ vars.OCTANT_SIGNING_IDENTITY }}
           OCTANT_SIGNING_TEAM_ID: ${{ vars.OCTANT_SIGNING_TEAM_ID }}
           OCTANT_NOTARY_PROFILE: octant-notary
+        run: bun run package:desktop
+
+      - name: Package Linux AppImage (unsigned dogfood)
+        if: ${{ !matrix.apple_signing }}
+        env:
+          OCTANT_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          OCTANT_PACKAGE_TARGET: ${{ matrix.target }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         run: bun run package:desktop
 
       - name: Publish the release archive
@@ -104,38 +133,71 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.verify.outputs.version }}
+          ARTIFACT_GLOB: ${{ matrix.artifact_glob }}
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          archive=$(ls out/Octant-*-darwin-arm64.zip)
-          gh release create "${GITHUB_REF_NAME}" "$archive" \
-            --title "Octant ${VERSION}" \
-            --generate-notes
+          archive=$(ls ${ARTIFACT_GLOB})
+          tag="${GITHUB_REF_NAME}"
+          # Matrix rows share one stable tag. The first arch creates the
+          # release; later arches attach their artifact without racing a second
+          # create.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$archive" --clobber
+          else
+            gh release create "$tag" "$archive" \
+              --title "Octant ${VERSION}" \
+              --generate-notes \
+              || gh release upload "$tag" "$archive" --clobber
+          fi
           # Constructed rather than read back from the API: the download URL of
           # a release asset is determined by the tag and the file name, and
           # deriving it means the feed cannot end up pointing at whichever
           # asset a list query happened to return first.
-          echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$archive")" >> "$GITHUB_OUTPUT"
+          echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/$(basename "$archive")" >> "$GITHUB_OUTPUT"
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
 
-      - name: Sign the feed
+      - name: Sign the feed (or dry-run when unsigned)
+        id: feed
         env:
           OCTANT_UPDATE_FEED_PRIVATE_KEY: ${{ secrets.OCTANT_UPDATE_FEED_PRIVATE_KEY }}
           VERSION: ${{ needs.verify.outputs.version }}
           ARTIFACT_URL: ${{ steps.release.outputs.url }}
           ARCHIVE: ${{ steps.release.outputs.archive }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+          APPLE_SIGNING: ${{ matrix.apple_signing }}
         run: |
           set -euo pipefail
-          bun scripts/sign-update-feed.ts \
-            --version "$VERSION" \
-            --ring stable \
-            --platform darwin \
-            --arch arm64 \
-            --url "$ARTIFACT_URL" \
-            --artifact "$ARCHIVE" \
-            --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
-            --out "${RUNNER_TEMP}/feed/stable/darwin-arm64.json"
+          out="${RUNNER_TEMP}/feed/stable/${TARGET}.json"
+          args=(
+            --version "$VERSION"
+            --ring stable
+            --platform "$PLATFORM"
+            --arch "$ARCH"
+            --url "$ARTIFACT_URL"
+            --artifact "$ARCHIVE"
+            --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+            --out "$out"
+          )
+          if [ -z "${OCTANT_UPDATE_FEED_PRIVATE_KEY:-}" ]; then
+            # macOS Apple Silicon remains a hard require: an unsigned zip at the
+            # live feed path would be an unauthenticated channel. Linux matrix
+            # scaffolding may dry-run without maintainer feed key material.
+            if [ "$APPLE_SIGNING" = "true" ]; then
+              echo "OCTANT_UPDATE_FEED_PRIVATE_KEY is required for darwin-arm64 releases." >&2
+              exit 1
+            fi
+            bun scripts/sign-update-feed.ts --dry-run "${args[@]}"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bun scripts/sign-update-feed.ts "${args[@]}"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
 
       - name: Publish the feed
+        if: steps.feed.outputs.signed == 'true'
         env:
           SSH_KEY: ${{ secrets.OCTANT_FEED_SSH_KEY }}
           SSH_HOST: ${{ vars.OCTANT_FEED_SSH_HOST }}
@@ -153,7 +215,8 @@ jobs:
           chmod 600 ~/.ssh/octant_feed ~/.ssh/known_hosts
           # GNU rsync understands --chmod; the macOS runner ships the BSD
           # client, which rejects that flag. Permissions are already set on the
-          # destination directory, so archive+compress is enough.
+          # destination directory, so archive+compress is enough. No --delete:
+          # each matrix arch owns one file under the ring directory.
           rsync --archive --compress \
             --rsh "ssh -i ~/.ssh/octant_feed -o IdentitiesOnly=yes" \
             "${RUNNER_TEMP}/feed/stable" \
