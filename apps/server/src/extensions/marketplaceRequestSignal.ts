@@ -1,3 +1,12 @@
+export {
+  MARKETPLACE_FETCH_USER_AGENT,
+  MARKETPLACE_FETCH_ALLOWED_HEADER_NAMES,
+  MarketplaceFetchesDisabledError,
+  createMarketplaceFetch,
+  marketplaceRequestHeaders,
+  type MarketplaceFetch,
+} from "./marketplaceHttps";
+
 const DEFAULT_MARKETPLACE_REQUEST_TIMEOUT_MS = 30_000;
 
 export function createMarketplaceRequestSignal(

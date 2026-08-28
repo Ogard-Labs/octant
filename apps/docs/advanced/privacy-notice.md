@@ -122,9 +122,8 @@ not sent.
 
 Those requests disclose the query you typed (for skill search), the IP
 address, and ordinary HTTP metadata. They do not send the journal,
-credentials, or thread contents. There is no Settings switch that disables
-the registries — not searching, not inspecting, and not installing is how
-you keep the calls from happening.
+credentials, or thread contents. Turn marketplace fetches off in
+**Settings → General → Marketplace**; off means no request is made.
 
 Local disk imports and `.agents/skills/` discovery do not contact a
 catalog. Details live under
