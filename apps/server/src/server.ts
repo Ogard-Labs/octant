@@ -152,6 +152,8 @@ import { WorkResearchProjection } from "./work/workResearchProjection";
 import { createWorkResearchSourcePort } from "./work/workResearchSourcePort";
 import { ThemeService } from "./theme/themeService";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
+import { GeneratedImageStore } from "./image/generatedImageStore";
+import { ImageJobService } from "./image/imageJobService";
 import { CodeContentStore } from "./code/codeContentStore";
 import { CodeEvidenceStore } from "./code/codeEvidenceStore";
 import { CodeAttachmentStore } from "./code/codeAttachmentStore";
@@ -3714,6 +3716,29 @@ export function startOctantServer(
     yield* Effect.promise(() => chatService.recoverManagedAttachments());
     yield* Effect.promise(() => codeAttachments.recover());
     yield* Effect.promise(() => workAttachments.recover());
+    const generatedImageStore = new GeneratedImageStore(persistence.dataDirectory);
+    yield* Effect.promise(() =>
+      generatedImageStore.recover({
+        isFinalizedAttachmentReferenced: (scopeId, attachmentId) =>
+          persistence.imageJobProjection.isFinalizedAttachmentReferenced(scopeId, attachmentId),
+      }),
+    );
+    const imageJobService = new ImageJobService({
+      journal: persistence.journal,
+      projection: persistence.imageJobProjection,
+      attachments: generatedImageStore,
+      readProviderInstance: (id) => persistence.readProviderInstance(id),
+      credentialResolver:
+        credentialResolver ??
+        ({
+          has: async () => false,
+          resolve: async () => "",
+        } as const),
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    yield* Effect.promise(() => imageJobService.reconcileInterruptedRunningJobs());
     yield* Effect.promise(() => chatService.recoverPendingDeletions());
     const linkedThreadService = createLinkedThreadRuntime({
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },

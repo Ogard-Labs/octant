@@ -91,6 +91,7 @@ export * from "./threadExport";
 export * from "./usage";
 export * from "./usageRpc";
 export * from "./usageDashboard";
+export * from "./imageGeneration";
 export * from "./agentProfile";
 export * from "./agentRun";
 export * from "./agentRunSettings";

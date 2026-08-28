@@ -22,6 +22,9 @@ export const UsageAttributionEntry = Schema.Struct({
   category: ContextEntryCategory,
   plannedTokens: NonNegativeInt,
   quality: AttributionQuality,
+  imageCount: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  imageSize: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32))),
+  imageQuality: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32))),
 }).annotations(strict);
 export type UsageAttributionEntry = typeof UsageAttributionEntry.Type;
 

@@ -262,6 +262,26 @@ describe("context contracts", () => {
     } as const;
     expect(decodeUsageReconciliation(reconciliation)).toEqual(reconciliation);
     expect(() => decodeUsageReconciliation({ ...reconciliation, varianceTokens: -5 })).toThrow();
+    const { planId: _planId, ...reconciliationWithoutPlan } = reconciliation;
+    expect(
+      decodeUsageReconciliation({
+        ...reconciliationWithoutPlan,
+        requestShape: "image-generation",
+        plannedInputTokens: 0,
+        actualInputTokens: 0,
+        varianceTokens: 0,
+        imageUnits: { count: 1, quality: "exact", size: "1024x1024", outputQuality: "high" },
+      }).imageUnits?.count,
+    ).toBe(1);
+    expect(() =>
+      decodeUsageReconciliation({
+        ...reconciliation,
+        requestShape: "image-generation",
+        plannedInputTokens: 0,
+        actualInputTokens: 0,
+        varianceTokens: 0,
+      }),
+    ).toThrow();
 
     const reservation = {
       id: ids.reservation,
