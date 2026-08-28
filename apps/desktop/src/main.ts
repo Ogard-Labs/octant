@@ -2112,7 +2112,11 @@ function installIpcHandlers(): void {
     });
   });
   ipcMain.handle(IPC_CHANNELS.listOpenInApplications, () =>
-    detectOpenInApplications({ exists: existsSync, homeDirectory: homedir(), platform: process.platform }),
+    detectOpenInApplications({
+      exists: existsSync,
+      homeDirectory: homedir(),
+      platform: process.platform,
+    }),
   );
   ipcMain.handle(IPC_CHANNELS.openCodeCheckoutInApplication, async (event, request: unknown) => {
     const context = ownedWindowContext(event);
