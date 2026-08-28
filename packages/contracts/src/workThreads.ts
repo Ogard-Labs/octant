@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { GithubIssueContextRequest } from "./githubIssueContext";
+import { LinearIssueContextRequest } from "./linearIssueContext";
 import { HostId } from "./host";
 import { ThreadWorkingDirectory } from "./workingDirectory";
 import { ProjectId } from "./projects";
@@ -56,6 +57,7 @@ export const CreateWorkThreadCommand = Schema.Struct({
   /** Confined working directory relative to the Project root; defaults to `.`. */
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   issueContext: Schema.optional(GithubIssueContextRequest),
+  linearIssueContext: Schema.optional(LinearIssueContextRequest),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 

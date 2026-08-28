@@ -95,6 +95,16 @@ export const LinearIssueRow = Schema.Struct({
 }).annotations(strict);
 export type LinearIssueRow = typeof LinearIssueRow.Type;
 
+const COMMENT_BODY_MAX_BYTES = 2 * 1024;
+
+export const LinearIssueComment = Schema.Struct({
+  author: safeText(128),
+  createdAt: safeText(64),
+  body: boundedBody(COMMENT_BODY_MAX_BYTES),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type LinearIssueComment = typeof LinearIssueComment.Type;
+
 export const LinearIssueDetail = Schema.Struct({
   id: LinearNodeId,
   identifier: LinearIssueIdentifier,
@@ -104,6 +114,7 @@ export const LinearIssueDetail = Schema.Struct({
   url: linearIssueUrl,
   description: boundedBody(ISSUE_BODY_MAX_BYTES),
   descriptionTruncated: Schema.Boolean,
+  comments: Schema.Array(LinearIssueComment).pipe(Schema.maxItems(10)),
 }).annotations(strict);
 export type LinearIssueDetail = typeof LinearIssueDetail.Type;
 

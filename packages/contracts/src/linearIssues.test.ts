@@ -68,6 +68,7 @@ describe("Linear issue contracts", () => {
         ...row,
         description: "bearer abcdefghijklmnopqrst",
         descriptionTruncated: false,
+        comments: [],
       }),
     ).toThrow();
   });
@@ -95,6 +96,7 @@ describe("Linear issue contracts", () => {
         ...row,
         description: "bearer abcdef",
         descriptionTruncated: false,
+        comments: [],
       }).description,
     ).toBe("bearer abcdef");
   });
@@ -105,8 +107,16 @@ describe("Linear issue contracts", () => {
         ...row,
         description: "Read-only browse.",
         descriptionTruncated: false,
-      }).descriptionTruncated,
-    ).toBe(false);
+        comments: [
+          {
+            author: "Ada",
+            createdAt: "2026-08-11T10:00:00Z",
+            body: "Looks good",
+            truncated: false,
+          },
+        ],
+      }).comments,
+    ).toHaveLength(1);
     expect(decodeLinearIssueGetInput({ id: row.id }).id).toBe(row.id);
     expect(linearIssueBrowseAvailable([])).toBe(false);
     expect(linearIssueBrowseAvailable([{ operationId: "list-issues", available: false }])).toBe(

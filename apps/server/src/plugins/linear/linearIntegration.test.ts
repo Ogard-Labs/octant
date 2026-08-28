@@ -225,6 +225,7 @@ describe("Linear integration plugin", () => {
           identifier: "ENG-12",
           description: "Read-only description.",
           descriptionTruncated: false,
+          comments: [],
           url: "https://linear.app/ogard-labs/issue/ENG-12",
         },
       },
