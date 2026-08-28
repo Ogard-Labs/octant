@@ -54,7 +54,7 @@ and the credential rules in 0005 / 0054:
 
 | ID  | Delta                                                              | Control                                                                                                                                                                                                                      |
 | --- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| E1  | Directory OAuth refresh tokens are longer-lived than API keys      | Broker-only storage; no journal, logs, export, or renderer echo; revoke/rotate is a host-local admin act                                                                                                                     |
+| E1  | Directory OAuth refresh tokens are longer-lived than API keys      | Broker-only storage; no journal, logs, export, or renderer echo. Host-local revoke invalidates Octant refs only — it does not revoke the IdP token. Prefer IdP revocation/rotation when available; residual risk is a still-valid refresh token outside Octant until the IdP invalidates it |
 | E2  | IAM signing material could be copied into provider child processes | Prefer per-request broker resolve or scoped signer; refuse durable cloud keys in managed-process env unless the driver proves the runtime cannot separate auth storage (then `incompatible`)                                 |
 | E3  | Enterprise auth could become a vendor-shaped host API              | All new kinds land in `@octant/provider-sdk` first; conformance harness covers them; no server import of a single-cloud SDK for identity                                                                                     |
 | E4  | Confused-deputy: a thread or remote principal triggers cloud spend | Existing mode, Project, and approval gates stay in front; remote stays local-host-required for credential changes (0013)                                                                                                     |
@@ -71,7 +71,9 @@ Implementation may leave Backlog only when:
    provider-native OAuth tokens" rule for CLI subscription flows that stay
    provider-owned.
 2. Conformance harness cases exist for the new kinds (ready, unauthenticated,
-   incompatible), including tenant/audience mismatch → `incompatible`.
+   unavailable, incompatible), including tenant/audience mismatch →
+   `incompatible`. `unavailable` covers missing/unreachable IAM or directory
+   material; `unauthenticated` covers present-but-rejected credentials.
 3. Threat model controls E1–E5 have owners in an implementation child.
 4. An explicit maintainer request authorizes scoped work against that ADR.
 
