@@ -69,14 +69,14 @@ in published documents. This draft does not invent those forms.
 For personal data in the shared store, the host-owner controller is the
 party who must be able to answer ordinary controller questions about:
 
-| Surface | What it is today |
-| ------- | ---------------- |
-| Event journal and projections | Authoritative store of Projects, threads, layouts, memory, grants, and actor envelopes |
-| Host logs | Files under the host logs directory |
-| Diagnostics export | Local redacted evidence packet; not an upload channel |
-| Thread export | Host-authoritative `octant.thread-bundle/1` cut of one thread the caller may already open |
-| Thread retention and purge | Explicit, confirmed erasure of named threads, including journal events and derived projections |
-| Settings → Host data map | Read-only map of what this host stores and where |
+| Surface                       | What it is today                                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| Event journal and projections | Authoritative store of Projects, threads, layouts, memory, grants, and actor envelopes         |
+| Host logs                     | Files under the host logs directory                                                            |
+| Diagnostics export            | Local redacted evidence packet; not an upload channel                                          |
+| Thread export                 | Host-authoritative `octant.thread-bundle/1` cut of one thread the caller may already open      |
+| Thread retention and purge    | Explicit, confirmed erasure of named threads, including journal events and derived projections |
+| Settings → Host data map      | Read-only map of what this host stores and where                                               |
 
 Audit for collaboration is the journal itself: mutations carry a
 principal-bearing actor. Layer 2 requires those actors to name a principal
@@ -118,14 +118,14 @@ happened. Those are not claimed as shipped here.
 
 ## Processor and non-processor lines
 
-| Party | Footing on a shared host |
-| ----- | ------------------------ |
-| Host owner | Default controller of the host store |
-| Teammate principals | Data subjects (and may be controllers of their own devices' local pairing material only) |
-| Ogard Labs | Not controller of the shared journal; ships software |
-| BYO providers | Customer's processors under the customer's own contract |
-| Update feed / marketplace registries | Separate traffic; not the journal path; see the privacy notice |
-| Git remotes the team chooses | Team-controlled transport for artifact bundles; Octant does not push |
+| Party                                | Footing on a shared host                                                                 |
+| ------------------------------------ | ---------------------------------------------------------------------------------------- |
+| Host owner                           | Default controller of the host store                                                     |
+| Teammate principals                  | Data subjects (and may be controllers of their own devices' local pairing material only) |
+| Ogard Labs                           | Not controller of the shared journal; ships software                                     |
+| BYO providers                        | Customer's processors under the customer's own contract                                  |
+| Update feed / marketplace registries | Separate traffic; not the journal path; see the privacy notice                           |
+| Git remotes the team chooses         | Team-controlled transport for artifact bundles; Octant does not push                     |
 
 Credential bytes stay in the host OS secret store. Invoking a provider
 consumes a credential only when the acting principal holds a

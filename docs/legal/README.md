@@ -21,8 +21,8 @@ VitePress publication.
 
 ## Drafts in this directory
 
-| Draft | Topic |
-| ----- | ----- |
+| Draft                                                         | Topic                                                                                                                                                                           |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Shared-host controller footing](./shared-host-controller.md) | When one host holds several principals' data: who is controller for the journal, logs, and audit export; alignment with collaboration design; shipped export and purge surfaces |
 
 ## Rules for edits
