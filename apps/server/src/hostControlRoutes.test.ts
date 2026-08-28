@@ -5,6 +5,8 @@ import {
   decodeHostLifecycleOutcome,
   decodeHostRestoreOutcome,
 } from "@octant/contracts/host-control";
+import { decodeHostDataMap } from "@octant/contracts/host-data-map";
+import { desktopCredentialStore } from "./hostDataMap";
 import type { HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import {
@@ -390,5 +392,81 @@ describe("host control routes", () => {
       }),
     );
     expect(response?.status).toBe(204);
+  });
+
+  it("returns a populated data map to an authorized local window", async () => {
+    const dataDirectory = "/Users/ada/Library/Application Support/Octant";
+    const { handler } = setup({
+      diagnostics: () => makeDiagnostics("desktop"),
+      dataMap: {
+        dataDirectory,
+        platform: "darwin",
+        credentialStore: desktopCredentialStore(),
+        listProjects: () => [
+          { id: "11111111-1111-4111-8111-111111111111", name: "Notes", type: "chat" },
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            name: "Studio",
+            type: "code",
+            boundRoot: "/Users/ada/src/studio",
+          },
+        ],
+      },
+    });
+    const response = await handler(
+      makeRequest("/api/host-control/data-map", { method: "GET", capability }),
+    );
+    expect(response?.status).toBe(200);
+    const report = decodeHostDataMap(await response!.json());
+    expect(report.host.kind).toBe("desktop");
+    expect(report.host.journal).toEqual({
+      kind: "known",
+      path: `${dataDirectory}/octant.sqlite3`,
+    });
+    expect(report.host.credentials.kind).toBe("known");
+    expect(report.projects.kind).toBe("known");
+    expect(JSON.stringify(report)).not.toContain(CONTROL_SOCKET);
+  });
+
+  it("reports unknown categories when the host cannot verify locations", async () => {
+    const { handler } = setup({ diagnostics: () => makeDiagnostics("service") });
+    const response = await handler(
+      makeRequest("/api/host-control/data-map", { method: "GET", capability }),
+    );
+    const report = decodeHostDataMap(await response!.json());
+    expect(report.host.kind).toBe("headless");
+    expect(report.host.journal).toEqual({ kind: "unknown" });
+    expect(report.host.credentials).toEqual({ kind: "unknown" });
+    expect(report.projects).toEqual({ kind: "unknown" });
+  });
+
+  it("refuses the data map without a window capability, off loopback, or with a query string", async () => {
+    const { handler } = setup();
+    const unauthenticated = await handler(
+      makeRequest("/api/host-control/data-map", { method: "GET" }),
+    );
+    expect(unauthenticated?.status).toBe(401);
+
+    const remote = await handler(
+      makeRequest("/api/host-control/data-map", {
+        method: "GET",
+        capability,
+        hostname: "192.168.1.20",
+      }),
+    );
+    expect(remote?.status).toBe(400);
+
+    const withQuery = await handler(
+      makeRequest("/api/host-control/data-map?verbose=1", { method: "GET", capability }),
+    );
+    expect(withQuery?.status).toBe(400);
+  });
+
+  it("rejects POST on the data map", async () => {
+    const { handler } = setup();
+    const response = await handler(
+      makeRequest("/api/host-control/data-map", { capability, body: {} }),
+    );
+    expect(response?.status).toBe(405);
   });
 });

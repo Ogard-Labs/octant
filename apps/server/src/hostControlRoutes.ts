@@ -8,6 +8,12 @@ import {
   type HostLifecycleOutcome,
   type HostRestoreOutcome,
 } from "@octant/contracts/host-control";
+import type { HostDataMap } from "@octant/contracts/host-data-map";
+import {
+  composeHostDataMap,
+  type HostDataMapCredentialStoreInput,
+  type HostDataMapProjectInput,
+} from "./hostDataMap";
 import {
   decodePurgeThreadsRequest,
   decodeSetThreadRetentionRequest,
@@ -45,8 +51,10 @@ import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthori
  *   `/api/host-control` is a remote local-only prefix — three independent
  *   layers keep this surface off the remote listener.
  *
- * The wire never carries secrets or raw host paths: the control endpoint and
- * backup destination stay in local diagnostic tooling.
+ * Status, lifecycle, backup, and restore never carry secrets or raw host
+ * paths: the control endpoint and backup destination stay in local
+ * diagnostic tooling. The data-map read is the exception that names
+ * locations — never values — so Settings can show what this host stores.
  */
 
 const METHODS = "GET, POST, OPTIONS";
@@ -55,12 +63,15 @@ const BODY_LIMIT = 8_192;
 
 const ROUTES = {
   status: "/api/host-control/status",
+  dataMap: "/api/host-control/data-map",
   lifecycle: "/api/host-control/lifecycle",
   backup: "/api/host-control/backup",
   restore: "/api/host-control/restore",
   retention: "/api/host-control/thread-retention",
   purge: "/api/host-control/thread-purge",
 } as const;
+
+const GET_ROUTES = new Set<string>([ROUTES.status, ROUTES.dataMap]);
 
 const RESTORE_GUIDANCE =
   "Stop the Octant host, then run the offline restore command with --confirm.";
@@ -90,10 +101,22 @@ export interface HostControlRouteDependencies {
   /** Graceful owner drain request (the same authority the control socket uses). */
   readonly requestOwnerStop?: () => void;
   readonly backup?: (label: string) => HostControlBackupReceipt;
+  /**
+   * Verified host-runtime locations and Project list for the data map.
+   * Omitting it is a test seam: every location category reports `unknown`.
+   */
+  readonly dataMap?: HostDataMapRouteDependencies;
   readonly threadRetention?: ThreadRetentionService;
   readonly now?: () => number;
   /** Defers the drain until after the response is written. Test seam. */
   readonly scheduleStop?: (callback: () => void) => void;
+}
+
+export interface HostDataMapRouteDependencies {
+  readonly dataDirectory: string;
+  readonly platform: "darwin" | "linux";
+  readonly credentialStore?: HostDataMapCredentialStoreInput;
+  readonly listProjects?: () => ReadonlyArray<HostDataMapProjectInput>;
 }
 
 export function createHostControlRouteHandler(
@@ -128,7 +151,7 @@ export function createHostControlRouteHandler(
         return failure("HTTP method is not supported for this route.", 405, origin);
       }
     } else {
-      const expectedMethod = route === ROUTES.status ? "GET" : "POST";
+      const expectedMethod = GET_ROUTES.has(route) ? "GET" : "POST";
       if (request.method !== expectedMethod) {
         return failure("HTTP method is not supported for this route.", 405, origin);
       }
@@ -149,6 +172,9 @@ export function createHostControlRouteHandler(
 
     if (route === ROUTES.status) {
       return authorized("status", origin, () => handleStatus(dependencies, origin));
+    }
+    if (route === ROUTES.dataMap) {
+      return authorized("data-map", origin, () => handleDataMap(dependencies, origin));
     }
     if (route === ROUTES.retention && request.method === "GET") {
       return authorized("retention", origin, () => handleReadRetention(dependencies, origin));
@@ -225,6 +251,37 @@ async function authorized(
     return failure("Host control is unauthorized.", 401, origin);
   }
   return handle();
+}
+
+function handleDataMap(
+  dependencies: HostControlRouteDependencies,
+  origin: string | null,
+): Response {
+  const raw = dependencies.diagnostics();
+  if (raw === undefined) {
+    return failure("Host control is unavailable while the owner is starting.", 503, origin);
+  }
+  const diagnostics = boundHostRuntimeDiagnostics(raw);
+  const serviceMode = decodeServiceMode(diagnostics.identity.serviceMode);
+  if (serviceMode === undefined) {
+    return failure("Host control is unavailable while the owner is starting.", 503, origin);
+  }
+  const dataMap = dependencies.dataMap;
+  const report: HostDataMap = composeHostDataMap({
+    hostId: diagnostics.identity.hostId,
+    serviceMode,
+    ...(dataMap === undefined
+      ? {}
+      : {
+          platform: dataMap.platform,
+          dataDirectory: dataMap.dataDirectory,
+          ...(dataMap.credentialStore === undefined
+            ? {}
+            : { credentialStore: dataMap.credentialStore }),
+          ...(dataMap.listProjects === undefined ? {} : { projects: dataMap.listProjects() }),
+        }),
+  });
+  return json(report, 200, origin);
 }
 
 async function handleStatus(
