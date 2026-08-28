@@ -110,6 +110,46 @@ export function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/**
+ * Whether this host can sign a feed right now.
+ *
+ * A missing private key is not a soft skip at publish time: an unsigned feed
+ * document must never be written where a signed one belongs. Dry-run
+ * scaffolding validates the release shape and path without minting that file.
+ */
+export type FeedSigningMaterial =
+  | { readonly kind: "ready"; readonly privateKey: string }
+  | { readonly kind: "unsigned-refuse"; readonly reason: string };
+
+export function resolveFeedSigningMaterial(
+  environment: NodeJS.ProcessEnv = process.env,
+): FeedSigningMaterial {
+  const privateKey = (environment[FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE] ?? "").trim();
+  if (privateKey === "") {
+    return {
+      kind: "unsigned-refuse",
+      reason: `${FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE} is not set, so this release cannot be signed.`,
+    };
+  }
+  return { kind: "ready", privateKey };
+}
+
+/**
+ * Validate the release the workflow would publish, and name its feed path,
+ * without producing a signature.
+ *
+ * Used by release-matrix scaffolding when the signing secret is absent: the
+ * path and schema still have to match `<ring>/<platform>-<arch>.json`, and
+ * refusing to write an unsigned feed is the correct outcome.
+ */
+export function dryRunFeedDocument(input: ReleaseInput): {
+  readonly release: AppUpdateRelease;
+  readonly feedPath: string;
+} {
+  const release = buildRelease(input);
+  return { release, feedPath: feedRelativePath(release) };
+}
+
 export interface FeedCommand {
   readonly version: string;
   readonly ring: AppReleaseRing;
@@ -177,20 +217,15 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
     );
     return;
   }
-  const command = parseFeedCommand(argv);
-  const privateKey = (process.env[FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE] ?? "").trim();
-  if (privateKey === "") {
-    throw new Error(
-      `${FEED_PRIVATE_KEY_ENVIRONMENT_VARIABLE} is not set, so this release cannot be signed.`,
-    );
-  }
+  const dryRun = argv.includes("--dry-run");
+  const command = parseFeedCommand(argv.filter((argument) => argument !== "--dry-run"));
   // Hashed from the artifact on disk rather than taken as an argument: the
   // hash is what the app checks the downloaded bytes against, and a hash
   // supplied by hand is a hash of whatever the author believed was there.
   const artifact = await readFile(command.artifact);
   const notes =
     command.notesFile === undefined ? undefined : await readFile(command.notesFile, "utf8");
-  const release = buildRelease({
+  const releaseInput: ReleaseInput = {
     version: command.version,
     ring: command.ring,
     platform: command.platform,
@@ -199,8 +234,30 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
     sha256: sha256Hex(artifact),
     releasedAt: command.releasedAt,
     ...(notes === undefined ? {} : { notes: notes.trim().slice(0, 4096) }),
-  });
-  const feed = signFeed(release, privateKey);
+  };
+
+  if (dryRun) {
+    const { release, feedPath } = dryRunFeedDocument(releaseInput);
+    const material = resolveFeedSigningMaterial();
+    console.log(`Dry-run feed path: <base>/${feedPath}`);
+    console.log(
+      `Dry-run release schema ok for ${release.version} (${release.platform}-${release.arch}).`,
+    );
+    if (material.kind === "unsigned-refuse") {
+      console.log(`Unsigned refuse: ${material.reason}`);
+      console.log("No feed file written.");
+      return;
+    }
+    console.log("Signing material is present; re-run without --dry-run to write a signed feed.");
+    return;
+  }
+
+  const material = resolveFeedSigningMaterial();
+  if (material.kind === "unsigned-refuse") {
+    throw new Error(material.reason);
+  }
+  const release = buildRelease(releaseInput);
+  const feed = signFeed(release, material.privateKey);
   await mkdir(dirname(command.out), { recursive: true });
   await writeFile(command.out, `${JSON.stringify(feed, null, 2)}\n`, "utf8");
   console.log(`Signed ${release.ring} feed for ${release.version}: ${command.out}`);

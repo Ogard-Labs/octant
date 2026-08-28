@@ -143,9 +143,10 @@ Local data lives in `~/Library/Application Support/Octant/` (override with
 On x64 Linux the same command produces
 `out/Octant-<version>-linux-x64.AppImage` (plus `out/Octant-linux-x64/` for
 inspection). That AppImage is an unsigned dogfood artifact: Electron still owns
-the local server as a peer Machine, but Linux has no signed update channel yet,
-so the updater refuses to install updates rather than auto-updating from an
-unsigned package. Mark the AppImage executable and launch it directly. AppRun
+the local server as a peer Machine, but a dogfood AppImage is not signed
+auto-update. Release workflows may scaffold `<ring>/linux-x64.json`; the
+updater still refuses Linux installs until a maintainer-published signed feed
+exists. Mark the AppImage executable and launch it directly. AppRun
 keeps the Chromium sandbox when unprivileged user namespaces work, and only
 adds `--no-sandbox` when that probe fails (AppImage mounts are `nosuid`).
 Ubuntu 24.04+ AppArmor may still restrict Chromium userns; a dedicated profile
