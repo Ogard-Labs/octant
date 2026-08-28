@@ -17,8 +17,13 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect, Queue, Stream } from "effect";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
+import { ProviderDriverConfigurationError } from "./providerDriverFactory";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
-import { ProviderService, runPackagedProviderSmokeTurn } from "./providerService";
+import {
+  ProviderService,
+  runPackagedProviderSmokeTurn,
+  type ProviderServiceOptions,
+} from "./providerService";
 
 const windowId = decodeWindowId("80000000-0000-4000-8000-000000000010");
 const otherWindowId = decodeWindowId("80000000-0000-4000-8000-000000000013");
@@ -2073,6 +2078,136 @@ describe("ProviderService", () => {
     await probe;
     expect(fixture.service.pendingInstanceOperationCount()).toBe(0);
   });
+
+  it("reports a provider no driver can serve as unusable with its reason", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      driver: () => {
+        throw new ProviderDriverConfigurationError();
+      },
+    });
+
+    await expect(fixture.service.bootstrap(windowId)).resolves.toMatchObject({
+      observedStates: [
+        {
+          instanceId,
+          readiness: "incompatible",
+          processState: "stopped",
+          models: [],
+          capabilities: { streaming: "unavailable" },
+          message: "Provider driver configuration is invalid.",
+        },
+      ],
+    });
+  });
+
+  it("applies a configuration change to the running provider set without a restart", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      driver: (instance) => {
+        if (
+          instance.configuration.kind === "opencode-cli" &&
+          instance.configuration.binaryPath === "/usr/local/bin/opencode"
+        ) {
+          throw new ProviderDriverConfigurationError();
+        }
+        return { kind: "opencode" } as never;
+      },
+    });
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.runtime.observedState(instanceId)?.readiness).toBe("ready");
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-provider-binary",
+        instanceId,
+        expectedVersion: 1,
+        binaryPath: "/usr/local/bin/opencode",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-updated" });
+
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({
+      readiness: "incompatible",
+      message: "Provider driver configuration is invalid.",
+    });
+  });
+
+  it("drops runtime state for a provider that is no longer configured", async () => {
+    const fixture = serviceFixture({ instances: [provider()] });
+    await fixture.service.probe(windowId, instanceId);
+    fixture.runtime.setObservedState(observation({ instanceId: otherId }));
+
+    fixture.service.reconcileConfiguredProviders();
+
+    expect(fixture.runtime.observedState(otherId)).toBeUndefined();
+    expect(fixture.runtime.observedState(instanceId)?.readiness).toBe("ready");
+  });
+
+  it("warms one runtime for every enabled provider and skips the others", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        provider(),
+        provider({ id: otherId, displayName: "OpenCode spare" }),
+        claudeProvider({
+          id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000014"),
+          enabled: false,
+        }),
+      ],
+    });
+
+    await fixture.service.warmEnabledProviders();
+
+    expect(fixture.probe.mock.calls.map(([instance]) => instance.id)).toEqual([
+      instanceId,
+      otherId,
+    ]);
+  });
+
+  it("keeps a warmed provider runtime alive under its idle lease", async () => {
+    const fixture = serviceFixture({ instances: [provider()] });
+    const service = new ProviderService({
+      persistence: fixture.persistence,
+      runtimeRegistry: fixture.runtime,
+      driver: (instance) => ({
+        kind: "opencode",
+        probe: () =>
+          Effect.scoped(
+            Effect.flatMap(
+              fixture.runtime.acquireRuntime(instance.id, {
+                idleMs: 30_000,
+                start: async () => ({ value: "warm-runtime", close: async () => undefined }),
+              }),
+              () => Effect.succeed(observation({ instanceId: instance.id })),
+            ),
+          ) as never,
+        acquire: () => Effect.fail({ category: "unsupported", message: "not used" }),
+      }),
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+    });
+
+    await service.warmEnabledProviders();
+
+    expect(fixture.runtime.hasRuntime(instanceId)).toBe(true);
+    await fixture.runtime.closeAll();
+  });
+
+  it("keeps warming the remaining providers when one refuses to start", async () => {
+    const fixture = serviceFixture({
+      instances: [provider(), provider({ id: otherId, displayName: "OpenCode spare" })],
+      probe: async (instance) => {
+        if (instance.id === instanceId) {
+          throw { category: "unavailable", message: "Provider runtime is unavailable." };
+        }
+        return observation({ instanceId: instance.id });
+      },
+    });
+
+    await expect(fixture.service.warmEnabledProviders()).resolves.toBeUndefined();
+
+    expect(fixture.runtime.observedState(instanceId)?.readiness).toBe("unavailable");
+    expect(fixture.runtime.observedState(otherId)?.readiness).toBe("ready");
+  });
 });
 
 function serviceFixture(
@@ -2081,6 +2216,7 @@ function serviceFixture(
     readonly appendError?: Error;
     readonly probeResult?: ReturnType<typeof observation>;
     readonly probe?: (instance: ProviderInstance) => Promise<unknown>;
+    readonly driver?: NonNullable<ProviderServiceOptions["driver"]>;
     readonly clearResumeIdentities?: (providerId: typeof instanceId) => Promise<void>;
     readonly clearRuntimeUsageLimits?: (providerId: typeof instanceId) => void;
     readonly withCatalogPersistence?: boolean;
@@ -2153,6 +2289,7 @@ function serviceFixture(
       persistence,
       runtimeRegistry: runtime,
       probe,
+      ...(options.driver === undefined ? {} : { driver: options.driver }),
       ...(options.clearResumeIdentities === undefined
         ? {}
         : { clearResumeIdentities: options.clearResumeIdentities }),

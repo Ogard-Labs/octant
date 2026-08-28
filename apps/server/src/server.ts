@@ -366,6 +366,11 @@ import { createProviderFromDiscoveryCandidate } from "./providers/discoveryProvi
 import { makeDiscoveryService } from "./providers/discoveryService";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import { ProviderService } from "./providers/providerService";
+import {
+  CANONICAL_REVIEWED_MODEL_MANIFEST,
+  refreshReviewedModelManifest,
+  ReviewedModelManifest,
+} from "./providers/reviewedModelManifest";
 import { ProviderUsageLimitsService } from "./providers/providerUsageLimitsService";
 import { createProviderUsageLimitsRouteHandler } from "./providers/providerUsageLimitsRoutes";
 import { ProviderRuntimeUsageLimitsStore } from "./providers/providerRuntimeUsageLimitsStore";
@@ -2703,6 +2708,16 @@ export function startOctantServer(
     });
     probeProviderForThreads = (providerInstanceId) =>
       providerService.probe(LOCAL_HOST_ID as never, providerInstanceId);
+    const reviewedModelManifest = new ReviewedModelManifest();
+    // Model classification tracks the canonical manifest branch by commit
+    // rather than by app release. It is opt-in so the local-first default
+    // reaches no remote, and background so a refused refresh only leaves the
+    // built-in conservative limits in place.
+    if (process.env.OCTANT_REVIEWED_MODEL_MANIFEST === "1") {
+      void refreshReviewedModelManifest({ reference: CANONICAL_REVIEWED_MODEL_MANIFEST })
+        .then((refresh) => reviewedModelManifest.accept(refresh))
+        .catch(() => undefined);
+    }
     const providerRoutes = createProviderRouteHandler({
       service: providerService,
       windowAuthorityStore,
@@ -3452,6 +3467,7 @@ export function startOctantServer(
     });
     const chatService = new ChatService({
       persistence,
+      reviewedModelManifest,
       hiddenThreadIds: () => {
         const hidden = new Set(sideChatSidecars.hiddenThreadIds());
         for (const threadId of navigatorAssistantBindings.hiddenThreadIds()) hidden.add(threadId);
@@ -5598,6 +5614,10 @@ export function startOctantServer(
     });
     let remoteListener: PrivateListener | undefined;
     let remoteListenerError: PrivateListenerFailureCode | undefined;
+    // Retained so shutdown can settle warming before the runtime registry
+    // closes: an acquisition that lands after `closeAll()` would leave a warm
+    // runtime alive on its idle lease with nothing left to close it.
+    let warmingProviders: Promise<void> = Promise.resolve();
     // The private listener lifecycle is owned by a server-side controller so
     // the packaged host controls (over the loopback bridge) drive the real
     // dual-listener gateway, not a stub. `currentRemoteGateway` tracks the most
@@ -5792,6 +5812,12 @@ export function startOctantServer(
               }
             },
           });
+          // Warming keeps one idle runtime per enabled provider so the first
+          // turn of a new thread does not pay provider startup. It starts only
+          // once the listener binds, so a server that never serves leaves no
+          // provider process behind, and it is background work: a provider that
+          // refuses to start must not delay or fail startup.
+          warmingProviders = providerService.warmEnabledProviders().catch(() => undefined);
           // Startup auto-enable: when a launch-time private listener config is
           // supplied (test/smoke seam), enable it through the controller after
           // the loopback listener binds. A failure fails closed with a typed
@@ -5931,6 +5957,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            await warmingProviders;
             await providerRuntimeRegistry.closeAll();
           } catch (error) {
             shutdownFailure ??= error;

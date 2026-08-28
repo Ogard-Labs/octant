@@ -24,6 +24,7 @@ import {
   type ContextSummaryId,
   type GlobalSequence,
   type OpenAiCompatibleProviderConfiguration,
+  type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderContextBlock,
   type MentionableThreadId,
@@ -149,19 +150,33 @@ function probeFixture(overrides?: Partial<ProviderProbeResult>): ProviderProbeRe
   });
 }
 
-function withProbe(driver: ProviderDriver, probeResult: ProviderProbeResult): ProviderDriver {
+function withProbe(
+  driver: ProviderDriver,
+  probeResult: ProviderProbeResult,
+  probeFor?: (providerInstanceId: string) => ProviderProbeResult | undefined,
+): ProviderDriver {
   return {
     ...driver,
-    probe: driver.probe ?? (() => Effect.succeed(probeResult)),
+    probe:
+      driver.probe ??
+      ((input) => Effect.succeed(probeFor?.(String(input.instanceId)) ?? probeResult) as never),
   };
 }
 
 function openFixture(options?: {
   readonly driver?: ProviderDriver;
+  /** Reports distinct provider facts per instance, for cross-provider routing. */
+  readonly probeFor?: (providerInstanceId: string) => ProviderProbeResult | undefined;
+  /** Refuses to construct a driver for an instance, as an unusable configuration does. */
+  readonly refuseDriverFor?: (providerInstanceId: string) => Error | undefined;
+  readonly settings?: ChatSettings;
   readonly probe?: ProviderProbeResult;
   readonly contextFacts?: ProviderDriver["contextFacts"];
   readonly seedSettings?: boolean;
   readonly providerEnabled?: boolean;
+  /** Per-instance enablement; overrides `providerEnabled` when provided. */
+  readonly providerEnabledFor?: (providerInstanceId: string) => boolean;
+  readonly missingProviderInstanceIds?: ReadonlyArray<string>;
   readonly agentEligibleDefaults?: ReadonlyArray<{
     readonly providerInstanceId: string;
     readonly modelId: string;
@@ -316,16 +331,20 @@ function openFixture(options?: {
             history: [],
           }
         : { active: [], history: [] },
-    readProviderInstance: () => ({
-      id: decodeProviderInstanceId(ids.provider),
-      displayName: "Fixture provider",
-      driverKind: "openai-compatible",
-      enabled: options?.providerEnabled ?? true,
-      configuration: {},
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-    }),
+    readProviderInstance: (instanceId: ProviderInstanceId) => {
+      const id = String(instanceId);
+      if (options?.missingProviderInstanceIds?.includes(id)) return undefined;
+      return {
+        id: decodeProviderInstanceId(id),
+        displayName: "Fixture provider",
+        driverKind: "openai-compatible",
+        enabled: options?.providerEnabledFor?.(id) ?? options?.providerEnabled ?? true,
+        configuration: {},
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
     readProviderInstances: () => [],
     readProviderDefaults: () => ({
       defaultProviderInstanceId: ids.provider,
@@ -365,7 +384,7 @@ function openFixture(options?: {
           correlationId: ids.correlation,
           actor: { kind: "system", actorId: ids.actor },
           occurredAt: now,
-          payload: { kind: "settings-updated", settings: settings() },
+          payload: { kind: "settings-updated", settings: options?.settings ?? settings() },
         },
       ],
     });
@@ -471,6 +490,7 @@ function openFixture(options?: {
         ...(options?.contextFacts === undefined ? {} : { contextFacts: options.contextFacts }),
       } as unknown as ProviderDriver),
     probe,
+    options?.probeFor,
   );
 
   const contextHarness = new ContextHarnessService({
@@ -507,7 +527,11 @@ function openFixture(options?: {
     dataDirectory,
     uuid: () => crypto.randomUUID(),
     clock: () => now,
-    driver: () => driver,
+    driver: (providerInstanceId) => {
+      const refusal = options?.refuseDriverFor?.(String(providerInstanceId));
+      if (refusal !== undefined) throw refusal;
+      return driver;
+    },
     contextHarness,
     capacityScheduler,
     researchRouter,
@@ -1564,6 +1588,69 @@ describe("ChatService", () => {
       kind: "settings-updated",
       settings: { searxngBaseUrl: "https://search.example.test/base/" },
     });
+  });
+
+  it("clears a stored fallback when an update omits it, and refuses one that is missing or disabled", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const fallback = { providerInstanceId: fallbackProvider, modelId: "model-a" };
+    const seeded = openFixture({
+      settings: { ...settings(), providerFallback: fallback } as ChatSettings,
+    });
+    const omitted = await seeded.service.execute({
+      kind: "update-chat-settings",
+      expectedVersion: 1,
+      defaultProviderInstanceId: ids.provider,
+      defaultModelId: "model-a",
+      defaultResearchEnabled: false,
+      defaultResearchRouting: "automatic",
+      defaultPersonalityInstructions: "Be calm.",
+    });
+    expect(omitted).toMatchObject({ kind: "settings-updated" });
+    if (omitted.kind !== "settings-updated") throw new Error("Expected settings-updated result.");
+    expect(omitted.settings.providerFallback).toBeUndefined();
+
+    const preserved = await openFixture().service.execute({
+      kind: "update-chat-settings",
+      expectedVersion: 1,
+      defaultProviderInstanceId: ids.provider,
+      defaultModelId: "model-a",
+      defaultResearchEnabled: false,
+      defaultResearchRouting: "automatic",
+      defaultPersonalityInstructions: "Be calm.",
+      providerFallback: fallback,
+    });
+    expect(preserved).toMatchObject({
+      kind: "settings-updated",
+      settings: { providerFallback: fallback },
+    });
+
+    await expect(
+      openFixture({
+        providerEnabledFor: (providerInstanceId) => providerInstanceId !== fallbackProvider,
+      }).service.execute({
+        kind: "update-chat-settings",
+        expectedVersion: 1,
+        defaultProviderInstanceId: ids.provider,
+        defaultModelId: "model-a",
+        defaultResearchEnabled: false,
+        defaultResearchRouting: "automatic",
+        defaultPersonalityInstructions: "Be calm.",
+        providerFallback: fallback,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+
+    await expect(
+      openFixture({ missingProviderInstanceIds: [fallbackProvider] }).service.execute({
+        kind: "update-chat-settings",
+        expectedVersion: 1,
+        defaultProviderInstanceId: ids.provider,
+        defaultModelId: "model-a",
+        defaultResearchEnabled: false,
+        defaultResearchRouting: "automatic",
+        defaultPersonalityInstructions: "Be calm.",
+        providerFallback: fallback,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
   });
 
   it("copies authoritative Chat Settings into each new thread", async () => {
@@ -4901,6 +4988,198 @@ describe("ChatService", () => {
       }),
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
     expect(planTurn).not.toHaveBeenCalled();
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+  });
+
+  it("continues a conversation on the chosen fallback provider when its own provider drops the model", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Fallback route",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Keep this conversation alive.",
+      }),
+    ).resolves.toMatchObject({ kind: "turn-created" });
+
+    const view = service.read(created.thread.id);
+    expect(view.turns[0]?.attempts[0]?.providerInstanceId).toBe(fallbackProvider);
+    expect(view.thread.providerInstanceId).toBe(ids.provider);
+  });
+
+  it("continues a conversation on the chosen fallback provider when its own driver cannot be built", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined,
+      refuseDriverFor: (providerInstanceId) =>
+        providerInstanceId === ids.provider
+          ? new Error("Provider driver configuration is invalid.")
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unusable configuration",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Keep going on the fallback.",
+      }),
+    ).resolves.toMatchObject({ kind: "turn-created" });
+    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.providerInstanceId).toBe(
+      fallbackProvider,
+    );
+  });
+
+  it("keeps a researching conversation on its own provider when the fallback has no research backend", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({
+              instanceId: decodeProviderInstanceId(fallbackProvider),
+              capabilities: {
+                ...probeFixture().capabilities,
+                nativeWebResearch: "unsupported",
+                appManagedTools: "unsupported",
+              },
+            })
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Researching thread",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const configured = await service.execute({
+      kind: "change-chat-research",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      researchEnabled: true,
+      researchRouting: "automatic",
+    });
+    if (configured.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: configured.thread.version,
+        prompt: "Research this.",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+  });
+
+  it("keeps a conversation on its own provider when the chosen fallback cannot serve the same turn", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({
+              instanceId: decodeProviderInstanceId(fallbackProvider),
+              readiness: "unauthenticated",
+            })
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unusable fallback",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Report the real reason.",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+  });
+
+  it("does not probe a disabled fallback and reports the original provider's refusal", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const constructed: string[] = [];
+    const probed: string[] = [];
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) => {
+        probed.push(providerInstanceId);
+        return providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined;
+      },
+      refuseDriverFor: (providerInstanceId) => {
+        constructed.push(providerInstanceId);
+        return undefined;
+      },
+      providerEnabledFor: (providerInstanceId) => providerInstanceId !== fallbackProvider,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Disabled fallback",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Do not spawn the disabled runtime.",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(constructed).not.toContain(fallbackProvider);
+    expect(probed).not.toContain(fallbackProvider);
     expect(service.read(created.thread.id).turns).toHaveLength(0);
   });
 
