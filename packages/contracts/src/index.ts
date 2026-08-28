@@ -30,6 +30,7 @@ export * from "./executionCapsule";
 export * from "./extensionEvents";
 export * from "./extensionRpc";
 export * from "./integration";
+export * from "./linearIssues";
 export * from "./folderBrowse";
 export * from "./browserAutomation";
 export * from "./browserAutomationRpc";

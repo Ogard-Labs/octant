@@ -14,6 +14,7 @@ const truthfulInput = {
   projects: "available",
   pullRequests: "unavailable",
   githubIssues: "unavailable",
+  linearIssues: "unavailable",
   threadBoard: "unavailable",
 } as const satisfies SidebarNavigationInput;
 
@@ -172,6 +173,7 @@ describe("SidebarNavigation", () => {
           projects: "available",
           pullRequests: "unavailable",
           githubIssues: "unavailable",
+          linearIssues: "unavailable",
           threadBoard: "unavailable",
         }}
         projectSection={<nav aria-label="Projects">Projects</nav>}

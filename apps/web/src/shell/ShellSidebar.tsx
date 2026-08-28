@@ -135,6 +135,10 @@ export function ShellSidebar(props: ShellSidebarProps) {
       props.githubIssuesReadAvailable !== true
         ? "unavailable"
         : "available",
+    linearIssues:
+      codeActions["linear-issues"] === undefined || !sidebarContributions.has("linear-issues")
+        ? "unavailable"
+        : "available",
     threadBoard:
       (codeActions["thread-board"] !== undefined || workActions["thread-board"] !== undefined) &&
       sidebarContributions.has("thread-board")

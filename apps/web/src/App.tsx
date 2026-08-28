@@ -166,6 +166,10 @@ import {
   githubIssuesReadAvailable as snapshotAllowsGithubIssuesRead,
   withGithubIssuesReadSync,
 } from "./github/githubIssuesReadAvailable";
+import {
+  linearIssuesReadAvailable,
+  withLinearIssuesReadSync,
+} from "./linear/linearIssuesReadAvailable";
 import { WorkspaceRailLayers } from "./shell/WorkspaceRailLayers";
 import { BottomUtilityPanel } from "./shell/BottomUtilityPanel";
 import { ShellDialogHost } from "./shell/ShellDialogHost";
@@ -625,6 +629,9 @@ function LaunchedShell(
   const [codePullRequestsOpen, setCodePullRequestsOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
+  const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
+  const [linearIssuesRead, setLinearIssuesRead] = useState(false);
+  const linearAvailabilityGenerationRef = useRef(0);
   const [selectedProjectPullRequest, setSelectedProjectPullRequest] = useState<
     CodeProjectPullRequestDetailQuery | undefined
   >();
@@ -1130,7 +1137,7 @@ function LaunchedShell(
     () => withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable),
     [githubTransport],
   );
-  const linearClient = useMemo(
+  const linearTransport = useMemo(
     () =>
       createIntegrationClient({
         baseUrl: props.launch.serverUrl,
@@ -1139,6 +1146,15 @@ function LaunchedShell(
         slug: "linear",
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
+  );
+  const linearClient = useMemo(
+    () =>
+      withLinearIssuesReadSync(linearTransport, (available) => {
+        linearAvailabilityGenerationRef.current += 1;
+        setLinearIssuesRead(available);
+        if (!available) setLinearIssuesOpen(false);
+      }),
+    [linearTransport],
   );
   useEffect(() => {
     let cancelled = false;
@@ -1155,6 +1171,34 @@ function LaunchedShell(
       cancelled = true;
     };
   }, [githubTransport]);
+  const linearPluginEffective = FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true;
+  useEffect(() => {
+    if (!linearPluginEffective) return;
+    if (activeMode !== "code") {
+      setLinearIssuesRead(false);
+      setLinearIssuesOpen(false);
+      return;
+    }
+    const generation = linearAvailabilityGenerationRef.current + 1;
+    linearAvailabilityGenerationRef.current = generation;
+    let cancelled = false;
+    void linearTransport.authenticationSnapshot().then(
+      (snapshot) => {
+        if (cancelled || generation !== linearAvailabilityGenerationRef.current) return;
+        const available = linearIssuesReadAvailable(snapshot);
+        setLinearIssuesRead(available);
+        if (!available) setLinearIssuesOpen(false);
+      },
+      () => {
+        if (cancelled || generation !== linearAvailabilityGenerationRef.current) return;
+        setLinearIssuesRead(false);
+        setLinearIssuesOpen(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [linearPluginEffective, activeMode, linearTransport]);
   const githubCloneClient = useMemo(
     () =>
       createGithubCloneClient({
@@ -2561,6 +2605,7 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     githubIssuesOpen ||
+    linearIssuesOpen ||
     workBoardOpen ||
     archiveOpen ||
     automationCenterVisible ||
@@ -2954,6 +2999,7 @@ function LaunchedShell(
     if (mode !== "code") setCodeBoardOpen(false);
     if (mode !== "code") setCodePullRequestsOpen(false);
     if (mode !== "code") setGithubIssuesOpen(false);
+    if (mode !== "code") setLinearIssuesOpen(false);
     if (mode !== "work") setWorkBoardOpen(false);
     // The Automation Center is one shared Work/Code surface; leaving both
     // work modes dismisses it.
@@ -2977,11 +3023,14 @@ function LaunchedShell(
       setCodeBoardOpen(false);
       setCodePullRequestsOpen(false);
       setGithubIssuesOpen(false);
+      setLinearIssuesOpen(false);
+      setArchiveOpen(false);
     },
     openThreadBoard:
       activeMode === "code" ? () => setCodeBoardOpen(true) : () => setWorkBoardOpen(true),
     openPullRequests: () => setCodePullRequestsOpen(true),
     openGithubIssues: () => setGithubIssuesOpen(true),
+    openLinearIssues: () => setLinearIssuesOpen(true),
   };
 
   const pluginSidebarDestinationActions: Record<string, () => void> = {};
@@ -2990,6 +3039,7 @@ function LaunchedShell(
     FIRST_PARTY_PLUGINS_EFFECTIVE,
   )) {
     if (contribution.entryPoint === undefined) continue;
+    if (contribution.destinationId === "linear-issues" && !linearIssuesRead) continue;
     const result = loadPluginSidebarDestinationAction(contribution.entryPoint);
     if (result.kind !== "ready") continue;
     pluginSidebarDestinationActions[contribution.destinationId] = () =>
@@ -4220,6 +4270,9 @@ function LaunchedShell(
                 codePullRequestsOpen={codePullRequestsOpen}
                 githubIssuesOpen={githubIssuesOpen}
                 githubClient={githubClient}
+                linearIssuesOpen={linearIssuesOpen}
+                linearClient={linearClient}
+                onCloseLinearIssues={() => setLinearIssuesOpen(false)}
                 workBoardOpen={workBoardOpen}
                 activeMode={activeMode}
                 codeClient={codeClient}
@@ -4436,6 +4489,7 @@ function LaunchedShell(
                       codeBoardOpen ||
                       codePullRequestsOpen ||
                       githubIssuesOpen ||
+                      linearIssuesOpen ||
                       workBoardOpen ||
                       archiveOpen ||
                       automationCenterVisible ||

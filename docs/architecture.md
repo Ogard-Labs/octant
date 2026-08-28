@@ -258,6 +258,19 @@ Disabled GitHub, missing capability, and unauthorized or rate-limited states
 fail closed. See
 [security/github-repository-onboarding-threat-model.md](security/github-repository-onboarding-threat-model.md).
 
+Code also has a host-scoped Linear issues workspace contributed by the
+bundled-off Linear plugin as `sidebar.destination` `linear-issues`, Code mode
+only. The sidebar row is shown only when that contribution is effective, its
+action is wired, and the Linear authentication snapshot reports `list-issues`
+available. Browse goes through the Integration port (`list-issues`,
+`get-issue`, `list-issue-filters`) over Linear GraphQL with bounded page size
+and description bytes. Issue bodies are a live projection, not Octant source of
+truth; credentials and raw API payloads never enter prompts or tool output.
+Open in Linear is an external `linear.app` URL. Disabled, untrusted,
+unauthorized, expired, or rate-limited Linear contributes no sidebar item,
+catalogue rows, or thread context. Create-from-issue, writes, and Chat/Work
+browse are not this surface.
+
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
