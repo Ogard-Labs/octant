@@ -94,6 +94,7 @@
     "./zen-background-media": "./src/zenBackgroundMedia.ts",
     "./cursor-acp": "./src/cursorAcp.ts",
     "./github-catalogue": "./src/githubCatalogue.ts",
+    "./tracker-reference": "./src/trackerReference.ts",
     "./github-onboarding": "./src/githubOnboarding.ts",
     "./code-project-pull-requests": "./src/codeProjectPullRequests.ts",
     "./canvas-share-snapshot": "./src/canvasShareSnapshot.ts",
