@@ -3406,6 +3406,7 @@ function LaunchedShell(
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
     issueContext?: import("@octant/contracts").GithubIssueContextRequest,
+    linearIssueContext?: import("@octant/contracts").LinearIssueContextRequest,
   ): Promise<boolean | void> {
     setDraftCreating(true);
     setDraftError(undefined);
@@ -3424,6 +3425,7 @@ function LaunchedShell(
           title,
           ...(chatDraftProjectId === undefined ? {} : { projectId: chatDraftProjectId }),
           ...(issueContext === undefined ? {} : { issueContext }),
+          ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
         });
         if (result?.kind !== "thread-created") {
           setDraftError(chatController.errorMessage ?? "The chat thread could not be created.");
@@ -3613,6 +3615,7 @@ function LaunchedShell(
           bindingRevisionId,
           workingDirectory: "." as never,
           ...(issueContext === undefined ? {} : { issueContext }),
+          ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
         });
         if (!("kind" in created) || created.kind !== "thread-created") {
           setDraftError("The Work thread could not be created.");
@@ -4719,6 +4722,10 @@ function LaunchedShell(
                     onDraftCreateThread={handleDraftCreateThread}
                     githubPluginEnabled={
                       FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true
+                    }
+                    linearClient={linearClient}
+                    linearPluginEnabled={
+                      FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true
                     }
                     onDraftCreateCodeThread={handleDraftCreateCodeThread}
                     onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}

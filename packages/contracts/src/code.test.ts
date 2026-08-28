@@ -810,6 +810,14 @@ describe("Code managed thread creation contracts", () => {
     ).toMatchObject({
       issueContext: { owner: "octant", name: "octant", number: 7 },
     });
+    expect(
+      decodeCodeCommand({
+        ...managedCommand,
+        linearIssueContext: { id: "11111111-1111-4111-8111-111111111111" },
+      }),
+    ).toMatchObject({
+      linearIssueContext: { id: "11111111-1111-4111-8111-111111111111" },
+    });
     expect(() =>
       decodeCodeCommand({
         ...managedCommand,

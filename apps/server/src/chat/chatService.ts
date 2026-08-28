@@ -71,9 +71,23 @@ import {
   prepareOptionalIssueContext,
   type GithubIssueContextService,
 } from "../github/githubIssueContextService";
+import {
+  linearIssueContextFailureCategory,
+  prepareOptionalLinearIssueContext,
+  type LinearIssueContextService,
+} from "../plugins/linear/linearIssueContextService";
 
 type GithubIssueContextPort = Pick<
   GithubIssueContextService,
+  | "prepare"
+  | "bindCreatedThread"
+  | "peekFramedForFirstTurn"
+  | "consumeFramedForFirstTurn"
+  | "takeFramedForFirstTurn"
+>;
+
+type LinearIssueContextPort = Pick<
+  LinearIssueContextService,
   | "prepare"
   | "bindCreatedThread"
   | "peekFramedForFirstTurn"
@@ -498,6 +512,7 @@ export interface ChatServiceOptions {
    * wired to real catalogs or accounting.
    */
   readonly issueContext?: GithubIssueContextPort;
+  readonly linearIssueContext?: LinearIssueContextPort;
   readonly gatherMultiModelRuntimeFacts?: (input: {
     readonly pool: MultiModelPool;
     readonly mode: OctantMode;
@@ -596,6 +611,7 @@ export class ChatService {
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
   readonly #resolveThreadMentionContext?: ChatServiceOptions["resolveThreadMentionContext"];
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #reviewedModelManifest?: ReviewedModelManifest;
   readonly #activeAttempts = new Map<string, AbortController>();
   readonly #activeThreadExecutions = new Set<string>();
@@ -647,6 +663,9 @@ export class ChatService {
     }
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
+    }
+    if (options.linearIssueContext !== undefined) {
+      this.#linearIssueContext = options.linearIssueContext;
     }
     this.#turnRunner = new ChatTurnRunner({
       capacityScheduler: options.capacityScheduler,
@@ -1345,6 +1364,12 @@ export class ChatService {
     if (command.projectId !== undefined) {
       this.#assertActiveChatProject(command.projectId);
     }
+    if (command.issueContext !== undefined && command.linearIssueContext !== undefined) {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Choose either a GitHub issue or a Linear issue, not both.",
+      });
+    }
     const preparedIssue = await prepareOptionalIssueContext(
       this.#issueContext,
       command.issueContext,
@@ -1354,6 +1379,17 @@ export class ChatService {
       throw new ChatServiceError({
         category: issueContextFailureCategory(preparedIssue.reason),
         message: preparedIssue.message,
+      });
+    }
+    const preparedLinearIssue = await prepareOptionalLinearIssueContext(
+      this.#linearIssueContext,
+      command.linearIssueContext,
+      new AbortController().signal,
+    );
+    if (preparedLinearIssue.status === "refused") {
+      throw new ChatServiceError({
+        category: linearIssueContextFailureCategory(preparedLinearIssue.reason),
+        message: preparedLinearIssue.message,
       });
     }
     const settings = this.#requireChatSettings();
@@ -1381,6 +1417,17 @@ export class ChatService {
           threadId: String(thread.id),
           framed: preparedIssue.framed,
           request: command.issueContext,
+        });
+      } catch {
+        // The thread is already journaled; taint recording must not invert create.
+      }
+    }
+    if (preparedLinearIssue.status === "ready" && command.linearIssueContext !== undefined) {
+      try {
+        this.#linearIssueContext?.bindCreatedThread({
+          threadId: String(thread.id),
+          framed: preparedLinearIssue.framed,
+          request: command.linearIssueContext,
         });
       } catch {
         // The thread is already journaled; taint recording must not invert create.
@@ -3596,10 +3643,20 @@ export class ChatService {
     );
     const priorTurns = this.#persistence.readChatThreadView(thread.id)?.turns ?? [];
     const stillFirstTurn = priorTurns.every((turn) => turn.sequence === 1);
-    if (!stillFirstTurn) this.#issueContext?.consumeFramedForFirstTurn(String(thread.id));
-    const issueContextFramed = stillFirstTurn
+    if (!stillFirstTurn) {
+      this.#issueContext?.consumeFramedForFirstTurn(String(thread.id));
+      this.#linearIssueContext?.consumeFramedForFirstTurn(String(thread.id));
+    }
+    const githubIssueContextFramed = stillFirstTurn
       ? this.#issueContext?.peekFramedForFirstTurn(String(thread.id))
       : undefined;
+    const linearIssueContextFramed =
+      stillFirstTurn && githubIssueContextFramed === undefined
+        ? this.#linearIssueContext?.peekFramedForFirstTurn(String(thread.id))
+        : undefined;
+    const issueContextFramed = githubIssueContextFramed ?? linearIssueContextFramed;
+    const issueContextSource =
+      githubIssueContextFramed !== undefined ? "github-issue" : "linear-issue";
     const issueContextEntries =
       issueContextFramed === undefined
         ? []
@@ -3611,7 +3668,7 @@ export class ChatService {
                 issueContextFramed.text,
                 Math.max(16, Math.ceil(issueContextFramed.text.length / 4)),
                 "required",
-                { kind: "message", referenceId: `github-issue:${thread.id}` },
+                { kind: "message", referenceId: `${issueContextSource}:${thread.id}` },
               ),
               { kind: "user-message", text: issueContextFramed.text },
             ),
