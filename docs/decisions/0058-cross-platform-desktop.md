@@ -15,15 +15,19 @@ not a Mac app plus a thinner Linux/Windows shell.
 
 - Octant desktop is **one identical app** on macOS, Linux, and Windows. Platform
   differences are technical fail-closed posture, never a second product.
-- This ADR supersedes only 0034's rule that Intel, Windows, and Linux desktop
-  packaging stay outside the release boundary. Every other 0034 rule stands:
+- 0034 stays `Proposed` and is revised in place in this same change: its rule
+  that Intel, Windows, and Linux desktop packaging stay outside the release
+  boundary is narrowed to open desktop packaging under its own signing rules.
+  Every other 0034 rule stands:
   trust from signatures, fail-closed verification, user-controlled apply, and
   minimum update-check disclosure.
 - **Machine shape.** A Linux or Windows desktop install is a peer Machine
   ("This computer"), same as "This Mac". The Electron process always owns the
   local server lifecycle. It does not attach to a foreign `octant server`.
 - **Product surfaces.** Chat, Work, Code, approvals, terminals, Git, provider
-  CLIs, and remote pairing ship on every desktop OS. Computer-use ships when the
+  CLIs, and remote pairing ship on every desktop OS, with one exception:
+  Windows Work and Code stay `incompatible` until a Windows confinement ADR
+  exists (see Confinement). Computer-use ships when the
   destination driver reports support (0053). Simulator and Apple workbench stay
   macOS-only and fail closed. Vibrancy stays macOS-only. The host tray is
   portable via Electron Tray / AppIndicator with non-template icons.
