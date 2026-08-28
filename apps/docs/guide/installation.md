@@ -1,16 +1,28 @@
 ---
-description: Install Octant on Apple Silicon macOS and configure the local development environment.
+description: Install Octant on Apple Silicon macOS or x64 Linux and configure the local development environment.
 ---
 
 # Installation
 
-Octant is an Apple Silicon technical preview for macOS, signed with a Developer ID and notarized by Apple. It requires an Apple Silicon Mac and runs its local server through Electron's Node process. No cloud service, external relay, or Intel build is included in this preview.
+Octant ships an Apple Silicon technical preview for macOS (Developer ID signed
+and notarized) and an unsigned x64 Linux AppImage for Ubuntu dogfood. Both run
+the local server through Electron's Node process. No cloud service or external
+relay is included in this preview.
 
 ## System requirements
+
+### Apple Silicon (macOS)
 
 - Apple Silicon Mac (M1 or later)
 - macOS Sequoia or later
 - Bun 1.3.14 (required for development and local iteration)
+- Node 26 only when running the Node SQLite portability smoke
+
+### Linux x64 (Ubuntu dogfood)
+
+- x64 Linux host (Ubuntu is the dogfood target)
+- Bun 1.3.14 (required for development and local iteration)
+- Bubblewrap and a live Secret Service session for Work/Code
 - Node 26 only when running the Node SQLite portability smoke
 
 ## Install from source
@@ -29,6 +41,8 @@ bun run verify
 
 ## Package the desktop app
 
+### Apple Silicon (macOS)
+
 Build and package the Apple Silicon app:
 
 ```sh
@@ -40,15 +54,56 @@ The command produces `out/Octant.app` for `darwin-arm64`. The packaged app runs 
 
 Packaging locally produces an **unsigned** app and says so, because signing needs an Apple Developer ID that only the maintainer holds. An unsigned build works, but it cannot update itself: the updater replaces the app only when the replacement satisfies the running app's code signature, and an unsigned app has none. To produce a release build, set `OCTANT_SIGNING_IDENTITY`, `OCTANT_NOTARY_PROFILE`, and `OCTANT_SIGNING_TEAM_ID`, and declare it with `OCTANT_RELEASE_BUILD=1` — a declared release refuses to finish unsigned rather than emitting something that looks shippable.
 
+### Linux AppImage (Ubuntu dogfood)
+
+On an x64 Linux host (for example Ubuntu), the same packaging entry point emits an AppImage. Darwin Keychain/code-file helpers are skipped; credentials use Secret Service via host-runtime.
+
+```sh
+bun run build
+bun run package:desktop
+# or explicitly:
+OCTANT_PACKAGE_TARGET=linux-x64 bun run package:desktop
+```
+
+Produces:
+
+- `out/Octant-<version>-linux-x64.AppImage` — portable dogfood artifact
+- `out/Octant-linux-x64/` — electron-packager directory kept beside it for inspection
+
+The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. It is **unsigned**. There is no Linux signed update feed yet, so the desktop updater refuses to install updates on Linux rather than treating an unsigned AppImage as an auto-update channel. Signed Linux artifacts and feed matrix work land separately.
+
+Launch:
+
+```sh
+chmod +x out/Octant-*-linux-x64.AppImage
+./out/Octant-*-linux-x64.AppImage
+```
+
+If your host cannot mount nested AppImages, run with `APPIMAGE_EXTRACT_AND_RUN=1`. Work/Code still need Bubblewrap and a live Secret Service session on the host (see below).
+
+AppRun keeps Electron’s Chromium sandbox when the host allows unprivileged user namespaces (`unshare -Ur`). AppImage mounts are `nosuid`, so the SUID `chrome-sandbox` helper cannot work; `--no-sandbox` is added only when that userns probe fails. On Ubuntu 24.04+, AppArmor can still restrict Chromium’s userns even when the probe succeeds — a dedicated AppArmor profile for the AppImage is out of scope for this packaging path and remains a residual launch risk on those hosts.
+
 ## Data directory
 
-On macOS, Octant stores local data at:
+### macOS
+
+Octant stores local data at:
 
 ```text
 ~/Library/Application Support/Octant/
 ```
 
-The authoritative SQLite store is `octant.sqlite3`. Native window state lives in `octant-window-state.json`. Set `OCTANT_DATA_DIR` to an absolute path to override the default location. Linux uses the standard XDG data, config, state, and runtime roots when no override is set.
+The authoritative SQLite store is `octant.sqlite3`. Native window state lives in `octant-window-state.json`. Set `OCTANT_DATA_DIR` to an absolute path to override the default location.
+
+### Linux
+
+Without `OCTANT_DATA_DIR`, Linux uses the XDG layout:
+
+```text
+~/.local/share/octant/
+```
+
+Config, state, and runtime roots follow the matching XDG variables when set. Set `OCTANT_DATA_DIR` to an absolute path to override the data root.
 
 To run the same local host without Electron during development:
 
@@ -60,7 +115,7 @@ The foreground command drains on SIGINT/SIGTERM and reports an existing owner in
 
 ### Headless Linux for ADE testing
 
-The packaged desktop app is macOS-only. A Linux host can run the same server and browser client to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the macOS system requirements above), then:
+Prefer the Linux AppImage dogfood path above when you want the Electron Machine on Ubuntu. A Linux host can also run the same server and browser client without Electron to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the system requirements above), then:
 
 ```sh
 bash scripts/ade/install-linux-host-deps.sh
