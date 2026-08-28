@@ -9,6 +9,7 @@ describe("authorizeHostControlAction", () => {
   it("maps every host control operation to a catalogued local-host action", () => {
     expect(HOST_CONTROL_ACTION_NAMES).toEqual({
       status: "host.service.status",
+      "data-map": "host.store.data-map",
       stop: "host.service.stop",
       restart: "host.service.restart",
       enable: "host.service.enable",
@@ -22,6 +23,7 @@ describe("authorizeHostControlAction", () => {
 
   it.each([
     "status",
+    "data-map",
     "stop",
     "restart",
     "enable",

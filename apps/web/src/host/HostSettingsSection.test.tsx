@@ -9,6 +9,7 @@ import type {
   HostRestoreOutcome,
 } from "@octant/contracts/host-control";
 import type { PurgeThreadsOutcome } from "@octant/contracts/thread-retention";
+import { localHostDisplayName } from "@octant/client-runtime";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import { HostSettingsSection } from "./HostSettingsSection";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
@@ -77,6 +78,27 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
         kind: "refused-online",
         guidance: "Stop the Octant host, then run the offline restore command with --confirm.",
       })),
+    readDataMap: async () => ({
+      host: {
+        hostId: "host-1",
+        displayName: localHostDisplayName(),
+        kind: "headless",
+        serviceMode: "service",
+        journal: { kind: "unknown" },
+        projections: { kind: "unknown" },
+        artifacts: [],
+        caches: [],
+        credentials: { kind: "unknown" },
+        outbound: [],
+      },
+      projects: { kind: "unknown" },
+      related: [
+        {
+          kind: "thread-retention" as const,
+          settings: { section: "host" as const, setting: "thread-retention" },
+        },
+      ],
+    }),
     readThreadRetention: async () => ({ windows: [], tombstones: [] }),
     setThreadRetention: async () => ({ windows: [], tombstones: [] }),
     purgeThreads:
@@ -191,9 +213,7 @@ describe("HostSettingsSection", () => {
     await screen.findByText("host-1");
     fireEvent.click(screen.getByRole("button", { name: "Stop host" }));
 
-    await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("The host is draining and will stop.");
-    });
+    expect(await screen.findByText("The host is draining and will stop.")).toBeInTheDocument();
     expect(lifecycle).toHaveBeenCalledWith("stop");
   });
 
@@ -294,7 +314,7 @@ describe("HostSettingsSection", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
       fireEvent.click(screen.getByRole("button", { name: "Restart host" }));
-      await screen.findByRole("status");
+      await screen.findByText("Accepted.");
       fireEvent.click(screen.getByRole("button", { name: "Create backup" }));
       await screen.findByText(/Backup manual created/);
       fireEvent.click(screen.getByRole("button", { name: "Restore from backup" }));

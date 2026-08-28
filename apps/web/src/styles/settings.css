@@ -1505,6 +1505,35 @@
   font-size: var(--oct-text-sm);
 }
 
+.host-data-map {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.host-data-map__subheading {
+  margin: 8px 0 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-weight: 600;
+}
+
+.host-data-map__related {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.host-data-map__related a {
+  color: var(--octant-text-primary);
+}
+
+@media (max-width: 720px) {
+  .host-data-map .settings-fact-list__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
 .host-settings__note,
 .github-settings__note {
   max-width: 68ch;

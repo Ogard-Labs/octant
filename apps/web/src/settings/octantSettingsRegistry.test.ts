@@ -37,6 +37,13 @@ describe("octantSettingsRegistry", () => {
     expect(host?.scope).toBe("host");
     expect(host?.settings).toEqual([
       {
+        id: "data-map",
+        label: "Data map",
+        scope: "host",
+        keywords:
+          "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
+      },
+      {
         id: "automation-notifications",
         label: "Automation notifications",
         scope: "host",
