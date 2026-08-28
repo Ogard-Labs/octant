@@ -48,7 +48,7 @@ Read the record that owns your change before editing, not all of them:
 | Canvas boards, comments, and layout revisions       | `docs/decisions/0052`                                               |
 | Extensions, skills, plugin host                     | `docs/decisions/0011`, `docs/decisions/0001`                        |
 | Subagents and agent runs                            | `docs/decisions/0012`                                               |
-| Agent-to-agent messaging authority                  | `docs/decisions/0059`                                               |
+| Agent-to-agent messaging authority                  | `docs/decisions/0063`                                               |
 | Remote clients and mobile                           | `docs/decisions/0013`                                               |
 | Collaboration, shared host, git-mediated sharing    | `docs/decisions/0040`                                               |
 | Cross-platform desktop packaging and updates        | `docs/decisions/0034`, `docs/decisions/0058`                        |

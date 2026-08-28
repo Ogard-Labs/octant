@@ -66,7 +66,7 @@ distilled successor of the earlier long-form design specifications.
 | [0056](0056-image-generation-jobs-and-adapters.md)            | Image generation jobs, adapters, and artifact scope                                         | Accepted           |
 | [0057](0057-linux-confinement-bubblewrap.md)                  | Linux confinement uses Bubblewrap as a scoped exception to the Seatbelt-only implementation | Accepted           |
 | [0058](0058-cross-platform-desktop.md)                        | One desktop app across macOS, Linux, and Windows                                            | Proposed           |
-| [0059](0059-agent-to-agent-messaging.md)                      | Agent-to-agent messaging authority                                                          | Proposed           |
+| [0063](0063-agent-to-agent-messaging.md)                      | Agent-to-agent messaging authority                                                          | Proposed           |
 
 ## Adding an ADR
 

@@ -181,7 +181,7 @@ appends to the source.
 
 Broader structured messaging between AgentRuns and threads, beyond mention
 excerpts and beyond that Chat one-hop tool, is designed in
-[decisions/0059-agent-to-agent-messaging.md](decisions/0059-agent-to-agent-messaging.md)
+[decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md)
 and
 [security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md).
 It is Proposed only: the host would admit, clamp, journal, and deliver; bodies
