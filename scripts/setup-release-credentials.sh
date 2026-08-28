@@ -197,8 +197,19 @@ ENV_FILE="$(mktemp -d)/unused.env"
 # The library's set_secret writes a repository secret, which any workflow on
 # any branch can read; these belong to the environments, whose branch and tag
 # policies are what keep a side branch from reading the signing key.
+require_preview_main_policy() {
+  local names
+  names=$(gh api "repos/${REPO}/environments/preview/deployment-branch-policies" \
+    --jq '[.branch_policies[]? | "\(.type):\(.name)"] | join(",")')
+  if [[ "$names" != "branch:main" ]]; then
+    warn "preview must be limited to main before secrets are written (found: ${names:-none})."
+    exit 1
+  fi
+}
+
 set_env_secret() {
   local name="$1" value="$2" ring
+  require_preview_main_policy
   for ring in "${RINGS[@]}"; do
     if printf '%s' "$value" | gh secret set "$name" --repo "$REPO" --env "$ring" >/dev/null 2>&1; then
       printf '  %s✓ set%s %s in the %s environment\n' "$GREEN" "$RESET" "$name" "$ring"
@@ -350,9 +361,13 @@ stage "octant.sh: a deploy key for publishing the feed"
 say "The workflow copies one signed JSON file per ring to your server. It needs"
 say "an SSH key that can write only that directory."
 ask FEED_SSH_USER "SSH user on octant.sh:"
-ask FEED_REMOTE_PATH "Directory the feed is served from (e.g. /var/www/octant.sh/updates):"
+ask FEED_REMOTE_PATH "Directory the feed is served from (e.g. /home/henrik/octant-updates):"
+ask FEED_SSH_HOST "SSH host (octant.sh):"
+ask FEED_SSH_KNOWN_HOSTS "Pinned known_hosts line for that host:"
 set_repo_var OCTANT_FEED_SSH_USER "$FEED_SSH_USER"
 set_repo_var OCTANT_FEED_REMOTE_PATH "$FEED_REMOTE_PATH"
+set_repo_var OCTANT_FEED_SSH_HOST "$FEED_SSH_HOST"
+set_repo_var OCTANT_FEED_SSH_KNOWN_HOSTS "$FEED_SSH_KNOWN_HOSTS"
 DEPLOY_KEY_DIR=$(mktemp -d)
 chmod 700 "$DEPLOY_KEY_DIR"
 ssh-keygen -t ed25519 -N "" -C "octant-release-feed" -f "${DEPLOY_KEY_DIR}/id" -q

@@ -11,11 +11,13 @@ import { OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
  * somebody controls that domain today; the signature proves the release is one
  * we published. See `docs/decisions/0034`.
  *
- * Empty until a release key exists, and empty is not a permissive default:
- * `createFeedVerifier` refuses every signature while it is empty, so a build
- * that forgot to set it offers no updates rather than accepting any.
+ * A missing or unusable value is not a permissive default:
+ * `createFeedVerifier` refuses every signature unless this is a valid Ed25519
+ * SPKI key, so a build that forgot to set it offers no updates rather than
+ * accepting any.
  */
-export const OCTANT_UPDATE_PUBLIC_KEY = "";
+export const OCTANT_UPDATE_PUBLIC_KEY =
+  "MCowBQYDK2VwAyEA5n78HQaS4Z3kQbVzFG3NCUaW3Gkx4ZogaxpTYPt4B/8=";
 
 /**
  * What an update check says about the machine asking.

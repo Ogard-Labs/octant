@@ -151,7 +151,10 @@ jobs:
           # answers on that address is a feed published to an unknown host.
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/octant_feed ~/.ssh/known_hosts
-          rsync --archive --compress --chmod=D755,F644 \
+          # GNU rsync understands --chmod; the macOS runner ships the BSD
+          # client, which rejects that flag. Permissions are already set on the
+          # destination directory, so archive+compress is enough.
+          rsync --archive --compress \
             --rsh "ssh -i ~/.ssh/octant_feed -o IdentitiesOnly=yes" \
             "${RUNNER_TEMP}/feed/stable" \
             "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}/"

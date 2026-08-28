@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createFeedVerifier,
   DEFAULT_OCTANT_UPDATE_FEED_BASE_URL,
+  OCTANT_UPDATE_PUBLIC_KEY,
   fetchUpdateFeed,
   fetchVerifiedArtifact,
   resolveUpdateFeedBaseUrl,
@@ -549,6 +550,12 @@ describe("what an update check discloses", () => {
     expect(headers["user-agent"]).not.toMatch(/\d/);
     expect(init.credentials).toBe("omit");
     expect(Object.keys(headers).sort()).toEqual(["accept", "user-agent"]);
+  });
+
+  it("compiles a usable release public key", () => {
+    expect(OCTANT_UPDATE_PUBLIC_KEY).not.toBe("");
+    expect(createFeedVerifier().configured).toBe(true);
+    expect(createFeedVerifier("").configured).toBe(false);
   });
 
   it("refuses to fetch a feed over plain HTTP", async () => {
