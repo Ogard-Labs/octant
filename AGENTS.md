@@ -50,6 +50,7 @@ Read the record that owns your change before editing, not all of them:
 | Subagents and agent runs                            | `docs/decisions/0012`                                               |
 | Remote clients and mobile                           | `docs/decisions/0013`                                               |
 | Collaboration, shared host, git-mediated sharing    | `docs/decisions/0040`                                               |
+| Cross-platform desktop packaging and updates        | `docs/decisions/0034`, `docs/decisions/0058`                        |
 | Apple build and validation                          | `docs/decisions/0014`                                               |
 | Computer-use destinations                           | `docs/decisions/0053`                                               |
 | Shell, navigation, workspace layout                 | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`  |
@@ -277,8 +278,10 @@ The first release is the Apple Silicon technical preview with the
 provider-neutral plugin/skill marketplace. Per `docs/decisions/0034`, it is
 signed with a Developer ID, notarized, and updates itself — those three are one
 deliverable, because an updater on an unsigned app is an unauthenticated
-code-delivery channel and macOS refuses the replacement anyway. Do not add
-Intel, Windows/Linux packaging, native mobile store distribution, hosted relay,
-schedules, connector/OAuth marketplace, full LSP/extension host, or product
-features that mutate pull requests unless a decision record and an explicit
-request authorize that scope.
+code-delivery channel and macOS refuses the replacement anyway. Cross-platform
+desktop (macOS, Linux, Windows) is authorized by `docs/decisions/0058` and
+sequenced there: Linux desktop shell next, Windows Work/Code only after a
+Windows confinement ADR. Do not add native mobile store distribution, hosted
+relay, schedules, connector/OAuth marketplace, full LSP/extension host, or
+product features that mutate pull requests unless a decision record and an
+explicit request authorize that scope.

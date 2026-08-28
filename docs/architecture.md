@@ -1,7 +1,9 @@
 # Octant architecture
 
-Octant is a local-first macOS workspace for Chat, Work, and Code across many AI
-providers. This document is the single architecture overview for the
+Octant is a local-first desktop workspace for Chat, Work, and Code across many AI
+providers. The first shipping surface is Apple Silicon macOS; Linux and Windows
+desktop are the same product under [decisions/0058-cross-platform-desktop.md](decisions/0058-cross-platform-desktop.md).
+This document is the single architecture overview for the
 repository. It describes the shape of the system as it exists in code; the
 decision records under `docs/decisions/` explain why individual choices were
 made.
@@ -408,7 +410,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   bounded generated-image attachment scope, and usage rows attributed as
   `image-generation`; see
   [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
-  Invocation and thread preview are not part of that record.
+  Composer **Create image…** actions and an app-managed `octant_create_image`
+  tool invoke that job service through `/api/image/` when an enabled image
+  profile exists; generated images preview in the thread by opaque attachment
+  id, chain edits through `parentArtifactRef`, export with the thread, and
+  never grant Chat filesystem authority.
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;
@@ -569,7 +575,7 @@ mechanisms are:
 | `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads                    | contracts, domain                                                 |
 | `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                                       | contracts, host-runtime                                           |
 | `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway                     | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
-| `apps/desktop`            | Electron shell: windows, menus, Keychain, brokers, pickers, signed updates, server process lifecycle, packaging                       | contracts, domain, host-runtime                                   |
+| `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging     | contracts, domain, host-runtime                                   |
 | `apps/web`                | React renderer for desktop and paired browsers                                                                                        | client-runtime, contracts, domain, plugin-host, theme             |
 | `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                | client-runtime, contracts, domain                                 |
 

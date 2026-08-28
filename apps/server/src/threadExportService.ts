@@ -35,6 +35,12 @@ import {
 } from "@octant/domain";
 import { Schema } from "effect";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvas/canvasProjection";
+import {
+  decodeImageGenerationScopeId,
+  type ImageGenerationScopeId,
+  type ImageJob,
+} from "@octant/contracts";
+import { generatedImageExportAttachments } from "@octant/domain";
 
 const IN_PROGRESS = new Set(["queued", "streaming", "waiting", "running", "accepted"]);
 const MAX_CODE_EXPORT_CONVERSATION_PAGES = 100;
@@ -93,6 +99,9 @@ export interface ThreadExportServiceOptions {
   readonly work: ThreadExportWorkPort;
   readonly code: ThreadExportCodePort;
   readonly canvases: Pick<CanvasProjection, "byThread">;
+  readonly generatedImages?: {
+    readonly listByScope: (scopeId: ImageGenerationScopeId) => ReadonlyArray<ImageJob>;
+  };
 }
 
 /**
@@ -109,6 +118,7 @@ export class ThreadExportService {
   readonly #work: ThreadExportWorkPort;
   readonly #code: ThreadExportCodePort;
   readonly #canvases: Pick<CanvasProjection, "byThread">;
+  readonly #generatedImages: ThreadExportServiceOptions["generatedImages"];
 
   constructor(options: ThreadExportServiceOptions) {
     this.#hostId = options.hostId;
@@ -117,6 +127,7 @@ export class ThreadExportService {
     this.#work = options.work;
     this.#code = options.code;
     this.#canvases = options.canvases;
+    this.#generatedImages = options.generatedImages;
   }
 
   async exportThread(
@@ -208,12 +219,15 @@ export class ThreadExportService {
         });
       }
     }
-    const attachments: ThreadExportAttachment[] = view.attachments.map((attachment) => ({
-      displayName: attachment.displayName,
-      mediaType: attachment.mediaType,
-      byteLength: attachment.byteLength,
-      status: attachment.status,
-    }));
+    const attachments: ThreadExportAttachment[] = [
+      ...view.attachments.map((attachment) => ({
+        displayName: attachment.displayName,
+        mediaType: attachment.mediaType,
+        byteLength: attachment.byteLength,
+        status: attachment.status,
+      })),
+      ...this.#generatedAttachments(threadId),
+    ];
     const citations: ThreadExportCitation[] = view.citations.map((citation) => ({
       sourceTitle: citation.sourceTitle,
       sourceUrl: citation.sourceUrl,
@@ -317,10 +331,13 @@ export class ThreadExportService {
       updatedAt: read.thread.updatedAt,
       transcript: transcriptWithCounts(entries, 0),
       artifacts: this.#artifacts("work", read.thread.projectId, threadId),
-      attachments: [],
+      attachments: this.#generatedAttachments(threadId),
       citations: [],
       ...completion,
-      omissions: collectOmissions({ "in-progress": inProgress }),
+      omissions: collectOmissions({
+        "in-progress": inProgress,
+        "attachment-bytes": this.#generatedAttachments(threadId).length,
+      }),
     };
   }
 
@@ -362,12 +379,13 @@ export class ThreadExportService {
       ...branched,
       transcript: transcriptWithCounts(conversation.entries, 0),
       artifacts: this.#artifacts("code", thread.projectId, threadId),
-      attachments: [],
+      attachments: this.#generatedAttachments(threadId),
       citations: [],
       omissions: collectOmissions({
         "in-progress": conversation.inProgress,
         "unreadable-content": conversation.unreadable,
         "truncated-conversation": conversation.truncated ? 1 : 0,
+        "attachment-bytes": this.#generatedAttachments(threadId).length,
         "bulk-outside-journal": 1,
       }),
     };
@@ -466,6 +484,17 @@ export class ThreadExportService {
     }
     const normalized = text.trim();
     return normalized.length === 0 ? undefined : normalized;
+  }
+
+  #generatedAttachments(threadId: string): ReadonlyArray<ThreadExportAttachment> {
+    if (this.#generatedImages === undefined) return [];
+    try {
+      return generatedImageExportAttachments(
+        this.#generatedImages.listByScope(decodeImageGenerationScopeId(threadId)),
+      );
+    } catch {
+      return [];
+    }
   }
 
   #artifacts(

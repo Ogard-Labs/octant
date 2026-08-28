@@ -865,6 +865,35 @@ describe("WorkThreadWorkspace", () => {
     expect(await screen.findByText("This Work thread is no longer available.")).toBeInTheDocument();
     expect(store.read("work", String(threadId))).toBeUndefined();
   });
+
+  it("shows why Save to Project failed instead of leaving an unhandled rejection", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => {
+      throw new Error("disk full");
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        imageGenerationClient={
+          {
+            list: async () => ({ jobs: [completedGeneratedJob()] }),
+            artifact: async () => new Blob([Uint8Array.from([1])], { type: "image/png" }),
+            save,
+          } as never
+        }
+        imageGenerationProfiles={[imageProfile()]}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Save to Project" }));
+    expect(await screen.findByText("The image could not be saved.")).toBeVisible();
+  });
 });
 
 function workTurn(overrides: Record<string, unknown> = {}) {
@@ -969,6 +998,46 @@ function alternateProviderGroup(): PickerGroup {
       },
     ],
   } as never;
+}
+
+function imageProfile() {
+  return {
+    instanceId: providerId,
+    displayName: "OpenAI Image",
+    driverKind: "openai-image" as const,
+    modelAllowlist: ["gpt-image-2" as never],
+    defaultModel: "gpt-image-2" as never,
+  };
+}
+
+function completedGeneratedJob() {
+  const jobId = "a3000000-0000-4000-8000-000000000003";
+  return {
+    id: jobId,
+    status: "completed",
+    threadKind: "work-thread",
+    scopeId: String(threadId),
+    profileInstanceId: providerId,
+    modelId: "gpt-image-2",
+    promptHash: "a".repeat(64),
+    artifacts: [
+      {
+        attachmentId: "a3000000-0000-4000-8000-000000000010",
+        hash: "b".repeat(64),
+        size: 1,
+        mime: "image/png",
+        evidence: {
+          profileInstanceId: providerId,
+          modelId: "gpt-image-2",
+          promptHash: "a".repeat(64),
+          jobId,
+        },
+      },
+    ],
+    version: 3,
+    createdAt: "2026-08-01T20:00:00.000Z",
+    updatedAt: "2026-08-01T20:00:00.000Z",
+  };
 }
 
 function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {

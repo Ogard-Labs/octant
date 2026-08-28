@@ -11,6 +11,7 @@
     "./chat-client": "./src/chatClient.ts",
     "./browser-automation-client": "./src/browserAutomationClient.ts",
     "./canvas-client": "./src/canvasClient.ts",
+    "./image-generation-client": "./src/imageGenerationClient.ts",
     "./computer-use-client": "./src/computerUseClient.ts",
     "./code-client": "./src/codeClient.ts",
     "./work-mutation-client": "./src/workMutationClient.ts",

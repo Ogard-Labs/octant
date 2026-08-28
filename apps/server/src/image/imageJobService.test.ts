@@ -165,6 +165,74 @@ describe("image job service", () => {
     expect(imageRow?.attribution[0]?.plannedTokens).toBe(0);
   });
 
+  it("chains an edit job to the parent artifact without retaining provider URLs", async () => {
+    const { service } = openHarness(successfulAdapter());
+    const original = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "a red cube",
+    });
+    const completed = await service.whenTerminal(original.id);
+    const parent = completed.artifacts[0];
+    expect(parent).toBeDefined();
+    if (parent === undefined) return;
+    const edit = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "make the cube blue",
+      parentArtifactRef: {
+        attachmentId: parent.attachmentId,
+        hash: parent.hash,
+        size: parent.size,
+        mime: parent.mime,
+      },
+    });
+    const revised = await service.whenTerminal(edit.id);
+    expect(revised.status).toBe("completed");
+    expect(revised.parentArtifactRef?.attachmentId).toBe(parent.attachmentId);
+    expect(revised.artifacts[0]?.evidence.parentArtifactRef?.attachmentId).toBe(
+      parent.attachmentId,
+    );
+  });
+
+  it("refuses an edit that also carries explicit reference images", async () => {
+    const { service } = openHarness(successfulAdapter());
+    const original = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "a red cube",
+    });
+    const completed = await service.whenTerminal(original.id);
+    const parent = completed.artifacts[0];
+    expect(parent).toBeDefined();
+    if (parent === undefined) return;
+    await expect(
+      service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: profileId,
+        modelId,
+        prompt: "make the cube blue",
+        parentArtifactRef: {
+          attachmentId: parent.attachmentId,
+          hash: parent.hash,
+          size: parent.size,
+          mime: parent.mime,
+        },
+        references: [{ mediaType: "image/png", bytes: png }],
+      }),
+    ).rejects.toMatchObject({
+      category: "invalid",
+      message: "An edit job cannot combine a parent image with explicit references.",
+    });
+  });
+
   it("surfaces a safety refusal as a failed job and never calls another profile", async () => {
     const generate = vi.fn(async () => ({
       status: "refused" as const,

@@ -1711,6 +1711,30 @@ describe("CodeThreadWorkspace", () => {
     });
   });
 
+  it("shows why Save to Project failed instead of leaving an unhandled rejection", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => {
+      throw new Error("disk full");
+    });
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        imageGenerationClient={
+          {
+            list: async () => ({ jobs: [completedGeneratedJob()] }),
+            artifact: async () => new Blob([Uint8Array.from([1])], { type: "image/png" }),
+            save,
+          } as never
+        }
+        imageGenerationProfiles={[imageProfile()]}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Save to Project" }));
+    expect(await screen.findByText("The image could not be saved.")).toBeVisible();
+  });
+
   it("marks a stale changed-file observation rather than treating it as current", async () => {
     const queryBoard = vi.fn(async () =>
       boardView([
@@ -1759,6 +1783,46 @@ describe("CodeThreadWorkspace", () => {
     expect(trigger).not.toHaveTextContent("changed");
   });
 });
+
+function imageProfile() {
+  return {
+    instanceId: providerId,
+    displayName: "OpenAI Image",
+    driverKind: "openai-image" as const,
+    modelAllowlist: ["gpt-image-2" as never],
+    defaultModel: "gpt-image-2" as never,
+  };
+}
+
+function completedGeneratedJob() {
+  const jobId = "a3000000-0000-4000-8000-000000000003";
+  return {
+    id: jobId,
+    status: "completed",
+    threadKind: "code-thread",
+    scopeId: String(threadId),
+    profileInstanceId: providerId,
+    modelId: "gpt-image-2",
+    promptHash: "a".repeat(64),
+    artifacts: [
+      {
+        attachmentId: "a3000000-0000-4000-8000-000000000010",
+        hash: "b".repeat(64),
+        size: 1,
+        mime: "image/png",
+        evidence: {
+          profileInstanceId: providerId,
+          modelId: "gpt-image-2",
+          promptHash: "a".repeat(64),
+          jobId,
+        },
+      },
+    ],
+    version: 3,
+    createdAt: "2026-07-27T09:00:00.000Z",
+    updatedAt: "2026-07-27T09:00:00.000Z",
+  };
+}
 
 function providerGroup(): PickerGroup {
   return {

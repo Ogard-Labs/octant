@@ -255,6 +255,11 @@ export class WorkMutationService {
       filesystem: this.#filesystem,
       canonicalPath: resolution.absolutePath,
       allowCreate: true,
+      parent: {
+        absolutePath: resolution.parentAbsolute,
+        identity: resolution.parentIdentity,
+        remaining: resolution.remaining,
+      },
       bytes,
     });
     if (!created) return failedReply(request, "write-failed");
@@ -607,7 +612,17 @@ export class WorkMutationService {
         canonicalPath: targetAbsolutePath,
         allowCreate: !samePath,
         bytes: targetBytes,
-        ...(samePath ? { expected: resolved.sourceIdentity } : {}),
+        ...(samePath
+          ? { expected: resolved.sourceIdentity }
+          : newResolutionForTransform === undefined
+            ? {}
+            : {
+                parent: {
+                  absolutePath: newResolutionForTransform.parentAbsolute,
+                  identity: newResolutionForTransform.parentIdentity,
+                  remaining: newResolutionForTransform.remaining,
+                },
+              }),
       });
       if (!written) return failedReply(request, "write-failed", request.artifactId);
     }
@@ -1071,6 +1086,11 @@ export class WorkMutationService {
         filesystem: this.#filesystem,
         canonicalPath: exportResolution.absolutePath,
         allowCreate: true,
+        parent: {
+          absolutePath: exportResolution.parentAbsolute,
+          identity: exportResolution.parentIdentity,
+          remaining: exportResolution.remaining,
+        },
         bytes: exportBytes,
       });
       if (!written) return failedReply(request, "write-failed", request.artifactId);
