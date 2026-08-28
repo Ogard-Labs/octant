@@ -65,6 +65,7 @@ describe("recognizeTrackerReferences", () => {
     expect(recognizeTrackerReferences("https://github.com/octant/octant#12")).toEqual([]);
     expect(recognizeTrackerReferences("prefix_octant/octant#12")).toEqual([]);
     expect(recognizeTrackerReferences("octant/octant#12x")).toEqual([]);
+    expect(recognizeTrackerReferences("octant/octant#12_more")).toEqual([]);
     expect(recognizeTrackerReferences("see ./octant#12")).toEqual([]);
   });
 
@@ -74,7 +75,22 @@ describe("recognizeTrackerReferences", () => {
     expect(recognizeTrackerReferences("abc-99")).toEqual([]);
     expect(recognizeTrackerReferences("A-9")).toEqual([]);
     expect(recognizeTrackerReferences("ABCDEFGHIJK-1")).toEqual([]);
+    expect(recognizeTrackerReferences("ABC-99_more")).toEqual([]);
     expect(recognizeTrackerReferences("#[ABC-99]")).toEqual([]);
+  });
+
+  it("recognizes a tracker-key whose numeric suffix is longer than ten digits", () => {
+    expect(recognizeTrackerReferences("see ABC-12345678901 please")).toEqual([
+      {
+        start: 4,
+        end: 19,
+        reference: {
+          patternKind: "tracker-key",
+          raw: "ABC-12345678901",
+          key: "ABC-12345678901",
+        },
+      },
+    ]);
   });
 
   it("returns mixed GitHub and tracker-key spans in left-to-right order without overlapping", () => {

@@ -23,7 +23,7 @@ export type TrackerReferencePatternKind = typeof TrackerReferencePatternKind.Typ
  * display-only on `raw`; resolvers key off this value.
  */
 export const TrackerKey = Schema.String.pipe(
-  Schema.filter((value) => /^[A-Z][A-Z0-9]{1,9}-[0-9]{1,10}$/.test(value)),
+  Schema.filter((value) => /^[A-Z][A-Z0-9]{1,9}-[0-9]+$/.test(value)),
 );
 export type TrackerKey = typeof TrackerKey.Type;
 

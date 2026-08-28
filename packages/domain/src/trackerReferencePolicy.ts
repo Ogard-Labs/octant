@@ -13,18 +13,18 @@ export interface TrackerReferenceSpan {
 // Keep these aligned with `GithubRepositoryOwner` / `GithubRepositoryName`.
 const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const NAME_PATTERN = /^(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
-const TRACKER_KEY_IDENTITY = /^[A-Z][A-Z0-9]{1,9}-[0-9]{1,10}$/;
+const TRACKER_KEY_IDENTITY = /^[A-Z][A-Z0-9]{1,9}-[0-9]+$/;
 
 // GitHub form requires owner/name#number. A leading path separator is refused
 // so a github.com URL fragment is not mistaken for a shorthand.
 const GITHUB_CANDIDATE =
-  /(?<![A-Za-z0-9_.\-/])([A-Za-z0-9-]{1,39})\/([A-Za-z0-9_.-]{1,100})#([1-9][0-9]{0,8})(?![A-Za-z0-9])/g;
+  /(?<![A-Za-z0-9_.\-/])([A-Za-z0-9-]{1,39})\/([A-Za-z0-9_.-]{1,100})#([1-9][0-9]{0,8})(?![A-Za-z0-9_])/g;
 
-// Tracker-key form is `#?[A-Z][A-Z0-9]{1,9}-[0-9]{1,10}`. Bare `#123` is excluded
+// Tracker-key form is `#?[A-Z][A-Z0-9]{1,9}-[0-9]+`. Bare `#123` is excluded
 // because it is already the `#thread` mention token: unmatched `#text` stays
 // ordinary text, and stealing `#123` would reopen or suppress that typeahead.
 const TRACKER_KEY_CANDIDATE =
-  /(?<![A-Za-z0-9._#/[\]-])(#?[A-Z][A-Z0-9]{1,9}-[0-9]{1,10})(?![A-Za-z0-9])/g;
+  /(?<![A-Za-z0-9._#/[\]-])(#?[A-Z][A-Z0-9]{1,9}-[0-9]+)(?![A-Za-z0-9_])/g;
 
 /**
  * Scan a text run for tracker-reference spans. The grammar is conservative on

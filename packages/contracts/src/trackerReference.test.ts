@@ -92,6 +92,20 @@ describe("tracker reference contracts", () => {
     ).toThrow();
   });
 
+  it("accepts a tracker-key whose numeric suffix is longer than ten digits", () => {
+    expect(
+      decodeTrackerReference({
+        patternKind: "tracker-key",
+        raw: "ABC-12345678901",
+        key: "ABC-12345678901",
+      }),
+    ).toEqual({
+      patternKind: "tracker-key",
+      raw: "ABC-12345678901",
+      key: "ABC-12345678901",
+    });
+  });
+
   it("rejects excess properties on a reference and on a batch request", () => {
     expect(() => decodeTrackerReference({ ...githubReference, extra: true })).toThrow();
     expect(() => decodeTrackerReference({ ...githubReference, key: "ABC-99" })).toThrow();
