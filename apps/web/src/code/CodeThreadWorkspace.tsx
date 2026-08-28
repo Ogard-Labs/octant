@@ -1034,11 +1034,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           client={props.imageGenerationClient}
           onAttach={(file) => attachments.attach([file])}
           onSaveToProject={(job, artifact) => {
-            void props.imageGenerationClient?.save({
-              jobId: job.id,
-              attachmentId: artifact.attachmentId,
-              relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
-            });
+            void props.imageGenerationClient
+              ?.save({
+                jobId: job.id,
+                attachmentId: artifact.attachmentId,
+                relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+              })
+              .then((result) => {
+                if (result === undefined) return;
+                if (result.status !== "saved") attachments.refuse(result.reason);
+              })
+              .catch(() => {
+                attachments.refuse("The image could not be saved.");
+              });
           }}
           profiles={props.imageGenerationProfiles}
           scopeId={decodeImageGenerationScopeId(String(thread.id))}

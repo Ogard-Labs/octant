@@ -143,7 +143,7 @@ describe("generated image export attachments", () => {
     const attachments = generatedImageExportAttachments([completed, running]);
     expect(attachments).toHaveLength(1);
     expect(attachments[0]).toMatchObject({
-      displayName: "generated-1.png",
+      displayName: `generated-${String(completed.id)}-1.png`,
       mediaType: "image/png",
       byteLength: 48,
       status: "finalized",
@@ -153,5 +153,38 @@ describe("generated image export attachments", () => {
         parentAttachmentId: parent.attachmentId,
       },
     });
+  });
+
+  it("names exported images from media type and job identity", () => {
+    const jpegJob: ImageJob = {
+      id: "a1000000-0000-4000-8000-000000000021" as ImageJob["id"],
+      status: "completed",
+      threadKind: "chat-thread",
+      scopeId: "a1000000-0000-4000-8000-000000000003" as ImageJob["scopeId"],
+      profileInstanceId: openAiImage().id,
+      modelId: "gpt-image-2" as ImageJob["modelId"],
+      promptHash: "a".repeat(64),
+      artifacts: [
+        {
+          attachmentId:
+            "a1000000-0000-4000-8000-000000000022" as ImageJob["artifacts"][number]["attachmentId"],
+          hash: "c".repeat(64),
+          size: 48,
+          mime: "image/jpeg",
+          evidence: {
+            profileInstanceId: openAiImage().id,
+            modelId: "gpt-image-2" as ImageJob["modelId"],
+            promptHash: "a".repeat(64),
+            jobId: "a1000000-0000-4000-8000-000000000021" as ImageJob["id"],
+          },
+        },
+      ],
+      version: 3 as ImageJob["version"],
+      createdAt: timestamp as ImageJob["createdAt"],
+      updatedAt: timestamp as ImageJob["updatedAt"],
+    };
+    expect(generatedImageExportAttachments([jpegJob])[0]?.displayName).toBe(
+      `generated-${String(jpegJob.id)}-1.jpg`,
+    );
   });
 });

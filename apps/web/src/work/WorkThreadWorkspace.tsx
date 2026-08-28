@@ -651,6 +651,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   .then((result) => {
                     if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
                     else setStatus(result.reason);
+                  })
+                  .catch(() => {
+                    setStatus("The image could not be saved.");
                   });
               }}
               profiles={props.imageGenerationProfiles}

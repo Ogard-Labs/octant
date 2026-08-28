@@ -644,20 +644,42 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             onAttach={(file) => {
               const displayName = file.name;
               const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
+              const threadId = view.thread.id;
               void (async () => {
-                const buffer = await file.arrayBuffer();
-                await props.controller.upload({
-                  threadId: view.thread.id,
-                  attachmentId,
-                  displayName,
-                  mediaType: file.type || "image/png",
-                  bytes: new Uint8Array(buffer),
-                });
-                setPendingAttachments((current) => {
-                  const next = [...current, { id: attachmentId, displayName }];
-                  pendingAttachmentsRef.current = next;
-                  return next;
-                });
+                try {
+                  const buffer = await file.arrayBuffer();
+                  if (!mountedRef.current || activeThreadIdRef.current !== String(threadId)) {
+                    return;
+                  }
+                  await props.controller.upload({
+                    threadId,
+                    attachmentId,
+                    displayName,
+                    mediaType: file.type || "image/png",
+                    bytes: new Uint8Array(buffer),
+                  });
+                  if (!mountedRef.current || activeThreadIdRef.current !== String(threadId)) {
+                    await discardAttachmentRef
+                      .current({ threadId, attachmentId })
+                      .catch(() => undefined);
+                    return;
+                  }
+                  setPendingAttachments((current) => {
+                    const next = [...current, { id: attachmentId, displayName }];
+                    pendingAttachmentsRef.current = next;
+                    return next;
+                  });
+                } catch {
+                  await discardAttachmentRef
+                    .current({ threadId, attachmentId })
+                    .catch(() => undefined);
+                  if (mountedRef.current && activeThreadIdRef.current === String(threadId)) {
+                    setAttachmentStatus({
+                      kind: "failed",
+                      message: `${displayName} could not be attached. Try again.`,
+                    });
+                  }
+                }
               })();
             }}
             profiles={listEligibleImageProfiles(props.providerSnapshot?.instances ?? [])}
@@ -796,14 +818,20 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         attachment={attachmentCapability}
         attachmentBusy={uploadingMessage !== undefined || attachmentStatus.kind === "removing"}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-        imageGeneration={{
-          profiles: listEligibleImageProfiles(props.providerSnapshot?.instances ?? []),
-          scopeId: decodeImageGenerationScopeId(String(thread.id)),
-          ...(props.imageGenerationClient === undefined
-            ? {}
-            : { client: props.imageGenerationClient }),
-          ...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings }),
-        }}
+        {...(props.providerSnapshot === undefined
+          ? {}
+          : {
+              imageGeneration: {
+                profiles: listEligibleImageProfiles(props.providerSnapshot.instances),
+                scopeId: decodeImageGenerationScopeId(String(thread.id)),
+                ...(props.imageGenerationClient === undefined
+                  ? {}
+                  : { client: props.imageGenerationClient }),
+                ...(props.onOpenSettings === undefined
+                  ? {}
+                  : { onOpenSettings: props.onOpenSettings }),
+              },
+            })}
         draft={props.controller.pendingDraft}
         caretRestoreKey={String(thread.id)}
         {...(props.controller.pendingDraftCaret === undefined

@@ -198,8 +198,9 @@ describe("ThreadExportService", () => {
     expect(outcome.kind).toBe("exported");
     if (outcome.kind !== "exported") return;
     const generated = outcome.bundle.evidence.attachments.find(
-      (attachment) => attachment.displayName === "generated-1.png",
+      (attachment) => attachment.generation?.jobId === jobId,
     );
+    expect(generated?.displayName).toBe(`generated-${jobId}-1.png`);
     expect(generated?.generation?.jobId).toBe(jobId);
     expect(generated?.generation?.modelId).toBe("gpt-image-2");
     expect(JSON.stringify(outcome.bundle)).not.toContain("iVBOR");

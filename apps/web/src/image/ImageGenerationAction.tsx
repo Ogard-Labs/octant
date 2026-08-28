@@ -8,7 +8,7 @@ import type {
 } from "@octant/contracts";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { Image as ImageIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ImageGenerationSheet, type ImageGenerationDraft } from "./ImageGenerationSheet";
 
@@ -29,9 +29,21 @@ export function ImageGenerationAction(props: ImageGenerationActionProps) {
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const ready = props.profiles.length > 0;
   const threadAvailable = props.scopeId !== undefined;
+  const mountedRef = useRef(true);
+  const pollGenerationRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      pollGenerationRef.current += 1;
+    };
+  }, []);
 
   async function submit(draft: ImageGenerationDraft) {
     if (props.client === undefined || props.scopeId === undefined) return;
+    const pollGeneration = pollGenerationRef.current + 1;
+    pollGenerationRef.current = pollGeneration;
     setSubmitting(true);
     setErrorMessage(undefined);
     const request: ImageGenerationEnqueueRequest = {
@@ -53,24 +65,31 @@ export function ImageGenerationAction(props: ImageGenerationActionProps) {
     };
     try {
       const queued = await props.client.enqueue(request);
+      if (!mountedRef.current || pollGeneration !== pollGenerationRef.current) return;
       setJob(queued);
-      void poll(queued);
+      void poll(queued, pollGeneration);
     } catch (error) {
+      if (!mountedRef.current || pollGeneration !== pollGenerationRef.current) return;
       setErrorMessage(error instanceof Error ? error.message : "Image generation failed.");
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current && pollGeneration === pollGenerationRef.current) {
+        setSubmitting(false);
+      }
     }
   }
 
-  async function poll(current: ImageJob) {
+  async function poll(current: ImageJob, pollGeneration: number) {
     if (props.client === undefined) return;
     let next = current;
     while (next.status === "queued" || next.status === "running") {
       await new Promise((resolve) => setTimeout(resolve, 750));
+      if (!mountedRef.current || pollGeneration !== pollGenerationRef.current) return;
       try {
         next = await props.client.get(next.id);
+        if (!mountedRef.current || pollGeneration !== pollGenerationRef.current) return;
         setJob(next);
       } catch (error) {
+        if (!mountedRef.current || pollGeneration !== pollGenerationRef.current) return;
         setErrorMessage(error instanceof Error ? error.message : "Image generation failed.");
         return;
       }

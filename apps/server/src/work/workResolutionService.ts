@@ -95,65 +95,11 @@ export class WorkResolutionService {
     }
 
     const absolutePath = joinPath(input.binding.canonicalRoot, relativePath);
-    let stat: WorkFileStat;
-    try {
-      stat = await this.#filesystem.lstat(absolutePath);
-    } catch {
-      return { status: "unavailable" };
-    }
-
-    if (stat.isSymbolicLink) {
-      let target: string;
-      try {
-        target = await this.#filesystem.readlink(absolutePath);
-      } catch {
-        return { status: "unavailable" };
-      }
-      let resolvedTarget: string;
-      try {
-        // A `readlink` result is relative to the link's own parent, not to the
-        // server process's working directory. Canonicalizing it raw resolved a
-        // legitimate `notes/latest.md -> releases/v1.md` somewhere else
-        // entirely, so an artifact safely inside the root was refused as an
-        // escape. Containment still decides; the join only asks the question
-        // about the right path.
-        resolvedTarget = await this.#filesystem.realpath(
-          target.startsWith("/") ? target : joinPath(parentPath(absolutePath), target),
-        );
-      } catch {
-        return { status: "symlink-escape" };
-      }
-      if (
-        classifySymlinkContainment(input.binding.canonicalRoot, resolvedTarget) === "escapes-root"
-      ) {
-        return { status: "symlink-escape" };
-      }
-    }
-
-    let canonicalAbsolute: string;
-    try {
-      canonicalAbsolute = await this.#filesystem.realpath(absolutePath);
-    } catch {
-      return { status: "unavailable" };
-    }
-    if (
-      classifyPathContainment(input.binding.canonicalRoot, canonicalAbsolute) === "escapes-root"
-    ) {
-      return { status: "escapes-root" };
-    }
-
-    // Containment has finished deciding; from here the path is opened once and
-    // never resolved again. An object swapped in behind the name, an object that
-    // is no longer a regular file, and one past the ceiling are all unobservable
-    // rather than read — the same answer this service already gives for a source
-    // it cannot see.
-    let resolvedStat: WorkFileStat;
-    try {
-      resolvedStat = await this.#filesystem.stat(canonicalAbsolute);
-    } catch {
-      return { status: "unavailable" };
-    }
-    if (!resolvedStat.isFile) return { status: "unavailable" };
+    const contained = await this.#containExisting(input.binding, absolutePath);
+    if (contained.status !== "ok") return { status: contained.status };
+    if (!contained.isFile) return { status: "unavailable" };
+    const resolvedStat = contained.stat;
+    const canonicalAbsolute = contained.canonical;
     const bytes = await readConfinedWorkFile({
       filesystem: this.#filesystem,
       canonicalPath: canonicalAbsolute,
@@ -188,8 +134,113 @@ export class WorkResolutionService {
       if (error instanceof WorkConfinementRejected) return { status: "escapes-root" };
       throw error;
     }
-    const absolutePath = joinPath(input.binding.canonicalRoot, relativePath);
-    return { status: "resolved-for-create", absolutePath, relativePath };
+    const parts = relativePath.split("/");
+    let depth = parts.length - 1;
+    while (true) {
+      const parentParts = parts.slice(0, depth);
+      const parentAbsolute =
+        parentParts.length === 0
+          ? input.binding.canonicalRoot
+          : joinPath(input.binding.canonicalRoot, parentParts.join("/"));
+      const contained = await this.#containExisting(input.binding, parentAbsolute);
+      if (contained.status === "ok") {
+        if (!contained.isDirectory) return { status: "unavailable" };
+        const missing = parts.slice(depth);
+        return {
+          status: "resolved-for-create",
+          absolutePath: missing.reduce(
+            (path, segment) => joinPath(path, segment),
+            contained.canonical,
+          ),
+          relativePath,
+        };
+      }
+      if (contained.status !== "unavailable") return { status: contained.status };
+      if (depth === 0) {
+        return {
+          status: "resolved-for-create",
+          absolutePath: joinPath(input.binding.canonicalRoot, relativePath),
+          relativePath,
+        };
+      }
+      depth -= 1;
+    }
+  }
+
+  /**
+   * The same symlink-then-realpath sequence `resolve` uses, for a path that
+   * already exists. Create uses this on parent directories so `O_NOFOLLOW` on
+   * the final name cannot write through an ancestor that escaped the root.
+   */
+  async #containExisting(
+    binding: WorkRootBinding,
+    absolutePath: string,
+  ): Promise<
+    | {
+        readonly status: "ok";
+        readonly canonical: string;
+        readonly isDirectory: boolean;
+        readonly isFile: boolean;
+        readonly stat: WorkFileStat;
+      }
+    | { readonly status: "symlink-escape" | "escapes-root" | "unavailable" }
+  > {
+    let stat: WorkFileStat;
+    try {
+      stat = await this.#filesystem.lstat(absolutePath);
+    } catch {
+      return { status: "unavailable" };
+    }
+
+    if (stat.isSymbolicLink) {
+      let target: string;
+      try {
+        target = await this.#filesystem.readlink(absolutePath);
+      } catch {
+        return { status: "unavailable" };
+      }
+      let resolvedTarget: string;
+      try {
+        // A `readlink` result is relative to the link's own parent, not to the
+        // server process's working directory. Canonicalizing it raw resolved a
+        // legitimate `notes/latest.md -> releases/v1.md` somewhere else
+        // entirely, so an artifact safely inside the root was refused as an
+        // escape. Containment still decides; the join only asks the question
+        // about the right path.
+        resolvedTarget = await this.#filesystem.realpath(
+          target.startsWith("/") ? target : joinPath(parentPath(absolutePath), target),
+        );
+      } catch {
+        return { status: "symlink-escape" };
+      }
+      if (classifySymlinkContainment(binding.canonicalRoot, resolvedTarget) === "escapes-root") {
+        return { status: "symlink-escape" };
+      }
+    }
+
+    let canonicalAbsolute: string;
+    try {
+      canonicalAbsolute = await this.#filesystem.realpath(absolutePath);
+    } catch {
+      return { status: "unavailable" };
+    }
+    if (classifyPathContainment(binding.canonicalRoot, canonicalAbsolute) === "escapes-root") {
+      return { status: "escapes-root" };
+    }
+
+    let resolvedStat: WorkFileStat;
+    try {
+      resolvedStat = await this.#filesystem.stat(canonicalAbsolute);
+    } catch {
+      return { status: "unavailable" };
+    }
+    return {
+      status: "ok",
+      canonical: canonicalAbsolute,
+      isDirectory: resolvedStat.isDirectory,
+      isFile: resolvedStat.isFile,
+      stat: resolvedStat,
+    };
   }
 }
 

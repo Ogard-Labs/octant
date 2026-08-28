@@ -557,7 +557,6 @@ import {
   authorizeCanvasInventoryAccess,
   canonicalizeWorkRelativePath,
   chatAttemptAnswered,
-  classifyPathContainment,
   decidesCodeEffectsByApproval,
   defaultAgentRunAuthorityCeilingForMode,
   defaultShellSettings,
@@ -4611,12 +4610,18 @@ export function startOctantServer(
               reason: "The Code Project is unavailable.",
             } satisfies ImageGenerationSaveResult;
           }
-          const relativePath = canonicalizeWorkRelativePath(input.relativePath);
           canonicalRoot = project.binding.canonicalRoot;
-          const absolutePath = canonicalRoot.endsWith("/")
-            ? `${canonicalRoot}${relativePath}`
-            : `${canonicalRoot}/${relativePath}`;
-          if (classifyPathContainment(canonicalRoot, absolutePath) === "escapes-root") {
+          const relativePath = canonicalizeWorkRelativePath(input.relativePath);
+          const resolution = await workResolutionService.resolveForCreate({
+            binding: {
+              canonicalRoot,
+              knownCanonicalRoot: canonicalRoot,
+              availability: "available",
+              bindingSuperseded: false,
+            },
+            relativePath,
+          });
+          if (resolution.status !== "resolved-for-create") {
             return {
               status: "refused",
               reason: "The save path is outside the Project.",
@@ -4624,7 +4629,7 @@ export function startOctantServer(
           }
           const written = await writeConfinedWorkFile({
             filesystem: liveWorkFilesystem,
-            canonicalPath: absolutePath,
+            canonicalPath: resolution.absolutePath,
             allowCreate: true,
             bytes: input.bytes,
           });
@@ -4634,7 +4639,7 @@ export function startOctantServer(
               reason: "The image could not be saved.",
             } satisfies ImageGenerationSaveResult;
           }
-          return { status: "saved", relativePath };
+          return { status: "saved", relativePath: resolution.relativePath };
         } catch {
           return {
             status: "failed",

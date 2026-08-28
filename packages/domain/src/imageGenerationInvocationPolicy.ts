@@ -120,7 +120,7 @@ export function generatedImageExportAttachments(
     for (const [index, artifact] of job.artifacts.entries()) {
       const parent = artifact.evidence.parentArtifactRef;
       attachments.push({
-        displayName: `generated-${index + 1}.png`,
+        displayName: `generated-${String(job.id)}-${index + 1}.${imageFileExtension(artifact.mime)}`,
         mediaType: artifact.mime,
         byteLength: artifact.size,
         status: "finalized",
@@ -135,4 +135,11 @@ export function generatedImageExportAttachments(
     }
   }
   return attachments;
+}
+
+function imageFileExtension(mime: ImageJob["artifacts"][number]["mime"]): string {
+  if (mime === "image/jpeg") return "jpg";
+  if (mime === "image/webp") return "webp";
+  if (mime === "image/gif") return "gif";
+  return "png";
 }

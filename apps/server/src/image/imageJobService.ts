@@ -210,7 +210,13 @@ export class ImageJobService {
       mediaType: reference.mediaType,
       bytes: Uint8Array.from(reference.bytes),
     }));
-    if (input.parentArtifactRef !== undefined && references.length === 0) {
+    if (input.parentArtifactRef !== undefined && references.length > 0) {
+      throw new ImageJobServiceError(
+        "invalid",
+        "An edit job cannot combine a parent image with explicit references.",
+      );
+    }
+    if (input.parentArtifactRef !== undefined) {
       try {
         const parentBytes = await this.#attachments.read({
           scopeId: decodeImageGenerationScopeId(input.scopeId),
