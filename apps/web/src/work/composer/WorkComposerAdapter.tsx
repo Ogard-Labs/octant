@@ -53,6 +53,7 @@ export interface WorkComposerAdapterProps {
   readonly windowCapability?: string;
   readonly onAttachFolder?: () => void;
   readonly folderControl?: ReactNode;
+  readonly createFromControl?: ReactNode;
   /** Optional multi-model pool control slot rendered in the composer bar. */
   readonly poolControl?: ReactNode;
   readonly onCancel: () => void;
@@ -300,6 +301,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                   requiredCapability="work"
                 />
                 {props.folderControl}
+                {props.createFromControl}
                 {props.folderControl !== undefined ? null : hasFolder &&
                   props.projectName !== undefined ? (
                   <span className="work-composer-adapter__context-item" title={props.projectRoot}>

@@ -72,6 +72,9 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
           ? {}
           : { remoteName: input.composer.worktreeSource.remoteName }),
         ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+        ...(input.composer.issueContext === undefined
+          ? {}
+          : { issueContext: input.composer.issueContext }),
       }),
     };
   }
@@ -109,6 +112,9 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
         createdAt: input.timestamp,
         updatedAt: input.timestamp,
       }),
+      ...(input.composer.issueContext === undefined
+        ? {}
+        : { issueContext: input.composer.issueContext }),
     },
   };
 }

@@ -399,6 +399,7 @@ describe("Project restart recovery", () => {
       { projection_name: "diagnostics-exports", reason: "unknown-event-name" },
       { projection_name: "extensions", reason: "unknown-event-name" },
       { projection_name: "github-clones", reason: "unknown-event-name" },
+      { projection_name: "image-jobs", reason: "unknown-event-name" },
       { projection_name: "product-feedback", reason: "unknown-event-name" },
       { projection_name: "projects", reason: "unknown-event-name" },
       { projection_name: "providers", reason: "unknown-event-name" },

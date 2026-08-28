@@ -3,22 +3,33 @@ import type {
   IntegrationAuthenticationSnapshot,
   IntegrationObservation,
 } from "@octant/contracts/integration";
+import type { IntegrationHostPort, IntegrationRuntime } from "@octant/plugin-api/integration";
 import {
-  INTEGRATION_CREDENTIAL_REF_HEADER,
-  type IntegrationHostPort,
-  type IntegrationRuntime,
-} from "@octant/plugin-api/integration";
+  LINEAR_AUTHORIZE_URL,
+  LINEAR_OAUTH_SCOPES,
+  LINEAR_OAUTH_UNCONFIGURED,
+  LINEAR_RECONNECT_REASON,
+  LINEAR_REVOKE_URL,
+  LINEAR_TOKEN_URL,
+} from "./linearConstants";
+import {
+  graphqlWithReference,
+  LINEAR_ISSUE_RATE_LIMITED,
+  LINEAR_ISSUE_UNAVAILABLE,
+  isRecord,
+  readName,
+} from "./linearGraphql";
+import { executeLinearIssueOperation, linearIssueBrowseCapabilities } from "./linearIssueBrowse";
 
-export const LINEAR_AUTHORIZE_URL = "https://linear.app/oauth/authorize";
-export const LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token";
-export const LINEAR_REVOKE_URL = "https://api.linear.app/oauth/revoke";
-export const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
-export const LINEAR_OAUTH_SCOPES = ["read"] as const;
-
-export const LINEAR_OAUTH_UNCONFIGURED =
-  "Linear OAuth is not configured on this host. Set OCTANT_LINEAR_OAUTH_CLIENT_ID to a public OAuth client id.";
-
-export const LINEAR_RECONNECT_REASON = "The Linear authorization expired. Reconnect to continue.";
+export {
+  LINEAR_AUTHORIZE_URL,
+  LINEAR_GRAPHQL_URL,
+  LINEAR_OAUTH_SCOPES,
+  LINEAR_OAUTH_UNCONFIGURED,
+  LINEAR_RECONNECT_REASON,
+  LINEAR_REVOKE_URL,
+  LINEAR_TOKEN_URL,
+} from "./linearConstants";
 
 const IDENTITY_QUERY = "{ viewer { id name organization { name urlKey } } }";
 
@@ -43,11 +54,16 @@ export function createLinearIntegration(
 
   return {
     observe: async (command, signal) => {
-      if (command.kind !== "authenticate") {
+      if (command.kind === "operation") {
         return {
           kind: "operation",
           operationId: command.operationId,
-          result: { kind: "refused", reason: "Linear issue operations are not available yet." },
+          result: await executeLinearIssueOperation(
+            hostPort,
+            command.operationId,
+            command.input,
+            signal,
+          ),
         };
       }
       return snapshot(signal);
@@ -57,7 +73,12 @@ export function createLinearIntegration(
         return {
           kind: "operation",
           operationId: command.operationId,
-          result: { kind: "refused", reason: "Linear issue operations are not available yet." },
+          result: await executeLinearIssueOperation(
+            hostPort,
+            command.operationId,
+            command.input,
+            signal,
+          ),
         };
       }
       return {
@@ -157,33 +178,26 @@ async function identitySnapshot(
   source: "oauth" | "personal-api-key",
   signal?: AbortSignal,
 ): Promise<IntegrationAuthenticationSnapshot> {
-  let response: Response;
-  try {
-    response = await hostPort.fetch(
-      new Request(LINEAR_GRAPHQL_URL, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          [INTEGRATION_CREDENTIAL_REF_HEADER]: reference,
-        },
-        body: JSON.stringify({ query: IDENTITY_QUERY }),
-        ...(signal === undefined ? {} : { signal }),
-      }),
-    );
-  } catch {
-    return { state: "unavailable", capabilities: [], remediation: "Linear is unavailable." };
+  const result = await graphqlWithReference(
+    hostPort,
+    reference,
+    source,
+    IDENTITY_QUERY,
+    undefined,
+    signal,
+  );
+  if (result.kind === "unauthorized") {
+    return source === "personal-api-key" && !result.reconnect
+      ? unauthorized("The Linear personal API key was rejected.")
+      : reconnectSnapshot();
   }
-  if (response.status === 401) {
-    const body = await readJson(response);
-    if (isRecord(body) && body.error === "invalid_grant") return reconnectSnapshot();
-    if (source === "oauth") return reconnectSnapshot();
-    return unauthorized("The Linear personal API key was rejected.");
+  if (result.kind === "rate-limited") {
+    return { state: "rate-limited", capabilities: [], remediation: LINEAR_ISSUE_RATE_LIMITED };
   }
-  if (!response.ok) {
-    return { state: "unavailable", capabilities: [], remediation: "Linear is unavailable." };
+  if (result.kind !== "ok") {
+    return { state: "unavailable", capabilities: [], remediation: LINEAR_ISSUE_UNAVAILABLE };
   }
-  const body = await readJson(response);
-  const account = readIdentity(body, source);
+  const account = readIdentity(result.body, source);
   if (account === undefined) {
     return {
       state: "unavailable",
@@ -191,7 +205,7 @@ async function identitySnapshot(
       remediation: "Linear identity is unavailable.",
     };
   }
-  return { state: "ready", account, capabilities: [] };
+  return { state: "ready", account, capabilities: [...linearIssueBrowseCapabilities()] };
 }
 
 function readIdentity(
@@ -208,12 +222,6 @@ function readIdentity(
   return { login, source, scopes: [...LINEAR_OAUTH_SCOPES] };
 }
 
-function readName(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim().slice(0, 128)
-    : undefined;
-}
-
 function configuredClientId(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   const trimmed = value.trim();
@@ -228,16 +236,4 @@ function unauthorized(remediation: string): IntegrationAuthenticationSnapshot {
 
 function reconnectSnapshot(): IntegrationAuthenticationSnapshot {
   return { state: "unauthorized", capabilities: [], remediation: LINEAR_RECONNECT_REASON };
-}
-
-async function readJson(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return undefined;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

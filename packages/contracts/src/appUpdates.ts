@@ -40,6 +40,34 @@ export const AppUpdateArchitecture = Schema.Literal("arm64");
 export type AppUpdateArchitecture = typeof AppUpdateArchitecture.Type;
 
 /**
+ * Which stream of releases a build follows.
+ *
+ * `stable` is what a release tag produces. `preview` is the current state of
+ * `main`, built on a schedule, and its versions carry a `-preview.…` tag so
+ * they sort below the release they lead to — which is what lets someone on a
+ * preview move to stable the day stable catches up, without anything having to
+ * special-case the handover.
+ */
+export const AppReleaseRing = Schema.Literal("stable", "preview");
+export type AppReleaseRing = typeof AppReleaseRing.Type;
+
+export const APP_RELEASE_RINGS: ReadonlyArray<AppReleaseRing> = ["stable", "preview"];
+
+/** Narrow an unchecked value to a ring, for the boundaries a schema does not cover. */
+export function isAppReleaseRing(value: unknown): value is AppReleaseRing {
+  return value === "stable" || value === "preview";
+}
+
+/**
+ * The prerelease tag that marks a build as belonging to the preview ring.
+ *
+ * The ring is read from the version rather than compiled in beside it. Two
+ * declarations of the same fact can disagree, and the one that would have been
+ * wrong here is the one deciding which feed an app reads.
+ */
+export const PREVIEW_PRERELEASE_TAG = "preview";
+
+/**
  * The release a feed offers.
  *
  * These are exactly the fields that are signed. Anything the app decides from
@@ -50,6 +78,17 @@ export const AppUpdateRelease = Schema.Struct({
   version: AppVersion,
   platform: AppUpdatePlatform,
   arch: AppUpdateArchitecture,
+  /**
+   * The ring this release was published to.
+   *
+   * Signed, and checked against the ring the app asked for. Both rings are
+   * signed by the same key, so without this a preview feed document is a
+   * valid stable one: anyone who could write to the stable feed's location
+   * could put a preview build in front of every stable user without forging
+   * anything. The ring belongs inside the signature for the same reason the
+   * version does.
+   */
+  ring: AppReleaseRing,
   /**
    * Where the replacement is. Any HTTPS location: the artifact is verified
    * against `sha256` before anything is installed, so whichever host serves it
@@ -100,6 +139,12 @@ export const AppUpdateRefusal = Schema.Literal(
   "corrupt-artifact",
   "not-newer",
   "wrong-platform",
+  /**
+   * The release is genuine, but it was published to a ring this app did not
+   * ask for. Distinct from a bad signature: nothing was forged, the feed at
+   * that location is simply not the one it claims to be.
+   */
+  "wrong-ring",
 );
 export type AppUpdateRefusal = typeof AppUpdateRefusal.Type;
 
@@ -130,6 +175,8 @@ export const AppUpdateState = Schema.Struct({
   checkedAt: Schema.optional(UtcTimestamp),
   /** Whether Octant may check on its own. Off means it does not check at all. */
   automaticChecks: Schema.Boolean,
+  /** The ring this app is following, which decides which feed it reads. */
+  ring: AppReleaseRing,
 }).annotations(strict);
 export type AppUpdateState = typeof AppUpdateState.Type;
 
@@ -143,6 +190,7 @@ export type AppUpdateState = typeof AppUpdateState.Type;
 export const OCTANT_UPDATE_CHECK_DISCLOSURE = [
   "The Octant version you are running, so the service can say whether anything is newer.",
   "Your platform and processor architecture, so it offers a build that runs on this Mac.",
+  "Which release ring you follow, stable or preview, because each ring has its own feed address.",
   "The IP address the request comes from, as any network request discloses.",
   "The time of the request.",
 ] as const;
@@ -155,12 +203,13 @@ export const OCTANT_UPDATE_CHECK_DISCLOSURE = [
  * field list.
  */
 export const OCTANT_UPDATE_CHECK_INFERENCE = [
-  "That someone at that IP address runs Octant, which version, and roughly how often it is open.",
+  "That someone at that IP address runs Octant, which version, on which ring, and roughly how often it is open.",
   "Nothing that names you: no account, no install identifier, no Project or thread, no usage, and no cookie.",
   "Nothing across endpoints: an update check is the only request this path makes.",
 ] as const;
 
 export const decodeAppVersion = Schema.decodeUnknownSync(AppVersion);
+export const decodeAppReleaseRing = Schema.decodeUnknownSync(AppReleaseRing);
 export const decodeAppUpdateFeed = Schema.decodeUnknownSync(AppUpdateFeed);
 export const decodeAppUpdateRelease = Schema.decodeUnknownSync(AppUpdateRelease);
 export const decodeAppUpdateState = Schema.decodeUnknownSync(AppUpdateState);

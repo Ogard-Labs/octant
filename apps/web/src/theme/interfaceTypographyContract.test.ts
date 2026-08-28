@@ -137,6 +137,17 @@ describe("interface typography contract", () => {
     }
   });
 
+  it("keeps the create-from-issue hint on the interface type scale", () => {
+    const source = readFileSync(resolve(cssRoot, "shell.css"), "utf8");
+    const block = cssBlocks(source).find(
+      (candidate) => candidate.selector.trim() === ".create-from-issue__hint",
+    );
+    expect(block, ".create-from-issue__hint must have a typography rule").toBeDefined();
+    expect(block?.declarations).toMatch(/font-size:\s*calc\([^;]*--oct-text-step/);
+    expect(block?.declarations).not.toMatch(/font-size:\s*\d+px/);
+    expect(block?.declarations).not.toMatch(/font-size:\s*[\d.]+rem/);
+  });
+
   it("keeps the board's visible labels and cards on interface typography", () => {
     const source = readFileSync(resolve(cssRoot, "octant.css"), "utf8");
     expect(source).not.toMatch(/--oct-font-(ui|sans)\b/);

@@ -306,7 +306,9 @@ export interface WorkspaceViewProps {
     deliveryOutcome?: import("@octant/contracts/code").CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
+    issueContext?: import("@octant/contracts").GithubIssueContextRequest,
   ) => boolean | void | Promise<boolean | void>;
+  readonly githubPluginEnabled?: boolean;
   readonly draftCodeExecute?: (
     command: import("@octant/contracts/code").CodeCommand,
     signal?: AbortSignal,
@@ -804,6 +806,9 @@ function renderNonCodeTab(
         {...(props.githubCloneClient === undefined
           ? {}
           : { githubCloneClient: props.githubCloneClient })}
+        {...(props.githubPluginEnabled === undefined
+          ? {}
+          : { githubPluginEnabled: props.githubPluginEnabled })}
         {...(tab.projectId === undefined ? {} : { projectId: tab.projectId })}
         {...(props.draftProjectName === undefined ? {} : { projectName: props.draftProjectName })}
         {...(props.draftProjectRoot === undefined ? {} : { projectRoot: props.draftProjectRoot })}
@@ -833,7 +838,14 @@ function renderNonCodeTab(
         {...(props.projectWindowCapability === undefined
           ? {}
           : { windowCapability: props.projectWindowCapability })}
-        onCreateThread={(prompt, folderSelection, deliveryOutcome, images, threadMentionIds) => {
+        onCreateThread={(
+          prompt,
+          folderSelection,
+          deliveryOutcome,
+          images,
+          threadMentionIds,
+          issueContext,
+        ) => {
           if (props.onDraftCreateThread === undefined) return;
           return props.onDraftCreateThread(
             tab.mode,
@@ -842,6 +854,7 @@ function renderNonCodeTab(
             deliveryOutcome,
             images,
             threadMentionIds,
+            issueContext,
           );
         }}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}

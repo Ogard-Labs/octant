@@ -43,7 +43,7 @@ than only that it is small.
   builds is not, and the code refuses to be configured that way rather than
   trusting a release process to remember. Mobile store distribution and hosted
   relay stay outside the boundary. Desktop packaging beyond the first Apple
-  Silicon surface is opened by 0057 under the same signing and updater rules.
+  Silicon surface is opened by 0058 under the same signing and updater rules.
 - **Trust comes from the signature, never from the host.** A feed served from
   the expected domain over a valid certificate proves only that somebody
   controls that domain today, which is not a claim about a release. Octant
@@ -76,6 +76,27 @@ than only that it is small.
   the exact ordering this design exists to prevent — and handing it a remote URL
   we had checked would leave a second fetch that could return different bytes.
   It also means the artifact's host is contacted once, by us.
+- **Two rings, one key, and the ring inside the signature.** Releases are
+  published to `stable` (a tagged release) and `preview` (a scheduled build of
+  `main`), each its own feed at `<base>/<ring>/<platform>-<arch>.json`. The ring
+  a build belongs to is read from its own version — a preview carries a
+  `-preview.…` prerelease tag — rather than stored beside it, because two
+  declarations of one fact can disagree and the one that would be wrong here
+  decides which feed an app reads. The person may follow either ring; the
+  version ordering makes both directions safe on its own, since a prerelease
+  sorts below the release it leads to and no ring may offer a version that is
+  not strictly newer. The ring is one of the signed fields and is checked
+  against the ring the app asked for. Without that check a preview feed
+  document is a valid stable one, and whoever could write to the stable feed's
+  location could put unreviewed `main` in front of every stable user without
+  forging anything. One key signs both rings, so this check — not the
+  signature — is what actually separates the streams.
+- **The path is part of what a check discloses, and is written down as such.**
+  Addressing a feed by ring keeps it a static file a CDN can cache and a
+  self-hoster can mirror by copying a directory, at the cost of telling the
+  feed host which ring a person follows. That is disclosed alongside the
+  version, platform, and architecture rather than treated as incidental
+  because it sits in a path rather than a parameter.
 - **Where the feed and the artifact live is configuration; what they must prove
   is not.** The feed endpoint defaults to the published one and is overridable,
   so the maintainer can move it and a self-hosting person or team can point at
@@ -143,6 +164,17 @@ than only that it is small.
   who downloads. It is a download rather than a check, and only happens when a
   person asks for one, but it is a second party seeing traffic the feed host
   would otherwise have seen alone.
+- Preview builds are notarized like stable ones, so the ring buys no shortcut:
+  a nightly costs a full sign-and-notarize cycle. That is why previews are built
+  on a schedule and skipped when `main` has not moved, rather than per merge —
+  ten merges in a day are one useful preview.
+- Publishing runs from CI, so the build host holds the Developer ID, the notary
+  credentials, and the feed signing key as secrets. They are scoped to a
+  deployment environment rather than the repository, and the stable environment
+  requires a human approval before any of them is readable — a tag proposes a
+  release and a person approves it. The preview environment does not, which is
+  the trade being made: a nightly nobody has to approve, signed by the same key
+  that signs stable.
 - Users on an unsigned build cannot update to a signed one in place: the
   designated requirement changes, so the first signed release is a download.
   That is a one-time cost of graduating the boundary and is stated in the

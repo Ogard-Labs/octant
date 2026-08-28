@@ -21,7 +21,11 @@ import type {
   CodeCommandResult,
   CodeDeliveryOutcomeKind,
 } from "@octant/contracts/code";
-import type { MentionableThreadId } from "@octant/contracts";
+import type { GithubIssueContextRequest, MentionableThreadId } from "@octant/contracts";
+import {
+  CreateFromIssuePicker,
+  useGithubIssuesCreateAvailable,
+} from "../github/CreateFromIssuePicker";
 import { draftThreadModePresentation, type DraftIntentCard } from "@octant/contracts/thread-draft";
 import {
   resolveCodeNewThreadWorkspace,
@@ -77,6 +81,8 @@ export interface DraftThreadWorkspaceProps {
    *  repository selection to appear in the Code composer. */
   readonly githubClient?: GithubClient;
   readonly githubCloneClient?: GithubCloneClient;
+  /** False when the GitHub first-party plugin is not effective. */
+  readonly githubPluginEnabled?: boolean;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
@@ -90,6 +96,7 @@ export interface DraftThreadWorkspaceProps {
     deliveryOutcome?: CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
+    issueContext?: GithubIssueContextRequest,
   ) => boolean | void | Promise<boolean | void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
@@ -121,6 +128,27 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | undefined>(
     props.projectId,
   );
+  const [issueContext, setIssueContext] = useState<GithubIssueContextRequest>();
+  const [createFromOpen, setCreateFromOpen] = useState(false);
+  const issuesCreateAvailable = useGithubIssuesCreateAvailable(
+    props.githubClient,
+    props.githubPluginEnabled !== false,
+  );
+  const createFromControl =
+    issuesCreateAvailable && props.githubClient !== undefined ? (
+      <CreateFromIssueControl
+        client={props.githubClient}
+        creating={props.creating === true}
+        onClear={() => setIssueContext(undefined)}
+        onSelect={(selected) => {
+          setIssueContext(selected);
+          setCreateFromOpen(false);
+        }}
+        open={createFromOpen}
+        onToggle={() => setCreateFromOpen((open) => !open)}
+        {...(issueContext === undefined ? {} : { selected: issueContext })}
+      />
+    ) : null;
   const [selectedProjectLabel, setSelectedProjectLabel] = useState(
     props.projectId === undefined ? undefined : props.projectName,
   );
@@ -288,6 +316,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             : { onExecutionPolicyChange: props.onExecutionPolicyChange })}
           folderControl={folderControl}
           {...(githubControl === null ? {} : { githubControl })}
+          {...(createFromControl === null ? {} : { createFromControl })}
           {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}
           providerGroups={props.providerGroups}
           {...(props.selectedProviderInstanceId === undefined
@@ -305,16 +334,26 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { profileControl: props.executionProfile })}
           onCreateThread={(input) => {
+            const submitted = issueContext === undefined ? input : { ...input, issueContext };
             if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
-              return props.onCreateCodeThread(input, selectedProjectId);
+              return props.onCreateCodeThread(submitted, selectedProjectId);
             }
             // Carry the outcome the user confirmed in the composer so the
             // fallback path never re-derives or auto-confirms a suggestion.
-            return props.onCreateThread(
-              input.prompt,
-              selectedProjectId,
-              input.deliveryTarget.outcomeKind,
-            );
+            return submitted.issueContext === undefined
+              ? props.onCreateThread(
+                  submitted.prompt,
+                  selectedProjectId,
+                  submitted.deliveryTarget.outcomeKind,
+                )
+              : props.onCreateThread(
+                  submitted.prompt,
+                  selectedProjectId,
+                  submitted.deliveryTarget.outcomeKind,
+                  submitted.images,
+                  submitted.threadMentionIds,
+                  submitted.issueContext,
+                );
           }}
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined
@@ -338,6 +377,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
           {...(selectedProjectRoot === undefined ? {} : { projectRoot: selectedProjectRoot })}
           folderControl={folderControl}
+          {...(createFromControl === null ? {} : { createFromControl })}
           providerGroups={props.providerGroups}
           {...(props.selectedProviderInstanceId === undefined
             ? {}
@@ -351,7 +391,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { windowCapability: props.windowCapability })}
           onCreateThread={(prompt, images, threadMentionIds) =>
-            props.onCreateThread(prompt, selectedProjectId, undefined, images, threadMentionIds)
+            issueContext === undefined
+              ? props.onCreateThread(prompt, selectedProjectId, undefined, images, threadMentionIds)
+              : props.onCreateThread(
+                  prompt,
+                  selectedProjectId,
+                  undefined,
+                  images,
+                  threadMentionIds,
+                  issueContext,
+                )
           }
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined
@@ -374,8 +423,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    void props.onCreateThread(trimmed);
-  }, [canSubmit, props, trimmed]);
+    if (issueContext === undefined) {
+      void props.onCreateThread(trimmed);
+      return;
+    }
+    void props.onCreateThread(trimmed, undefined, undefined, undefined, undefined, issueContext);
+  }, [canSubmit, issueContext, props, trimmed]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -441,6 +494,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               ? {}
               : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
           />
+          {createFromControl}
           <ThreadComposer
             input={
               <OctantTextarea
@@ -474,6 +528,67 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         </div>
       </div>
     </section>
+  );
+}
+
+function CreateFromIssueControl(props: {
+  readonly client: GithubClient;
+  readonly creating: boolean;
+  readonly open: boolean;
+  readonly selected?: GithubIssueContextRequest;
+  readonly onSelect: (issue: GithubIssueContextRequest) => void;
+  readonly onClear: () => void;
+  readonly onToggle: () => void;
+}) {
+  const selectedLabel =
+    props.selected === undefined
+      ? undefined
+      : `${props.selected.owner}/${props.selected.name}#${String(props.selected.number)}`;
+  return (
+    <div className="create-from-issue-control">
+      <div className="create-from-issue-control__bar">
+        <OctantButton
+          aria-expanded={props.open}
+          disabled={props.creating}
+          onClick={props.onToggle}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Create from…
+        </OctantButton>
+        {selectedLabel === undefined ? null : (
+          <span className="create-from-issue-control__selection">
+            <span>{selectedLabel}</span>
+            <OctantButton
+              aria-label="Remove selected issue"
+              disabled={props.creating}
+              onClick={props.onClear}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Remove
+            </OctantButton>
+          </span>
+        )}
+      </div>
+      {props.open ? (
+        <div className="create-from-issue-control__panel" role="tablist" aria-label="Create from">
+          <OctantButton aria-selected role="tab" size="sm" type="button" variant="ghost">
+            Issues
+          </OctantButton>
+          <div role="tabpanel">
+            <CreateFromIssuePicker
+              client={props.client}
+              disabled={props.creating}
+              onSelect={props.onSelect}
+              {...(props.selected === undefined ? {} : { selected: props.selected })}
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

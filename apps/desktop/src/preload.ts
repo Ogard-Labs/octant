@@ -19,6 +19,7 @@ export const IPC_CHANNELS = {
   appUpdateDownload: "octant:app-update:download",
   appUpdateInstall: "octant:app-update:install",
   appUpdateAutomatic: "octant:app-update:automatic",
+  appUpdateRing: "octant:app-update:ring",
   clearProviderCredential: "octant:provider-credential:clear",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
@@ -492,6 +493,13 @@ export function createHostBridge(
         return Promise.reject(new TypeError("Invalid update setting."));
       }
       return decodeAppUpdateState(await ipc.invoke(IPC_CHANNELS.appUpdateAutomatic, enabled));
+    },
+    setAppUpdateRing: async (ring: string) => {
+      // Rejected here as well as in the host. The bridge is the renderer's
+      // whole vocabulary, so a value it will not carry is one the host never
+      // has to have an opinion about.
+      if (!isReleaseRing(ring)) return Promise.reject(new TypeError("Invalid release ring."));
+      return decodeAppUpdateState(await ipc.invoke(IPC_CHANNELS.appUpdateRing, ring));
     },
     subscribeAppUpdateState: (listener: (state: AppUpdateState) => void) => {
       const receive: MaterialListener = (_event, value) => {
@@ -1287,6 +1295,14 @@ function decodeBrowserSurfaceState(value: unknown): BrowserSurfaceState {
   });
 }
 
+/**
+ * The rings, mirrored rather than imported, for the same reason the statuses
+ * below are: the preload is sandboxed and must not pull a runtime package in.
+ */
+function isReleaseRing(value: unknown): value is "stable" | "preview" {
+  return value === "stable" || value === "preview";
+}
+
 const APP_UPDATE_STATUSES = [
   "idle",
   "checking",
@@ -1312,6 +1328,7 @@ function decodeAppUpdateState(value: unknown): AppUpdateState {
     typeof value.currentVersion !== "string" ||
     value.currentVersion.length > 64 ||
     typeof value.automaticChecks !== "boolean" ||
+    !isReleaseRing(value.ring) ||
     (value.refusal !== undefined && typeof value.refusal !== "string") ||
     (value.message !== undefined && typeof value.message !== "string") ||
     (value.checkedAt !== undefined && typeof value.checkedAt !== "string")
@@ -1322,6 +1339,7 @@ function decodeAppUpdateState(value: unknown): AppUpdateState {
     status: value.status,
     currentVersion: value.currentVersion,
     automaticChecks: value.automaticChecks,
+    ring: value.ring,
     ...(value.available === undefined
       ? {}
       : { available: decodeAppUpdateRelease(value.available) }),
@@ -1337,6 +1355,7 @@ function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
     typeof value.version !== "string" ||
     typeof value.platform !== "string" ||
     typeof value.arch !== "string" ||
+    !isReleaseRing(value.ring) ||
     typeof value.url !== "string" ||
     !value.url.startsWith("https://") ||
     typeof value.sha256 !== "string" ||
@@ -1349,6 +1368,7 @@ function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
     version: value.version,
     platform: value.platform,
     arch: value.arch,
+    ring: value.ring,
     url: value.url,
     sha256: value.sha256,
     releasedAt: value.releasedAt,

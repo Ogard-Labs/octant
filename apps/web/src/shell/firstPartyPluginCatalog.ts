@@ -108,6 +108,14 @@ const githubPlugin = firstPartyManifest({
       entryPoint: "builtin:github/sidebar-destination",
     },
     {
+      point: "sidebar.destination",
+      componentId: "github-integration",
+      destinationId: "github-issues",
+      label: "Issues",
+      modes: ["code"],
+      entryPoint: "builtin:github/issues-destination",
+    },
+    {
       point: "settings.section",
       componentId: "github-integration",
       sectionId: "github",
@@ -149,6 +157,14 @@ const linearPlugin = firstPartyManifest({
     },
   ],
   contributions: [
+    {
+      point: "sidebar.destination",
+      componentId: "linear-integration",
+      destinationId: "linear-issues",
+      label: "Linear",
+      modes: ["code"],
+      entryPoint: "builtin:linear/sidebar-destination",
+    },
     {
       point: "settings.section",
       componentId: "linear-integration",

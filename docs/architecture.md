@@ -2,7 +2,7 @@
 
 Octant is a local-first desktop workspace for Chat, Work, and Code across many AI
 providers. The first shipping surface is Apple Silicon macOS; Linux and Windows
-desktop are the same product under [decisions/0057-cross-platform-desktop.md](decisions/0057-cross-platform-desktop.md).
+desktop are the same product under [decisions/0058-cross-platform-desktop.md](decisions/0058-cross-platform-desktop.md).
 This document is the single architecture overview for the
 repository. It describes the shape of the system as it exists in code; the
 decision records under `docs/decisions/` explain why individual choices were
@@ -240,21 +240,38 @@ cache. It stores only exact PR identities already produced by Code operations,
 so a restart can show an identity as stale and unknown until the next explicit
 refresh.
 
-**Approved GitHub issue browser, not yet implemented.** The first-party GitHub
-plugin contributes a second `sidebar.destination` (`github-issues`) that opens
-a host-scoped, read-only issue browser. The sidebar row is shown only when the
-contribution is present, its action is wired, and the authentication snapshot
-reports `issues-read` available. Catalogue reads stay on the existing
-`githubCatalogue` union over `/api/github/catalogue/reads`: `kind: "issues"`
-gains optional server-composed search, and a new `kind: "issue"` returns a
-bounded detail. Create-from-issue attaches only `{ owner, name, number }` to
-the draft; the server reauthorizes
-`issues-read`, frames redacted issue text through
+**GitHub issue browser.** The first-party GitHub plugin contributes a second
+`sidebar.destination` (`github-issues`) that opens a host-scoped, read-only
+issue browser. The sidebar row is shown only when the contribution is present,
+its action is wired, and the authentication snapshot reports `issues-read`
+available. Catalogue reads stay on the existing `githubCatalogue` union over
+`/api/github/catalogue/reads`: `kind: "issues"` includes optional
+server-composed search, and `kind: "issue"` returns a bounded detail. The
+browser renders title, body, and comments as plain text; links stay inert full
+URLs.
+
+Create-from-issue is implemented. The composer `Create from…` Issues tab
+attaches only `{ owner, name, number }` to the draft. At creation the server
+reauthorizes `issues-read`, frames redacted issue text through
 `apps/server/src/context/externalContentFraming.ts`, and appends
-`thread.external-content-ingested@1`. The resulting thread is ordinary Chat,
-Work, or Code with no GitHub write-back. Disabled GitHub, missing capability,
-and unauthorized or rate-limited states fail closed. See
+`thread.external-content-ingested@1`. Refusal fails creation visibly. The
+resulting thread is ordinary Chat, Work, or Code with no GitHub write-back.
+Disabled GitHub, missing capability, and unauthorized or rate-limited states
+fail closed. See
 [security/github-repository-onboarding-threat-model.md](security/github-repository-onboarding-threat-model.md).
+
+Code also has a host-scoped Linear issues workspace contributed by the
+bundled-off Linear plugin as `sidebar.destination` `linear-issues`, Code mode
+only. The sidebar row is shown only when that contribution is effective, its
+action is wired, and the Linear authentication snapshot reports `list-issues`
+available. Browse goes through the Integration port (`list-issues`,
+`get-issue`, `list-issue-filters`) over Linear GraphQL with bounded page size
+and description bytes. Issue bodies are a live projection, not Octant source of
+truth; credentials and raw API payloads never enter prompts or tool output.
+Open in Linear is an external `linear.app` URL. Disabled, untrusted,
+unauthorized, expired, or rate-limited Linear contributes no sidebar item,
+catalogue rows, or thread context. Create-from-issue, writes, and Chat/Work
+browse are not this surface.
 
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
@@ -389,6 +406,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
   (Kilo Code, Devin, Mistral Vibe, Kimi Code, Grok Build). Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
+  Generation itself is a journaled job with OpenAI and Gemini adapters, a
+  bounded generated-image attachment scope, and usage rows attributed as
+  `image-generation`; see
+  [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
+  Invocation and thread preview are not part of that record.
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;
@@ -400,8 +422,8 @@ modelId }`, and the model picker is provider-first. Discovery can find
   app-managed tools, images, resume, approvals, and subagents are supported.
   The server disables what is unsupported instead of emulating it. Bounded
   provider subprocesses run under a deny-default profile: Seatbelt via
-  `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing either
-  backend fails closed as incompatible.
+  `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing the backend
+  selected for the host platform fails closed as incompatible.
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
@@ -493,12 +515,13 @@ mechanisms are:
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
-  recorded in [decisions/0056-linux-confinement-bubblewrap.md](decisions/0056-linux-confinement-bubblewrap.md).
+  recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
   Sensitive system roots remain denied even where runtime compatibility
   requires a broad file-read rule; each launch's exact roots are re-allowed
   after those denials. Path checks alone are never the boundary. Confined
   reads open a handle and verify identity against what containment resolved.
-  Missing `sandbox-exec` or `bwrap` fails closed.
+  Missing the platform-selected backend (`sandbox-exec` on macOS, `bwrap` on
+  Linux) fails closed.
 - **Linux Station isolation tracer, not product-wired.** The server now has a
   provider-neutral execution-capsule service plus a rootless Podman and gVisor
   `systrap` driver. The tracer accepts only digest-pinned images, independent
@@ -548,7 +571,7 @@ mechanisms are:
 | `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads                    | contracts, domain                                                 |
 | `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                                       | contracts, host-runtime                                           |
 | `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway                     | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
-| `apps/desktop`            | Electron shell: windows, menus, host credential broker, pickers, signed updates, server process lifecycle, packaging                  | contracts, domain, host-runtime                                   |
+| `apps/desktop`            | Electron shell: windows, menus, host credential broker, pickers, signed updates, server process lifecycle, packaging                       | contracts, domain, host-runtime                                   |
 | `apps/web`                | React renderer for desktop and paired browsers                                                                                        | client-runtime, contracts, domain, plugin-host, theme             |
 | `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                | client-runtime, contracts, domain                                 |
 

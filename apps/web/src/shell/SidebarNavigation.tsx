@@ -1,8 +1,10 @@
 import {
+  CircleDot,
   Columns3,
   FileStack,
   GitFork,
   GitPullRequest,
+  ListTodo,
   Puzzle,
   SquarePen,
   Workflow,
@@ -79,6 +81,10 @@ function navigationIcon(id: SidebarNavigationDescriptorId) {
       return Columns3;
     case "pull-requests":
       return GitPullRequest;
+    case "github-issues":
+      return CircleDot;
+    case "linear-issues":
+      return ListTodo;
     default:
       return undefined;
   }

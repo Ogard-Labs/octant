@@ -1,4 +1,4 @@
-# 0057. One desktop app across macOS, Linux, and Windows
+# 0058. One desktop app across macOS, Linux, and Windows
 
 **Status:** Proposed
 
@@ -7,7 +7,7 @@
 The first surface was Apple Silicon macOS because that is the maintainer's
 daily driver, not because Octant is a Mac-only product. ADR 0034 and the
 release boundary deferred Intel macOS, Windows, and Linux desktop packaging.
-Headless Linux Stations (0031, 0048, 0054, 0056) already run the server without
+Headless Linux Stations (0031, 0048, 0054, 0057) already run the server without
 Electron. Users still need the same Electron Machine on every OS: one product,
 not a Mac app plus a thinner Linux/Windows shell.
 
@@ -28,7 +28,7 @@ not a Mac app plus a thinner Linux/Windows shell.
   macOS-only and fail closed. Vibrancy stays macOS-only. The host tray is
   portable via Electron Tray / AppIndicator with non-template icons.
 - **Confinement.** macOS keeps Seatbelt. Linux desktop Work/Code uses Bubblewrap
-  (0056). Capsules (0048) remain Station-only. Windows Work/Code stay
+  (0057). Capsules (0048) remain Station-only. Windows Work/Code stay
   `incompatible` until a Windows confinement ADR exists; Windows packaging
   follows Linux + macOS desktop parity.
 - **Credentials and native helpers.** Desktop uses the host-runtime credential
@@ -59,7 +59,7 @@ not a Mac app plus a thinner Linux/Windows shell.
 
 - 0034 Signed, notarized, user-controlled updates
 - 0054 The credential broker is a host capability, not a desktop one
-- 0056 Linux confinement uses Bubblewrap as a scoped exception
+- 0057 Linux confinement uses Bubblewrap as a scoped exception
 - 0048 Linux Stations isolate Code work in execution capsules
 - 0053 Computer-use destinations
 - 0009 Sandbox confinement, approvals, and Plan mode

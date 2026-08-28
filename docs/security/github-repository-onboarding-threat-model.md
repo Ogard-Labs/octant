@@ -18,8 +18,8 @@ host use its installed, authenticated GitHub CLI to discover accessible reposito
 metadata, and clone one user-confirmed repository into a managed inventory before binding it as an
 ordinary Code Project.
 
-The same host-scoped connection also feeds an approved, not-yet-implemented issue browser and
-create-from-issue flow.
+The same host-scoped connection also feeds the issue browser and the approved,
+not-yet-implemented create-from-issue flow.
 Issue list, search, and detail reads reuse the existing catalogue route and the `issues-read`
 capability. Creating a thread from an issue injects bounded, redacted GitHub issue text as
 untrusted external content. Those surfaces do not clone, bind, or write back to GitHub.

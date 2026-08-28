@@ -116,7 +116,7 @@ decision opens a slice. Each remaining item needs its own design before work
 starts.
 
 - **Windows desktop confinement and credentials** — the identical desktop app
-  (0057) sequences Windows after Linux + macOS parity; Work/Code stay
+  (0058) sequences Windows after Linux + macOS parity; Work/Code stay
   `incompatible` until a Windows sandbox ADR exists.
 - **Mobile maturity** — device builds, live push notifications, native capture,
   voice input, and public store distribution for the Expo client.

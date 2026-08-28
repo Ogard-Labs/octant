@@ -1,5 +1,7 @@
 import type { AutomationClient } from "@octant/client-runtime";
+import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { CodeProjectPullRequestRow, ThreadBoardPullRequestIdentity } from "@octant/contracts";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
@@ -41,6 +43,16 @@ const CodeProjectPullRequests = lazy(() =>
     default: module.CodeProjectPullRequests,
   })),
 );
+const GitHubIssueBrowser = lazy(() =>
+  import("../github/GitHubIssueBrowser").then((module) => ({
+    default: module.GitHubIssueBrowser,
+  })),
+);
+const LinearIssueBrowser = lazy(() =>
+  import("../linear/LinearIssueBrowser").then((module) => ({
+    default: module.LinearIssueBrowser,
+  })),
+);
 const CodeThreadBoard = lazy(() =>
   import("../code/CodeThreadBoard").then((module) => ({ default: module.CodeThreadBoard })),
 );
@@ -53,6 +65,11 @@ export interface WorkspaceRailLayersProps {
   readonly onDismissRailPlaceholder: () => void;
   readonly codeBoardOpen: boolean;
   readonly codePullRequestsOpen: boolean;
+  readonly githubIssuesOpen: boolean;
+  readonly githubClient: GithubClient;
+  readonly linearIssuesOpen: boolean;
+  readonly linearClient: IntegrationClient;
+  readonly onCloseLinearIssues: () => void;
   readonly workBoardOpen: boolean;
   readonly activeMode: OctantMode;
   readonly codeClient: CodeClient;
@@ -61,6 +78,7 @@ export interface WorkspaceRailLayersProps {
   readonly workBoardProjects: ReadonlyArray<ThreadBoardProjectRef>;
   readonly onCloseCodeBoard: () => void;
   readonly onCloseCodePullRequests: () => void;
+  readonly onCloseGithubIssues: () => void;
   readonly onCloseWorkBoard: () => void;
   readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
   readonly onOpenWorkBoardThread: (target: WorkThreadOpenTarget) => void;
@@ -118,6 +136,26 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
           />
         </div>
       )}
+      {props.githubIssuesOpen && props.activeMode === "code" ? (
+        <div className="code-board-layer">
+          <LazyRailSurface label="GitHub issues">
+            <GitHubIssueBrowser client={props.githubClient} onClose={props.onCloseGithubIssues} />
+          </LazyRailSurface>
+        </div>
+      ) : null}
+      {props.linearIssuesOpen && props.activeMode === "code" ? (
+        <div className="code-board-layer">
+          <LazyRailSurface label="Linear">
+            <LinearIssueBrowser
+              getIssue={(input) => props.linearClient.getIssue(input)}
+              isNarrow={props.isNarrow}
+              listIssueFilters={() => props.linearClient.listIssueFilters()}
+              listIssues={(input) => props.linearClient.listIssues(input)}
+              onClose={props.onCloseLinearIssues}
+            />
+          </LazyRailSurface>
+        </div>
+      ) : null}
       {props.codePullRequestsOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
           <LazyRailSurface label="Pull requests">

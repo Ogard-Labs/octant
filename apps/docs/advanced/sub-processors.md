@@ -70,10 +70,11 @@ the machine at all.
 The position above covers BYO provider inference. Other requests Octant
 makes on its own, or because you asked, are different relationships:
 
-- **Update checks** go to the feed host
-  (`https://octant.sh/updates/darwin-arm64.json` by default, or an HTTPS URL
-  you set). That host can see IP address, version, platform, and
-  architecture. See [Installation](/guide/installation#updates).
+- **Update checks** go to the feed host (under `https://octant.sh/updates` by
+  default, or an HTTPS base you set). That host can see IP address, version,
+  platform, architecture, and which release ring you follow. Release archives
+  are hosted on GitHub, so downloading an update also discloses your IP address
+  to GitHub. See [Installation](/guide/installation#updates).
 - **Marketplace inspect and skill search** contact skills.sh, the npm
   registry, and GitHub when you search skills, inspect, or install. Catalog
   search itself is local. Those parties see the query and the fetch, not

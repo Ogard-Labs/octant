@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ImageUsageUnits } from "./imageGeneration";
 import { AggregateReference, UtcTimestamp } from "./events";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 
@@ -429,7 +430,7 @@ const StableRequestShape = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]
 
 export const UsageReconciliation = Schema.Struct({
   id: UsageReconciliationId,
-  planId: ContextPlanId,
+  planId: Schema.optional(ContextPlanId),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   requestShape: StableRequestShape,
@@ -442,12 +443,18 @@ export const UsageReconciliation = Schema.Struct({
   providerExecutionDurationMs: Schema.optional(NonNegativeInt),
   varianceTokens: Schema.Int,
   observedAt: UtcTimestamp,
+  imageUnits: Schema.optional(ImageUsageUnits),
 })
   .annotations(strict)
   .pipe(
     Schema.filter((reconciliation) => {
       const variance = reconciliation.actualInputTokens - reconciliation.plannedInputTokens;
-      return Number.isSafeInteger(variance) && reconciliation.varianceTokens === variance;
+      if (!Number.isSafeInteger(variance) || reconciliation.varianceTokens !== variance) {
+        return false;
+      }
+      const imageGeneration = reconciliation.requestShape === "image-generation";
+      if (imageGeneration) return reconciliation.imageUnits !== undefined;
+      return reconciliation.planId !== undefined && reconciliation.imageUnits === undefined;
     }),
   );
 export type UsageReconciliation = typeof UsageReconciliation.Type;

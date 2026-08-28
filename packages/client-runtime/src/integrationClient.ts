@@ -1,9 +1,26 @@
 import {
   decodeIntegrationAuthenticationCommand,
   decodeIntegrationAuthenticationSnapshot,
+  decodeIntegrationExecutionResult,
   type IntegrationAuthenticationCommand,
   type IntegrationAuthenticationSnapshot,
+  type IntegrationExecutionResult,
 } from "@octant/contracts/integration";
+import {
+  decodeLinearIssueDetail,
+  decodeLinearIssueFilterOptions,
+  decodeLinearIssueGetInput,
+  decodeLinearIssueListInput,
+  decodeLinearIssueListPage,
+  LINEAR_ISSUE_FILTERS_OPERATION,
+  LINEAR_ISSUE_GET_OPERATION,
+  LINEAR_ISSUE_LIST_OPERATION,
+  type LinearIssueDetail,
+  type LinearIssueFilterOptions,
+  type LinearIssueGetInput,
+  type LinearIssueListInput,
+  type LinearIssueListPage,
+} from "@octant/contracts/linear-issues";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface IntegrationClientOptions {
@@ -18,6 +35,10 @@ export interface IntegrationClient {
   executeAuthenticationCommand(
     command: IntegrationAuthenticationCommand,
   ): Promise<IntegrationAuthenticationSnapshot>;
+  executeOperation(operationId: string, input: unknown): Promise<IntegrationExecutionResult>;
+  listIssues(input?: LinearIssueListInput): Promise<LinearIssueListPage>;
+  getIssue(input: LinearIssueGetInput): Promise<LinearIssueDetail>;
+  listIssueFilters(): Promise<LinearIssueFilterOptions>;
   storePersonalCredential(credential: string): Promise<void>;
   deletePersonalCredential(): Promise<void>;
 }
@@ -45,6 +66,7 @@ export function createIntegrationClient(options: IntegrationClientOptions): Inte
   } as const;
   const snapshotPath = linearAuthenticationPath(options.slug);
   const commandsPath = linearAuthenticationCommandsPath(options.slug);
+  const operationsPath = linearOperationsPath(options.slug);
   const secretsPath = `/api/integrations/${encodeURIComponent(options.slug)}/secrets`;
 
   async function send(path: string, init: RequestInit): Promise<unknown> {
@@ -76,6 +98,18 @@ export function createIntegrationClient(options: IntegrationClientOptions): Inte
     });
   }
 
+  async function executeOperation(
+    operationId: string,
+    input: unknown,
+  ): Promise<IntegrationExecutionResult> {
+    const body = await post(operationsPath, {
+      kind: "operation",
+      operationId,
+      input,
+    });
+    return decodeResponse(body, decodeIntegrationExecutionResult);
+  }
+
   return {
     async authenticationSnapshot() {
       const body = await send(snapshotPath, { method: "GET", headers });
@@ -85,6 +119,27 @@ export function createIntegrationClient(options: IntegrationClientOptions): Inte
       const validated = decodeRequest(command, decodeIntegrationAuthenticationCommand);
       const body = await post(commandsPath, validated);
       return decodeResponse(body, decodeIntegrationAuthenticationSnapshot);
+    },
+    executeOperation,
+    async listIssues(input = {}) {
+      const validated = decodeRequest(input, decodeLinearIssueListInput);
+      return readOperationValue(
+        await executeOperation(LINEAR_ISSUE_LIST_OPERATION, validated),
+        decodeLinearIssueListPage,
+      );
+    },
+    async getIssue(input) {
+      const validated = decodeRequest(input, decodeLinearIssueGetInput);
+      return readOperationValue(
+        await executeOperation(LINEAR_ISSUE_GET_OPERATION, validated),
+        decodeLinearIssueDetail,
+      );
+    },
+    async listIssueFilters() {
+      return readOperationValue(
+        await executeOperation(LINEAR_ISSUE_FILTERS_OPERATION, {}),
+        decodeLinearIssueFilterOptions,
+      );
     },
     async storePersonalCredential(credential) {
       await post(secretsPath, {
@@ -130,6 +185,22 @@ function linearAuthenticationCommandsPath(slug: string): string {
   return slug === "linear"
     ? "/api/integrations/linear/authentication/commands"
     : `/api/integrations/${encodeURIComponent(slug)}/authentication/commands`;
+}
+
+function linearOperationsPath(slug: string): string {
+  return slug === "linear"
+    ? "/api/integrations/linear/operations"
+    : `/api/integrations/${encodeURIComponent(slug)}/operations`;
+}
+
+function readOperationValue<T>(
+  result: IntegrationExecutionResult,
+  decode: (input: unknown) => T,
+): T {
+  if (result.kind !== "ok") {
+    throw new IntegrationClientFailure(result.reason, 0);
+  }
+  return decodeResponse(result.value, decode);
 }
 
 function validateLoopbackBaseUrl(baseUrl: string): void {

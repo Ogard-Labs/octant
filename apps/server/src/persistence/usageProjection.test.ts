@@ -169,6 +169,49 @@ function appendFullUsageCycle(
 }
 
 describe("UsageProjection", () => {
+  it("records image-generation units in attribution_json without a schema bump", () => {
+    const { connection, journal } = openDatabase();
+    journal.append({
+      aggregate: { aggregateType: "image-job", aggregateId: ids.aggregate },
+      expectedVersion: 0,
+      events: [
+        pending("context.usage-reconciled@1", {
+          reconciliation: {
+            id: ids.usage,
+            providerInstanceId: ids.provider,
+            modelId: "gpt-image-2",
+            requestShape: "image-generation",
+            plannedInputTokens: 0,
+            actualInputTokens: 0,
+            actualOutputTokens: 0,
+            varianceTokens: 0,
+            observedAt: now,
+            imageUnits: {
+              count: 2,
+              quality: "exact",
+              size: "1024x1024",
+              outputQuality: "high",
+            },
+          },
+        }),
+      ],
+    });
+
+    const record = readUsageRecord(connection, ids.usage);
+    expect(record).toBeDefined();
+    expect(record!.requestShape).toBe("image-generation");
+    expect(record!.attribution).toEqual([
+      {
+        category: "current-request",
+        plannedTokens: 0,
+        quality: "exact",
+        imageCount: 2,
+        imageSize: "1024x1024",
+        imageQuality: "high",
+      },
+    ]);
+  });
+
   it("builds a usage record from a full context event cycle", () => {
     const { connection, journal } = openDatabase();
     appendFullUsageCycle(journal);

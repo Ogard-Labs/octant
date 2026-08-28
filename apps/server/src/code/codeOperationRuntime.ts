@@ -174,6 +174,9 @@ export interface CodeOperationRuntimeOptions {
   readonly resolveFileMentionContext?: CodeOperationServiceOptions["resolveFileMentionContext"];
   /** Takes the notes the user pointed at the running product into the next turn. */
   readonly takeProductFeedbackForTurn?: CodeOperationServiceOptions["takeProductFeedbackForTurn"];
+  readonly takeIssueContextFramed?: CodeOperationServiceOptions["takeIssueContextFramed"];
+  readonly peekIssueContextFramed?: CodeOperationServiceOptions["peekIssueContextFramed"];
+  readonly consumeIssueContextFramed?: CodeOperationServiceOptions["consumeIssueContextFramed"];
   /**
    * The Project checkout a run comes home to. The host resolves the path; this
    * runtime observes its branch and cleanliness itself, so the merge gate reads
@@ -423,6 +426,15 @@ export function createCodeOperationRuntime(
     ...(options.takeProductFeedbackForTurn === undefined
       ? {}
       : { takeProductFeedbackForTurn: options.takeProductFeedbackForTurn }),
+    ...(options.takeIssueContextFramed === undefined
+      ? {}
+      : { takeIssueContextFramed: options.takeIssueContextFramed }),
+    ...(options.peekIssueContextFramed === undefined
+      ? {}
+      : { peekIssueContextFramed: options.peekIssueContextFramed }),
+    ...(options.consumeIssueContextFramed === undefined
+      ? {}
+      : { consumeIssueContextFramed: options.consumeIssueContextFramed }),
     ...(options.resolveBaseCheckoutRoot === undefined
       ? {}
       : {

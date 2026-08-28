@@ -52,6 +52,7 @@ import {
   WorkAttachmentTooLarge,
   type WorkAttachmentStore,
 } from "./workAttachmentStore";
+import type { FramedExternalContent } from "../context/externalContentFraming";
 import type { WorkTurnProjection } from "./workTurnProjection";
 import {
   WorkTurnRuntime,
@@ -163,6 +164,9 @@ export interface WorkTurnServiceDependencies {
     readonly windowId: WindowId;
     readonly threadId: WorkThreadId;
   }) => Promise<ReadonlyArray<ProviderContextBlock>>;
+  readonly takeIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
+  readonly peekIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
+  readonly consumeIssueContextFramed?: (threadId: string) => void;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly expectedHostId?: string;
@@ -186,6 +190,9 @@ export class WorkTurnService {
   readonly #turnRuntime: WorkTurnRuntimePort;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
   readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
+  readonly #takeIssueContextFramed: WorkTurnServiceDependencies["takeIssueContextFramed"];
+  readonly #peekIssueContextFramed: WorkTurnServiceDependencies["peekIssueContextFramed"];
+  readonly #consumeIssueContextFramed: WorkTurnServiceDependencies["consumeIssueContextFramed"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #expectedHostId: string;
@@ -206,6 +213,15 @@ export class WorkTurnService {
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
     this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
+    if (dependencies.takeIssueContextFramed !== undefined) {
+      this.#takeIssueContextFramed = dependencies.takeIssueContextFramed;
+    }
+    if (dependencies.peekIssueContextFramed !== undefined) {
+      this.#peekIssueContextFramed = dependencies.peekIssueContextFramed;
+    }
+    if (dependencies.consumeIssueContextFramed !== undefined) {
+      this.#consumeIssueContextFramed = dependencies.consumeIssueContextFramed;
+    }
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
     this.#expectedHostId = dependencies.expectedHostId ?? "local";
@@ -330,6 +346,7 @@ export class WorkTurnService {
           authenticatedWindowId,
           command.threadId,
         )),
+        ...this.#issueContextContribution(command.threadId),
         {
           text: command.prompt,
           sourceKind: "message",
@@ -366,6 +383,7 @@ export class WorkTurnService {
       }
       throw this.#mapFailure(error);
     }
+    this.#consumeIssueContextFramed?.(String(command.threadId));
 
     const accepted = this.#projection.lookup(command.requestId);
     if (accepted === undefined) {
@@ -519,6 +537,23 @@ export class WorkTurnService {
       live === undefined ? latest : decodeWorkTurnState({ ...latest, response: live }),
       outcome,
     );
+  }
+
+  #issueContextContribution(threadId: WorkThreadId): ReadonlyArray<WorkTurnContextContribution> {
+    const framed =
+      this.#peekIssueContextFramed?.(String(threadId)) ??
+      this.#takeIssueContextFramed?.(String(threadId));
+    if (framed === undefined) return [];
+    return [
+      {
+        text: framed.text,
+        sourceKind: "message",
+        referenceId: `github-issue:${String(threadId)}`,
+        category: "workspace-context",
+        posture: "required",
+        block: { kind: "user-message", text: framed.text },
+      },
+    ];
   }
 
   #priorTranscriptContributions(

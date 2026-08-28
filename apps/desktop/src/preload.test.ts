@@ -109,6 +109,7 @@ describe("desktop preload bridge", () => {
       "rotateRemoteHostIdentity",
       "selectLocalPluginFolder",
       "selectProjectRoot",
+      "setAppUpdateRing",
       "setAttentionBadge",
       "setAutomaticAppUpdateChecks",
       "setProviderCredential",

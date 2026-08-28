@@ -70,6 +70,21 @@ describe("UsageAttributionEntry", () => {
       }),
     ).toThrow();
   });
+
+  it("decodes optional image units without treating them as tokens", () => {
+    const entry = decodeUsageAttributionEntry({
+      category: "current-request",
+      plannedTokens: 0,
+      quality: "exact",
+      imageCount: 2,
+      imageSize: "1024x1024",
+      imageQuality: "high",
+    });
+    expect(entry.plannedTokens).toBe(0);
+    expect(entry.imageCount).toBe(2);
+    expect(entry.imageSize).toBe("1024x1024");
+    expect(entry.imageQuality).toBe("high");
+  });
 });
 
 describe("UsageRecord", () => {

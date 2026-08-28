@@ -152,6 +152,8 @@ import { WorkResearchProjection } from "./work/workResearchProjection";
 import { createWorkResearchSourcePort } from "./work/workResearchSourcePort";
 import { ThemeService } from "./theme/themeService";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
+import { GeneratedImageStore } from "./image/generatedImageStore";
+import { ImageJobService } from "./image/imageJobService";
 import { CodeContentStore } from "./code/codeContentStore";
 import { CodeEvidenceStore } from "./code/codeEvidenceStore";
 import { CodeAttachmentStore } from "./code/codeAttachmentStore";
@@ -248,6 +250,7 @@ import { GhRepositoryCataloguePort } from "./github/ghRepositoryCataloguePort";
 import { GhRepositoryObservationPort } from "./github/ghRepositoryObservationPort";
 import { GithubCapabilityService } from "./github/githubCapabilityService";
 import { GithubCatalogueService } from "./github/githubCatalogueService";
+import { GithubIssueContextService } from "./github/githubIssueContextService";
 import { GithubReadToolService } from "./github/githubReadToolService";
 import { ManagedCloneProcessPort, createOwnedGitContext } from "./github/managedCloneProcessPort";
 import { ManagedCloneService } from "./github/managedCloneService";
@@ -1809,6 +1812,19 @@ export function startOctantServer(
       catalogue: githubCatalogueService,
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
     });
+    const externalContentIngestionStore = new ExternalContentIngestionStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const githubIssueContextService = new GithubIssueContextService({
+      catalogue: githubCatalogueService,
+      snapshot: (signal) => githubCapabilityService.snapshot(signal),
+      ingestion: externalContentIngestionStore,
+      uuid: randomUUID,
+    });
     const githubRoutes = createGithubRouteHandler({
       windowAuthorityStore,
       service: githubCapabilityService,
@@ -2353,6 +2369,7 @@ export function startOctantServer(
         },
         onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
         probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
+        issueContext: githubIssueContextService,
       });
     // Revocation is wired at construction, before any window can hold a watch.
     activeCodeService = codeService;
@@ -2890,13 +2907,6 @@ export function startOctantServer(
             headless: headlessBrowserRuntime,
           }));
     yield* Effect.promise(() => browserRuntime.reconcile?.() ?? Promise.resolve());
-    const externalContentIngestionStore = new ExternalContentIngestionStore({
-      journal: persistence.journal,
-      connection: persistence.connection,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
-    });
     browserAutomationService = new BrowserAutomationService({
       runtime: browserRuntime,
       authority: browserAuthority,
@@ -3135,6 +3145,10 @@ export function startOctantServer(
         takeProductFeedbackForTurn: createProductFeedbackTurnPort({
           service: productFeedbackService,
         }),
+        peekIssueContextFramed: (threadId) =>
+          githubIssueContextService.peekFramedForFirstTurn(threadId),
+        consumeIssueContextFramed: (threadId) =>
+          githubIssueContextService.consumeFramedForFirstTurn(threadId),
         // Where a run comes home to: the directory the thread's Project binds.
         // A run on a managed worktree works in a sibling tree; the merge lands
         // in the person's own checkout, and only the Project knows where that
@@ -3537,6 +3551,7 @@ export function startOctantServer(
     });
     const chatService = new ChatService({
       persistence,
+      issueContext: githubIssueContextService,
       reviewedModelManifest,
       hiddenThreadIds: () => {
         const hidden = new Set(sideChatSidecars.hiddenThreadIds());
@@ -3701,6 +3716,29 @@ export function startOctantServer(
     yield* Effect.promise(() => chatService.recoverManagedAttachments());
     yield* Effect.promise(() => codeAttachments.recover());
     yield* Effect.promise(() => workAttachments.recover());
+    const generatedImageStore = new GeneratedImageStore(persistence.dataDirectory);
+    yield* Effect.promise(() =>
+      generatedImageStore.recover({
+        isFinalizedAttachmentReferenced: (scopeId, attachmentId) =>
+          persistence.imageJobProjection.isFinalizedAttachmentReferenced(scopeId, attachmentId),
+      }),
+    );
+    const imageJobService = new ImageJobService({
+      journal: persistence.journal,
+      projection: persistence.imageJobProjection,
+      attachments: generatedImageStore,
+      readProviderInstance: (id) => persistence.readProviderInstance(id),
+      credentialResolver:
+        credentialResolver ??
+        ({
+          has: async () => false,
+          resolve: async () => "",
+        } as const),
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    yield* Effect.promise(() => imageJobService.reconcileInterruptedRunningJobs());
     yield* Effect.promise(() => chatService.recoverPendingDeletions());
     const linkedThreadService = createLinkedThreadRuntime({
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -3851,6 +3889,7 @@ export function startOctantServer(
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
       onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
+      issueContext: githubIssueContextService,
     });
     const workTurnProjection = new WorkTurnProjection();
     requireJournalHydration(
@@ -3871,6 +3910,10 @@ export function startOctantServer(
     const workTurnService = new WorkTurnService({
       persistence,
       threads: workThreadService,
+      peekIssueContextFramed: (threadId) =>
+        githubIssueContextService.peekFramedForFirstTurn(threadId),
+      consumeIssueContextFramed: (threadId) =>
+        githubIssueContextService.consumeFramedForFirstTurn(threadId),
       projects: projectService,
       projection: workTurnProjection,
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
