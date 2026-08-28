@@ -141,15 +141,17 @@ describe("Linux Bubblewrap confinement", () => {
       const result = spawnSync(
         DEFAULT_BWRAP_PATH,
         buildLinuxConfinementLaunch({
-          executable: "/usr/bin/test",
-          args: ["-r", sentinel],
+          executable: "/bin/sh",
+          args: ["-c", 'test ! -r "$1" && printf confined', "sh", sentinel],
           boundRoot,
           temporaryDirectory: "/tmp",
           networkEgress: "none",
         }).args,
         { encoding: "utf8" },
       );
-      expect(result.status).not.toBe(0);
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("confined");
     },
   );
 });

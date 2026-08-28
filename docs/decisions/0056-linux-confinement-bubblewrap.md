@@ -28,8 +28,9 @@ expressed with those primitives, but the _mechanism_ is different.
 - On macOS, the shared confinement builder continues to use `sandbox-exec`.
 - On Linux, the shared confinement builder uses Bubblewrap (`bwrap`) with:
   - `--unshare-all` so the child cannot see or affect host processes, the host
-    network namespace (unless the thread policy allows egress), IPC, UTS, or
-    cgroup controllers;
+    network namespace (unless the thread policy allows egress), IPC, or UTS.
+    That flag includes `--unshare-cgroup-try`, so cgroup-namespace isolation is
+    best effort and must not be treated as guaranteed;
   - `--new-session` and `--die-with-parent` to detach the child from the host
     TTY/session and terminate it when the launcher exits;
   - `--proc /proc` and `--dev /dev` to provide a private kernel pseudo-fs view;
