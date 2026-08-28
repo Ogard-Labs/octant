@@ -4,9 +4,11 @@ import { canonicalReleaseBytes, resolveUpdateOffer } from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import {
   buildRelease,
+  dryRunFeedDocument,
   feedRelativePath,
   generateFeedKeyPair,
   parseFeedCommand,
+  resolveFeedSigningMaterial,
   sha256Hex,
   signFeed,
 } from "./sign-update-feed";
@@ -111,6 +113,38 @@ describe("signing an update feed", () => {
 
   it("names the file a ring is published under", () => {
     expect(feedRelativePath(release({ ring: "preview" }))).toBe("preview/darwin-arm64.json");
+  });
+
+  it("names the linux-x64 dogfood feed the same way as macOS", () => {
+    expect(feedRelativePath(release({ ring: "stable", platform: "linux", arch: "x64" }))).toBe(
+      "stable/linux-x64.json",
+    );
+    expect(feedRelativePath(release({ ring: "preview", platform: "linux", arch: "x64" }))).toBe(
+      "preview/linux-x64.json",
+    );
+  });
+
+  it("dry-runs a linux-x64 feed path without writing a signature", () => {
+    const { release: document, feedPath } = dryRunFeedDocument({
+      version: "0.2.0",
+      ring: "preview",
+      platform: "linux",
+      arch: "x64",
+      url: "https://github.com/Ogard-Labs/octant/releases/download/v0.2.0/Octant-0.2.0-linux-x64.AppImage",
+      sha256: sha256Hex(ARTIFACT),
+      releasedAt: "2026-08-28T09:00:00.000Z",
+    });
+    expect(feedPath).toBe("preview/linux-x64.json");
+    expect(document.platform).toBe("linux");
+    expect(document.arch).toBe("x64");
+    expect(document.ring).toBe("preview");
+  });
+
+  it("refuses unsigned feed signing when the private key is missing", () => {
+    expect(resolveFeedSigningMaterial({})).toEqual({
+      kind: "unsigned-refuse",
+      reason: expect.stringMatching(/OCTANT_UPDATE_FEED_PRIVATE_KEY/),
+    });
   });
 });
 
