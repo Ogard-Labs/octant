@@ -621,6 +621,13 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   run the script manually and source `session.env` the same way. Provider
   CLIs are ordinary host binaries: install one to a user-writable path such
   as `~/.local/bin` and point the provider instance at that absolute path.
+- `bun run package:desktop` packages the peer Machine for the build host:
+  `out/Octant.app` on Apple Silicon macOS, or an unsigned
+  `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with
+  `out/Octant-linux-x64/` kept for inspection). Linux packages skip Darwin
+  helpers and remain fail-closed for auto-update until a signed Linux feed
+  exists. Override with `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64` on a
+  matching host only.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.
 - Formatting is `oxfmt`, linting is `oxlint`; Turbo runs the per-package

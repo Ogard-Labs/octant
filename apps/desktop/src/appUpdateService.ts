@@ -23,9 +23,9 @@ import {
 /**
  * Platforms that publish a signed desktop update feed today.
  *
- * Linux unpackaged builds must fail closed: an updater on an unsigned artifact
- * is an unauthenticated code-delivery channel. Packaging and the Linux feed
- * matrix land separately.
+ * Linux desktop builds (unpackaged or AppImage) must fail closed: an updater on
+ * an unsigned artifact is an unauthenticated code-delivery channel. A signed
+ * Linux feed matrix is a separate deliverable.
  */
 export function supportsSignedDesktopUpdateChannel(platform: string): boolean {
   return platform === "darwin";
