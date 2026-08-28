@@ -63,6 +63,26 @@ not a Mac app plus a thinner Linux/Windows shell.
   unconditionally deferred; Windows Work/Code remain blocked on a future ADR.
 - Headless Station work (0048) stays separate from desktop Electron parity.
 
+## Out of scope
+
+Windows packaging stays outside the first release boundary
+(`AGENTS.md` Current Release Boundary; roadmap Later). This record sequences
+Windows after Linux + macOS desktop parity and does not authorize Windows
+installers, signed Windows update feeds, or packaging CI until all of these
+hold:
+
+1. Linux ADE testing is green (ADE suite and related CI evidence on the Linux
+   dogfood track).
+2. Linux AppImage packaging ships (`package:desktop` / AppImage path on main).
+3. The signed Linux update feed is green (0034 update pipeline evidence for
+   Linux artifacts).
+4. The maintainer explicitly opens Windows packaging (authorized issue or ADR
+   supersession recorded in Linear; not inferred from a green Linux check).
+
+Until then, do not add Windows packaging scripts or CI. Windows Work and Code
+remain `incompatible` until a Windows confinement ADR exists; that ADR is a
+separate gate from packaging.
+
 ## Related
 
 - 0034 Signed, notarized, user-controlled updates
