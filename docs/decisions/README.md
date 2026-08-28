@@ -64,6 +64,7 @@ distilled successor of the earlier long-form design specifications.
 | [0054](0054-headless-host-credential-store.md)                | The credential broker is a host capability, not a desktop one                               | Accepted           |
 | [0055](0055-image-generation-provider-profiles.md)            | Image generation provider profiles                                                          | Accepted           |
 | [0056](0056-linux-confinement-bubblewrap.md)                  | Linux confinement uses Bubblewrap as a scoped exception to the Seatbelt-only implementation | Accepted           |
+| [0057](0057-cross-platform-desktop.md)                        | One desktop app across macOS, Linux, and Windows                                            | Proposed           |
 
 ## Adding an ADR
 

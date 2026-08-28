@@ -111,11 +111,13 @@ Hardening in progress for the preview:
 
 ## Later
 
-Explicitly deferred by the current release boundary. Each needs its own design
-before work starts.
+Explicitly deferred by the current release boundary, except where a later
+decision opens a slice. Each remaining item needs its own design before work
+starts.
 
-- **Intel macOS, Windows, and Linux desktop packaging** — Apple Silicon is the
-  deliberate first surface; other platforms need their own confinement design.
+- **Windows desktop confinement and credentials** — the identical desktop app
+  (0057) sequences Windows after Linux + macOS parity; Work/Code stay
+  `incompatible` until a Windows sandbox ADR exists.
 - **Mobile maturity** — device builds, live push notifications, native capture,
   voice input, and public store distribution for the Expo client.
 - **Hosted relay** — only if LAN, Tailscale, or SSH cannot satisfy a concrete

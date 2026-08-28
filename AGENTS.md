@@ -53,6 +53,7 @@ Read the record that owns your change before editing, not all of them:
 | Computer-use destinations                           | `docs/decisions/0053`                                               |
 | Shell, navigation, workspace layout                 | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`  |
 | Components and theme                                | `docs/decisions/0016`, `docs/decisions/0046`                        |
+| Cross-platform desktop packaging and updates        | `docs/decisions/0034`, `docs/decisions/0057`                        |
 
 A change that contradicts an `Accepted` record is not a code change. Supersede
 the record first, in the same pull request, per `docs/decisions/README.md`. A
@@ -276,8 +277,10 @@ The first release is the Apple Silicon technical preview with the
 provider-neutral plugin/skill marketplace. Per `docs/decisions/0034`, it is
 signed with a Developer ID, notarized, and updates itself — those three are one
 deliverable, because an updater on an unsigned app is an unauthenticated
-code-delivery channel and macOS refuses the replacement anyway. Do not add
-Intel, Windows/Linux packaging, native mobile store distribution, hosted relay,
-schedules, connector/OAuth marketplace, full LSP/extension host, or product
-features that mutate pull requests unless a decision record and an explicit
-request authorize that scope.
+code-delivery channel and macOS refuses the replacement anyway. Cross-platform
+desktop (macOS, Linux, Windows) is authorized by `docs/decisions/0057` and
+sequenced there: Linux desktop shell next, Windows Work/Code only after a
+Windows confinement ADR. Do not add native mobile store distribution, hosted
+relay, schedules, connector/OAuth marketplace, full LSP/extension host, or
+product features that mutate pull requests unless a decision record and an
+explicit request authorize that scope.
