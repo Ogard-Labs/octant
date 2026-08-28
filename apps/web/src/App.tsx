@@ -174,6 +174,8 @@ import {
   linearIssuesReadAvailable,
   withLinearIssuesReadSync,
 } from "./linear/linearIssuesReadAvailable";
+import { createTrackerReferenceClientPorts } from "./tracker/trackerReferenceClientPorts";
+import { TrackerReferenceProvider } from "./tracker/TrackerReferenceContext";
 import { WorkspaceRailLayers } from "./shell/WorkspaceRailLayers";
 import { BottomUtilityPanel } from "./shell/BottomUtilityPanel";
 import { ShellDialogHost } from "./shell/ShellDialogHost";
@@ -1179,11 +1181,15 @@ function LaunchedShell(
   }, [githubTransport]);
   const linearPluginEffective = FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true;
   useEffect(() => {
-    if (!linearPluginEffective) return;
-    if (activeMode !== "code") {
+    if (!linearPluginEffective) {
       setLinearIssuesRead(false);
       setLinearIssuesOpen(false);
       return;
+    }
+    // The Issues sidebar stays Code-only; availability still probes in every
+    // mode so composer/transcript tracker tags can resolve when connected.
+    if (activeMode !== "code") {
+      setLinearIssuesOpen(false);
     }
     const generation = linearAvailabilityGenerationRef.current + 1;
     linearAvailabilityGenerationRef.current = generation;
@@ -1205,6 +1211,30 @@ function LaunchedShell(
       cancelled = true;
     };
   }, [linearPluginEffective, activeMode, linearTransport]);
+  const trackerReferencePorts = useMemo(
+    () =>
+      createTrackerReferenceClientPorts({
+        github: {
+          available: githubIssuesReadAvailable,
+          client: githubClient,
+        },
+        ...(linearPluginEffective
+          ? {
+              linear: {
+                available: linearIssuesRead,
+                client: linearClient,
+              },
+            }
+          : {}),
+      }),
+    [
+      githubIssuesReadAvailable,
+      githubClient,
+      linearPluginEffective,
+      linearIssuesRead,
+      linearClient,
+    ],
+  );
   const githubCloneClient = useMemo(
     () =>
       createGithubCloneClient({
@@ -4986,9 +5016,11 @@ function LaunchedShell(
         registry={codeThreadControllers}
         threadIds={openCodeThreadIds}
       />
-      <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-        <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
-      </SidebarThreadDragContext.Provider>
+      <TrackerReferenceProvider ports={trackerReferencePorts}>
+        <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+          <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
+        </SidebarThreadDragContext.Provider>
+      </TrackerReferenceProvider>
     </OctantCommandProvider>
   );
 }
