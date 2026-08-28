@@ -28,15 +28,14 @@ tokens in process state that outlives a request. Server still resolves through
 provider-neutral capability and readiness vocabulary on the existing driver
 contract:
 
-| Need | Prefer | Avoid |
-| --- | --- | --- |
-| Directory ID / OAuth for a model endpoint | Driver-declared auth kind; browser or device flow owned by the host; broker stores refresh/access as opaque refs | Embedding one IdP SDK in `apps/server`; journaling tokens |
-| Cloud-IAM request signing | Driver asks the broker (or a broker-backed signer) for a short-lived signature or session; endpoint config stays in the registry instance | Shipping cloud SDK credentials into provider child env verbatim; teaching the server a vendor IAM client |
-| Readiness | Honest `unauthenticated` / `unavailable` when directory or IAM material is missing | Falling back silently to API-key mode |
+| Need                                      | Prefer                                                                                                                                    | Avoid                                                                                                    |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Directory ID / OAuth for a model endpoint | Driver-declared auth kind; browser or device flow owned by the host; broker stores refresh/access as opaque refs                          | Embedding one IdP SDK in `apps/server`; journaling tokens                                                |
+| Cloud-IAM request signing                 | Driver asks the broker (or a broker-backed signer) for a short-lived signature or session; endpoint config stays in the registry instance | Shipping cloud SDK credentials into provider child env verbatim; teaching the server a vendor IAM client |
+| Readiness                                 | Honest `unauthenticated` / `unavailable` when directory or IAM material is missing                                                        | Falling back silently to API-key mode                                                                    |
 
 No core Chat/Work/Code path may require a specific IdP or cloud. A driver that
-cannot represent the auth kind safely reports `incompatible` or blocks, matching
-0005.
+cannot represent the auth kind safely reports `incompatible` or blocks, matching 0005.
 
 Out of scope here: a catalogued connector marketplace, installing or updating
 provider runtimes, and any path that lets a plugin mint host credentials.
@@ -47,13 +46,13 @@ Relative to
 [security-architecture-threat-model](security/security-architecture-threat-model.md)
 and the credential rules in 0005 / 0054:
 
-| ID | Delta | Control |
-| --- | --- | --- |
-| E1 | Directory OAuth refresh tokens are longer-lived than API keys | Broker-only storage; no journal, logs, export, or renderer echo; revoke/rotate is a host-local admin act |
-| E2 | IAM signing material could be copied into provider child processes | Prefer per-request broker resolve or scoped signer; refuse durable cloud keys in managed-process env unless the driver proves the runtime cannot separate auth storage (then `incompatible`) |
-| E3 | Enterprise auth could become a vendor-shaped host API | All new kinds land in `@octant/provider-sdk` first; conformance harness covers them; no server import of a single-cloud SDK for identity |
-| E4 | Confused-deputy: a thread or remote principal triggers cloud spend | Existing mode, Project, and approval gates stay in front; remote stays local-host-required for credential changes (0013) |
-| E5 | Mis-set registry endpoint talks to the wrong tenant | Instance config is explicit; readiness probes must fail closed on audience/tenant mismatch the driver can detect |
+| ID  | Delta                                                              | Control                                                                                                                                                                                      |
+| --- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E1  | Directory OAuth refresh tokens are longer-lived than API keys      | Broker-only storage; no journal, logs, export, or renderer echo; revoke/rotate is a host-local admin act                                                                                     |
+| E2  | IAM signing material could be copied into provider child processes | Prefer per-request broker resolve or scoped signer; refuse durable cloud keys in managed-process env unless the driver proves the runtime cannot separate auth storage (then `incompatible`) |
+| E3  | Enterprise auth could become a vendor-shaped host API              | All new kinds land in `@octant/provider-sdk` first; conformance harness covers them; no server import of a single-cloud SDK for identity                                                     |
+| E4  | Confused-deputy: a thread or remote principal triggers cloud spend | Existing mode, Project, and approval gates stay in front; remote stays local-host-required for credential changes (0013)                                                                     |
+| E5  | Mis-set registry endpoint talks to the wrong tenant                | Instance config is explicit; readiness probes must fail closed on audience/tenant mismatch the driver can detect                                                                             |
 
 No new trust boundary moves credentials into `apps/server` or the renderer.
 
