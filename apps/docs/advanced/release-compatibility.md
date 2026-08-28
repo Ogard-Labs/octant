@@ -47,8 +47,9 @@ validation remain post-preview work.
   relaunch. It never replaces a running app, and it refuses to relaunch
   while an agent is still working or a thread is waiting on you. An
   unsigned local package cannot update itself. Keep a backup of your data
-  directory across upgrades. See [Installation](/guide/installation) for
-  how an update is verified.
+  directory across upgrades. See [Installation](/guide/installation#updates)
+  for how an update is verified and what a check sends (provisional until
+  signed self-updating releases are final).
 
 ## What is excluded from the preview
 
