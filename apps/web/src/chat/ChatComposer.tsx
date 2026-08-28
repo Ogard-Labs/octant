@@ -17,6 +17,7 @@ import {
   type ThreadMentionChip,
   type ThreadMentions,
 } from "./ThreadMentionPicker";
+import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import type {
   CanvasContextSelection,
   CanvasContextSelectionId,
@@ -440,6 +441,7 @@ export function ChatComposer(props: ChatComposerProps) {
           ? {}
           : { onOpenSideChat: props.threadMentions.onOpenSideChat })}
       />
+      <TrackerReferenceComposerHints draft={props.draft} />
       {(props.pendingAttachments ?? []).length > 0 ? (
         <ul aria-label="Attached files" className="composer-chips chat-composer__selections">
           {(props.pendingAttachments ?? []).map((attachmentSelection) => (

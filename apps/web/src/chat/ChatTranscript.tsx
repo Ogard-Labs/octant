@@ -17,6 +17,7 @@ import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
+import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChatRichText } from "./ChatRichText";
 import { ChatTurnEditor } from "./ChatTurnEditor";
 
@@ -486,7 +487,7 @@ function MessageBody(props: {
   if (props.content === undefined) {
     return <p role="alert">{props.missing}</p>;
   }
-  return <p>{props.content.body}</p>;
+  return <TrackerReferenceText asParagraph text={props.content.body} />;
 }
 
 function AttemptStatus(props: { readonly outcome: ChatAttemptOutcome }) {
