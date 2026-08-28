@@ -186,6 +186,80 @@ describe("FuseExecutionCapsuleDiskStore", () => {
     await expect(lstat(disk.runRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("releases a capsule whose mount is only briefly busy at unmount", async () => {
+    const stateRoot = await privateStateRoot();
+    const runRootBase = await mkdtemp(join("/tmp", "ocr-"));
+    roots.push(runRootBase);
+    let mounted = false;
+    let busyUnmounts = 2;
+    const run = vi.fn<ExecutionCapsuleDiskCommandRunner["run"]>(async (command, args) => {
+      if (command === "/usr/bin/fuse2fs") mounted = true;
+      if (command === "/usr/bin/fusermount3") {
+        if (busyUnmounts > 0) {
+          busyUnmounts -= 1;
+          return { exitCode: 1, stdout: "", stderr: "Device or resource busy" };
+        }
+        mounted = false;
+      }
+      if (command === "/usr/bin/podman" && args[0] === "unshare") {
+        const target = args.at(-1);
+        if (target === undefined) throw new Error("Mapped cleanup target is missing.");
+        await rm(target, { force: true, recursive: true });
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const store = new FuseExecutionCapsuleDiskStore({
+      stateRoot,
+      runRootBase,
+      expectedUid: process.getuid?.() ?? 0,
+      expectedGid: process.getgid?.() ?? 0,
+      runner: { run },
+      mountProbe: { isMounted: async () => mounted },
+      unmountRetryDelayMilliseconds: 0,
+    });
+    const disk = await store.create({
+      runtimeId: "octant-capsule-11111111111141118111111111111111",
+      diskBytes: 256 * 1_024 * 1_024,
+    });
+
+    await store.release(disk);
+
+    const unmountCalls = run.mock.calls.filter(([command]) => command === "/usr/bin/fusermount3");
+    expect(unmountCalls).toHaveLength(3);
+    await expect(lstat(disk.directory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("still refuses a mount that stays busy past the retry bound", async () => {
+    const stateRoot = await privateStateRoot();
+    const runRootBase = await mkdtemp(join("/tmp", "ocr-"));
+    roots.push(runRootBase);
+    let mounted = false;
+    const run = vi.fn<ExecutionCapsuleDiskCommandRunner["run"]>(async (command) => {
+      if (command === "/usr/bin/fuse2fs") mounted = true;
+      if (command === "/usr/bin/fusermount3") {
+        return { exitCode: 1, stdout: "", stderr: "Device or resource busy" };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const store = new FuseExecutionCapsuleDiskStore({
+      stateRoot,
+      runRootBase,
+      expectedUid: process.getuid?.() ?? 0,
+      expectedGid: process.getgid?.() ?? 0,
+      runner: { run },
+      mountProbe: { isMounted: async () => mounted },
+      unmountRetryDelayMilliseconds: 0,
+    });
+    const disk = await store.create({
+      runtimeId: "octant-capsule-11111111111141118111111111111111",
+      diskBytes: 256 * 1_024 * 1_024,
+    });
+
+    await expect(store.release(disk)).rejects.toThrow("Execution capsule disk unmount failed.");
+    const unmountCalls = run.mock.calls.filter(([command]) => command === "/usr/bin/fusermount3");
+    expect(unmountCalls).toHaveLength(5);
+  });
+
   it("refuses a forged cleanup location without touching the unrelated directory", async () => {
     const stateRoot = await privateStateRoot();
     const runRootBase = await mkdtemp(join("/tmp", "ocr-"));

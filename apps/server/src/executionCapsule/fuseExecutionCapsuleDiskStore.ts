@@ -47,6 +47,7 @@ export interface FuseExecutionCapsuleDiskStoreOptions {
   readonly fusermountPath?: string;
   readonly podmanPath?: string;
   readonly rmPath?: string;
+  readonly unmountRetryDelayMilliseconds?: number;
 }
 
 /**
@@ -65,6 +66,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
   readonly #fusermountPath: string;
   readonly #podmanPath: string;
   readonly #rmPath: string;
+  readonly #unmountRetryDelayMilliseconds: number;
 
   constructor(options: FuseExecutionCapsuleDiskStoreOptions) {
     this.#stateRoot = options.stateRoot;
@@ -78,6 +80,7 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
     this.#fusermountPath = options.fusermountPath ?? "/usr/bin/fusermount3";
     this.#podmanPath = options.podmanPath ?? "/usr/bin/podman";
     this.#rmPath = options.rmPath ?? "/usr/bin/rm";
+    this.#unmountRetryDelayMilliseconds = options.unmountRetryDelayMilliseconds ?? 250;
   }
 
   async create(input: {
@@ -148,11 +151,18 @@ export class FuseExecutionCapsuleDiskStore implements ExecutionCapsuleDiskStore 
 
   async close(location: ExecutionCapsuleDiskLocation): Promise<void> {
     this.#assertOwnedLocation(location);
-    if (await this.#mountProbe.isMounted(location.mountPath)) {
+    // A capsule process that exited moments ago can keep the FUSE mount busy
+    // for a beat, and a single fusermount3 then fails EBUSY for a mount that
+    // releases on its own — observed as a release reported failed in the
+    // capsule evidence suite. Retry briefly; a mount still busy past the
+    // bound is a real failure and stays one.
+    for (let attempt = 1; await this.#mountProbe.isMounted(location.mountPath); attempt += 1) {
       const unmounted = await this.#runner.run(this.#fusermountPath, ["-u", location.mountPath]);
-      if (unmounted.exitCode !== 0 || (await this.#mountProbe.isMounted(location.mountPath))) {
-        throw new Error("Execution capsule disk unmount failed.");
+      if (unmounted.exitCode === 0 && !(await this.#mountProbe.isMounted(location.mountPath))) {
+        break;
       }
+      if (attempt >= 5) throw new Error("Execution capsule disk unmount failed.");
+      await new Promise((resolve) => setTimeout(resolve, this.#unmountRetryDelayMilliseconds));
     }
     await this.#removeRunRoot(location);
   }
