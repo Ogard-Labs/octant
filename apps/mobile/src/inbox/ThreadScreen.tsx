@@ -19,6 +19,7 @@ import {
   uploadMobileChatAttachment,
   type MobileInboxRow,
 } from "@octant/client-runtime";
+import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
 import type { ChatThreadView, ThreadFollowUp, ThreadWorkItem } from "@octant/contracts";
 import { presentStaleHostSecurity } from "@octant/domain";
 import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
@@ -112,7 +113,7 @@ export interface ThreadScreenProps {
 
 export function ThreadScreen(props: ThreadScreenProps) {
   const { colors } = useTheme();
-  const { transportForHost, hosts, health } = useMobileSession();
+  const { transportForHost, hosts, health, hub } = useMobileSession();
   const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
   const transport = useMemo(
     () => (props.selected === undefined ? undefined : transportForHost(props.selected.hostId)),
@@ -122,6 +123,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
     if (props.selected === undefined) return "idle" as const;
     return health.find((entry) => entry.hostId === props.selected!.hostId)?.kind ?? "idle";
   }, [health, props.selected]);
+  const selectedOrigin = useMemo(
+    () =>
+      props.selected === undefined
+        ? undefined
+        : hosts.find((host) => host.hostId === props.selected?.hostId)?.origin,
+    [hosts, props.selected],
+  );
+  const supervisor = useMemo(
+    () => (selectedOrigin === undefined ? undefined : hub.supervisorForOrigin(selectedOrigin)),
+    [hub, selectedOrigin],
+  );
+  const connectionStatus = useConnectionStatus(supervisor);
   const staleGate = useMemo(() => presentStaleHostSecurity(hostHealth), [hostHealth]);
   const models = usePlacementHostModels(transport);
   const [view, setView] = useState<ChatThreadView | undefined>();
@@ -219,10 +232,13 @@ export function ThreadScreen(props: ThreadScreenProps) {
     const subscription = AppState.addEventListener("change", (next) => {
       const returnedToForeground = enteredMobileForeground(previous, next);
       previous = next;
-      if (returnedToForeground) void refresh({ quiet: true });
+      if (returnedToForeground) {
+        supervisor?.wake();
+        void refresh({ quiet: true });
+      }
     });
     return () => subscription.remove();
-  }, [props.selected?.mode, refresh]);
+  }, [props.selected?.mode, refresh, supervisor]);
 
   useEffect(() => {
     if (transport === undefined || props.selected?.mode !== "chat") {
@@ -537,6 +553,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
           lineHeight: 22,
         },
         error: { color: colors.danger },
+        connectionStatus: {
+          color: colors.textSecondary,
+          fontSize: 12,
+          lineHeight: 16,
+        },
         transcript: { gap: mobileSpacing.sm, paddingTop: mobileSpacing.sm },
         emptyChat: {
           flexGrow: 1,
@@ -639,6 +660,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
         keyboardShouldPersistTaps="handled"
         style={styles.scroll}
       >
+        {connectionStatus.kind === "waiting-to-retry" ? (
+          <Text style={styles.connectionStatus}>Reconnecting to the host…</Text>
+        ) : connectionStatus.kind === "offline" ? (
+          <Text style={styles.connectionStatus}>Waiting for the network.</Text>
+        ) : null}
         {activeSurface === "browser" && transport !== undefined ? (
           <BrowserSurfacePanel
             mode={props.selected.mode}

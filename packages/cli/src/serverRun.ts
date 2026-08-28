@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { nextRestartBackoff } from "@octant/host-runtime";
 
 export interface ServerRunSpawnSpec {
   readonly command: string;
@@ -24,28 +25,86 @@ export interface ServerRunOptions {
   readonly bridgeSecret?: () => string;
   readonly installSignalHandler?: (handler: () => void) => () => void;
   readonly afterSpawn?: () => void | Promise<void>;
+  readonly sleep?: (delayMs: number) => Promise<void>;
+  readonly now?: () => number;
+  readonly writeNotice?: (message: string) => void;
 }
 
 export async function runServerRunCommand(options: ServerRunOptions = {}): Promise<number> {
   const env = options.env ?? process.env;
   const command = options.serverStartCommand?.() ?? defaultServerStartCommand();
-  const child = (options.spawn ?? defaultSpawn)({
-    command: command.command,
-    args: command.args,
-    env: {
-      ...env,
-      OCTANT_DESKTOP_BRIDGE_SECRET: (options.bridgeSecret ?? createBridgeSecret)(),
-      OCTANT_HOST_SERVICE_MODE: env.OCTANT_HOST_SERVICE_MODE ?? "foreground",
-      OCTANT_SERVER_INSTANCE_ID: (options.instanceId ?? randomUUID)(),
-      ...(options.port === undefined ? {} : { OCTANT_SERVER_PORT: String(options.port) }),
-    },
+  const spawn = options.spawn ?? defaultSpawn;
+  const now = options.now ?? Date.now;
+  const writeNotice =
+    options.writeNotice ?? ((message: string) => process.stderr.write(`${message}\n`));
+  let currentChild: ServerRunChild | undefined;
+  let shutdownRequested = false;
+  let settlePendingDelay: (() => void) | undefined;
+  const sleep = (delayMs: number): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: unknown): void => {
+        if (settled) return;
+        settled = true;
+        settlePendingDelay = undefined;
+        if (error === undefined) resolve();
+        else reject(error);
+      };
+      settlePendingDelay = () => finish();
+      if (options.sleep !== undefined) {
+        void Promise.resolve(options.sleep(delayMs)).then(
+          () => finish(),
+          (error: unknown) => finish(error),
+        );
+        return;
+      }
+      const timer = globalThis.setTimeout(() => finish(), delayMs);
+      settlePendingDelay = () => {
+        globalThis.clearTimeout(timer);
+        finish();
+      };
+    });
+  const removeSignalHandler = (options.installSignalHandler ?? defaultInstallSignalHandler)(() => {
+    shutdownRequested = true;
+    currentChild?.kill("SIGTERM");
+    // After the child has already exited, there is no process to signal.
+    // Settle the backoff so SIGTERM does not wait out the delay.
+    settlePendingDelay?.();
   });
-  const removeSignalHandler = (options.installSignalHandler ?? defaultInstallSignalHandler)(() =>
-    child.kill("SIGTERM"),
-  );
+  let failures = 0;
+  let firstSpawn = true;
+  let lastExitCode = 0;
   try {
-    await options.afterSpawn?.();
-    return await child.exited;
+    while (true) {
+      const startedAt = now();
+      currentChild = spawn({
+        command: command.command,
+        args: command.args,
+        env: {
+          ...env,
+          OCTANT_DESKTOP_BRIDGE_SECRET: (options.bridgeSecret ?? createBridgeSecret)(),
+          OCTANT_HOST_SERVICE_MODE: env.OCTANT_HOST_SERVICE_MODE ?? "foreground",
+          OCTANT_SERVER_INSTANCE_ID: (options.instanceId ?? randomUUID)(),
+          ...(options.port === undefined ? {} : { OCTANT_SERVER_PORT: String(options.port) }),
+        },
+      });
+      if (firstSpawn) {
+        firstSpawn = false;
+        await options.afterSpawn?.();
+      }
+      lastExitCode = await currentChild.exited;
+      currentChild = undefined;
+      if (shutdownRequested || lastExitCode === 0) return lastExitCode;
+      if (now() - startedAt >= 60_000) failures = 0;
+      const backoff = nextRestartBackoff({ failures, now: now() });
+      if (backoff.crashLoop) return lastExitCode;
+      failures += 1;
+      writeNotice(
+        `Octant server exited with code ${lastExitCode}; restarting in ${backoff.delayMs}ms.`,
+      );
+      await sleep(backoff.delayMs);
+      if (shutdownRequested) return lastExitCode;
+    }
   } finally {
     removeSignalHandler();
   }
