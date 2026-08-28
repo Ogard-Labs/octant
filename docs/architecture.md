@@ -600,6 +600,21 @@ mechanisms are:
 Dependencies point inward: no package imports an app, and `contracts` imports
 nothing first-party.
 
+## Current Release Boundary
+
+The agent contract in `AGENTS.md` owns the Current Release Boundary wording.
+The first shipping surface is the Apple Silicon technical preview with the
+provider-neutral plugin and skill marketplace, signed and self-updating per
+[0034](decisions/0034-signed-updates.md). Cross-platform desktop is authorized
+and sequenced by [0058](decisions/0058-cross-platform-desktop.md).
+
+Two holds stay Later until dedicated decision records, published seams, and an
+explicit maintainer request open them:
+[connector / OAuth marketplace and full LSP / extension host / debugger](release-boundary-holds.md).
+The [roadmap Later](roadmap.md#later) list names the same deferrals among
+others. Neither hold is opened by plugin work, a first-party Integration, or
+Monaco and external-editor handoff.
+
 ## Development loop
 
 ```sh
