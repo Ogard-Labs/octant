@@ -97,6 +97,35 @@ describe("work thread contracts", () => {
         hostId: "local",
       }),
     ).toThrow();
+    expect(
+      decodeWorkThreadCommand({
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Release notes",
+        providerInstanceId: ids.provider,
+        modelId: "gemma4:latest",
+        hostId: "local",
+        bindingRevisionId: ids.tab,
+        issueContext: { owner: "octant", name: "octant", number: 7 },
+      }),
+    ).toMatchObject({
+      kind: "create-work-thread",
+      issueContext: { owner: "octant", name: "octant", number: 7 },
+    });
+    expect(() =>
+      decodeWorkThreadCommand({
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Release notes",
+        providerInstanceId: ids.provider,
+        modelId: "gemma4:latest",
+        hostId: "local",
+        bindingRevisionId: ids.tab,
+        issueContext: { owner: "octant", name: "octant", number: 7, body: "assembled" },
+      }),
+    ).toThrow();
   });
 
   it("decodes an in-thread provider/model change command", () => {

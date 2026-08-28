@@ -495,6 +495,23 @@ describe("chat contracts", () => {
         providerInstanceId: ids.provider,
       }),
     ).toThrow();
+    expect(
+      decodeChatCommand({
+        kind: "create-chat-thread",
+        title: "From an issue",
+        issueContext: { owner: "octant", name: "octant", number: 7 },
+      }),
+    ).toMatchObject({
+      kind: "create-chat-thread",
+      issueContext: { owner: "octant", name: "octant", number: 7 },
+    });
+    expect(() =>
+      decodeChatCommand({
+        kind: "create-chat-thread",
+        title: "From an issue",
+        issueContext: { owner: "octant", name: "octant", number: 7, body: "assembled" },
+      }),
+    ).toThrow();
   });
 
   it("reserves deleting and deleted lifecycle states for the purge workflow", () => {

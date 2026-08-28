@@ -127,9 +127,14 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
   }, [loadPage, trimmedQuery]);
 
   useEffect(() => {
+    const readCatalogue = client.readCatalogue;
+    if (typeof readCatalogue !== "function") return;
+    const pending = readCatalogue({ kind: "recent-repositories" });
+    if (pending === null || typeof pending !== "object" || typeof pending.then !== "function") {
+      return;
+    }
     let alive = true;
-    void client
-      .readCatalogue({ kind: "recent-repositories" })
+    void pending
       .then((response) => {
         if (!alive || response.kind !== "recent-repositories") return;
         setRecents(response.rows);

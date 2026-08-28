@@ -57,7 +57,7 @@ import {
   useThreadMentionTypeahead,
 } from "../../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../../chat/useThreadMentions";
-import type { MentionableThreadId } from "@octant/contracts";
+import type { GithubIssueContextRequest, MentionableThreadId } from "@octant/contracts";
 import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/contracts/code";
 
 export const CODE_DELIVERY_OUTCOME_LABELS: Record<CodeDeliveryOutcomeKind, string> = {
@@ -113,6 +113,7 @@ export interface CodeComposerAdapterProps {
    * Host, Octant Project, and GitHub repository stay distinct visible selections.
    */
   readonly githubControl?: ReactNode;
+  readonly createFromControl?: ReactNode;
   /** Optional multi-model pool control slot rendered in the composer bar. */
   readonly poolControl?: ReactNode;
   /**
@@ -157,6 +158,7 @@ export interface CodeComposerSubmitInput {
   };
   readonly images?: ReadonlyArray<File>;
   readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
+  readonly issueContext?: GithubIssueContextRequest;
 }
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
@@ -580,6 +582,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     </span>
                   ) : null}
                   {props.githubControl}
+                  {props.createFromControl}
                   {props.projectId === undefined ? null : (
                     <span className="code-composer-adapter__context-item">
                       <OctantNativeSelect

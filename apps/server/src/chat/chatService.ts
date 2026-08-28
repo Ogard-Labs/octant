@@ -66,6 +66,20 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
+import {
+  issueContextFailureCategory,
+  prepareOptionalIssueContext,
+  type GithubIssueContextService,
+} from "../github/githubIssueContextService";
+
+type GithubIssueContextPort = Pick<
+  GithubIssueContextService,
+  | "prepare"
+  | "bindCreatedThread"
+  | "peekFramedForFirstTurn"
+  | "consumeFramedForFirstTurn"
+  | "takeFramedForFirstTurn"
+>;
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
@@ -483,6 +497,7 @@ export interface ChatServiceOptions {
    * is always empty and `supportedCapabilities`/`costRank` are not yet
    * wired to real catalogs or accounting.
    */
+  readonly issueContext?: GithubIssueContextPort;
   readonly gatherMultiModelRuntimeFacts?: (input: {
     readonly pool: MultiModelPool;
     readonly mode: OctantMode;
@@ -580,6 +595,7 @@ export class ChatService {
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
   readonly #resolveThreadMentionContext?: ChatServiceOptions["resolveThreadMentionContext"];
+  readonly #issueContext?: GithubIssueContextPort;
   readonly #reviewedModelManifest?: ReviewedModelManifest;
   readonly #activeAttempts = new Map<string, AbortController>();
   readonly #activeThreadExecutions = new Set<string>();
@@ -628,6 +644,9 @@ export class ChatService {
     }
     if (options.resolveThreadMentionContext !== undefined) {
       this.#resolveThreadMentionContext = options.resolveThreadMentionContext;
+    }
+    if (options.issueContext !== undefined) {
+      this.#issueContext = options.issueContext;
     }
     this.#turnRunner = new ChatTurnRunner({
       capacityScheduler: options.capacityScheduler,
@@ -1326,6 +1345,17 @@ export class ChatService {
     if (command.projectId !== undefined) {
       this.#assertActiveChatProject(command.projectId);
     }
+    const preparedIssue = await prepareOptionalIssueContext(
+      this.#issueContext,
+      command.issueContext,
+      new AbortController().signal,
+    );
+    if (preparedIssue.status === "refused") {
+      throw new ChatServiceError({
+        category: issueContextFailureCategory(preparedIssue.reason),
+        message: preparedIssue.message,
+      });
+    }
     const settings = this.#requireChatSettings();
     const timestamp = decodeTimestamp(this.#clock());
     const thread = createChatThread({
@@ -1345,6 +1375,17 @@ export class ChatService {
       expectedVersion: 0,
       events: [this.#pending("chat.thread-created@1", { kind: "thread-created", thread })],
     });
+    if (preparedIssue.status === "ready" && command.issueContext !== undefined) {
+      try {
+        this.#issueContext?.bindCreatedThread({
+          threadId: String(thread.id),
+          framed: preparedIssue.framed,
+          request: command.issueContext,
+        });
+      } catch {
+        // The thread is already journaled; taint recording must not invert create.
+      }
+    }
     return { kind: "thread-created", thread };
   }
 
@@ -3553,6 +3594,28 @@ export class ChatService {
         { kind: "user-message", text: mention.text },
       ),
     );
+    const priorTurns = this.#persistence.readChatThreadView(thread.id)?.turns ?? [];
+    const stillFirstTurn = priorTurns.every((turn) => turn.sequence === 1);
+    if (!stillFirstTurn) this.#issueContext?.consumeFramedForFirstTurn(String(thread.id));
+    const issueContextFramed = stillFirstTurn
+      ? this.#issueContext?.peekFramedForFirstTurn(String(thread.id))
+      : undefined;
+    const issueContextEntries =
+      issueContextFramed === undefined
+        ? []
+        : [
+            contextEntry(
+              this.#contextEntry(
+                thread,
+                "workspace-context",
+                issueContextFramed.text,
+                Math.max(16, Math.ceil(issueContextFramed.text.length / 4)),
+                "required",
+                { kind: "message", referenceId: `github-issue:${thread.id}` },
+              ),
+              { kind: "user-message", text: issueContextFramed.text },
+            ),
+          ];
     const historicalAttachmentEntries = (thread.handoffWarning?.omittedAttachments ?? []).map(
       (attachment) =>
         this.#contextEntry(
@@ -3604,6 +3667,7 @@ export class ChatService {
         ),
       ...sideChatSourceEntries,
       ...threadMentionEntries,
+      ...issueContextEntries,
       ...attachmentEntries,
       ...previewSelectionEntries,
       ...canvasSelectionEntries,

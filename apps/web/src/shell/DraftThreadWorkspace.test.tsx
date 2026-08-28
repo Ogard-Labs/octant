@@ -570,7 +570,11 @@ describe("DraftThreadWorkspace", () => {
   const GITHUB_RECEIPT = "R".repeat(43);
   const GITHUB_DIGEST = "a".repeat(64);
 
-  function makeGithubClient(): GithubClient {
+  function makeGithubClient(
+    overrides: {
+      readonly snapshot?: import("@octant/contracts").GithubAuthenticationSnapshot;
+    } = {},
+  ): GithubClient {
     const page: GithubCatalogueReadResponse = {
       kind: "repositories",
       page: {
@@ -592,6 +596,7 @@ describe("DraftThreadWorkspace", () => {
     } as GithubCatalogueReadResponse;
     return {
       authenticationSnapshot: vi.fn(async () => {
+        if (overrides.snapshot !== undefined) return overrides.snapshot;
         throw new Error("not used");
       }),
       executeAuthenticationCommand: vi.fn(async () => {
@@ -706,6 +711,58 @@ describe("DraftThreadWorkspace", () => {
     // draft prompt survives the whole onboarding round trip.
     expect(screen.getByRole("button", { name: "Project: atlas-docs" })).toBeVisible();
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("Keep this draft");
+  });
+
+  it("shows the Create from Issues tab when issues-read is available", async () => {
+    const user = userEvent.setup();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        githubClient={makeGithubClient({
+          snapshot: {
+            state: "ready",
+            account: { login: "octocat", gitProtocol: "https", scopes: ["repo"] },
+            capabilities: [
+              { kind: "repository-catalogue", available: true },
+              { kind: "issues-read", available: true },
+              { kind: "pull-requests-read", available: true },
+              { kind: "projects-read", available: true },
+            ],
+          },
+        })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Create from…" }));
+    expect(screen.getByRole("tab", { name: "Issues" })).toBeVisible();
+  });
+
+  it("hides Create from when the GitHub plugin is disabled", async () => {
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        githubClient={makeGithubClient({
+          snapshot: {
+            state: "ready",
+            account: { login: "octocat", gitProtocol: "https", scopes: ["repo"] },
+            capabilities: [{ kind: "issues-read", available: true }],
+          },
+        })}
+        githubPluginEnabled={false}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Create from…" })).toBeNull();
+  });
+
+  it("hides Create from when issues-read is unavailable", async () => {
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        githubClient={makeGithubClient({
+          snapshot: { state: "unauthorized", capabilities: [] },
+        })}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Create from…" })).toBeNull());
   });
 
   it("fails the GitHub flow closed while an existing Project fixes the repository", async () => {

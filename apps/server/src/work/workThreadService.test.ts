@@ -79,6 +79,79 @@ describe("WorkThreadService", () => {
     );
   });
 
+  it("refuses to create a thread when promised GitHub issue context cannot be loaded", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      issueContext: {
+        prepare: vi.fn(async () => ({
+          status: "refused" as const,
+          reason: "unauthorized" as const,
+          message: "The selected GitHub issue could not be loaded. The thread was not created.",
+        })),
+        bindCreatedThread: vi.fn(),
+        peekFramedForFirstTurn: vi.fn(),
+        consumeFramedForFirstTurn: vi.fn(),
+        takeFramedForFirstTurn: vi.fn(),
+      },
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+        issueContext: { owner: "octant", name: "octant", number: 7 },
+      }),
+    ).rejects.toEqual(
+      new WorkThreadServiceError({
+        category: "unauthorized",
+        message: "The selected GitHub issue could not be loaded. The thread was not created.",
+      }),
+    );
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("still creates a thread when recording issue-context taint throws", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      issueContext: {
+        prepare: vi.fn(async () => ({
+          status: "ready" as const,
+          framed: {
+            section: "workspace-context" as const,
+            text: "framed",
+          },
+        })),
+        bindCreatedThread: vi.fn(() => {
+          throw new Error("taint journal failed");
+        }),
+        peekFramedForFirstTurn: vi.fn(),
+        consumeFramedForFirstTurn: vi.fn(),
+        takeFramedForFirstTurn: vi.fn(),
+      },
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+        issueContext: { owner: "octant", name: "octant", number: 7 },
+      }),
+    ).resolves.toEqual({ kind: "thread-created", thread: thread() });
+    expect(fixture.persistence.journal.append).toHaveBeenCalled();
+  });
+
   it("requires an enabled provider instance and active Work Project", async () => {
     const fixture = serviceFixture({
       threads: [],
@@ -686,6 +759,7 @@ function serviceFixture(
     readonly probeProvider?: WorkThreadServiceDependencies["probeProvider"];
     readonly project?: Project;
     readonly events?: ReadonlyArray<EventEnvelope>;
+    readonly issueContext?: WorkThreadServiceDependencies["issueContext"];
   } = {},
 ) {
   const projection = new WorkThreadProjection();
@@ -759,6 +833,7 @@ function serviceFixture(
     workingDirectories,
     onWorkingDirectoryChanged,
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
+    ...(options.issueContext === undefined ? {} : { issueContext: options.issueContext }),
   });
   return {
     service,
