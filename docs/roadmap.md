@@ -125,10 +125,12 @@ starts.
   reachability need; local-first remote access comes first. Research:
   [remote-path-sufficiency.md](remote-path-sufficiency.md).
 - **Connector / OAuth marketplace** — OAuth, revocation, publisher trust, and
-  data boundaries are much larger than plugin distribution.
+  data boundaries are much larger than plugin distribution. Start gates:
+  [release-boundary holds](release-boundary-holds.md#connector--oauth-marketplace).
 - **Full LSP / extension host / debugger** — Monaco and explicit external-editor
   handoff remain primary; a full IDE would run as a separately launched
-  companion.
+  companion. Start gates:
+  [release-boundary holds](release-boundary-holds.md#full-lsp--extension-host--debugger).
 - **Apple devices and distribution** — physical devices, provisioning,
   TestFlight, and App Store submission on top of the Simulator loop.
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
