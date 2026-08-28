@@ -29,67 +29,76 @@ export interface TrackerReferenceClientPortsInput {
 export function createTrackerReferenceClientPorts(
   input: TrackerReferenceClientPortsInput,
 ): TrackerReferenceResolvePorts {
-  const ports: {
-    github?: TrackerReferenceResolvePorts["github"];
-    linear?: TrackerReferenceResolvePorts["linear"];
-  } = {};
+  const githubInput = input.github;
+  const linearInput = input.linear;
 
-  if (input.github !== undefined) {
-    const { available, client } = input.github;
-    ports.github = {
-      available,
-      readIssue: async ({ owner, name, number }) => {
-        const response = await client.readCatalogue({
-          kind: "issue",
-          owner,
-          name,
-          number,
-        });
-        if (response.kind === "unavailable") {
-          return {
-            kind: "unavailable",
-            reason: githubUnavailableReason(response.reason),
-            ...(response.remediation === undefined ? {} : { remediation: response.remediation }),
-            ...(response.retryAfterSeconds === undefined
-              ? {}
-              : { retryAfterSeconds: response.retryAfterSeconds }),
-          };
-        }
-        if (response.kind !== "issue") {
-          return { kind: "unavailable", reason: "unavailable" };
-        }
-        return {
-          kind: "resolved",
-          title: response.issue.title,
-          url: response.issue.url,
-          state: response.issue.state,
-        };
-      },
-    };
-  }
-
-  if (input.linear !== undefined) {
-    const { available, client } = input.linear;
-    ports.linear = {
-      available,
-      getIssue: async (key) => {
-        try {
-          const detail = await client.getIssue({ id: key });
-          return {
-            kind: "resolved",
-            title: detail.title,
-            url: detail.url,
-            state: linearStateToChipState(detail.state.type),
-          };
-        } catch (error) {
-          if (error instanceof IntegrationClientFailure) {
-            return linearFailureToLookup(error.message);
-          }
-          return { kind: "unavailable", reason: "unavailable" };
-        }
-      },
-    };
-  }
-
-  return ports;
+  return {
+    ...(githubInput === undefined
+      ? {}
+      : {
+          github: {
+            available: githubInput.available,
+            readIssue: async ({
+              owner,
+              name,
+              number,
+            }: {
+              readonly owner: string;
+              readonly name: string;
+              readonly number: number;
+            }) => {
+              const response = await githubInput.client.readCatalogue({
+                kind: "issue",
+                owner,
+                name,
+                number,
+              });
+              if (response.kind === "unavailable") {
+                return {
+                  kind: "unavailable" as const,
+                  reason: githubUnavailableReason(response.reason),
+                  ...(response.remediation === undefined
+                    ? {}
+                    : { remediation: response.remediation }),
+                  ...(response.retryAfterSeconds === undefined
+                    ? {}
+                    : { retryAfterSeconds: response.retryAfterSeconds }),
+                };
+              }
+              if (response.kind !== "issue") {
+                return { kind: "unavailable" as const, reason: "unavailable" as const };
+              }
+              return {
+                kind: "resolved" as const,
+                title: response.issue.title,
+                url: response.issue.url,
+                state: response.issue.state,
+              };
+            },
+          },
+        }),
+    ...(linearInput === undefined
+      ? {}
+      : {
+          linear: {
+            available: linearInput.available,
+            getIssue: async (key: string) => {
+              try {
+                const detail = await linearInput.client.getIssue({ id: key });
+                return {
+                  kind: "resolved" as const,
+                  title: detail.title,
+                  url: detail.url,
+                  state: linearStateToChipState(detail.state.type),
+                };
+              } catch (error) {
+                if (error instanceof IntegrationClientFailure) {
+                  return linearFailureToLookup(error.message);
+                }
+                return { kind: "unavailable" as const, reason: "unavailable" as const };
+              }
+            },
+          },
+        }),
+  };
 }
