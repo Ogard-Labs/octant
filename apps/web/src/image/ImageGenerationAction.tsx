@@ -27,7 +27,7 @@ export function ImageGenerationAction(props: ImageGenerationActionProps) {
   const [job, setJob] = useState<ImageJob | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
-  const ready = props.profiles.length > 0;
+  const ready = props.client !== undefined && props.profiles.length > 0;
   const threadAvailable = props.scopeId !== undefined;
   const mountedRef = useRef(true);
   const pollGenerationRef = useRef(0);
@@ -98,6 +98,7 @@ export function ImageGenerationAction(props: ImageGenerationActionProps) {
 
   async function cancel() {
     if (props.client === undefined || job === undefined) return;
+    pollGenerationRef.current += 1;
     try {
       setJob(await props.client.cancel(job.id));
     } catch (error) {

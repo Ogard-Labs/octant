@@ -2292,6 +2292,17 @@ describe("ChatWorkspace", () => {
     expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
   });
 
+  it("does not show Create image when the image client is missing", () => {
+    render(
+      <ChatWorkspace
+        controller={controllerFixture()}
+        onOpenSettings={vi.fn()}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
+  });
+
   it("does not attach a generated image after the thread has changed", async () => {
     const user = userEvent.setup();
     let finishUpload!: () => void;

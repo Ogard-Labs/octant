@@ -1,6 +1,7 @@
 import type {
   WorkFileStat,
   WorkFilesystemPort,
+  WorkOpenDirectory,
   WorkOpenFile,
   WorkOpenWriteFile,
 } from "./workFilesystemPort";
@@ -33,11 +34,19 @@ interface FileNode {
 export function workFilesystemFixture(root = "/work"): WorkFilesystemFixture {
   const files = new Map<string, FileNode>();
   const dirs = new Set<string>([root]);
+  const dirInodes = new Map<string, string>();
   const symlinks = new Map<string, string>();
   let nextInode = 0;
   const mintInode = (): string => {
     nextInode += 1;
     return String(nextInode);
+  };
+  const inodeForDir = (path: string): string => {
+    const existing = dirInodes.get(path);
+    if (existing !== undefined) return existing;
+    const assigned = mintInode();
+    dirInodes.set(path, assigned);
+    return assigned;
   };
   const resolve = (path: string): string => symlinks.get(path) ?? path;
   const writeHandle = (node: FileNode): WorkOpenWriteFile => ({
@@ -49,6 +58,48 @@ export function workFilesystemFixture(root = "/work"): WorkFilesystemFixture {
     }),
     write: async (bytes) => {
       node.bytes = bytes;
+    },
+    close: async () => {},
+  });
+  const childPath = (parent: string, name: string): string => {
+    if (
+      name.length === 0 ||
+      name === "." ||
+      name === ".." ||
+      name.includes("/") ||
+      name.includes("\0")
+    ) {
+      throw new Error(`invalid directory entry ${name}`);
+    }
+    return parent === "/" ? `/${name}` : `${parent}/${name}`;
+  };
+  const directoryHandle = (captured: string, inode: string): WorkOpenDirectory => ({
+    stat: async () => ({
+      isDirectory: true,
+      device: "1",
+      inode,
+    }),
+    openDirectory: async (name) => {
+      const child = childPath(captured, name);
+      if (symlinks.has(child)) throw new Error(`ELOOP ${child}`);
+      if (!dirs.has(child)) throw new Error(`no dir at ${child}`);
+      return directoryHandle(child, inodeForDir(child));
+    },
+    mkdir: async (name) => {
+      dirs.add(childPath(captured, name));
+    },
+    openWriteFile: async (name, options) => {
+      const child = childPath(captured, name);
+      if (symlinks.has(child)) throw new Error(`ELOOP ${child}`);
+      if (options.exclusiveCreate) {
+        if (files.has(child) || dirs.has(child)) throw new Error(`EEXIST ${child}`);
+        const node: FileNode = { bytes: new Uint8Array(), inode: mintInode() };
+        files.set(child, node);
+        return writeHandle(node);
+      }
+      const opened = files.get(child);
+      if (opened === undefined) throw new Error(`no file at ${child}`);
+      return writeHandle(opened);
     },
     close: async () => {},
   });
@@ -71,7 +122,7 @@ export function workFilesystemFixture(root = "/work"): WorkFilesystemFixture {
         isSymbolicLink: false,
         size: 0,
         device: "1",
-        inode: "0",
+        inode: inodeForDir(path),
       };
     }
     const node = files.get(path);
@@ -130,6 +181,11 @@ export function workFilesystemFixture(root = "/work"): WorkFilesystemFixture {
       const opened = files.get(path);
       if (opened === undefined) throw new Error(`no file at ${path}`);
       return writeHandle(opened);
+    },
+    openDirectory: async (path): Promise<WorkOpenDirectory> => {
+      if (symlinks.has(path)) throw new Error(`ELOOP ${path}`);
+      if (!dirs.has(path)) throw new Error(`no dir at ${path}`);
+      return directoryHandle(path, inodeForDir(path));
     },
     readFile: async (path) => {
       const node = files.get(resolve(path));

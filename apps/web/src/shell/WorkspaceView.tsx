@@ -875,14 +875,13 @@ function renderNonCodeTab(
           void props.onClosePane(paneId);
         }}
         {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
-        {...(props.providerController.snapshot === undefined
+        {...(props.providerController.snapshot === undefined ||
+        props.imageGenerationClient === undefined
           ? {}
           : {
               imageGeneration: {
                 profiles: listEligibleImageProfiles(props.providerController.snapshot.instances),
-                ...(props.imageGenerationClient === undefined
-                  ? {}
-                  : { client: props.imageGenerationClient }),
+                client: props.imageGenerationClient,
                 ...(openProviderSettings === undefined
                   ? {}
                   : { onOpenSettings: openProviderSettings }),

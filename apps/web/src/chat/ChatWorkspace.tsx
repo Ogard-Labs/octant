@@ -818,15 +818,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         attachment={attachmentCapability}
         attachmentBusy={uploadingMessage !== undefined || attachmentStatus.kind === "removing"}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-        {...(props.providerSnapshot === undefined
+        {...(props.providerSnapshot === undefined || props.imageGenerationClient === undefined
           ? {}
           : {
               imageGeneration: {
                 profiles: listEligibleImageProfiles(props.providerSnapshot.instances),
                 scopeId: decodeImageGenerationScopeId(String(thread.id)),
-                ...(props.imageGenerationClient === undefined
-                  ? {}
-                  : { client: props.imageGenerationClient }),
+                client: props.imageGenerationClient,
                 ...(props.onOpenSettings === undefined
                   ? {}
                   : { onOpenSettings: props.onOpenSettings }),

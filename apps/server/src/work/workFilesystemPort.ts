@@ -10,6 +10,7 @@ import {
   mkdir,
   unlink,
   rename,
+  type FileHandle,
 } from "node:fs/promises";
 
 /**
@@ -75,6 +76,29 @@ export interface WorkOpenWriteFile {
 }
 
 /**
+ * One open directory, held so child creates stay bound to this object.
+ *
+ * `O_NOFOLLOW` on a path-based create only refuses a symlinked final name. A
+ * parent swapped for an escaping symlink after resolveForCreate would still be
+ * followed. Child opens go through this handle so that swap cannot redirect
+ * the write.
+ */
+export interface WorkOpenDirectory {
+  stat(): Promise<{
+    readonly isDirectory: boolean;
+    readonly device: string;
+    readonly inode: string;
+  }>;
+  openDirectory(name: string): Promise<WorkOpenDirectory>;
+  mkdir(name: string): Promise<void>;
+  openWriteFile(
+    name: string,
+    options: { readonly exclusiveCreate: boolean },
+  ): Promise<WorkOpenWriteFile>;
+  close(): Promise<void>;
+}
+
+/**
  * Testable filesystem port for Work resolution and mutation. The live
  * implementation delegates to `node:fs/promises`; tests supply an in-memory
  * implementation so confinement, symlink, moved-root, and cancellation paths
@@ -101,6 +125,7 @@ export interface WorkFilesystemPort {
     path: string,
     options: { readonly exclusiveCreate: boolean },
   ): Promise<WorkOpenWriteFile>;
+  openDirectory(path: string): Promise<WorkOpenDirectory>;
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, bytes: Uint8Array): Promise<void>;
   mkdir(path: string, options: { readonly recursive: true }): Promise<void>;
@@ -159,39 +184,11 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
       close: () => handle.close(),
     };
   },
-  openWriteFile: async (path, options) => {
-    const flags = options.exclusiveCreate
-      ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW
-      : constants.O_WRONLY | constants.O_NOFOLLOW;
-    const handle = await open(path, flags, 0o600);
-    return {
-      stat: async () => {
-        const info = await handle.stat({ bigint: true });
-        return {
-          isFile: info.isFile(),
-          size: Number(info.size),
-          device: String(info.dev),
-          inode: String(info.ino),
-        };
-      },
-      write: async (bytes) => {
-        await handle.truncate(0);
-        const buffer = Buffer.from(bytes);
-        let offset = 0;
-        while (offset < buffer.byteLength) {
-          const { bytesWritten } = await handle.write(
-            buffer,
-            offset,
-            buffer.byteLength - offset,
-            offset,
-          );
-          if (bytesWritten === 0) throw new Error("short write");
-          offset += bytesWritten;
-        }
-      },
-      close: () => handle.close(),
-    };
-  },
+  openWriteFile: async (path, options) => openLiveWriteFile(path, options),
+  openDirectory: async (path) =>
+    liveDirectory(
+      await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW),
+    ),
   readFile: async (path) => await readFile(path),
   writeFile: async (path, bytes) => {
     await writeFile(path, bytes);
@@ -202,3 +199,85 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
   unlink,
   rename,
 };
+
+function confinedEntryName(name: string): string {
+  if (
+    name.length === 0 ||
+    name === "." ||
+    name === ".." ||
+    name.includes("/") ||
+    name.includes("\0")
+  ) {
+    throw new Error(`invalid directory entry ${name}`);
+  }
+  return name;
+}
+
+function childFromDirectoryFd(handle: FileHandle, name: string): string {
+  const prefix =
+    process.platform === "linux" ? `/proc/self/fd/${handle.fd}` : `/dev/fd/${handle.fd}`;
+  return `${prefix}/${confinedEntryName(name)}`;
+}
+
+function liveDirectory(handle: FileHandle): WorkOpenDirectory {
+  return {
+    stat: async () => {
+      const info = await handle.stat({ bigint: true });
+      return {
+        isDirectory: info.isDirectory(),
+        device: String(info.dev),
+        inode: String(info.ino),
+      };
+    },
+    openDirectory: async (name) =>
+      liveDirectory(
+        await open(
+          childFromDirectoryFd(handle, name),
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        ),
+      ),
+    mkdir: async (name) => {
+      await mkdir(childFromDirectoryFd(handle, name));
+    },
+    openWriteFile: async (name, options) =>
+      openLiveWriteFile(childFromDirectoryFd(handle, name), options),
+    close: () => handle.close(),
+  };
+}
+
+async function openLiveWriteFile(
+  path: string,
+  options: { readonly exclusiveCreate: boolean },
+): Promise<WorkOpenWriteFile> {
+  const flags = options.exclusiveCreate
+    ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW
+    : constants.O_WRONLY | constants.O_NOFOLLOW;
+  const handle = await open(path, flags, 0o600);
+  return {
+    stat: async () => {
+      const info = await handle.stat({ bigint: true });
+      return {
+        isFile: info.isFile(),
+        size: Number(info.size),
+        device: String(info.dev),
+        inode: String(info.ino),
+      };
+    },
+    write: async (bytes) => {
+      await handle.truncate(0);
+      const buffer = Buffer.from(bytes);
+      let offset = 0;
+      while (offset < buffer.byteLength) {
+        const { bytesWritten } = await handle.write(
+          buffer,
+          offset,
+          buffer.byteLength - offset,
+          offset,
+        );
+        if (bytesWritten === 0) throw new Error("short write");
+        offset += bytesWritten;
+      }
+    },
+    close: () => handle.close(),
+  };
+}

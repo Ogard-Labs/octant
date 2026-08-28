@@ -50,6 +50,9 @@ export type WorkResolutionOutcome =
       readonly status: "resolved-for-create";
       readonly absolutePath: string;
       readonly relativePath: string;
+      readonly parentAbsolute: string;
+      readonly parentIdentity: WorkFileIdentity;
+      readonly remaining: ReadonlyArray<string>;
     }
   | { readonly status: "revoked-root" }
   | { readonly status: "moved-root" }
@@ -145,24 +148,22 @@ export class WorkResolutionService {
       const contained = await this.#containExisting(input.binding, parentAbsolute);
       if (contained.status === "ok") {
         if (!contained.isDirectory) return { status: "unavailable" };
-        const missing = parts.slice(depth);
+        const remaining = parts.slice(depth);
+        if (remaining.length === 0) return { status: "unavailable" };
         return {
           status: "resolved-for-create",
-          absolutePath: missing.reduce(
+          absolutePath: remaining.reduce(
             (path, segment) => joinPath(path, segment),
             contained.canonical,
           ),
           relativePath,
+          parentAbsolute: contained.canonical,
+          parentIdentity: { device: contained.stat.device, inode: contained.stat.inode },
+          remaining,
         };
       }
       if (contained.status !== "unavailable") return { status: contained.status };
-      if (depth === 0) {
-        return {
-          status: "resolved-for-create",
-          absolutePath: joinPath(input.binding.canonicalRoot, relativePath),
-          relativePath,
-        };
-      }
+      if (depth === 0) return { status: "unavailable" };
       depth -= 1;
     }
   }

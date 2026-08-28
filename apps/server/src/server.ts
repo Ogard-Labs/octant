@@ -156,6 +156,7 @@ import { GeneratedImageStore } from "./image/generatedImageStore";
 import { ImageJobService } from "./image/imageJobService";
 import { createImageAgentTools } from "./image/imageAgentTools";
 import { createImageRouteHandler } from "./image/imageRoutes";
+import { chatImageScopeAllowedForWindow } from "./image/imageScopeAuthority";
 import { writeConfinedWorkFile } from "./work/workConfinedWrite";
 import { CodeContentStore } from "./code/codeContentStore";
 import { CodeEvidenceStore } from "./code/codeEvidenceStore";
@@ -4530,7 +4531,11 @@ export function startOctantServer(
         try {
           if (threadKind === "chat-thread") {
             const view = chatService.read(decodeChatThreadId(threadId));
-            return view !== undefined && view.thread.lifecycle !== "deleted";
+            const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+            return chatImageScopeAllowedForWindow({
+              chatContext: workspace?.contextByMode.chat,
+              thread: view?.thread,
+            });
           }
           if (threadKind === "work-thread") {
             const bootstrap = await workThreadService.bootstrap(windowId);
@@ -4589,6 +4594,11 @@ export function startOctantServer(
               filesystem: liveWorkFilesystem,
               canonicalPath: resolution.absolutePath,
               allowCreate: true,
+              parent: {
+                absolutePath: resolution.parentAbsolute,
+                identity: resolution.parentIdentity,
+                remaining: resolution.remaining,
+              },
               bytes: input.bytes,
             });
             if (!written) {
@@ -4631,6 +4641,11 @@ export function startOctantServer(
             filesystem: liveWorkFilesystem,
             canonicalPath: resolution.absolutePath,
             allowCreate: true,
+            parent: {
+              absolutePath: resolution.parentAbsolute,
+              identity: resolution.parentIdentity,
+              remaining: resolution.remaining,
+            },
             bytes: input.bytes,
           });
           if (!written) {

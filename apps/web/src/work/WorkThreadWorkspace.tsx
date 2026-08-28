@@ -803,11 +803,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     >
                       <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
                     </OctantButton>
-                    {props.imageGenerationProfiles === undefined ? null : (
+                    {props.imageGenerationClient === undefined ||
+                    props.imageGenerationProfiles === undefined ? null : (
                       <ImageGenerationAction
-                        {...(props.imageGenerationClient === undefined
-                          ? {}
-                          : { client: props.imageGenerationClient })}
+                        client={props.imageGenerationClient}
                         {...(props.onOpenSettings === undefined
                           ? {}
                           : { onOpenSettings: props.onOpenSettings })}

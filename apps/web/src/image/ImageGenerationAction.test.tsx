@@ -35,6 +35,59 @@ function queuedJob(): ImageJob {
 }
 
 describe("ImageGenerationAction", () => {
+  it("does not offer an active Create image action without a client", () => {
+    render(
+      <ImageGenerationAction
+        profiles={[profile()]}
+        scopeId={scopeId as never}
+        threadKind="chat-thread"
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /^Create image$/ })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Create image unavailable. Open Settings to add an image profile.",
+      }),
+    ).toBeDisabled();
+  });
+
+  it("does not restore a stale poll after cancel starts", async () => {
+    const user = userEvent.setup();
+    let finishGet!: (job: ImageJob) => void;
+    const get = vi.fn(
+      () =>
+        new Promise<ImageJob>((resolve) => {
+          finishGet = resolve;
+        }),
+    );
+    const cancel = vi.fn(async () => ({ ...queuedJob(), status: "cancelled" as const }));
+    const client = {
+      enqueue: vi.fn(async () => queuedJob()),
+      get,
+      cancel,
+    } as unknown as ImageGenerationClient;
+    render(
+      <ImageGenerationAction
+        client={client}
+        profiles={[profile()]}
+        scopeId={scopeId as never}
+        threadKind="chat-thread"
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Create image" }));
+    await user.type(screen.getByLabelText("Image prompt"), "a red cube");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(client.enqueue).toHaveBeenCalled());
+    await waitFor(() => expect(get).toHaveBeenCalled(), { timeout: 2000 });
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByText("Cancelled.")).toBeVisible();
+    finishGet({ ...queuedJob(), status: "running" });
+    await Promise.resolve();
+    expect(screen.getByText("Cancelled.")).toBeVisible();
+    expect(screen.queryByText("Generating…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Queued…")).not.toBeInTheDocument();
+  });
+
   it("stops polling after unmount", async () => {
     const user = userEvent.setup();
     const get = vi.fn(async () => queuedJob());
