@@ -44,9 +44,9 @@ attacker-authored issue text become instructions violates the product's core sec
   discovery.
 - **GitHub and network:** return attacker-influenced names, descriptions, branches, API errors,
   pagination, clone content, redirects, and transport failures.
-- **Public GitHub issue authors:** anyone who can file or comment on a repository the principal
-  can read. Their text is untrusted by definition and may enter Octant when the user creates a
-  thread from that issue.
+- **GitHub issue authors:** anyone who can file or comment on an accessible repository the
+  principal can read. Their text is untrusted by definition and may enter Octant when the user
+  creates a thread from that issue.
 - **Repository content:** is untrusted after clone. Git configuration, attributes, hooks, submodules,
   filenames, symlinks, and working-tree content may be malicious.
 - **Local attacker:** may race filesystem paths or replace directories when they already possess
@@ -155,7 +155,7 @@ executable actions require their normal approvals.
 
 ### Prompt injection via issue bodies and comments
 
-**Stories:** Anyone can author an issue or comment on a public repository, so create-from-issue
+**Stories:** Anyone can author an issue or comment on an accessible repository, so create-from-issue
 ingests attacker-authored text by design. A body or comment that looks like a system instruction,
 approval grant, or tool invocation tries to become commands; a token-shaped string tries to persist
 in context; a huge body tries to exhaust the first-turn budget.

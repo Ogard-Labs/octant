@@ -236,14 +236,15 @@ cache. It stores only exact PR identities already produced by Code operations,
 so a restart can show an identity as stale and unknown until the next explicit
 refresh.
 
-**Approved GitHub issue browser, not yet implemented.** When the first-party
-GitHub plugin is effective and the authentication snapshot reports
-`issues-read` available, it contributes a second `sidebar.destination`
-(`github-issues`) that opens a host-scoped, read-only issue browser. Catalogue
-reads stay on the existing `githubCatalogue` union over
-`/api/github/catalogue/reads`: `kind: "issues"` gains optional server-composed
-search, and a new `kind: "issue"` returns a bounded detail. Create-from-issue
-attaches only `{ owner, name, number }` to the draft; the server reauthorizes
+**Approved GitHub issue browser, not yet implemented.** The first-party GitHub
+plugin contributes a second `sidebar.destination` (`github-issues`) that opens
+a host-scoped, read-only issue browser. The sidebar row is shown only when the
+contribution is present, its action is wired, and the authentication snapshot
+reports `issues-read` available. Catalogue reads stay on the existing
+`githubCatalogue` union over `/api/github/catalogue/reads`: `kind: "issues"`
+gains optional server-composed search, and a new `kind: "issue"` returns a
+bounded detail. Create-from-issue attaches only `{ owner, name, number }` to
+the draft; the server reauthorizes
 `issues-read`, frames redacted issue text through
 `apps/server/src/context/externalContentFraming.ts`, and appends
 `thread.external-content-ingested@1`. The resulting thread is ordinary Chat,
