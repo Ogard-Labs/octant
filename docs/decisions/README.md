@@ -67,7 +67,8 @@ distilled successor of the earlier long-form design specifications.
 | [0057](0057-linux-confinement-bubblewrap.md)                  | Linux confinement uses Bubblewrap as a scoped exception to the Seatbelt-only implementation | Accepted           |
 | [0058](0058-cross-platform-desktop.md)                        | One desktop app across macOS, Linux, and Windows                                            | Proposed           |
 | [0059](0059-multi-host-federation.md)                         | Multi-host federation completes without new host authority                                  | Proposed           |
-| [0060](0060-agent-to-agent-messaging.md)                      | Agent-to-agent messaging authority                                                          | Proposed           |
+| [0060](0060-usage-spend-ceilings.md)                          | Usage spend ceilings                                                                        | Proposed           |
+| [0061](0061-agent-to-agent-messaging.md)                      | Agent-to-agent messaging authority                                                          | Proposed           |
 
 ## Adding an ADR
 

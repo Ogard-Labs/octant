@@ -43,12 +43,13 @@ Read the record that owns your change before editing, not all of them:
 | Provider drivers, capabilities, registry, harness   | `docs/decisions/0005`–`docs/decisions/0007`, `docs/decisions/0055`  |
 | Image generation jobs, adapters, and artifacts      | `docs/decisions/0055`, `docs/decisions/0056`                        |
 | Context limits, capacity, scheduling                | `docs/decisions/0008`                                               |
+| Usage spend ceilings (Project / thread)             | `docs/decisions/0059`                                               |
 | Sandbox, approvals, Plan mode, access postures      | `docs/decisions/0009`, `docs/decisions/0018`, `docs/decisions/0057` |
 | File preview and canvas artifacts                   | `docs/decisions/0010`                                               |
 | Canvas boards, comments, and layout revisions       | `docs/decisions/0052`                                               |
 | Extensions, skills, plugin host                     | `docs/decisions/0011`, `docs/decisions/0001`                        |
 | Subagents and agent runs                            | `docs/decisions/0012`                                               |
-| Agent-to-agent messaging authority                  | `docs/decisions/0060`                                               |
+| Agent-to-agent messaging authority                  | `docs/decisions/0061`                                               |
 | Remote clients and mobile                           | `docs/decisions/0013`                                               |
 | Multi-host federation registry and pairing at scale | `docs/decisions/0059`                                               |
 | Collaboration, shared host, git-mediated sharing    | `docs/decisions/0040`                                               |
