@@ -51,6 +51,12 @@ implementation change is authorized.
   admission and the capacity scheduler refuse a turn that would start over a
   hard ceiling. Soft warning thresholds may surface earlier in Usage and
   Environment; they never substitute for the hard refuse.
+- **Hard ceilings use atomic reservation, not a post-hoc sum alone.** Counting
+  only committed `UsageRecord` rows races concurrent admitted turns and under-
+  counts in-flight spend. Admission must reserve remaining capacity for the
+  scoped turn (commit on completion, release on cancel or failure, with a
+  defined retry path). A turn whose remaining reservation cannot cover its
+  declared or observed need is refused before provider side effects.
 - **Unknown spend fails closed for the dimensions that are set.** If a token
   ceiling is set and recent rows are `unavailable` or would leave the total
   unknowable, the host refuses rather than treating missing tokens as zero.
