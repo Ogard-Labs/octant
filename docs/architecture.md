@@ -23,7 +23,7 @@ The design rests on a small set of invariants that every package obeys:
   server marketplace fetches when the person searches or inspects the catalog.
   An in-app changelog, when implemented, rides that update path and bundled
   notes rather than adding a third call
-  ([decisions/0059-in-app-changelog.md](decisions/0059-in-app-changelog.md)).
+  ([decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md)).
 - **The server is the authority.** Every authority check (mode, Project,
   thread, provider, approval, remote principal) runs in `apps/server` before a
   side effect. The renderer and mobile app render what the server says is
