@@ -104,7 +104,7 @@ absolute paths, raw body text, credentials, or provider payloads.
 ## Residual risk
 
 - This document is design-only. Controls are not enforced until contracts,
-  domain policy, and server delivery land under an Accepted 0059.
+  domain policy, and server delivery land under an Accepted 0060.
 - Model-to-model social engineering inside a single already-authorized thread
   remains a residual of ordinary tool use; messaging must not make that worse
   across threads.
