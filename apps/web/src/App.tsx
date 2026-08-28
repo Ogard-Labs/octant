@@ -3266,6 +3266,7 @@ function LaunchedShell(
     deliveryOutcome?: CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
+    issueContext?: import("@octant/contracts").GithubIssueContextRequest,
   ): Promise<boolean | void> {
     setDraftCreating(true);
     setDraftError(undefined);
@@ -3283,9 +3284,10 @@ function LaunchedShell(
           kind: "create-chat-thread",
           title,
           ...(chatDraftProjectId === undefined ? {} : { projectId: chatDraftProjectId }),
+          ...(issueContext === undefined ? {} : { issueContext }),
         });
         if (result?.kind !== "thread-created") {
-          setDraftError("The chat thread could not be created.");
+          setDraftError(chatController.errorMessage ?? "The chat thread could not be created.");
           return;
         }
         let thread = result.thread;
@@ -3471,6 +3473,7 @@ function LaunchedShell(
           hostId: createHostId,
           bindingRevisionId,
           workingDirectory: "." as never,
+          ...(issueContext === undefined ? {} : { issueContext }),
         });
         if (!("kind" in created) || created.kind !== "thread-created") {
           setDraftError("The Work thread could not be created.");
@@ -4563,6 +4566,9 @@ function LaunchedShell(
                     }}
                     onDraftRequestedExecutionPolicyChange={setDraftComposerExecutionPolicy}
                     onDraftCreateThread={handleDraftCreateThread}
+                    githubPluginEnabled={
+                      FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true
+                    }
                     onDraftCreateCodeThread={handleDraftCreateCodeThread}
                     onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}
                     draftCodeExecute={codeController.execute}

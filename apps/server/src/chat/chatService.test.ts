@@ -238,6 +238,7 @@ function openFixture(options?: {
   >;
   readonly contextMaintenanceTimeoutMs?: number;
   readonly contextMaintenanceShutdownTimeoutMs?: number;
+  readonly issueContext?: ConstructorParameters<typeof ChatService>[0]["issueContext"];
 }): {
   readonly dataDirectory: string;
   readonly persistence: PersistenceService;
@@ -559,6 +560,7 @@ function openFixture(options?: {
     ...(options?.gatherMultiModelRuntimeFacts === undefined
       ? {}
       : { gatherMultiModelRuntimeFacts: options.gatherMultiModelRuntimeFacts }),
+    ...(options?.issueContext === undefined ? {} : { issueContext: options.issueContext }),
   });
 
   return {
@@ -975,6 +977,35 @@ describe("ChatService", () => {
     });
 
     expect(created).toMatchObject({ kind: "thread-created", thread: { id: threadId } });
+  });
+
+  it("refuses to create a thread when promised GitHub issue context cannot be loaded", async () => {
+    const { service, persistence } = openFixture({
+      issueContext: {
+        prepare: async () => ({
+          status: "refused" as const,
+          reason: "unauthorized" as const,
+          message: "The selected GitHub issue could not be loaded. The thread was not created.",
+        }),
+        bindCreatedThread: vi.fn(),
+        takeFramedForFirstTurn: vi.fn(),
+      },
+    });
+
+    await expect(
+      service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "From an issue",
+        issueContext: { owner: "octant", name: "octant", number: 7 },
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message: "The selected GitHub issue could not be loaded. The thread was not created.",
+      },
+    });
+    expect(persistence.readChatThreads()).toEqual([]);
   });
 
   it("hides Side Chat sidecar threads from bootstrap and search while keeping them readable", async () => {

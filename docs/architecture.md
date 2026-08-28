@@ -243,15 +243,16 @@ plugin contributes a second `sidebar.destination` (`github-issues`) that opens
 a host-scoped, read-only issue browser. The sidebar row is shown only when the
 contribution is present, its action is wired, and the authentication snapshot
 reports `issues-read` available. Catalogue reads stay on the existing
-`githubCatalogue` union over `/api/github/catalogue/reads`: `kind: "issues"`
-gains optional server-composed search, and a new `kind: "issue"` returns a
-bounded detail. Create-from-issue attaches only `{ owner, name, number }` to
-the draft; the server reauthorizes
-`issues-read`, frames redacted issue text through
+`githubCatalogue` union over `/api/github/catalogue/reads`.
+
+Create-from-issue is implemented. The composer `Create from…` Issues tab
+attaches only `{ owner, name, number }` to the draft. At creation the server
+reauthorizes `issues-read`, frames redacted issue text through
 `apps/server/src/context/externalContentFraming.ts`, and appends
-`thread.external-content-ingested@1`. The resulting thread is ordinary Chat,
-Work, or Code with no GitHub write-back. Disabled GitHub, missing capability,
-and unauthorized or rate-limited states fail closed. See
+`thread.external-content-ingested@1`. Refusal fails creation visibly. The
+resulting thread is ordinary Chat, Work, or Code with no GitHub write-back.
+Disabled GitHub, missing capability, and unauthorized or rate-limited states
+fail closed. See
 [security/github-repository-onboarding-threat-model.md](security/github-repository-onboarding-threat-model.md).
 
 Context usage is a circular used-versus-available meter on

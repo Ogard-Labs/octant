@@ -1339,6 +1339,35 @@ form > .work-composer-adapter__attachments {
   justify-content: flex-start;
 }
 
+.create-from-issue-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.create-from-issue-control__bar,
+.create-from-issue-control__selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.create-from-issue-control__panel,
+.create-from-issue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.create-from-issue__hint {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+}
+
 .draft-thread__error,
 .work-composer-adapter__error {
   margin: 0;

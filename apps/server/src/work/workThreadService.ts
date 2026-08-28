@@ -23,6 +23,16 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { hasWorkToolAuthority } from "@octant/domain";
+import {
+  issueContextFailureCategory,
+  prepareOptionalIssueContext,
+  type GithubIssueContextService,
+} from "../github/githubIssueContextService";
+
+type GithubIssueContextPort = Pick<
+  GithubIssueContextService,
+  "prepare" | "bindCreatedThread" | "takeFramedForFirstTurn"
+>;
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -93,6 +103,7 @@ export interface WorkThreadServiceDependencies {
     readonly projectId: ProjectId;
     readonly threadId: WorkThreadId;
   }) => Promise<void>;
+  readonly issueContext?: GithubIssueContextPort;
 }
 
 export class WorkThreadServiceError extends Error {
@@ -112,6 +123,7 @@ export class WorkThreadService {
   readonly #clock: () => string;
   readonly #workingDirectories: WorkThreadServiceDependencies["workingDirectories"];
   readonly #onWorkingDirectoryChanged: WorkThreadServiceDependencies["onWorkingDirectoryChanged"];
+  readonly #issueContext?: GithubIssueContextPort;
 
   constructor(dependencies: WorkThreadServiceDependencies) {
     this.#persistence = dependencies.persistence;
@@ -122,6 +134,9 @@ export class WorkThreadService {
     this.#clock = dependencies.clock;
     this.#workingDirectories = dependencies.workingDirectories;
     this.#onWorkingDirectoryChanged = dependencies.onWorkingDirectoryChanged;
+    if (dependencies.issueContext !== undefined) {
+      this.#issueContext = dependencies.issueContext;
+    }
   }
 
   async bootstrap(authenticatedWindowId: WindowId): Promise<WorkThreadBootstrap> {
@@ -171,6 +186,17 @@ export class WorkThreadService {
         if (this.#projection.read(command.threadId) !== undefined) {
           throw this.#failure("invalid", "Work thread already exists.");
         }
+        const preparedIssue = await prepareOptionalIssueContext(
+          this.#issueContext,
+          command.issueContext,
+          new AbortController().signal,
+        );
+        if (preparedIssue.status === "refused") {
+          throw this.#failure(
+            issueContextFailureCategory(preparedIssue.reason),
+            preparedIssue.message,
+          );
+        }
         const created = decodeWorkThread({
           id: command.threadId,
           projectId: command.projectId,
@@ -189,6 +215,13 @@ export class WorkThreadService {
           thread: created,
         });
         this.#projection.apply({ kind: "thread-created", thread: created });
+        if (preparedIssue.status === "ready" && command.issueContext !== undefined) {
+          this.#issueContext?.bindCreatedThread({
+            threadId: String(created.id),
+            framed: preparedIssue.framed,
+            request: command.issueContext,
+          });
+        }
         return { kind: "thread-created", thread: created };
       }
 

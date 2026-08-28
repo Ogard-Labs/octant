@@ -27,6 +27,7 @@ import {
   type ProviderContextBlock,
   type WindowId,
 } from "@octant/contracts";
+import type { FramedExternalContent } from "../context/externalContentFraming";
 import { composeCodeProfileContext } from "./codeTurnContext";
 import type { CodeProfileSkillResolver } from "./codeProfileSkillResolver";
 import {
@@ -680,6 +681,7 @@ export interface CodeOperationServiceOptions {
     readonly context?: string;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
   }>;
+  readonly takeIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   /**
    * Reads the conversation a forked thread inherits, for its first turn only.
    *
@@ -2091,6 +2093,7 @@ export class CodeOperationService {
       })
       .catch(() => undefined);
     const profileContext = await this.#resolveProfileContext(thread);
+    const issueContext = this.#options.takeIssueContextFramed?.(String(thread.id));
     const context = [
       ...profileContext,
       ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
@@ -2099,6 +2102,9 @@ export class CodeOperationService {
       ...(feedback?.context === undefined || feedback.context.trim().length === 0
         ? []
         : [{ kind: "user-message", text: feedback.context } as const]),
+      ...(issueContext === undefined
+        ? []
+        : [{ kind: "user-message", text: issueContext.text } as const]),
     ];
     // A model that cannot read a picture is told so plainly rather than sent
     // the turn with its images quietly removed.

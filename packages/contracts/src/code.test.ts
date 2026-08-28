@@ -801,6 +801,23 @@ describe("Code managed thread creation contracts", () => {
     expect(decodeCodeCommand(managedCommand)).toEqual(managedCommand);
   });
 
+  it("accepts an issue reference on managed thread creation and rejects assembled issue text", () => {
+    expect(
+      decodeCodeCommand({
+        ...managedCommand,
+        issueContext: { owner: "octant", name: "octant", number: 7 },
+      }),
+    ).toMatchObject({
+      issueContext: { owner: "octant", name: "octant", number: 7 },
+    });
+    expect(() =>
+      decodeCodeCommand({
+        ...managedCommand,
+        issueContext: { owner: "octant", name: "octant", number: 7, body: "assembled" },
+      }),
+    ).toThrow();
+  });
+
   it("rejects a managed thread creation command with an empty source branch or excess field", () => {
     expect(() => decodeCodeCommand({ ...managedCommand, sourceBranch: "" })).toThrow();
     expect(() => decodeCodeCommand({ ...managedCommand, extra: 1 })).toThrow();
