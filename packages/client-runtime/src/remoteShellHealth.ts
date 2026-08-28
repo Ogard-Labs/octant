@@ -34,7 +34,7 @@ export function buildRemoteHostObservation(input: {
   return [
     {
       hostId: decodeHostId(hostId),
-      displayName: input.displayName ?? hostDisplayNameFromState(input.state) ?? "This Mac",
+      displayName: input.displayName ?? hostDisplayNameFromState(input.state) ?? "Remote host",
       health: mapBridgeStateToHostHealth(input.state),
       capabilities: ["chat", "work", "code"],
     },

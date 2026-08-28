@@ -56,6 +56,10 @@ describe("ChatSettingsView", () => {
       defaultResearchRouting: "searxng",
       searxngBaseUrl: "https://search.example/",
       defaultPersonalityInstructions: "Be calm and precise.",
+      providerFallback: {
+        providerInstanceId: providerA as never,
+        modelId: "model-a" as never,
+      },
     });
   }, 15_000);
 
@@ -109,6 +113,10 @@ function settings(): ChatSettings {
     defaultResearchEnabled: false,
     defaultResearchRouting: "automatic",
     defaultPersonalityInstructions: "Be calm, direct, and useful.",
+    providerFallback: {
+      providerInstanceId: providerA as never,
+      modelId: "model-a" as never,
+    },
     version: 4 as never,
     updatedAt: now as never,
   };

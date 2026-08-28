@@ -1,6 +1,7 @@
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { ChatThread } from "@octant/contracts/chat";
 import { useEffect, useState } from "react";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 
 /**
  * `idle` while nothing is asked for, then the state of the host's answer. It is
@@ -35,11 +36,12 @@ export function useArchivedChatThreadSearch(
 ): ArchivedChatThreadSearch {
   const { client, enabled } = options;
   const query = options.query.trim();
+  const debouncedQuery = useDebouncedValue(query, 120);
   const [threads, setThreads] = useState<ReadonlyArray<ChatThread>>([]);
   const [status, setStatus] = useState<ArchivedChatThreadSearchStatus>("idle");
 
   useEffect(() => {
-    if (!enabled || query === "") {
+    if (!enabled || debouncedQuery === "") {
       setThreads([]);
       setStatus("idle");
       return;
@@ -48,7 +50,7 @@ export function useArchivedChatThreadSearch(
     setStatus("loading");
     void (async () => {
       try {
-        const hits = await client.search(query);
+        const hits = await client.search(debouncedQuery);
         if (!current) return;
         setThreads(hits.filter((thread) => thread.lifecycle === "archived"));
         setStatus("ready");
@@ -63,7 +65,7 @@ export function useArchivedChatThreadSearch(
     return () => {
       current = false;
     };
-  }, [client, enabled, query]);
+  }, [client, enabled, debouncedQuery]);
 
   return { threads, status };
 }

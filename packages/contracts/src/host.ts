@@ -11,7 +11,8 @@ export type HostId = typeof HostId.Type;
  *  envelope carries this value until multi-host federation lands. */
 export const LOCAL_HOST_ID: HostId = Schema.decodeUnknownSync(HostId)("local");
 
-export const LOCAL_HOST_DISPLAY_NAME = "This Mac";
+/** Neutral fallback; host-owned surfaces resolve the platform-specific label. */
+export const LOCAL_HOST_DISPLAY_NAME = "This computer";
 
 // ── Host health ─────────────────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ export type HostHealth = typeof HostHealth.Type;
 // ── Host identity report ────────────────────────────────────────────────────
 
 /** Server-exposed identity and capability report for one host. In v1 the
- *  server always reports exactly one healthy `This Mac` entry. */
+ *  server always reports exactly one healthy local entry. */
 export const HostIdentity = Schema.Struct({
   hostId: HostId,
   displayName: Schema.NonEmptyTrimmedString,

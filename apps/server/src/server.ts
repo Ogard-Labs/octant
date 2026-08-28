@@ -365,7 +365,17 @@ import { createDiscoveryRouteHandler } from "./providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "./providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "./providers/discoveryService";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
+import {
+  LatencyStatsProjection,
+  observedRpcLatency,
+  slowRequestRoute,
+} from "./latencyStatsProjection";
 import { ProviderService } from "./providers/providerService";
+import {
+  CANONICAL_REVIEWED_MODEL_MANIFEST,
+  refreshReviewedModelManifest,
+  ReviewedModelManifest,
+} from "./providers/reviewedModelManifest";
 import { ProviderUsageLimitsService } from "./providers/providerUsageLimitsService";
 import { createProviderUsageLimitsRouteHandler } from "./providers/providerUsageLimitsRoutes";
 import { ProviderRuntimeUsageLimitsStore } from "./providers/providerRuntimeUsageLimitsStore";
@@ -381,6 +391,7 @@ import { createWebAssetsHandler } from "./webAssets";
 import { createZenRouteHandler } from "./zenRoutes";
 import { createZenBackgroundRouteHandler } from "./zenBackgroundRoutes";
 import { createUsageRouteHandler } from "./usageRoutes";
+import { CacheStatsProjection } from "./cacheStatsProjection";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
 import { resolveWindowProjectScope, type UsageProjectScope } from "./usageProjectScope";
 import { SideChatSidecarStore } from "./chat/sideChatSidecarStore";
@@ -534,6 +545,7 @@ import {
   findWorkspacePresetTarget,
 } from "@octant/domain";
 import { ZenThreadCatalog } from "./zen/zenThreadCatalog";
+import { localHostDisplayName } from "./localHostDisplayName";
 import { ZenAssistantTools } from "./zen/zenAssistantTools";
 import { createCanvasAgentTools, type CanvasAgentToolPort } from "./canvas/canvasAgentTools";
 import { combineAppManagedToolSets } from "./providers/appManagedToolSet";
@@ -1316,6 +1328,10 @@ export function startOctantServer(
         }),
       );
     }
+    const latencyStats = new LatencyStatsProjection();
+    for (const fact of persistence.projectionCatchUp) {
+      latencyStats.record("projection-catch-up", fact.durationMs);
+    }
 
     const serve = options.serve;
     if (serve === undefined) {
@@ -1754,9 +1770,13 @@ export function startOctantServer(
         if (!readable) revokeProjectPullRequests?.();
       },
     });
+    // One reading for every cache this host keeps, so the usage dashboard can
+    // report them together and a failing external cache paces itself.
+    const cacheStats = new CacheStatsProjection();
     const githubCatalogueService = new GithubCatalogueService({
       port: githubCataloguePort,
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
+      cacheStats,
     });
     const githubReadToolService = new GithubReadToolService({
       catalogue: githubCatalogueService,
@@ -1783,12 +1803,15 @@ export function startOctantServer(
       connection: persistence.connection,
       windowAuthorityStore,
       readWindowProjectScope: readWindowUsageProjectScope,
+      cacheStats,
+      latencyStats: () => latencyStats.read(),
     });
     const usageRoutes = createUsageRouteHandler({
       connection: persistence.connection,
       windowAuthorityStore,
       readWindowProjectScope: readWindowUsageProjectScope,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+      latencyStats: () => latencyStats.read(),
     });
     const diagnosticsExportRoutes = createDiagnosticsExportRouteHandler({
       connection: persistence.connection,
@@ -2295,6 +2318,7 @@ export function startOctantServer(
       },
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
+      cacheStats,
       threads: {
         list: async (windowId) => {
           const bootstrap = await codeService.bootstrap(windowId);
@@ -2338,6 +2362,8 @@ export function startOctantServer(
       options.providerRuntimeRegistry ??
       new ProviderRuntimeRegistry({
         receiptDirectory: join(providerDataDirectory, "providers", "runtime-receipts"),
+        observeAcquireMs: (durationMs) =>
+          latencyStats.record("provider-runtime-acquire", durationMs),
       });
     const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
     const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive();
@@ -2697,6 +2723,16 @@ export function startOctantServer(
     });
     probeProviderForThreads = (providerInstanceId) =>
       providerService.probe(LOCAL_HOST_ID as never, providerInstanceId);
+    const reviewedModelManifest = new ReviewedModelManifest();
+    // Model classification tracks the canonical manifest branch by commit
+    // rather than by app release. It is opt-in so the local-first default
+    // reaches no remote, and background so a refused refresh only leaves the
+    // built-in conservative limits in place.
+    if (process.env.OCTANT_REVIEWED_MODEL_MANIFEST === "1") {
+      void refreshReviewedModelManifest({ reference: CANONICAL_REVIEWED_MODEL_MANIFEST })
+        .then((refresh) => reviewedModelManifest.accept(refresh))
+        .catch(() => undefined);
+    }
     const providerRoutes = createProviderRouteHandler({
       service: providerService,
       windowAuthorityStore,
@@ -3446,6 +3482,7 @@ export function startOctantServer(
     });
     const chatService = new ChatService({
       persistence,
+      reviewedModelManifest,
       hiddenThreadIds: () => {
         const hidden = new Set(sideChatSidecars.hiddenThreadIds());
         for (const threadId of navigatorAssistantBindings.hiddenThreadIds()) hidden.add(threadId);
@@ -3605,6 +3642,7 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    yield* Effect.promise(() => chatService.reapStaleProviderSessions({ staleAfterMs: 0 }));
     yield* Effect.promise(() => chatService.recoverManagedAttachments());
     yield* Effect.promise(() => codeAttachments.recover());
     yield* Effect.promise(() => workAttachments.recover());
@@ -4136,6 +4174,7 @@ export function startOctantServer(
     });
     const zenThreadCatalog = new ZenThreadCatalog({
       localHostId: LOCAL_HOST_ID,
+      localHostDisplayName: localHostDisplayName(),
       readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
       readProjects: (windowId) => projectService.bootstrap(windowId),
       readChatThreads: () => persistence.readChatThreads(),
@@ -5580,6 +5619,29 @@ export function startOctantServer(
       (await workResearchRoutes(request)) ??
       (await themeRoutes(request));
 
+    const dispatchMeasuredProductRoutes = async (
+      request: Request,
+    ): Promise<Response | undefined> => {
+      const url = new URL(request.url);
+      const measurement = observedRpcLatency(url.pathname);
+      if (measurement === undefined) return dispatchProductRoutes(request);
+      const startedAt = performance.now();
+      const response = await dispatchProductRoutes(request);
+      if (response === undefined) return undefined;
+      // This measures time to produce the response; a streaming route that
+      // promptly returns its stream is not considered slow. Round once so the
+      // dashboard slowCount and this warning agree on the same millisecond.
+      const durationMs = Math.max(0, Math.round(performance.now() - startedAt));
+      latencyStats.record(measurement, durationMs);
+      const thresholdMs = latencyStats.slowThresholdMs(measurement);
+      if (thresholdMs !== undefined && durationMs >= thresholdMs) {
+        console.warn(
+          `Octant request handling took ${(durationMs / 1_000).toFixed(1)}s for ${request.method} ${slowRequestRoute(url.pathname)}, past ${(thresholdMs / 1_000).toFixed(0)}s slow request threshold.`,
+        );
+      }
+      return response;
+    };
+
     const forwardListDrift = compareRemoteForwardListToClassifier();
     if (forwardListDrift.length > 0) {
       throw new Error(
@@ -5587,10 +5649,14 @@ export function startOctantServer(
       );
     }
     const authenticatedProductDispatch = createAuthenticatedProductDispatch({
-      dispatch: dispatchProductRoutes,
+      dispatch: dispatchMeasuredProductRoutes,
     });
     let remoteListener: PrivateListener | undefined;
     let remoteListenerError: PrivateListenerFailureCode | undefined;
+    // Retained so shutdown can settle warming before the runtime registry
+    // closes: an acquisition that lands after `closeAll()` would leave a warm
+    // runtime alive on its idle lease with nothing left to close it.
+    let warmingProviders: Promise<void> = Promise.resolve();
     // The private listener lifecycle is owned by a server-side controller so
     // the packaged host controls (over the loopback bridge) drive the real
     // dual-listener gateway, not a stub. `currentRemoteGateway` tracks the most
@@ -5778,13 +5844,13 @@ export function startOctantServer(
                   if (origin !== null && isAllowedRendererOrigin(origin)) {
                     headers.set("access-control-allow-origin", origin);
                   }
-                  return Response.json({ hosts: listHosts() }, { headers });
+                  return Response.json({ hosts: listHosts(localHostDisplayName()) }, { headers });
                 }
                 return (
                   (await privateListenerAdministrationRoutes(request)) ??
                   (await localDeviceAdministrationRoutes(request)) ??
                   (await hostControlRoutes(request)) ??
-                  (await dispatchProductRoutes(request)) ??
+                  (await dispatchMeasuredProductRoutes(request)) ??
                   (await webAssets(request)) ??
                   new Response("Not Found", { status: 404 })
                 );
@@ -5805,6 +5871,12 @@ export function startOctantServer(
               }
             },
           });
+          // Warming keeps one idle runtime per enabled provider so the first
+          // turn of a new thread does not pay provider startup. It starts only
+          // once the listener binds, so a server that never serves leaves no
+          // provider process behind, and it is background work: a provider that
+          // refuses to start must not delay or fail startup.
+          warmingProviders = providerService.warmEnabledProviders().catch(() => undefined);
           // Startup auto-enable: when a launch-time private listener config is
           // supplied (test/smoke seam), enable it through the controller after
           // the loopback listener binds. A failure fails closed with a typed
@@ -5944,6 +6016,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           try {
+            await warmingProviders;
             await providerRuntimeRegistry.closeAll();
           } catch (error) {
             shutdownFailure ??= error;

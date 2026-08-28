@@ -10,6 +10,7 @@ import type {
 } from "@octant/contracts";
 import { decodeGithubCatalogueReadResponse } from "@octant/contracts";
 import { decideGithubCatalogueRead } from "@octant/domain";
+import { CacheStatsProjection, type CacheStatsRecorder } from "../cacheStatsProjection";
 import type {
   GhCatalogueFailure,
   GhCataloguePageObservation,
@@ -80,19 +81,25 @@ export class GithubCatalogueService {
   readonly #cacheTtlMs: number;
   readonly #cache = new Map<string, CacheEntry>();
   readonly #knownRows = new Map<string, GithubRepositoryRow>();
+  readonly #cacheStats: CacheStatsRecorder;
   #recents: GithubRepositoryRow[] = [];
   #cachedAccountKey: string | undefined;
+  #heldFailure: "rate-limited" | "unavailable" | undefined;
 
   constructor(options: {
     readonly port: CataloguePort;
     readonly snapshot: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>;
     readonly now?: () => number;
     readonly cacheTtlMs?: number;
+    readonly cacheStats?: CacheStatsRecorder;
   }) {
     this.#port = options.port;
     this.#snapshot = options.snapshot;
     this.#now = options.now ?? Date.now;
     this.#cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+    // Pacing is part of how this service treats a failing GitHub, so it holds a
+    // reading of its own when the host did not give it a shared one.
+    this.#cacheStats = options.cacheStats ?? new CacheStatsProjection({ now: this.#now });
   }
 
   async read(
@@ -121,11 +128,35 @@ export class GithubCatalogueService {
     if (!refresh) {
       const cached = this.#cache.get(cacheKey);
       if (cached !== undefined && this.#now() - cached.fetchedAt < this.#cacheTtlMs) {
+        this.#cacheStats.recordHit("github-catalogue");
         return cached.response;
       }
+      // A GitHub that just failed will usually fail again, and retrying on every
+      // expired entry turns one outage into a request per read — which for a
+      // rate-limited account is what keeps it limited. While the streak is
+      // pacing, an expired entry is served with its stale label instead. A
+      // refresh the user asked for is never held back.
+      if (this.#cacheStats.holdsUnattendedRefresh("github-catalogue")) {
+        const heldReason = this.#heldFailure ?? "unavailable";
+        if (cached !== undefined) {
+          this.#cacheStats.recordHit("github-catalogue");
+          return this.#decodeOrUnavailable(
+            markStale(
+              cached.response,
+              heldReason === "rate-limited" ? "rate-limited" : "disconnected",
+            ),
+            capability,
+          );
+        }
+        this.#cacheStats.recordMiss("github-catalogue");
+        return { kind: "unavailable", capability, reason: heldReason };
+      }
     }
+    this.#cacheStats.recordMiss("github-catalogue");
     const result = await this.#fetch(request, signal);
     if (result.kind === "ok") {
+      this.#heldFailure = undefined;
+      this.#cacheStats.recordRefreshSucceeded("github-catalogue");
       const response = this.#decodeOrUnavailable(result.value, capability);
       if (response.kind !== "unavailable") this.#storeCache(cacheKey, response);
       return response;
@@ -134,6 +165,8 @@ export class GithubCatalogueService {
     // bounded stale view. Authorization losses drop straight to unavailable so
     // revoked access never keeps private data actionable.
     if (result.kind === "rate-limited" || result.kind === "unavailable") {
+      this.#heldFailure = result.kind;
+      this.#cacheStats.recordRefreshFailed("github-catalogue");
       const cached = this.#cache.get(cacheKey);
       if (cached !== undefined) {
         const staleReason: GithubCatalogueStaleReason = refresh
@@ -184,11 +217,14 @@ export class GithubCatalogueService {
     const snapshot = await this.#snapshot(signal);
     const accountKey = `${snapshot.account?.login ?? ""}`;
     // A different active account must never see the previous account's cached
-    // catalogue, known rows, or recents.
+    // catalogue, known rows, or recents, and must not inherit that account's
+    // rate-limit hold.
     if (this.#cachedAccountKey !== undefined && this.#cachedAccountKey !== accountKey) {
       this.#cache.clear();
       this.#knownRows.clear();
       this.#recents = [];
+      this.#heldFailure = undefined;
+      this.#cacheStats.clearBackoff("github-catalogue");
     }
     this.#cachedAccountKey = accountKey;
     return snapshot;

@@ -61,6 +61,7 @@ distilled successor of the earlier long-form design specifications.
 | [0051](0051-board-cards-summarize-plan-progress.md)           | Board cards summarize plan progress                               | Accepted           |
 | [0052](0052-canvas-boards.md)                                 | Canvas boards are the diagram block                               | Proposed           |
 | [0053](0053-computer-use-destinations.md)                     | Computer-use destinations                                         | Accepted           |
+| [0054](0054-headless-host-credential-store.md)                | The credential broker is a host capability, not a desktop one     | Accepted           |
 
 ## Adding an ADR
 

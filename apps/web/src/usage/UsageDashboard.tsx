@@ -17,6 +17,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import "../styles/usage.css";
+import { LatencyStatsSection } from "./LatencyStatsSection";
 
 export interface UsageDashboardProps {
   readonly client: UsageClient;
@@ -90,6 +91,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
   >(null);
   const [actionMessage, setActionMessage] = useState<string>();
   const [refreshing, setRefreshing] = useState(false);
+  const [connectionLatencyMs, setConnectionLatencyMs] = useState<number>();
   const mounted = useRef(false);
   const dataRef = useRef<UsageQueryResponse | null>(null);
   const requestSequence = useRef(0);
@@ -100,6 +102,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
     if (hasPriorData) setRefreshing(true);
     else setStatus("loading");
     setErrorMessage(undefined);
+    const startedAt = performance.now();
     try {
       const result = await props.client.query({
         filter,
@@ -110,6 +113,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
       if (!mounted.current || requestId !== requestSequence.current) return;
       dataRef.current = result;
       setData(result);
+      setConnectionLatencyMs(Math.max(0, performance.now() - startedAt));
       setRefreshing(false);
       setStatus("ready");
     } catch (error) {
@@ -265,6 +269,11 @@ export function UsageDashboard(props: UsageDashboardProps) {
           suffix=" ms"
         />
       </div>
+      <LatencyStatsSection
+        className="usage-dashboard__section"
+        connectionLatencyMs={connectionLatencyMs}
+        latencyStats={data.latencyStats}
+      />
 
       <div className="usage-dashboard__quality" role="group" aria-label="Data quality">
         <QualityBadge count={data.totals.exactCount} label="Exact" quality="exact" />

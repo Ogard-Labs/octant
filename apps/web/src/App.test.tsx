@@ -3179,7 +3179,7 @@ describe("App", () => {
     // Search is navigation: typing "material" shows a result list, and
     // selecting the Translucent sidebar result deep-links to Appearance.
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "material");
-    const listbox = screen.getByRole("listbox", { name: "Settings search results" });
+    const listbox = await screen.findByRole("listbox", { name: "Settings search results" });
     listbox.focus();
     fireEvent.keyDown(listbox, { key: "ArrowDown" });
     fireEvent.keyDown(listbox, { key: "Enter" });
@@ -3191,7 +3191,7 @@ describe("App", () => {
 
     // Search "mode switcher" and deep-link to the control, then mutate it.
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "mode switcher");
-    const modeListbox = screen.getByRole("listbox", { name: "Settings search results" });
+    const modeListbox = await screen.findByRole("listbox", { name: "Settings search results" });
     modeListbox.focus();
     fireEvent.keyDown(modeListbox, { key: "ArrowDown" });
     fireEvent.keyDown(modeListbox, { key: "Enter" });
@@ -3205,7 +3205,9 @@ describe("App", () => {
 
     // Search "providers" and deep-link to the Providers & Models section.
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "providers");
-    const providersListbox = screen.getByRole("listbox", { name: "Settings search results" });
+    const providersListbox = await screen.findByRole("listbox", {
+      name: "Settings search results",
+    });
     providersListbox.focus();
     fireEvent.keyDown(providersListbox, { key: "ArrowDown" });
     fireEvent.keyDown(providersListbox, { key: "Enter" });
@@ -3214,7 +3216,7 @@ describe("App", () => {
 
     // Keyword search still routes to the Providers section.
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "OpenCode");
-    const openCodeListbox = screen.getByRole("listbox", { name: "Settings search results" });
+    const openCodeListbox = await screen.findByRole("listbox", { name: "Settings search results" });
     openCodeListbox.focus();
     fireEvent.keyDown(openCodeListbox, { key: "ArrowDown" });
     fireEvent.keyDown(openCodeListbox, { key: "Enter" });

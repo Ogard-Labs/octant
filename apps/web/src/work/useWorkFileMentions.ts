@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts";
 import { reconcileFileMentionPaths } from "@octant/domain";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 import {
   applyPathMention,
   rankPathMentionCandidates,
@@ -78,38 +79,37 @@ export function useWorkFileMentions(options: WorkFileMentionsOptions): WorkFileM
     });
   }, [options.draft]);
 
+  const debouncedMention = useDebouncedValue(mention, 120);
+
   useEffect(() => {
-    if (client === undefined || scope === undefined || mention === undefined) {
+    if (client === undefined || scope === undefined || debouncedMention === undefined) {
       setCandidates([]);
       setBusy(false);
       return;
     }
     const controller = new AbortController();
     setBusy(true);
-    const debounce = globalThis.setTimeout(() => {
-      void (async () => {
-        try {
-          const hits = await client.complete(
-            decodeFileMentionRequestId(globalThis.crypto.randomUUID()),
-            scope,
-            mention.query,
-            controller.signal,
-          );
-          if (!controller.signal.aborted) {
-            setCandidates(rankPathMentionCandidates(hits, mention.query));
-          }
-        } catch {
-          if (!controller.signal.aborted) setCandidates([]);
-        } finally {
-          if (!controller.signal.aborted) setBusy(false);
+    void (async () => {
+      try {
+        const hits = await client.complete(
+          decodeFileMentionRequestId(globalThis.crypto.randomUUID()),
+          scope,
+          debouncedMention.query,
+          controller.signal,
+        );
+        if (!controller.signal.aborted) {
+          setCandidates(rankPathMentionCandidates(hits, debouncedMention.query));
         }
-      })();
-    }, 120);
+      } catch {
+        if (!controller.signal.aborted) setCandidates([]);
+      } finally {
+        if (!controller.signal.aborted) setBusy(false);
+      }
+    })();
     return () => {
-      globalThis.clearTimeout(debounce);
       controller.abort();
     };
-  }, [client, mention, scope]);
+  }, [client, scope, debouncedMention]);
 
   const open = mention !== undefined && client !== undefined && scope !== undefined;
   const activeCandidate = open ? candidates[activeIndex] : undefined;

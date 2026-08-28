@@ -5,6 +5,7 @@ import {
   decodeUsageRetentionRequest,
   type UsageByCategory,
   type UsageByProvider,
+  type UsageLatencyStats,
   type UsagePurgeResult,
   type UsageQueryResponse,
   type UsageRecord,
@@ -65,6 +66,8 @@ export interface UsageRouteDependencies {
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
   readonly clock?: () => string;
+  /** Host-process latency observations reported with usage reads. */
+  readonly latencyStats?: () => UsageLatencyStats;
 }
 
 export function createUsageRouteHandler(dependencies: UsageRouteDependencies) {
@@ -180,7 +183,13 @@ async function handleQuery(
       projectScope,
     );
 
-    const response = buildUsageQueryResponse(records, hasMore, clock(), timeZone);
+    const response = buildUsageQueryResponse(
+      records,
+      hasMore,
+      clock(),
+      timeZone,
+      dependencies.latencyStats?.(),
+    );
     return new Response(JSON.stringify(response), {
       status: 200,
       headers: { "content-type": "application/json", ...corsHeaders(origin) },
@@ -353,6 +362,7 @@ function buildUsageQueryResponse(
   hasMore: boolean,
   queryAt: string,
   timeZone: string,
+  latencyStats?: UsageLatencyStats,
 ): UsageQueryResponse {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -481,6 +491,7 @@ function buildUsageQueryResponse(
     topConsumers: aggregation.topConsumers,
     hasMore,
     queryAt: queryAt as UsageQueryResponse["queryAt"],
+    latencyStats: latencyStats ?? { measurements: [] },
   };
 }
 

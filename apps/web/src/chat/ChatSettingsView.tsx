@@ -113,6 +113,9 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             defaultResearchRouting: draft.defaultResearchRouting,
             ...(searxngBaseUrl === "" ? {} : { searxngBaseUrl }),
             defaultPersonalityInstructions: instructions,
+            ...(props.settings.providerFallback === undefined
+              ? {}
+              : { providerFallback: props.settings.providerFallback }),
           };
           setSaving(true);
           try {

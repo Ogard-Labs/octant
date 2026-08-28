@@ -32,14 +32,17 @@ import {
   readHostInfoReceipt,
   resolveHostRuntimePaths,
   ServicePolicyStore,
+  startCredentialBroker,
   writeBridgeSecretProjection,
+  type CredentialBroker,
+  type CredentialPurgeStore,
+  type CredentialStore,
   type HostRuntimePaths,
 } from "@octant/host-runtime";
 import {
   decodePreviewHandoffRequest,
   type PreviewHandoffRequest,
 } from "@octant/contracts/previews";
-import { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 import type { AppVersion } from "@octant/contracts/app-updates";
 import { createAppUpdateService } from "./appUpdateService";
 import { buildApplicationMenuTemplate } from "./applicationMenu";
@@ -68,11 +71,9 @@ import {
   type NativeCodeOperationApprovalRequest,
 } from "./codeOperationApproval";
 import { parseCodeDeepLink, type CodeDeepLink } from "./codeDeepLinks";
-import type { CredentialStore } from "./credentialStore";
 import {
   makeKeychainCredentialPurgeStore,
   makeKeychainCredentialStore,
-  type CredentialPurgeStore,
 } from "./keychainCredentialStore";
 import {
   HostIdentitySigningFailure,
@@ -107,6 +108,7 @@ import {
   waitForStorageReady,
 } from "./serverProcess";
 import { createHostLifecycleController, type LocalHostDescriptor } from "./hostLifecycle";
+import { createDesktopBackendSupervisor } from "./desktopBackendSupervision";
 import { buildMenuBarItems, formatRedactedHostDiagnostics } from "./menuBar";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
 import { buildQuitConfirmation, evaluateQuitRequest } from "./quitGuard";
@@ -1203,6 +1205,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       }
       const child = server;
       const broker = credentialBroker;
+      desktopBackendSupervisor.release();
       server = undefined;
       credentialBroker = undefined;
       browserRuntimeBroker = undefined;
@@ -1217,8 +1220,12 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       activeServerUrl = attached.url;
       return { url: attached.url, instanceId: attached.instanceId, ownership: "managed" };
     }
+    if (server !== undefined) desktopBackendSupervisor.observe(server);
     return { url: serverUrl, instanceId, ownership: "desktop-owned" };
   } catch (error) {
+    if (desktopBackendSupervisor.snapshot().status !== "restarting") {
+      desktopBackendSupervisor.release();
+    }
     const child = server;
     const broker = credentialBroker;
     const browserBroker = browserRuntimeBroker ?? startingBrowserBroker;
@@ -1239,6 +1246,11 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
 
 async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   if (host.ownership !== "desktop-owned") return;
+  // Supervisor-driven restart uses stop()+start() to replace the child.
+  // Releasing here would cancel that restart if the replacement start fails.
+  if (desktopBackendSupervisor.snapshot().status !== "restarting") {
+    desktopBackendSupervisor.release();
+  }
   const child = server;
   const broker = credentialBroker;
   const browserBroker = browserRuntimeBroker;
@@ -1259,6 +1271,21 @@ const hostLifecycle = createHostLifecycleController({
   attach: attachExistingLocalHost,
   start: startDesktopOwnedHost,
   stop: stopDesktopOwnedHost,
+});
+
+const desktopBackendSupervisor = createDesktopBackendSupervisor({
+  restart: async () => {
+    await hostLifecycle.restart();
+    return server;
+  },
+  reportFatal: (error) => {
+    dialog.showErrorBox(
+      "Octant could not restart its local server",
+      formatDesktopStartupFailure(error),
+    );
+    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    updateHostTray();
+  },
 });
 
 async function createWindow(): Promise<void> {

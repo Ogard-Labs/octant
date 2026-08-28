@@ -470,6 +470,7 @@ function assembleServices(
   });
 
   const localDeviceAdministration: LocalDeviceAdministrationPort = {
+    createPairingTicket: (input) => lifecycle.createTicket(input),
     listPendingPairings: () => lifecycle.listPendingClaims(),
     approvePairing: (input) => lifecycle.approveTicket(input),
     denyPairing: (input) => lifecycle.denyTicket(input),

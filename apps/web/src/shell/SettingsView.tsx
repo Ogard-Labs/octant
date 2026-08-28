@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { ArrowLeft, Search } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
@@ -194,9 +195,13 @@ export function SettingsView(props: SettingsViewProps) {
     onDeepLinkApplied?.();
   }, [pendingDeepLink, route, onDeepLinkApplied]);
 
+  const debouncedSearch = useDebouncedValue(props.search, 120);
+  // Leave search mode as soon as the input clears. Debounce only the
+  // expensive filter; otherwise selecting a result keeps the results panel
+  // mounted for 120ms and the destination setting never appears.
   const hasQuery = props.search.trim() !== "";
-  const navSections = filterSectionsForNavigator(availableSections, capabilities, props.search);
-  const searchResults = searchSettings(availableSections, capabilities, props.search);
+  const navSections = filterSectionsForNavigator(availableSections, capabilities, debouncedSearch);
+  const searchResults = searchSettings(availableSections, capabilities, debouncedSearch);
   const navItems: SettingsNavigationItem[] = navSections.map((section) => ({
     id: section.id,
     label: section.label,

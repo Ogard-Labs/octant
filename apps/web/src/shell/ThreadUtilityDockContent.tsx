@@ -25,7 +25,6 @@ import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
 import { BrowserWorkspace } from "../browser/BrowserWorkspace";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import type { ChatReadCursorStore } from "../chat/useChatController";
-import { CodeFileExplorerPanel } from "../code/CodeFileExplorerPanel";
 import type { CodeController } from "../code/useCodeController";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
@@ -33,12 +32,21 @@ import { ShipPanel } from "../ship/ShipPanel";
 import type { PickerGroup } from "@octant/domain";
 import type { ProviderController } from "../providers/useProviderController";
 import { DockCanvasTool } from "./DockCanvasTool";
-import { DockReviewTool } from "./DockReviewTool";
 import type { OctantHostBridge } from "./hostBridge";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 import { ShellState } from "./ShellState";
 
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
+const CodeFileExplorerPanel = lazy(() =>
+  import("../code/CodeFileExplorerPanel").then((module) => ({
+    default: module.CodeFileExplorerPanel,
+  })),
+);
+const DockReviewTool = lazy(() =>
+  import("./DockReviewTool").then((module) => ({
+    default: module.DockReviewTool,
+  })),
+);
 
 const dockTabIds = {
   browser: decodeWorkspaceTabId("90000000-0000-4000-8000-000000000001"),
@@ -151,17 +159,21 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
       return unavailable("Files", "Files are not yet available for this thread type.");
     }
     return (
-      <CodeFileExplorerPanel
-        {...(props.subject.checkoutId === undefined
-          ? {}
-          : { checkoutId: props.subject.checkoutId })}
-        onOpenFile={(entry) => props.onOpenFile(entry.path)}
-        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-        threadId={decodeCodeThreadId(props.subject.threadId)}
-        {...(props.windowCapability === undefined
-          ? {}
-          : { windowCapability: props.windowCapability })}
-      />
+      <Suspense
+        fallback={<ShellState message="Loading files." state="loading" title="Loading Files" />}
+      >
+        <CodeFileExplorerPanel
+          {...(props.subject.checkoutId === undefined
+            ? {}
+            : { checkoutId: props.subject.checkoutId })}
+          onOpenFile={(entry) => props.onOpenFile(entry.path)}
+          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+          threadId={decodeCodeThreadId(props.subject.threadId)}
+          {...(props.windowCapability === undefined
+            ? {}
+            : { windowCapability: props.windowCapability })}
+        />
+      </Suspense>
     );
   }
 
@@ -199,19 +211,23 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
       return unavailable("Review", "Review is not yet available for this thread type.");
     }
     return (
-      <DockReviewTool
-        {...(props.codeController === undefined ? {} : { controller: props.codeController })}
-        threadId={decodeCodeThreadId(props.subject.threadId)}
-        {...(props.subject.checkoutId === undefined
-          ? {}
-          : { checkoutId: props.subject.checkoutId })}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        onOpenFile={props.onOpenFile}
-        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-        {...(props.windowCapability === undefined
-          ? {}
-          : { windowCapability: props.windowCapability })}
-      />
+      <Suspense
+        fallback={<ShellState message="Loading review." state="loading" title="Loading Review" />}
+      >
+        <DockReviewTool
+          {...(props.codeController === undefined ? {} : { controller: props.codeController })}
+          threadId={decodeCodeThreadId(props.subject.threadId)}
+          {...(props.subject.checkoutId === undefined
+            ? {}
+            : { checkoutId: props.subject.checkoutId })}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          onOpenFile={props.onOpenFile}
+          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+          {...(props.windowCapability === undefined
+            ? {}
+            : { windowCapability: props.windowCapability })}
+        />
+      </Suspense>
     );
   }
 

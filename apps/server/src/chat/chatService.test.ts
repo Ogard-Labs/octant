@@ -3,11 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeChatAttachmentId,
+  decodeChatAttempt,
+  decodeChatAttemptId,
+  decodeChatContentId,
+  decodeChatTurnId,
+  decodeContextManifestId,
   decodeContextEntry,
   decodeContextPlan,
   decodeContextSubjectRef,
   decodeContextSummaryId,
   decodeProviderInstanceId,
+  decodeProviderSessionId,
   decodeProviderObservedState,
   decodeProviderServiceLimits,
   type AggregateVersion,
@@ -18,6 +24,7 @@ import {
   type ContextSummaryId,
   type GlobalSequence,
   type OpenAiCompatibleProviderConfiguration,
+  type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderContextBlock,
   type MentionableThreadId,
@@ -46,6 +53,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextHarnessService } from "../context/contextHarnessService";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
+import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { readDiagnosticsFailureIncident } from "../persistence/diagnosticsExportProjection";
@@ -142,19 +150,33 @@ function probeFixture(overrides?: Partial<ProviderProbeResult>): ProviderProbeRe
   });
 }
 
-function withProbe(driver: ProviderDriver, probeResult: ProviderProbeResult): ProviderDriver {
+function withProbe(
+  driver: ProviderDriver,
+  probeResult: ProviderProbeResult,
+  probeFor?: (providerInstanceId: string) => ProviderProbeResult | undefined,
+): ProviderDriver {
   return {
     ...driver,
-    probe: driver.probe ?? (() => Effect.succeed(probeResult)),
+    probe:
+      driver.probe ??
+      ((input) => Effect.succeed(probeFor?.(String(input.instanceId)) ?? probeResult) as never),
   };
 }
 
 function openFixture(options?: {
   readonly driver?: ProviderDriver;
+  /** Reports distinct provider facts per instance, for cross-provider routing. */
+  readonly probeFor?: (providerInstanceId: string) => ProviderProbeResult | undefined;
+  /** Refuses to construct a driver for an instance, as an unusable configuration does. */
+  readonly refuseDriverFor?: (providerInstanceId: string) => Error | undefined;
+  readonly settings?: ChatSettings;
   readonly probe?: ProviderProbeResult;
   readonly contextFacts?: ProviderDriver["contextFacts"];
   readonly seedSettings?: boolean;
   readonly providerEnabled?: boolean;
+  /** Per-instance enablement; overrides `providerEnabled` when provided. */
+  readonly providerEnabledFor?: (providerInstanceId: string) => boolean;
+  readonly missingProviderInstanceIds?: ReadonlyArray<string>;
   readonly agentEligibleDefaults?: ReadonlyArray<{
     readonly providerInstanceId: string;
     readonly modelId: string;
@@ -309,16 +331,20 @@ function openFixture(options?: {
             history: [],
           }
         : { active: [], history: [] },
-    readProviderInstance: () => ({
-      id: decodeProviderInstanceId(ids.provider),
-      displayName: "Fixture provider",
-      driverKind: "openai-compatible",
-      enabled: options?.providerEnabled ?? true,
-      configuration: {},
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-    }),
+    readProviderInstance: (instanceId: ProviderInstanceId) => {
+      const id = String(instanceId);
+      if (options?.missingProviderInstanceIds?.includes(id)) return undefined;
+      return {
+        id: decodeProviderInstanceId(id),
+        displayName: "Fixture provider",
+        driverKind: "openai-compatible",
+        enabled: options?.providerEnabledFor?.(id) ?? options?.providerEnabled ?? true,
+        configuration: {},
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
     readProviderInstances: () => [],
     readProviderDefaults: () => ({
       defaultProviderInstanceId: ids.provider,
@@ -358,7 +384,7 @@ function openFixture(options?: {
           correlationId: ids.correlation,
           actor: { kind: "system", actorId: ids.actor },
           occurredAt: now,
-          payload: { kind: "settings-updated", settings: settings() },
+          payload: { kind: "settings-updated", settings: options?.settings ?? settings() },
         },
       ],
     });
@@ -464,6 +490,7 @@ function openFixture(options?: {
         ...(options?.contextFacts === undefined ? {} : { contextFacts: options.contextFacts }),
       } as unknown as ProviderDriver),
     probe,
+    options?.probeFor,
   );
 
   const contextHarness = new ContextHarnessService({
@@ -500,7 +527,11 @@ function openFixture(options?: {
     dataDirectory,
     uuid: () => crypto.randomUUID(),
     clock: () => now,
-    driver: () => driver,
+    driver: (providerInstanceId) => {
+      const refusal = options?.refuseDriverFor?.(String(providerInstanceId));
+      if (refusal !== undefined) throw refusal;
+      return driver;
+    },
     contextHarness,
     capacityScheduler,
     researchRouter,
@@ -1557,6 +1588,69 @@ describe("ChatService", () => {
       kind: "settings-updated",
       settings: { searxngBaseUrl: "https://search.example.test/base/" },
     });
+  });
+
+  it("clears a stored fallback when an update omits it, and refuses one that is missing or disabled", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const fallback = { providerInstanceId: fallbackProvider, modelId: "model-a" };
+    const seeded = openFixture({
+      settings: { ...settings(), providerFallback: fallback } as ChatSettings,
+    });
+    const omitted = await seeded.service.execute({
+      kind: "update-chat-settings",
+      expectedVersion: 1,
+      defaultProviderInstanceId: ids.provider,
+      defaultModelId: "model-a",
+      defaultResearchEnabled: false,
+      defaultResearchRouting: "automatic",
+      defaultPersonalityInstructions: "Be calm.",
+    });
+    expect(omitted).toMatchObject({ kind: "settings-updated" });
+    if (omitted.kind !== "settings-updated") throw new Error("Expected settings-updated result.");
+    expect(omitted.settings.providerFallback).toBeUndefined();
+
+    const preserved = await openFixture().service.execute({
+      kind: "update-chat-settings",
+      expectedVersion: 1,
+      defaultProviderInstanceId: ids.provider,
+      defaultModelId: "model-a",
+      defaultResearchEnabled: false,
+      defaultResearchRouting: "automatic",
+      defaultPersonalityInstructions: "Be calm.",
+      providerFallback: fallback,
+    });
+    expect(preserved).toMatchObject({
+      kind: "settings-updated",
+      settings: { providerFallback: fallback },
+    });
+
+    await expect(
+      openFixture({
+        providerEnabledFor: (providerInstanceId) => providerInstanceId !== fallbackProvider,
+      }).service.execute({
+        kind: "update-chat-settings",
+        expectedVersion: 1,
+        defaultProviderInstanceId: ids.provider,
+        defaultModelId: "model-a",
+        defaultResearchEnabled: false,
+        defaultResearchRouting: "automatic",
+        defaultPersonalityInstructions: "Be calm.",
+        providerFallback: fallback,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+
+    await expect(
+      openFixture({ missingProviderInstanceIds: [fallbackProvider] }).service.execute({
+        kind: "update-chat-settings",
+        expectedVersion: 1,
+        defaultProviderInstanceId: ids.provider,
+        defaultModelId: "model-a",
+        defaultResearchEnabled: false,
+        defaultResearchRouting: "automatic",
+        defaultPersonalityInstructions: "Be calm.",
+        providerFallback: fallback,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
   });
 
   it("copies authoritative Chat Settings into each new thread", async () => {
@@ -4897,6 +4991,198 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns).toHaveLength(0);
   });
 
+  it("continues a conversation on the chosen fallback provider when its own provider drops the model", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Fallback route",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Keep this conversation alive.",
+      }),
+    ).resolves.toMatchObject({ kind: "turn-created" });
+
+    const view = service.read(created.thread.id);
+    expect(view.turns[0]?.attempts[0]?.providerInstanceId).toBe(fallbackProvider);
+    expect(view.thread.providerInstanceId).toBe(ids.provider);
+  });
+
+  it("continues a conversation on the chosen fallback provider when its own driver cannot be built", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined,
+      refuseDriverFor: (providerInstanceId) =>
+        providerInstanceId === ids.provider
+          ? new Error("Provider driver configuration is invalid.")
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unusable configuration",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Keep going on the fallback.",
+      }),
+    ).resolves.toMatchObject({ kind: "turn-created" });
+    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.providerInstanceId).toBe(
+      fallbackProvider,
+    );
+  });
+
+  it("keeps a researching conversation on its own provider when the fallback has no research backend", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({
+              instanceId: decodeProviderInstanceId(fallbackProvider),
+              capabilities: {
+                ...probeFixture().capabilities,
+                nativeWebResearch: "unsupported",
+                appManagedTools: "unsupported",
+              },
+            })
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Researching thread",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const configured = await service.execute({
+      kind: "change-chat-research",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      researchEnabled: true,
+      researchRouting: "automatic",
+    });
+    if (configured.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: configured.thread.version,
+        prompt: "Research this.",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+  });
+
+  it("keeps a conversation on its own provider when the chosen fallback cannot serve the same turn", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({
+              instanceId: decodeProviderInstanceId(fallbackProvider),
+              readiness: "unauthenticated",
+            })
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unusable fallback",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Report the real reason.",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+  });
+
+  it("does not probe a disabled fallback and reports the original provider's refusal", async () => {
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const constructed: string[] = [];
+    const probed: string[] = [];
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) => {
+        probed.push(providerInstanceId);
+        return providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined;
+      },
+      refuseDriverFor: (providerInstanceId) => {
+        constructed.push(providerInstanceId);
+        return undefined;
+      },
+      providerEnabledFor: (providerInstanceId) => providerInstanceId !== fallbackProvider,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Disabled fallback",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Do not spawn the disabled runtime.",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(constructed).not.toContain(fallbackProvider);
+    expect(probed).not.toContain(fallbackProvider);
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+  });
+
   it("offers Zen-only tools to the exact authenticated assistant thread and zero ordinary threads", async () => {
     const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
     let assistantThreadId: string | undefined;
@@ -5835,5 +6121,541 @@ describe("ChatService", () => {
       ).rejects.toMatchObject({ failure: { category: "stale" } });
       expect(() => service.read(branchThreadId)).toThrow(ChatServiceError);
     });
+  });
+});
+
+function seedLeftoverStreamingAttempt(
+  persistence: PersistenceService,
+  thread: ChatThread,
+  keys: {
+    readonly turnId: string;
+    readonly attemptId: string;
+    readonly sessionId: string;
+    readonly manifestId: string;
+    readonly contentId: string;
+    readonly title: string;
+  },
+): void {
+  const turnId = decodeChatTurnId(keys.turnId);
+  const attempt = decodeChatAttempt({
+    id: decodeChatAttemptId(keys.attemptId),
+    turnId,
+    threadId: thread.id,
+    providerInstanceId: thread.providerInstanceId,
+    providerSessionId: decodeProviderSessionId(keys.sessionId),
+    modelId: thread.modelId,
+    contextManifestId: decodeContextManifestId(keys.manifestId),
+    outcome: "streaming",
+    responseRefs: [],
+    citationIds: [],
+    createdAt: now,
+    updatedAt: now,
+  });
+  const turn = {
+    id: turnId,
+    threadId: thread.id,
+    sequence: 1,
+    userMessageRef: {
+      contentId: decodeChatContentId(keys.contentId),
+      digest: decodeContentSha256("a".repeat(64)),
+      byteLength: 0,
+    },
+    attachmentIds: [],
+    attempts: [attempt],
+    createdAt: now,
+  };
+  persistence.connection
+    .prepare(`
+      INSERT INTO chat_content_store (
+        content_id, thread_id, content_role, body_text, digest, byte_length
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      String(turn.userMessageRef.contentId),
+      String(thread.id),
+      "user",
+      keys.title,
+      "a".repeat(64),
+      0,
+    );
+  persistence.journal.append({
+    aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+    expectedVersion: thread.version,
+    events: [
+      {
+        eventId: crypto.randomUUID(),
+        eventName: "chat.turn-created@1",
+        eventVersion: 1,
+        correlationId: crypto.randomUUID(),
+        actor: { kind: "system", actorId: ids.actor },
+        occurredAt: now,
+        payload: { kind: "turn-created", turn },
+      },
+    ],
+  });
+}
+
+function isAttemptUpdateFor(input: unknown, threadId: ChatThread["id"]): boolean {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    "aggregate" in input &&
+    typeof input.aggregate === "object" &&
+    input.aggregate !== null &&
+    "aggregateId" in input.aggregate &&
+    String(input.aggregate.aggregateId) === String(threadId) &&
+    "events" in input &&
+    Array.isArray(input.events) &&
+    input.events.some(
+      (event) =>
+        typeof event === "object" &&
+        event !== null &&
+        "eventName" in event &&
+        event.eventName === "chat.attempt-updated@1",
+    )
+  );
+}
+
+describe("ChatService provider session recovery", () => {
+  it("retains a streaming attempt while this process still owns its provider turn", async () => {
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    let releaseSend!: () => void;
+    const sendGate = new Promise<void>((resolve) => {
+      releaseSend = resolve;
+    });
+    const driver = {
+      acquire: () =>
+        Effect.succeed({
+          events: Stream.fromQueue(queue),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.succeed({ sessionId: input.sessionId }),
+          send: (input: { readonly sessionId: string }) =>
+            Effect.gen(function* () {
+              yield* Queue.offer(queue, {
+                kind: "text-delta",
+                sessionId: input.sessionId,
+                text: "Fixture response",
+              } as never);
+              yield* Effect.promise(() => sendGate);
+            }),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        }),
+    } as unknown as ProviderDriver;
+    const { service } = openFixture({ driver });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Keep active provider session",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    const running = service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Keep this turn active",
+    });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "streaming",
+    );
+    const active = service.read(created.thread.id);
+    const turn = active.turns[0];
+    const attempt = turn?.attempts[0];
+    if (turn === undefined || attempt === undefined) {
+      throw new Error("Expected an active streaming attempt.");
+    }
+
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+      reaped: 0,
+      resumable: 0,
+    });
+    await service.execute({
+      kind: "interrupt-chat-turn",
+      threadId: active.thread.id,
+      expectedVersion: active.thread.version,
+      turnId: turn.id,
+      attemptId: attempt.id,
+    });
+    releaseSend();
+    await expect(running).resolves.toMatchObject({ kind: "turn-created" });
+  });
+
+  it("interrupts a stale streaming attempt while retaining its resume cursor", async () => {
+    const { service, persistence } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Recover provider session",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const thread = created.thread;
+    const turnId = decodeChatTurnId("85000000-0000-4000-8000-000000000001");
+    const attempt = decodeChatAttempt({
+      id: decodeChatAttemptId("85000000-0000-4000-8000-000000000002"),
+      turnId,
+      threadId: thread.id,
+      providerInstanceId: thread.providerInstanceId,
+      providerSessionId: decodeProviderSessionId("85000000-0000-4000-8000-000000000003"),
+      modelId: thread.modelId,
+      contextManifestId: decodeContextManifestId("85000000-0000-4000-8000-000000000004"),
+      outcome: "streaming",
+      responseRefs: [],
+      citationIds: [],
+      resumeCursor: { driverKind: "openai-compatible", value: "resume-me" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const turn = {
+      id: turnId,
+      threadId: thread.id,
+      sequence: 1,
+      userMessageRef: {
+        contentId: decodeChatContentId("85000000-0000-4000-8000-000000000005"),
+        digest: decodeContentSha256("a".repeat(64)),
+        byteLength: 0,
+      },
+      attachmentIds: [],
+      attempts: [attempt],
+      createdAt: now,
+    };
+    persistence.connection
+      .prepare(`
+        INSERT INTO chat_content_store (
+          content_id, thread_id, content_role, body_text, digest, byte_length
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        String(turn.userMessageRef.contentId),
+        String(thread.id),
+        "user",
+        "Recover provider session",
+        "a".repeat(64),
+        0,
+      );
+    persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+      expectedVersion: thread.version,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: "chat.turn-created@1",
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor: { kind: "system", actorId: ids.actor },
+          occurredAt: now,
+          payload: { kind: "turn-created", turn },
+        },
+      ],
+    });
+    expect(persistence.readChatThreadView(thread.id)?.turns).toHaveLength(1);
+
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+      reaped: 1,
+      resumable: 1,
+    });
+    const recovered = service.read(thread.id).turns[0]?.attempts[0];
+    expect(recovered?.outcome).toBe("interrupted");
+    expect(recovered?.resumeCursor).toEqual({
+      driverKind: "openai-compatible",
+      value: "resume-me",
+    });
+  });
+
+  it("interrupts every leftover streaming attempt on the same thread", async () => {
+    const { service, persistence } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Recover stacked provider sessions",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const thread = created.thread;
+    const turnId = decodeChatTurnId("85000000-0000-4000-8000-000000000011");
+    const firstAttempt = decodeChatAttempt({
+      id: decodeChatAttemptId("85000000-0000-4000-8000-000000000012"),
+      turnId,
+      threadId: thread.id,
+      providerInstanceId: thread.providerInstanceId,
+      providerSessionId: decodeProviderSessionId("85000000-0000-4000-8000-000000000013"),
+      modelId: thread.modelId,
+      contextManifestId: decodeContextManifestId("85000000-0000-4000-8000-000000000014"),
+      outcome: "streaming",
+      responseRefs: [],
+      citationIds: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    const secondAttempt = decodeChatAttempt({
+      id: decodeChatAttemptId("85000000-0000-4000-8000-000000000015"),
+      turnId,
+      threadId: thread.id,
+      providerInstanceId: thread.providerInstanceId,
+      providerSessionId: decodeProviderSessionId("85000000-0000-4000-8000-000000000016"),
+      modelId: thread.modelId,
+      contextManifestId: decodeContextManifestId("85000000-0000-4000-8000-000000000017"),
+      outcome: "streaming",
+      responseRefs: [],
+      citationIds: [],
+      resumeCursor: { driverKind: "openai-compatible", value: "resume-second" },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const turn = {
+      id: turnId,
+      threadId: thread.id,
+      sequence: 1,
+      userMessageRef: {
+        contentId: decodeChatContentId("85000000-0000-4000-8000-000000000018"),
+        digest: decodeContentSha256("a".repeat(64)),
+        byteLength: 0,
+      },
+      attachmentIds: [],
+      attempts: [firstAttempt, secondAttempt],
+      createdAt: now,
+    };
+    persistence.connection
+      .prepare(`
+        INSERT INTO chat_content_store (
+          content_id, thread_id, content_role, body_text, digest, byte_length
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        String(turn.userMessageRef.contentId),
+        String(thread.id),
+        "user",
+        "Recover stacked provider sessions",
+        "a".repeat(64),
+        0,
+      );
+    persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+      expectedVersion: thread.version,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: "chat.turn-created@1",
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor: { kind: "system", actorId: ids.actor },
+          occurredAt: now,
+          payload: { kind: "turn-created", turn },
+        },
+      ],
+    });
+
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+      reaped: 2,
+      resumable: 1,
+    });
+    const recovered = service.read(thread.id).turns[0]?.attempts;
+    expect(recovered?.map((attempt) => attempt.outcome)).toEqual(["interrupted", "interrupted"]);
+  });
+
+  it("retries a journal conflict once while reaping leftover sessions", async () => {
+    const { service, persistence } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Recover after a version race",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const thread = created.thread;
+    const turnId = decodeChatTurnId("85000000-0000-4000-8000-000000000021");
+    const attempt = decodeChatAttempt({
+      id: decodeChatAttemptId("85000000-0000-4000-8000-000000000022"),
+      turnId,
+      threadId: thread.id,
+      providerInstanceId: thread.providerInstanceId,
+      providerSessionId: decodeProviderSessionId("85000000-0000-4000-8000-000000000023"),
+      modelId: thread.modelId,
+      contextManifestId: decodeContextManifestId("85000000-0000-4000-8000-000000000024"),
+      outcome: "streaming",
+      responseRefs: [],
+      citationIds: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    const turn = {
+      id: turnId,
+      threadId: thread.id,
+      sequence: 1,
+      userMessageRef: {
+        contentId: decodeChatContentId("85000000-0000-4000-8000-000000000025"),
+        digest: decodeContentSha256("a".repeat(64)),
+        byteLength: 0,
+      },
+      attachmentIds: [],
+      attempts: [attempt],
+      createdAt: now,
+    };
+    persistence.connection
+      .prepare(`
+        INSERT INTO chat_content_store (
+          content_id, thread_id, content_role, body_text, digest, byte_length
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        String(turn.userMessageRef.contentId),
+        String(thread.id),
+        "user",
+        "Recover after a version race",
+        "a".repeat(64),
+        0,
+      );
+    persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+      expectedVersion: thread.version,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: "chat.turn-created@1",
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor: { kind: "system", actorId: ids.actor },
+          occurredAt: now,
+          payload: { kind: "turn-created", turn },
+        },
+      ],
+    });
+
+    const originalAppend = persistence.journal.append.bind(persistence.journal);
+    let failedOnce = false;
+    persistence.journal.append = (input) => {
+      if (
+        !failedOnce &&
+        typeof input === "object" &&
+        input !== null &&
+        "events" in input &&
+        Array.isArray(input.events) &&
+        input.events.some(
+          (event) =>
+            typeof event === "object" &&
+            event !== null &&
+            "eventName" in event &&
+            event.eventName === "chat.attempt-updated@1",
+        )
+      ) {
+        failedOnce = true;
+        throw new ConcurrencyConflict({
+          aggregateType: "chat-thread",
+          aggregateId: String(thread.id),
+          expectedVersion: 0,
+          actualVersion: 1,
+        });
+      }
+      return originalAppend(input);
+    };
+
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+      reaped: 1,
+      resumable: 0,
+    });
+    expect(service.read(thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
+  });
+
+  it("isolates a non-conflict journal failure so remaining threads still recover", async () => {
+    const { service, persistence } = openFixture();
+    const failing = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unreapable leftover session",
+    });
+    const recovering = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Recoverable leftover session",
+    });
+    if (failing.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    if (recovering.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    seedLeftoverStreamingAttempt(persistence, recovering.thread, {
+      turnId: "85000000-0000-4000-8000-000000000041",
+      attemptId: "85000000-0000-4000-8000-000000000042",
+      sessionId: "85000000-0000-4000-8000-000000000043",
+      manifestId: "85000000-0000-4000-8000-000000000044",
+      contentId: "85000000-0000-4000-8000-000000000045",
+      title: "Recoverable leftover session",
+    });
+    seedLeftoverStreamingAttempt(persistence, failing.thread, {
+      turnId: "85000000-0000-4000-8000-000000000031",
+      attemptId: "85000000-0000-4000-8000-000000000032",
+      sessionId: "85000000-0000-4000-8000-000000000033",
+      manifestId: "85000000-0000-4000-8000-000000000034",
+      contentId: "85000000-0000-4000-8000-000000000035",
+      title: "Unreapable leftover session",
+    });
+
+    const originalAppend = persistence.journal.append.bind(persistence.journal);
+    persistence.journal.append = (input) => {
+      if (isAttemptUpdateFor(input, failing.thread.id)) {
+        throw new JournalWriteFailed({ operation: "append" });
+      }
+      return originalAppend(input);
+    };
+
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+      reaped: 1,
+      resumable: 0,
+    });
+    expect(service.read(failing.thread.id).turns[0]?.attempts[0]?.outcome).toBe("streaming");
+    expect(service.read(recovering.thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
+  });
+
+  it("isolates a second journal conflict so remaining threads still recover", async () => {
+    const { service, persistence } = openFixture();
+    const conflicting = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Conflicted leftover session",
+    });
+    const recovering = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Recoverable leftover session",
+    });
+    if (conflicting.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    if (recovering.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    seedLeftoverStreamingAttempt(persistence, recovering.thread, {
+      turnId: "85000000-0000-4000-8000-000000000061",
+      attemptId: "85000000-0000-4000-8000-000000000062",
+      sessionId: "85000000-0000-4000-8000-000000000063",
+      manifestId: "85000000-0000-4000-8000-000000000064",
+      contentId: "85000000-0000-4000-8000-000000000065",
+      title: "Recoverable leftover session",
+    });
+    seedLeftoverStreamingAttempt(persistence, conflicting.thread, {
+      turnId: "85000000-0000-4000-8000-000000000051",
+      attemptId: "85000000-0000-4000-8000-000000000052",
+      sessionId: "85000000-0000-4000-8000-000000000053",
+      manifestId: "85000000-0000-4000-8000-000000000054",
+      contentId: "85000000-0000-4000-8000-000000000055",
+      title: "Conflicted leftover session",
+    });
+
+    const originalAppend = persistence.journal.append.bind(persistence.journal);
+    let conflicts = 0;
+    persistence.journal.append = (input) => {
+      if (isAttemptUpdateFor(input, conflicting.thread.id) && conflicts < 2) {
+        conflicts += 1;
+        throw new ConcurrencyConflict({
+          aggregateType: "chat-thread",
+          aggregateId: String(conflicting.thread.id),
+          expectedVersion: 0,
+          actualVersion: 1,
+        });
+      }
+      return originalAppend(input);
+    };
+
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+      reaped: 1,
+      resumable: 0,
+    });
+    expect(conflicts).toBe(2);
+    expect(service.read(conflicting.thread.id).turns[0]?.attempts[0]?.outcome).toBe("streaming");
+    expect(service.read(recovering.thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
   });
 });

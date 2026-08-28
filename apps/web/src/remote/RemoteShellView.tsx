@@ -1,6 +1,8 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { RemoteSessionBridge } from "@octant/client-runtime";
+import { createConnectionSupervisor, type ConnectionStatus } from "@octant/client-runtime";
+import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
 import {
   buildRemoteHostObservation,
   canExecuteRemoteProductMutation,
@@ -32,6 +34,7 @@ export interface RemoteShellViewProps {
   readonly bridge: RemoteSessionBridge;
   readonly onReset: () => void;
   readonly onSignedOut?: () => void;
+  readonly origin?: string;
 }
 
 const modeDescriptions: Record<OctantMode, string> = {
@@ -136,6 +139,16 @@ const auxiliaryExercises: ReadonlyArray<{
 
 export function RemoteShellView(props: RemoteShellViewProps) {
   const state = useRemoteSession(props.bridge);
+  const origin = props.origin ?? globalThis.location?.origin ?? "";
+  const supervisor = useMemo(
+    () => createConnectionSupervisor({ bridge: props.bridge, origin }),
+    [props.bridge, origin],
+  );
+  useEffect(() => {
+    supervisor.start();
+    return () => supervisor.stop();
+  }, [supervisor]);
+  const connectionStatus = useConnectionStatus(supervisor);
   const draftRegistry = useMemo(() => createRemoteDraftRegistry(), []);
   const hosts = buildRemoteHostObservation({ state });
   const [activeMode, setActiveMode] = useState<OctantMode>("chat");
@@ -220,7 +233,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   if (state.kind === "unavailable") {
     return (
       <ShellState
-        action={{ label: "Try reconnect", onClick: () => props.bridge.reconnect() }}
+        action={{ label: "Try reconnect", onClick: supervisor.retryNow }}
         message={state.reason}
         role="alert"
         state="disconnected"
@@ -233,6 +246,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
 
   return (
     <section aria-label="Remote Octant shell" className="remote-shell" role="region">
+      <ConnectionStatusLine status={connectionStatus} />
       <header className="remote-shell__header">
         <h1 className="remote-shell__title">Octant remote session</h1>
         <HostSelector hosts={hosts} />
@@ -389,5 +403,20 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         End remote session
       </OctantButton>
     </section>
+  );
+}
+
+function ConnectionStatusLine(props: { readonly status: ConnectionStatus }) {
+  if (props.status.kind === "connected") return null;
+  const message =
+    props.status.kind === "blocked"
+      ? (props.status.reason ?? "Remote access is blocked.")
+      : props.status.kind === "offline"
+        ? "Waiting for the network."
+        : "Reconnecting to the host…";
+  return (
+    <p aria-live="polite" className="remote-shell__status" role="status">
+      {message}
+    </p>
   );
 }

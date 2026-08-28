@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeChatBootstrap } from "@octant/contracts/chat";
-import { autoConfigureChatDefaults } from "./autoConfigureChatDefaults";
+import { autoConfigureChatDefaults, chatDefaultModelCommand } from "./autoConfigureChatDefaults";
 
 const now = "2026-08-06T00:00:00.000Z";
 
@@ -62,5 +62,43 @@ describe("autoConfigureChatDefaults", () => {
       threads: [],
     }).settings;
     expect(autoConfigureChatDefaults(configured, [])).toBeUndefined();
+  });
+
+  it("carries an existing fallback through a default-model replace so a model choice cannot clear it", () => {
+    const fallback = {
+      providerInstanceId: "10000000-0000-4000-8000-000000000003",
+      modelId: "model-b",
+    };
+    const settings = decodeChatBootstrap({
+      settings: {
+        defaultProviderInstanceId: "10000000-0000-4000-8000-000000000002",
+        defaultModelId: "model-a",
+        defaultResearchEnabled: false,
+        defaultResearchRouting: "automatic",
+        searxngBaseUrl: "https://search.example.test",
+        defaultPersonalityInstructions: "Be calm.",
+        providerFallback: fallback,
+        version: 2,
+        updatedAt: now,
+      },
+      threads: [],
+    }).settings;
+
+    expect(
+      chatDefaultModelCommand(settings, {
+        providerInstanceId: "10000000-0000-4000-8000-000000000001" as never,
+        modelId: "gpt-5.6-luna" as never,
+      }),
+    ).toEqual({
+      kind: "update-chat-settings",
+      expectedVersion: 2,
+      defaultProviderInstanceId: "10000000-0000-4000-8000-000000000001",
+      defaultModelId: "gpt-5.6-luna",
+      defaultResearchEnabled: false,
+      defaultResearchRouting: "automatic",
+      defaultPersonalityInstructions: "Be calm.",
+      searxngBaseUrl: "https://search.example.test",
+      providerFallback: fallback,
+    });
   });
 });
