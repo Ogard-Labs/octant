@@ -47,6 +47,9 @@ without over-trusting a surface that has not shipped.
 - [Data residency](/advanced/data-residency) — draft: local-first means this machine, in its region.
 - Shared-host controller footing — draft in the repository at
   `docs/legal/shared-host-controller.md` (pending counsel).
+- [DPA template](/advanced/dpa-template) — draft: processor clauses if an Octant-hosted component ships.
+- [SCC position](/advanced/scc-position) — draft: transfers for BYO inference vs Octant-operated surfaces.
+- [EULA placeholders](/advanced/eula-placeholders) — draft: governing law and venue blanks for a future EULA.
 - [Recovery and troubleshooting](/advanced/recovery) — replay, rebuilds, conflict recovery, and diagnostic tooling.
 - [Release compatibility](/advanced/release-compatibility) — technical-preview boundaries, data location, and migration notes.
 

@@ -79,6 +79,7 @@ see the draft at `docs/legal/shared-host-controller.md`.
 ## Next steps
 
 - [Privacy notice](/advanced/privacy-notice) for what the store holds and what can leave
+- [SCC position](/advanced/scc-position) for transfers that are not "move the journal"
 - [Privacy and security](/advanced/privacy-and-security) for owner-only permissions and credentials
 - [Release compatibility](/advanced/release-compatibility) for preview platform boundaries
 - [Installation](/guide/installation) for `OCTANT_DATA_DIR` and update-check location
