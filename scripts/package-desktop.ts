@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import {
   access,
+  chmod,
   cp,
   mkdir,
   readFile,
@@ -13,6 +14,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DESKTOP_PRELOAD_FILENAME } from "../apps/desktop/src/runtimePaths";
@@ -41,10 +43,79 @@ export const DESKTOP_PACKAGE_IDENTITY = {
 } as const;
 
 export const RELEASE_VERSION_ENVIRONMENT_VARIABLE = "OCTANT_RELEASE_VERSION";
+export const PACKAGE_TARGET_ENVIRONMENT_VARIABLE = "OCTANT_PACKAGE_TARGET";
 
 /** Same grammar the updater compares by, so a build cannot mint a version it could not order. */
 const RELEASE_VERSION_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]{1,64})?$/;
+
+/**
+ * Desktop packaging targets this repository knows how to emit.
+ *
+ * `darwin-arm64` is the signed Apple Silicon path. `linux-x64` is the Ubuntu
+ * dogfood AppImage path: unsigned, fail-closed for updates until a signed Linux
+ * feed exists. Windows and other arches stay refused rather than half-shipped.
+ */
+export type DesktopPackageTargetId = "darwin-arm64" | "linux-x64";
+
+export interface DesktopPackageTarget {
+  readonly id: DesktopPackageTargetId;
+  readonly platform: "darwin" | "linux";
+  readonly arch: "arm64" | "x64";
+}
+
+export const DESKTOP_PACKAGE_TARGETS: Readonly<
+  Record<DesktopPackageTargetId, DesktopPackageTarget>
+> = {
+  "darwin-arm64": { id: "darwin-arm64", platform: "darwin", arch: "arm64" },
+  "linux-x64": { id: "linux-x64", platform: "linux", arch: "x64" },
+};
+
+/**
+ * Pick the packaging target from the environment or the build host.
+ *
+ * Explicit `OCTANT_PACKAGE_TARGET` always wins. Otherwise macOS packages the
+ * Apple Silicon app and Linux packages the x64 AppImage dogfood artifact.
+ * Cross-host packaging is refused: native modules must match the machine that
+ * rebuilds them.
+ */
+export function resolveDesktopPackageTarget(
+  environment: Record<string, string | undefined>,
+  host: { readonly platform: NodeJS.Platform; readonly arch: string } = process,
+): DesktopPackageTarget {
+  const configured = (environment[PACKAGE_TARGET_ENVIRONMENT_VARIABLE] ?? "").trim();
+  if (configured !== "") {
+    const target = DESKTOP_PACKAGE_TARGETS[configured as DesktopPackageTargetId];
+    if (target === undefined) {
+      throw new Error(
+        `${PACKAGE_TARGET_ENVIRONMENT_VARIABLE} must be one of ${Object.keys(DESKTOP_PACKAGE_TARGETS).join(", ")}, not ${configured}.`,
+      );
+    }
+    assertHostCanPackageTarget(target, host);
+    return target;
+  }
+  if (host.platform === "darwin" && host.arch === "arm64") {
+    return DESKTOP_PACKAGE_TARGETS["darwin-arm64"];
+  }
+  if (host.platform === "linux" && (host.arch === "x64" || host.arch === "x86_64")) {
+    return DESKTOP_PACKAGE_TARGETS["linux-x64"];
+  }
+  throw new Error(
+    `Desktop packaging has no default target for ${host.platform}/${host.arch}. Set ${PACKAGE_TARGET_ENVIRONMENT_VARIABLE}.`,
+  );
+}
+
+function assertHostCanPackageTarget(
+  target: DesktopPackageTarget,
+  host: { readonly platform: NodeJS.Platform; readonly arch: string },
+): void {
+  const hostArch = host.arch === "x86_64" ? "x64" : host.arch;
+  if (host.platform !== target.platform || hostArch !== target.arch) {
+    throw new Error(
+      `Cannot package ${target.id} on ${host.platform}/${host.arch}: native modules must be rebuilt on a matching host.`,
+    );
+  }
+}
 
 /**
  * The version this build stamps into the app.
@@ -99,7 +170,8 @@ export const PACKAGED_RUNTIME_IMPORTS = [
   "yaml",
 ] as const;
 
-export const REQUIRED_PACKAGED_FILES = [
+/** Staged app payload shared by every desktop packaging target. */
+export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/desktop/dist/main.mjs",
   `apps/desktop/dist/${DESKTOP_PRELOAD_FILENAME}`,
   "apps/desktop/node_modules/effect/package.json",
@@ -120,13 +192,25 @@ export const REQUIRED_PACKAGED_FILES = [
   "apps/server/node_modules/node-pty/build/Release/spawn-helper",
   "apps/server/node_modules/playwright-core/package.json",
   "apps/server/node_modules/yaml/package.json",
+] as const;
+
+export const REQUIRED_DARWIN_HELPER_FILES = [
   "Octant.app/Contents/Resources/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
+] as const;
+
+/** Full darwin-arm64 checklist (staged payload + Keychain/code-file helpers). */
+export const REQUIRED_PACKAGED_FILES = [
+  ...REQUIRED_STAGED_PACKAGED_FILES,
+  ...REQUIRED_DARWIN_HELPER_FILES,
 ] as const;
 
 export const PACKAGED_EXECUTABLE_FILES = [
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
+  "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+] as const;
+export const PACKAGED_LINUX_EXECUTABLE_FILES = [
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
 ] as const;
 export const PACKAGED_ARM64_FILES = [
@@ -135,9 +219,19 @@ export const PACKAGED_ARM64_FILES = [
   "app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
 ] as const;
+export const PACKAGED_LINUX_NATIVE_FILES = [
+  "app/apps/server/node_modules/node-pty/build/Release/pty.node",
+  "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+  "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+] as const;
 export const FORBIDDEN_PACKAGED_FILES = [
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-code-file-helper",
+] as const;
+/** Darwin helpers must never appear inside a Linux portable tree or AppDir. */
+export const FORBIDDEN_LINUX_HELPER_PATTERNS = [
+  /(?:^|\/)octant-keychain-helper$/,
+  /(?:^|\/)octant-code-file-helper$/,
 ] as const;
 export const FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS = [
   /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk-[^/]+\//,
@@ -155,13 +249,19 @@ export const REQUIRED_CODE_WEB_ASSET_PATTERNS = [
   { label: "Xterm runtime styles", pattern: /^apps\/web\/dist\/assets\/xtermRuntime-[^/]+\.css$/ },
 ] as const;
 
-const ALLOWED_NATIVE_PAYLOADS = new Set([
+const ALLOWED_DARWIN_NATIVE_PAYLOADS = new Set([
   "Octant.app/Contents/Resources/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
 ]);
+
+const ALLOWED_LINUX_NATIVE_SUFFIXES = [
+  "/resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+  "/resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
+  "/resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+] as const;
 
 export function validateCodeWebAssets(paths: ReadonlyArray<string>): void {
   for (const requirement of REQUIRED_CODE_WEB_ASSET_PATTERNS) {
@@ -177,8 +277,25 @@ export function validateNativePayloadAllowlist(paths: ReadonlyArray<string>): vo
       path.includes("/Contents/Resources/native/") ||
       path.endsWith(".node") ||
       path.endsWith("/spawn-helper");
-    if (nativeCandidate && !ALLOWED_NATIVE_PAYLOADS.has(path)) {
+    if (nativeCandidate && !ALLOWED_DARWIN_NATIVE_PAYLOADS.has(path)) {
       throw new Error(`Packaged bundle contains unexpected native payload ${path}.`);
+    }
+  }
+}
+
+/**
+ * Linux portable trees and AppDirs may only carry the rebuilt SQLite and PTY
+ * natives under resources/app — never Darwin Keychain/code-file helpers.
+ */
+export function validateLinuxNativePayloadAllowlist(paths: ReadonlyArray<string>): void {
+  for (const path of paths) {
+    if (FORBIDDEN_LINUX_HELPER_PATTERNS.some((pattern) => pattern.test(path))) {
+      throw new Error(`Linux package contains Darwin-only helper ${path}.`);
+    }
+    const nativeCandidate = path.endsWith(".node") || path.endsWith("/spawn-helper");
+    if (!nativeCandidate) continue;
+    if (!ALLOWED_LINUX_NATIVE_SUFFIXES.some((suffix) => path.endsWith(suffix))) {
+      throw new Error(`Linux package contains unexpected native payload ${path}.`);
     }
   }
 }
@@ -186,6 +303,18 @@ export function validateNativePayloadAllowlist(paths: ReadonlyArray<string>): vo
 export function selectFinalBundlePaths(paths: ReadonlyArray<string>): ReadonlyArray<string> {
   const prefix = `${DESKTOP_PACKAGE_IDENTITY.productName}.app/`;
   return paths.filter((path) => path.startsWith(prefix));
+}
+
+export function selectLinuxPackagePaths(
+  paths: ReadonlyArray<string>,
+  packageDirectoryName: string,
+): ReadonlyArray<string> {
+  const prefix = `${packageDirectoryName}/`;
+  return paths.filter((path) => path.startsWith(prefix));
+}
+
+export function linuxPackageDirectoryName(target: DesktopPackageTarget): string {
+  return `${DESKTOP_PACKAGE_IDENTITY.productName}-${target.platform}-${target.arch}`;
 }
 
 export async function pruneUnusedNativePayloads(
@@ -250,10 +379,32 @@ async function stripMachODebugMetadata(path: string): Promise<void> {
   });
 }
 
+async function stripElfDebugMetadata(path: string): Promise<void> {
+  await new Promise<void>((resolvePromise, reject) => {
+    execFile("strip", ["--strip-debug", path], (error) => {
+      if (error === null) resolvePromise();
+      else reject(new Error("Packaged native runtime debug metadata could not be stripped."));
+    });
+  });
+}
+
+export function nativeDebugStripForPlatform(
+  platform: DesktopPackageTarget["platform"],
+): (path: string) => Promise<void> {
+  return platform === "darwin" ? stripMachODebugMetadata : stripElfDebugMetadata;
+}
+
 export function packagedBundlePath(requiredPath: string): string {
   return requiredPath.startsWith(`${DESKTOP_PACKAGE_IDENTITY.productName}.app/`)
     ? requiredPath
     : `${DESKTOP_PACKAGE_IDENTITY.productName}.app/Contents/Resources/app/${requiredPath}`;
+}
+
+export function packagedLinuxBundlePath(
+  requiredPath: string,
+  packageDirectoryName: string,
+): string {
+  return `${packageDirectoryName}/resources/app/${requiredPath}`;
 }
 
 export interface PackagedPayloadEntry {
@@ -302,27 +453,38 @@ function escapeAppleScriptString(appPath: string): string {
   return escapedPath;
 }
 
-export function createPackagerOptions(dir: string, out: string, version: string): PackagerOptions {
+export function createPackagerOptions(
+  dir: string,
+  out: string,
+  version: string,
+  target: DesktopPackageTarget = DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+): PackagerOptions {
   return {
     appBundleId: DESKTOP_PACKAGE_IDENTITY.bundleId,
     appVersion: version,
-    arch: "arm64",
+    arch: target.arch,
     asar: false,
     dir,
     electronVersion: ELECTRON_VERSION,
-    icon: resolve(dir, "apps/desktop/resources/icon.icns"),
+    icon:
+      target.platform === "darwin"
+        ? resolve(dir, "apps/desktop/resources/icon.icns")
+        : resolve(dir, "apps/desktop/resources/icon.png"),
     name: DESKTOP_PACKAGE_IDENTITY.productName,
     out,
     overwrite: true,
-    platform: "darwin",
+    platform: target.platform,
     prune: false,
     protocols: [{ name: "Octant Code links", schemes: ["octant"] }],
   };
 }
 
-export function createNativeRebuildOptions(stageRoot: string): RebuildOptions {
+export function createNativeRebuildOptions(
+  stageRoot: string,
+  target: DesktopPackageTarget = DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+): RebuildOptions {
   return {
-    arch: "arm64",
+    arch: target.arch,
     buildPath: resolve(stageRoot, "apps/server"),
     electronVersion: ELECTRON_VERSION,
     force: true,
@@ -349,9 +511,7 @@ export function createServerRuntimeManifest() {
 
 export function validatePackagedPayload(entries: ReadonlyArray<PackagedPayloadEntry>): void {
   const paths = new Set(entries.map((entry) => entry.path));
-  for (const requiredPath of REQUIRED_PACKAGED_FILES.filter(
-    (path) => !path.startsWith(`${DESKTOP_PACKAGE_IDENTITY.productName}.app/`),
-  )) {
+  for (const requiredPath of REQUIRED_STAGED_PACKAGED_FILES) {
     if (!paths.has(requiredPath)) throw new Error(`Packaged payload is missing ${requiredPath}.`);
   }
 
@@ -387,6 +547,7 @@ export function validateBundledInternalRuntime(entries: ReadonlyArray<PackagedPa
 export async function stageDesktopRuntime(
   repositoryRoot: string,
   stageRoot: string,
+  target: DesktopPackageTarget = DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
 ): Promise<void> {
   await rm(stageRoot, { recursive: true, force: true });
   await mkdir(stageRoot, { recursive: true });
@@ -413,9 +574,9 @@ export async function stageDesktopRuntime(
 
   await stageExternalRuntimePackages(repositoryRoot, stageRoot);
   await stageExternalRuntimePackages(repositoryRoot, stageRoot, ["effect"], "desktop");
-  await rebuild(createNativeRebuildOptions(stageRoot));
+  await rebuild(createNativeRebuildOptions(stageRoot, target));
   await pruneUnusedNativePayloads(stageRoot);
-  await stripNativeDebugMetadata(stageRoot);
+  await stripNativeDebugMetadata(stageRoot, nativeDebugStripForPlatform(target.platform));
 
   validatePackagedPayload(await collectPayloadEntries(stageRoot));
   await validatePackagedRuntimeImports(stageRoot);
@@ -428,13 +589,16 @@ export async function validatePackagedRuntimeImports(
   runtimePath = "apps/server",
 ): Promise<void> {
   const probe = imports.map((packageName) => `import(${JSON.stringify(packageName)})`).join(",");
+  const nodeExecutable = resolveNodeExecutable();
   await new Promise<void>((resolvePromise, reject) => {
     execFile(
-      "/usr/bin/env",
-      ["node", "--input-type=module", "--eval", `await Promise.all([${probe}])`],
+      nodeExecutable,
+      ["--input-type=module", "--eval", `await Promise.all([${probe}])`],
       {
         cwd: resolve(stageRoot, runtimePath),
-        env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin" },
+        env: {
+          PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/exec-daemon",
+        },
         timeout: 10_000,
       },
       (error) => {
@@ -445,19 +609,57 @@ export async function validatePackagedRuntimeImports(
   });
 }
 
-async function packageDesktop(repositoryRoot: string): Promise<string> {
+/**
+ * Resolve a real Node binary for the packaged-import probe.
+ *
+ * The probe must run under Node, not Bun. ADE Linux hosts often expose Node
+ * only as `/exec-daemon/node`, so a hard-coded `/usr/bin/env node` with a
+ * macOS-centric PATH fails closed before staging finishes.
+ */
+export function resolveNodeExecutable(
+  which: (command: string) => string | null = Bun.which,
+  environment: Record<string, string | undefined> = process.env,
+  exists: (path: string) => boolean = existsSync,
+): string {
+  const configured = (environment.OCTANT_NODE_BINARY ?? "").trim();
+  if (configured !== "") return configured;
+  const fromPath = which("node");
+  if (fromPath !== null) return fromPath;
+  for (const candidate of ["/usr/bin/node", "/bin/node", "/exec-daemon/node"] as const) {
+    if (exists(candidate)) return candidate;
+  }
+  throw new Error("Packaged runtime import probe requires Node on PATH (or OCTANT_NODE_BINARY).");
+}
+
+async function packageDesktop(repositoryRoot: string): Promise<{
+  readonly target: DesktopPackageTarget;
+  readonly artifactPath: string;
+  readonly portableDirectoryPath?: string;
+}> {
+  const target = resolveDesktopPackageTarget(process.env);
+  if (target.platform === "darwin") {
+    const artifactPath = await packageDarwinDesktop(repositoryRoot, target);
+    return { target, artifactPath };
+  }
+  return await packageLinuxDesktop(repositoryRoot, target);
+}
+
+async function packageDarwinDesktop(
+  repositoryRoot: string,
+  target: DesktopPackageTarget,
+): Promise<string> {
   const outRoot = resolve(repositoryRoot, "out");
   const stageRoot = join(outRoot, STAGE_DIRECTORY);
   const packagerRoot = join(outRoot, PACKAGER_DIRECTORY);
   const finalApp = join(outRoot, `${DESKTOP_PACKAGE_IDENTITY.productName}.app`);
 
   await mkdir(outRoot, { recursive: true });
-  await stageDesktopRuntime(repositoryRoot, stageRoot);
+  await stageDesktopRuntime(repositoryRoot, stageRoot, target);
   await rm(packagerRoot, { recursive: true, force: true });
   await rm(finalApp, { recursive: true, force: true });
 
   const packagedDirectories = await packager(
-    createPackagerOptions(stageRoot, packagerRoot, resolveReleaseVersion(process.env)),
+    createPackagerOptions(stageRoot, packagerRoot, resolveReleaseVersion(process.env), target),
   );
   if (packagedDirectories.length !== 1) {
     throw new Error(
@@ -506,6 +708,210 @@ async function packageDesktop(repositoryRoot: string): Promise<string> {
   );
   await validateBundleIdentity(finalApp);
   return finalApp;
+}
+
+/**
+ * Package the Linux peer Machine as an AppImage (and keep the portable
+ * electron-packager directory beside it for inspection).
+ *
+ * Darwin helpers are never built here: Secret Service is host-runtime, and an
+ * updater channel does not exist until Linux artifacts are signed separately.
+ */
+async function packageLinuxDesktop(
+  repositoryRoot: string,
+  target: DesktopPackageTarget,
+): Promise<{
+  readonly target: DesktopPackageTarget;
+  readonly artifactPath: string;
+  readonly portableDirectoryPath: string;
+}> {
+  const version = resolveReleaseVersion(process.env);
+  const outRoot = resolve(repositoryRoot, "out");
+  const stageRoot = join(outRoot, STAGE_DIRECTORY);
+  const packagerRoot = join(outRoot, PACKAGER_DIRECTORY);
+  const packageDirName = linuxPackageDirectoryName(target);
+  const finalPackageDir = join(outRoot, packageDirName);
+  const appImagePath = join(
+    outRoot,
+    `${DESKTOP_PACKAGE_IDENTITY.productName}-${version}-${target.id}.AppImage`,
+  );
+
+  await mkdir(outRoot, { recursive: true });
+  await stageDesktopRuntime(repositoryRoot, stageRoot, target);
+  await rm(packagerRoot, { recursive: true, force: true });
+  await rm(finalPackageDir, { recursive: true, force: true });
+  await rm(appImagePath, { force: true });
+
+  const packagedDirectories = await packager(
+    createPackagerOptions(stageRoot, packagerRoot, version, target),
+  );
+  if (packagedDirectories.length !== 1) {
+    throw new Error(
+      `Expected one packaged desktop directory, received ${packagedDirectories.length}.`,
+    );
+  }
+  await rename(packagedDirectories[0]!, finalPackageDir);
+  await rm(packagerRoot, { recursive: true, force: true });
+
+  const resourcesRoot = join(finalPackageDir, "resources");
+  for (const relativePath of PACKAGED_LINUX_EXECUTABLE_FILES) {
+    await access(join(resourcesRoot, relativePath), 1);
+  }
+  for (const relativePath of PACKAGED_LINUX_NATIVE_FILES) {
+    await validatePackagedElf(join(resourcesRoot, relativePath));
+  }
+
+  const packagedPayload = join(resourcesRoot, "app");
+  validatePackagedPayload(await collectPayloadEntries(packagedPayload));
+  const packageEntries = await collectPayloadEntries(finalPackageDir);
+  validateLinuxNativePayloadAllowlist(
+    packageEntries.map((entry) => `${packageDirName}/${entry.path}`),
+  );
+  for (const requiredPath of REQUIRED_STAGED_PACKAGED_FILES) {
+    await access(join(packagedPayload, requiredPath));
+  }
+  validatePackagedRendererPolicy(
+    await readFile(join(packagedPayload, "apps/web/dist/index.html"), "utf8"),
+  );
+  await validateLinuxPackageIdentity(finalPackageDir);
+
+  const appImage = await buildLinuxAppImage({
+    repositoryRoot,
+    packageDirectory: finalPackageDir,
+    appImagePath,
+    version,
+    target,
+  });
+  return {
+    target,
+    artifactPath: appImage,
+    portableDirectoryPath: finalPackageDir,
+  };
+}
+
+export function createLinuxDesktopEntry(version: string): string {
+  return [
+    "[Desktop Entry]",
+    "Type=Application",
+    `Name=${DESKTOP_PACKAGE_IDENTITY.productName}`,
+    `Comment=Octant desktop Machine ${version}`,
+    `Exec=${DESKTOP_PACKAGE_IDENTITY.productName}`,
+    "Icon=octant",
+    "Categories=Development;",
+    "StartupWMClass=Octant",
+    "Terminal=false",
+    "",
+  ].join("\n");
+}
+
+export function createLinuxAppRunScript(executableName: string): string {
+  return [
+    "#!/bin/sh",
+    // Resolve the AppDir even when the AppImage was extracted to a temp tree.
+    'SELF="$(readlink -f "$0" 2>/dev/null || printf %s "$0")"',
+    'HERE="${SELF%/*}"',
+    `exec "\${HERE}/${executableName}" "$@"`,
+    "",
+  ].join("\n");
+}
+
+export async function stageLinuxAppDir(input: {
+  readonly packageDirectory: string;
+  readonly appDir: string;
+  readonly version: string;
+}): Promise<void> {
+  await rm(input.appDir, { recursive: true, force: true });
+  await mkdir(input.appDir, { recursive: true });
+  await cp(input.packageDirectory, input.appDir, { recursive: true });
+  await writeFile(
+    join(input.appDir, "AppRun"),
+    createLinuxAppRunScript(DESKTOP_PACKAGE_IDENTITY.productName),
+    "utf8",
+  );
+  await chmod(join(input.appDir, "AppRun"), 0o755);
+  await writeFile(
+    join(input.appDir, "octant.desktop"),
+    createLinuxDesktopEntry(input.version),
+    "utf8",
+  );
+  await cp(
+    join(input.packageDirectory, "resources/app/apps/desktop/resources/icon.png"),
+    join(input.appDir, "octant.png"),
+  );
+}
+
+/**
+ * Pin continuous appimagetool so dogfood hosts do not need a distro package.
+ * Extract-and-run covers hosts without FUSE mounted for nested AppImages.
+ */
+export const APPIMAGE_TOOL_URL =
+  "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage";
+
+async function buildLinuxAppImage(input: {
+  readonly repositoryRoot: string;
+  readonly packageDirectory: string;
+  readonly appImagePath: string;
+  readonly version: string;
+  readonly target: DesktopPackageTarget;
+}): Promise<string> {
+  const toolsRoot = join(input.repositoryRoot, "out", ".tools");
+  const appDir = join(
+    input.repositoryRoot,
+    "out",
+    ".appdir",
+    linuxPackageDirectoryName(input.target),
+  );
+  await stageLinuxAppDir({
+    packageDirectory: input.packageDirectory,
+    appDir,
+    version: input.version,
+  });
+  const appImageTool = await ensureAppImageTool(toolsRoot);
+  await runCommand([appImageTool, "--no-appstream", appDir, input.appImagePath], {
+    env: {
+      ...process.env,
+      ARCH: input.target.arch === "x64" ? "x86_64" : input.target.arch,
+      APPIMAGE_EXTRACT_AND_RUN: "1",
+    },
+  });
+  await access(input.appImagePath, 1);
+  await chmod(input.appImagePath, 0o755);
+  await rm(appDir, { recursive: true, force: true });
+  return input.appImagePath;
+}
+
+async function ensureAppImageTool(toolsRoot: string): Promise<string> {
+  const destination = join(toolsRoot, "appimagetool-x86_64.AppImage");
+  const existing = await stat(destination).catch(() => undefined);
+  if (existing?.isFile()) {
+    await chmod(destination, 0o755);
+    return destination;
+  }
+  await mkdir(toolsRoot, { recursive: true });
+  const response = await fetch(APPIMAGE_TOOL_URL);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to download appimagetool (${response.status}). Install it locally or retry with network access.`,
+    );
+  }
+  await writeFile(destination, Buffer.from(await response.arrayBuffer()));
+  await chmod(destination, 0o755);
+  return destination;
+}
+
+async function validateLinuxPackageIdentity(packageDirectory: string): Promise<void> {
+  await access(join(packageDirectory, DESKTOP_PACKAGE_IDENTITY.productName), 1);
+  const desktopEntryCandidates = [
+    join(packageDirectory, `${DESKTOP_PACKAGE_IDENTITY.productName}.desktop`),
+  ];
+  for (const candidate of desktopEntryCandidates) {
+    const existing = await stat(candidate).catch(() => undefined);
+    if (!existing?.isFile()) continue;
+    const desktop = await readFile(candidate, "utf8");
+    if (!desktop.includes(DESKTOP_PACKAGE_IDENTITY.productName)) {
+      throw new Error("Packaged Linux desktop entry is not Octant.");
+    }
+  }
 }
 
 /**
@@ -627,6 +1033,18 @@ async function validatePackagedArm64(path: string): Promise<void> {
   const description = await new Response(process.stdout).text();
   if ((await process.exited) !== 0 || !description.includes("arm64")) {
     throw new Error("Packaged native runtime payload is not Apple Silicon.");
+  }
+}
+
+async function validatePackagedElf(path: string): Promise<void> {
+  const child = Bun.spawn(["/usr/bin/file", "-b", path], {
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const description = await new Response(child.stdout).text();
+  if ((await child.exited) !== 0 || !/ELF\s+64-bit/.test(description)) {
+    throw new Error(`Packaged native runtime payload is not a Linux ELF binary: ${path}.`);
   }
 }
 
@@ -819,34 +1237,52 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 
 if (import.meta.main) {
   const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-  const appPath = await packageDesktop(repositoryRoot);
-  const outcome = await signPackagedDesktop({
-    repositoryRoot,
-    appPath,
-    environment: process.env,
-    run: runCommand,
-  });
-  if (outcome.kind === "signed") {
-    console.log(`Packaged, signed, and notarized Apple Silicon app: ${appPath}`);
-    console.log(`Release archive for the update feed: ${outcome.archivePath}`);
+  const packaged = await packageDesktop(repositoryRoot);
+  if (packaged.target.platform === "darwin") {
+    const outcome = await signPackagedDesktop({
+      repositoryRoot,
+      appPath: packaged.artifactPath,
+      environment: process.env,
+      run: (argv) => runCommand(argv),
+    });
+    if (outcome.kind === "signed") {
+      console.log(`Packaged, signed, and notarized Apple Silicon app: ${packaged.artifactPath}`);
+      console.log(`Release archive for the update feed: ${outcome.archivePath}`);
+    } else {
+      // Said out loud rather than left to be discovered: this build cannot be
+      // updated in place, because there is no signature for the platform updater
+      // to check a replacement against.
+      console.log(`Packaged UNSIGNED Apple Silicon app: ${packaged.artifactPath}`);
+      console.log(
+        `Unsigned because ${outcome.missing.join(", ")} not set; it will not auto-update.`,
+      );
+    }
   } else {
-    // Said out loud rather than left to be discovered: this build cannot be
-    // updated in place, because there is no signature for the platform updater
-    // to check a replacement against.
-    console.log(`Packaged UNSIGNED Apple Silicon app: ${appPath}`);
-    console.log(`Unsigned because ${outcome.missing.join(", ")} not set; it will not auto-update.`);
+    // Linux dogfood ships unsigned. A signed update channel is a separate
+    // deliverable; until then the app refuses install so an AppImage cannot
+    // become an unauthenticated code-delivery path.
+    console.log(`Packaged UNSIGNED Linux AppImage: ${packaged.artifactPath}`);
+    if (packaged.portableDirectoryPath !== undefined) {
+      console.log(`Portable electron-packager directory: ${packaged.portableDirectoryPath}`);
+    }
+    console.log("Linux has no signed update channel yet; this build will not auto-update.");
   }
 }
 
-async function runCommand(argv: ReadonlyArray<string>): Promise<void> {
+async function runCommand(
+  argv: ReadonlyArray<string>,
+  options: { readonly env?: NodeJS.ProcessEnv } = {},
+): Promise<void> {
   const [command, ...args] = argv;
   if (command === undefined) throw new Error("Empty command.");
-  const child = Bun.spawn([command, ...args], {
-    stdin: "ignore",
-    stdout: "inherit",
-    stderr: "inherit",
-  });
+  const spawnOptions = {
+    stdin: "ignore" as const,
+    stdout: "inherit" as const,
+    stderr: "inherit" as const,
+    ...(options.env === undefined ? {} : { env: options.env }),
+  };
+  const child = Bun.spawn([command, ...args], spawnOptions);
   if ((await child.exited) !== 0) {
-    throw new Error(`${command} failed while signing the desktop app.`);
+    throw new Error(`${command} failed while packaging the desktop app.`);
   }
 }

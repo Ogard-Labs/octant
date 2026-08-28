@@ -29,6 +29,8 @@ bun run verify
 
 ## Package the desktop app
 
+### Apple Silicon (macOS)
+
 Build and package the Apple Silicon app:
 
 ```sh
@@ -39,6 +41,33 @@ bun run package:desktop
 The command produces `out/Octant.app` for `darwin-arm64`. The packaged app runs without Bun; it bundles its own rebuilt SQLite native module.
 
 Packaging locally produces an **unsigned** app and says so, because signing needs an Apple Developer ID that only the maintainer holds. An unsigned build works, but it cannot update itself: the updater replaces the app only when the replacement satisfies the running app's code signature, and an unsigned app has none. To produce a release build, set `OCTANT_SIGNING_IDENTITY`, `OCTANT_NOTARY_PROFILE`, and `OCTANT_SIGNING_TEAM_ID`, and declare it with `OCTANT_RELEASE_BUILD=1` — a declared release refuses to finish unsigned rather than emitting something that looks shippable.
+
+### Linux AppImage (Ubuntu dogfood)
+
+On an x64 Linux host (for example Ubuntu), the same packaging entry point emits an AppImage. Darwin Keychain/code-file helpers are skipped; credentials use Secret Service via host-runtime.
+
+```sh
+bun run build
+bun run package:desktop
+# or explicitly:
+OCTANT_PACKAGE_TARGET=linux-x64 bun run package:desktop
+```
+
+Produces:
+
+- `out/Octant-<version>-linux-x64.AppImage` — portable dogfood artifact
+- `out/Octant-linux-x64/` — electron-packager directory kept beside it for inspection
+
+The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. It is **unsigned**. There is no Linux signed update feed yet, so the desktop updater refuses to install updates on Linux rather than treating an unsigned AppImage as an auto-update channel. Signed Linux artifacts and feed matrix work land separately.
+
+Launch:
+
+```sh
+chmod +x out/Octant-*-linux-x64.AppImage
+./out/Octant-*-linux-x64.AppImage
+```
+
+If your host cannot mount nested AppImages, run with `APPIMAGE_EXTRACT_AND_RUN=1`. Work/Code still need Bubblewrap and a live Secret Service session on the host (see below).
 
 ## Data directory
 
@@ -60,7 +89,7 @@ The foreground command drains on SIGINT/SIGTERM and reports an existing owner in
 
 ### Headless Linux for ADE testing
 
-The packaged desktop app is macOS-only. A Linux host can run the same server and browser client to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the macOS system requirements above), then:
+Prefer the Linux AppImage dogfood path above when you want the Electron Machine on Ubuntu. A Linux host can also run the same server and browser client without Electron to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the macOS system requirements above), then:
 
 ```sh
 bash scripts/ade/install-linux-host-deps.sh

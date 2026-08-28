@@ -9,21 +9,35 @@ import { SERVER_INTERNAL_RUNTIME_PATTERN } from "../apps/server/tsdown.config";
 import { describe, expect, it, vi } from "vitest";
 import {
   DESKTOP_PACKAGE_IDENTITY,
+  DESKTOP_PACKAGE_TARGETS,
   PACKAGED_EXECUTABLE_FILES,
   PACKAGED_ARM64_FILES,
+  PACKAGED_LINUX_EXECUTABLE_FILES,
+  PACKAGED_LINUX_NATIVE_FILES,
   FORBIDDEN_PACKAGED_FILES,
   FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS,
+  FORBIDDEN_LINUX_HELPER_PATTERNS,
   PACKAGED_RUNTIME_IMPORTS,
   REQUIRED_PACKAGED_FILES,
+  REQUIRED_STAGED_PACKAGED_FILES,
+  REQUIRED_DARWIN_HELPER_FILES,
   REQUIRED_CODE_WEB_ASSET_PATTERNS,
+  APPIMAGE_TOOL_URL,
   createActivateAppleScript,
+  createLinuxAppRunScript,
+  createLinuxDesktopEntry,
   createNativeRebuildOptions,
   createPackagerOptions,
   createQuitAppleScript,
   createServerRuntimeManifest,
+  linuxPackageDirectoryName,
   packagedBundlePath,
+  packagedLinuxBundlePath,
   pruneUnusedNativePayloads,
+  resolveDesktopPackageTarget,
+  resolveNodeExecutable,
   selectFinalBundlePaths,
+  selectLinuxPackagePaths,
   validatePackagedRendererPolicy,
   stripNativeDebugMetadata,
   validatePackagedPayload,
@@ -31,6 +45,7 @@ import {
   validateBundledInternalRuntime,
   validatePackagedRuntimeImports,
   validateCodeWebAssets,
+  validateLinuxNativePayloadAllowlist,
   validateNativePayloadAllowlist,
   waitForChildExit,
 } from "./package-desktop";
@@ -38,7 +53,7 @@ import {
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
 describe("desktop packaging boundary", () => {
-  it("targets only the Apple Silicon technical preview, at a stated version", () => {
+  it("defaults the Apple Silicon packager options, and can target Linux x64 AppImage packaging", () => {
     // The version is not cosmetic: the updater compares it against the feed,
     // and a build that cannot say which version it is cannot refuse a
     // downgrade.
@@ -57,6 +72,55 @@ describe("desktop packaging boundary", () => {
       prune: false,
       protocols: [{ name: "Octant Code links", schemes: ["octant"] }],
     });
+    expect(
+      createPackagerOptions(
+        "/tmp/octant-stage",
+        "/tmp/octant-out",
+        "0.1.0",
+        DESKTOP_PACKAGE_TARGETS["linux-x64"],
+      ),
+    ).toEqual({
+      appBundleId: "app.octant.desktop",
+      appVersion: "0.1.0",
+      arch: "x64",
+      asar: false,
+      dir: "/tmp/octant-stage",
+      electronVersion: "43.1.0",
+      icon: "/tmp/octant-stage/apps/desktop/resources/icon.png",
+      name: "Octant",
+      out: "/tmp/octant-out",
+      overwrite: true,
+      platform: "linux",
+      prune: false,
+      protocols: [{ name: "Octant Code links", schemes: ["octant"] }],
+    });
+  });
+
+  it("resolves packaging targets from the host or an explicit override", () => {
+    expect(resolveDesktopPackageTarget({}, { platform: "darwin", arch: "arm64" }).id).toBe(
+      "darwin-arm64",
+    );
+    expect(resolveDesktopPackageTarget({}, { platform: "linux", arch: "x64" }).id).toBe(
+      "linux-x64",
+    );
+    expect(
+      resolveDesktopPackageTarget(
+        { OCTANT_PACKAGE_TARGET: "linux-x64" },
+        { platform: "linux", arch: "x64" },
+      ).id,
+    ).toBe("linux-x64");
+    expect(() =>
+      resolveDesktopPackageTarget(
+        { OCTANT_PACKAGE_TARGET: "linux-x64" },
+        { platform: "darwin", arch: "arm64" },
+      ),
+    ).toThrow(/matching host/);
+    expect(() =>
+      resolveDesktopPackageTarget(
+        { OCTANT_PACKAGE_TARGET: "windows-x64" },
+        { platform: "linux", arch: "x64" },
+      ),
+    ).toThrow(/OCTANT_PACKAGE_TARGET/);
   });
 
   it("uses only Octant product and bundle identity", () => {
@@ -81,7 +145,7 @@ describe("desktop packaging boundary", () => {
       filename: "preload.cjs",
       format: "cjs",
     });
-    expect(REQUIRED_PACKAGED_FILES).toEqual([
+    expect(REQUIRED_STAGED_PACKAGED_FILES).toEqual([
       "apps/desktop/dist/main.mjs",
       "apps/desktop/dist/preload.cjs",
       "apps/desktop/node_modules/effect/package.json",
@@ -102,14 +166,28 @@ describe("desktop packaging boundary", () => {
       "apps/server/node_modules/node-pty/build/Release/spawn-helper",
       "apps/server/node_modules/playwright-core/package.json",
       "apps/server/node_modules/yaml/package.json",
+    ]);
+    expect(REQUIRED_DARWIN_HELPER_FILES).toEqual([
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
+    ]);
+    expect(REQUIRED_PACKAGED_FILES).toEqual([
+      ...REQUIRED_STAGED_PACKAGED_FILES,
+      ...REQUIRED_DARWIN_HELPER_FILES,
     ]);
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-keychain-helper");
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-code-file-helper");
     expect(PACKAGED_EXECUTABLE_FILES).toContain(
       "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
     );
+    expect(PACKAGED_LINUX_EXECUTABLE_FILES).toEqual([
+      "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+    ]);
+    expect(PACKAGED_LINUX_NATIVE_FILES).toEqual([
+      "app/apps/server/node_modules/node-pty/build/Release/pty.node",
+      "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+      "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+    ]);
     expect(PACKAGED_ARM64_FILES).toEqual([
       "native/octant-keychain-helper",
       "native/octant-code-file-helper",
@@ -122,12 +200,58 @@ describe("desktop packaging boundary", () => {
     expect(FORBIDDEN_PACKAGED_FILES).toContain(
       "Octant.app/Contents/Resources/app/apps/desktop/dist/native/octant-code-file-helper",
     );
+    expect(FORBIDDEN_LINUX_HELPER_PATTERNS).toHaveLength(2);
     expect(FORBIDDEN_PACKAGED_EXECUTABLE_PATTERNS).toEqual([
       /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk-[^/]+\//,
       /^apps\/server\/node_modules\/@anthropic-ai\/claude-agent-sdk\/(?:vendor\/)?claude(?:\.exe)?$/,
     ]);
   });
 
+  it("refuses Darwin helpers inside a Linux package tree", () => {
+    const allowed = [
+      "Octant-linux-x64/resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      "Octant-linux-x64/resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
+      "Octant-linux-x64/resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+    ];
+    expect(() => validateLinuxNativePayloadAllowlist(allowed)).not.toThrow();
+    expect(() =>
+      validateLinuxNativePayloadAllowlist([
+        ...allowed,
+        "Octant-linux-x64/resources/native/octant-keychain-helper",
+      ]),
+    ).toThrow(/Darwin-only helper/);
+    expect(() =>
+      validateLinuxNativePayloadAllowlist([
+        ...allowed,
+        "Octant-linux-x64/resources/app/unreviewed.node",
+      ]),
+    ).toThrow(/unexpected native payload/);
+  });
+
+  it("stages a Linux AppDir launcher, desktop entry, and pinned appimagetool URL", () => {
+    expect(linuxPackageDirectoryName(DESKTOP_PACKAGE_TARGETS["linux-x64"])).toBe(
+      "Octant-linux-x64",
+    );
+    expect(createLinuxDesktopEntry("0.1.0")).toContain("Name=Octant");
+    expect(createLinuxDesktopEntry("0.1.0")).toContain("Icon=octant");
+    expect(createLinuxAppRunScript("Octant")).toContain('exec "${HERE}/Octant" "$@"');
+    expect(APPIMAGE_TOOL_URL).toContain("appimagetool-x86_64.AppImage");
+    expect(
+      packagedLinuxBundlePath(
+        "apps/server/dist/main.mjs",
+        linuxPackageDirectoryName(DESKTOP_PACKAGE_TARGETS["linux-x64"]),
+      ),
+    ).toBe("Octant-linux-x64/resources/app/apps/server/dist/main.mjs");
+    expect(
+      selectLinuxPackagePaths(
+        [
+          "Octant-linux-x64/resources/app/apps/server/dist/main.mjs",
+          ".desktop-stage/apps/server/dist/main.mjs",
+        ],
+        "Octant-linux-x64",
+      ),
+    ).toEqual(["Octant-linux-x64/resources/app/apps/server/dist/main.mjs"]);
+  });
   it("requires Monaco, workers, and Xterm assets in the packaged renderer", () => {
     expect(REQUIRED_CODE_WEB_ASSET_PATTERNS).toHaveLength(5);
     const paths = [
@@ -321,9 +445,7 @@ describe("desktop packaging boundary", () => {
     ]);
     expect(() =>
       validatePackagedPayload([
-        ...REQUIRED_PACKAGED_FILES.filter((path) => !path.startsWith("Octant.app/")).map(
-          (path) => ({ path, content: "Octant" }),
-        ),
+        ...REQUIRED_STAGED_PACKAGED_FILES.map((path) => ({ path, content: "Octant" })),
         {
           path: "apps/server/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude",
         },
@@ -341,6 +463,30 @@ describe("desktop packaging boundary", () => {
     );
   });
 
+  it("resolves a Node executable for the packaged-import probe without assuming /usr/bin/node", () => {
+    expect(
+      resolveNodeExecutable(
+        () => null,
+        {},
+        (path) => path === "/exec-daemon/node",
+      ),
+    ).toBe("/exec-daemon/node");
+    expect(
+      resolveNodeExecutable(
+        () => "/custom/node",
+        {},
+        () => false,
+      ),
+    ).toBe("/custom/node");
+    expect(
+      resolveNodeExecutable(
+        () => null,
+        { OCTANT_NODE_BINARY: "/opt/node" },
+        () => false,
+      ),
+    ).toBe("/opt/node");
+  });
+
   it("resolves the pinned Agent SDK JavaScript with Node rather than Bun", async () => {
     await expect(
       validatePackagedRuntimeImports(repositoryRoot, ["@anthropic-ai/claude-agent-sdk"]),
@@ -356,9 +502,18 @@ describe("desktop packaging boundary", () => {
     );
   });
 
-  it("rebuilds the staged SQLite and PTY native modules for pinned Electron arm64", () => {
+  it("rebuilds the staged SQLite and PTY native modules for the selected Electron arch", () => {
     expect(createNativeRebuildOptions("/tmp/octant-stage")).toEqual({
       arch: "arm64",
+      buildPath: "/tmp/octant-stage/apps/server",
+      electronVersion: "43.1.0",
+      force: true,
+      onlyModules: ["better-sqlite3", "node-pty"],
+    });
+    expect(
+      createNativeRebuildOptions("/tmp/octant-stage", DESKTOP_PACKAGE_TARGETS["linux-x64"]),
+    ).toEqual({
+      arch: "x64",
       buildPath: "/tmp/octant-stage/apps/server",
       electronVersion: "43.1.0",
       force: true,
@@ -412,9 +567,7 @@ describe("desktop packaging boundary", () => {
   });
 
   it("rejects missing runtime content, secrets, source maps, and forbidden identity", () => {
-    const required = REQUIRED_PACKAGED_FILES.filter((path) => !path.startsWith("Octant.app/")).map(
-      (path) => ({ path, content: "Octant" }),
-    );
+    const required = REQUIRED_STAGED_PACKAGED_FILES.map((path) => ({ path, content: "Octant" }));
     expect(() => validatePackagedPayload(required.slice(1))).toThrow(
       "missing apps/desktop/dist/main.mjs",
     );

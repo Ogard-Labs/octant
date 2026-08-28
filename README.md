@@ -115,15 +115,21 @@ cd octant
 bun install --frozen-lockfile
 bun run build
 bun run package:desktop
-open out/Octant.app
 ```
 
-A build you package yourself is unsigned, so macOS Gatekeeper will warn on
-first launch; right-click the app and choose Open, or allow it under System
-Settings > Privacy & Security. An unsigned build also does not update itself —
-the updater installs a replacement only when it satisfies the running app's code
-signature. Signed releases carry that signature and update in place.
+On Apple Silicon macOS that produces `out/Octant.app`. A build you package
+yourself is unsigned, so macOS Gatekeeper will warn on first launch; right-click
+the app and choose Open, or allow it under System Settings > Privacy & Security.
+An unsigned build also does not update itself — the updater installs a
+replacement only when it satisfies the running app's code signature. Signed
+releases carry that signature and update in place.
 
+On x64 Linux the same command produces
+`out/Octant-<version>-linux-x64.AppImage` (plus `out/Octant-linux-x64/` for
+inspection). That AppImage is an unsigned dogfood artifact: Electron still owns
+the local server as a peer Machine, but Linux has no signed update channel yet,
+so the updater refuses to install updates rather than auto-updating from an
+unsigned package. Mark the AppImage executable and launch it directly.
 On first run, the welcome surface collects a name and optional workspace
 choices, then reports provider, Project, and a mode-valid default model
 separately. One action starts a real thread when those facts are true; a
