@@ -60,6 +60,7 @@ import {
   useThreadMentionTypeahead,
 } from "../../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../../chat/useThreadMentions";
+import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type { GithubIssueContextRequest, MentionableThreadId } from "@octant/contracts";
 import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/contracts/code";
 
@@ -438,6 +439,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   chips={threadMentions.chips}
                   onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
                 />
+                <TrackerReferenceComposerHints draft={prompt} />
                 <WorkImageAttachmentChips images={images} />
               </>
             }

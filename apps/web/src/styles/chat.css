@@ -1136,3 +1136,85 @@ html[data-octant-reduced-motion="true"]
 .side-chat__empty p {
   margin: 0;
 }
+
+/* Read-only tracker-tag chips. The raw token stays visible so the transcript
+   matches the journal text; title and status live on the tooltip / meta. */
+.tracker-reference-text {
+  white-space: pre-wrap;
+}
+
+.tracker-reference-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  margin: 0 1px;
+  padding: 0 6px;
+  color: var(--oct-fg);
+  background: color-mix(in oklab, var(--oct-selection) 55%, transparent);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm, 4px);
+  font-size: inherit;
+  font-weight: 500;
+  line-height: 1.35;
+  text-decoration: none;
+  vertical-align: baseline;
+}
+
+.tracker-reference-chip:hover {
+  border-color: var(--octant-border-strong, var(--oct-border));
+  background: var(--oct-selection);
+}
+
+.tracker-reference-chip__raw {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tracker-reference-chip__meta {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+}
+
+.tracker-reference-chip__tooltip {
+  display: grid;
+  gap: 2px;
+  max-width: 280px;
+}
+
+.tracker-reference-chip__title {
+  color: var(--oct-fg);
+  font-weight: 500;
+}
+
+.tracker-reference-chip__state {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.tracker-reference-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tracker-reference-hints > li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tracker-reference-hints__title {
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
