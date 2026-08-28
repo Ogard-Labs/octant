@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { resolveServerRunOptions, runServerRunCommand } from "./serverRun";
+import { resolveServerRunOptions, runServerRunCommand, type ServerRunSpawnSpec } from "./serverRun";
 
 describe("runServerRunCommand", () => {
   it("uses an absolute runtime for the default nested server invocation", async () => {
@@ -13,6 +13,7 @@ describe("runServerRunCommand", () => {
       },
       instanceId: () => "11111111-1111-4111-8111-111111111111",
       bridgeSecret: () => "foreground-bridge-secret",
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: () => () => undefined,
     });
 
@@ -48,6 +49,7 @@ describe("runServerRunCommand", () => {
       },
       instanceId: () => "11111111-1111-4111-8111-111111111111",
       bridgeSecret: () => "foreground-bridge-secret",
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: () => () => undefined,
     });
 
@@ -83,6 +85,7 @@ describe("runServerRunCommand", () => {
       spawn: () => ({ exited: Promise.resolve(7), kill }),
       serverStartCommand: () => ({ command: "server-bin", args: [] }),
       instanceId: () => "11111111-1111-4111-8111-111111111111",
+      credentialBrokerFactory: async () => undefined,
       installSignalHandler: (handler) => {
         terminate = handler;
         return () => undefined;
@@ -92,5 +95,174 @@ describe("runServerRunCommand", () => {
 
     expect(kill).toHaveBeenCalledWith("SIGTERM");
     expect(result).toBe(7);
+  });
+
+  it("restarts a crashed foreground server after the calculated backoff", async () => {
+    const children = [
+      { exited: Promise.resolve(9), kill: vi.fn() },
+      { exited: Promise.resolve(0), kill: vi.fn() },
+    ];
+    const specs: ServerRunSpawnSpec[] = [];
+    const spawn = vi.fn((spec: ServerRunSpawnSpec) => {
+      specs.push(spec);
+      return children.shift() ?? { exited: Promise.resolve(0), kill: vi.fn() };
+    });
+    const sleep = vi.fn(async () => undefined);
+    const writeNotice = vi.fn();
+    const result = await runServerRunCommand({
+      env: {},
+      spawn,
+      sleep,
+      writeNotice,
+      credentialBrokerFactory: async () => undefined,
+      installSignalHandler: () => () => undefined,
+      instanceId: vi
+        .fn()
+        .mockReturnValueOnce("11111111-1111-4111-8111-111111111111")
+        .mockReturnValueOnce("22222222-2222-4222-8222-222222222222"),
+      bridgeSecret: vi
+        .fn()
+        .mockReturnValueOnce("first-secret")
+        .mockReturnValueOnce("second-secret"),
+    });
+
+    expect(result).toBe(0);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(1_000);
+    expect(writeNotice).toHaveBeenCalledWith(
+      "Octant server exited with code 9; restarting in 1000ms.",
+    );
+    expect(specs[0]?.env.OCTANT_SERVER_INSTANCE_ID).not.toBe(
+      specs[1]?.env.OCTANT_SERVER_INSTANCE_ID,
+    );
+    expect(specs[0]?.env.OCTANT_DESKTOP_BRIDGE_SECRET).not.toBe(
+      specs[1]?.env.OCTANT_DESKTOP_BRIDGE_SECRET,
+    );
+  });
+
+  it("settles backoff delay when shutdown is requested after the child has exited", async () => {
+    let terminate: (() => void) | undefined;
+    let signalSleep: (() => void) | undefined;
+    const inSleep = new Promise<void>((resolve) => {
+      signalSleep = resolve;
+    });
+    const spawn = vi.fn(() => ({ exited: Promise.resolve(9), kill: vi.fn() }));
+    const sleep = vi.fn(
+      () =>
+        new Promise<void>(() => {
+          signalSleep?.();
+        }),
+    );
+    const running = runServerRunCommand({
+      env: {},
+      spawn,
+      sleep,
+      writeNotice: vi.fn(),
+      credentialBrokerFactory: async () => undefined,
+      installSignalHandler: (handler) => {
+        terminate = handler;
+        return () => undefined;
+      },
+    });
+
+    await inSleep;
+    terminate?.();
+    await expect(running).resolves.toBe(9);
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it("does not restart a foreground server that exits cleanly", async () => {
+    const spawn = vi.fn(() => ({ exited: Promise.resolve(0), kill: vi.fn() }));
+    const result = await runServerRunCommand({
+      env: {},
+      spawn,
+      credentialBrokerFactory: async () => undefined,
+      installSignalHandler: () => () => undefined,
+    });
+
+    expect(result).toBe(0);
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it("does not restart a foreground server after Ctrl-C requests shutdown", async () => {
+    let terminate: (() => void) | undefined;
+    const spawn = vi.fn(() => ({ exited: Promise.resolve(7), kill: vi.fn() }));
+    const result = await runServerRunCommand({
+      env: {},
+      spawn,
+      credentialBrokerFactory: async () => undefined,
+      installSignalHandler: (handler) => {
+        terminate = handler;
+        return () => undefined;
+      },
+      afterSpawn: () => terminate?.(),
+    });
+
+    expect(result).toBe(7);
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it("returns the last exit code when repeated foreground crashes reach the cap", async () => {
+    const spawn = vi.fn(() => ({ exited: Promise.resolve(11), kill: vi.fn() }));
+    const sleep = vi.fn(async () => undefined);
+    const result = await runServerRunCommand({
+      env: {},
+      spawn,
+      sleep,
+      writeNotice: vi.fn(),
+      credentialBrokerFactory: async () => undefined,
+      installSignalHandler: () => () => undefined,
+    });
+
+    expect(result).toBe(11);
+    expect(spawn).toHaveBeenCalledTimes(6);
+  });
+
+  it("passes a Linux broker pair to the child and closes it after exit", async () => {
+    if (process.platform !== "linux") return;
+    let captured: ServerRunSpawnSpec | undefined;
+    const close = vi.fn(async () => undefined);
+    const result = await runServerRunCommand({
+      env: {
+        OCTANT_CREDENTIAL_BROKER_URL: "stale",
+        OCTANT_CREDENTIAL_BROKER_TOKEN: "stale",
+      },
+      spawn: (spec) => {
+        captured = spec;
+        return { exited: Promise.resolve(0), kill: vi.fn() };
+      },
+      credentialBrokerFactory: async () => ({
+        url: "http://127.0.0.1:41234/",
+        token: "broker-token",
+        close,
+        fetchForTest: async () => new Response(),
+      }),
+      installSignalHandler: () => () => undefined,
+    });
+
+    expect(result).toBe(0);
+    expect(captured?.env.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41234/");
+    expect(captured?.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-token");
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("passes no broker environment when Linux has no usable secret store", async () => {
+    if (process.platform !== "linux") return;
+    let captured: ServerRunSpawnSpec | undefined;
+    await runServerRunCommand({
+      env: {
+        OCTANT_CREDENTIAL_BROKER_URL: "stale",
+        OCTANT_CREDENTIAL_BROKER_TOKEN: "stale",
+      },
+      spawn: (spec) => {
+        captured = spec;
+        return { exited: Promise.resolve(0), kill: vi.fn() };
+      },
+      credentialBrokerFactory: async () => undefined,
+      installSignalHandler: () => () => undefined,
+    });
+
+    expect(captured?.env).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_URL");
+    expect(captured?.env).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_TOKEN");
   });
 });

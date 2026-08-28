@@ -49,7 +49,7 @@ import {
   validateProjectWindowTarget,
 } from "./main";
 import type { RemoteDeviceControlService } from "./remoteDeviceControls";
-import type { CredentialStore } from "./credentialStore";
+import type { CredentialStore } from "@octant/host-runtime";
 import { ProjectWindowAuthorityUnavailableError } from "./projectRootPicker";
 
 describe("packaged desktop storage identity", () => {

@@ -58,6 +58,7 @@
     "./shell-client": "./src/shellClient.ts",
     "./remote-pairing-client": "./src/remotePairingClient.ts",
     "./remote-session-bridge": "./src/remoteSessionBridge.ts",
+    "./use-connection-status": "./src/useConnectionStatus.ts",
     "./theme-client": "./src/themeClient.ts",
     "./usage-client": "./src/usageClient.ts",
     "./validation-evidence-client": "./src/validationEvidenceClient.ts",
@@ -77,8 +78,13 @@
     "@octant/domain": "workspace:*"
   },
   "devDependencies": {
+    "@types/react": "catalog:",
+    "react": "catalog:",
     "tsdown": "0.22.5",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
   }
 }

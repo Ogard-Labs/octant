@@ -11,6 +11,14 @@ import {
   runHeadlessArtifactCliCommand,
 } from "./artifactCommand";
 import { join } from "node:path";
+import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
+import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
+import {
+  resolveAuthCliCommand,
+  resolvePairCliCommand,
+  runRemoteAccessCliCommand,
+  type RemoteAccessCliCommand,
+} from "./remoteAccessCommand";
 
 interface ParsedArgs {
   readonly command: string;
@@ -164,6 +172,40 @@ async function main(): Promise<number> {
     }
     return await runServerRunCommand(options);
   }
+  if (args.command === "project") {
+    const command = resolveProjectCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await withLocalControlSession((session) =>
+      runProjectCliCommand({
+        command,
+        session,
+        cwd: process.cwd(),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
+  if (args.command === "pair" || args.command === "auth") {
+    const command: RemoteAccessCliCommand | undefined =
+      args.command === "pair"
+        ? resolvePairCliCommand(args.positional, args.flags)
+        : resolveAuthCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await withLocalControlSession((session) =>
+      runRemoteAccessCliCommand({
+        command,
+        session,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
   if (args.command === "status") {
     const report = await runStatusCommand({
       hostname: typeof args.flags.hostname === "string" ? args.flags.hostname : undefined,
@@ -173,6 +215,23 @@ async function main(): Promise<number> {
   }
   printUsage();
   return 1;
+}
+
+async function withLocalControlSession(
+  run: (session: OpenedLocalControlSession) => Promise<number>,
+): Promise<number> {
+  const session = await openLocalControlSession({
+    host: { env: process.env, platform: process.platform, home: homedir() },
+  });
+  if (session.kind === "refuses") {
+    process.stderr.write(`${session.reason}\n`);
+    return 1;
+  }
+  try {
+    return await run(session);
+  } finally {
+    await session.close();
+  }
 }
 
 function resolveCliHostRuntimePaths() {
@@ -199,6 +258,12 @@ function printUsage(): void {
       "  octant server install --artifact <path> [--install-root <path>]",
       "  octant server upgrade --artifact <path> [--install-root <path>]",
       "  octant server uninstall [--install-root <path>] [--data-dir <path>] [--remove-data --confirm <exact-data-dir>]",
+      "  octant project add <path> [--type work|code] [--name <name>]",
+      "  octant project remove <name>",
+      "  octant project rename <name> <new name>",
+      "  octant pair [--source loopback|lan-private|tailscale]",
+      "  octant auth list",
+      "  octant auth revoke <device-id> | --all",
       "  octant status [--hostname <host>] [--port <port>]",
       "",
     ].join("\n"),

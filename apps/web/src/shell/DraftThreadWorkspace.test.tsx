@@ -667,7 +667,7 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("status", { name: /Host: This Mac/ })).toBeVisible();
+    expect(screen.getByRole("status", { name: /Host: This computer/ })).toBeVisible();
     expect(screen.getByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
     expect(screen.getByRole("button", { name: "GitHub repository" })).toBeVisible();
   });

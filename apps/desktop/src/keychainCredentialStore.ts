@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
-import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
+import {
+  CredentialPurgeFailure,
+  CredentialStoreFailure,
+  type CredentialPurgeInput,
+  type CredentialPurgeResult,
+  type CredentialPurgeStore,
+  type CredentialStore,
+} from "@octant/host-runtime";
 
 export const KEYCHAIN_HELPER_MAX_BYTES = 16 * 1_024;
 const DEFAULT_TIMEOUT_MS = 2_000;
@@ -116,56 +123,6 @@ export function makeKeychainCredentialStore(
       await invoke({ operation: "delete", providerInstanceId });
     },
   };
-}
-
-export type CredentialPurgeFailureCategory = "locked" | "unavailable" | "indeterminate" | "failed";
-
-const PURGE_FAILURE_MESSAGES: Readonly<Record<CredentialPurgeFailureCategory, string>> = {
-  locked: "The macOS Keychain is locked or requires interaction.",
-  unavailable: "The macOS Keychain is unavailable.",
-  indeterminate: "The Keychain credential purge outcome could not be confirmed.",
-  failed: "The Keychain credential purge failed.",
-};
-
-export class CredentialPurgeFailure extends Error {
-  constructor(readonly category: CredentialPurgeFailureCategory) {
-    super(PURGE_FAILURE_MESSAGES[category]);
-    this.name = "CredentialPurgeFailure";
-  }
-}
-
-export type CredentialPurgeResult =
-  | { readonly dryRun: true; readonly matchedCount: number }
-  | { readonly dryRun: false; readonly deletedCount: number; readonly failedCount: number };
-
-export interface CredentialPurgeInput {
-  readonly dryRun: boolean;
-  /**
-   * Exact provider identities referenced by the selected SQLite store. This
-   * authorizes migration/removal of a pre-scope Keychain item without letting
-   * one store claim every legacy credential belonging to another data dir.
-   */
-  readonly providerInstanceIds: readonly string[];
-  /**
-   * Public fingerprint projected by the selected SQLite store. It attributes
-   * the one pre-scope host-identity record before a destructive purge may
-   * migrate or delete it; absent evidence leaves that legacy key untouched and
-   * blocks the purge rather than claiming another store's identity.
-   */
-  readonly hostIdentityFingerprint?: string;
-}
-
-export interface CredentialPurgeStore {
-  /**
-   * Enumerates and, when `dryRun` is false, deletes this store's scoped
-   * Keychain items plus legacy provider credentials named by the authoritative
-   * `providerInstanceIds` list. A pre-scope host identity is considered only
-   * when its selected-store fingerprint proves ownership. It never claims
-   * unscoped credentials from another data directory. A nonzero `failedCount`
-   * means some owned items were not removed and the caller MUST treat that as
-   * not fully performed.
-   */
-  readonly purge: (input: CredentialPurgeInput) => Promise<CredentialPurgeResult>;
 }
 
 export function keychainPurgeHelperSpec(

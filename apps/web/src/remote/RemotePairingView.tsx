@@ -108,11 +108,15 @@ export function RemotePairingView(props: RemotePairingViewProps) {
         />
       );
     case "resumed":
-      return <RemoteShellView bridge={sessionClient} onReset={resetFromShell} />;
+      return (
+        <RemoteShellView bridge={sessionClient} onReset={resetFromShell} origin={props.baseUrl} />
+      );
     case "waiting":
       return <RemotePairingWaiting claim={pairing.screen.claim} onCancel={pairing.reset} />;
     case "approved":
-      return <RemoteShellView bridge={sessionClient} onReset={resetFromShell} />;
+      return (
+        <RemoteShellView bridge={sessionClient} onReset={resetFromShell} origin={props.baseUrl} />
+      );
     case "failed":
       return (
         <RemotePairingFailed

@@ -81,6 +81,7 @@ describe("UsageQueryResponse", () => {
     topConsumers: [],
     hasMore: false,
     queryAt: timestamp,
+    latencyStats: { measurements: [] },
   };
 
   it("decodes a response with time buckets, cumulative, and top consumers", () => {
@@ -142,6 +143,12 @@ describe("UsageQueryResponse", () => {
     expect(response.totals.totalReasoningTokens).toBeUndefined();
     expect(response.totals.totalCacheReadInputTokens).toBeUndefined();
     expect(response.totals.totalProviderExecutionDurationMs).toBeUndefined();
+  });
+
+  it("defaults missing host latency observations to an empty reading", () => {
+    const { latencyStats: _latencyStats, ...withoutLatencyStats } = baseResponse;
+    const response = decodeUsageQueryResponse(withoutLatencyStats);
+    expect(response.latencyStats).toEqual({ measurements: [] });
   });
 
   it("rejects excess properties on the response", () => {
