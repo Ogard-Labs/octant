@@ -36,6 +36,7 @@ import {
   pruneUnusedNativePayloads,
   resolveDesktopPackageTarget,
   resolveNodeExecutable,
+  nativePayloadsToStrip,
   selectFinalBundlePaths,
   selectLinuxPackagePaths,
   validatePackagedRendererPolicy,
@@ -163,7 +164,6 @@ describe("desktop packaging boundary", () => {
       "apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "apps/server/node_modules/node-pty/package.json",
       "apps/server/node_modules/node-pty/build/Release/pty.node",
-      "apps/server/node_modules/node-pty/build/Release/spawn-helper",
       "apps/server/node_modules/playwright-core/package.json",
       "apps/server/node_modules/yaml/package.json",
     ]);
@@ -173,6 +173,7 @@ describe("desktop packaging boundary", () => {
     ]);
     expect(REQUIRED_PACKAGED_FILES).toEqual([
       ...REQUIRED_STAGED_PACKAGED_FILES,
+      "apps/server/node_modules/node-pty/build/Release/spawn-helper",
       ...REQUIRED_DARWIN_HELPER_FILES,
     ]);
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-keychain-helper");
@@ -180,12 +181,9 @@ describe("desktop packaging boundary", () => {
     expect(PACKAGED_EXECUTABLE_FILES).toContain(
       "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
     );
-    expect(PACKAGED_LINUX_EXECUTABLE_FILES).toEqual([
-      "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
-    ]);
+    expect(PACKAGED_LINUX_EXECUTABLE_FILES).toEqual([]);
     expect(PACKAGED_LINUX_NATIVE_FILES).toEqual([
       "app/apps/server/node_modules/node-pty/build/Release/pty.node",
-      "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
       "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
     ]);
     expect(PACKAGED_ARM64_FILES).toEqual([
@@ -211,7 +209,6 @@ describe("desktop packaging boundary", () => {
     const allowed = [
       "Octant-linux-x64/resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
       "Octant-linux-x64/resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
-      "Octant-linux-x64/resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
     ];
     expect(() => validateLinuxNativePayloadAllowlist(allowed)).not.toThrow();
     expect(() =>
@@ -228,6 +225,20 @@ describe("desktop packaging boundary", () => {
     ).toThrow(/unexpected native payload/);
   });
 
+  it("does not require the macOS-only node-pty spawn-helper on Linux payloads", () => {
+    const linuxPayload = [
+      ...REQUIRED_STAGED_PACKAGED_FILES.map((path) => ({ path, content: "Octant" })),
+      { path: "apps/web/dist/assets/MonacoEditorPane-a.js", content: "Octant" },
+      { path: "apps/web/dist/assets/editor.api-b.js", content: "Octant" },
+      { path: "apps/web/dist/assets/editor.worker-c.js", content: "Octant" },
+      { path: "apps/web/dist/assets/xtermRuntime-d.js", content: "Octant" },
+      { path: "apps/web/dist/assets/xtermRuntime-e.css", content: "Octant" },
+    ];
+    expect(() =>
+      validatePackagedPayload(linuxPayload, DESKTOP_PACKAGE_TARGETS["linux-x64"]),
+    ).not.toThrow();
+    expect(() => validatePackagedPayload(linuxPayload)).toThrow(/spawn-helper/);
+  });
   it("stages a Linux AppDir launcher, desktop entry, and pinned appimagetool URL", () => {
     expect(linuxPackageDirectoryName(DESKTOP_PACKAGE_TARGETS["linux-x64"])).toBe(
       "Octant-linux-x64",
@@ -419,6 +430,14 @@ describe("desktop packaging boundary", () => {
     ]);
   });
 
+  it("strips only pty.node on Linux where spawn-helper is not built", async () => {
+    const strip = vi.fn(async () => undefined);
+    await stripNativeDebugMetadata("/tmp/octant-stage", strip, nativePayloadsToStrip("linux"));
+    expect(strip.mock.calls).toEqual([
+      ["/tmp/octant-stage/apps/server/node_modules/node-pty/build/Release/pty.node"],
+    ]);
+  });
+
   it("builds both native helpers after the desktop JavaScript bundle", async () => {
     const desktopPackage = JSON.parse(
       await readFile(resolve(repositoryRoot, "apps/desktop/package.json"), "utf8"),
@@ -445,7 +464,9 @@ describe("desktop packaging boundary", () => {
     ]);
     expect(() =>
       validatePackagedPayload([
-        ...REQUIRED_STAGED_PACKAGED_FILES.map((path) => ({ path, content: "Octant" })),
+        ...REQUIRED_PACKAGED_FILES.filter(
+          (path) => !path.startsWith("Octant.app/") && !path.includes("native/octant-"),
+        ).map((path) => ({ path, content: "Octant" })),
         {
           path: "apps/server/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude",
         },
@@ -567,7 +588,10 @@ describe("desktop packaging boundary", () => {
   });
 
   it("rejects missing runtime content, secrets, source maps, and forbidden identity", () => {
-    const required = REQUIRED_STAGED_PACKAGED_FILES.map((path) => ({ path, content: "Octant" }));
+    const required = [
+      ...REQUIRED_STAGED_PACKAGED_FILES,
+      "apps/server/node_modules/node-pty/build/Release/spawn-helper",
+    ].map((path) => ({ path, content: "Octant" }));
     expect(() => validatePackagedPayload(required.slice(1))).toThrow(
       "missing apps/desktop/dist/main.mjs",
     );

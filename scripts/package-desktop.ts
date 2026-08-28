@@ -189,19 +189,23 @@ export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   "apps/server/node_modules/node-pty/package.json",
   "apps/server/node_modules/node-pty/build/Release/pty.node",
-  "apps/server/node_modules/node-pty/build/Release/spawn-helper",
   "apps/server/node_modules/playwright-core/package.json",
   "apps/server/node_modules/yaml/package.json",
 ] as const;
+
+/** macOS-only node-pty helper; Linux uses forkpty and does not build this binary. */
+export const REQUIRED_DARWIN_PTY_HELPER_FILE =
+  "apps/server/node_modules/node-pty/build/Release/spawn-helper" as const;
 
 export const REQUIRED_DARWIN_HELPER_FILES = [
   "Octant.app/Contents/Resources/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
 ] as const;
 
-/** Full darwin-arm64 checklist (staged payload + Keychain/code-file helpers). */
+/** Full darwin-arm64 checklist (staged payload + PTY helper + Keychain/code-file helpers). */
 export const REQUIRED_PACKAGED_FILES = [
   ...REQUIRED_STAGED_PACKAGED_FILES,
+  REQUIRED_DARWIN_PTY_HELPER_FILE,
   ...REQUIRED_DARWIN_HELPER_FILES,
 ] as const;
 
@@ -210,9 +214,7 @@ export const PACKAGED_EXECUTABLE_FILES = [
   "native/octant-code-file-helper",
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
 ] as const;
-export const PACKAGED_LINUX_EXECUTABLE_FILES = [
-  "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
-] as const;
+export const PACKAGED_LINUX_EXECUTABLE_FILES = [] as const;
 export const PACKAGED_ARM64_FILES = [
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
@@ -221,7 +223,6 @@ export const PACKAGED_ARM64_FILES = [
 ] as const;
 export const PACKAGED_LINUX_NATIVE_FILES = [
   "app/apps/server/node_modules/node-pty/build/Release/pty.node",
-  "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
   "app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
 ] as const;
 export const FORBIDDEN_PACKAGED_FILES = [
@@ -260,7 +261,6 @@ const ALLOWED_DARWIN_NATIVE_PAYLOADS = new Set([
 const ALLOWED_LINUX_NATIVE_SUFFIXES = [
   "/resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   "/resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
-  "/resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
 ] as const;
 
 export function validateCodeWebAssets(paths: ReadonlyArray<string>): void {
@@ -361,13 +361,24 @@ export async function pruneUnusedNativePayloads(
 export async function stripNativeDebugMetadata(
   stageRoot: string,
   strip: (path: string) => Promise<void> = stripMachODebugMetadata,
+  relativePaths: ReadonlyArray<string> = nativePayloadsToStrip("darwin"),
 ): Promise<void> {
-  for (const path of [
-    "apps/server/node_modules/node-pty/build/Release/pty.node",
-    "apps/server/node_modules/node-pty/build/Release/spawn-helper",
-  ]) {
+  for (const path of relativePaths) {
     await strip(resolve(stageRoot, path));
   }
+}
+
+export function nativePayloadsToStrip(
+  platform: DesktopPackageTarget["platform"],
+): ReadonlyArray<string> {
+  // node-pty only builds spawn-helper on macOS; Linux uses forkpty.
+  if (platform === "darwin") {
+    return [
+      "apps/server/node_modules/node-pty/build/Release/pty.node",
+      "apps/server/node_modules/node-pty/build/Release/spawn-helper",
+    ];
+  }
+  return ["apps/server/node_modules/node-pty/build/Release/pty.node"];
 }
 
 async function stripMachODebugMetadata(path: string): Promise<void> {
@@ -509,9 +520,16 @@ export function createServerRuntimeManifest() {
   } as const;
 }
 
-export function validatePackagedPayload(entries: ReadonlyArray<PackagedPayloadEntry>): void {
+export function validatePackagedPayload(
+  entries: ReadonlyArray<PackagedPayloadEntry>,
+  target: DesktopPackageTarget = DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+): void {
   const paths = new Set(entries.map((entry) => entry.path));
-  for (const requiredPath of REQUIRED_STAGED_PACKAGED_FILES) {
+  const required = [
+    ...REQUIRED_STAGED_PACKAGED_FILES,
+    ...(target.platform === "darwin" ? [REQUIRED_DARWIN_PTY_HELPER_FILE] : []),
+  ];
+  for (const requiredPath of required) {
     if (!paths.has(requiredPath)) throw new Error(`Packaged payload is missing ${requiredPath}.`);
   }
 
@@ -576,9 +594,13 @@ export async function stageDesktopRuntime(
   await stageExternalRuntimePackages(repositoryRoot, stageRoot, ["effect"], "desktop");
   await rebuild(createNativeRebuildOptions(stageRoot, target));
   await pruneUnusedNativePayloads(stageRoot);
-  await stripNativeDebugMetadata(stageRoot, nativeDebugStripForPlatform(target.platform));
+  await stripNativeDebugMetadata(
+    stageRoot,
+    nativeDebugStripForPlatform(target.platform),
+    nativePayloadsToStrip(target.platform),
+  );
 
-  validatePackagedPayload(await collectPayloadEntries(stageRoot));
+  validatePackagedPayload(await collectPayloadEntries(stageRoot), target);
   await validatePackagedRuntimeImports(stageRoot);
   await validatePackagedRuntimeImports(stageRoot, ["effect"], "apps/desktop");
 }
@@ -689,7 +711,7 @@ async function packageDarwinDesktop(
   }
 
   const packagedPayload = join(finalApp, "Contents/Resources/app");
-  validatePackagedPayload(await collectPayloadEntries(packagedPayload));
+  validatePackagedPayload(await collectPayloadEntries(packagedPayload), target);
   const bundleEntries = await collectPayloadEntries(outRoot);
   const bundlePaths = new Set(bundleEntries.map((entry) => entry.path));
   validateNativePayloadAllowlist(selectFinalBundlePaths([...bundlePaths]));
@@ -754,15 +776,12 @@ async function packageLinuxDesktop(
   await rm(packagerRoot, { recursive: true, force: true });
 
   const resourcesRoot = join(finalPackageDir, "resources");
-  for (const relativePath of PACKAGED_LINUX_EXECUTABLE_FILES) {
-    await access(join(resourcesRoot, relativePath), 1);
-  }
   for (const relativePath of PACKAGED_LINUX_NATIVE_FILES) {
     await validatePackagedElf(join(resourcesRoot, relativePath));
   }
 
   const packagedPayload = join(resourcesRoot, "app");
-  validatePackagedPayload(await collectPayloadEntries(packagedPayload));
+  validatePackagedPayload(await collectPayloadEntries(packagedPayload), target);
   const packageEntries = await collectPayloadEntries(finalPackageDir);
   validateLinuxNativePayloadAllowlist(
     packageEntries.map((entry) => `${packageDirName}/${entry.path}`),
