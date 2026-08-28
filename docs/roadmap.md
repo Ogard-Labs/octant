@@ -130,7 +130,8 @@ starts.
 - **Apple devices and distribution** — physical devices, provisioning,
   TestFlight, and App Store submission on top of the Simulator loop.
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
-  Bedrock Converse/IAM adapters beyond the API-key paths.
+  Bedrock Converse/IAM adapters beyond the API-key paths. Design:
+  [enterprise-provider-identity.md](enterprise-provider-identity.md).
 - **Remote SSH development environments**, **live guest sharing**, **thread
   retention and purge**, **usage spend ceilings**, **agent-to-agent
   messaging**, and **in-app changelog** — each waits on the
