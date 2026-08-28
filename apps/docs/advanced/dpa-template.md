@@ -40,14 +40,14 @@ current preview.
 
 ## Parties and roles
 
-| Field | Placeholder |
-| --- | --- |
-| Controller (customer) | `[CUSTOMER LEGAL NAME]` |
-| Controller contact | `[CUSTOMER DPO / PRIVACY CONTACT]` |
-| Processor | `[OGARD LABS LEGAL ENTITY, TO BE CONFIRMED BY COUNSEL]` |
-| Processor contact | `[PROCESSOR PRIVACY CONTACT]` |
-| Effective date | `[YYYY-MM-DD]` |
-| Governing agreement | `[MASTER AGREEMENT / ORDER / EULA REFERENCE]` |
+| Field                 | Placeholder                                             |
+| --------------------- | ------------------------------------------------------- |
+| Controller (customer) | `[CUSTOMER LEGAL NAME]`                                 |
+| Controller contact    | `[CUSTOMER DPO / PRIVACY CONTACT]`                      |
+| Processor             | `[OGARD LABS LEGAL ENTITY, TO BE CONFIRMED BY COUNSEL]` |
+| Processor contact     | `[PROCESSOR PRIVACY CONTACT]`                           |
+| Effective date        | `[YYYY-MM-DD]`                                          |
+| Governing agreement   | `[MASTER AGREEMENT / ORDER / EULA REFERENCE]`           |
 
 **Roles for the on-device journal.** Even when this DPA is in force for a
 hosted component, the customer (or the named host-owner controller on a
@@ -74,12 +74,12 @@ required for legal or security obligations.
 
 Complete only for personal data that actually enters the hosted component.
 
-| Annex field | Placeholder |
-| --- | --- |
-| Data subjects | `[e.g. customer's staff, end users of customer's Projects]` |
+| Annex field              | Placeholder                                                                                    |
+| ------------------------ | ---------------------------------------------------------------------------------------------- |
+| Data subjects            | `[e.g. customer's staff, end users of customer's Projects]`                                    |
 | Personal data categories | `[e.g. account identifiers, IP addresses seen by the hosted surface, support ticket contents]` |
-| Special categories | `[NONE, or counsel-approved description]` |
-| Processing operations | `[storage, transmission, support access; list only what the component does]` |
+| Special categories       | `[NONE, or counsel-approved description]`                                                      |
+| Processing operations    | `[storage, transmission, support access; list only what the component does]`                   |
 
 Do not list journal transcripts, Keychain secrets, or provider payloads as
 Octant-processed categories unless the hosted component truly receives them.
@@ -120,14 +120,14 @@ that constrain those clauses:
 
 ## Annex A: processing description (blank)
 
-| Item | Value |
-| --- | --- |
-| Hosted component name | `[NAME OR "NONE: DPA NOT IN FORCE"]` |
-| Processing purposes | `[LIST]` |
-| Retention | `[DURATION / TRIGGER]` |
-| Sub-processors (Ogard Labs) | `[LIST OR NONE]` |
-| Transfer tools | `[SCC MODULES / ADEQUACY / NONE]` |
-| Technical and organizational measures summary | `[POINTER TO SECURITY EXHIBIT]` |
+| Item                                          | Value                                |
+| --------------------------------------------- | ------------------------------------ |
+| Hosted component name                         | `[NAME OR "NONE: DPA NOT IN FORCE"]` |
+| Processing purposes                           | `[LIST]`                             |
+| Retention                                     | `[DURATION / TRIGGER]`               |
+| Sub-processors (Ogard Labs)                   | `[LIST OR NONE]`                     |
+| Transfer tools                                | `[SCC MODULES / ADEQUACY / NONE]`    |
+| Technical and organizational measures summary | `[POINTER TO SECURITY EXHIBIT]`      |
 
 ## Annex B: relationship to local-first software
 
