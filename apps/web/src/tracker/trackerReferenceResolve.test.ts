@@ -123,6 +123,27 @@ describe("resolveTrackerReferences", () => {
       { status: "not-found", reference: trackerKeyReference },
     ]);
   });
+
+  it("refuses resolved lookups whose url is not http(s)", async () => {
+    const ports: TrackerReferenceResolvePorts = {
+      linear: {
+        available: true,
+        getIssue: async () => ({
+          kind: "resolved",
+          title: "Unsafe href",
+          url: "javascript:alert(1)",
+          state: "open",
+        }),
+      },
+    };
+    await expect(resolveTrackerReferences([trackerKeyReference], ports)).resolves.toEqual([
+      {
+        status: "unavailable",
+        reference: trackerKeyReference,
+        reason: "unavailable",
+      },
+    ]);
+  });
 });
 
 describe("tracker reference helpers", () => {

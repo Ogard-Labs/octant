@@ -52,8 +52,11 @@ export interface TrackerReferenceResolutionView {
  */
 export function useTrackerReferenceResolutions(text: string): TrackerReferenceResolutionView {
   const ports = useTrackerReferencePorts();
+  // Spans for rendering must track `text` immediately so slice offsets stay
+  // aligned while typing. Network resolution stays on the debounced copy.
+  const spans = useMemo(() => recognizeTrackerReferences(text), [text]);
   const debouncedText = useDebouncedValue(text, RESOLVE_DEBOUNCE_MS);
-  const spans = useMemo(() => recognizeTrackerReferences(debouncedText), [debouncedText]);
+  const resolveSpans = useMemo(() => recognizeTrackerReferences(debouncedText), [debouncedText]);
   const cacheRef = useRef(new Map<string, TrackerReferenceResolution>());
   const [byIdentity, setByIdentity] = useState(() => new Map<string, TrackerReferenceResolution>());
   const portsRef = useRef(ports);
@@ -70,12 +73,12 @@ export function useTrackerReferenceResolutions(text: string): TrackerReferenceRe
 
   useEffect(() => {
     const activePorts = portsRef.current;
-    if (activePorts === undefined || spans.length === 0) {
+    if (activePorts === undefined || resolveSpans.length === 0) {
       setByIdentity(new Map());
       return;
     }
 
-    const unique = uniqueReferences(spans.map((span) => span.reference));
+    const unique = uniqueReferences(resolveSpans.map((span) => span.reference));
     const missing = unique.filter((reference) => {
       return !cacheRef.current.has(trackerReferenceIdentity(reference));
     });
@@ -102,7 +105,7 @@ export function useTrackerReferenceResolutions(text: string): TrackerReferenceRe
     return () => {
       cancelled = true;
     };
-  }, [spans, ports, githubAvailable, linearAvailable]);
+  }, [resolveSpans, ports, githubAvailable, linearAvailable]);
 
   return { spans, byIdentity };
 }

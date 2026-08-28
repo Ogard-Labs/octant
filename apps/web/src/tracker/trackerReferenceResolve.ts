@@ -104,12 +104,16 @@ function mapLookup(
   lookup: TrackerReferenceLookup,
 ): TrackerReferenceResolution {
   if (lookup.kind === "resolved") {
+    const url = httpOrHttpsUrl(lookup.url);
+    if (url === undefined) {
+      return { status: "unavailable", reference, reason: "unavailable" };
+    }
     return {
       status: "resolved",
       reference,
       kind: "issue",
       title: lookup.title,
-      url: lookup.url,
+      url,
       state: lookup.state,
     };
   }
@@ -125,6 +129,16 @@ function mapLookup(
       ? {}
       : { retryAfterSeconds: lookup.retryAfterSeconds }),
   };
+}
+
+/** Chip hrefs only; non-web schemes from upstream stay off the renderer. */
+function httpOrHttpsUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Map Linear workflow state types onto the two-state chip contract. */

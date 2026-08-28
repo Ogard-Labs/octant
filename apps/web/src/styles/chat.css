@@ -1167,6 +1167,7 @@ html[data-octant-reduced-motion="true"]
 }
 
 .tracker-reference-chip__raw {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
