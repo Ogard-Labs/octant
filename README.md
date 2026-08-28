@@ -100,9 +100,18 @@ local test suite.
 
 ## Requirements
 
+### Apple Silicon (macOS)
+
 - Apple Silicon Mac (M1 or later) running a recent macOS
 - [Bun](https://bun.sh) 1.3.x for building from source (`packageManager` in
   `package.json` pins the exact version)
+- Node 26 only for the optional Node SQLite portability smoke
+
+### Linux x64 (Ubuntu dogfood)
+
+- x64 Linux host (Ubuntu is the dogfood target)
+- Bun 1.3.x for building from source
+- Bubblewrap and a live Secret Service session for Work/Code on the host
 - Node 26 only for the optional Node SQLite portability smoke
 
 ## Quick start (users)
@@ -115,21 +124,41 @@ cd octant
 bun install --frozen-lockfile
 bun run build
 bun run package:desktop
-open out/Octant.app
 ```
 
-A build you package yourself is unsigned, so macOS Gatekeeper will warn on
-first launch; right-click the app and choose Open, or allow it under System
-Settings > Privacy & Security. An unsigned build also does not update itself —
-the updater installs a replacement only when it satisfies the running app's code
-signature. Signed releases carry that signature and update in place.
+### Apple Silicon macOS
+
+Packaging produces `out/Octant.app`. A build you package yourself is unsigned,
+so macOS Gatekeeper will warn on first launch; right-click the app and choose
+Open, or allow it under System Settings > Privacy & Security. An unsigned build
+also does not update itself — the updater installs a replacement only when it
+satisfies the running app's code signature. Signed releases carry that
+signature and update in place.
+
+Local data lives in `~/Library/Application Support/Octant/` (override with
+`OCTANT_DATA_DIR`).
+
+### Linux x64 AppImage
+
+On x64 Linux the same command produces
+`out/Octant-<version>-linux-x64.AppImage` (plus `out/Octant-linux-x64/` for
+inspection). That AppImage is an unsigned dogfood artifact: Electron still owns
+the local server as a peer Machine, but Linux has no signed update channel yet,
+so the updater refuses to install updates rather than auto-updating from an
+unsigned package. Mark the AppImage executable and launch it directly. AppRun
+keeps the Chromium sandbox when unprivileged user namespaces work, and only
+adds `--no-sandbox` when that probe fails (AppImage mounts are `nosuid`).
+Ubuntu 24.04+ AppArmor may still restrict Chromium userns; a dedicated profile
+is out of scope for this dogfood path.
+
+Local data uses the XDG layout (`~/.local/share/octant/` by default; override
+with `OCTANT_DATA_DIR`).
 
 On first run, the welcome surface collects a name and optional workspace
 choices, then reports provider, Project, and a mode-valid default model
 separately. One action starts a real thread when those facts are true; a
 missing prerequisite opens its exact setup surface and returns to the same
-draft. Local data lives in `~/Library/Application Support/Octant/` (override
-with `OCTANT_DATA_DIR`).
+draft.
 
 ## Quick start (developers)
 
