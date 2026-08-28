@@ -22,9 +22,7 @@ export interface TrackerReferenceContextValue {
   readonly ports: TrackerReferenceResolvePorts;
 }
 
-const TrackerReferenceContext = createContext<TrackerReferenceContextValue | undefined>(
-  undefined,
-);
+const TrackerReferenceContext = createContext<TrackerReferenceContextValue | undefined>(undefined);
 
 export function TrackerReferenceProvider(props: {
   readonly ports: TrackerReferenceResolvePorts;
@@ -57,9 +55,7 @@ export function useTrackerReferenceResolutions(text: string): TrackerReferenceRe
   const debouncedText = useDebouncedValue(text, RESOLVE_DEBOUNCE_MS);
   const spans = useMemo(() => recognizeTrackerReferences(debouncedText), [debouncedText]);
   const cacheRef = useRef(new Map<string, TrackerReferenceResolution>());
-  const [byIdentity, setByIdentity] = useState(
-    () => new Map<string, TrackerReferenceResolution>(),
-  );
+  const [byIdentity, setByIdentity] = useState(() => new Map<string, TrackerReferenceResolution>());
   const portsRef = useRef(ports);
   portsRef.current = ports;
   const githubAvailable = ports?.github?.available === true;

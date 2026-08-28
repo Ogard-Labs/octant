@@ -166,7 +166,9 @@ function inlineContent(
         </a>
       );
     }
-    return <Fragment key={index}>{splitPlainTextWithTrackerReferences(token, byIdentity)}</Fragment>;
+    return (
+      <Fragment key={index}>{splitPlainTextWithTrackerReferences(token, byIdentity)}</Fragment>
+    );
   });
 }
 

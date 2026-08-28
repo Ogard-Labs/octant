@@ -1,9 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import type { TrackerReferenceResolution } from "@octant/contracts";
-import {
-  recognizeTrackerReferences,
-  type TrackerReferenceSpan,
-} from "@octant/domain";
+import { recognizeTrackerReferences, type TrackerReferenceSpan } from "@octant/domain";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { useTrackerReferenceResolutions } from "./TrackerReferenceContext";
 import { trackerReferenceIdentity } from "./trackerReferenceResolve";
@@ -42,9 +39,7 @@ export function renderWithTrackerReferences(
     }
     const resolution = byIdentity.get(trackerReferenceIdentity(span.reference));
     if (resolution?.status === "resolved") {
-      parts.push(
-        <TrackerReferenceChip key={`r-${span.start}-${index}`} resolution={resolution} />,
-      );
+      parts.push(<TrackerReferenceChip key={`r-${span.start}-${index}`} resolution={resolution} />);
     } else {
       parts.push(<Fragment key={`r-${span.start}-${index}`}>{span.reference.raw}</Fragment>);
     }

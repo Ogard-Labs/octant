@@ -6,7 +6,9 @@ import { TrackerReferenceComposerHints } from "./TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "./TrackerReferenceText";
 import type { TrackerReferenceResolvePorts } from "./trackerReferenceResolve";
 
-function ports(overrides: Partial<TrackerReferenceResolvePorts> = {}): TrackerReferenceResolvePorts {
+function ports(
+  overrides: Partial<TrackerReferenceResolvePorts> = {},
+): TrackerReferenceResolvePorts {
   return {
     github: {
       available: true,
