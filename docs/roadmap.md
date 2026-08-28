@@ -135,7 +135,7 @@ starts.
   retention and purge**, **usage spend ceilings**, **agent-to-agent
   messaging**, and **in-app changelog** — each waits on the
   foundation named in its own design note. Changelog design is
-  [decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md).
+  [decisions/0059-in-app-changelog.md](decisions/0059-in-app-changelog.md).
 
 ## Not planned
 
