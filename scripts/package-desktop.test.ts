@@ -246,7 +246,13 @@ describe("desktop packaging boundary", () => {
     );
     expect(createLinuxDesktopEntry("0.1.0")).toContain("Name=Octant");
     expect(createLinuxDesktopEntry("0.1.0")).toContain("Icon=octant");
-    expect(createLinuxAppRunScript("Octant")).toContain('exec "${HERE}/Octant" "$@"');
+    const appRun = createLinuxAppRunScript("Octant");
+    expect(appRun).toContain("unshare -Ur true");
+    expect(appRun).toContain('exec "${HERE}/Octant" "$@"');
+    expect(appRun).toContain('exec "${HERE}/Octant" --no-sandbox "$@"');
+    expect(appRun.indexOf('exec "${HERE}/Octant" "$@"')).toBeLessThan(
+      appRun.indexOf('exec "${HERE}/Octant" --no-sandbox "$@"'),
+    );
     expect(APPIMAGE_TOOL_URL).toBe(
       "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage",
     );

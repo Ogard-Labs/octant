@@ -394,8 +394,16 @@ async function stripMachODebugMetadata(path: string): Promise<void> {
 async function stripElfDebugMetadata(path: string): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
     execFile("strip", ["--strip-debug", path], (error) => {
-      if (error === null) resolvePromise();
-      else reject(new Error("Packaged native runtime debug metadata could not be stripped."));
+      if (error === null) {
+        resolvePromise();
+        return;
+      }
+      // Name the tool and target so a missing binutils install is actionable.
+      reject(
+        new Error(
+          `Packaged native runtime debug metadata could not be stripped for ${path}: ${error.message}. Install binutils.`,
+        ),
+      );
     });
   });
 }
@@ -855,7 +863,16 @@ export function createLinuxAppRunScript(executableName: string): string {
     // Resolve the AppDir even when the AppImage was extracted to a temp tree.
     'SELF="$(readlink -f "$0" 2>/dev/null || printf %s "$0")"',
     'HERE="${SELF%/*}"',
-    `exec "\${HERE}/${executableName}" "$@"`,
+    // AppImage FUSE mounts are nosuid, so chrome-sandbox SUID cannot work.
+    // Keep Chromium's user-namespace sandbox when the host allows unprivileged
+    // userns; only pass --no-sandbox when that probe fails (fail closed for
+    // launch). Residual Ubuntu 24.04 AppArmor profile gaps are documented in
+    // packaging docs rather than weakening sandbox globally.
+    'if unshare -Ur true >/dev/null 2>&1; then',
+    `  exec "\${HERE}/${executableName}" "$@"`,
+    "else",
+    `  exec "\${HERE}/${executableName}" --no-sandbox "$@"`,
+    "fi",
     "",
   ].join("\n");
 }

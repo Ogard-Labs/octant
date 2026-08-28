@@ -145,7 +145,11 @@ On x64 Linux the same command produces
 inspection). That AppImage is an unsigned dogfood artifact: Electron still owns
 the local server as a peer Machine, but Linux has no signed update channel yet,
 so the updater refuses to install updates rather than auto-updating from an
-unsigned package. Mark the AppImage executable and launch it directly.
+unsigned package. Mark the AppImage executable and launch it directly. AppRun
+keeps the Chromium sandbox when unprivileged user namespaces work, and only
+adds `--no-sandbox` when that probe fails (AppImage mounts are `nosuid`).
+Ubuntu 24.04+ AppArmor may still restrict Chromium userns; a dedicated profile
+is out of scope for this dogfood path.
 
 Local data uses the XDG layout (`~/.local/share/octant/` by default; override
 with `OCTANT_DATA_DIR`).
