@@ -54,6 +54,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "update updates upgrade version release automatic check download install relaunch privacy signed notarized",
         },
+        {
+          id: settingId("marketplace-fetches"),
+          label: "Marketplace fetches",
+          scope: "host",
+          keywords:
+            "marketplace fetches skills npm github registry catalog search inspect install privacy off",
+        },
       ],
     },
     {
