@@ -44,6 +44,47 @@ describe("createIntegrationClient", () => {
     expect(init.body).not.toMatch(/access_token|refresh_token|lin_api_/);
   });
 
+  it("posts issue browse operations on the quoted Linear operations path", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      jsonResponse({
+        kind: "ok",
+        value: {
+          rows: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              identifier: "ENG-12",
+              title: "Browse issues in the workspace",
+              state: { name: "In Progress", type: "started" },
+              url: "https://linear.app/ogard-labs/issue/ENG-12",
+            },
+          ],
+          hasNextPage: false,
+        },
+      }),
+    );
+    const page = await client(fetch).listIssues({ search: "browse" });
+    expect(page.rows[0]?.identifier).toBe("ENG-12");
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(String(url)).toBe("http://127.0.0.1:4317/api/integrations/linear/operations");
+    expect(JSON.parse(init.body)).toEqual({
+      kind: "operation",
+      operationId: "list-issues",
+      input: { search: "browse" },
+    });
+    expect(init.body).not.toMatch(/access_token|refresh_token|lin_api_/);
+  });
+
+  it("surfaces a refused issue read without token material", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ kind: "refused", reason: "Connect Linear to authorize this host." }),
+      );
+    await expect(client(fetch).listIssues()).rejects.toThrow(
+      "Connect Linear to authorize this host.",
+    );
+  });
+
   it("refuses a non-loopback base URL", () => {
     expect(() =>
       createIntegrationClient({

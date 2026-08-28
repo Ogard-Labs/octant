@@ -1,4 +1,4 @@
-# 0056. Linux confinement uses Bubblewrap as a scoped exception to the Seatbelt-only implementation
+# 0057. Linux confinement uses Bubblewrap as a scoped exception to the Seatbelt-only implementation
 
 **Status:** Accepted
 

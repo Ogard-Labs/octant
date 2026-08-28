@@ -141,6 +141,7 @@ import type { AgentRunProjection } from "../agentRun/agentRunProjection";
 import type { AutomationProjection } from "../automation/automationProjection";
 import type { CanvasProjection } from "../canvas/canvasProjection";
 import type { GithubCloneProjection } from "./githubCloneProjection";
+import type { ImageJobProjection } from "../image/imageJobProjection";
 
 export interface VerifiedStoreBackupReceipt extends StoreBackupReceipt {
   readonly path: string;
@@ -162,6 +163,7 @@ export interface PersistenceService {
   readonly canvasProjection: CanvasProjection;
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
+  readonly imageJobProjection: ImageJobProjection;
   readonly readShellSettings: () => ProjectedShellSettings | undefined;
   readonly readWindowWorkspace: (windowId: WindowId) => ProjectedWindowWorkspace | undefined;
   readonly readWindowWorkspaces: () => ReadonlyArray<ProjectedWindowWorkspace>;
@@ -379,6 +381,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       canvasProjection: runtime.canvasProjection,
       automationProjection: runtime.automationProjection,
       githubCloneProjection: runtime.githubCloneProjection,
+      imageJobProjection: runtime.imageJobProjection,
       readShellSettings: () => readShellSettings(connection),
       readWindowWorkspace: (windowId) => readWindowWorkspace(connection, windowId),
       readWindowWorkspaces: () => readWindowWorkspaces(connection),

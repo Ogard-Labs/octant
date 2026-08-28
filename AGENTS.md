@@ -41,8 +41,9 @@ Read the record that owns your change before editing, not all of them:
 | Modes, Projects, thread authority, checkout binding | `docs/decisions/0003`, `docs/decisions/0017`                        |
 | Package layering and dependency direction           | `docs/decisions/0004`                                               |
 | Provider drivers, capabilities, registry, harness   | `docs/decisions/0005`–`docs/decisions/0007`, `docs/decisions/0055`  |
+| Image generation jobs, adapters, and artifacts      | `docs/decisions/0055`, `docs/decisions/0056`                        |
 | Context limits, capacity, scheduling                | `docs/decisions/0008`                                               |
-| Sandbox, approvals, Plan mode, access postures      | `docs/decisions/0009`, `docs/decisions/0018`, `docs/decisions/0056` |
+| Sandbox, approvals, Plan mode, access postures      | `docs/decisions/0009`, `docs/decisions/0018`, `docs/decisions/0057` |
 | File preview and canvas artifacts                   | `docs/decisions/0010`                                               |
 | Canvas boards, comments, and layout revisions       | `docs/decisions/0052`                                               |
 | Extensions, skills, plugin host                     | `docs/decisions/0011`, `docs/decisions/0001`                        |

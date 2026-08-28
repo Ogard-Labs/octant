@@ -6,6 +6,10 @@ const store = { authenticate: vi.fn() };
 const service = {
   snapshot: vi.fn(async () => ({ state: "unauthorized", capabilities: [] })),
   execute: vi.fn(),
+  executeOperation: vi.fn(async () => ({
+    kind: "ok" as const,
+    value: { rows: [], hasNextPage: false },
+  })),
   completeAuthorization: vi.fn(async () => ({ kind: "stored" as const })),
   putSecret: vi.fn(async () => ({ kind: "stored" as const })),
   deleteSecret: vi.fn(async () => undefined),
@@ -87,5 +91,59 @@ describe("integration authentication routes", () => {
       "lin_api_abcdefghijklmnop1234",
     );
     expect(await response?.text()).not.toContain("lin_api_");
+  });
+
+  it("routes a read-only issue operation without returning token material", async () => {
+    const handler = createHandler();
+    const value = new Request("http://127.0.0.1/api/integrations/linear/operations", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://127.0.0.1" },
+      body: JSON.stringify({
+        kind: "operation",
+        operationId: "list-issues",
+        input: { search: "browse" },
+      }),
+    });
+    bindLocalWindow(value);
+    const response = await handler(value);
+    expect(response?.status).toBe(200);
+    expect(service.executeOperation).toHaveBeenCalledWith(
+      "linear",
+      { kind: "operation", operationId: "list-issues", input: { search: "browse" } },
+      expect.anything(),
+    );
+    expect(await response?.text()).not.toMatch(/lin_api_|access_token|refresh_token/);
+  });
+
+  it("allows a remote device to read issues and refuses authentication-shaped bodies", async () => {
+    const handler = createHandler();
+    const read = new Request("http://127.0.0.1/api/integrations/linear/operations", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://127.0.0.1" },
+      body: JSON.stringify({ kind: "operation", operationId: "list-issues", input: {} }),
+    });
+    bindPrincipalRouteContext(read, {
+      principal: {
+        kind: "remote-device",
+        hostId: "host",
+        deviceId: "device",
+        credentialGeneration: 1,
+        origin: "https://remote.test",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "session",
+      } as never,
+      scopeId: "scope" as never,
+    });
+    expect((await handler(read))?.status).toBe(200);
+
+    const invalid = new Request("http://127.0.0.1/api/integrations/linear/operations", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://127.0.0.1" },
+      body: JSON.stringify({ kind: "authenticate", command: { kind: "setup" } }),
+    });
+    bindLocalWindow(invalid);
+    expect((await handler(invalid))?.status).toBe(400);
+    expect(service.execute).not.toHaveBeenCalled();
   });
 });

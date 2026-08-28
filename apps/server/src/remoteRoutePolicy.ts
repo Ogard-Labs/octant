@@ -207,6 +207,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   },
   {
     kind: "exact" as const,
+    path: "/api/integrations/linear/operations",
+    methods: ["POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+    maxResponseBytes: 96 * 1_024,
+  },
+  {
+    kind: "exact" as const,
     path: "/api/providers/bootstrap",
     methods: ["GET", "HEAD"] as const,
   },

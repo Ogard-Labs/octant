@@ -248,6 +248,7 @@
         "@electron/packager": "20.0.2",
         "@electron/rebuild": "4.2.0",
         "@octant/contracts": "workspace:*",
+        "@octant/domain": "workspace:*",
         "@octant/host-runtime": "workspace:*",
         "@octant/provider-sdk": "workspace:*",
       },

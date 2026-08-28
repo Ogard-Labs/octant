@@ -69,7 +69,10 @@ export interface BrowserSurfaceState {
   readonly activeTabId?: string;
 }
 
-import type { AppUpdateState as AppUpdateStateView } from "@octant/contracts/app-updates";
+import type {
+  AppReleaseRing,
+  AppUpdateState as AppUpdateStateView,
+} from "@octant/contracts/app-updates";
 
 export type { AppUpdateStateView };
 
@@ -77,6 +80,7 @@ export interface AppUpdateReleaseView {
   readonly version: string;
   readonly platform: string;
   readonly arch: string;
+  readonly ring: AppReleaseRing;
   readonly url: string;
   readonly sha256: string;
   readonly releasedAt: string;
@@ -153,6 +157,7 @@ export interface OctantHostBridge {
   readonly downloadAppUpdate?: () => Promise<AppUpdateStateView>;
   readonly installAppUpdate?: () => Promise<AppUpdateInstallOutcome>;
   readonly setAutomaticAppUpdateChecks?: (enabled: boolean) => Promise<AppUpdateStateView>;
+  readonly setAppUpdateRing?: (ring: AppReleaseRing) => Promise<AppUpdateStateView>;
   readonly subscribeAppUpdateState?: (listener: (state: AppUpdateStateView) => void) => () => void;
   readonly openBrowserExternal?: (url: string) => Promise<void>;
   readonly subscribeBrowserSurfaceState?: (

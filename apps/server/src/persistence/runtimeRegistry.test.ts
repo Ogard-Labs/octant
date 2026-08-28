@@ -11,6 +11,38 @@ describe("createPhase1RuntimeRegistries", () => {
   // (EventRegistry#decode throws UnknownEventName). A store-level test with
   // a fake journal port cannot catch a missing registration here; only a
   // round trip through the real registry does.
+  it("registers image job events so the job service can append and hydrate", () => {
+    const registry = createPhase1RuntimeRegistries();
+    const job = {
+      id: "a1000000-0000-4000-8000-000000000001",
+      status: "queued",
+      threadKind: "chat-thread",
+      scopeId: "a1000000-0000-4000-8000-000000000003",
+      profileInstanceId: "a1000000-0000-4000-8000-000000000004",
+      modelId: "gpt-image-2",
+      promptHash: "a".repeat(64),
+      artifacts: [],
+      version: 1,
+      createdAt: "2026-08-28T12:00:00.000Z",
+      updatedAt: "2026-08-28T12:00:00.000Z",
+    };
+    expect(registry.events.decode("image.job-queued@1", 1, { job })).toEqual({ job });
+    expect(
+      registry.events.decode("image.job-status-changed@1", 1, {
+        jobId: job.id,
+        fromStatus: "running",
+        toStatus: "failed",
+        version: 3,
+        updatedAt: job.updatedAt,
+        recoveryReason: "interrupted by restart",
+        failure: { category: "interrupted", message: "interrupted by restart" },
+      }),
+    ).toMatchObject({ toStatus: "failed", recoveryReason: "interrupted by restart" });
+    expect(() =>
+      registry.events.decode("image.job-queued@1", 1, { job, b64_json: "secret-bytes" }),
+    ).toThrow(EventPayloadInvalid);
+  });
+
   it("registers agent-run-settings.updated@1 so AgentRunSettingsStore can append and hydrate", () => {
     const registry = createPhase1RuntimeRegistries();
     const payload = {
@@ -216,6 +248,8 @@ describe("createPhase1RuntimeRegistries", () => {
     expect(first.automationProjection).not.toBe(second.automationProjection);
     expect(first.projections.get("github-clones")).toBe(first.githubCloneProjection);
     expect(first.githubCloneProjection).not.toBe(second.githubCloneProjection);
+    expect(first.projections.get("image-jobs")).toBe(first.imageJobProjection);
+    expect(first.imageJobProjection).not.toBe(second.imageJobProjection);
     expect(first.projections.all().map((projection) => projection.name)).toEqual([
       "aggregate-heads",
       "projects",
@@ -230,6 +264,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "canvas",
       "automations",
       "github-clones",
+      "image-jobs",
       "zen",
       "agent-profiles",
       "validation-evidence",
@@ -255,6 +290,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "canvas",
       "automations",
       "github-clones",
+      "image-jobs",
       "zen",
       "agent-profiles",
       "validation-evidence",

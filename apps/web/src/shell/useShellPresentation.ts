@@ -1,3 +1,4 @@
+import type { AppReleaseRing } from "@octant/contracts/app-updates";
 import { useCallback, useEffect, useState } from "react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 
@@ -71,6 +72,25 @@ export function useAutomaticUpdateCheckSync(
     if (setAutomatic === undefined || automaticUpdateChecks === undefined) return;
     void setAutomatic(automaticUpdateChecks).catch(() => undefined);
   }, [automaticUpdateChecks, setAutomatic]);
+}
+
+/**
+ * Tell the host which release ring to follow, but only once someone has said.
+ *
+ * An unset preference is left unsent rather than resolved to a default here.
+ * The host already follows the ring its own version says it was built on, and
+ * a renderer that answered "stable" on behalf of someone who never chose would
+ * move every preview install onto stable the first time settings loaded.
+ */
+export function useReleaseRingSync(
+  hostBridge: OctantHostBridge | undefined,
+  releaseRing: AppReleaseRing | undefined,
+): void {
+  const setRing = hostBridge?.setAppUpdateRing;
+  useEffect(() => {
+    if (setRing === undefined || releaseRing === undefined) return;
+    void setRing(releaseRing).catch(() => undefined);
+  }, [releaseRing, setRing]);
 }
 
 /**

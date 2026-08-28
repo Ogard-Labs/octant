@@ -128,7 +128,9 @@ export function classifyProductAction(request: Request): string | undefined {
       method === "GET" ||
       method === "HEAD" ||
       (method === "POST" &&
-        (path.endsWith("/authentication/commands") || path.endsWith("/secrets")))
+        (path.endsWith("/authentication/commands") ||
+          path.endsWith("/operations") ||
+          path.endsWith("/secrets")))
     ) {
       return "settings.read-non-secret";
     }

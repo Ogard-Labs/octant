@@ -1,4 +1,5 @@
 import type { AutomationClient } from "@octant/client-runtime";
+import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { CodeProjectPullRequestRow, ThreadBoardPullRequestIdentity } from "@octant/contracts";
@@ -47,6 +48,11 @@ const GitHubIssueBrowser = lazy(() =>
     default: module.GitHubIssueBrowser,
   })),
 );
+const LinearIssueBrowser = lazy(() =>
+  import("../linear/LinearIssueBrowser").then((module) => ({
+    default: module.LinearIssueBrowser,
+  })),
+);
 const CodeThreadBoard = lazy(() =>
   import("../code/CodeThreadBoard").then((module) => ({ default: module.CodeThreadBoard })),
 );
@@ -61,6 +67,9 @@ export interface WorkspaceRailLayersProps {
   readonly codePullRequestsOpen: boolean;
   readonly githubIssuesOpen: boolean;
   readonly githubClient: GithubClient;
+  readonly linearIssuesOpen: boolean;
+  readonly linearClient: IntegrationClient;
+  readonly onCloseLinearIssues: () => void;
   readonly workBoardOpen: boolean;
   readonly activeMode: OctantMode;
   readonly codeClient: CodeClient;
@@ -131,6 +140,19 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
         <div className="code-board-layer">
           <LazyRailSurface label="GitHub issues">
             <GitHubIssueBrowser client={props.githubClient} onClose={props.onCloseGithubIssues} />
+          </LazyRailSurface>
+        </div>
+      ) : null}
+      {props.linearIssuesOpen && props.activeMode === "code" ? (
+        <div className="code-board-layer">
+          <LazyRailSurface label="Linear">
+            <LinearIssueBrowser
+              getIssue={(input) => props.linearClient.getIssue(input)}
+              isNarrow={props.isNarrow}
+              listIssueFilters={() => props.linearClient.listIssueFilters()}
+              listIssues={(input) => props.linearClient.listIssues(input)}
+              onClose={props.onCloseLinearIssues}
+            />
           </LazyRailSurface>
         </div>
       ) : null}

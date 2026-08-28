@@ -43,7 +43,8 @@ export class UsageProjection implements Projection {
 
   apply(connection: SqliteConnection, event: EventEnvelope): void {
     if (!usageEventNames.has(event.eventName)) return;
-    assertProjection(event.eventVersion === 1 && event.aggregateType === "context-ledger");
+    assertProjection(event.eventVersion === 1);
+    if (event.aggregateType !== "context-ledger" && event.aggregateType !== "image-job") return;
     this.#applyUsageReconciled(connection, event);
   }
 
@@ -55,7 +56,10 @@ export class UsageProjection implements Projection {
     const existing = rawUsageRecord(connection, reconciliation.id);
     if (existing !== undefined && existing.last_sequence >= event.globalSequence) return;
 
-    const plan = readContextPlan(connection, reconciliation.planId);
+    const plan =
+      reconciliation.planId === undefined
+        ? undefined
+        : readContextPlan(connection, reconciliation.planId);
     const manifest =
       plan !== undefined ? readContextManifest(connection, plan.manifestId) : undefined;
 
@@ -65,7 +69,24 @@ export class UsageProjection implements Projection {
     };
 
     const attribution: ReadonlyArray<UsageAttributionEntry> =
-      manifest !== undefined ? buildAttribution(manifest.entries, true) : [];
+      reconciliation.imageUnits !== undefined
+        ? [
+            {
+              category: "current-request",
+              plannedTokens: 0,
+              quality: reconciliation.imageUnits.quality,
+              imageCount: reconciliation.imageUnits.count,
+              ...(reconciliation.imageUnits.size === undefined
+                ? {}
+                : { imageSize: reconciliation.imageUnits.size }),
+              ...(reconciliation.imageUnits.outputQuality === undefined
+                ? {}
+                : { imageQuality: reconciliation.imageUnits.outputQuality }),
+            },
+          ]
+        : manifest !== undefined
+          ? buildAttribution(manifest.entries, true)
+          : [];
 
     const quality = classifyUsageQuality({
       hasReconciliation: true,

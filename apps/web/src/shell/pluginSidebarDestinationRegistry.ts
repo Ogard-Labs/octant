@@ -8,6 +8,7 @@ export interface SidebarDestinationActionContext {
   readonly openThreadBoard: () => void;
   readonly openPullRequests: () => void;
   readonly openGithubIssues: () => void;
+  readonly openLinearIssues: () => void;
 }
 
 export type SidebarDestinationAction = (ctx: SidebarDestinationActionContext) => void;
@@ -36,6 +37,13 @@ const builtInSidebarDestinationActions: ReadonlyMap<string, SidebarDestinationAc
     (ctx) => {
       ctx.closeOverlays();
       ctx.openGithubIssues();
+    },
+  ],
+  [
+    "builtin:linear/sidebar-destination",
+    (ctx) => {
+      ctx.closeOverlays();
+      ctx.openLinearIssues();
     },
   ],
 ]);

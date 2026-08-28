@@ -258,6 +258,19 @@ Disabled GitHub, missing capability, and unauthorized or rate-limited states
 fail closed. See
 [security/github-repository-onboarding-threat-model.md](security/github-repository-onboarding-threat-model.md).
 
+Code also has a host-scoped Linear issues workspace contributed by the
+bundled-off Linear plugin as `sidebar.destination` `linear-issues`, Code mode
+only. The sidebar row is shown only when that contribution is effective, its
+action is wired, and the Linear authentication snapshot reports `list-issues`
+available. Browse goes through the Integration port (`list-issues`,
+`get-issue`, `list-issue-filters`) over Linear GraphQL with bounded page size
+and description bytes. Issue bodies are a live projection, not Octant source of
+truth; credentials and raw API payloads never enter prompts or tool output.
+Open in Linear is an external `linear.app` URL. Disabled, untrusted,
+unauthorized, expired, or rate-limited Linear contributes no sidebar item,
+catalogue rows, or thread context. Create-from-issue, writes, and Chat/Work
+browse are not this surface.
+
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
@@ -391,6 +404,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
   (Kilo Code, Devin, Mistral Vibe, Kimi Code, Grok Build). Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
+  Generation itself is a journaled job with OpenAI and Gemini adapters, a
+  bounded generated-image attachment scope, and usage rows attributed as
+  `image-generation`; see
+  [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
+  Invocation and thread preview are not part of that record.
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;
@@ -495,7 +513,7 @@ mechanisms are:
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
-  recorded in [decisions/0056-linux-confinement-bubblewrap.md](decisions/0056-linux-confinement-bubblewrap.md).
+  recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
   Sensitive system roots remain denied even where runtime compatibility
   requires a broad file-read rule; each launch's exact roots are re-allowed
   after those denials. Path checks alone are never the boundary. Confined

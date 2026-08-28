@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   isPluginSidebarDestinationEntryPoint,
   loadPluginSidebarDestinationAction,
@@ -20,10 +20,26 @@ describe("plugin sidebar destination registry", () => {
     expect(result.kind).toBe("ready");
   });
 
+  it("returns the Linear issues destination action", () => {
+    const result = loadPluginSidebarDestinationAction("builtin:linear/sidebar-destination");
+    expect(result.kind).toBe("ready");
+    if (result.kind !== "ready") return;
+    const openLinearIssues = vi.fn();
+    result.action({
+      closeOverlays: vi.fn(),
+      openThreadBoard: vi.fn(),
+      openPullRequests: vi.fn(),
+      openGithubIssues: vi.fn(),
+      openLinearIssues,
+    });
+    expect(openLinearIssues).toHaveBeenCalledOnce();
+  });
+
   it("reports built-in entry points as registered", () => {
     expect(isPluginSidebarDestinationEntryPoint("builtin:board/destination")).toBe(true);
     expect(isPluginSidebarDestinationEntryPoint("builtin:github/sidebar-destination")).toBe(true);
     expect(isPluginSidebarDestinationEntryPoint("builtin:github/issues-destination")).toBe(true);
+    expect(isPluginSidebarDestinationEntryPoint("builtin:linear/sidebar-destination")).toBe(true);
   });
 
   it("returns an unknown result for unknown entry points", () => {

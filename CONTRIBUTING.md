@@ -108,6 +108,37 @@ docs: consolidate repository documentation
   When no useful automated test is practical, say so in the PR and describe
   the manual verification you did.
 
+## Releases
+
+Two rings, both built by GitHub Actions, both signed with a Developer ID and
+notarized. The rules they follow live in
+[decision 0034](docs/decisions/0034-signed-updates.md); this is the operating
+procedure.
+
+- **Preview** — `.github/workflows/release-preview.yml` runs nightly, builds
+  `main`, and publishes to `<base>/preview/darwin-arm64.json`. It skips itself
+  when `main` has not moved since the last preview. Force one with
+  `gh workflow run 'Release (preview)' -f force=true`.
+- **Stable** — `.github/workflows/release-stable.yml` runs on a
+  `vMAJOR.MINOR.PATCH` tag and publishes to `<base>/stable/darwin-arm64.json`.
+  The `stable` environment requires an approval, so pushing the tag proposes
+  the release and a maintainer approves it before anything is signed.
+
+Cutting a stable release is two steps: set
+`DESKTOP_PACKAGE_IDENTITY.version` in `scripts/package-desktop.ts` to the
+version you are releasing, then push the matching tag. The workflow refuses a
+tag that disagrees with that constant, because an app that announces one
+version while the feed offers another makes every install compare the wrong
+pair. After the release, bump the constant to the next version you are working
+toward; previews are prereleases of it.
+
+Credentials — the Developer ID certificate, the notary key, the Ed25519 feed
+signing key, and the deploy key that publishes the feed — are environment
+secrets, never repository secrets, so a workflow on a side branch cannot read
+them. `scripts/setup-release-credentials.sh` walks a maintainer through
+creating and installing all of them; run it once, and again when a key is
+rotated.
+
 ## AI-assisted contributions
 
 Using AI tools to write or review code is fine. You remain the author: read

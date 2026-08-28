@@ -2,7 +2,7 @@ import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppUpdateSettings } from "./AppUpdateSettings";
 import type { AppUpdateStateView, OctantHostBridge } from "../shell/hostBridge";
@@ -11,6 +11,7 @@ const ready: AppUpdateStateView = {
   status: "ready",
   currentVersion: "0.1.0" as AppUpdateStateView["currentVersion"],
   automaticChecks: true,
+  ring: "stable",
 };
 
 function bridge(overrides: Partial<OctantHostBridge> = {}): OctantHostBridge {
@@ -19,6 +20,7 @@ function bridge(overrides: Partial<OctantHostBridge> = {}): OctantHostBridge {
     downloadAppUpdate: vi.fn(async () => ready),
     installAppUpdate: vi.fn(async () => ({ kind: "installing" }) as const),
     setAutomaticAppUpdateChecks: vi.fn(async () => ready),
+    setAppUpdateRing: vi.fn(async () => ready),
     // The host pushes state; without an emission the surface is correctly idle.
     subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
       listener(ready);
@@ -34,15 +36,17 @@ function bridge(overrides: Partial<OctantHostBridge> = {}): OctantHostBridge {
 
 function view(overrides: Partial<OctantHostBridge> = {}, automaticChecks = true) {
   const onAutomaticChecksChange = vi.fn();
+  const onReleaseRingChange = vi.fn();
   const host = bridge(overrides);
   render(
     <AppUpdateSettings
       automaticChecks={automaticChecks}
       hostBridge={host}
       onAutomaticChecksChange={onAutomaticChecksChange}
+      onReleaseRingChange={onReleaseRingChange}
     />,
   );
-  return { host, onAutomaticChecksChange };
+  return { host, onAutomaticChecksChange, onReleaseRingChange };
 }
 
 describe("AppUpdateSettings", () => {
@@ -136,12 +140,30 @@ describe("AppUpdateSettings", () => {
     );
   });
 
+  it("moves to the preview ring and tells the host, not only the settings store", () => {
+    // Both matter: the store is what survives a relaunch, and the host is what
+    // the next check actually reads a feed from.
+    const { host, onReleaseRingChange } = view();
+
+    const rings = screen.getByRole("group", { name: "Release ring" });
+    expect(within(rings).getByRole("button", { name: "Stable" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(within(rings).getByRole("button", { name: "Preview" }));
+
+    expect(onReleaseRingChange).toHaveBeenCalledWith("preview");
+    expect(host.setAppUpdateRing).toHaveBeenCalledWith("preview");
+  });
+
   it("says plainly that a non-desktop client does not update itself", () => {
     render(
       <AppUpdateSettings
         automaticChecks
         hostBridge={{ close: vi.fn() } as unknown as OctantHostBridge}
         onAutomaticChecksChange={vi.fn()}
+        onReleaseRingChange={vi.fn()}
       />,
     );
 

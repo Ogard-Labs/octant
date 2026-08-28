@@ -70,6 +70,9 @@ export class ContextProjection implements Projection {
 
   apply(connection: SqliteConnection, event: EventEnvelope): void {
     if (!contextEventNames.has(event.eventName)) return;
+    if (event.eventName === "context.usage-reconciled@1" && event.aggregateType === "image-job") {
+      return;
+    }
     assertProjection(event.eventVersion === 1 && event.aggregateType === "context-ledger");
     switch (event.eventName) {
       case "context.manifest-created@1":
@@ -219,7 +222,9 @@ export class ContextProjection implements Projection {
     const reconciliation = decodeProjection(
       () => decodeContextUsageReconciled(event.payload).reconciliation,
     );
-    const plan = readContextPlan(connection, reconciliation.planId);
+    const planId = reconciliation.planId;
+    assertProjection(planId !== undefined);
+    const plan = readContextPlan(connection, planId);
     assertProjection(plan !== undefined);
     const manifest = readContextManifest(connection, plan.manifestId);
     assertProjection(
@@ -619,7 +624,9 @@ export function readContextSubjectProjection(
       : readContextUsage(connection, usageRow.reconciliation_id as never);
   let latestSent: { readonly manifest: ContextManifest; readonly plan: ContextPlan } | undefined;
   if (latestUsage !== undefined) {
-    const sentPlan = readContextPlan(connection, latestUsage.planId);
+    const usagePlanId = latestUsage.planId;
+    assertProjection(usagePlanId !== undefined);
+    const sentPlan = readContextPlan(connection, usagePlanId);
     assertProjection(sentPlan !== undefined);
     const sentManifestPersisted = readContextManifest(connection, sentPlan.manifestId);
     assertProjection(sentManifestPersisted !== undefined);
