@@ -573,6 +573,7 @@ import {
   createHostControlRouteHandler,
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
+import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
 import { ChatAttachmentStore } from "./chat/chatAttachmentStore";
 import { createPrivateListenerLifecycleController } from "./remote/privateListenerLifecycleController";
@@ -5783,6 +5784,8 @@ export function startOctantServer(
         if (mode === "chat") await chatAttachmentStore.purgeThread(threadId as never);
       },
     });
+    const hostRuntimePlatform =
+      process.platform === "darwin" || process.platform === "linux" ? process.platform : undefined;
     const hostControlRoutes = createHostControlRouteHandler({
       windowAuthorityStore,
       diagnostics: composeHostDiagnostics,
@@ -5793,6 +5796,24 @@ export function startOctantServer(
       ...(options.hostControl?.requestOwnerStop === undefined
         ? {}
         : { requestOwnerStop: options.hostControl.requestOwnerStop }),
+      ...(hostRuntimePlatform === undefined
+        ? {}
+        : {
+            dataMap: {
+              dataDirectory: persistence.dataDirectory,
+              platform: hostRuntimePlatform,
+              ...(options.credentialBrokerUrl !== undefined && hostRuntimePlatform === "darwin"
+                ? { credentialStore: desktopCredentialStore() }
+                : {}),
+              listProjects: () =>
+                persistence.readProjects().map((project) => ({
+                  id: String(project.id),
+                  name: project.name,
+                  type: project.type,
+                  ...(project.type === "chat" ? {} : { boundRoot: project.binding.canonicalRoot }),
+                })),
+            },
+          }),
       backup: (label) => {
         const receipt = persistence.createVerifiedBackup(label);
         return {

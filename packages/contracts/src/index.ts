@@ -48,6 +48,7 @@ export * from "./validationComposition";
 export * from "./validationEvents";
 export * from "./host";
 export * from "./hostControl";
+export * from "./hostDataMap";
 export * from "./remoteAccess";
 export * from "./remoteRequestProof";
 export * from "./remotePushNotifications";
