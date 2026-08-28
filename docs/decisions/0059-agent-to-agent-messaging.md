@@ -61,7 +61,7 @@ policy bypass dressed as convenience.
     (`unauthorized`, `depth-exceeded`, `recipient-terminal`, `oversize`,
     `policy`), `occurredAt`
   - acknowledged: `messageId`, `correlationId`, `occurredAt`
-  Duplicate or out-of-order provider events apply idempotently.
+    Duplicate or out-of-order provider events apply idempotently.
 - **Target matrix vs 0049.** 0049 remains Chat-only for
   `octant_thread_message` and does not admit Work or Code write hops.
   This record adds a separate tool family that may target Chat threads, Work
