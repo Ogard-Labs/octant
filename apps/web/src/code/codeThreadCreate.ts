@@ -75,6 +75,9 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
         ...(input.composer.issueContext === undefined
           ? {}
           : { issueContext: input.composer.issueContext }),
+        ...(input.composer.linearIssueContext === undefined
+          ? {}
+          : { linearIssueContext: input.composer.linearIssueContext }),
       }),
     };
   }
@@ -115,6 +118,9 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
       ...(input.composer.issueContext === undefined
         ? {}
         : { issueContext: input.composer.issueContext }),
+      ...(input.composer.linearIssueContext === undefined
+        ? {}
+        : { linearIssueContext: input.composer.linearIssueContext }),
     },
   };
 }

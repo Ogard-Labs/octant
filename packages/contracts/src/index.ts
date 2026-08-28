@@ -106,6 +106,7 @@ export * from "./zen";
 export * from "./cursorAcp";
 export * from "./githubCatalogue";
 export * from "./githubIssueContext";
+export * from "./linearIssueContext";
 export * from "./trackerReference";
 export * from "./githubClone";
 export * from "./githubOnboarding";

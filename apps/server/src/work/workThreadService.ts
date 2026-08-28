@@ -28,9 +28,23 @@ import {
   prepareOptionalIssueContext,
   type GithubIssueContextService,
 } from "../github/githubIssueContextService";
+import {
+  linearIssueContextFailureCategory,
+  prepareOptionalLinearIssueContext,
+  type LinearIssueContextService,
+} from "../plugins/linear/linearIssueContextService";
 
 type GithubIssueContextPort = Pick<
   GithubIssueContextService,
+  | "prepare"
+  | "bindCreatedThread"
+  | "peekFramedForFirstTurn"
+  | "consumeFramedForFirstTurn"
+  | "takeFramedForFirstTurn"
+>;
+
+type LinearIssueContextPort = Pick<
+  LinearIssueContextService,
   | "prepare"
   | "bindCreatedThread"
   | "peekFramedForFirstTurn"
@@ -108,6 +122,7 @@ export interface WorkThreadServiceDependencies {
     readonly threadId: WorkThreadId;
   }) => Promise<void>;
   readonly issueContext?: GithubIssueContextPort;
+  readonly linearIssueContext?: LinearIssueContextPort;
 }
 
 export class WorkThreadServiceError extends Error {
@@ -128,6 +143,7 @@ export class WorkThreadService {
   readonly #workingDirectories: WorkThreadServiceDependencies["workingDirectories"];
   readonly #onWorkingDirectoryChanged: WorkThreadServiceDependencies["onWorkingDirectoryChanged"];
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #linearIssueContext?: LinearIssueContextPort;
 
   constructor(dependencies: WorkThreadServiceDependencies) {
     this.#persistence = dependencies.persistence;
@@ -140,6 +156,9 @@ export class WorkThreadService {
     this.#onWorkingDirectoryChanged = dependencies.onWorkingDirectoryChanged;
     if (dependencies.issueContext !== undefined) {
       this.#issueContext = dependencies.issueContext;
+    }
+    if (dependencies.linearIssueContext !== undefined) {
+      this.#linearIssueContext = dependencies.linearIssueContext;
     }
   }
 
@@ -190,6 +209,12 @@ export class WorkThreadService {
         if (this.#projection.read(command.threadId) !== undefined) {
           throw this.#failure("invalid", "Work thread already exists.");
         }
+        if (command.issueContext !== undefined && command.linearIssueContext !== undefined) {
+          throw this.#failure(
+            "invalid",
+            "Choose either a GitHub issue or a Linear issue, not both.",
+          );
+        }
         const preparedIssue = await prepareOptionalIssueContext(
           this.#issueContext,
           command.issueContext,
@@ -199,6 +224,17 @@ export class WorkThreadService {
           throw this.#failure(
             issueContextFailureCategory(preparedIssue.reason),
             preparedIssue.message,
+          );
+        }
+        const preparedLinearIssue = await prepareOptionalLinearIssueContext(
+          this.#linearIssueContext,
+          command.linearIssueContext,
+          new AbortController().signal,
+        );
+        if (preparedLinearIssue.status === "refused") {
+          throw this.#failure(
+            linearIssueContextFailureCategory(preparedLinearIssue.reason),
+            preparedLinearIssue.message,
           );
         }
         const created = decodeWorkThread({
@@ -225,6 +261,17 @@ export class WorkThreadService {
               threadId: String(created.id),
               framed: preparedIssue.framed,
               request: command.issueContext,
+            });
+          } catch {
+            // The thread is already journaled; taint recording must not invert create.
+          }
+        }
+        if (preparedLinearIssue.status === "ready" && command.linearIssueContext !== undefined) {
+          try {
+            this.#linearIssueContext?.bindCreatedThread({
+              threadId: String(created.id),
+              framed: preparedLinearIssue.framed,
+              request: command.linearIssueContext,
             });
           } catch {
             // The thread is already journaled; taint recording must not invert create.

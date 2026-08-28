@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { GithubIssueContextRequest } from "./githubIssueContext";
+import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
 import { ThreadWorkingDirectory } from "./workingDirectory";
 import {
@@ -449,6 +450,7 @@ export const CodeCommand = Schema.Union(
     profileId: Schema.optional(AgentProfileId),
     approvalId: Schema.optional(CodeApprovalId),
     issueContext: Schema.optional(GithubIssueContextRequest),
+    linearIssueContext: Schema.optional(LinearIssueContextRequest),
   })
     .annotations(strict)
     .pipe(
@@ -466,6 +468,7 @@ export const CodeCommand = Schema.Union(
     thread: CodeThread,
     approvalId: Schema.optional(CodeApprovalId),
     issueContext: Schema.optional(GithubIssueContextRequest),
+    linearIssueContext: Schema.optional(LinearIssueContextRequest),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-lifecycle"),

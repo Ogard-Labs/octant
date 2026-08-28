@@ -5,6 +5,7 @@ import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { GithubClient } from "@octant/client-runtime/github-client";
+import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type {
   GithubCatalogueReadResponse,
@@ -51,6 +52,46 @@ const baseProps = {
   onCreateThread: vi.fn(),
   onCancel: vi.fn(),
 };
+
+function makeLinearClient(
+  options: {
+    readonly snapshot?: {
+      readonly state: "ready" | "unauthorized";
+      readonly capabilities: ReadonlyArray<{
+        readonly operationId: string;
+        readonly available: boolean;
+      }>;
+    };
+  } = {},
+): IntegrationClient {
+  const snapshot = options.snapshot ?? {
+    state: "ready" as const,
+    capabilities: [{ operationId: "list-issues", available: true }],
+  };
+  return {
+    authenticationSnapshot: async () => snapshot,
+    executeAuthenticationCommand: async () => snapshot,
+    executeOperation: async () => ({ kind: "refused", reason: "not used" }),
+    listIssues: async () => ({
+      rows: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          identifier: "ENG-12",
+          title: "Browse issues in the workspace",
+          state: { name: "In Progress", type: "started" },
+          url: "https://linear.app/ogard-labs/issue/ENG-12",
+        },
+      ],
+      hasNextPage: false,
+    }),
+    getIssue: async () => {
+      throw new Error("not used");
+    },
+    listIssueFilters: async () => ({ teams: [], states: [], assignees: [], projects: [] }),
+    storePersonalCredential: async () => {},
+    deletePersonalCredential: async () => {},
+  };
+}
 
 describe("DraftThreadWorkspace", () => {
   it("renders mode-specific welcome copy for chat", () => {
@@ -763,6 +804,59 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
     await waitFor(() => expect(screen.queryByRole("button", { name: "Create from…" })).toBeNull());
+  });
+
+  it("shows the Create from Linear tab when list-issues is available", async () => {
+    const user = userEvent.setup();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        linearClient={makeLinearClient()}
+        linearPluginEnabled={true}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Create from…" }));
+    expect(screen.getByRole("tab", { name: "Linear" })).toBeVisible();
+  });
+
+  it("hides Create from when the Linear plugin is disabled even if a client exists", async () => {
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        linearClient={makeLinearClient()}
+        linearPluginEnabled={false}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Create from…" })).toBeNull();
+  });
+
+  it("attaches only a Linear node id when creating from a Linear issue", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        linearClient={makeLinearClient()}
+        linearPluginEnabled={true}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Create from…" }));
+    await user.click(await screen.findByRole("tab", { name: "Linear" }));
+    await user.click(
+      await screen.findByRole("button", { name: /ENG-12 Browse issues in the workspace/ }),
+    );
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Start from Linear");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread).toHaveBeenCalledWith(
+      "Start from Linear",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { id: "11111111-1111-4111-8111-111111111111" },
+    );
   });
 
   it("fails the GitHub flow closed while an existing Project fixes the repository", async () => {

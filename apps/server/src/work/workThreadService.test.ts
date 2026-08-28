@@ -116,6 +116,43 @@ describe("WorkThreadService", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("refuses to create a thread when promised Linear issue context cannot be loaded", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      linearIssueContext: {
+        prepare: vi.fn(async () => ({
+          status: "refused" as const,
+          reason: "unauthorized" as const,
+          message: "The selected Linear issue could not be loaded. The thread was not created.",
+        })),
+        bindCreatedThread: vi.fn(),
+        peekFramedForFirstTurn: vi.fn(),
+        consumeFramedForFirstTurn: vi.fn(),
+        takeFramedForFirstTurn: vi.fn(),
+      },
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+        linearIssueContext: { id: "11111111-1111-4111-8111-111111111111" },
+      }),
+    ).rejects.toEqual(
+      new WorkThreadServiceError({
+        category: "unauthorized",
+        message: "The selected Linear issue could not be loaded. The thread was not created.",
+      }),
+    );
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("still creates a thread when recording issue-context taint throws", async () => {
     const fixture = serviceFixture({
       threads: [],
@@ -760,6 +797,7 @@ function serviceFixture(
     readonly project?: Project;
     readonly events?: ReadonlyArray<EventEnvelope>;
     readonly issueContext?: WorkThreadServiceDependencies["issueContext"];
+    readonly linearIssueContext?: WorkThreadServiceDependencies["linearIssueContext"];
   } = {},
 ) {
   const projection = new WorkThreadProjection();
@@ -834,6 +872,9 @@ function serviceFixture(
     onWorkingDirectoryChanged,
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
     ...(options.issueContext === undefined ? {} : { issueContext: options.issueContext }),
+    ...(options.linearIssueContext === undefined
+      ? {}
+      : { linearIssueContext: options.linearIssueContext }),
   });
   return {
     service,

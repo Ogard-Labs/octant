@@ -255,6 +255,8 @@ import { GhRepositoryObservationPort } from "./github/ghRepositoryObservationPor
 import { GithubCapabilityService } from "./github/githubCapabilityService";
 import { GithubCatalogueService } from "./github/githubCatalogueService";
 import { GithubIssueContextService } from "./github/githubIssueContextService";
+import { LinearIssueContextService } from "./plugins/linear/linearIssueContextService";
+import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "./github/githubReadToolService";
 import { ManagedCloneProcessPort, createOwnedGitContext } from "./github/managedCloneProcessPort";
 import { ManagedCloneService } from "./github/managedCloneService";
@@ -1861,6 +1863,26 @@ export function startOctantServer(
           : { clientId: options.linearOAuthClientId }),
       },
     });
+    const linearIssueContextService = new LinearIssueContextService({
+      reader: {
+        snapshot: (signal) => integrationService.snapshot("linear", signal),
+        executeGetIssue: async (id, signal) =>
+          integrationService.executeOperation(
+            "linear",
+            { kind: "operation", operationId: LINEAR_ISSUE_GET_OPERATION, input: { id } },
+            signal,
+          ),
+      },
+      ingestion: externalContentIngestionStore,
+      uuid: randomUUID,
+    });
+    const peekCreateFromIssueFramed = (threadId: string) =>
+      githubIssueContextService.peekFramedForFirstTurn(threadId) ??
+      linearIssueContextService.peekFramedForFirstTurn(threadId);
+    const consumeCreateFromIssueFramed = (threadId: string) => {
+      githubIssueContextService.consumeFramedForFirstTurn(threadId);
+      linearIssueContextService.consumeFramedForFirstTurn(threadId);
+    };
     const integrationRoutes = createIntegrationRouteHandler({
       windowAuthorityStore,
       service: integrationService,
@@ -2377,6 +2399,7 @@ export function startOctantServer(
         onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
         probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
         issueContext: githubIssueContextService,
+        linearIssueContext: linearIssueContextService,
       });
     // Revocation is wired at construction, before any window can hold a watch.
     activeCodeService = codeService;
@@ -3157,10 +3180,8 @@ export function startOctantServer(
         takeProductFeedbackForTurn: createProductFeedbackTurnPort({
           service: productFeedbackService,
         }),
-        peekIssueContextFramed: (threadId) =>
-          githubIssueContextService.peekFramedForFirstTurn(threadId),
-        consumeIssueContextFramed: (threadId) =>
-          githubIssueContextService.consumeFramedForFirstTurn(threadId),
+        peekIssueContextFramed: peekCreateFromIssueFramed,
+        consumeIssueContextFramed: consumeCreateFromIssueFramed,
         // Where a run comes home to: the directory the thread's Project binds.
         // A run on a managed worktree works in a sibling tree; the merge lands
         // in the person's own checkout, and only the Project knows where that
@@ -3565,6 +3586,7 @@ export function startOctantServer(
     const chatService = new ChatService({
       persistence,
       issueContext: githubIssueContextService,
+      linearIssueContext: linearIssueContextService,
       reviewedModelManifest,
       hiddenThreadIds: () => {
         const hidden = new Set(sideChatSidecars.hiddenThreadIds());
@@ -3912,6 +3934,7 @@ export function startOctantServer(
       onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
       issueContext: githubIssueContextService,
+      linearIssueContext: linearIssueContextService,
     });
     const workTurnProjection = new WorkTurnProjection();
     requireJournalHydration(
@@ -3932,10 +3955,8 @@ export function startOctantServer(
     const workTurnService = new WorkTurnService({
       persistence,
       threads: workThreadService,
-      peekIssueContextFramed: (threadId) =>
-        githubIssueContextService.peekFramedForFirstTurn(threadId),
-      consumeIssueContextFramed: (threadId) =>
-        githubIssueContextService.consumeFramedForFirstTurn(threadId),
+      peekIssueContextFramed: peekCreateFromIssueFramed,
+      consumeIssueContextFramed: consumeCreateFromIssueFramed,
       projects: projectService,
       projection: workTurnProjection,
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
