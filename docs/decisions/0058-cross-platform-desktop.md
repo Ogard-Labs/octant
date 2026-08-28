@@ -55,7 +55,7 @@ not a Mac app plus a thinner Linux/Windows shell.
   dogfood AppImage ≠ signed auto-update), then release-matrix scaffolding for
   `<ring>/linux-x64.json` beside `darwin-arm64.json` (in-app Linux channel
   still fail-closed until a signed feed is published), then Windows confinement
-  + credentials + packaging.
+  - credentials + packaging.
 - `apps/desktop` build must not require `swiftc` on Linux/Windows. Packaging
   scripts grow non-`.app` targets (Linux AppImage via the same
   `package:desktop` entry) without deleting the Apple Silicon path.
