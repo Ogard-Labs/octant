@@ -378,10 +378,12 @@ modelId }`, and the model picker is provider-first. Discovery can find
   compatible, Azure AI Foundry API-key, Ollama), SDK/RPC drivers (Claude Agent
   SDK, Codex app-server, OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
   (Kilo Code, Devin, Mistral Vibe, Kimi Code, Grok Build). The ACP drivers share one
-  generic ACP client and protocol layer; the remaining per-vendor ACP wrappers
-  are being collapsed into that single stack. Provider-specific wire payloads
-  never leave the adapter — the rest of the system sees only normalized runtime
-  events.
+  generic ACP client and protocol layer. Each in-tree vendor is a bundled
+  `provider-driver` plugin that reaches the host only through `provider-sdk`;
+  ACP vendors configure that shared stack rather than shipping a second runtime.
+  Disabled or incompatible driver plugins contribute no models, tools, or
+  capabilities. Provider-specific wire payloads never leave the adapter — the
+  rest of the system sees only normalized runtime events.
 - **Honest capability.** Each driver reports, per mode and per model, whether
   app-managed tools, images, resume, approvals, and subagents are supported.
   The server disables what is unsupported instead of emulating it. Bounded
@@ -401,7 +403,7 @@ modelId }`, and the model picker is provider-first. Discovery can find
 `@octant/plugin-host` is the pure model: normalized component kinds
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
-`ui-surface`, `appearance-pack`, `preview-viewer`), composer addressing
+`ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
@@ -423,7 +425,7 @@ Project, thread, and provider policy allow it. Any other state — `not-installe
 `untrusted`, `quarantined`, `plugin-disabled`, `component-disabled`,
 `incompatible`, `mode-prohibited`, `project-prohibited`, `thread-prohibited`,
 `host-prohibited`, `stale-catalog-epoch`, `broken`, `draining` — contributes no
-prompt, schema, tool, or route.
+prompt, schema, tool, route, model, or capability.
 
 - Executable components are quarantined until explicitly reviewed and then run
   in supervised, sandboxed processes with a ready handshake, bounded output,
@@ -513,21 +515,21 @@ mechanisms are:
 
 ## Package map
 
-| Package                   | Responsibility                                                                                                     | Depends on                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `packages/contracts`      | Effect Schema entities, commands, events, RPC and wire contracts; no runtime logic                                 | `effect`                                                          |
-| `packages/domain`         | Pure policies and state transitions (modes, tool calls, approvals, remote access, boards, canvas, …)               | contracts, theme                                                  |
-| `packages/theme`          | Semantic theme schema, presets, backgrounds, typography, importer, contrast                                        | contracts                                                         |
-| `packages/provider-sdk`   | `ProviderDriver` interface, normalized runtime events, discovery, conformance harnesses                            | contracts, `effect`                                               |
-| `packages/plugin-host`    | Extension manifests, component model, activation ladder, addressing, bundled skills, Agent Plugins loader          | contracts, `yaml`                                                 |
-| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties (re-exports contracts/extensions)    | contracts                                                         |
-| `packages/host-runtime`   | Host paths, owner receipts, service lifecycle, bridge secret, diagnostics, redaction (shared by desktop and CLI)   | —                                                                 |
-| `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads | contracts, domain                                                 |
-| `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                    | contracts, host-runtime                                           |
-| `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway  | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
-| `apps/desktop`            | Electron shell: windows, menus, Keychain, brokers, pickers, signed updates, server process lifecycle, packaging    | contracts, domain, host-runtime                                   |
-| `apps/web`                | React renderer for desktop and paired browsers                                                                     | client-runtime, contracts, domain, plugin-host, theme             |
-| `apps/mobile`             | Expo iOS/Android remote-control client                                                                             | client-runtime, contracts, domain                                 |
+| Package                   | Responsibility                                                                                                                        | Depends on                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `packages/contracts`      | Effect Schema entities, commands, events, RPC and wire contracts; no runtime logic                                                    | `effect`                                                          |
+| `packages/domain`         | Pure policies and state transitions (modes, tool calls, approvals, remote access, boards, canvas, …)                                  | contracts, theme                                                  |
+| `packages/theme`          | Semantic theme schema, presets, backgrounds, typography, importer, contrast                                                           | contracts                                                         |
+| `packages/provider-sdk`   | `ProviderDriver` interface, normalized runtime events, discovery, conformance harnesses                                               | contracts, `effect`                                               |
+| `packages/plugin-host`    | Extension manifests, component model, activation ladder, addressing, bundled skills and provider-driver plugins, Agent Plugins loader | contracts, `yaml`                                                 |
+| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties (re-exports contracts/extensions)                       | contracts                                                         |
+| `packages/host-runtime`   | Host paths, owner receipts, service lifecycle, bridge secret, diagnostics, redaction (shared by desktop and CLI)                      | —                                                                 |
+| `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads                    | contracts, domain                                                 |
+| `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                                       | contracts, host-runtime                                           |
+| `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway                     | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
+| `apps/desktop`            | Electron shell: windows, menus, Keychain, brokers, pickers, signed updates, server process lifecycle, packaging                       | contracts, domain, host-runtime                                   |
+| `apps/web`                | React renderer for desktop and paired browsers                                                                                        | client-runtime, contracts, domain, plugin-host, theme             |
+| `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                | client-runtime, contracts, domain                                 |
 
 Dependencies point inward: no package imports an app, and `contracts` imports
 nothing first-party.

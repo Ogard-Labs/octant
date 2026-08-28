@@ -3,6 +3,9 @@ import {
   decodeProviderInstanceId,
   type ProviderInstance,
 } from "@octant/contracts";
+import { BUNDLED_PROVIDER_DRIVER_PLUGINS } from "@octant/plugin-host/provider-drivers";
+import { DISCOVERY_DESCRIPTORS } from "@octant/provider-sdk/discovery";
+import { isAcpHostProfileDriver } from "@octant/provider-sdk/driver-plugins";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
@@ -21,6 +24,22 @@ import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000061");
 const timestamp = "2026-07-16T10:00:00.000Z";
+
+describe("bundled provider-driver plugins", () => {
+  it("registers every discovery descriptor as a provider-driver plugin", () => {
+    expect(BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind).sort()).toEqual(
+      DISCOVERY_DESCRIPTORS.map((descriptor) => descriptor.driverKind).sort(),
+    );
+  });
+
+  it("keeps ACP vendors on the host ACP stack", () => {
+    expect(
+      BUNDLED_PROVIDER_DRIVER_PLUGINS.filter((plugin) =>
+        isAcpHostProfileDriver(plugin.driverKind),
+      ).map((plugin) => plugin.driverKind),
+    ).toEqual(["kilo", "devin", "mistral-vibe", "kimi-code", "grok"]);
+  });
+});
 
 describe("makeProviderDriver", () => {
   it("selects the OpenCode process only for an OpenCode instance", async () => {
