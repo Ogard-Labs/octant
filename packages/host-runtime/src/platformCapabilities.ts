@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { isExecutable } from "./executableCheck";
 
 const execFileAsync = promisify(execFile);
 
@@ -46,12 +47,14 @@ export interface ProbeHostPlatformCapabilitiesOptions {
   readonly platform: string;
   readonly uid: number;
   readonly runner?: HostPlatformCapabilityProbeRunner;
+  readonly executable?: (path: string) => Promise<boolean>;
 }
 
 interface CapabilityProbe {
   readonly name: HostPlatformCapabilityName;
   readonly command: string;
   readonly args: readonly string[];
+  readonly additionalExecutablePaths?: readonly string[];
 }
 
 const ALL_CAPABILITIES: ReadonlyArray<HostPlatformCapabilityName> = [
@@ -86,6 +89,7 @@ function probesFor(platform: "darwin" | "linux", uid: number): ReadonlyArray<Cap
       name: "secret-store",
       command: "/usr/bin/busctl",
       args: ["--user", "--no-pager", "status", "org.freedesktop.secrets"],
+      additionalExecutablePaths: ["/usr/bin/secret-tool"],
     },
   ];
 }
@@ -104,8 +108,9 @@ export async function probeHostPlatformCapabilities(
     };
   }
   const runner = options.runner ?? defaultProbeRunner;
+  const executable = options.executable ?? isExecutable;
   const capabilities = await Promise.all(
-    probesFor(options.platform, options.uid).map((probe) => runProbe(runner, probe)),
+    probesFor(options.platform, options.uid).map((probe) => runProbe(runner, probe, executable)),
   );
   return { platform: options.platform, capabilities };
 }
@@ -122,11 +127,17 @@ export function availablePlatformCapabilityNames(
 async function runProbe(
   runner: HostPlatformCapabilityProbeRunner,
   probe: CapabilityProbe,
+  executable: (path: string) => Promise<boolean>,
 ): Promise<HostPlatformCapability> {
   try {
     const result = await runner.run(probe.command, probe.args);
     if (result.stdout.trim() === "") {
       return { name: probe.name, state: "unavailable", detail: "empty-probe-output" };
+    }
+    for (const path of probe.additionalExecutablePaths ?? []) {
+      if (!(await executable(path))) {
+        return { name: probe.name, state: "unavailable", detail: "tool-unavailable" };
+      }
     }
     return { name: probe.name, state: "available", detail: "probe-succeeded" };
   } catch (error) {

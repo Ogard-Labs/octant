@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GithubAuthenticationSnapshot } from "@octant/contracts";
 import { GithubCatalogueService } from "./githubCatalogueService";
+import { CacheStatsProjection } from "../cacheStatsProjection";
+import { CACHE_BACKOFF_FIRST_DELAY_MS } from "@octant/domain/cache-backoff-policy";
 
 const signal = () => new AbortController().signal;
 
@@ -88,6 +90,7 @@ function service(
     port?: ReturnType<typeof fakePort>;
     snapshot?: GithubAuthenticationSnapshot | (() => GithubAuthenticationSnapshot);
     now?: () => number;
+    cacheStats?: CacheStatsProjection;
   } = {},
 ) {
   const port = options.port ?? fakePort();
@@ -98,6 +101,7 @@ function service(
       port: port as never,
       snapshot: async () => (typeof snapshot === "function" ? snapshot() : snapshot),
       ...(options.now === undefined ? {} : { now: options.now }),
+      ...(options.cacheStats === undefined ? {} : { cacheStats: options.cacheStats }),
     }),
   };
 }
@@ -309,6 +313,132 @@ describe("GithubCatalogueService", () => {
         signal(),
       ),
     ).toEqual({ kind: "unavailable", capability: "issues-read", reason: "invalid-cursor" });
+  });
+
+  it("stops re-asking a failing GitHub on every read until the pacing delay passes", async () => {
+    const clock = { ms: 1_000 };
+    const now = () => clock.ms;
+    const port = fakePort({
+      listRepositories: vi.fn(async () => ({ kind: "rate-limited" as const })),
+    });
+    const cacheStats = new CacheStatsProjection({
+      now,
+      clock: () => new Date(clock.ms).toISOString(),
+    });
+    const { service: catalogue } = service({ port, now, cacheStats });
+
+    await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());
+    expect(port.listRepositories).toHaveBeenCalledTimes(1);
+
+    // An expired entry would normally be refetched; while the streak paces the
+    // cache, GitHub is left alone instead.
+    clock.ms += 1;
+    await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());
+    expect(port.listRepositories).toHaveBeenCalledTimes(1);
+
+    clock.ms += CACHE_BACKOFF_FIRST_DELAY_MS;
+    await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());
+    expect(port.listRepositories).toHaveBeenCalledTimes(2);
+    expect(cacheStats.read()).toEqual([
+      expect.objectContaining({ key: "github-catalogue", failureStreak: 2 }),
+    ]);
+  });
+
+  it("still reads GitHub for a refresh the user asked for while pacing failures", async () => {
+    const clock = { ms: 1_000 };
+    const now = () => clock.ms;
+    const port = fakePort({
+      listRepositories: vi.fn(async () => ({ kind: "unavailable" as const })),
+    });
+    const cacheStats = new CacheStatsProjection({
+      now,
+      clock: () => new Date(clock.ms).toISOString(),
+    });
+    const { service: catalogue } = service({ port, now, cacheStats });
+
+    await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());
+    await catalogue.read({ kind: "repositories", pageSize: 30, refresh: true }, signal());
+
+    expect(port.listRepositories).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not hold the next account's unattended reads after a rate-limited previous account", async () => {
+    const clock = { ms: 1_000 };
+    const now = () => clock.ms;
+    let login = "octocat";
+    let failing = true;
+    const port = fakePort({
+      listRepositories: vi.fn(async () =>
+        failing
+          ? { kind: "rate-limited" as const }
+          : {
+              kind: "ok" as const,
+              value: { rows: [observationRow], hasNextPage: false },
+            },
+      ),
+    });
+    const cacheStats = new CacheStatsProjection({
+      now,
+      clock: () => new Date(clock.ms).toISOString(),
+    });
+    const { service: catalogue } = service({
+      port,
+      now,
+      cacheStats,
+      snapshot: () => ({
+        ...readySnapshot,
+        account: { login, gitProtocol: "https", scopes: ["repo"] },
+      }),
+    });
+
+    await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());
+    expect(port.listRepositories).toHaveBeenCalledTimes(1);
+    expect(cacheStats.holdsUnattendedRefresh("github-catalogue")).toBe(true);
+
+    failing = false;
+    login = "someone-else";
+    clock.ms += 1;
+
+    const response = await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());
+    expect(port.listRepositories).toHaveBeenCalledTimes(2);
+    expect(response).toMatchObject({
+      kind: "repositories",
+      page: { freshness: { status: "fresh" } },
+    });
+    expect(cacheStats.holdsUnattendedRefresh("github-catalogue")).toBe(false);
+  });
+
+  it("clears the failure streak once GitHub answers again", async () => {
+    const clock = { ms: 1_000 };
+    const now = () => clock.ms;
+    let failing = true;
+    const port = fakePort({
+      listRepositories: vi.fn(async () =>
+        failing
+          ? { kind: "unavailable" as const }
+          : {
+              kind: "ok" as const,
+              value: { rows: [observationRow], hasNextPage: false },
+            },
+      ),
+    });
+    const cacheStats = new CacheStatsProjection({
+      now,
+      clock: () => new Date(clock.ms).toISOString(),
+    });
+    const { service: catalogue } = service({ port, now, cacheStats });
+
+    await catalogue.read({ kind: "repositories", pageSize: 30 }, signal());
+    failing = false;
+    await catalogue.read({ kind: "repositories", pageSize: 30, refresh: true }, signal());
+
+    expect(cacheStats.read()).toEqual([
+      expect.objectContaining({
+        failureStreak: 0,
+        lastRefreshAt: new Date(clock.ms).toISOString(),
+      }),
+    ]);
+    expect(cacheStats.holdsUnattendedRefresh("github-catalogue")).toBe(false);
   });
 
   it("fails closed when a port row violates the renderer contract", async () => {

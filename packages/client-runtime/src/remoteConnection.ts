@@ -213,6 +213,8 @@ export interface RemoteConnection {
   readonly disconnect: () => void;
   /** Renew the short-lived session without re-pairing. */
   readonly refresh: () => Promise<void>;
+  /** The connection supervisor uses this to renew a session spent in background. */
+  readonly renewIfSpent: () => Promise<void>;
   readonly session: () => RemoteSessionFacts | undefined;
   readonly deviceIdentity: () => DeviceIdentity | undefined;
   /** Swap the fetch port (used for tests and listener retargeting). */
@@ -633,6 +635,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     reconnect,
     disconnect,
     refresh,
+    renewIfSpent,
     session: () => session,
     deviceIdentity: () => deviceIdentity,
     updateFetch,

@@ -27,7 +27,8 @@ describe("runStatusCommand", () => {
     const report = await runStatusCommand({ fetch, stdout });
     expect(report.status).toBe("ready");
     expect(report.instanceId).toBe("instance-1");
-    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("ready"));
+    expect(report.secretStore).toBeDefined();
+    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("Secret store:"));
   });
 
   it("reports disabled when storage is not ready", async () => {
@@ -40,16 +41,62 @@ describe("runStatusCommand", () => {
         instanceId: "instance-2",
       }),
     );
-    const report = await runStatusCommand({ fetch });
+    const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const report = await runStatusCommand({ fetch, stdout });
     expect(report.status).toBe("disabled");
+    expect(report.secretStore).toBeDefined();
   });
 
   it("reports unreachable when the host cannot be contacted", async () => {
     const fetch = mockFetch(async () => {
       throw new Error("ECONNREFUSED");
     });
-    const report = await runStatusCommand({ fetch });
+    const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const report = await runStatusCommand({ fetch, stdout });
     expect(report.status).toBe("unreachable");
+    expect(report.secretStore).toBeDefined();
+  });
+
+  it("treats IPv6 loopback as a local target without throwing", async () => {
+    const fetch = mockFetch(async () =>
+      jsonResponse({
+        product: "Octant",
+        status: "ok",
+        storage: "ready",
+        version: "0.0.0-dev",
+        instanceId: "ipv6-instance",
+      }),
+    );
+    const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const report = await runStatusCommand({
+      hostname: "::1",
+      fetch,
+      stdout,
+    });
+    expect(report.status).toBe("ready");
+    expect(report.url.toString()).toBe("http://[::1]:13773/");
+    expect(report.secretStore).toBeDefined();
+    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("Secret store:"));
+  });
+
+  it("omits local secret-store status when inspecting a remote host", async () => {
+    const fetch = mockFetch(async () =>
+      jsonResponse({
+        product: "Octant",
+        status: "ok",
+        storage: "ready",
+        version: "0.0.0-dev",
+        instanceId: "remote-instance",
+      }),
+    );
+    const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const report = await runStatusCommand({
+      hostname: "station.example",
+      fetch,
+      stdout,
+    });
+    expect(report.secretStore).toBeUndefined();
+    expect(stdout.write).toHaveBeenCalledWith(expect.not.stringContaining("Secret store:"));
   });
 });
 
@@ -60,9 +107,11 @@ describe("formatStatusReport", () => {
       url: new URL("http://127.0.0.1:13773"),
       instanceId: "instance-1",
       version: "0.0.0-dev",
+      secretStore: "available",
     });
     expect(text).toContain("Endpoint: http://127.0.0.1:13773");
     expect(text).toContain("Instance: instance-1");
     expect(text).toContain("Version: 0.0.0-dev");
+    expect(text).toContain("Secret store: available");
   });
 });

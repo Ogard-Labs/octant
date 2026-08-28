@@ -9,6 +9,25 @@ import { UsageQuality, UsageRecord } from "./usage";
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
 const StableRequestShape = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
+const StableLatencyKey = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
+
+export const UsageLatencyStat = Schema.Struct({
+  key: StableLatencyKey,
+  label: Schema.NonEmptyTrimmedString,
+  observationCount: NonNegativeInt,
+  p50Ms: Schema.optional(NonNegativeInt),
+  p95Ms: Schema.optional(NonNegativeInt),
+  maxMs: Schema.optional(NonNegativeInt),
+  /** Present only for a measurement that has a slow threshold. */
+  slowThresholdMs: Schema.optional(NonNegativeInt),
+  slowCount: Schema.optional(NonNegativeInt),
+}).annotations(strict);
+export type UsageLatencyStat = typeof UsageLatencyStat.Type;
+
+export const UsageLatencyStats = Schema.Struct({
+  measurements: Schema.Array(UsageLatencyStat),
+}).annotations(strict);
+export type UsageLatencyStats = typeof UsageLatencyStats.Type;
 
 export const UsageQueryFilter = Schema.Struct({
   providerInstanceId: Schema.optional(ProviderInstanceId),
@@ -121,6 +140,10 @@ export const UsageQueryResponse = Schema.Struct({
   topConsumers: Schema.Array(UsageTopConsumer),
   hasMore: Schema.Boolean,
   queryAt: UtcTimestamp,
+  /** Host-process observations since this host started; empty when none have been observed. */
+  latencyStats: Schema.optionalWith(UsageLatencyStats, {
+    default: () => ({ measurements: [] }),
+  }),
 }).annotations(strict);
 export type UsageQueryResponse = typeof UsageQueryResponse.Type;
 
@@ -166,3 +189,4 @@ export const decodeUsageExportRequest = Schema.decodeUnknownSync(UsageExportRequ
 export const decodeUsageResetRequest = Schema.decodeUnknownSync(UsageResetRequest);
 export const decodeUsageRetentionRequest = Schema.decodeUnknownSync(UsageRetentionRequest);
 export const decodeUsagePurgeResult = Schema.decodeUnknownSync(UsagePurgeResult);
+export const decodeUsageLatencyStats = Schema.decodeUnknownSync(UsageLatencyStats);

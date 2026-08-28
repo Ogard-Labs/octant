@@ -122,6 +122,9 @@ export async function exerciseRemoteChatMutation(input: {
       defaultResearchRouting: settings.defaultResearchRouting,
       ...(settings.searxngBaseUrl === undefined ? {} : { searxngBaseUrl: settings.searxngBaseUrl }),
       defaultPersonalityInstructions: settings.defaultPersonalityInstructions,
+      ...(settings.providerFallback === undefined
+        ? {}
+        : { providerFallback: settings.providerFallback }),
     }),
   });
   return assertRemoteResponse("chat", response, "Chat mutation failed over the remote session.");

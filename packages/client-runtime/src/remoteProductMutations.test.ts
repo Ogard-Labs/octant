@@ -43,6 +43,8 @@ async function pemFromPublicKey(publicKey: CryptoKey): Promise<string> {
 
 const now = "2026-08-03T00:00:00.000Z";
 const providerInstanceId = "10000000-0000-4000-8000-000000000001";
+const fallbackProviderInstanceId = "10000000-0000-4000-8000-000000000009";
+let lastChatCommand: ReturnType<typeof decodeChatCommand> | undefined;
 const workThread = {
   id: "20000000-0000-4000-8000-000000000001",
   projectId: "30000000-0000-4000-8000-000000000001",
@@ -56,6 +58,7 @@ const workThread = {
 };
 
 async function readyBridge(): Promise<ReturnType<typeof createRemoteSessionBridge>> {
+  lastChatCommand = undefined;
   const server = createFakeRemoteServer({
     handleProductRequest({ method, path, body }) {
       if (method === "GET" && path === "/api/chat/bootstrap") {
@@ -66,6 +69,10 @@ async function readyBridge(): Promise<ReturnType<typeof createRemoteSessionBridg
             defaultResearchEnabled: false,
             defaultResearchRouting: "automatic",
             defaultPersonalityInstructions: "Be concise.",
+            providerFallback: {
+              providerInstanceId: fallbackProviderInstanceId,
+              modelId: "model-a",
+            },
             version: 1,
             updatedAt: now,
           },
@@ -74,6 +81,7 @@ async function readyBridge(): Promise<ReturnType<typeof createRemoteSessionBridg
       }
       if (method === "POST" && path === "/api/chat/commands") {
         const command = decodeChatCommand(body);
+        lastChatCommand = command;
         if (command.kind !== "update-chat-settings") {
           return Response.json({ category: "invalid" }, { status: 400 });
         }
@@ -155,6 +163,13 @@ describe("remoteProductMutations", () => {
     const bridge = await readyBridge();
     await expect(exerciseRemoteChatSurface({ bridge })).resolves.toEqual({ ok: true });
     await expect(exerciseRemoteChatMutation({ bridge })).resolves.toEqual({ ok: true });
+    expect(lastChatCommand).toMatchObject({
+      kind: "update-chat-settings",
+      providerFallback: {
+        providerInstanceId: fallbackProviderInstanceId,
+        modelId: "model-a",
+      },
+    });
     await expect(exerciseRemoteWorkSurface({ bridge })).resolves.toEqual({ ok: true });
     await expect(exerciseRemoteWorkMutation({ bridge })).resolves.toEqual({ ok: true });
     await expect(exerciseRemoteCodeSurface({ bridge })).resolves.toEqual({ ok: true });

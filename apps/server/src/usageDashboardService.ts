@@ -2,7 +2,9 @@ import type {
   UsageAttributionEntry,
   UsageDashboardRequest,
   UsageDashboardResponse,
+  UsageLatencyStats,
 } from "@octant/contracts";
+import type { CacheStatsProjection, CacheStatsRecorder } from "./cacheStatsProjection";
 import { buildUsageDashboard, type UsageDashboardSourceRow } from "./usageDashboardModel";
 import {
   USAGE_PROJECTION_SCHEMA_VERSION,
@@ -27,6 +29,9 @@ export interface UsageDashboardServiceOptions {
   readonly queryAt: string;
   readonly projectScope: UsageProjectScope;
   readonly maxScannedRows?: number;
+  /** Cache readings this query both reports and contributes its own to. */
+  readonly cacheStats?: CacheStatsProjection;
+  readonly latencyStats?: UsageLatencyStats;
 }
 
 /**
@@ -60,7 +65,13 @@ export function readUsageDashboard(
       continue;
     }
     const mode = deriveModeFromSubjectType(row.subject_type);
-    const projectId = resolveProjectId(connection, projectCache, row.subject_type, row.subject_id);
+    const projectId = resolveProjectId(
+      connection,
+      projectCache,
+      row.subject_type,
+      row.subject_id,
+      options.cacheStats,
+    );
     sourceRows.push({
       reconciliationId: row.reconciliation_id,
       hostId: row.host_id,
@@ -98,6 +109,8 @@ export function readUsageDashboard(
     breakdownLimit: request.breakdownLimit ?? DEFAULT_BREAKDOWN_LIMIT,
     unreadableRecordCount,
     scanTruncated: truncated,
+    ...(options.cacheStats === undefined ? {} : { cacheStats: options.cacheStats.read() }),
+    ...(options.latencyStats === undefined ? {} : { latencyStats: options.latencyStats }),
   });
 }
 
@@ -219,9 +232,14 @@ function resolveProjectId(
   cache: Map<string, string | undefined>,
   subjectType: string,
   subjectId: string,
+  cacheStats: CacheStatsRecorder | undefined,
 ): string | undefined {
   const key = `${subjectType} ${subjectId}`;
-  if (cache.has(key)) return cache.get(key);
+  if (cache.has(key)) {
+    cacheStats?.recordHit("usage-project-resolution");
+    return cache.get(key);
+  }
+  cacheStats?.recordMiss("usage-project-resolution");
 
   const ownership: Record<string, string | undefined> = {
     "chat-thread": "SELECT project_id FROM chat_thread_projection WHERE thread_id = ?",

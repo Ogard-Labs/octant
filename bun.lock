@@ -154,9 +154,14 @@
         "@octant/domain": "workspace:*",
       },
       "devDependencies": {
+        "@types/react": "catalog:",
+        "react": "catalog:",
         "tsdown": "0.22.5",
         "typescript": "catalog:",
         "vitest": "catalog:",
+      },
+      "peerDependencies": {
+        "react": "catalog:",
       },
     },
     "packages/contracts": {

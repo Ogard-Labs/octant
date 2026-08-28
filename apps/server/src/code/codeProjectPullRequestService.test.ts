@@ -1,6 +1,7 @@
 import { decodeProjectId, decodeWindowId } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { describe, expect, it, vi } from "vitest";
+import { CacheStatsProjection, type CacheStatsRecorder } from "../cacheStatsProjection";
 import {
   CodeProjectPullRequestService,
   type CodeProjectPullRequestAuthorizedProject,
@@ -83,6 +84,8 @@ function serviceFixture(options: {
     readonly number: number;
     readonly observedAt: string;
   }>;
+  readonly clock?: () => string;
+  readonly cacheStats?: CacheStatsRecorder;
 }) {
   const listActive = vi.fn(
     options.list ??
@@ -136,7 +139,8 @@ function serviceFixture(options: {
         },
       ],
     },
-    clock: () => now,
+    clock: options.clock ?? (() => now),
+    ...(options.cacheStats === undefined ? {} : { cacheStats: options.cacheStats }),
   });
   return { service, listActive, observeReviewByIdentity, journal };
 }
@@ -447,6 +451,63 @@ describe("CodeProjectPullRequestService", () => {
 
     expect(board.rows[0]).toMatchObject({ number: 11, state: "unknown" });
     expect(board.freshness).toMatchObject({ status: "stale", staleReason: "refresh-failed" });
+  });
+
+  it("does not treat a refresh-failed known-identity recovery as a successful list refresh", async () => {
+    const clock = { ms: Date.parse(now) };
+    const cacheStats = new CacheStatsProjection({
+      now: () => clock.ms,
+      clock: () => new Date(clock.ms).toISOString(),
+    });
+    const listed: GhActivePullRequestListResult = { status: "ok", rows: [ghRow()] };
+    let detail: GhPullRequestReviewResult = {
+      ...observedDetail,
+      pullRequest: {
+        ...observedDetail.pullRequest,
+        number: 11,
+        url: "https://github.com/octant/octant/pull/11",
+        title: "Merged pull request",
+        state: "merged",
+      },
+    };
+    const fixture = serviceFixture({
+      knownPullRequests: [{ number: 11, observedAt: "2026-08-21T08:00:00Z" }],
+      list: async () => listed,
+      detail: async () => detail,
+      clock: () => new Date(clock.ms).toISOString(),
+      cacheStats,
+    });
+
+    const first = await fixture.service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+    const firstRefreshAt = new Date(clock.ms).toISOString();
+    expect(first.freshness).toEqual({ status: "fresh", lastSuccessfulRefreshAt: firstRefreshAt });
+    expect(cacheStats.read()).toEqual([
+      expect.objectContaining({
+        key: "pull-request-list",
+        lastRefreshAt: firstRefreshAt,
+        failureStreak: 0,
+      }),
+    ]);
+
+    clock.ms += 60_000;
+    detail = { status: "unavailable" };
+    const second = await fixture.service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+    expect(second.freshness).toMatchObject({ status: "stale", staleReason: "refresh-failed" });
+    expect(cacheStats.read()).toEqual([
+      expect.objectContaining({
+        key: "pull-request-list",
+        lastRefreshAt: firstRefreshAt,
+        failureStreak: 0,
+      }),
+    ]);
   });
 
   it("bounds restart-recovered identities before returning a board snapshot", async () => {

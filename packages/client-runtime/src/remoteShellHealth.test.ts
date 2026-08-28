@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createRemoteDraftRegistry } from "./remoteDraftRegistry";
+import { localHostDisplayName } from "./localHostDisplayName";
 import {
   mapBridgeStateToHostHealth,
   buildRemoteHostObservation,
@@ -23,6 +24,18 @@ describe("remoteShellHealth", () => {
     });
     expect(hosts[0]?.health).toBe("healthy");
     expect(hosts[0]?.displayName).toBe("Mac");
+  });
+
+  it("does not label a nameless remote host as this computer", () => {
+    const hosts = buildRemoteHostObservation({
+      state: {
+        kind: "unavailable",
+        reason: "Remote host is unavailable.",
+        hostId: "11111111-1111-4111-8111-111111111111",
+      },
+    });
+    expect(hosts[0]?.displayName).toBe("Remote host");
+    expect(hosts[0]?.displayName).not.toBe(localHostDisplayName());
   });
 
   it("gates mutations to ready sessions only", () => {

@@ -1,5 +1,6 @@
 import type { HostHealth, HostId, HostIdentity } from "@octant/contracts/host";
-import { LOCAL_HOST_DISPLAY_NAME, LOCAL_HOST_ID } from "@octant/contracts/host";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { localHostDisplayName } from "@octant/client-runtime";
 import {
   listCreateHostOptions,
   preselectCreateHost,
@@ -57,7 +58,7 @@ function resolveHosts(hosts: ReadonlyArray<HostIdentity> | undefined): ReadonlyA
   return [
     {
       hostId: LOCAL_HOST_ID,
-      displayName: LOCAL_HOST_DISPLAY_NAME,
+      displayName: localHostDisplayName(),
       health: "connecting",
       capabilities: ["chat", "work", "code"],
     },
@@ -116,7 +117,7 @@ export function HostSelector(props: HostSelectorProps) {
     hosts.find((host) => host.hostId === selectedHostId) ??
     hosts.find((host) => host.hostId === preselected) ??
     hosts[0];
-  const displayName = selected?.displayName ?? LOCAL_HOST_DISPLAY_NAME;
+  const displayName = selected?.displayName ?? localHostDisplayName();
   const health = selected?.health ?? "connecting";
   const healthLabel = healthLabels[health];
   const fixed = props.fixedHostId !== undefined;
