@@ -8,12 +8,14 @@ import { canonicalReleaseBytes } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   createFeedVerifier,
-  DEFAULT_OCTANT_UPDATE_FEED_URL,
+  DEFAULT_OCTANT_UPDATE_FEED_BASE_URL,
+  OCTANT_UPDATE_PUBLIC_KEY,
   fetchUpdateFeed,
   fetchVerifiedArtifact,
-  resolveUpdateFeedUrl,
+  resolveUpdateFeedBaseUrl,
   UPDATE_CHECK_USER_AGENT,
-  UPDATE_FEED_URL_ENVIRONMENT_VARIABLE,
+  UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE,
+  updateFeedUrl,
 } from "./appUpdateFeed";
 import { createAppUpdateService, type AppUpdaterPort } from "./appUpdateService";
 
@@ -32,6 +34,7 @@ const release = {
   version: "0.3.0",
   platform: "darwin",
   arch: "arm64",
+  ring: "stable",
   url: "https://updates.example.test/Octant-0.3.0-arm64.zip",
   sha256: artifactDigest,
   releasedAt: "2026-08-19T09:00:00.000Z",
@@ -62,7 +65,8 @@ function updater(): AppUpdaterPort & {
   };
 }
 
-const FEED_URL = "https://updates.example.test/feed.json";
+const FEED_BASE_URL = "https://updates.example.test";
+const FEED_URL = `${FEED_BASE_URL}/stable/darwin-arm64.json`;
 
 function service(
   options: {
@@ -70,14 +74,20 @@ function service(
     readonly fetchFails?: boolean;
     readonly publicKey?: string;
     readonly currentVersion?: string;
-    readonly feedUrl?: string;
+    readonly feedBaseUrl?: string;
+    readonly ring?: "stable" | "preview";
     /** What the artifact host actually serves, when it disagrees with the signed hash. */
     readonly serves?: Buffer;
     readonly artifactUnreachable?: boolean;
   } = {},
 ) {
   const port = updater();
-  const feedUrl = options.feedUrl ?? FEED_URL;
+  const feedBaseUrl = options.feedBaseUrl ?? FEED_BASE_URL;
+  const feedUrl = updateFeedUrl(feedBaseUrl, {
+    ring: options.ring ?? "stable",
+    platform: "darwin",
+    arch: "arm64",
+  });
   const fetchImpl = vi.fn(async (input: string) => {
     if (options.fetchFails === true) throw new Error("offline");
     if (input.startsWith(feedUrl)) {
@@ -91,12 +101,13 @@ function service(
   }) as unknown as typeof globalThis.fetch;
   const updates = createAppUpdateService({
     updater: port,
-    feedUrl,
+    feedBaseUrl,
     app: {
       version: (options.currentVersion ?? "0.2.0") as AppVersion,
       platform: "darwin",
       arch: "arm64",
     },
+    ...(options.ring === undefined ? {} : { ring: options.ring }),
     automaticChecks: true,
     verifier: createFeedVerifier(options.publicKey ?? publicKeyBase64),
     fetchImpl,
@@ -177,7 +188,7 @@ describe("update verification", () => {
     const other = generateKeyPairSync("ed25519");
     const payload = release;
     const { updates } = service({
-      feedUrl: "https://updates.acme-internal.test/octant.json",
+      feedBaseUrl: "https://updates.acme-internal.test",
       document: {
         schemaVersion: 1,
         release: payload,
@@ -192,28 +203,80 @@ describe("update verification", () => {
   });
 });
 
+describe("release rings", () => {
+  it("follows the ring a build's own version says it was made on", async () => {
+    // Nothing configured it: the version carries the ring, so a preview build
+    // reads the preview feed on its first check.
+    const { fetchImpl, updates } = service({ currentVersion: "0.2.0-preview.20260828.4" });
+    await updates.check();
+    const [requested] = vi.mocked(fetchImpl).mock.calls[0] as [string];
+
+    expect(updates.state().ring).toBe("preview");
+    expect(requested).toContain("/preview/darwin-arm64.json");
+  });
+
+  it("refuses a stable feed's release while following preview", async () => {
+    // The stable document is genuinely signed; it is simply not this ring's.
+    const { updates } = service({ ring: "preview" });
+
+    expect(await updates.check()).toMatchObject({ status: "refused", refusal: "wrong-ring" });
+  });
+
+  it("drops a verified offer when the ring changes", async () => {
+    // The offer was verified against the ring being followed then. Carrying it
+    // across would let a preview release install after somebody chose stable.
+    const { updates } = service();
+    expect(await updates.check()).toMatchObject({ status: "available" });
+
+    const switched = updates.setRing("preview");
+
+    expect(switched.ring).toBe("preview");
+    expect(switched.status).toBe("idle");
+    expect(switched.available).toBeUndefined();
+  });
+});
+
 describe("where the feed is", () => {
   it("uses the published endpoint when nothing is configured", () => {
-    expect(resolveUpdateFeedUrl({})).toBe(DEFAULT_OCTANT_UPDATE_FEED_URL);
-    expect(DEFAULT_OCTANT_UPDATE_FEED_URL.startsWith("https://")).toBe(true);
+    expect(resolveUpdateFeedBaseUrl({})).toBe(DEFAULT_OCTANT_UPDATE_FEED_BASE_URL);
+    expect(DEFAULT_OCTANT_UPDATE_FEED_BASE_URL.startsWith("https://")).toBe(true);
   });
 
   it("lets a team point Octant at their own endpoint", () => {
     // The endpoint is configuration: the signature is what is trusted, so
     // moving the feed is a deployment choice rather than a security one.
     expect(
-      resolveUpdateFeedUrl({
-        [UPDATE_FEED_URL_ENVIRONMENT_VARIABLE]: "https://updates.acme-internal.test/octant.json",
+      resolveUpdateFeedBaseUrl({
+        [UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE]: "https://updates.acme-internal.test/octant",
       }),
-    ).toBe("https://updates.acme-internal.test/octant.json");
+    ).toBe("https://updates.acme-internal.test/octant");
+  });
+
+  it("addresses a feed by ring and machine, so a ring is a directory rather than a rewrite", () => {
+    // The shape the publisher writes and the app reads. Adding a platform is a
+    // new file at a known path, not a change to how anything is addressed.
+    expect(
+      updateFeedUrl("https://octant.sh/updates", {
+        ring: "preview",
+        platform: "darwin",
+        arch: "arm64",
+      }),
+    ).toBe("https://octant.sh/updates/preview/darwin-arm64.json");
+    expect(
+      updateFeedUrl("https://octant.sh/updates/", {
+        ring: "stable",
+        platform: "darwin",
+        arch: "arm64",
+      }),
+    ).toBe("https://octant.sh/updates/stable/darwin-arm64.json");
   });
 
   it("refuses a configured endpoint it cannot reach securely rather than falling back", () => {
     // Silently using the public feed would update somebody from a place they
     // did not choose, which is worse than not updating.
     expect(() =>
-      resolveUpdateFeedUrl({
-        [UPDATE_FEED_URL_ENVIRONMENT_VARIABLE]: "http://updates.test/f.json",
+      resolveUpdateFeedBaseUrl({
+        [UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE]: "http://updates.test",
       }),
     ).toThrow(/https/);
   });
@@ -314,7 +377,7 @@ describe("download hand-off", () => {
     const other = generateKeyPairSync("ed25519");
     const stale = createAppUpdateService({
       updater: port,
-      feedUrl: FEED_URL,
+      feedBaseUrl: FEED_BASE_URL,
       app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
       automaticChecks: false,
       verifier: createFeedVerifier(publicKeyBase64),
@@ -421,7 +484,7 @@ describe("automatic checking", () => {
     const timers: Array<() => void> = [];
     const updates = createAppUpdateService({
       updater: port,
-      feedUrl: FEED_URL,
+      feedBaseUrl: FEED_BASE_URL,
       app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
       automaticChecks,
       verifier: createFeedVerifier(publicKeyBase64),
@@ -489,6 +552,12 @@ describe("what an update check discloses", () => {
     expect(Object.keys(headers).sort()).toEqual(["accept", "user-agent"]);
   });
 
+  it("compiles a usable release public key", () => {
+    expect(OCTANT_UPDATE_PUBLIC_KEY).not.toBe("");
+    expect(createFeedVerifier().configured).toBe(true);
+    expect(createFeedVerifier("").configured).toBe(false);
+  });
+
   it("refuses to fetch a feed over plain HTTP", async () => {
     const fetchImpl = vi.fn() as unknown as typeof globalThis.fetch;
 
@@ -500,7 +569,7 @@ describe("what an update check discloses", () => {
 
   it("keeps the documented disclosure to what the request actually sends", () => {
     // If the request ever carries more than this, the list is wrong.
-    expect(OCTANT_UPDATE_CHECK_DISCLOSURE).toHaveLength(4);
+    expect(OCTANT_UPDATE_CHECK_DISCLOSURE).toHaveLength(5);
     expect(OCTANT_UPDATE_CHECK_DISCLOSURE.join(" ")).not.toMatch(
       /account|identifier|thread|Project|usage/i,
     );

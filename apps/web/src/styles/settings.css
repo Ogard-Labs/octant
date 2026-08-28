@@ -1567,6 +1567,14 @@
   color: var(--oct-muted);
 }
 
+.app-update__ring {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--oct-border-soft);
+}
+
 .app-update__automatic {
   display: flex;
   flex-direction: column;

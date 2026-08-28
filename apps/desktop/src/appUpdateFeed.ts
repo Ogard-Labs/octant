@@ -11,11 +11,13 @@ import { OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
  * somebody controls that domain today; the signature proves the release is one
  * we published. See `docs/decisions/0034`.
  *
- * Empty until a release key exists, and empty is not a permissive default:
- * `createFeedVerifier` refuses every signature while it is empty, so a build
- * that forgot to set it offers no updates rather than accepting any.
+ * A missing or unusable value is not a permissive default:
+ * `createFeedVerifier` refuses every signature unless this is a valid Ed25519
+ * SPKI key, so a build that forgot to set it offers no updates rather than
+ * accepting any.
  */
-export const OCTANT_UPDATE_PUBLIC_KEY = "";
+export const OCTANT_UPDATE_PUBLIC_KEY =
+  "MCowBQYDK2VwAyEA5n78HQaS4Z3kQbVzFG3NCUaW3Gkx4ZogaxpTYPt4B/8=";
 
 /**
  * What an update check says about the machine asking.
@@ -27,20 +29,25 @@ export const OCTANT_UPDATE_PUBLIC_KEY = "";
 export const UPDATE_CHECK_USER_AGENT = "Octant";
 
 /**
- * Where the signed feed lives by default.
+ * Where the signed feeds live by default.
+ *
+ * A base rather than one address, because a build follows a ring and runs on a
+ * platform, and each combination is its own feed: `<base>/<ring>/<platform>-<arch>.json`.
+ * That shape is why adding a ring or a platform later is a new file at a known
+ * path rather than a change to how anything is addressed.
  *
  * A default, not a constant the logic depends on. The maintainer may move the
  * endpoint, and a self-hosting user or a team may point at their own — so this
- * is one configurable value resolved in `resolveUpdateFeedUrl`, and nothing
+ * is one configurable value resolved in `resolveUpdateFeedBaseUrl`, and nothing
  * downstream assumes a host. Trust comes from the signature; pointing Octant at
  * a different server does not lower the bar it has to clear.
  */
-export const DEFAULT_OCTANT_UPDATE_FEED_URL = "https://octant.sh/updates/darwin-arm64.json";
+export const DEFAULT_OCTANT_UPDATE_FEED_BASE_URL = "https://octant.sh/updates";
 
-export const UPDATE_FEED_URL_ENVIRONMENT_VARIABLE = "OCTANT_UPDATE_FEED_URL";
+export const UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE = "OCTANT_UPDATE_FEED_BASE_URL";
 
 /**
- * Resolve the feed endpoint, preferring an explicit override.
+ * Resolve the feed base, preferring an explicit override.
  *
  * HTTPS is required of any endpoint, including an overridden one. That is
  * transport hygiene rather than trust: it keeps the request and the version it
@@ -51,18 +58,35 @@ export const UPDATE_FEED_URL_ENVIRONMENT_VARIABLE = "OCTANT_UPDATE_FEED_URL";
  * team that pointed Octant at their own server and got the public one anyway
  * would be updating from somewhere they did not choose.
  */
-export function resolveUpdateFeedUrl(
+export function resolveUpdateFeedBaseUrl(
   environment: Record<string, string | undefined> = {},
-  fallback: string = DEFAULT_OCTANT_UPDATE_FEED_URL,
+  fallback: string = DEFAULT_OCTANT_UPDATE_FEED_BASE_URL,
 ): string {
-  const configured = (environment[UPDATE_FEED_URL_ENVIRONMENT_VARIABLE] ?? "").trim();
+  const configured = (environment[UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE] ?? "").trim();
   if (configured === "") return fallback;
   if (!isHttpsUrl(configured)) {
     throw new Error(
-      `${UPDATE_FEED_URL_ENVIRONMENT_VARIABLE} must be an https URL; Octant will not check for updates over an insecure endpoint.`,
+      `${UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE} must be an https URL; Octant will not check for updates over an insecure endpoint.`,
     );
   }
-  return configured;
+  return configured.replace(/\/+$/, "");
+}
+
+/**
+ * The feed address for one ring on one machine.
+ *
+ * The ring and the platform are in the path rather than in query parameters so
+ * each feed is a plain static file a CDN can cache and a self-hoster can mirror
+ * by copying a directory. The segments are encoded because `platform` and
+ * `arch` come from the runtime rather than from a list this module controls.
+ */
+export function updateFeedUrl(
+  baseUrl: string,
+  target: { readonly ring: string; readonly platform: string; readonly arch: string },
+): string {
+  const ring = encodeURIComponent(target.ring);
+  const file = `${encodeURIComponent(target.platform)}-${encodeURIComponent(target.arch)}.json`;
+  return `${baseUrl.replace(/\/+$/, "")}/${ring}/${file}`;
 }
 
 function isHttpsUrl(value: string): boolean {

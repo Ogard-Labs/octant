@@ -43,10 +43,10 @@ import {
   decodePreviewHandoffRequest,
   type PreviewHandoffRequest,
 } from "@octant/contracts/previews";
-import type { AppVersion } from "@octant/contracts/app-updates";
+import { type AppVersion, isAppReleaseRing } from "@octant/contracts/app-updates";
 import { createAppUpdateService } from "./appUpdateService";
 import { buildApplicationMenuTemplate } from "./applicationMenu";
-import { resolveUpdateFeedUrl } from "./appUpdateFeed";
+import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
   createBrowserSurfaceHost,
   type BrowserSurfaceTabCommand,
@@ -164,6 +164,7 @@ const IPC_CHANNELS = {
   appUpdateDownload: "octant:app-update:download",
   appUpdateInstall: "octant:app-update:install",
   appUpdateAutomatic: "octant:app-update:automatic",
+  appUpdateRing: "octant:app-update:ring",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
   hostCapabilities: "octant:window:host-capabilities",
@@ -2250,6 +2251,14 @@ function installIpcHandlers(): void {
     if (typeof value !== "boolean") throw new Error("Octant rejected an invalid update setting.");
     return appUpdates().setAutomaticChecks(value);
   });
+  ipcMain.handle(IPC_CHANNELS.appUpdateRing, (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    // Checked against the known rings rather than passed through: the ring
+    // becomes a path segment in the feed address, so an unchecked string from
+    // the renderer would be choosing where the host makes its next request.
+    if (!isAppReleaseRing(value)) throw new Error("Octant rejected an unknown release ring.");
+    return appUpdates().setRing(value);
+  });
   ipcMain.handle(IPC_CHANNELS.browserSurfaceOpenExternal, async (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     await shell.openExternal(validateExternalBrowserUrl(value));
@@ -2388,7 +2397,7 @@ function validateBrowserSurfaceTabCommand(
 function appUpdates(): ReturnType<typeof createAppUpdateService> {
   appUpdateService ??= createAppUpdateService({
     updater: electronAutoUpdater,
-    feedUrl: resolveUpdateFeedUrl(process.env),
+    feedBaseUrl: resolveUpdateFeedBaseUrl(process.env),
     app: {
       version: app.getVersion() as AppVersion,
       platform: process.platform,

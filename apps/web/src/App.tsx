@@ -201,6 +201,7 @@ import {
   readSidebarCollapsed,
   resolveWorkspaceMaterial,
   useAutomaticUpdateCheckSync,
+  useReleaseRingSync,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
   useResolvedMaterial,
@@ -577,6 +578,7 @@ function LaunchedShell(
   );
   const sidebarVibrancySupported = useSidebarVibrancySupported(props.hostBridge);
   useAutomaticUpdateCheckSync(props.hostBridge, controller.settings?.automaticUpdateChecks);
+  useReleaseRingSync(props.hostBridge, controller.settings?.releaseRing);
   const sidebarBackgroundFetcher = useSidebarBackgroundFetcher(
     props.launch.serverUrl,
     props.projectWindowCapability,

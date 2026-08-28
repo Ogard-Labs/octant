@@ -649,6 +649,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
               onAutomaticChecksChange={(enabled) =>
                 props.onSettingsChange({ automaticUpdateChecks: enabled })
               }
+              onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
             />
           </SettingRow>
         </div>

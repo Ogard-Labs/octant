@@ -99,11 +99,31 @@ Because the bytes are verified rather than the host, the download may be
 served from anywhere the release notice points, and pointing Octant at a
 different update service does not lower the bar an update has to clear.
 
+### Release rings
+
+Octant publishes two streams, and you pick one in
+**Settings → General → Updates**:
+
+- **Stable** — the released build. This is where a normal install stays.
+- **Preview** — a nightly build of whatever has been merged. Newer, less
+  settled, and a separate download.
+
+A preview version reads like `0.2.0-preview.20260828.4`, and it sorts _below_
+the `0.2.0` it leads to. That is what makes the handover work without any
+special case: a preview install moves onto stable the day stable catches up,
+and Octant never offers you an older version than the one you are running. So
+switching from preview back to stable leaves you where you are until the next
+stable release passes you.
+
+Each ring is its own signed feed, and the ring is inside the signature. A
+preview release published at the stable address is refused, not installed.
+
 ### Pointing Octant at a different update service
 
-The default feed is `https://octant.sh/updates/darwin-arm64.json`. Set
-`OCTANT_UPDATE_FEED_URL` to an HTTPS URL to use your own — useful if you
-mirror releases inside a team. Octant refuses a non-HTTPS value rather than
+Feeds live at `<base>/<ring>/<platform>-<arch>.json`, and the default base is
+`https://octant.sh/updates`. Set `OCTANT_UPDATE_FEED_BASE_URL` to an HTTPS URL
+to use your own — useful if you mirror releases inside a team; mirror the same
+directory layout underneath it. Octant refuses a non-HTTPS value rather than
 quietly falling back to the default, and a release served from your endpoint
 still has to carry a signature Octant's built-in key accepts.
 

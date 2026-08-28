@@ -42,6 +42,7 @@
     "fmt:check": "oxfmt --check",
     "lint": "oxlint --report-unused-disable-directives",
     "package:desktop": "bun scripts/package-desktop.ts",
+    "feed:sign": "bun scripts/sign-update-feed.ts",
     "smoke:packaged-chat": "bun scripts/smoke-packaged-chat.ts",
     "smoke:packaged-desktop": "bun scripts/smoke-packaged-desktop.ts",
     "smoke:packaged-openai-compatible": "bun scripts/smoke-packaged-openai-compatible.ts",

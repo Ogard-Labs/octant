@@ -5,6 +5,7 @@ import {
   compareAppVersions,
   resolveUpdateInstallReadiness,
   resolveUpdateOffer,
+  ringForVersion,
 } from "./appUpdatePolicy";
 
 const version = (value: string) => value as AppVersion;
@@ -17,6 +18,7 @@ function feed(overrides: Record<string, unknown> = {}): Record<string, unknown> 
       version: "0.3.0",
       platform: "darwin",
       arch: "arm64",
+      ring: "stable",
       url: "https://updates.example.test/Octant-0.3.0-arm64.zip",
       sha256: "a".repeat(64),
       releasedAt: "2026-08-19T09:00:00.000Z",
@@ -27,9 +29,27 @@ function feed(overrides: Record<string, unknown> = {}): Record<string, unknown> 
   };
 }
 
-const app = { version: version("0.2.0"), platform: "darwin", arch: "arm64" };
+const app = {
+  version: version("0.2.0"),
+  platform: "darwin",
+  arch: "arm64",
+  ring: "stable" as const,
+};
 const accept = () => true;
 const reject = () => false;
+
+describe("ringForVersion", () => {
+  it("reads a build's ring from its own version", () => {
+    // Derived rather than stored beside the version: a build that was a
+    // preview but believed it was stable would put unreviewed main in front of
+    // everyone on the stable ring.
+    expect(ringForVersion(version("0.2.0"))).toBe("stable");
+    expect(ringForVersion(version("0.2.0-preview.20260828.4"))).toBe("preview");
+    // A prerelease that is not a preview — a release candidate — still belongs
+    // to the stable stream it is a candidate for.
+    expect(ringForVersion(version("0.2.0-rc.1"))).toBe("stable");
+  });
+});
 
 describe("resolveUpdateOffer", () => {
   it("offers a signed release that is newer and built for this machine", () => {
@@ -37,6 +57,39 @@ describe("resolveUpdateOffer", () => {
 
     expect(result.kind).toBe("offer");
     expect(result.kind === "offer" ? String(result.release.version) : undefined).toBe("0.3.0");
+  });
+
+  it("refuses a correctly signed release published to another ring", () => {
+    // Both rings are signed by the same key, so a preview document served at
+    // the stable address verifies. The signed ring is what keeps the streams
+    // apart, and refusing here is what stops unreviewed main from reaching
+    // everyone who chose stable.
+    const result = resolveUpdateOffer({
+      document: feed({ release: { ring: "preview" } }),
+      app,
+      verifySignature: accept,
+    });
+
+    expect(result).toEqual({ kind: "refuse", refusal: "wrong-ring" });
+  });
+
+  it("offers a preview release to an app following the preview ring", () => {
+    const result = resolveUpdateOffer({
+      document: feed({ release: { version: "0.3.0-preview.20260828.4", ring: "preview" } }),
+      app: { ...app, ring: "preview" },
+      verifySignature: accept,
+    });
+
+    expect(result.kind).toBe("offer");
+  });
+
+  it("covers the ring with the signature, so moving a feed invalidates it", () => {
+    const stable = feed().release as Record<string, unknown>;
+    const moved = { ...stable, ring: "preview" };
+
+    expect(canonicalReleaseBytes(stable as never)).not.toEqual(
+      canonicalReleaseBytes(moved as never),
+    );
   });
 
   it("refuses a release whose signature does not verify", () => {

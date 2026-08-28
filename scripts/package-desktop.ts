@@ -29,12 +29,52 @@ export const DESKTOP_PACKAGE_IDENTITY = {
   bundleId: "app.octant.desktop",
   productName: "Octant",
   /**
-   * The release this build is. One place, because the updater compares it
-   * against the feed and an app that cannot say which version it is cannot
-   * refuse to go backwards (`docs/decisions/0034`).
+   * The release this repository is working toward. One place, because the
+   * updater compares it against the feed and an app that cannot say which
+   * version it is cannot refuse to go backwards (`docs/decisions/0034`).
+   *
+   * A stable release is this exact version; a preview is a prerelease of it.
+   * Both are supplied per build by {@link resolveReleaseVersion}, which is why
+   * this is the declared target rather than the string every build carries.
    */
   version: "0.1.0",
 } as const;
+
+export const RELEASE_VERSION_ENVIRONMENT_VARIABLE = "OCTANT_RELEASE_VERSION";
+
+/** Same grammar the updater compares by, so a build cannot mint a version it could not order. */
+const RELEASE_VERSION_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]{1,64})?$/;
+
+/**
+ * The version this build stamps into the app.
+ *
+ * Defaults to the declared target, so a local package needs no environment.
+ * An override must be that same target, optionally with a prerelease tag: a
+ * release is `0.2.0` and a preview is `0.2.0-preview.…`. Anything else is
+ * refused rather than accepted, because a build free to name any version is a
+ * build that can publish `9.0.0` from a branch, and every install that saw it
+ * would then refuse the real release as older.
+ */
+export function resolveReleaseVersion(
+  environment: Record<string, string | undefined>,
+  declared: string = DESKTOP_PACKAGE_IDENTITY.version,
+): string {
+  const configured = (environment[RELEASE_VERSION_ENVIRONMENT_VARIABLE] ?? "").trim();
+  if (configured === "") return declared;
+  if (!RELEASE_VERSION_PATTERN.test(configured)) {
+    throw new Error(
+      `${RELEASE_VERSION_ENVIRONMENT_VARIABLE} must be MAJOR.MINOR.PATCH with an optional prerelease tag, not ${configured}.`,
+    );
+  }
+  const [core] = configured.split("-");
+  if (core !== declared) {
+    throw new Error(
+      `${RELEASE_VERSION_ENVIRONMENT_VARIABLE} is ${configured}, but this repository declares ${declared}. Bump DESKTOP_PACKAGE_IDENTITY.version first.`,
+    );
+  }
+  return configured;
+}
 
 const ELECTRON_VERSION = "43.1.0";
 const STAGE_DIRECTORY = ".desktop-stage";
@@ -262,10 +302,10 @@ function escapeAppleScriptString(appPath: string): string {
   return escapedPath;
 }
 
-export function createPackagerOptions(dir: string, out: string): PackagerOptions {
+export function createPackagerOptions(dir: string, out: string, version: string): PackagerOptions {
   return {
     appBundleId: DESKTOP_PACKAGE_IDENTITY.bundleId,
-    appVersion: DESKTOP_PACKAGE_IDENTITY.version,
+    appVersion: version,
     arch: "arm64",
     asar: false,
     dir,
@@ -416,7 +456,9 @@ async function packageDesktop(repositoryRoot: string): Promise<string> {
   await rm(packagerRoot, { recursive: true, force: true });
   await rm(finalApp, { recursive: true, force: true });
 
-  const packagedDirectories = await packager(createPackagerOptions(stageRoot, packagerRoot));
+  const packagedDirectories = await packager(
+    createPackagerOptions(stageRoot, packagerRoot, resolveReleaseVersion(process.env)),
+  );
   if (packagedDirectories.length !== 1) {
     throw new Error(
       `Expected one packaged desktop directory, received ${packagedDirectories.length}.`,
@@ -565,7 +607,7 @@ export async function signPackagedDesktop(input: {
     }
     return { kind: "unsigned", missing: resolution.missing };
   }
-  const archivePath = `${input.appPath.replace(/\.app$/, "")}-${DESKTOP_PACKAGE_IDENTITY.version}-arm64.zip`;
+  const archivePath = `${input.appPath.replace(/\.app$/, "")}-${resolveReleaseVersion(input.environment)}-darwin-arm64.zip`;
   await signAndNotarizeDesktop({
     repositoryRoot: input.repositoryRoot,
     appPath: input.appPath,
