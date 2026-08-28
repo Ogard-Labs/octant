@@ -50,6 +50,7 @@ Read the record that owns your change before editing, not all of them:
 | Subagents and agent runs                            | `docs/decisions/0012`                                               |
 | Agent-to-agent messaging authority                  | `docs/decisions/0059`                                               |
 | Remote clients and mobile                           | `docs/decisions/0013`                                               |
+| Multi-host federation registry and pairing at scale | `docs/decisions/0059`                                               |
 | Collaboration, shared host, git-mediated sharing    | `docs/decisions/0040`                                               |
 | Cross-platform desktop packaging and updates        | `docs/decisions/0034`, `docs/decisions/0058`                        |
 | Apple build and validation                          | `docs/decisions/0014`                                               |

@@ -1,4 +1,4 @@
-# 0059. Agent-to-agent messaging authority
+# 0060. Agent-to-agent messaging authority
 
 **Status:** Proposed
 

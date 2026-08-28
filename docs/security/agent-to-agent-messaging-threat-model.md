@@ -10,7 +10,7 @@
 host, beyond bounded `#thread` mention excerpts and beyond Chat-only
 `octant_thread_message` (0049)
 
-**Design:** [`../decisions/0059-agent-to-agent-messaging.md`](../decisions/0059-agent-to-agent-messaging.md)
+**Design:** [`../decisions/0060-agent-to-agent-messaging.md`](../decisions/0060-agent-to-agent-messaging.md)
 
 ## Overview
 
@@ -114,7 +114,7 @@ absolute paths, raw body text, credentials, or provider payloads.
 
 ## Related
 
-- [`../decisions/0059-agent-to-agent-messaging.md`](../decisions/0059-agent-to-agent-messaging.md)
+- [`../decisions/0060-agent-to-agent-messaging.md`](../decisions/0060-agent-to-agent-messaging.md)
 - [`security-architecture-threat-model.md`](security-architecture-threat-model.md)
 - [`../decisions/0012-mixed-provider-subagents.md`](../decisions/0012-mixed-provider-subagents.md)
 - [`../decisions/0049-thread-dialogue-lane.md`](../decisions/0049-thread-dialogue-lane.md)

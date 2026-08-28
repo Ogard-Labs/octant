@@ -134,7 +134,7 @@ starts.
 - **Remote SSH development environments**, **live guest sharing**, **thread
   retention and purge**, **usage spend ceilings**, **agent-to-agent
   messaging** (authority model in
-  [decisions/0059-agent-to-agent-messaging.md](decisions/0059-agent-to-agent-messaging.md);
+  [decisions/0060-agent-to-agent-messaging.md](decisions/0060-agent-to-agent-messaging.md);
   implementation waits on acceptance), and **in-app changelog** — each waits
   on the foundation named in its own design note.
 

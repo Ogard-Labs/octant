@@ -183,7 +183,7 @@ appends to the source.
 
 Broader structured messaging between AgentRuns and threads, beyond mention
 excerpts and beyond that Chat one-hop tool, is designed in
-[decisions/0059-agent-to-agent-messaging.md](decisions/0059-agent-to-agent-messaging.md)
+[decisions/0060-agent-to-agent-messaging.md](decisions/0060-agent-to-agent-messaging.md)
 and
 [security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md).
 It is Proposed only: the host would admit, clamp, journal, and deliver; bodies
@@ -580,7 +580,11 @@ mechanisms are:
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal.
 - **Hosts never trust each other.** Multi-host views merge read models
-  client-side; credentials and mutable authority never cross hosts.
+  client-side; credentials and mutable authority never cross hosts. Completing
+  all-hosts honesty, pairing at scale, and conflict presentation is client
+  registry work under
+  [decisions/0059-multi-host-federation.md](decisions/0059-multi-host-federation.md),
+  not a new trust boundary.
 
 ## Package map
 
