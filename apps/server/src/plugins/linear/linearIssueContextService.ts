@@ -27,7 +27,7 @@ import {
 } from "./linearGraphql";
 
 const SECRETISH =
-  /(?:lin_api_[A-Za-z0-9_]+|bearer\s+[A-Za-z0-9._\-]{20,}|(?:refresh_token|access_token)\s*[=:]|token=[^\s&]+|authorization\s*:\s*\S+)/gi;
+  /(?:lin_api_[A-Za-z0-9_]+|bearer\s+[A-Za-z0-9._\-]{20,}|(?:refresh_token|access_token)\s*[=:]\s*\S+|token=[^\s&]+|authorization\s*:\s*\S+)/gi;
 const TITLE_MAX_CHARS = 256;
 const AUTHOR_MAX_CHARS = 128;
 const STATE_MAX_CHARS = 64;

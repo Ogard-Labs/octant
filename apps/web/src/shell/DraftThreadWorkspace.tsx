@@ -471,15 +471,23 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { imageGeneration: props.imageGeneration })}
           onCreateThread={(prompt, images, threadMentionIds) =>
-            props.onCreateThread(
-              prompt,
-              selectedProjectId,
-              undefined,
-              images,
-              threadMentionIds,
-              issueContext,
-              linearIssueContext,
-            )
+            issueContext === undefined && linearIssueContext === undefined
+              ? props.onCreateThread(
+                  prompt,
+                  selectedProjectId,
+                  undefined,
+                  images,
+                  threadMentionIds,
+                )
+              : props.onCreateThread(
+                  prompt,
+                  selectedProjectId,
+                  undefined,
+                  images,
+                  threadMentionIds,
+                  issueContext,
+                  linearIssueContext,
+                )
           }
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined
