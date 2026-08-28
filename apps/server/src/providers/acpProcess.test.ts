@@ -695,20 +695,36 @@ describe("Kimi Code immutable managed profile", () => {
     }
   });
 
-  it("fails closed on unsupported hosts and non-canonical roots", async () => {
+  it("keeps immutable managed-profile confinement and fails closed on Linux without Bubblewrap", async () => {
+    expect(kimi.process.confinement.kind).toBe("immutable-managed-profile");
+
     const target = fixture(kimi);
-    const unsupported = await failureOf(
-      makeAcpConfinementLive({ platform: "linux" }).prepare({
-        profile: kimi,
-        binaryPath: target.binaryPath,
-        root: target.canonicalRoot,
-        managedHome: join(target.canonicalRoot, "managed-kimi"),
-        mode: "code",
-        executionPolicy: "full-access",
-        environment: {},
-      }),
-    );
-    expect(unsupported.category).toBe("incompatible");
+    for (const executionPolicy of ["approval-gated", "full-access"] as const) {
+      const unsupported = await failureOf(
+        makeAcpConfinementLive({
+          platform: "linux",
+          // Usable bwrap would confine deny-default ACP agents; managed-profile must not fall through.
+          sandboxPath: target.bwrapPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        }).prepare({
+          profile: kimi,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, `managed-kimi-${executionPolicy}`),
+          mode: "code",
+          executionPolicy,
+          environment: {},
+        }),
+      );
+      expect(unsupported).toEqual({
+        category: "incompatible",
+        message: "Kimi Code immutable managed profile is only available on macOS.",
+      });
+    }
+  });
+
+  it("fails closed on non-canonical roots", async () => {
+    const target = fixture(kimi);
     const invalidRoot = await failureOf(
       confinement(target).prepare({
         profile: kimi,
