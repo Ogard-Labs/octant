@@ -614,6 +614,29 @@ describe("ProviderService", () => {
     expect(createFixture.append).not.toHaveBeenCalled();
   });
 
+  it("still journals an image profile when vendor-driver plugins are not effective", async () => {
+    const fixture = serviceFixture({
+      isDriverPluginEffective: () => false,
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-openai-image-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "GPT Image",
+        configuration: {
+          kind: "openai-image-http",
+          modelAllowlist: ["gpt-image-2"],
+          defaultModel: "gpt-image-2",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-created",
+      instance: { driverKind: "openai-image", displayName: "GPT Image" },
+    });
+    expect(fixture.append).toHaveBeenCalled();
+  });
+
   it("creates providers with optimistic versions and unique active names", async () => {
     const fixture = serviceFixture();
     await expect(

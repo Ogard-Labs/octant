@@ -67,6 +67,7 @@ import {
   orderProviderModels,
   describeProviderConfigurationChange,
   invalidateModelCapabilityEvidence,
+  isImageProfileDriverKind,
   type CapabilityEvidenceChange,
 } from "@octant/domain";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
@@ -226,7 +227,7 @@ export class ProviderService implements ProviderServiceApi {
         .filter(({ instanceId }) => configuredIds.has(instanceId))
         .flatMap((catalog) => {
           const instance = instanceById.get(String(catalog.instanceId));
-          if (instance === undefined || !this.#isDriverPluginEffective(instance.driverKind)) {
+          if (instance === undefined || !this.#isDriverKindAvailable(instance.driverKind)) {
             return [];
           }
           return [
@@ -252,7 +253,7 @@ export class ProviderService implements ProviderServiceApi {
         .filter(({ instanceId }) => configuredIds.has(instanceId))
         .map((state) => {
           const instance = instanceById.get(String(state.instanceId));
-          if (instance === undefined || !this.#isDriverPluginEffective(instance.driverKind)) {
+          if (instance === undefined || !this.#isDriverKindAvailable(instance.driverKind)) {
             return decodeProviderObservedState({
               instanceId: state.instanceId,
               readiness: "unavailable",
@@ -869,7 +870,7 @@ export class ProviderService implements ProviderServiceApi {
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#invalid("Enable this provider before probing it.");
         }
-        if (!this.#isDriverPluginEffective(instance.driverKind)) {
+        if (!this.#isDriverKindAvailable(instance.driverKind)) {
           this.#runtime.clearObservedState(instanceId);
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#unsupported("This provider driver is not available.");
@@ -1210,9 +1211,13 @@ export class ProviderService implements ProviderServiceApi {
   }
 
   #assertDriverPluginEffective(instance: ProviderInstance): void {
-    if (!this.#isDriverPluginEffective(instance.driverKind)) {
+    if (!this.#isDriverKindAvailable(instance.driverKind)) {
       throw this.#unsupported("This provider driver is not available.");
     }
+  }
+
+  #isDriverKindAvailable(driverKind: ProviderDriverKind): boolean {
+    return isImageProfileDriverKind(driverKind) || this.#isDriverPluginEffective(driverKind);
   }
 
   #assertReady(): void {
