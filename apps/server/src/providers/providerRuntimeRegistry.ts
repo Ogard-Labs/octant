@@ -38,6 +38,7 @@ export interface ProviderRuntimeRegistryOptions {
   readonly processGroupExists?: (pid: number) => Promise<boolean> | boolean;
   readonly killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void;
   readonly shutdownTimeoutMs?: number;
+  readonly observeAcquireMs?: (durationMs: number) => void;
 }
 
 export interface ProviderRuntimeAcquireOptions<T> {
@@ -83,6 +84,7 @@ export class ProviderRuntimeRegistry {
   readonly #processGroupExists: (pid: number) => Promise<boolean> | boolean;
   readonly #killProcessGroup: ((pid: number, signal: NodeJS.Signals) => void) | undefined;
   readonly #shutdownTimeoutMs: number;
+  readonly #observeAcquireMs: ((durationMs: number) => void) | undefined;
   readonly #observedByInstance = new Map<ProviderInstanceId, ProviderObservedState>();
   readonly #activeSessionsByInstance = new Map<ProviderInstanceId, number>();
   readonly #compatibleProtocols = new Map<ProviderInstanceId, CompatibleProtocol>();
@@ -95,6 +97,7 @@ export class ProviderRuntimeRegistry {
     this.#processGroupExists = options.processGroupExists ?? defaultProcessGroupExists;
     this.#killProcessGroup = options.killProcessGroup;
     this.#shutdownTimeoutMs = options.shutdownTimeoutMs ?? 2_000;
+    this.#observeAcquireMs = options.observeAcquireMs;
   }
 
   observedStates(): ReadonlyArray<ProviderObservedState> {
@@ -162,8 +165,11 @@ export class ProviderRuntimeRegistry {
     let acquired: RuntimeEntry<T> | undefined;
     const acquire = Effect.tryPromise({
       try: async () => {
+        const startedAt = performance.now();
+        let createdRuntimeEntry = false;
         let entry = this.#runtimes.get(instanceId) as RuntimeEntry<T> | undefined;
         if (entry === undefined) {
+          createdRuntimeEntry = true;
           entry = {
             refs: 0,
             resource: options
@@ -192,7 +198,15 @@ export class ProviderRuntimeRegistry {
         }
         entry.refs += 1;
         acquired = entry;
-        return (await entry.resource).value;
+        const value = (await entry.resource).value;
+        if (createdRuntimeEntry) {
+          try {
+            this.#observeAcquireMs?.(performance.now() - startedAt);
+          } catch {
+            // Operational observations must not change a successful acquire.
+          }
+        }
+        return value;
       },
       catch: (error): ProviderFailure => {
         try {

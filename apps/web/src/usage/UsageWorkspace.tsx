@@ -16,6 +16,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { UsageActivityHeatmap } from "./UsageActivityHeatmap";
+import { LatencyStatsSection } from "./LatencyStatsSection";
 import { useUsageDashboardController } from "./useUsageDashboardController";
 import "./usageWorkspace.css";
 
@@ -194,6 +195,11 @@ export function UsageWorkspace(props: UsageWorkspaceProps) {
           <CacheSection stats={dashboard.cacheStats} />
           <HostSection hosts={dashboard.hosts} />
           <AttributionSourceSection sources={dashboard.dimensionSources} />
+          <LatencyStatsSection
+            className="usage-workspace__section"
+            connectionLatencyMs={controller.connectionLatencyMs}
+            latencyStats={dashboard.latencyStats}
+          />
           <p className="usage-workspace__footer">
             Read from this host at {new Date(dashboard.queryAt).toLocaleString()}. Retention,
             export, and reset live in Settings under Usage and data.

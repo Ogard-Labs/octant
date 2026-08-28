@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
+import { UsageLatencyStats } from "./usageRpc";
 import { UsageReconciliationId } from "./context";
 import { HostId } from "./host";
 import { OctantMode } from "./modes";
@@ -255,6 +256,10 @@ export const UsageDashboardResponse = Schema.Struct({
   }),
   timeZone: Schema.NonEmptyTrimmedString,
   queryAt: UtcTimestamp,
+  /** Host-process observations since this host started; empty when none have been observed. */
+  latencyStats: Schema.optionalWith(UsageLatencyStats, {
+    default: () => ({ measurements: [] }),
+  }),
 }).annotations(strict);
 export type UsageDashboardResponse = typeof UsageDashboardResponse.Type;
 

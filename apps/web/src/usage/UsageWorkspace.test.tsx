@@ -149,6 +149,7 @@ function dashboard(overrides: Partial<UsageDashboardResponse> = {}): UsageDashbo
       ],
       tokenCacheHitRatio: 0.75,
     },
+    latencyStats: { measurements: [] },
     ...overrides,
   } as unknown as UsageDashboardResponse;
 }
@@ -199,6 +200,46 @@ describe("UsageWorkspace", () => {
     render(<UsageWorkspace client={client} />);
 
     expect(screen.queryByRole("button", { name: "Back to app" })).toBeNull();
+  });
+
+  it("renders host latency measurements and the renderer round trip", async () => {
+    const { client } = clientReturning(
+      dashboard({
+        latencyStats: {
+          measurements: [
+            {
+              key: "rpc",
+              label: "Request handling",
+              observationCount: 3,
+              p50Ms: 12,
+              p95Ms: 18,
+              maxMs: 22,
+              slowThresholdMs: 15_000,
+              slowCount: 1,
+            },
+          ],
+        },
+      }),
+    );
+    render(<UsageWorkspace client={client} />);
+
+    const latency = await screen.findByRole("region", { name: "Latency" });
+    expect(within(latency).getByText("Request handling")).toBeInTheDocument();
+    expect(
+      within(latency).getByText(/3 observations · p50 12 ms · p95 18 ms · max 22 ms/),
+    ).toBeInTheDocument();
+    expect(within(latency).getByText(/1 past 15s/)).toBeInTheDocument();
+    expect(within(latency).getByText(/Connection round trip \(this window\):/)).toBeInTheDocument();
+  });
+
+  it("reports an honest empty state when the host has no latency observations", async () => {
+    const { client } = clientReturning(dashboard({ latencyStats: { measurements: [] } }));
+    render(<UsageWorkspace client={client} />);
+
+    const latency = await screen.findByRole("region", { name: "Latency" });
+    expect(
+      within(latency).getByText("No host latency observations have been recorded."),
+    ).toBeInTheDocument();
   });
 
   it("says the totals are a floor when the ledger scan was capped", async () => {

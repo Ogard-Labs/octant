@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -38,6 +38,7 @@ function emptyResponse(): UsageQueryResponse {
     topConsumers: [],
     hasMore: false,
     queryAt,
+    latencyStats: { measurements: [] },
   };
 }
 
@@ -127,6 +128,7 @@ function seededResponse(): UsageQueryResponse {
     ],
     hasMore: false,
     queryAt,
+    latencyStats: { measurements: [] },
   };
 }
 
@@ -183,6 +185,32 @@ describe("UsageDashboard", () => {
     expect(await screen.findByText("Total requests")).toBeInTheDocument();
     expect(screen.getByText("Exact: 1")).toBeInTheDocument();
     expect(screen.getByLabelText("Usage by provider")).toBeInTheDocument();
+  });
+
+  it("renders host latency measurements after the totals", async () => {
+    const response = {
+      ...seededResponse(),
+      latencyStats: {
+        measurements: [
+          {
+            key: "provider-runtime-acquire",
+            label: "Provider runtime start",
+            observationCount: 2,
+            p50Ms: 8,
+            p95Ms: 14,
+            maxMs: 14,
+          },
+        ],
+      },
+    };
+    const client = createMockClient(response);
+    render(<UsageDashboard client={client} />);
+
+    const latency = await screen.findByRole("region", { name: "Latency" });
+    expect(within(latency).getByText("Provider runtime start")).toBeInTheDocument();
+    expect(
+      within(latency).getByText(/2 observations · p50 8 ms · p95 14 ms · max 14 ms/),
+    ).toBeInTheDocument();
   });
 
   it("renders daily, weekly, and cumulative activity views", async () => {
