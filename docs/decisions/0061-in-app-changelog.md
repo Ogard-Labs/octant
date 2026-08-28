@@ -1,4 +1,4 @@
-# 0060. In-app changelog rides the update path
+# 0061. In-app changelog rides the update path
 
 **Status:** Proposed
 
