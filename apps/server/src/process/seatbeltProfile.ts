@@ -1,23 +1,24 @@
 /**
- * Shared macOS Seatbelt profile builder for Octant-spawned tool and provider
- * subprocesses.
+ * Shared confinement builder for Octant-spawned tool and provider subprocesses.
  *
  * Tool launchers that execute arbitrary code — Code terminal shells
  * (`terminalProcessPort`; design doc historically named `shellService`), the
  * project-confined test runner, and Git helpers — must prepare launches through
- * this module so profiles cannot drift. Missing `sandbox-exec` fails closed;
- * there is no unconfined fallback.
+ * this module so policies cannot drift. On macOS this is the Seatbelt
+ * `sandbox-exec` profile; on Linux it is a rootless Bubblewrap namespace.
+ * Missing the platform runtime fails closed; there is no unconfined fallback.
  *
  * Network egress is materialized as OS `none` | `allow` only. The finer
  * `provider-endpoints-only` host allowlist is enforced by Octant-owned
  * brokered tools, not by a local egress proxy in V1.
  *
  * Native macOS sandbox-exec probes remain packaged/native validation evidence;
- * Linux CI unit-tests profile string generation and egress mapping.
+ * Linux CI covers profile string generation and Bubblewrap launch construction.
  */
 import { accessSync, constants, existsSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, sep } from "node:path";
+import { buildLinuxConfinementLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
 
 export class SeatbeltConfinementError extends Error {
@@ -106,6 +107,7 @@ export interface SeatbeltConfinementPort {
 
 export interface SeatbeltConfinementOptions {
   readonly platform?: NodeJS.Platform;
+  /** Override the runtime path: `sandbox-exec` on macOS, `bwrap` on Linux. */
   readonly sandboxPath?: string;
   readonly homeDirectory?: string;
   readonly usersDirectory?: string;
@@ -320,50 +322,66 @@ export function makeSeatbeltConfinementLive(
   options: SeatbeltConfinementOptions = {},
 ): SeatbeltConfinementPort {
   const platform = options.platform ?? process.platform;
-  const sandboxPath = options.sandboxPath ?? DEFAULT_SANDBOX_PATH;
+  const sandboxPath =
+    options.sandboxPath ?? (platform === "darwin" ? DEFAULT_SANDBOX_PATH : DEFAULT_BWRAP_PATH);
   return {
     prepare: (input) => {
-      requireSandboxExec({ platform, sandboxPath });
-      const privateHomeAllowPaths = input.privateHomeAllowPaths ?? [
-        input.boundRoot,
-        input.temporaryDirectory,
-        ...(input.additionalWriteRoots ?? []),
-        ...(input.readRoots ?? []),
-      ];
-      const profile = buildDenyDefaultSeatbeltProfile({
-        boundRoot: input.boundRoot,
-        temporaryDirectory: input.temporaryDirectory,
-        networkEgress: input.networkEgress,
-        ...(input.additionalWriteRoots === undefined
-          ? {}
-          : { additionalWriteRoots: input.additionalWriteRoots }),
-        ...(input.readRoots === undefined ? {} : { readRoots: input.readRoots }),
-        ...(input.allowProcessFork === undefined
-          ? {}
-          : { allowProcessFork: input.allowProcessFork }),
-        ...(input.allowFileReadStar === undefined
-          ? {}
-          : { allowFileReadStar: input.allowFileReadStar }),
-        ...(input.writeBoundRoot === undefined ? {} : { writeBoundRoot: input.writeBoundRoot }),
-        ...(input.additionalDenyReadPaths === undefined
-          ? {}
-          : { additionalDenyReadPaths: input.additionalDenyReadPaths }),
-        ...(input.additionalDenyWritePaths === undefined
-          ? {}
-          : { additionalDenyWritePaths: input.additionalDenyWritePaths }),
-        privateHomeAllowPaths,
-        ...(input.extraRules === undefined ? {} : { extraRules: input.extraRules }),
-        ...(options.homeDirectory === undefined ? {} : { homeDirectory: options.homeDirectory }),
-        ...(options.usersDirectory === undefined ? {} : { usersDirectory: options.usersDirectory }),
-      });
-      return wrapCommandInSandboxExec({
-        sandboxPath,
-        profile,
-        executable: input.executable,
-        args: input.args,
-      });
+      if (platform === "darwin") {
+        return prepareDarwinSeatbelt(input, { ...options, sandboxPath });
+      }
+      if (platform === "linux") {
+        return buildLinuxConfinementLaunch(input, { bwrapPath: sandboxPath });
+      }
+      throw new SeatbeltConfinementError(
+        "incompatible",
+        "Confinement is supported only on macOS and Linux.",
+      );
     },
   };
+}
+
+function prepareDarwinSeatbelt(
+  input: SeatbeltConfinementPrepareInput,
+  options: SeatbeltConfinementOptions,
+): ConfinedProcessLaunch {
+  const sandboxPath = options.sandboxPath ?? DEFAULT_SANDBOX_PATH;
+  requireSandboxExec({ platform: "darwin", sandboxPath });
+  const privateHomeAllowPaths = input.privateHomeAllowPaths ?? [
+    input.boundRoot,
+    input.temporaryDirectory,
+    ...(input.additionalWriteRoots ?? []),
+    ...(input.readRoots ?? []),
+  ];
+  const profile = buildDenyDefaultSeatbeltProfile({
+    boundRoot: input.boundRoot,
+    temporaryDirectory: input.temporaryDirectory,
+    networkEgress: input.networkEgress,
+    ...(input.additionalWriteRoots === undefined
+      ? {}
+      : { additionalWriteRoots: input.additionalWriteRoots }),
+    ...(input.readRoots === undefined ? {} : { readRoots: input.readRoots }),
+    ...(input.allowProcessFork === undefined ? {} : { allowProcessFork: input.allowProcessFork }),
+    ...(input.allowFileReadStar === undefined
+      ? {}
+      : { allowFileReadStar: input.allowFileReadStar }),
+    ...(input.writeBoundRoot === undefined ? {} : { writeBoundRoot: input.writeBoundRoot }),
+    ...(input.additionalDenyReadPaths === undefined
+      ? {}
+      : { additionalDenyReadPaths: input.additionalDenyReadPaths }),
+    ...(input.additionalDenyWritePaths === undefined
+      ? {}
+      : { additionalDenyWritePaths: input.additionalDenyWritePaths }),
+    privateHomeAllowPaths,
+    ...(input.extraRules === undefined ? {} : { extraRules: input.extraRules }),
+    ...(options.homeDirectory === undefined ? {} : { homeDirectory: options.homeDirectory }),
+    ...(options.usersDirectory === undefined ? {} : { usersDirectory: options.usersDirectory }),
+  });
+  return wrapCommandInSandboxExec({
+    sandboxPath,
+    profile,
+    executable: input.executable,
+    args: input.args,
+  });
 }
 
 function assertAbsolute(path: string, label: string): void {

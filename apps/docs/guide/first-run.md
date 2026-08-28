@@ -38,9 +38,10 @@ From first run, **Set up a provider** opens Settings on the Providers section:
    readiness, detected version, models, and capabilities without sending a
    prompt or exposing account identity.
 
-Credentials are stored in macOS Keychain and resolved through the
-authenticated desktop broker. They are never written to the event journal or
-returned to the renderer.
+Credentials are stored in the host secret store (macOS Keychain, or Linux
+Secret Service on a headless host) and resolved through the authenticated
+host broker. They are never written to the event journal or returned to the
+renderer.
 
 Closing Settings returns to first run with the answers you already gave.
 

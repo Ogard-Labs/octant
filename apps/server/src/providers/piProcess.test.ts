@@ -26,13 +26,15 @@ function fixture() {
   const auth = join(base, "auth.json");
   const models = join(base, "models.json");
   const sandbox = join(base, "sandbox-exec");
+  const bwrap = join(base, "bwrap");
   mkdirSync(root);
   writeFileSync(binary, "#!/bin/sh\n", { mode: 0o700 });
   writeFileSync(sandbox, "#!/bin/sh\n", { mode: 0o700 });
+  writeFileSync(bwrap, '#!/bin/sh\nexec "$@"\n', { mode: 0o700 });
   writeFileSync(auth, "private", { mode: 0o600 });
   writeFileSync(models, '{"providers":[]}', { mode: 0o600 });
   chmodSync(binary, 0o700);
-  return { base, root, home, binary, auth, models, sandbox };
+  return { base, root, home, binary, auth, models, sandbox, bwrap };
 }
 
 afterEach(async () => {
@@ -205,19 +207,25 @@ describe("Pi process boundary", () => {
     ).rejects.toThrow(/invalid-configuration/);
 
     const other = fixture();
-    await expect(
-      Effect.runPromise(
-        makePiConfinementLive({ platform: "linux", temporaryDirectory: other.base }).prepare({
-          binaryPath: other.binary,
-          root: other.root,
-          piHome: other.home,
-          sessionDirectory: join(other.home, "sessions"),
-          sessionId: "x",
-          mode: "code",
-          executionPolicy: "approval-gated",
-          environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, other.home),
-        }),
-      ),
-    ).rejects.toThrow(/incompatible/);
+    const linux = await Effect.runPromise(
+      makePiConfinementLive({
+        platform: "linux",
+        sandboxPath: other.bwrap,
+        temporaryDirectory: other.base,
+      }).prepare({
+        binaryPath: other.binary,
+        root: other.root,
+        piHome: other.home,
+        sessionDirectory: join(other.home, "sessions"),
+        sessionId: "x",
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, other.home),
+      }),
+    );
+    expect(linux.command).toBe(other.bwrap);
+    expect(linux.args).toContain("--unshare-all");
+    expect(linux.args).toContain("--");
+    expect(linux.args).toContain(other.binary);
   });
 });
