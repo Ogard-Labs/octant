@@ -65,14 +65,16 @@ The packaged desktop app is macOS-only. A Linux host can run the same server and
 ```sh
 bash scripts/ade/install-linux-host-deps.sh
 bash scripts/ade/start-secret-service-session.sh
+# Load the bus address into this shell; new login shells also pick it up via bashrc.
+. "${HOME}/.config/octant-host/session.env"
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 bun --cwd packages/cli src/bin.ts server run
 bun --cwd packages/cli src/bin.ts web
 ```
 
-`install-linux-host-deps.sh` installs `bubblewrap`, `libsecret-tools`, `gnome-keyring`, `dbus-x11`, and `dbus-user-session` when missing, and wires a shell hook that loads the live session bus address. `start-secret-service-session.sh` must run on every host boot: it probes a live D-Bus (and rejects a snapshotted socket path), starts `gnome-keyring-daemon` for the secrets component when needed, points the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a GUI prompt, and proves a store/lookup round-trip.
+`install-linux-host-deps.sh` installs `bubblewrap`, `libsecret-tools`, `gnome-keyring`, `dbus-x11`, and `dbus-user-session` when missing, and wires a shell hook that loads the live session bus address from `~/.config/octant-host/session.env`. `start-secret-service-session.sh` must run on every host boot: it probes a live D-Bus (and rejects a snapshotted socket path), starts `gnome-keyring-daemon` for the secrets component when needed, points the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a GUI prompt, writes `session.env`, and proves a store/lookup round-trip. Running the start script as a subprocess cannot export into the parent shell, so source `session.env` before `server run` in the same shell (or open a new login shell after install has wired bashrc).
 
-On a Cloud Agent Saved environment, put the install script in `install` and the start script in `start` so new agents get Secret Service without a manual step:
+The start script is the intended Cloud Agent environment `start` boot hook. Until a Saved environment persists and executes `start` on each agent boot, run `scripts/ade/start-secret-service-session.sh` manually after install (then source `session.env` as above). When configuring a Saved environment that does run `start`, keep install and start separate:
 
 ```text
 install:

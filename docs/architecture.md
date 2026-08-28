@@ -599,9 +599,12 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
 - A headless Linux station: `octant server run`, then `octant web` (or
   `octant web --dev` for Vite). Linux requires `bubblewrap`, an unlocked
   freedesktop Secret Service session, and the `secret-tool` client. Without
-  those, the host fails closed. ADE and other boot-managed hosts run
+  those, the host fails closed. ADE and other boot-managed hosts should run
   `scripts/ade/start-secret-service-session.sh` on each start so the session
-  bus and keyring are live (never a snapshotted socket path alone). Provider
+  bus and keyring are live (never a snapshotted socket path alone); until a
+  Cloud Agent Saved environment executes that `start` hook, run the script
+  manually and source `~/.config/octant-host/session.env` before the host.
+  Provider
   CLIs are ordinary host binaries: install one to a user-writable path such
   as `~/.local/bin` and point the provider instance at that absolute path.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be

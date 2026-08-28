@@ -5,6 +5,12 @@
 # host boot hook). Always probes the live bus; never treats a snapshotted
 # DBUS_SESSION_BUS_ADDRESS as proof that Secret Service is available.
 #
+# Run as a subprocess (Cloud Agent `start`, or `bash …/start-secret-service-session.sh`).
+# Exports in this process do not reach the parent shell: this script writes
+# ~/.config/octant-host/session.env for install-linux-host-deps.sh's bashrc hook
+# and for an explicit `. ~/.config/octant-host/session.env` in the same shell
+# before `server run`.
+#
 # On hosts without systemd --user (typical ADE containers), falls back to
 # dbus-launch. Points the Secret Service `default` alias at the session
 # collection so secret-tool does not block on a GUI unlock prompt.
@@ -101,4 +107,5 @@ if [[ "${got}" != "${probe_value}" ]]; then
   exit 1
 fi
 
-printf 'octant ade: Secret Service session ready\n'
+printf 'octant ade: Secret Service session ready (source %s to load DBUS into this shell)\n' \
+  "${SESSION_ENV}"
