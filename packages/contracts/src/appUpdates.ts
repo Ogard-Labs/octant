@@ -33,10 +33,18 @@ export const AppVersion = Schema.String.pipe(
 );
 export type AppVersion = typeof AppVersion.Type;
 
-export const AppUpdatePlatform = Schema.Literal("darwin");
+/**
+ * Platforms that may appear in a signed update feed.
+ *
+ * `darwin` is the Apple Silicon technical preview. `linux` is the Ubuntu
+ * dogfood arch once a signed feed is published; the schema accepts it so the
+ * release matrix can name `<ring>/linux-x64.json` with the same document shape.
+ * Windows stays out until packaging lands.
+ */
+export const AppUpdatePlatform = Schema.Literal("darwin", "linux");
 export type AppUpdatePlatform = typeof AppUpdatePlatform.Type;
 
-export const AppUpdateArchitecture = Schema.Literal("arm64");
+export const AppUpdateArchitecture = Schema.Literal("arm64", "x64");
 export type AppUpdateArchitecture = typeof AppUpdateArchitecture.Type;
 
 /**
@@ -189,7 +197,7 @@ export type AppUpdateState = typeof AppUpdateState.Type;
  */
 export const OCTANT_UPDATE_CHECK_DISCLOSURE = [
   "The Octant version you are running, so the service can say whether anything is newer.",
-  "Your platform and processor architecture, so it offers a build that runs on this Mac.",
+  "Your platform and processor architecture, so it offers a build that runs on this machine.",
   "Which release ring you follow, stable or preview, because each ring has its own feed address.",
   "The IP address the request comes from, as any network request discloses.",
   "The time of the request.",

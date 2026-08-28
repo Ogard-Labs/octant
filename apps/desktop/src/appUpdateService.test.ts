@@ -17,7 +17,11 @@ import {
   UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE,
   updateFeedUrl,
 } from "./appUpdateFeed";
-import { createAppUpdateService, type AppUpdaterPort } from "./appUpdateService";
+import {
+  createAppUpdateService,
+  supportsSignedDesktopUpdateChannel,
+  type AppUpdaterPort,
+} from "./appUpdateService";
 
 const keys = generateKeyPairSync("ed25519");
 const publicKeyBase64 = keys.publicKey.export({ format: "der", type: "spki" }).toString("base64");
@@ -269,6 +273,13 @@ describe("where the feed is", () => {
         arch: "arm64",
       }),
     ).toBe("https://octant.sh/updates/stable/darwin-arm64.json");
+    expect(
+      updateFeedUrl("https://octant.sh/updates", {
+        ring: "preview",
+        platform: "linux",
+        arch: "x64",
+      }),
+    ).toBe("https://octant.sh/updates/preview/linux-x64.json");
   });
 
   it("refuses a configured endpoint it cannot reach securely rather than falling back", () => {
@@ -489,6 +500,14 @@ describe("applying an update", () => {
       refusal: "untrusted-signature",
     });
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps the signed update channel darwin-only while Linux feed scaffolding lands", () => {
+    // A release matrix may build an AppImage and name <ring>/linux-x64.json,
+    // but an unsigned dogfood artifact must still refuse in-app updates.
+    expect(supportsSignedDesktopUpdateChannel("darwin")).toBe(true);
+    expect(supportsSignedDesktopUpdateChannel("linux")).toBe(false);
+    expect(supportsSignedDesktopUpdateChannel("win32")).toBe(false);
   });
 });
 
