@@ -20,14 +20,14 @@ A second flow verifies the fail-closed behavior when `/usr/bin/bwrap` is unavail
 
 ## Code references
 
-| Claim | Source |
-| --- | --- |
-| Linux confinement builder emits `bwrap --unshare-all` plus `--proc /proc`, `--dev /dev`, read-only system binds, writable bound root/temp/shell-state, then `-- <executable> <args>` | `apps/server/src/process/linuxConfinement.ts:73-164` |
-| `SeatbeltConfinementPort` dispatches to `buildLinuxConfinementLaunch` on Linux | `apps/server/src/process/seatbeltProfile.ts:321-341` |
-| `TerminalProcessPort` constructs `makeSeatbeltConfinementLive` and spawns `launch.command`/`launch.args` | `apps/server/src/code/terminalProcessPort.ts:208-282` |
-| The Code thread exposes `octant_terminal` to the provider; `run` starts a terminal and writes the command | `apps/server/src/code/codeAppManagedTools.ts:40-310` |
-| `bwrap` missing/not executable throws `SeatbeltConfinementError("incompatible", "Linux confinement requires an executable bubblewrap (bwrap) runtime.")` | `apps/server/src/process/linuxConfinement.ts:24-38` |
-| Local host label is platform-aware and reads "This computer" on Linux | `apps/web/src/shell/HostSelector.tsx`, `apps/web/src/shell/DraftThreadWorkspace.tsx`, `packages/client-runtime/src/localHostDisplayName.ts` |
+| Claim                                                                                                                                                                                | Source                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux confinement builder emits `bwrap --unshare-all` plus `--proc /proc`, `--dev /dev`, read-only system binds, writable bound root/temp/shell-state, then `-- <executable> <args>` | `apps/server/src/process/linuxConfinement.ts:73-164`                                                                                        |
+| `SeatbeltConfinementPort` dispatches to `buildLinuxConfinementLaunch` on Linux                                                                                                       | `apps/server/src/process/seatbeltProfile.ts:321-341`                                                                                        |
+| `TerminalProcessPort` constructs `makeSeatbeltConfinementLive` and spawns `launch.command`/`launch.args`                                                                             | `apps/server/src/code/terminalProcessPort.ts:208-282`                                                                                       |
+| The Code thread exposes `octant_terminal` to the provider; `run` starts a terminal and writes the command                                                                            | `apps/server/src/code/codeAppManagedTools.ts:40-310`                                                                                        |
+| `bwrap` missing/not executable throws `SeatbeltConfinementError("incompatible", "Linux confinement requires an executable bubblewrap (bwrap) runtime.")`                             | `apps/server/src/process/linuxConfinement.ts:24-38`                                                                                         |
+| Local host label is platform-aware and reads "This computer" on Linux                                                                                                                | `apps/web/src/shell/HostSelector.tsx`, `apps/web/src/shell/DraftThreadWorkspace.tsx`, `packages/client-runtime/src/localHostDisplayName.ts` |
 
 ## Setup (do once before the primary flow)
 
@@ -149,8 +149,8 @@ A second flow verifies the fail-closed behavior when `/usr/bin/bwrap` is unavail
    - `Linux confinement requires an executable bubblewrap (bwrap) runtime.`
    - `incompatible`
    - `Terminal ... unavailable` / `Code operation requires approval` / `Code operation is unauthorized`
-   (the exact server-level wording may be wrapped by the UI, but it must be a clear
-   typed error, not a blank screen, spinner, or generic crash).
+     (the exact server-level wording may be wrapped by the UI, but it must be a clear
+     typed error, not a blank screen, spinner, or generic crash).
 5. PASS: `ps -ef | grep '[b]wrap'` shows **no** `/usr/bin/bwrap` process launched.
 6. PASS: browser DevTools console shows **no uncaught exceptions**.
 7. Screenshot the error state.
@@ -174,7 +174,7 @@ A second flow verifies the fail-closed behavior when `/usr/bin/bwrap` is unavail
   right-side Terminal opened, and `echo $((1729 - -1))` returned `1730` inside the confined
   `/bin/zsh` shell.
 - T1 process evidence: `ps -ef` showed `/usr/bin/bwrap --unshare-all --share-net --new-session
-  --die-with-parent --proc /proc --dev /dev --ro-bind /usr/bin /bin ... -- /bin/zsh`.
+--die-with-parent --proc /proc --dev /dev --ro-bind /usr/bin /bin ... -- /bin/zsh`.
 - T1 caveats: the first-run `zsh-newuser-install` prompt appeared because `HOME` in the sandbox
   had no `.zsh*` files; the `+` key did not render when typed in xterm, so the arithmetic was
   performed as `1729 - -1`.

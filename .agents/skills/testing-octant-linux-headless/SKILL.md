@@ -73,10 +73,10 @@ Launch tokens are single-use and expire in 5 minutes (`LAUNCH_SESSION_DEFAULT_TT
 Connect to the Devin Chrome remote-debugging endpoint (`http://127.0.0.1:29229` in the current environment) and use `puppeteer-core`:
 
 ```typescript
-import puppeteer from 'puppeteer-core';
-const browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:29229' });
+import puppeteer from "puppeteer-core";
+const browser = await puppeteer.connect({ browserURL: "http://127.0.0.1:29229" });
 const page = await browser.newPage();
-await page.goto(authUrl, { waitUntil: 'networkidle2' });
+await page.goto(authUrl, { waitUntil: "networkidle2" });
 ```
 
 - If the installed `puppeteer-core` is older, `page.waitForTimeout` may not exist; use `await new Promise(r => setTimeout(r, ms))`.

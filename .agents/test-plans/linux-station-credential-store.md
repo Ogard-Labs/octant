@@ -21,19 +21,19 @@ not that it boots.
 
 ## Code evidence behind the plan
 
-| Claim under test | Source |
-| --- | --- |
-| Broker started only when Secret Service probes available; env injected into server child | `packages/cli/src/serverRun.ts:39-54,75-80` |
-| Server reads broker env | `apps/server/src/serverConfig.ts:128-129` |
-| `octant status` secret-store line | `packages/cli/src/status.ts:36-47,52-59` |
-| Linux secret-store probe = `busctl --user status org.freedesktop.secrets` + `/usr/bin/secret-tool` executable | `packages/host-runtime/src/platformCapabilities.ts` (`probesFor`) |
-| Secret Service store uses `secret-tool store/lookup/clear`, attrs `service=octant account=<uuid>` | `packages/host-runtime/src/secretServiceCredentialStore.ts:73-166` |
-| Add-provider form: `aria-label="Provider type"` → `<option value="codex">Codex CLI</option>`, "Provider name", "Codex CLI binary" | `apps/web/src/providers/ProviderSettingsConfiguration.tsx:236,251-275` |
-| Codex readiness `ready` vs `unauthenticated` + message "Authenticate Codex and make at least one usable model available." | `apps/server/src/providers/codexDriver.ts:449-462` |
-| Chat blocks with "Configure a default Chat provider and model before creating a conversation." | `apps/server/src/chat/chatService.ts:2598` |
-| Chat defaults auto-configured from first eligible picker group | `apps/web/src/chat/autoConfigureChatDefaults.ts:35-51` |
-| Local host label: neutral constant + platform-aware server label | `packages/contracts/src/host.ts`, `apps/server/src/localHostDisplayName.ts`, `apps/web/src/shell/HostSelector.tsx:58,117`, `apps/web/src/shell/DraftThreadWorkspace.tsx:227-230`, `apps/web/src/App.tsx:1957,2026` |
-| **Suspected gap:** every web credential write goes through the Electron-only bridge | `apps/web/src/App.tsx:1618` (`credentialManagementAvailable: hostBridge !== undefined`), `apps/web/src/shell/hostBridge.ts:220-235` (requires `window.octantHost`), `apps/web/src/providers/useProviderController.ts:355,405,461,…` |
+| Claim under test                                                                                                                  | Source                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Broker started only when Secret Service probes available; env injected into server child                                          | `packages/cli/src/serverRun.ts:39-54,75-80`                                                                                                                                                                                         |
+| Server reads broker env                                                                                                           | `apps/server/src/serverConfig.ts:128-129`                                                                                                                                                                                           |
+| `octant status` secret-store line                                                                                                 | `packages/cli/src/status.ts:36-47,52-59`                                                                                                                                                                                            |
+| Linux secret-store probe = `busctl --user status org.freedesktop.secrets` + `/usr/bin/secret-tool` executable                     | `packages/host-runtime/src/platformCapabilities.ts` (`probesFor`)                                                                                                                                                                   |
+| Secret Service store uses `secret-tool store/lookup/clear`, attrs `service=octant account=<uuid>`                                 | `packages/host-runtime/src/secretServiceCredentialStore.ts:73-166`                                                                                                                                                                  |
+| Add-provider form: `aria-label="Provider type"` → `<option value="codex">Codex CLI</option>`, "Provider name", "Codex CLI binary" | `apps/web/src/providers/ProviderSettingsConfiguration.tsx:236,251-275`                                                                                                                                                              |
+| Codex readiness `ready` vs `unauthenticated` + message "Authenticate Codex and make at least one usable model available."         | `apps/server/src/providers/codexDriver.ts:449-462`                                                                                                                                                                                  |
+| Chat blocks with "Configure a default Chat provider and model before creating a conversation."                                    | `apps/server/src/chat/chatService.ts:2598`                                                                                                                                                                                          |
+| Chat defaults auto-configured from first eligible picker group                                                                    | `apps/web/src/chat/autoConfigureChatDefaults.ts:35-51`                                                                                                                                                                              |
+| Local host label: neutral constant + platform-aware server label                                                                  | `packages/contracts/src/host.ts`, `apps/server/src/localHostDisplayName.ts`, `apps/web/src/shell/HostSelector.tsx:58,117`, `apps/web/src/shell/DraftThreadWorkspace.tsx:227-230`, `apps/web/src/App.tsx:1957,2026`                  |
+| **Suspected gap:** every web credential write goes through the Electron-only bridge                                               | `apps/web/src/App.tsx:1618` (`credentialManagementAvailable: hostBridge !== undefined`), `apps/web/src/shell/hostBridge.ts:220-235` (requires `window.octantHost`), `apps/web/src/providers/useProviderController.ts:355,405,461,…` |
 
 ---
 
@@ -45,7 +45,7 @@ Already partly captured during setup; re-run for the record.
    - PASS iff output contains `Secret store: available` and `Octant host status: ready`.
 2. `octant status --port 13774` with `env -u DBUS_SESSION_BUS_ADDRESS`.
    - PASS iff same host reports `Secret store: unavailable`. (Same instance id in both →
-     proves the line reflects the *probe*, not the host.)
+     proves the line reflects the _probe_, not the host.)
 3. Compare `/proc/<server-child>/environ` for both servers.
    - PASS iff Server A's child has non-empty `OCTANT_CREDENTIAL_BROKER_URL` on `127.0.0.1`
      **and** `OCTANT_CREDENTIAL_BROKER_TOKEN`, and Server B's child has **neither**.
