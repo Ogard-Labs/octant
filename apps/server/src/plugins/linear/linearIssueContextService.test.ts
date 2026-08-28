@@ -95,7 +95,10 @@ describe("Linear issue context", () => {
     expect(composed).not.toContain("lin_api_");
     expect(composed).not.toContain("supersecretvalue");
     expect(composed).not.toContain("\u0000");
-    expect(redactLinearIssueContextText("authorization: Bearer secret")).toContain("[redacted]");
+    const authorization = redactLinearIssueContextText("authorization: Bearer secret-token-value");
+    expect(authorization).toContain("[redacted]");
+    expect(authorization).not.toContain("secret-token-value");
+    expect(authorization).not.toContain("Bearer");
   });
 
   it("frames prepared issue context as untrusted external workspace data", async () => {

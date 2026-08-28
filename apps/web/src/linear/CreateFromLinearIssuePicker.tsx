@@ -156,6 +156,12 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
           ...(page.endCursor === undefined ? {} : { endCursor: page.endCursor }),
         };
       });
+    } catch (error) {
+      if (operation !== issuesGeneration.current) return;
+      setIssues({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Linear issues are unavailable.",
+      });
     } finally {
       setLoadingMore(false);
     }

@@ -100,4 +100,24 @@ describe("Create from Linear issue picker", () => {
     expect(() => render(<AvailabilityProbe client={stub} pluginEnabled={true} />)).not.toThrow();
     expect(await screen.findByText("linear-create-hidden")).toBeVisible();
   });
+
+  it("shows an error when Load more rejects without an unhandled rejection", async () => {
+    const user = userEvent.setup();
+    const listIssues = vi
+      .fn()
+      .mockResolvedValueOnce({
+        rows: page.rows,
+        hasNextPage: true,
+        endCursor: "cursor-1",
+      } satisfies LinearIssueListPage)
+      .mockRejectedValueOnce(new Error("Linear rate limited"));
+    render(
+      <CreateFromLinearIssuePicker
+        client={makeClient(readySnapshot, { listIssues })}
+        onSelect={vi.fn()}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Load more issues" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Linear rate limited");
+  });
 });
