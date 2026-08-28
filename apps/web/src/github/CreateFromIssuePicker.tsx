@@ -11,8 +11,13 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
 export function issuesReadIsAvailable(snapshot: GithubAuthenticationSnapshot): boolean {
-  return snapshot.capabilities.some(
-    (capability) => capability.kind === "issues-read" && capability.available,
+  return (
+    snapshot !== null &&
+    typeof snapshot === "object" &&
+    Array.isArray(snapshot.capabilities) &&
+    snapshot.capabilities.some(
+      (capability) => capability.kind === "issues-read" && capability.available,
+    )
   );
 }
 
@@ -26,11 +31,21 @@ export function useGithubIssuesCreateAvailable(
       setAvailable(false);
       return;
     }
+    const readSnapshot = client.authenticationSnapshot;
+    if (typeof readSnapshot !== "function") {
+      setAvailable(false);
+      return;
+    }
+    const pending = thenableFrom(readSnapshot.call(client));
+    if (pending === undefined) {
+      setAvailable(false);
+      return;
+    }
     let cancelled = false;
-    void client
-      .authenticationSnapshot()
+    void pending
       .then((snapshot) => {
-        if (!cancelled) setAvailable(issuesReadIsAvailable(snapshot));
+        if (!cancelled)
+          setAvailable(issuesReadIsAvailable(snapshot as GithubAuthenticationSnapshot));
       })
       .catch(() => {
         if (!cancelled) setAvailable(false);
@@ -40,6 +55,18 @@ export function useGithubIssuesCreateAvailable(
     };
   }, [client, pluginEnabled]);
   return available;
+}
+
+function thenableFrom(value: unknown): Promise<unknown> | undefined {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "then" in value &&
+    typeof value.then === "function"
+  ) {
+    return value as Promise<unknown>;
+  }
+  return undefined;
 }
 
 export interface CreateFromIssuePickerProps {
@@ -71,9 +98,14 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
 
   const loadIssues = useCallback(
     async (owner: string, name: string, search: string) => {
+      const readCatalogue = client.readCatalogue;
+      if (typeof readCatalogue !== "function") {
+        setIssues({ kind: "unavailable", message: "GitHub issues are unavailable." });
+        return;
+      }
       setIssues({ kind: "loading" });
       try {
-        const response = await client.readCatalogue({
+        const response = await readCatalogue({
           kind: "issues",
           owner,
           name,
@@ -119,9 +151,11 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
     if (repository === undefined || issues.kind !== "ready" || issues.endCursor === undefined) {
       return;
     }
+    const readCatalogue = client.readCatalogue;
+    if (typeof readCatalogue !== "function") return;
     setLoadingMore(true);
     try {
-      const response = await client.readCatalogue({
+      const response = await readCatalogue({
         kind: "issues",
         owner: repository.owner,
         name: repository.name,

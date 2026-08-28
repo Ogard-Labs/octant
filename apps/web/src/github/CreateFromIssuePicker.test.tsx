@@ -125,4 +125,24 @@ describe("Create from issue picker", () => {
     render(<AvailabilityProbe client={makeClient()} pluginEnabled={true} />);
     await waitFor(() => expect(screen.getByText("issues-create-available")).toBeVisible());
   });
+
+  it("does not throw when the client has no catalogue reads", async () => {
+    const stub = {} as GithubClient;
+    expect(() => render(<AvailabilityProbe client={stub} pluginEnabled={true} />)).not.toThrow();
+    expect(await screen.findByText("issues-create-hidden")).toBeVisible();
+  });
+
+  it("does not throw when authenticationSnapshot returns nothing", async () => {
+    const stub = { authenticationSnapshot: vi.fn() } as unknown as GithubClient;
+    expect(() => render(<AvailabilityProbe client={stub} pluginEnabled={true} />)).not.toThrow();
+    expect(await screen.findByText("issues-create-hidden")).toBeVisible();
+  });
+
+  it("does not throw when catalogue reads are missing from the picker", () => {
+    const stub = {
+      authenticationSnapshot: async () => readySnapshot,
+    } as unknown as GithubClient;
+    expect(() => render(<CreateFromIssuePicker client={stub} onSelect={vi.fn()} />)).not.toThrow();
+    expect(screen.getByText("Choose a repository to list its issues.")).toBeVisible();
+  });
 });
