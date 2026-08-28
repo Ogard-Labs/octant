@@ -51,9 +51,11 @@ not a Mac app plus a thinner Linux/Windows shell.
 ## Consequences
 
 - Implementation is sequenced: Linux desktop shell (skip Swift, Secret Service,
-  unpackaged launch, tray), then Ubuntu-dogfood AppImage packaging (unsigned,
-  fail-closed updates), then signed Linux artifacts once the release pipeline
-  publishes them, then Windows confinement + credentials + packaging.
+  unpackaged launch, tray), then Ubuntu-dogfood AppImage packaging (unsigned;
+  dogfood AppImage ≠ signed auto-update), then release-matrix scaffolding for
+  `<ring>/linux-x64.json` beside `darwin-arm64.json` (in-app Linux channel
+  still fail-closed until a signed feed is published), then Windows confinement
+  - credentials + packaging.
 - `apps/desktop` build must not require `swiftc` on Linux/Windows. Packaging
   scripts grow non-`.app` targets (Linux AppImage via the same
   `package:desktop` entry) without deleting the Apple Silicon path.
