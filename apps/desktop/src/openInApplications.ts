@@ -26,61 +26,78 @@ type SpawnApplication = (
 interface CatalogueEntry {
   readonly id: OpenInApplicationId;
   readonly label: string;
-  readonly systemPaths: ReadonlyArray<string>;
-  readonly userApplicationName?: string;
+  readonly darwinSystemPaths: ReadonlyArray<string>;
+  readonly darwinUserApplicationName?: string;
+  readonly linuxSystemPaths: ReadonlyArray<string>;
 }
 
 const OPEN_IN_APPLICATIONS: ReadonlyArray<CatalogueEntry> = [
   {
     id: "vscode",
     label: "VS Code",
-    systemPaths: ["/Applications/Visual Studio Code.app"],
-    userApplicationName: "Visual Studio Code.app",
+    darwinSystemPaths: ["/Applications/Visual Studio Code.app"],
+    darwinUserApplicationName: "Visual Studio Code.app",
+    linuxSystemPaths: ["/usr/share/code/code", "/usr/bin/code", "/snap/bin/code"],
   },
   {
     id: "cursor",
     label: "Cursor",
-    systemPaths: ["/Applications/Cursor.app"],
-    userApplicationName: "Cursor.app",
+    darwinSystemPaths: ["/Applications/Cursor.app"],
+    darwinUserApplicationName: "Cursor.app",
+    linuxSystemPaths: ["/usr/bin/cursor", "/usr/share/cursor/cursor", "/snap/bin/cursor"],
   },
   {
     id: "zed",
     label: "Zed",
-    systemPaths: ["/Applications/Zed.app", "/Applications/Zed Preview.app"],
-    userApplicationName: "Zed.app",
+    darwinSystemPaths: ["/Applications/Zed.app", "/Applications/Zed Preview.app"],
+    darwinUserApplicationName: "Zed.app",
+    linuxSystemPaths: ["/usr/bin/zed", "/usr/lib/zed/zed-editor"],
   },
   {
     id: "finder",
     label: "Finder",
-    systemPaths: ["/System/Library/CoreServices/Finder.app"],
+    darwinSystemPaths: ["/System/Library/CoreServices/Finder.app"],
+    linuxSystemPaths: [],
   },
   {
     id: "terminal",
     label: "Terminal",
-    systemPaths: ["/System/Applications/Utilities/Terminal.app"],
+    darwinSystemPaths: ["/System/Applications/Utilities/Terminal.app"],
+    linuxSystemPaths: [
+      "/usr/bin/x-terminal-emulator",
+      "/usr/bin/gnome-terminal",
+      "/usr/bin/konsole",
+    ],
   },
   {
     id: "ghostty",
     label: "Ghostty",
-    systemPaths: ["/Applications/Ghostty.app"],
-    userApplicationName: "Ghostty.app",
+    darwinSystemPaths: ["/Applications/Ghostty.app"],
+    darwinUserApplicationName: "Ghostty.app",
+    linuxSystemPaths: ["/usr/bin/ghostty"],
   },
   {
     id: "xcode",
     label: "Xcode",
-    systemPaths: ["/Applications/Xcode.app"],
-    userApplicationName: "Xcode.app",
+    darwinSystemPaths: ["/Applications/Xcode.app"],
+    darwinUserApplicationName: "Xcode.app",
+    linuxSystemPaths: [],
   },
 ];
 
 export function detectOpenInApplications(options: {
   readonly exists: (path: string) => boolean;
   readonly homeDirectory: string;
+  readonly platform?: NodeJS.Platform;
 }): ReadonlyArray<OpenInApplicationDescriptor> {
+  const platform = options.platform ?? "darwin";
   return OPEN_IN_APPLICATIONS.map((entry) => ({
     id: entry.id,
-    label: entry.label,
-    available: resolveApplicationPath(entry, options) !== undefined,
+    label: platform === "linux" && entry.id === "finder" ? "Files" : entry.label,
+    available:
+      platform === "linux" && entry.id === "finder"
+        ? true
+        : resolveApplicationPath(entry, options, platform) !== undefined,
   }));
 }
 
@@ -89,24 +106,52 @@ export function launchOpenInApplication(options: {
   readonly checkoutRoot: string;
   readonly exists: (path: string) => boolean;
   readonly homeDirectory: string;
+  readonly platform?: NodeJS.Platform;
   readonly shell: { readonly showItemInFolder: (path: string) => void };
   readonly spawn: SpawnApplication;
 }): void {
+  const platform = options.platform ?? "darwin";
   const entry = OPEN_IN_APPLICATIONS.find((candidate) => candidate.id === options.applicationId);
-  const applicationPath = entry === undefined ? undefined : resolveApplicationPath(entry, options);
   if (
     entry === undefined ||
     !isAbsolute(options.checkoutRoot) ||
-    options.checkoutRoot.includes("\0") ||
-    applicationPath === undefined
+    options.checkoutRoot.includes("\0")
   ) {
     throw new Error("Octant could not open the selected application.");
   }
   if (entry.id === "finder") {
+    if (platform === "linux") {
+      try {
+        options
+          .spawn("/usr/bin/xdg-open", [options.checkoutRoot], {
+            detached: true,
+            shell: false,
+            stdio: "ignore",
+          })
+          .unref?.();
+      } catch {
+        throw new Error("Octant could not open the selected application.");
+      }
+      return;
+    }
     options.shell.showItemInFolder(options.checkoutRoot);
     return;
   }
+  const applicationPath = resolveApplicationPath(entry, options, platform);
+  if (applicationPath === undefined) {
+    throw new Error("Octant could not open the selected application.");
+  }
   try {
+    if (platform === "linux") {
+      options
+        .spawn(applicationPath, [options.checkoutRoot], {
+          detached: true,
+          shell: false,
+          stdio: "ignore",
+        })
+        .unref?.();
+      return;
+    }
     options
       .spawn("/usr/bin/open", ["-a", applicationPath, options.checkoutRoot], {
         detached: true,
@@ -168,12 +213,16 @@ export async function openCodeCheckoutInApplicationFromServer(options: {
 function resolveApplicationPath(
   entry: CatalogueEntry,
   options: { readonly exists: (path: string) => boolean; readonly homeDirectory: string },
+  platform: NodeJS.Platform,
 ): string | undefined {
+  if (platform === "linux") {
+    return entry.linuxSystemPaths.find((path) => options.exists(path));
+  }
   const candidates = [
-    ...entry.systemPaths,
-    ...(entry.userApplicationName === undefined
+    ...entry.darwinSystemPaths,
+    ...(entry.darwinUserApplicationName === undefined
       ? []
-      : [join(options.homeDirectory, "Applications", entry.userApplicationName)]),
+      : [join(options.homeDirectory, "Applications", entry.darwinUserApplicationName)]),
   ];
   return candidates.find((path) => options.exists(path));
 }

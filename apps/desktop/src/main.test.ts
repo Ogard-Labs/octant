@@ -53,16 +53,29 @@ import type { CredentialStore } from "@octant/host-runtime";
 import { ProjectWindowAuthorityUnavailableError } from "./projectRootPicker";
 
 describe("packaged desktop storage identity", () => {
-  it("uses the canonical Octant Application Support directory", () => {
-    expect(resolveDesktopDataDirectory(undefined, "/Users/test/Library/Application Support")).toBe(
-      "/Users/test/Library/Application Support/Octant",
+  it("uses the canonical Octant Application Support directory on macOS", () => {
+    expect(
+      resolveDesktopDataDirectory(undefined, "/Users/test/Library/Application Support", "darwin"),
+    ).toBe("/Users/test/Library/Application Support/Octant");
+  });
+
+  it("uses the XDG data home on Linux", () => {
+    expect(resolveDesktopDataDirectory(undefined, "/home/test/.config", "linux")).toBe(
+      "/home/test/.local/share/octant",
     );
   });
 
   it("preserves an explicit isolated data directory", () => {
     expect(
-      resolveDesktopDataDirectory("/tmp/octant-qa", "/Users/test/Library/Application Support"),
+      resolveDesktopDataDirectory(
+        "/tmp/octant-qa",
+        "/Users/test/Library/Application Support",
+        "darwin",
+      ),
     ).toBe("/private/tmp/octant-qa");
+    expect(resolveDesktopDataDirectory("/tmp/octant-qa", "/home/test/.config", "linux")).toBe(
+      "/tmp/octant-qa",
+    );
   });
 });
 

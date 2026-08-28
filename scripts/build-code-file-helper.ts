@@ -24,6 +24,11 @@ export const codeFileHelperBuildArgs = (source: string, destination: string) => 
   source,
 ];
 
+/** Code file helpers are Darwin-only; Linux/Windows builds must not require swiftc. */
+export function shouldBuildCodeFileHelper(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "darwin";
+}
+
 function optionValue(name: string): string | undefined {
   const index = process.argv.indexOf(name);
   return index === -1 ? undefined : process.argv[index + 1];
@@ -33,6 +38,7 @@ export async function buildCodeFileHelper(
   source = optionValue("--source") ?? defaultSource,
   destination = optionValue("--destination") ?? defaultDestination,
 ): Promise<void> {
+  if (!shouldBuildCodeFileHelper()) return;
   const resolvedSource = resolve(repositoryRoot, source);
   const resolvedDestination = resolve(repositoryRoot, destination);
   const moduleCache = resolve(tmpdir(), "octant-swift-module-cache");

@@ -1,16 +1,28 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { HOST_TRAY_ICON_SIZE, createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
+import {
+  HOST_TRAY_ICON_SIZE,
+  createHostTrayImage,
+  hostTrayUsesTemplateImage,
+  shouldPresentHostTray,
+} from "./menuBarIcon";
 
-describe("macOS menu-bar icon", () => {
-  it("keeps the status item available while the app is running, including stopped host state", () => {
+describe("host tray icon", () => {
+  it("keeps the status item available on macOS and Linux while the app is running", () => {
     expect(shouldPresentHostTray("darwin", "running")).toBe(true);
     expect(shouldPresentHostTray("darwin", "stopped")).toBe(true);
-    expect(shouldPresentHostTray("linux", "running")).toBe(false);
+    expect(shouldPresentHostTray("linux", "running")).toBe(true);
+    expect(shouldPresentHostTray("linux", "stopped")).toBe(true);
+    expect(shouldPresentHostTray("win32", "running")).toBe(false);
   });
 
-  it("creates an 18px monochrome template glyph from a non-empty source", () => {
+  it("uses template glyphs only on macOS", () => {
+    expect(hostTrayUsesTemplateImage("darwin")).toBe(true);
+    expect(hostTrayUsesTemplateImage("linux")).toBe(false);
+  });
+
+  it("creates an 18px monochrome template glyph from a non-empty source on macOS", () => {
     const setTemplateImage = vi.fn();
     const resized = {
       isEmpty: () => false,
@@ -24,13 +36,35 @@ describe("macOS menu-bar icon", () => {
     };
     const createFromPath = vi.fn(() => source);
 
-    expect(createHostTrayImage({ createFromPath }, "/tmp/menuBarTemplate.png")).toBe(resized);
+    expect(createHostTrayImage({ createFromPath }, "/tmp/menuBarTemplate.png", "darwin")).toBe(
+      resized,
+    );
     expect(source.resize).toHaveBeenCalledWith({
       height: HOST_TRAY_ICON_SIZE,
       quality: "best",
       width: HOST_TRAY_ICON_SIZE,
     });
     expect(setTemplateImage).toHaveBeenCalledWith(true);
+  });
+
+  it("creates a non-template tray glyph on Linux", () => {
+    const setTemplateImage = vi.fn();
+    const resized = {
+      isEmpty: () => false,
+      resize: vi.fn(() => resized),
+      setTemplateImage,
+    };
+    const source = {
+      isEmpty: () => false,
+      resize: vi.fn(() => resized),
+      setTemplateImage: vi.fn(),
+    };
+    const createFromPath = vi.fn(() => source);
+
+    expect(createHostTrayImage({ createFromPath }, "/tmp/menuBarTemplate.png", "linux")).toBe(
+      resized,
+    );
+    expect(setTemplateImage).toHaveBeenCalledWith(false);
   });
 
   it("ships the supplied transparent 1x and 2x PNG representations for Electron", async () => {

@@ -21,6 +21,11 @@ export const keychainHelperBuildArgs = (source: string, destination: string) => 
   source,
 ];
 
+/** Keychain helpers are Darwin-only; Linux/Windows builds must not require swiftc. */
+export function shouldBuildKeychainHelper(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "darwin";
+}
+
 function optionValue(name: string): string | undefined {
   const index = Bun.argv.indexOf(name);
   return index === -1 ? undefined : Bun.argv[index + 1];
@@ -30,15 +35,16 @@ export async function buildKeychainHelper(
   source = optionValue("--source") ?? defaultSource,
   destination = optionValue("--destination") ?? defaultDestination,
 ): Promise<void> {
+  if (!shouldBuildKeychainHelper()) return;
   const resolvedSource = resolve(repositoryRoot, source);
   const resolvedDestination = resolve(repositoryRoot, destination);
   await mkdir(dirname(resolvedDestination), { recursive: true });
-  const process = Bun.spawn(keychainHelperBuildArgs(resolvedSource, resolvedDestination), {
+  const child = Bun.spawn(keychainHelperBuildArgs(resolvedSource, resolvedDestination), {
     stdin: "ignore",
     stdout: "inherit",
     stderr: "inherit",
   });
-  const exitCode = await process.exited;
+  const exitCode = await child.exited;
   if (exitCode !== 0) throw new Error("Octant Keychain helper build failed.");
 }
 

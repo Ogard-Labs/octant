@@ -281,6 +281,24 @@ describe("resolveStableHostAttachment", () => {
 });
 
 describe("serverSpawnSpec", () => {
+  it("omits credential broker and Code file helper env when unset", () => {
+    const spec = serverSpawnSpec({
+      browserBrokerToken: "browser-token",
+      browserBrokerUrl: "http://127.0.0.1:42000/",
+      desktopBridgeSecret: "desktop-secret",
+      root: "/repo",
+      port: 13_773,
+      instanceId: "managed-instance",
+      packaged: false,
+      execPath: "/usr/bin/octant",
+      env: { PATH: "/usr/bin" },
+    });
+    expect(spec.env.OCTANT_CREDENTIAL_BROKER_URL).toBeUndefined();
+    expect(spec.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBeUndefined();
+    expect(spec.env.OCTANT_CODE_FILE_HELPER_PATH).toBeUndefined();
+    expect(spec.env.OCTANT_BROWSER_BROKER_URL).toBe("http://127.0.0.1:42000/");
+  });
+
   it("adds trusted macOS package-manager paths for packaged servers", () => {
     expect(
       resolvePackagedServerPath(

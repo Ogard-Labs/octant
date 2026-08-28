@@ -103,11 +103,13 @@ export async function openPreviewHandoffFromServer(options: {
 }
 
 /**
- * Native executor for the packaged Electron app. `shell.showItemInFolder`
+ * Native executor for the packaged Electron app. On macOS, `shell.showItemInFolder`
  * reveals in Finder, `qlmanage -p` opens Quick Look as an isolated child
  * process with a bounded lifetime, and `shell.openPath` opens the system
- * default application. No generic shell and no string interpolation reaches
- * a process boundary: the path is always one separate spawn argument.
+ * default application. On Linux, reveal and open go through `xdg-open` (and
+ * the desktop portals behind it); Quick Look stays macOS-only and no-ops.
+ * No generic shell and no string interpolation reaches a process boundary:
+ * the path is always one separate spawn argument.
  */
 export function createNativePreviewHandoffExecutor(options: {
   readonly shell: {
@@ -115,14 +117,21 @@ export function createNativePreviewHandoffExecutor(options: {
     readonly openPath: (path: string) => Promise<string>;
   };
   readonly spawn: SpawnProcess;
+  readonly platform?: NodeJS.Platform;
   readonly quickLookLifetimeMs?: number;
 }): PreviewHandoffExecutor {
   const lifetimeMs = options.quickLookLifetimeMs ?? QUICK_LOOK_MAX_LIFETIME_MS;
+  const platform = options.platform ?? "darwin";
   return {
     async revealInFinder(path) {
+      if (platform === "linux") {
+        await spawnDetached(options.spawn, "/usr/bin/xdg-open", [path]);
+        return;
+      }
       options.shell.showItemInFolder(path);
     },
     async quickLook(path, signal) {
+      if (platform !== "darwin") return;
       await new Promise<void>((resolve) => {
         let child: SpawnedProcess | undefined;
         try {
@@ -158,10 +167,26 @@ export function createNativePreviewHandoffExecutor(options: {
       });
     },
     async openExternal(path) {
+      if (platform === "linux") {
+        await spawnDetached(options.spawn, "/usr/bin/xdg-open", [path]);
+        return;
+      }
       const error = await options.shell.openPath(path);
       if (error !== "") throw new Error("Octant could not open the preview externally.");
     },
   };
+}
+
+async function spawnDetached(
+  spawn: SpawnProcess,
+  command: string,
+  args: readonly string[],
+): Promise<void> {
+  try {
+    spawn(command, args);
+  } catch {
+    throw new Error("Octant could not open the preview externally.");
+  }
 }
 
 function decodeHandoffTarget(value: unknown): {

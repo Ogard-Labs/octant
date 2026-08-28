@@ -35,7 +35,6 @@ import {
   startCredentialBroker,
   writeBridgeSecretProjection,
   type CredentialBroker,
-  type CredentialPurgeStore,
   type CredentialStore,
   type HostRuntimePaths,
 } from "@octant/host-runtime";
@@ -72,9 +71,9 @@ import {
 } from "./codeOperationApproval";
 import { parseCodeDeepLink, type CodeDeepLink } from "./codeDeepLinks";
 import {
-  makeKeychainCredentialPurgeStore,
-  makeKeychainCredentialStore,
-} from "./keychainCredentialStore";
+  resolveDesktopCredentialBackend,
+  type DesktopCredentialBackend,
+} from "./desktopCredentialStore";
 import {
   HostIdentitySigningFailure,
   makeHostIdentitySigningService,
@@ -665,9 +664,9 @@ export async function startManagedServerResources<
   TBroker extends ManagedBrokerResource,
   TServer,
 >(options: {
-  readonly startBroker: () => Promise<TBroker>;
-  readonly startServer: (broker: TBroker) => TServer;
-}): Promise<{ readonly broker: TBroker; readonly server: TServer }> {
+  readonly startBroker: () => Promise<TBroker | undefined>;
+  readonly startServer: (broker: TBroker | undefined) => TServer;
+}): Promise<{ readonly broker: TBroker | undefined; readonly server: TServer }> {
   let broker: TBroker | undefined;
   try {
     broker = await options.startBroker();
@@ -829,18 +828,26 @@ export function createProjectWindowAuthorityLifecycle() {
 export function resolveDesktopDataDirectory(
   configuredDirectory: string | undefined,
   appDataDirectory: string,
+  platform: NodeJS.Platform = process.platform,
 ): string {
-  return resolveDesktopHostRuntimePaths(configuredDirectory, appDataDirectory).dataDirectory;
+  return resolveDesktopHostRuntimePaths(configuredDirectory, appDataDirectory, platform)
+    .dataDirectory;
 }
 
 function resolveDesktopHostRuntimePaths(
   configuredDirectory: string | undefined,
   appDataDirectory: string,
+  platform: NodeJS.Platform = process.platform,
 ): HostRuntimePaths {
+  if (platform !== "darwin" && platform !== "linux") {
+    throw new Error(`Octant desktop does not support host paths on ${platform}.`);
+  }
+  const home =
+    platform === "darwin" ? resolve(appDataDirectory, "..", "..") : resolve(homedir());
   return resolveHostRuntimePaths({
     env: { OCTANT_DATA_DIR: configuredDirectory },
-    platform: "darwin",
-    home: resolve(appDataDirectory, "..", ".."),
+    platform,
+    home,
     temporaryDirectory: canonicalTemporaryDirectory(),
     uid: process.getuid?.() ?? 0,
   });
@@ -883,8 +890,8 @@ let credentialBroker: CredentialBroker | undefined;
 let browserRuntimeBroker: BrowserRuntimeBroker | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
-let credentialStore: CredentialStore | undefined;
-let credentialPurgeStore: CredentialPurgeStore | undefined;
+let credentialBackend: DesktopCredentialBackend | undefined;
+let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
   readStoredDesktopBridgeSecret(desktopDataDirectory) ?? generateProjectBridgeToken(randomBytes);
 let serverInstanceId: string | undefined;
@@ -1066,28 +1073,58 @@ export function prepareDevelopmentRendererUrl(
   return launchUrl.toString();
 }
 
-function getCredentialStore(): CredentialStore {
-  credentialStore ??= makeKeychainCredentialStore(
-    resolveKeychainHelperPath({
+function getCredentialBackend(): Promise<DesktopCredentialBackend> {
+  credentialBackendPromise ??= resolveDesktopCredentialBackend({
+    platform: process.platform,
+    keychainHelperPath: resolveKeychainHelperPath({
       packaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
       moduleUrl: import.meta.url,
     }),
-    { storeScope: desktopHostId },
-  );
-  return credentialStore;
+    storeScope: desktopHostId,
+  }).then((backend) => {
+    credentialBackend = backend;
+    return backend;
+  });
+  return credentialBackendPromise;
 }
 
-function getCredentialPurgeStore(): CredentialPurgeStore {
-  credentialPurgeStore ??= makeKeychainCredentialPurgeStore(
-    resolveKeychainHelperPath({
-      packaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      moduleUrl: import.meta.url,
-    }),
-    { storeScope: desktopHostId },
-  );
-  return credentialPurgeStore;
+function lazyCredentialStore(): CredentialStore {
+  return {
+    set: async (providerInstanceId, credential) => {
+      const backend = await getCredentialBackend();
+      if (backend.store === undefined) {
+        throw new Error("unavailable");
+      }
+      await backend.store.set(providerInstanceId, credential);
+    },
+    has: async (providerInstanceId) => {
+      const backend = await getCredentialBackend();
+      if (backend.store === undefined) return false;
+      return await backend.store.has(providerInstanceId);
+    },
+    resolve: async (providerInstanceId) => {
+      const backend = await getCredentialBackend();
+      if (backend.store === undefined) {
+        throw new Error("unavailable");
+      }
+      return await backend.store.resolve(providerInstanceId);
+    },
+    delete: async (providerInstanceId) => {
+      const backend = await getCredentialBackend();
+      if (backend.store === undefined) {
+        throw new Error("unavailable");
+      }
+      await backend.store.delete(providerInstanceId);
+    },
+  };
+}
+
+async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefined> {
+  if (credentialBroker !== undefined) return credentialBroker;
+  const backend = await getCredentialBackend();
+  if (backend.store === undefined) return undefined;
+  return await startCredentialBroker(backend.store, backend.purgeStore);
 }
 
 async function resolveExistingHostAttachment() {
@@ -1154,21 +1191,25 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(browserSurfaceHost);
     startingBrowserBroker = nextBrowserRuntimeBroker;
     const resources = await startManagedServerResources({
-      startBroker: () =>
-        credentialBroker === undefined
-          ? startCredentialBroker(getCredentialStore(), getCredentialPurgeStore())
-          : Promise.resolve(credentialBroker),
+      startBroker: () => startDesktopCredentialBroker(),
       startServer: (broker) => {
+        const codeFileHelperPath = resolveCodeFileHelperPath({
+          packaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+          moduleUrl: import.meta.url,
+        });
         const spec = serverSpawnSpec({
           browserBrokerToken: nextBrowserRuntimeBroker.token,
           browserBrokerUrl: nextBrowserRuntimeBroker.url,
-          codeFileHelperPath: resolveCodeFileHelperPath({
-            packaged: app.isPackaged,
-            resourcesPath: process.resourcesPath,
-            moduleUrl: import.meta.url,
-          }),
-          credentialBrokerToken: broker.token,
-          credentialBrokerUrl: broker.url,
+          ...(process.platform === "darwin" && existsSync(codeFileHelperPath)
+            ? { codeFileHelperPath }
+            : {}),
+          ...(broker === undefined
+            ? {}
+            : {
+                credentialBrokerToken: broker.token,
+                credentialBrokerUrl: broker.url,
+              }),
           desktopBridgeSecret,
           root,
           port,
@@ -1735,7 +1776,7 @@ function ensureHostTray(): void {
   if (!shouldPresentHostTray(process.platform, snapshot.state)) return;
   if (hostTray === undefined) {
     const iconPath = resolve(repositoryRoot(), "apps/desktop/resources/menuBarTemplate.png");
-    hostTray = new Tray(createHostTrayImage(nativeImage, iconPath));
+    hostTray = new Tray(createHostTrayImage(nativeImage, iconPath, process.platform));
     hostTray.on("click", () => hostTray?.popUpContextMenu());
   }
   updateHostTray();
@@ -1994,7 +2035,7 @@ function installIpcHandlers(): void {
   installProviderCredentialIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
-    store: getCredentialStore(),
+    store: lazyCredentialStore(),
   });
   installPrivateListenerIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
@@ -2068,7 +2109,7 @@ function installIpcHandlers(): void {
     });
   });
   ipcMain.handle(IPC_CHANNELS.listOpenInApplications, () =>
-    detectOpenInApplications({ exists: existsSync, homeDirectory: homedir() }),
+    detectOpenInApplications({ exists: existsSync, homeDirectory: homedir(), platform: process.platform }),
   );
   ipcMain.handle(IPC_CHANNELS.openCodeCheckoutInApplication, async (event, request: unknown) => {
     const context = ownedWindowContext(event);
@@ -2087,6 +2128,7 @@ function installIpcHandlers(): void {
           checkoutRoot,
           exists: existsSync,
           homeDirectory: homedir(),
+          platform: process.platform,
           shell,
           spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
         }),
@@ -2095,6 +2137,7 @@ function installIpcHandlers(): void {
   const activePreviewHandoffs = new Map<string, AbortController>();
   const previewHandoffExecutor = createNativePreviewHandoffExecutor({
     shell,
+    platform: process.platform,
     spawn: (command, args) => spawn(command, [...args], { shell: false, stdio: "ignore" }),
   });
   ipcMain.handle(IPC_CHANNELS.previewHandoff, async (event, request: unknown) => {

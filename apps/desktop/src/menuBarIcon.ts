@@ -18,12 +18,21 @@ export function shouldPresentHostTray(
   platform: NodeJS.Platform,
   _state: "attention-required" | "running" | "starting" | "stopped",
 ): boolean {
+  return platform === "darwin" || platform === "linux";
+}
+
+/**
+ * macOS menu-bar glyphs are template images so the system recolors them.
+ * Linux AppIndicator / Electron trays need ordinary non-template PNGs.
+ */
+export function hostTrayUsesTemplateImage(platform: NodeJS.Platform): boolean {
   return platform === "darwin";
 }
 
 export function createHostTrayImage<TImage extends HostTrayImage<TImage>>(
   factory: HostTrayImageFactory<TImage>,
   path: string,
+  platform: NodeJS.Platform = "darwin",
 ): TImage {
   const source = factory.createFromPath(path);
   if (source.isEmpty()) throw new Error("Octant menu-bar icon could not be loaded.");
@@ -35,6 +44,6 @@ export function createHostTrayImage<TImage extends HostTrayImage<TImage>>(
   if (image.isEmpty()) throw new Error("Octant menu-bar icon could not be resized.");
   // The menu-bar asset is the bare Octant aperture glyph drawn black on
   // transparent, so macOS recolors it for light, dark, and selected states.
-  image.setTemplateImage(true);
+  image.setTemplateImage(hostTrayUsesTemplateImage(platform));
   return image;
 }

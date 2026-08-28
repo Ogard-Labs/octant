@@ -16,7 +16,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildCodeFileHelper, codeFileHelperBuildArgs } from "./build-code-file-helper";
+import {
+  buildCodeFileHelper,
+  codeFileHelperBuildArgs,
+  shouldBuildCodeFileHelper,
+} from "./build-code-file-helper";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const correlationId = "70000000-0000-4000-8000-000000000003";
@@ -90,16 +94,24 @@ async function send(
 }
 
 beforeAll(async () => {
+  if (!shouldBuildCodeFileHelper()) return;
   fixtureRoot = await mkdtemp(join(tmpdir(), "octant-code-helper-test-"));
   helperPath = join(fixtureRoot, "octant-code-file-helper");
   await buildCodeFileHelper(undefined, helperPath);
 }, 30_000);
 
 afterAll(async () => {
+  if (fixtureRoot === "") return;
   await rm(fixtureRoot, { recursive: true, force: true });
 });
 
 describe("Code file helper build", () => {
+  it("skips the Swift Code file helper off macOS so Linux builds do not require swiftc", () => {
+    expect(shouldBuildCodeFileHelper("darwin")).toBe(true);
+    expect(shouldBuildCodeFileHelper("linux")).toBe(false);
+    expect(shouldBuildCodeFileHelper("win32")).toBe(false);
+  });
+
   it("pins an optimized Apple Silicon macOS 14 executable", async () => {
     expect(codeFileHelperBuildArgs("/repo/helper.swift", "/repo/dist/helper")).toEqual([
       "swiftc",
@@ -110,6 +122,7 @@ describe("Code file helper build", () => {
       "/repo/dist/helper",
       "/repo/helper.swift",
     ]);
+    if (!shouldBuildCodeFileHelper()) return;
     expect((await stat(helperPath)).mode & 0o111).toBe(0o111);
   });
 
@@ -131,7 +144,7 @@ describe("Code file helper build", () => {
   });
 });
 
-describe("Code file helper native fixture", () => {
+describe.runIf(shouldBuildCodeFileHelper())("Code file helper native fixture", () => {
   it("inspects through a retained root descriptor and rejects final/intermediate symlinks and hardlinks", async () => {
     const root = join(fixtureRoot, "inspect-root");
     const movedRoot = join(fixtureRoot, "inspect-root-moved");

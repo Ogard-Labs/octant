@@ -165,9 +165,25 @@ describe("openPreviewHandoffFromServer", () => {
 describe("createNativePreviewHandoffExecutor", () => {
   it("reveals in Finder through shell.showItemInFolder", async () => {
     const shell = { showItemInFolder: vi.fn(), openPath: vi.fn(async () => "") };
-    const executor = createNativePreviewHandoffExecutor({ shell, spawn: vi.fn() });
+    const executor = createNativePreviewHandoffExecutor({
+      shell,
+      spawn: vi.fn(),
+      platform: "darwin",
+    });
     await executor.revealInFinder("/private/repo/notes.md");
     expect(shell.showItemInFolder).toHaveBeenCalledWith("/private/repo/notes.md");
+  });
+
+  it("reveals and opens paths on Linux through xdg-open", async () => {
+    const spawn = vi.fn();
+    const shell = { showItemInFolder: vi.fn(), openPath: vi.fn(async () => "") };
+    const executor = createNativePreviewHandoffExecutor({ shell, spawn, platform: "linux" });
+    await executor.revealInFinder("/home/example/notes.md");
+    await executor.openExternal("/home/example/notes.md");
+    expect(spawn).toHaveBeenCalledWith("/usr/bin/xdg-open", ["/home/example/notes.md"]);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(shell.showItemInFolder).not.toHaveBeenCalled();
+    expect(shell.openPath).not.toHaveBeenCalled();
   });
 
   it("opens the system default application through shell.openPath and sanitizes failures", async () => {
@@ -175,7 +191,11 @@ describe("createNativePreviewHandoffExecutor", () => {
       showItemInFolder: vi.fn(),
       openPath: vi.fn(async () => "NSFileNoApplicationError /private/secret/notes.md"),
     };
-    const executor = createNativePreviewHandoffExecutor({ shell, spawn: vi.fn() });
+    const executor = createNativePreviewHandoffExecutor({
+      shell,
+      spawn: vi.fn(),
+      platform: "darwin",
+    });
     await expect(executor.openExternal("/private/secret/notes.md")).rejects.toThrow(
       "Octant could not open the preview externally.",
     );
@@ -192,12 +212,24 @@ describe("createNativePreviewHandoffExecutor", () => {
     const executor = createNativePreviewHandoffExecutor({
       shell: { showItemInFolder: vi.fn(), openPath: vi.fn(async () => "") },
       spawn,
+      platform: "darwin",
       quickLookLifetimeMs: 60_000,
     });
     const pending = executor.quickLook("/private/repo/notes.md");
     expect(spawn).toHaveBeenCalledWith("qlmanage", ["-p", "/private/repo/notes.md"]);
     exitHandlers[0]?.();
     await pending;
+  });
+
+  it("skips Quick Look on Linux", async () => {
+    const spawn = vi.fn();
+    const executor = createNativePreviewHandoffExecutor({
+      shell: { showItemInFolder: vi.fn(), openPath: vi.fn(async () => "") },
+      spawn,
+      platform: "linux",
+    });
+    await executor.quickLook("/home/example/notes.md");
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it("kills the Quick Look child on cancellation with a bounded lifetime", async () => {
@@ -207,6 +239,7 @@ describe("createNativePreviewHandoffExecutor", () => {
     const executor = createNativePreviewHandoffExecutor({
       shell: { showItemInFolder: vi.fn(), openPath: vi.fn(async () => "") },
       spawn,
+      platform: "darwin",
       quickLookLifetimeMs: 60_000,
     });
     const pending = executor.quickLook("/private/repo/notes.md", controller.signal);
@@ -221,6 +254,7 @@ describe("createNativePreviewHandoffExecutor", () => {
     const executor = createNativePreviewHandoffExecutor({
       shell: { showItemInFolder: vi.fn(), openPath: vi.fn(async () => "") },
       spawn,
+      platform: "darwin",
       quickLookLifetimeMs: 10,
     });
     await executor.quickLook("/private/repo/notes.md");

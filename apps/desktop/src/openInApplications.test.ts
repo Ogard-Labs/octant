@@ -14,6 +14,7 @@ describe("Open in applications", () => {
     const result = detectOpenInApplications({
       exists: (path) => existing.has(path),
       homeDirectory: "/Users/example",
+      platform: "darwin",
     });
 
     expect(result.map((entry) => entry.id)).toEqual([
@@ -31,6 +32,22 @@ describe("Open in applications", () => {
     });
     expect(result.find((entry) => entry.id === "finder")?.available).toBe(true);
     expect(result.find((entry) => entry.id === "cursor")?.available).toBe(false);
+  });
+
+  it("detects Linux editor binaries and always offers the file manager reveal", () => {
+    const result = detectOpenInApplications({
+      exists: (path) => path === "/usr/bin/code",
+      homeDirectory: "/home/example",
+      platform: "linux",
+    });
+    expect(result.find((entry) => entry.id === "vscode")).toMatchObject({
+      available: true,
+    });
+    expect(result.find((entry) => entry.id === "finder")).toMatchObject({
+      label: "Files",
+      available: true,
+    });
+    expect(result.find((entry) => entry.id === "xcode")?.available).toBe(false);
   });
 
   it("resolves the checkout through the authenticated desktop route before launching", async () => {
@@ -68,6 +85,7 @@ describe("Open in applications", () => {
       checkoutRoot: "/private/repo",
       exists: (path) => path === "/Applications/Visual Studio Code.app",
       homeDirectory: "/Users/example",
+      platform: "darwin",
       shell: { showItemInFolder: vi.fn() },
       spawn,
     });
@@ -79,12 +97,47 @@ describe("Open in applications", () => {
     );
   });
 
+  it("opens Linux applications with the binary and reveals folders through xdg-open", () => {
+    const spawn = vi.fn(() => ({ unref: vi.fn() }));
+    launchOpenInApplication({
+      applicationId: "vscode",
+      checkoutRoot: "/home/example/repo",
+      exists: (path) => path === "/usr/bin/code",
+      homeDirectory: "/home/example",
+      platform: "linux",
+      shell: { showItemInFolder: vi.fn() },
+      spawn,
+    });
+    expect(spawn).toHaveBeenCalledWith("/usr/bin/code", ["/home/example/repo"], {
+      detached: true,
+      shell: false,
+      stdio: "ignore",
+    });
+
+    spawn.mockClear();
+    launchOpenInApplication({
+      applicationId: "finder",
+      checkoutRoot: "/home/example/repo",
+      exists: () => false,
+      homeDirectory: "/home/example",
+      platform: "linux",
+      shell: { showItemInFolder: vi.fn() },
+      spawn,
+    });
+    expect(spawn).toHaveBeenCalledWith("/usr/bin/xdg-open", ["/home/example/repo"], {
+      detached: true,
+      shell: false,
+      stdio: "ignore",
+    });
+  });
+
   it("reveals the checkout in Finder and refuses unavailable applications", () => {
     const showItemInFolder = vi.fn();
     const common = {
       checkoutRoot: "/private/repo",
       exists: (path: string) => path === "/System/Library/CoreServices/Finder.app",
       homeDirectory: "/Users/example",
+      platform: "darwin" as const,
       shell: { showItemInFolder },
       spawn: vi.fn(),
     } as const;
