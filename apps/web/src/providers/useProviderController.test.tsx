@@ -387,6 +387,56 @@ describe("useProviderController", () => {
     expect(JSON.stringify(result.current)).not.toContain("private-value");
   });
 
+  it("creates an image profile before storing its write-only credential and purges it on remove", async () => {
+    const calls: string[] = [];
+    const created = openAiImageProvider();
+    const api = client();
+    vi.mocked(api.execute).mockImplementation(async (command) => {
+      if (command.kind === "create-openai-image-provider") {
+        calls.push("provider.create");
+        return { kind: "provider-created", instance: { ...created, id: command.instanceId } };
+      }
+      if (command.kind !== "remove-provider") {
+        throw new Error(`unexpected provider command ${command.kind}`);
+      }
+      calls.push("provider.remove");
+      return { kind: "provider-removed", instanceId: command.instanceId, version: 2 as never };
+    });
+    const host = credentialHost(calls);
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.createOpenAiImage(
+          "GPT Image",
+          created.configuration,
+          transientCredential("image-secret", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+    expect(calls).toEqual(["provider.create", "credential.set", "field.clear"]);
+    expect(JSON.stringify(result.current)).not.toContain("image-secret");
+
+    const createdId = result.current.instances.find(
+      (instance) => instance.driverKind === "openai-image",
+    )?.id;
+    expect(createdId).toBeDefined();
+    if (createdId === undefined) throw new Error("expected created image profile");
+
+    await act(async () => {
+      await expect(result.current.remove(createdId)).resolves.toBe(true);
+    });
+    expect(calls).toEqual([
+      "provider.create",
+      "credential.set",
+      "field.clear",
+      "provider.remove",
+      "credential.clear",
+    ]);
+    expect(host.clearProviderCredential).toHaveBeenCalledWith(createdId);
+  });
+
   it("creates Claude subscription configuration without credential mutation", async () => {
     const calls: string[] = [];
     const api = client();
@@ -1786,6 +1836,27 @@ function provider(patch: Partial<ProviderInstance> = {}): ProviderInstance {
     updatedAt: "2026-07-14T10:00:00.000Z" as ProviderInstance["updatedAt"],
     ...patch,
   });
+}
+
+function openAiImageProvider(
+  patch: Partial<ProviderInstance> = {},
+): Extract<ProviderInstance, { driverKind: "openai-image" }> {
+  return {
+    id,
+    displayName: "GPT Image",
+    driverKind: "openai-image",
+    configuration: {
+      kind: "openai-image-http",
+      modelAllowlist: ["gpt-image-2" as never],
+      defaultModel: "gpt-image-2" as never,
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: "2026-08-28T10:00:00.000Z" as ProviderInstance["createdAt"],
+    updatedAt: "2026-08-28T10:00:00.000Z" as ProviderInstance["updatedAt"],
+    ...patch,
+  } as Extract<ProviderInstance, { driverKind: "openai-image" }>;
 }
 
 function httpProvider(

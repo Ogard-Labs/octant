@@ -12,6 +12,7 @@ import {
   orderProviderModels,
   resolveCapabilitySupport,
 } from "./modelCatalogPolicy";
+import { isImageProfileDriverKind } from "./providerPolicy";
 
 const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   codex: "Codex CLI",
@@ -28,6 +29,8 @@ const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   "openai-compatible": "OpenAI-compatible HTTP",
   "anthropic-compatible": "Anthropic-compatible HTTP",
   "azure-foundry": "Azure AI Foundry",
+  "openai-image": "OpenAI Image",
+  "gemini-native-image": "Gemini Image",
 };
 
 export function driverLabel(driverKind: ProviderDriverKind): string {
@@ -210,6 +213,7 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
   const ordered = orderProviderInstances(input.instances, input.providerOrder ?? []);
   const groups: PickerGroup[] = [];
   for (const instance of ordered) {
+    if (isImageProfileDriverKind(instance.driverKind)) continue;
     const observed = input.observedByInstance.get(instance.id);
     if (observed === undefined) {
       maybeAppendUnavailableCurrent(groups, instance, input, observed);

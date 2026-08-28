@@ -17,6 +17,7 @@ export const PROVIDER_GLYPH_COLOR_FALLBACKS: Readonly<Record<string, string>> = 
   "mistral-vibe": "#f6862b",
   "kimi-code": "#5b6cff",
   "azure-foundry": "#2f88d8",
+  "gemini-native-image": "#5b8def",
 };
 
 export function providerGlyphColorForKind(

@@ -29,6 +29,8 @@ const REGISTERED_PROVIDER_DRIVER_KINDS = {
   "openai-compatible": true,
   "anthropic-compatible": true,
   "azure-foundry": true,
+  "openai-image": true,
+  "gemini-native-image": true,
 } as const satisfies Readonly<Record<RegisteredProviderDriverKind, true>>;
 
 const registeredProviderDriverKinds = Object.keys(
@@ -52,11 +54,13 @@ const CHAT_OUTCOMES = {
   "openai-compatible": "complete",
   "anthropic-compatible": "complete",
   "azure-foundry": "complete",
+  "openai-image": "unavailable",
+  "gemini-native-image": "unavailable",
 } as const satisfies Readonly<Record<RegisteredProviderDriverKind, ChatOutcome>>;
 
 describe("Chat provider matrix", () => {
   it("consumes Chat conformance evidence for every registered provider kind", () => {
-    expect(new Set(registeredProviderDriverKinds).size).toBe(14);
+    expect(new Set(registeredProviderDriverKinds).size).toBe(16);
 
     for (const driverKind of registeredProviderDriverKinds) {
       if (CHAT_OUTCOMES[driverKind] === "unavailable") continue;

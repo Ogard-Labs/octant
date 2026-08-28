@@ -244,6 +244,7 @@ describe("SettingsView", () => {
     const user = userEvent.setup();
     const enabledId = "70000000-0000-4000-8000-000000000091" as never;
     const disabledId = "70000000-0000-4000-8000-000000000092" as never;
+    const imageId = "70000000-0000-4000-8000-000000000095" as never;
     const probe = vi.fn(async () => true);
     const instances = [
       {
@@ -260,6 +261,18 @@ describe("SettingsView", () => {
         driverKind: "opencode",
         enabled: false,
         configuration: { kind: "opencode-cli", binaryPath: "/usr/local/bin/opencode" },
+        version: 1,
+      },
+      {
+        id: imageId,
+        displayName: "GPT Image",
+        driverKind: "openai-image",
+        enabled: true,
+        configuration: {
+          kind: "openai-image-http",
+          modelAllowlist: ["gpt-image-2"],
+          defaultModel: "gpt-image-2",
+        },
         version: 1,
       },
     ];
@@ -280,6 +293,7 @@ describe("SettingsView", () => {
     expect(probe).toHaveBeenCalledOnce();
     expect(probe).toHaveBeenCalledWith(enabledId);
     expect(probe).not.toHaveBeenCalledWith(disabledId);
+    expect(probe).not.toHaveBeenCalledWith(imageId);
   });
 
   it("probes providers that become available during the discovery refresh", async () => {

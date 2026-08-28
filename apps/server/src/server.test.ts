@@ -239,6 +239,43 @@ describe("startOctantServer", () => {
     ).toThrow(/not effective/i);
   });
 
+  it.each(["openai-image", "gemini-native-image"] as const)(
+    "refuses to construct a turn driver for an %s image profile",
+    (driverKind) => {
+      const instance = decodeProviderInstance({
+        id: "80000000-0000-4000-8000-000000000441",
+        displayName: driverKind === "openai-image" ? "GPT Image" : "Gemini Image",
+        driverKind,
+        configuration:
+          driverKind === "openai-image"
+            ? {
+                kind: "openai-image-http",
+                modelAllowlist: ["gpt-image-2"],
+                defaultModel: "gpt-image-2",
+              }
+            : {
+                kind: "gemini-native-image-http",
+                modelAllowlist: ["gemini-3.1-flash-image"],
+                defaultModel: "gemini-3.1-flash-image",
+              },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: "2026-08-28T10:00:00.000Z",
+        updatedAt: "2026-08-28T10:00:00.000Z",
+      });
+
+      expect(() =>
+        makeConfiguredProviderDriver(instance, {
+          openCodeProcess: { start: () => Effect.die("must not start OpenCode") },
+          codexProcess: { start: () => Effect.die("must not start Codex") },
+          runtimeRegistry: new ProviderRuntimeRegistry(),
+          permissionPersistence: () => "current-session",
+        }),
+      ).toThrow(/invalid/i);
+    },
+  );
+
   it("rejects existing and future paths that escape through a Project symlink", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-paths-"));
     directories.push(directory);

@@ -857,6 +857,134 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("rotated-secret");
   });
 
+  it("creates an OpenAI image profile with a write-only key and no base URL", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: openAiImageProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await user.selectOptions(screen.getByLabelText("Provider type"), "openai-image");
+    const create = screen.getByRole("form", { name: "Add OpenAI image profile" });
+    expect(within(create).queryByLabelText("API base URL")).not.toBeInTheDocument();
+    expect(within(create).getByText(/Organization Verification/i)).toBeVisible();
+    await user.type(within(create).getByLabelText("Provider name"), "Studio images");
+    await user.type(within(create).getByLabelText("Model allowlist"), "gpt-image-2, gpt-image-1");
+    await user.type(within(create).getByLabelText("Default model"), "gpt-image-2");
+    await user.selectOptions(within(create).getByLabelText("Quality"), "high");
+    await user.type(within(create).getByLabelText("API key"), "image-secret");
+    await user.click(screen.getByRole("button", { name: "Add OpenAI image profile" }));
+
+    expect(props.onCreateOpenAiImage).toHaveBeenCalledOnce();
+    const [name, configuration, credential] = vi.mocked(props.onCreateOpenAiImage).mock.calls[0]!;
+    expect(name).toBe("Studio images");
+    expect(configuration).toMatchObject({
+      kind: "openai-image-http",
+      modelAllowlist: ["gpt-image-2", "gpt-image-1"],
+      defaultModel: "gpt-image-2",
+      quality: "high",
+    });
+    expect("baseUrl" in configuration).toBe(false);
+    expect(credential.value).toBe("image-secret");
+    credential.clear();
+    expect(within(create).getByLabelText("API key")).toHaveValue("");
+    expect(document.body.textContent).not.toContain("image-secret");
+  });
+
+  it("shows stored Keychain status and omits a connection check for an OpenAI image profile", async () => {
+    renderExpanded(<ProviderSettingsView {...fixture({ instance: openAiImageProvider() })} />);
+    const stored = screen.getByRole("article", { name: "GPT Image" });
+    expect(await within(stored).findByText("Stored in Keychain")).toBeVisible();
+    expect(
+      within(stored).queryByRole("button", { name: /check connection/i }),
+    ).not.toBeInTheDocument();
+    expect(within(stored).queryByLabelText(/API base URL/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a missing image-profile credential as not configured", async () => {
+    const props = fixture({ instance: openAiImageProvider() });
+    renderExpanded(
+      <ProviderSettingsView
+        {...props}
+        onProviderCredentialStatus={vi.fn(async () => "missing" as const)}
+      />,
+    );
+    expect(
+      await within(screen.getByRole("article", { name: "GPT Image" })).findByText("Not configured"),
+    ).toBeVisible();
+  });
+
+  it("shows unavailable credential status for an image profile on a remote client", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({ instance: openAiImageProvider(), credentialManagementAvailable: false })}
+      />,
+    );
+    const card = screen.getByRole("article", { name: "GPT Image" });
+    expect(within(card).getByText("Unavailable")).toBeVisible();
+    expect(within(card).getByLabelText("API key for GPT Image")).toBeDisabled();
+  });
+
+  it("saves OpenAI image configuration and clears the stored key on remove", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: openAiImageProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "GPT Image" });
+    await user.clear(within(card).getByLabelText("Model allowlist for GPT Image"));
+    await user.type(within(card).getByLabelText("Model allowlist for GPT Image"), "gpt-image-1");
+    await user.clear(within(card).getByLabelText("Default model for GPT Image"));
+    await user.type(within(card).getByLabelText("Default model for GPT Image"), "gpt-image-1");
+    await user.type(within(card).getByLabelText("API key for GPT Image"), "rotated-image");
+    await user.click(
+      within(card).getByRole("button", { name: "Save OpenAI image settings for GPT Image" }),
+    );
+    expect(props.onChangeOpenAiImageConfiguration).toHaveBeenCalledOnce();
+    const [, configuration, credential] = vi.mocked(props.onChangeOpenAiImageConfiguration).mock
+      .calls[0]!;
+    expect(configuration).toMatchObject({
+      kind: "openai-image-http",
+      modelAllowlist: ["gpt-image-1"],
+      defaultModel: "gpt-image-1",
+    });
+    expect(credential.value).toBe("rotated-image");
+    expect(document.body.textContent).not.toContain("rotated-image");
+
+    await user.click(within(card).getByRole("button", { name: "Remove GPT Image" }));
+    expect(props.onRemove).toHaveBeenCalledWith(id);
+  });
+
+  it("creates a Gemini image profile with a write-only key and no base URL", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: geminiImageProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await user.selectOptions(screen.getByLabelText("Provider type"), "gemini-native-image");
+    const create = screen.getByRole("form", { name: "Add Gemini image profile" });
+    expect(within(create).queryByLabelText("API base URL")).not.toBeInTheDocument();
+    await user.type(within(create).getByLabelText("Provider name"), "Nano Banana");
+    await user.type(
+      within(create).getByLabelText("Model allowlist"),
+      "gemini-3.1-flash-image, gemini-2.5-flash-image",
+    );
+    await user.type(within(create).getByLabelText("Default model"), "gemini-3.1-flash-image");
+    await user.selectOptions(within(create).getByLabelText("Aspect ratio"), "16:9");
+    await user.type(within(create).getByLabelText("API key"), "gemini-secret");
+    await user.click(screen.getByRole("button", { name: "Add Gemini image profile" }));
+
+    expect(props.onCreateGeminiImage).toHaveBeenCalledOnce();
+    const [name, configuration, credential] = vi.mocked(props.onCreateGeminiImage).mock.calls[0]!;
+    expect(name).toBe("Nano Banana");
+    expect(configuration).toMatchObject({
+      kind: "gemini-native-image-http",
+      modelAllowlist: ["gemini-3.1-flash-image", "gemini-2.5-flash-image"],
+      defaultModel: "gemini-3.1-flash-image",
+      aspectRatio: "16:9",
+    });
+    expect("baseUrl" in configuration).toBe(false);
+    expect(credential.value).toBe("gemini-secret");
+    credential.clear();
+    expect(within(create).getByLabelText("API key")).toHaveValue("");
+    expect(document.body.textContent).not.toContain("gemini-secret");
+  });
+
   it("resets stale api-key auth back to bearer when switching from Anthropic to OpenAI-compatible", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: anthropicProvider() });
@@ -1489,6 +1617,8 @@ function ControllerBackedProviderSettings(props: {
       onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
       onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
       onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
+      onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
+      onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
       onClearProviderCredential={controller.clearProviderCredential}
       onBeginProviderAuthentication={controller.beginProviderAuthentication}
       onCompleteProviderAuthentication={controller.completeProviderAuthentication}
@@ -1500,6 +1630,8 @@ function ControllerBackedProviderSettings(props: {
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}
       onCreateAzureFoundry={controller.createAzureFoundry}
+      onCreateOpenAiImage={controller.createOpenAiImage}
+      onCreateGeminiImage={controller.createGeminiImage}
       onPermissionPersistenceChange={controller.updatePermissionPersistence}
       onProbe={controller.probe}
       onProviderOrderChange={controller.updateProviderOrder}
@@ -1610,6 +1742,14 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onCreateOpenAiImage: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onCreateGeminiImage: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
     onRename: vi.fn(async () => true),
     onChangeBinary: vi.fn(async () => true),
     onChangeClaudeConfiguration: vi.fn(async (_id, _configuration, credential) => {
@@ -1644,6 +1784,14 @@ function fixture(
       return true;
     }),
     onChangeAzureFoundryConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeOpenAiImageConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeGeminiImageConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
     }),
@@ -1815,6 +1963,42 @@ function anthropicProvider(): ProviderInstance {
     version: 1 as never,
     createdAt: "2026-07-15T10:00:00.000Z" as never,
     updatedAt: "2026-07-15T10:00:00.000Z" as never,
+  };
+}
+
+function openAiImageProvider(): ProviderInstance {
+  return {
+    id,
+    displayName: "GPT Image",
+    driverKind: "openai-image",
+    configuration: {
+      kind: "openai-image-http",
+      modelAllowlist: ["gpt-image-2" as never],
+      defaultModel: "gpt-image-2" as never,
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-08-28T10:00:00.000Z" as never,
+    updatedAt: "2026-08-28T10:00:00.000Z" as never,
+  };
+}
+
+function geminiImageProvider(): ProviderInstance {
+  return {
+    id,
+    displayName: "Gemini Image",
+    driverKind: "gemini-native-image",
+    configuration: {
+      kind: "gemini-native-image-http",
+      modelAllowlist: ["gemini-3.1-flash-image" as never],
+      defaultModel: "gemini-3.1-flash-image" as never,
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-08-28T10:00:00.000Z" as never,
+    updatedAt: "2026-08-28T10:00:00.000Z" as never,
   };
 }
 

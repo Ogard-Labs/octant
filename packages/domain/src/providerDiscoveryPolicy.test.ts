@@ -178,5 +178,14 @@ describe("driver classification", () => {
   it("reports no unclassified known drivers", () => {
     expect(isUnclassifiedDriverKind("codex")).toBe(false);
     expect(isUnclassifiedDriverKind("openai-compatible")).toBe(false);
+    expect(isUnclassifiedDriverKind("openai-image")).toBe(false);
+    expect(isUnclassifiedDriverKind("gemini-native-image")).toBe(false);
+  });
+
+  it("does not treat image profiles as auto-detected or URL-configured endpoints", () => {
+    expect(canAutoDetectDriverKind("openai-image")).toBe(false);
+    expect(canAutoDetectDriverKind("gemini-native-image")).toBe(false);
+    expect(requiresManualEndpoint("openai-image")).toBe(false);
+    expect(requiresManualEndpoint("gemini-native-image")).toBe(false);
   });
 });

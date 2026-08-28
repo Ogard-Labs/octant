@@ -381,9 +381,13 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 modelId }`, and the model picker is provider-first. Discovery can find
   installed runtimes but never auto-registers or installs them.
 - **Driver families.** Direct HTTP drivers (OpenAI-compatible, Anthropic-
-  compatible, Azure AI Foundry API-key, Ollama), SDK/RPC drivers (Claude Agent
-  SDK, Codex app-server, OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
-  (Kilo Code, Devin, Mistral Vibe, Kimi Code, Grok Build). The ACP drivers share one
+  compatible, Azure AI Foundry API-key, Ollama), image HTTP profiles
+  (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
+  Code turn drivers), SDK/RPC drivers (Claude Agent SDK, Codex app-server,
+  OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
+  (Kilo Code, Devin, Mistral Vibe, Kimi Code, Grok Build). Image profiles are
+  recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
+  The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;
   ACP vendors configure that shared stack rather than shipping a second runtime.

@@ -366,7 +366,10 @@ import { makeCodexProcessLive } from "./providers/codexProcess";
 import type { CodexProcessPort } from "./providers/codexProcess";
 import { makeAcpProcessLive, type AcpProcessPort } from "./providers/acpProcess";
 import type { AcpProviderKind } from "./providers/acpProfiles";
-import { makeProviderDriver } from "./providers/providerDriverFactory";
+import {
+  makeProviderDriver,
+  ProviderDriverConfigurationError,
+} from "./providers/providerDriverFactory";
 import { JournalOllamaHistoryStore, type OllamaHistoryStore } from "./providers/ollamaHistoryStore";
 import { makeOpenCodeProcessLive } from "./providers/openCodeProcess";
 import type { OpenCodeProcessPort } from "./providers/openCodeProcess";
@@ -550,6 +553,7 @@ import {
   defaultShellSettings,
   formatThreadMentionContext,
   isAgentRunActiveStatus,
+  isImageProfileDriverKind,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   resolveAgentRunLiveParentGrant,
@@ -692,6 +696,9 @@ export function makeConfiguredProviderDriver(
 ): ProviderDriver {
   if (!instance.enabled) {
     throw new Error("Provider instance is disabled.");
+  }
+  if (isImageProfileDriverKind(instance.driverKind)) {
+    throw new ProviderDriverConfigurationError();
   }
   const admitted = options.admittedDriverKinds ?? admittedBundledProviderDriverKinds();
   if (!admitted.has(instance.driverKind)) {
