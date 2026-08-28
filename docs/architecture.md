@@ -24,7 +24,7 @@ The design rests on a small set of invariants that every package obeys:
   installs from the catalog. Both have a Settings off switch that means no
   request is made. An in-app changelog, when implemented, rides that update
   path and bundled notes rather than adding a third call
-  ([decisions/0059-in-app-changelog.md](decisions/0059-in-app-changelog.md)).
+  ([decisions/0060-in-app-changelog.md](decisions/0060-in-app-changelog.md)).
 - **The server is the authority.** Every authority check (mode, Project,
   thread, provider, approval, remote principal) runs in `apps/server` before a
   side effect. The renderer and mobile app render what the server says is
@@ -572,7 +572,11 @@ mechanisms are:
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal.
 - **Hosts never trust each other.** Multi-host views merge read models
-  client-side; credentials and mutable authority never cross hosts.
+  client-side; credentials and mutable authority never cross hosts. Completing
+  all-hosts honesty, pairing at scale, and conflict presentation is client
+  registry work under
+  [decisions/0059-multi-host-federation.md](decisions/0059-multi-host-federation.md),
+  not a new trust boundary.
 
 ## Package map
 
