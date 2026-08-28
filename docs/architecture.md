@@ -222,7 +222,7 @@ text, and hardware-key input extends the same Apple workbench control channel
 as boot and screenshot, with XCTest-less host injection behind that channel
 only, computer-use-style actor attribution, and the same remote/headless
 fail-closed attach gate (see
-[decisions/0059-simulator-frame-input-transport.md](decisions/0059-simulator-frame-input-transport.md)).
+[decisions/0060-simulator-frame-input-transport.md](decisions/0060-simulator-frame-input-transport.md)).
 At narrow widths the dock becomes an overlay drawer. Environment belongs to a thread as a compact header
 summary with a transient disclosure whose open state is renderer-only. It may
 summarize the active thread's server-authored child AgentRuns, including their
@@ -575,7 +575,11 @@ mechanisms are:
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal.
 - **Hosts never trust each other.** Multi-host views merge read models
-  client-side; credentials and mutable authority never cross hosts.
+  client-side; credentials and mutable authority never cross hosts. Completing
+  all-hosts honesty, pairing at scale, and conflict presentation is client
+  registry work under
+  [decisions/0059-multi-host-federation.md](decisions/0059-multi-host-federation.md),
+  not a new trust boundary.
 
 ## Package map
 
