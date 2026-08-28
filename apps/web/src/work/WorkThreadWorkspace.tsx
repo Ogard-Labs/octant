@@ -58,6 +58,8 @@ import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useW
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
 import { useWorkFileMentions } from "./useWorkFileMentions";
 import { samePollingData } from "../polling/samePollingData";
+import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
+import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export interface WorkThreadWorkspaceProps {
@@ -607,7 +609,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   key={`${turn.requestId}-${entry.role}-${index}`}
                 >
                   <strong>{entry.role === "user" ? "You" : "Assistant"}</strong>
-                  <p>{entry.text === "" ? "Working…" : entry.text}</p>
+                  {entry.text === "" ? (
+                    <p>Working…</p>
+                  ) : (
+                    <TrackerReferenceText asParagraph text={entry.text} />
+                  )}
                   {entry.status === undefined ? null : <p role="status">{entry.status}</p>}
                 </article>
               )),
@@ -690,6 +696,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     threadMentions.composer?.onRemoveChip(mentionedThreadId)
                   }
                 />
+                <TrackerReferenceComposerHints draft={prompt} />
                 <WorkImageAttachmentChips images={images} />
                 {composerDraft.persistError === undefined ? null : (
                   <p className="work-thread-workspace__hint" role="status">

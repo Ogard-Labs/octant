@@ -34,6 +34,8 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController, CodeTurnStatus } from "./useCodeController";
 import { ChatRichText } from "../chat/ChatRichText";
+import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
+import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
 import { useThreadPlan } from "../plan/ThreadPlanContext";
 import type { ThreadTaskChangedFiles } from "../plan/ThreadTaskViewer";
@@ -936,8 +938,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     stays exactly as they typed it. */}
                     {message.role === "assistant" && message.text.length > 0 ? (
                       <ChatRichText body={message.text} />
+                    ) : message.text.length > 0 ? (
+                      <TrackerReferenceText asParagraph text={message.text} />
                     ) : (
-                      <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
+                      <p>{busy ? "Thinking…" : ""}</p>
                     )}
                     {message.role === "user" && message.executionPolicy !== undefined ? (
                       <p className="code-thread-workspace__turn-access">
@@ -1072,6 +1076,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 threadMentions.composer?.onRemoveChip(mentionedThreadId)
               }
             />
+            <TrackerReferenceComposerHints draft={draft} />
             {queued.statusMessage === undefined ? null : (
               <p className="code-thread-workspace__hint" role="status">
                 {queued.statusMessage}
