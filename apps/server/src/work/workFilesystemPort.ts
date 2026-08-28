@@ -8,6 +8,7 @@ import {
   readFile,
   writeFile,
   mkdir,
+  rmdir,
   unlink,
   rename,
   type FileHandle,
@@ -222,9 +223,9 @@ function confinedEntryName(name: string): string {
 // atomically in-kernel. Resolution hands this port canonical paths, so the
 // flag only fires on a component swapped in after the containment proof — the
 // escape the Linux fd-relative walk refuses by construction. The two walks
-// diverge only on a benign race: a parent renamed mid-write keeps receiving
-// the Linux write through the held object, while macOS refuses and the caller
-// reports the write as refused.
+// diverge only on a raced parent rename: the Linux write keeps landing on the
+// held object, while macOS refuses and the caller reports the write as
+// refused.
 const darwinNoFollowAny = 0x20000000;
 
 // O_NOFOLLOW_ANY subsumes O_NOFOLLOW, and macOS refuses the pair with EINVAL
@@ -257,11 +258,32 @@ function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirec
         `${directoryPath}/${confinedEntryName(name)}`,
       ),
     mkdir: async (name) => {
-      // On macOS a swapped-in symlinked ancestor could route this mkdir
-      // elsewhere, but it can only mint an empty directory: the child open
-      // that follows carries O_NOFOLLOW_ANY and refuses the swap, so no bytes
-      // are ever written through it.
-      await mkdir(childOpenPath(handle, directoryPath, name));
+      const path = childOpenPath(handle, directoryPath, name);
+      if (process.platform === "linux") {
+        await mkdir(path);
+        return;
+      }
+      // mkdir(2) accepts no O_NOFOLLOW_ANY and the runtime exposes no mkdirat,
+      // so a symlink swapped over the tracked path could route this create
+      // outside the proven parent — a mutation confinement must not emit even
+      // when empty. Refuse while the path no longer names the held object,
+      // and revert the create when the guarded re-open cannot prove where it
+      // landed. The remaining window is the check-to-mkdir gap; nothing can
+      // be written through it because every byte-carrying open stays guarded.
+      const named = await lstat(directoryPath, { bigint: true });
+      const held = await handle.stat({ bigint: true });
+      if (!named.isDirectory() || named.dev !== held.dev || named.ino !== held.ino) {
+        throw new Error(`directory entry ${name} cannot be created under a moved parent`);
+      }
+      await mkdir(path);
+      let created: FileHandle;
+      try {
+        created = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | childNoFollow);
+      } catch (error) {
+        await rmdir(path).catch(() => undefined);
+        throw error;
+      }
+      await created.close();
     },
     openWriteFile: async (name, options) =>
       openLiveWriteFile(childOpenPath(handle, directoryPath, name), options, childNoFollow),

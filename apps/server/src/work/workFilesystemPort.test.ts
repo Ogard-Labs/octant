@@ -61,6 +61,34 @@ describe("live Work filesystem directory chain", () => {
     }
   });
 
+  it("never creates a directory outside the root when the proven parent name is swapped", async () => {
+    const root = fixture();
+    const outside = fixture();
+    mkdirSync(join(root, "a"));
+
+    const proven = await liveWorkFilesystem.openDirectory(join(root, "a"));
+    try {
+      await rename(join(root, "a"), join(root, "a-moved"));
+      symlinkSync(outside, join(root, "a"));
+
+      // Linux creates through the held object, so the child lands inside the
+      // moved original; macOS refuses the swapped name outright. Neither may
+      // leave anything under the swap target.
+      try {
+        await proven.mkdir("child");
+        const created = await stat(join(root, "a-moved", "child"), { bigint: true });
+        expect(created.isDirectory()).toBe(true);
+      } catch {
+        await expect(stat(join(root, "a-moved", "child"))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      }
+      await expect(stat(join(outside, "child"))).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await proven.close();
+    }
+  });
+
   it("never opens a decoy behind an ancestor swapped in after the parent was proven", async () => {
     const root = fixture();
     const outside = fixture();
