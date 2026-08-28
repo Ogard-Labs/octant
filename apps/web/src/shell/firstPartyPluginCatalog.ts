@@ -108,6 +108,14 @@ const githubPlugin = firstPartyManifest({
       entryPoint: "builtin:github/sidebar-destination",
     },
     {
+      point: "sidebar.destination",
+      componentId: "github-integration",
+      destinationId: "github-issues",
+      label: "Issues",
+      modes: ["code"],
+      entryPoint: "builtin:github/issues-destination",
+    },
+    {
       point: "settings.section",
       componentId: "github-integration",
       sectionId: "github",

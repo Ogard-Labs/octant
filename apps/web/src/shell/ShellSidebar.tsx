@@ -12,7 +12,11 @@ import type { ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
-import { FIRST_PARTY_PLUGINS_EFFECTIVE, resolveSidebarContributions } from "./contributionRegistry";
+import {
+  FIRST_PARTY_PLUGINS_EFFECTIVE,
+  resolveSidebarContributions,
+  type FirstPartyPluginComponentId,
+} from "./contributionRegistry";
 import { IconButton } from "./IconButton";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
@@ -74,6 +78,10 @@ export interface ShellSidebarProps {
   readonly projectSection: ReactNode;
   readonly resolvedSidebarBackground?: ResolvedSidebarBackground | undefined;
   readonly backgroundFetcher?: BackgroundFetcher | undefined;
+  /** Overrides bundled plugin activation so a disabled GitHub package can hide its rows. */
+  readonly firstPartyPluginsEffective?: ReadonlyMap<FirstPartyPluginComponentId, boolean>;
+  /** Snapshot `issues-read` availability. Absent or false hides the Issues row. */
+  readonly githubIssuesReadAvailable?: boolean;
 }
 
 export function ShellSidebar(props: ShellSidebarProps) {
@@ -86,7 +94,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
   const workActions = workReady ? props.workNavigation.actions : {};
   const sidebarContributions = resolveSidebarContributions(
     activeMode,
-    FIRST_PARTY_PLUGINS_EFFECTIVE,
+    props.firstPartyPluginsEffective ?? FIRST_PARTY_PLUGINS_EFFECTIVE,
   );
   const chatStatusMessage =
     activeMode !== "chat"
@@ -119,6 +127,12 @@ export function ShellSidebar(props: ShellSidebarProps) {
     projects: "available",
     pullRequests:
       codeActions["pull-requests"] === undefined || !sidebarContributions.has("pull-requests")
+        ? "unavailable"
+        : "available",
+    githubIssues:
+      codeActions["github-issues"] === undefined ||
+      !sidebarContributions.has("github-issues") ||
+      props.githubIssuesReadAvailable !== true
         ? "unavailable"
         : "available",
     threadBoard:

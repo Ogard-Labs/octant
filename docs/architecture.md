@@ -238,12 +238,15 @@ cache. It stores only exact PR identities already produced by Code operations,
 so a restart can show an identity as stale and unknown until the next explicit
 refresh.
 
-**Approved GitHub issue browser, not yet implemented.** The first-party GitHub
-plugin contributes a second `sidebar.destination` (`github-issues`) that opens
-a host-scoped, read-only issue browser. The sidebar row is shown only when the
-contribution is present, its action is wired, and the authentication snapshot
-reports `issues-read` available. Catalogue reads stay on the existing
-`githubCatalogue` union over `/api/github/catalogue/reads`.
+**GitHub issue browser.** The first-party GitHub plugin contributes a second
+`sidebar.destination` (`github-issues`) that opens a host-scoped, read-only
+issue browser. The sidebar row is shown only when the contribution is present,
+its action is wired, and the authentication snapshot reports `issues-read`
+available. Catalogue reads stay on the existing `githubCatalogue` union over
+`/api/github/catalogue/reads`: `kind: "issues"` includes optional
+server-composed search, and `kind: "issue"` returns a bounded detail. The
+browser renders title, body, and comments as plain text; links stay inert full
+URLs.
 
 Create-from-issue is implemented. The composer `Create from…` Issues tab
 attaches only `{ owner, name, number }` to the draft. At creation the server

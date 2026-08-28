@@ -15,9 +15,15 @@ describe("plugin sidebar destination registry", () => {
     expect(result.kind).toBe("ready");
   });
 
+  it("returns the built-in GitHub issues destination action", () => {
+    const result = loadPluginSidebarDestinationAction("builtin:github/issues-destination");
+    expect(result.kind).toBe("ready");
+  });
+
   it("reports built-in entry points as registered", () => {
     expect(isPluginSidebarDestinationEntryPoint("builtin:board/destination")).toBe(true);
     expect(isPluginSidebarDestinationEntryPoint("builtin:github/sidebar-destination")).toBe(true);
+    expect(isPluginSidebarDestinationEntryPoint("builtin:github/issues-destination")).toBe(true);
   });
 
   it("returns an unknown result for unknown entry points", () => {

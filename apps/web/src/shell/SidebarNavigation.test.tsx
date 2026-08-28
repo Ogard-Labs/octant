@@ -13,6 +13,7 @@ const truthfulInput = {
   plugins: "unavailable",
   projects: "available",
   pullRequests: "unavailable",
+  githubIssues: "unavailable",
   threadBoard: "unavailable",
 } as const satisfies SidebarNavigationInput;
 
@@ -24,6 +25,7 @@ describe("SidebarNavigation", () => {
       automations: vi.fn(),
       plugins: vi.fn(),
       "pull-requests": vi.fn(),
+      "github-issues": vi.fn(),
       "thread-board": vi.fn(),
     };
     render(
@@ -36,6 +38,7 @@ describe("SidebarNavigation", () => {
           createThread: "available",
           plugins: "available",
           pullRequests: "available",
+          githubIssues: "available",
           threadBoard: "available",
         }}
         projectAction={<button type="button">New Code Project</button>}
@@ -43,13 +46,14 @@ describe("SidebarNavigation", () => {
       />,
     );
 
-    for (const label of ["New thread", "Thread board", "Pull requests"]) {
+    for (const label of ["New thread", "Thread board", "Issues", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     expect(actions["new-code-thread"]).toHaveBeenCalledOnce();
     expect(actions.automations).not.toHaveBeenCalled();
     expect(actions.plugins).not.toHaveBeenCalled();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
+    expect(actions["github-issues"]).toHaveBeenCalledOnce();
     expect(actions["pull-requests"]).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "New thread" })).toHaveClass("sidebar-item");
     // Search is a mode-switcher icon and thread rows nest under Projects, so
@@ -167,6 +171,7 @@ describe("SidebarNavigation", () => {
           plugins: "available",
           projects: "available",
           pullRequests: "unavailable",
+          githubIssues: "unavailable",
           threadBoard: "unavailable",
         }}
         projectSection={<nav aria-label="Projects">Projects</nav>}
