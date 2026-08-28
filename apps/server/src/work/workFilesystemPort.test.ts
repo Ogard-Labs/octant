@@ -74,11 +74,12 @@ describe("live Work filesystem directory chain", () => {
       // Linux creates through the held object, so the child lands inside the
       // moved original; macOS refuses the swapped name outright. Neither may
       // leave anything under the swap target.
-      try {
+      if (process.platform === "linux") {
         await proven.mkdir("child");
         const created = await stat(join(root, "a-moved", "child"), { bigint: true });
         expect(created.isDirectory()).toBe(true);
-      } catch {
+      } else {
+        await expect(proven.mkdir("child")).rejects.toThrow("moved parent");
         await expect(stat(join(root, "a-moved", "child"))).rejects.toMatchObject({
           code: "ENOENT",
         });

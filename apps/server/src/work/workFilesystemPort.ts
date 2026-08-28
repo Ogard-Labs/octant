@@ -8,7 +8,6 @@ import {
   readFile,
   writeFile,
   mkdir,
-  rmdir,
   unlink,
   rename,
   type FileHandle,
@@ -266,23 +265,20 @@ function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirec
       // mkdir(2) accepts no O_NOFOLLOW_ANY and the runtime exposes no mkdirat,
       // so a symlink swapped over the tracked path could route this create
       // outside the proven parent — a mutation confinement must not emit even
-      // when empty. Refuse while the path no longer names the held object,
-      // and revert the create when the guarded re-open cannot prove where it
-      // landed. The remaining window is the check-to-mkdir gap; nothing can
-      // be written through it because every byte-carrying open stays guarded.
+      // when empty. Refuse while the path no longer names the held object.
+      // There is deliberately no rmdir cleanup on failure: a path-based
+      // deletion follows a swapped component the same way and would hand the
+      // race an unconfined delete, which is strictly worse than the one empty
+      // directory a lost check-to-mkdir race can leave. Nothing can ever be
+      // written through that race, because every byte-carrying open stays
+      // guarded.
       const named = await lstat(directoryPath, { bigint: true });
       const held = await handle.stat({ bigint: true });
       if (!named.isDirectory() || named.dev !== held.dev || named.ino !== held.ino) {
         throw new Error(`directory entry ${name} cannot be created under a moved parent`);
       }
       await mkdir(path);
-      let created: FileHandle;
-      try {
-        created = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | childNoFollow);
-      } catch (error) {
-        await rmdir(path).catch(() => undefined);
-        throw error;
-      }
+      const created = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | childNoFollow);
       await created.close();
     },
     openWriteFile: async (name, options) =>
