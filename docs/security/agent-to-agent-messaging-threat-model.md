@@ -10,7 +10,7 @@
 host, beyond bounded `#thread` mention excerpts and beyond Chat-only
 `octant_thread_message` (0049)
 
-**Design:** [`../decisions/0061-agent-to-agent-messaging.md`](../decisions/0061-agent-to-agent-messaging.md)
+**Design:** [`../decisions/0063-agent-to-agent-messaging.md`](../decisions/0063-agent-to-agent-messaging.md)
 
 ## Overview
 
@@ -104,7 +104,7 @@ absolute paths, raw body text, credentials, or provider payloads.
 ## Residual risk
 
 - This document is design-only. Controls are not enforced until contracts,
-  domain policy, and server delivery land under an Accepted 0061.
+  domain policy, and server delivery land under an Accepted 0063.
 - Model-to-model social engineering inside a single already-authorized thread
   remains a residual of ordinary tool use; messaging must not make that worse
   across threads.
@@ -114,7 +114,7 @@ absolute paths, raw body text, credentials, or provider payloads.
 
 ## Related
 
-- [`../decisions/0061-agent-to-agent-messaging.md`](../decisions/0061-agent-to-agent-messaging.md)
+- [`../decisions/0063-agent-to-agent-messaging.md`](../decisions/0063-agent-to-agent-messaging.md)
 - [`security-architecture-threat-model.md`](security-architecture-threat-model.md)
 - [`../decisions/0012-mixed-provider-subagents.md`](../decisions/0012-mixed-provider-subagents.md)
 - [`../decisions/0049-thread-dialogue-lane.md`](../decisions/0049-thread-dialogue-lane.md)

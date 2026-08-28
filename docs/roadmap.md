@@ -136,9 +136,11 @@ starts.
   Bedrock Converse/IAM adapters beyond the API-key paths.
 - **Remote SSH development environments**, **live guest sharing**, **thread
   retention and purge**, **agent-to-agent messaging** (authority model in
-  [decisions/0061-agent-to-agent-messaging.md](decisions/0061-agent-to-agent-messaging.md);
+  [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md);
   implementation waits on acceptance), and **in-app changelog** — each waits
   on the foundation named in its own design note.
+  Changelog design is
+  [decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md).
 - **Usage spend ceilings** — Project and thread caps on provider usage,
   reusing the usage ledger and goal-budget shape; design in
   [0060](decisions/0060-usage-spend-ceilings.md). Enforcement waits until that
