@@ -1,16 +1,28 @@
 ---
-description: Install Octant on Apple Silicon macOS and configure the local development environment.
+description: Install Octant on Apple Silicon macOS or x64 Linux and configure the local development environment.
 ---
 
 # Installation
 
-Octant is an Apple Silicon technical preview for macOS, signed with a Developer ID and notarized by Apple. It requires an Apple Silicon Mac and runs its local server through Electron's Node process. No cloud service, external relay, or Intel build is included in this preview.
+Octant ships an Apple Silicon technical preview for macOS (Developer ID signed
+and notarized) and an unsigned x64 Linux AppImage for Ubuntu dogfood. Both run
+the local server through Electron's Node process. No cloud service or external
+relay is included in this preview.
 
 ## System requirements
+
+### Apple Silicon (macOS)
 
 - Apple Silicon Mac (M1 or later)
 - macOS Sequoia or later
 - Bun 1.3.14 (required for development and local iteration)
+- Node 26 only when running the Node SQLite portability smoke
+
+### Linux x64 (Ubuntu dogfood)
+
+- x64 Linux host (Ubuntu is the dogfood target)
+- Bun 1.3.14 (required for development and local iteration)
+- Bubblewrap and a live Secret Service session for Work/Code
 - Node 26 only when running the Node SQLite portability smoke
 
 ## Install from source
@@ -71,13 +83,25 @@ If your host cannot mount nested AppImages, run with `APPIMAGE_EXTRACT_AND_RUN=1
 
 ## Data directory
 
-On macOS, Octant stores local data at:
+### macOS
+
+Octant stores local data at:
 
 ```text
 ~/Library/Application Support/Octant/
 ```
 
-The authoritative SQLite store is `octant.sqlite3`. Native window state lives in `octant-window-state.json`. Set `OCTANT_DATA_DIR` to an absolute path to override the default location. Linux uses the standard XDG data, config, state, and runtime roots when no override is set.
+The authoritative SQLite store is `octant.sqlite3`. Native window state lives in `octant-window-state.json`. Set `OCTANT_DATA_DIR` to an absolute path to override the default location.
+
+### Linux
+
+Without `OCTANT_DATA_DIR`, Linux uses the XDG layout:
+
+```text
+~/.local/share/octant/
+```
+
+Config, state, and runtime roots follow the matching XDG variables when set. Set `OCTANT_DATA_DIR` to an absolute path to override the data root.
 
 To run the same local host without Electron during development:
 
@@ -89,7 +113,7 @@ The foreground command drains on SIGINT/SIGTERM and reports an existing owner in
 
 ### Headless Linux for ADE testing
 
-Prefer the Linux AppImage dogfood path above when you want the Electron Machine on Ubuntu. A Linux host can also run the same server and browser client without Electron to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the macOS system requirements above), then:
+Prefer the Linux AppImage dogfood path above when you want the Electron Machine on Ubuntu. A Linux host can also run the same server and browser client without Electron to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the system requirements above), then:
 
 ```sh
 bash scripts/ade/install-linux-host-deps.sh

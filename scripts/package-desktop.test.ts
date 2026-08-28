@@ -23,6 +23,7 @@ import {
   REQUIRED_DARWIN_HELPER_FILES,
   REQUIRED_CODE_WEB_ASSET_PATTERNS,
   APPIMAGE_TOOL_URL,
+  APPIMAGE_TOOL_SHA256,
   createActivateAppleScript,
   createLinuxAppRunScript,
   createLinuxDesktopEntry,
@@ -246,7 +247,12 @@ describe("desktop packaging boundary", () => {
     expect(createLinuxDesktopEntry("0.1.0")).toContain("Name=Octant");
     expect(createLinuxDesktopEntry("0.1.0")).toContain("Icon=octant");
     expect(createLinuxAppRunScript("Octant")).toContain('exec "${HERE}/Octant" "$@"');
-    expect(APPIMAGE_TOOL_URL).toContain("appimagetool-x86_64.AppImage");
+    expect(APPIMAGE_TOOL_URL).toBe(
+      "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage",
+    );
+    expect(APPIMAGE_TOOL_SHA256).toBe(
+      "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0",
+    );
     expect(
       packagedLinuxBundlePath(
         "apps/server/dist/main.mjs",

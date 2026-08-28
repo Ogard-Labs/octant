@@ -1,6 +1,7 @@
 import { packager, type Options as PackagerOptions } from "@electron/packager";
 import { rebuild, type RebuildOptions } from "@electron/rebuild";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import {
   access,
@@ -637,9 +638,13 @@ export async function validatePackagedRuntimeImports(
  * The probe must run under Node, not Bun. ADE Linux hosts often expose Node
  * only as `/exec-daemon/node`, so a hard-coded `/usr/bin/env node` with a
  * macOS-centric PATH fails closed before staging finishes.
+ *
+ * Default `which` uses Bun when the packaging script runs under Bun, and
+ * otherwise falls through to the fixed candidates so vitest-under-Node (macOS
+ * CI) does not throw `Bun is not defined` while evaluating defaults.
  */
 export function resolveNodeExecutable(
-  which: (command: string) => string | null = Bun.which,
+  which: (command: string) => string | null = resolveNodeWhich,
   environment: Record<string, string | undefined> = process.env,
   exists: (path: string) => boolean = existsSync,
 ): string {
@@ -651,6 +656,11 @@ export function resolveNodeExecutable(
     if (exists(candidate)) return candidate;
   }
   throw new Error("Packaged runtime import probe requires Node on PATH (or OCTANT_NODE_BINARY).");
+}
+
+function resolveNodeWhich(command: string): string | null {
+  const bunGlobal = (globalThis as { Bun?: { which?: (name: string) => string | null } }).Bun;
+  return bunGlobal?.which?.(command) ?? null;
 }
 
 async function packageDesktop(repositoryRoot: string): Promise<{
@@ -860,11 +870,13 @@ export async function stageLinuxAppDir(input: {
 }
 
 /**
- * Pin continuous appimagetool so dogfood hosts do not need a distro package.
- * Extract-and-run covers hosts without FUSE mounted for nested AppImages.
+ * Pin appimagetool 1.9.1 so dogfood hosts do not need a distro package and
+ * do not execute a mutable continuous build. Verify SHA-256 before running.
  */
 export const APPIMAGE_TOOL_URL =
-  "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage";
+  "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage";
+export const APPIMAGE_TOOL_SHA256 =
+  "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0";
 
 async function buildLinuxAppImage(input: {
   readonly repositoryRoot: string;
@@ -885,6 +897,7 @@ async function buildLinuxAppImage(input: {
     appDir,
     version: input.version,
   });
+  await validateLinuxAppDirIdentity(appDir);
   const appImageTool = await ensureAppImageTool(toolsRoot);
   await runCommand([appImageTool, "--no-appstream", appDir, input.appImagePath], {
     env: {
@@ -903,6 +916,7 @@ async function ensureAppImageTool(toolsRoot: string): Promise<string> {
   const destination = join(toolsRoot, "appimagetool-x86_64.AppImage");
   const existing = await stat(destination).catch(() => undefined);
   if (existing?.isFile()) {
+    await assertAppImageToolDigest(destination);
     await chmod(destination, 0o755);
     return destination;
   }
@@ -914,22 +928,40 @@ async function ensureAppImageTool(toolsRoot: string): Promise<string> {
     );
   }
   await writeFile(destination, Buffer.from(await response.arrayBuffer()));
+  await assertAppImageToolDigest(destination);
   await chmod(destination, 0o755);
   return destination;
 }
 
+async function assertAppImageToolDigest(toolPath: string): Promise<void> {
+  const digest = createHash("sha256")
+    .update(await readFile(toolPath))
+    .digest("hex");
+  if (digest !== APPIMAGE_TOOL_SHA256) {
+    throw new Error(
+      `appimagetool SHA-256 mismatch (got ${digest}, expected ${APPIMAGE_TOOL_SHA256}). Refusing to execute.`,
+    );
+  }
+}
+
 async function validateLinuxPackageIdentity(packageDirectory: string): Promise<void> {
   await access(join(packageDirectory, DESKTOP_PACKAGE_IDENTITY.productName), 1);
-  const desktopEntryCandidates = [
-    join(packageDirectory, `${DESKTOP_PACKAGE_IDENTITY.productName}.desktop`),
-  ];
-  for (const candidate of desktopEntryCandidates) {
-    const existing = await stat(candidate).catch(() => undefined);
-    if (!existing?.isFile()) continue;
-    const desktop = await readFile(candidate, "utf8");
-    if (!desktop.includes(DESKTOP_PACKAGE_IDENTITY.productName)) {
-      throw new Error("Packaged Linux desktop entry is not Octant.");
-    }
+}
+
+/**
+ * The desktop entry is written into the AppDir during staging, not into the
+ * electron-packager directory, so identity for that file is checked here.
+ */
+async function validateLinuxAppDirIdentity(appDir: string): Promise<void> {
+  await access(join(appDir, DESKTOP_PACKAGE_IDENTITY.productName), 1);
+  const desktopPath = join(appDir, "octant.desktop");
+  const existing = await stat(desktopPath).catch(() => undefined);
+  if (existing?.isFile() !== true) {
+    throw new Error("Packaged Linux AppDir is missing octant.desktop.");
+  }
+  const desktop = await readFile(desktopPath, "utf8");
+  if (!desktop.includes(`Name=${DESKTOP_PACKAGE_IDENTITY.productName}`)) {
+    throw new Error("Packaged Linux desktop entry is not Octant.");
   }
 }
 
