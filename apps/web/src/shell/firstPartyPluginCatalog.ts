@@ -15,6 +15,7 @@ import {
 export type FirstPartyPluginComponentId =
   | "board"
   | "github-integration"
+  | "linear-integration"
   | "appearance-pack"
   | "preview-viewers";
 
@@ -120,6 +121,48 @@ const githubPlugin = firstPartyManifest({
   ],
 });
 
+const linearPlugin = firstPartyManifest({
+  manifestVersion: 1,
+  extensionId: "10000000-0000-4000-8000-0000000000e1",
+  packageId: "20000000-0000-4000-8000-0000000000e1",
+  slug: "linear",
+  displayName: "Linear",
+  version: "1.0.0",
+  digest: digest("e"),
+  source: { kind: "bundled", sourceRef: "app:linear" },
+  provenance: { publisher: "Octant", reviewed: true },
+  license: { kind: "spdx", identifier: "MIT" },
+  compatibility: {
+    platforms: ["macos"],
+    modes: ["code"],
+    providerFamilies: [],
+  },
+  declaredCapabilities: ["network", "credentials"],
+  primaryComponentId: "linear-integration",
+  components: [
+    {
+      id: "linear-integration",
+      kind: "integration",
+      displayName: "Linear",
+      declaredCapabilities: ["network", "credentials"],
+      entryPoint: "builtin:linear",
+    },
+  ],
+  contributions: [
+    {
+      point: "settings.section",
+      componentId: "linear-integration",
+      sectionId: "linear",
+      label: "Linear",
+      scope: "host",
+      keywords:
+        "linear workspace authentication connection setup oauth connect disconnect reconnect issues",
+      entryPoint: "builtin:linear/settings",
+      description: "Connect Linear with OAuth. Tokens stay on this host.",
+    },
+  ],
+});
+
 /**
  * Bundled appearance pack. Host built-ins (system, light, dark) stay in the
  * host; this package contributes the branded Octant preset so disabling the
@@ -206,19 +249,22 @@ const previewPlugin = firstPartyManifest({
 export const FIRST_PARTY_PLUGIN_CATALOG: ReadonlyArray<ExtensionPackageManifest> = [
   boardPlugin,
   githubPlugin,
+  linearPlugin,
   appearancePlugin,
   previewPlugin,
 ];
 
 /**
- * Stand-in for the server's first-party plugin activation state. These
- * packages are bundled and enabled by default with no toggle UI yet; step 4
+ * Stand-in for the server's first-party plugin activation state. Most
+ * packages are bundled and enabled by default with no toggle UI yet; Linear
+ * is bundled-off until that catalog is sourced from the server. Step 4
  * replaces this with a value sourced from the server catalog.
  */
 export const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponentId, boolean> =
   new Map([
     ["board", true],
     ["github-integration", true],
+    ["linear-integration", false],
     ["appearance-pack", true],
     ["preview-viewers", true],
   ]);
@@ -231,6 +277,7 @@ export function isFirstPartyPluginComponentId(value: string): value is FirstPart
   return (
     value === "board" ||
     value === "github-integration" ||
+    value === "linear-integration" ||
     value === "appearance-pack" ||
     value === "preview-viewers"
   );

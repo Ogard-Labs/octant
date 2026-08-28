@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createIntegrationHostPort } from "./integrationHostPort";
-import { loadIntegrationModule } from "./integrationLoader";
+import { constructIntegrationRuntime, loadIntegrationModule } from "./integrationLoader";
 
 const fakeModulePath = new URL("./__fixtures__/fakeIntegration.ts", import.meta.url).href;
 const missingModulePath = new URL("./__fixtures__/missingIntegration.ts", import.meta.url).href;
@@ -41,6 +41,26 @@ describe("integration loader", () => {
     expect(result.kind).toBe("failed");
     if (result.kind !== "failed") return;
     expect(result.code).toBe("factory-not-callable");
+  });
+
+  it("constructs a runtime from a statically imported factory", async () => {
+    const hostPort = createIntegrationHostPort();
+    const result = constructIntegrationRuntime(
+      () => ({
+        observe: async () => ({
+          kind: "authentication" as const,
+          snapshot: { state: "unauthorized" as const, capabilities: [] },
+        }),
+        execute: async () => ({
+          kind: "authentication" as const,
+          snapshot: { state: "unauthorized" as const, capabilities: [] },
+        }),
+        close: async () => {},
+      }),
+      hostPort,
+      "inline",
+    );
+    expect(result.kind).toBe("loaded");
   });
 
   it("returns a failure when the factory throws", async () => {

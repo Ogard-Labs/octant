@@ -276,10 +276,13 @@ the component is not effective. Settings sections still come from the
 host-compiled `octantSettingsRegistry`, and sidebar destinations other than
 `thread-board` and `pull-requests` are discarded, so plugin-provided Settings
 and navigation are not yet a published seam. Completing that seam, and
-publishing the Integration port, are step 4 and land before Linear. Extracting
-the thread board and GitHub remains step 5. Linear is not on that extraction
+publishing the Integration port, are step 4 and land before Linear. Step 4
+landed: `settings.section` and `sidebar.destination` render plugin modules,
+and the typed Integration host port and module loader exist. Extracting the
+thread board and GitHub remains step 5. Linear is not on that extraction
 list: it is added as a bundled-off plugin through the Integration kind after
-those host seams exist. Packaging remaining zen/appearance assets and every
+those host seams exist, and that Settings OAuth path is now the first
+Integration plugin on those ports. Packaging remaining zen/appearance assets and every
 viewer as separable `@octant/*` plugins remains step 6. Marketplace/host stays
 in the host. Connector/OAuth marketplace stays Later; a first-party Linear
 plugin is not that marketplace. Step 3 landed: each in-tree vendor driver is a

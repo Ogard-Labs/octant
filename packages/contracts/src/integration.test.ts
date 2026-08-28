@@ -32,7 +32,22 @@ describe("integration contract", () => {
       },
     });
     expect(snapshot.interaction?.kind).toBe("device-flow");
-    expect(snapshot.interaction?.userCode).toBe("ABCD-1234");
+    if (snapshot.interaction?.kind !== "device-flow") return;
+    expect(snapshot.interaction.userCode).toBe("ABCD-1234");
+  });
+
+  it("decodes an authorization-redirect interaction without a user code", () => {
+    const snapshot = decodeIntegrationAuthenticationSnapshot({
+      state: "unauthorized",
+      capabilities: [],
+      interaction: {
+        kind: "authorization-redirect",
+        authorizationUri: "https://example.com/oauth/authorize?client_id=public",
+      },
+    });
+    expect(snapshot.interaction?.kind).toBe("authorization-redirect");
+    if (snapshot.interaction?.kind !== "authorization-redirect") return;
+    expect(snapshot.interaction.authorizationUri).toContain("client_id=public");
   });
 
   it("decodes authentication commands", () => {

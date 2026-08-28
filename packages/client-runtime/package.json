@@ -24,6 +24,7 @@
     "./discovery-client": "./src/discoveryClient.ts",
     "./extension-client": "./src/extensionClient.ts",
     "./github-client": "./src/githubClient.ts",
+    "./integration-client": "./src/integrationClient.ts",
     "./github-clone-client": "./src/githubCloneClient.ts",
     "./host-client": "./src/hostClient.ts",
     "./host-control-client": "./src/hostControlClient.ts",

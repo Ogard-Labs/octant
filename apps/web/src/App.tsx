@@ -29,6 +29,7 @@ import { createProviderUsageLimitsClient } from "@octant/client-runtime/provider
 import { createDiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createGithubClient } from "@octant/client-runtime/github-client";
+import { createIntegrationClient } from "@octant/client-runtime/integration-client";
 import { createGithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import { createAgentProfileClient, type AgentProfileClient } from "@octant/client-runtime";
 import { createAgentRunClient, type AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -1116,6 +1117,16 @@ function LaunchedShell(
         baseUrl: props.launch.serverUrl,
         fetch: globalThis.fetch,
         windowCapability: props.projectWindowCapability,
+      }),
+    [props.launch.serverUrl, props.projectWindowCapability],
+  );
+  const linearClient = useMemo(
+    () =>
+      createIntegrationClient({
+        baseUrl: props.launch.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.projectWindowCapability,
+        slug: "linear",
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
@@ -3737,6 +3748,7 @@ function LaunchedShell(
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
       githubClient={githubClient}
+      integrationClient={linearClient}
       usageClient={usageClient}
       {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
       visibleSettings={controller.visibleSettings}

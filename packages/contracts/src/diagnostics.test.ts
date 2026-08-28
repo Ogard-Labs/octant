@@ -107,6 +107,12 @@ describe("DiagnosticSafeText", () => {
     ).toThrow();
   });
 
+  it("rejects a Linear personal API key", () => {
+    expect(() =>
+      decodeDiagnosticSafeText("Rejected lin_api_abcdefghijklmnop1234 for the workspace"),
+    ).toThrow();
+  });
+
   it.each([
     "Provider rejected ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.",
     "Remote credential AKIAABCDEFGHIJKLMNOP was rejected.",

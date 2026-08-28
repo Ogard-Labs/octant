@@ -4,6 +4,7 @@ import type { AutomationNotificationClient } from "@octant/client-runtime/automa
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { GithubClient } from "@octant/client-runtime/github-client";
+import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
@@ -60,6 +61,7 @@ export interface ShellSettingsSurfaceProps {
   readonly hostFederationLifecycle?: HostFederationLifecycle;
   readonly hostBridge?: OctantHostBridge;
   readonly githubClient: GithubClient;
+  readonly integrationClient?: IntegrationClient;
   readonly usageClient: UsageClient;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly visibleSettings: ReadonlyArray<ImplementedSettingId>;
@@ -120,6 +122,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               ? {}
               : { hostFederationLifecycle: props.hostFederationLifecycle })}
             githubClient={props.githubClient}
+            {...(props.integrationClient === undefined
+              ? {}
+              : { integrationClient: props.integrationClient })}
             usageClient={props.usageClient}
             {...(props.providerUsageLimitsClient === undefined
               ? {}

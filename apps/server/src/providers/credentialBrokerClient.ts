@@ -14,11 +14,20 @@ export interface CredentialBrokerClientOptions {
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 }
 
+export interface ProviderCredentialStore extends ProviderCredentialResolver {
+  readonly set: (providerInstanceId: string, credential: string) => Promise<void>;
+  readonly delete: (providerInstanceId: string) => Promise<void>;
+}
+
 export function makeCredentialBrokerClient(
   options: CredentialBrokerClientOptions,
-): ProviderCredentialResolver {
+): ProviderCredentialStore {
   const fetch = options.fetch ?? globalThis.fetch;
-  const request = async (operation: "has" | "resolve", providerInstanceId: string) => {
+  const request = async (
+    operation: "has" | "resolve" | "set" | "delete",
+    providerInstanceId: string,
+    credential?: string,
+  ) => {
     if (!UUID_PATTERN.test(providerInstanceId)) throw brokerFailure();
     let response: Response;
     try {
@@ -29,7 +38,9 @@ export function makeCredentialBrokerClient(
           "content-type": "application/json",
           "x-octant-credential-broker-token": options.token,
         },
-        body: JSON.stringify({ providerInstanceId }),
+        body: JSON.stringify(
+          credential === undefined ? { providerInstanceId } : { providerInstanceId, credential },
+        ),
       });
     } catch {
       throw brokerFailure();
@@ -56,6 +67,18 @@ export function makeCredentialBrokerClient(
         throw brokerFailure();
       }
       return value.credential;
+    },
+    set: async (providerInstanceId: string, credential: string): Promise<void> => {
+      const value = await request("set", providerInstanceId, credential);
+      if (!hasExactKeys(value, ["stored"]) || value.stored !== true) {
+        throw brokerFailure();
+      }
+    },
+    delete: async (providerInstanceId: string): Promise<void> => {
+      const value = await request("delete", providerInstanceId);
+      if (!hasExactKeys(value, ["deleted"]) || value.deleted !== true) {
+        throw brokerFailure();
+      }
     },
   });
 }

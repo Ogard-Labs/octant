@@ -16,6 +16,7 @@ describe("octantSettingsRegistry", () => {
       "usage",
       "host",
       "github",
+      "linear",
       "advanced",
     ]);
   });

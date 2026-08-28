@@ -123,6 +123,17 @@ export function classifyProductAction(request: Request): string | undefined {
   if (path === "/api/providers/bootstrap") {
     return method === "GET" || method === "HEAD" ? "provider.list-models" : undefined;
   }
+  if (path.startsWith("/api/integrations/")) {
+    if (
+      method === "GET" ||
+      method === "HEAD" ||
+      (method === "POST" &&
+        (path.endsWith("/authentication/commands") || path.endsWith("/secrets")))
+    ) {
+      return "settings.read-non-secret";
+    }
+    return undefined;
+  }
   if (path.startsWith("/api/github/")) {
     // A paired user can explicitly confirm host-local GitHub authentication
     // lifecycle commands. The final route still rejects providers/automation
