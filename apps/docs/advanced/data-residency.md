@@ -72,7 +72,9 @@ journal.
 
 A later design would let a team run one headless host on infrastructure
 they control. That host's region would still be the region of _their_
-machine or cluster, not an Octant region. It has not shipped.
+machine or cluster, not an Octant region. It has not shipped. Who is
+controller of that shared journal is a separate question from residency;
+see the draft at `docs/legal/shared-host-controller.md`.
 
 ## Next steps
 
