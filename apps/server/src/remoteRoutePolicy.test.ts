@@ -222,6 +222,7 @@ describe("remote route policy", () => {
       "/api/host-control/restore",
       "/api/host-control/thread-retention",
       "/api/host-control/thread-purge",
+      "/api/host-control/data-map",
       "/api/missing",
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);

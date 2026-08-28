@@ -54,6 +54,54 @@ describe("createHostControlClient", () => {
     expect((init.headers as Record<string, string>)["x-octant-window-capability"]).toBe(capability);
   });
 
+  it("fetches the data map with the window capability header and decodes the report", async () => {
+    const dataMapBody = {
+      host: {
+        hostId: "host-1",
+        displayName: "This computer",
+        kind: "desktop",
+        serviceMode: "desktop",
+        journal: {
+          kind: "known",
+          path: "/Users/ada/Library/Application Support/Octant/octant.sqlite3",
+        },
+        projections: {
+          kind: "known",
+          path: "/Users/ada/Library/Application Support/Octant/octant.sqlite3",
+        },
+        artifacts: [],
+        caches: [],
+        credentials: { kind: "unknown" },
+        outbound: [
+          {
+            kind: "known",
+            category: "provider-calls",
+            leavesMachine: true,
+            purpose: "Requests you send to a configured provider leave this machine.",
+          },
+        ],
+      },
+      projects: { kind: "known", projects: [] },
+      related: [
+        { kind: "thread-retention", settings: { section: "host", setting: "thread-retention" } },
+      ],
+    };
+    const fetchImpl = fetchReturning(200, dataMapBody);
+    const client = createHostControlClient({
+      baseUrl: "http://127.0.0.1:4100",
+      fetch: fetchImpl,
+      windowCapability: capability,
+    });
+
+    const report = await client.readDataMap();
+
+    expect(report.host.kind).toBe("desktop");
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:4100/api/host-control/data-map");
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>)["x-octant-window-capability"]).toBe(capability);
+  });
+
   it("posts a lifecycle action and decodes an accepted outcome", async () => {
     const fetchImpl = fetchReturning(200, {
       kind: "accepted",

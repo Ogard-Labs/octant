@@ -15,6 +15,7 @@ import {
 
 export type HostControlOperation =
   | "status"
+  | "data-map"
   | "stop"
   | "restart"
   | "enable"
@@ -32,6 +33,7 @@ export type HostControlOperation =
  */
 export const HOST_CONTROL_ACTION_NAMES: Readonly<Record<HostControlOperation, string>> = {
   status: "host.service.status",
+  "data-map": "host.store.data-map",
   stop: "host.service.stop",
   restart: "host.service.restart",
   enable: "host.service.enable",
