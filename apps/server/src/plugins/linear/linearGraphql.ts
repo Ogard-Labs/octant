@@ -18,9 +18,7 @@ export type LinearGraphqlResult =
   | { readonly kind: "forbidden" }
   | { readonly kind: "unavailable" };
 
-export async function requestLinearCredential(
-  hostPort: IntegrationHostPort,
-): Promise<
+export async function requestLinearCredential(hostPort: IntegrationHostPort): Promise<
   | {
       readonly kind: "granted";
       readonly reference: string;
