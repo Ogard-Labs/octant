@@ -67,6 +67,7 @@ const settings = {
   environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
   firstRunOnboarding: "pending",
   automaticUpdateChecks: true,
+  marketplaceFetchesEnabled: true,
   navigatorAssistant: {},
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
