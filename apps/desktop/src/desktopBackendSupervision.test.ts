@@ -8,22 +8,41 @@ import type { ManagedChildProcess } from "./serverProcess";
 
 interface FakeChild extends ManagedChildProcess {
   readonly exit: () => void;
+  readonly once: (event: "exit", listener: () => void) => unknown;
+  readonly kill: (signal: NodeJS.Signals) => boolean | void;
 }
 
-function createChild(): FakeChild {
+function createChild(state?: {
+  readonly exitCode?: number | null;
+  readonly signalCode?: NodeJS.Signals | null;
+}): FakeChild {
   let listener: (() => void) | undefined;
   return {
-    exitCode: null,
-    signalCode: null,
+    exitCode: state?.exitCode ?? null,
+    signalCode: state?.signalCode ?? null,
     kill: vi.fn(),
-    once: (_event, next) => {
+    once: vi.fn((_event, next) => {
       listener = next;
-    },
-    off: (_event, next) => {
+    }),
+    off: vi.fn((_event, next) => {
       if (listener === next) listener = undefined;
-    },
+    }),
     exit: () => listener?.(),
   };
+}
+
+function createDeferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+  readonly reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
 }
 
 function createSchedule() {
@@ -71,6 +90,7 @@ describe("createDesktopBackendSupervisor", () => {
     });
 
     supervisor.observe(first);
+    expect(first.once).toHaveBeenCalledOnce();
     first.exit();
     expect(supervisor.snapshot()).toMatchObject({
       failures: 1,
@@ -176,14 +196,12 @@ describe("createDesktopBackendSupervisor", () => {
     expect(supervisor.snapshot().failures).toBe(0);
   });
 
-  it("keeps crash retries after a restart port that releases then fails transiently", async () => {
+  it("keeps crash retries after a restart port that fails transiently", async () => {
     const schedule = createSchedule();
     const first = createChild();
     const second = createChild();
     let attempts = 0;
-    let releaseForRestart = (): void => undefined;
     const restart = vi.fn(async () => {
-      releaseForRestart();
       attempts += 1;
       if (attempts === 1) {
         throw Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" });
@@ -196,7 +214,6 @@ describe("createDesktopBackendSupervisor", () => {
       schedule: schedule.schedule,
       now: () => 1_000,
     });
-    releaseForRestart = () => supervisor.release();
 
     supervisor.observe(first);
     first.exit();
@@ -209,5 +226,94 @@ describe("createDesktopBackendSupervisor", () => {
     await Promise.resolve();
     expect(restart).toHaveBeenCalledTimes(2);
     expect(supervisor.snapshot().status).toBe("supervising");
+  });
+
+  it("does not observe a resolved restart after release", async () => {
+    const schedule = createSchedule();
+    const first = createChild();
+    const second = createChild();
+    const pending = createDeferred<FakeChild | undefined>();
+    const restart = vi.fn(() => pending.promise);
+    const supervisor = createDesktopBackendSupervisor({
+      restart,
+      reportFatal: vi.fn(),
+      schedule: schedule.schedule,
+      now: () => 1_000,
+    });
+
+    supervisor.observe(first);
+    first.exit();
+    schedule.runs.at(-1)?.run();
+    expect(supervisor.snapshot().status).toBe("restarting");
+
+    supervisor.release();
+    pending.resolve(second);
+    await Promise.resolve();
+
+    expect(second.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(second.once).not.toHaveBeenCalled();
+    expect(restart).toHaveBeenCalledOnce();
+    expect(supervisor.snapshot().status).toBe("idle");
+  });
+
+  it("does not retry a rejected restart after release", async () => {
+    const schedule = createSchedule();
+    const first = createChild();
+    const pending = createDeferred<FakeChild | undefined>();
+    const restart = vi.fn(() => pending.promise);
+    const supervisor = createDesktopBackendSupervisor({
+      restart,
+      reportFatal: vi.fn(),
+      schedule: schedule.schedule,
+      now: () => 1_000,
+    });
+
+    supervisor.observe(first);
+    first.exit();
+    schedule.runs.at(-1)?.run();
+    expect(supervisor.snapshot().status).toBe("restarting");
+
+    supervisor.release();
+    pending.reject(Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" }));
+    await Promise.resolve();
+
+    expect(restart).toHaveBeenCalledOnce();
+    expect(supervisor.snapshot().status).toBe("idle");
+  });
+
+  it("restarts a child that already exited before observation", () => {
+    const schedule = createSchedule();
+    const child = createChild({ exitCode: 1 });
+    const supervisor = createDesktopBackendSupervisor({
+      restart: vi.fn(async () => createChild()),
+      reportFatal: vi.fn(),
+      schedule: schedule.schedule,
+      now: () => 1_000,
+    });
+
+    supervisor.observe(child);
+    expect(child.once).not.toHaveBeenCalled();
+    expect(supervisor.snapshot()).toMatchObject({
+      failures: 1,
+      status: "waiting-to-restart",
+    });
+  });
+
+  it("restarts a child that already received a signal before observation", () => {
+    const schedule = createSchedule();
+    const child = createChild({ signalCode: "SIGTERM" });
+    const supervisor = createDesktopBackendSupervisor({
+      restart: vi.fn(async () => createChild()),
+      reportFatal: vi.fn(),
+      schedule: schedule.schedule,
+      now: () => 1_000,
+    });
+
+    supervisor.observe(child);
+    expect(child.once).not.toHaveBeenCalled();
+    expect(supervisor.snapshot()).toMatchObject({
+      failures: 1,
+      status: "waiting-to-restart",
+    });
   });
 });

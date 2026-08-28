@@ -52,7 +52,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextHarnessService } from "../context/contextHarnessService";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
-import { ConcurrencyConflict } from "../persistence/journalErrors";
+import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { readDiagnosticsFailureIncident } from "../persistence/diagnosticsExportProjection";
@@ -5845,6 +5845,98 @@ describe("ChatService", () => {
   });
 });
 
+function seedLeftoverStreamingAttempt(
+  persistence: PersistenceService,
+  thread: ChatThread,
+  keys: {
+    readonly turnId: string;
+    readonly attemptId: string;
+    readonly sessionId: string;
+    readonly manifestId: string;
+    readonly contentId: string;
+    readonly title: string;
+  },
+): void {
+  const turnId = decodeChatTurnId(keys.turnId);
+  const attempt = decodeChatAttempt({
+    id: decodeChatAttemptId(keys.attemptId),
+    turnId,
+    threadId: thread.id,
+    providerInstanceId: thread.providerInstanceId,
+    providerSessionId: decodeProviderSessionId(keys.sessionId),
+    modelId: thread.modelId,
+    contextManifestId: decodeContextManifestId(keys.manifestId),
+    outcome: "streaming",
+    responseRefs: [],
+    citationIds: [],
+    createdAt: now,
+    updatedAt: now,
+  });
+  const turn = {
+    id: turnId,
+    threadId: thread.id,
+    sequence: 1,
+    userMessageRef: {
+      contentId: decodeChatContentId(keys.contentId),
+      digest: decodeContentSha256("a".repeat(64)),
+      byteLength: 0,
+    },
+    attachmentIds: [],
+    attempts: [attempt],
+    createdAt: now,
+  };
+  persistence.connection
+    .prepare(`
+      INSERT INTO chat_content_store (
+        content_id, thread_id, content_role, body_text, digest, byte_length
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      String(turn.userMessageRef.contentId),
+      String(thread.id),
+      "user",
+      keys.title,
+      "a".repeat(64),
+      0,
+    );
+  persistence.journal.append({
+    aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+    expectedVersion: thread.version,
+    events: [
+      {
+        eventId: crypto.randomUUID(),
+        eventName: "chat.turn-created@1",
+        eventVersion: 1,
+        correlationId: crypto.randomUUID(),
+        actor: { kind: "system", actorId: ids.actor },
+        occurredAt: now,
+        payload: { kind: "turn-created", turn },
+      },
+    ],
+  });
+}
+
+function isAttemptUpdateFor(input: unknown, threadId: ChatThread["id"]): boolean {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    "aggregate" in input &&
+    typeof input.aggregate === "object" &&
+    input.aggregate !== null &&
+    "aggregateId" in input.aggregate &&
+    String(input.aggregate.aggregateId) === String(threadId) &&
+    "events" in input &&
+    Array.isArray(input.events) &&
+    input.events.some(
+      (event) =>
+        typeof event === "object" &&
+        event !== null &&
+        "eventName" in event &&
+        event.eventName === "chat.attempt-updated@1",
+    )
+  );
+}
+
 describe("ChatService provider session recovery", () => {
   it("retains a streaming attempt while this process still owns its provider turn", async () => {
     const queue = Effect.runSync(Queue.unbounded<never>());
@@ -6184,5 +6276,107 @@ describe("ChatService provider session recovery", () => {
       resumable: 0,
     });
     expect(service.read(thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
+  });
+
+  it("isolates a non-conflict journal failure so remaining threads still recover", async () => {
+    const { service, persistence } = openFixture();
+    const failing = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unreapable leftover session",
+    });
+    const recovering = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Recoverable leftover session",
+    });
+    if (failing.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    if (recovering.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    seedLeftoverStreamingAttempt(persistence, recovering.thread, {
+      turnId: "85000000-0000-4000-8000-000000000041",
+      attemptId: "85000000-0000-4000-8000-000000000042",
+      sessionId: "85000000-0000-4000-8000-000000000043",
+      manifestId: "85000000-0000-4000-8000-000000000044",
+      contentId: "85000000-0000-4000-8000-000000000045",
+      title: "Recoverable leftover session",
+    });
+    seedLeftoverStreamingAttempt(persistence, failing.thread, {
+      turnId: "85000000-0000-4000-8000-000000000031",
+      attemptId: "85000000-0000-4000-8000-000000000032",
+      sessionId: "85000000-0000-4000-8000-000000000033",
+      manifestId: "85000000-0000-4000-8000-000000000034",
+      contentId: "85000000-0000-4000-8000-000000000035",
+      title: "Unreapable leftover session",
+    });
+
+    const originalAppend = persistence.journal.append.bind(persistence.journal);
+    persistence.journal.append = (input) => {
+      if (isAttemptUpdateFor(input, failing.thread.id)) {
+        throw new JournalWriteFailed({ operation: "append" });
+      }
+      return originalAppend(input);
+    };
+
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+      reaped: 1,
+      resumable: 0,
+    });
+    expect(service.read(failing.thread.id).turns[0]?.attempts[0]?.outcome).toBe("streaming");
+    expect(service.read(recovering.thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
+  });
+
+  it("isolates a second journal conflict so remaining threads still recover", async () => {
+    const { service, persistence } = openFixture();
+    const conflicting = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Conflicted leftover session",
+    });
+    const recovering = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Recoverable leftover session",
+    });
+    if (conflicting.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    if (recovering.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    seedLeftoverStreamingAttempt(persistence, recovering.thread, {
+      turnId: "85000000-0000-4000-8000-000000000061",
+      attemptId: "85000000-0000-4000-8000-000000000062",
+      sessionId: "85000000-0000-4000-8000-000000000063",
+      manifestId: "85000000-0000-4000-8000-000000000064",
+      contentId: "85000000-0000-4000-8000-000000000065",
+      title: "Recoverable leftover session",
+    });
+    seedLeftoverStreamingAttempt(persistence, conflicting.thread, {
+      turnId: "85000000-0000-4000-8000-000000000051",
+      attemptId: "85000000-0000-4000-8000-000000000052",
+      sessionId: "85000000-0000-4000-8000-000000000053",
+      manifestId: "85000000-0000-4000-8000-000000000054",
+      contentId: "85000000-0000-4000-8000-000000000055",
+      title: "Conflicted leftover session",
+    });
+
+    const originalAppend = persistence.journal.append.bind(persistence.journal);
+    let conflicts = 0;
+    persistence.journal.append = (input) => {
+      if (isAttemptUpdateFor(input, conflicting.thread.id) && conflicts < 2) {
+        conflicts += 1;
+        throw new ConcurrencyConflict({
+          aggregateType: "chat-thread",
+          aggregateId: String(conflicting.thread.id),
+          expectedVersion: 0,
+          actualVersion: 1,
+        });
+      }
+      return originalAppend(input);
+    };
+
+    await expect(service.reapStaleProviderSessions({ staleAfterMs: 0 })).resolves.toEqual({
+      reaped: 1,
+      resumable: 0,
+    });
+    expect(conflicts).toBe(2);
+    expect(service.read(conflicting.thread.id).turns[0]?.attempts[0]?.outcome).toBe("streaming");
+    expect(service.read(recovering.thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
   });
 });

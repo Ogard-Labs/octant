@@ -1222,7 +1222,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     if (server !== undefined) desktopBackendSupervisor.observe(server);
     return { url: serverUrl, instanceId, ownership: "desktop-owned" };
   } catch (error) {
-    desktopBackendSupervisor.release();
+    if (desktopBackendSupervisor.snapshot().status !== "restarting") {
+      desktopBackendSupervisor.release();
+    }
     const child = server;
     const broker = credentialBroker;
     const browserBroker = browserRuntimeBroker ?? startingBrowserBroker;
@@ -1243,7 +1245,11 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
 
 async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   if (host.ownership !== "desktop-owned") return;
-  desktopBackendSupervisor.release();
+  // Supervisor-driven restart uses stop()+start() to replace the child.
+  // Releasing here would cancel that restart if the replacement start fails.
+  if (desktopBackendSupervisor.snapshot().status !== "restarting") {
+    desktopBackendSupervisor.release();
+  }
   const child = server;
   const broker = credentialBroker;
   const browserBroker = browserRuntimeBroker;

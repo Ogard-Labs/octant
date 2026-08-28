@@ -117,13 +117,24 @@ export function createDesktopBackendSupervisor(
     scheduleRestart(backoff);
   };
 
+  const discardRestartedChild = (child: ManagedChildProcess): void => {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // The replacement may already have exited after shutdown won the race.
+    }
+  };
+
   const restart = async (): Promise<void> => {
     try {
       const child = await ports.restart();
       if (status === "gave-up") return;
+      // release() during an in-flight restart is a real stop, not a replacement.
+      if (released) {
+        if (child !== undefined) discardRestartedChild(child);
+        return;
+      }
       if (child === undefined) {
-        // A managed attach release()s on purpose; keep that as a real stop.
-        if (released) return;
         failures += 1;
         scheduleTransientRestart();
         return;
@@ -135,11 +146,8 @@ export function createDesktopBackendSupervisor(
         gaveUp(error);
         return;
       }
+      if (released) return;
       failures += 1;
-      // Desktop stop()+start() release()s this supervisor while replacing the
-      // child. That is not an intentional shutdown; crash recovery must keep
-      // retrying until observe() or give-up.
-      released = false;
       scheduleTransientRestart();
     }
   };
@@ -163,6 +171,11 @@ export function createDesktopBackendSupervisor(
     released = false;
     observedChild = child;
     status = "supervising";
+    // ChildProcess does not replay "exit" for a listener attached after exit.
+    if (child.exitCode !== null || child.signalCode !== null) {
+      onExit(child);
+      return;
+    }
     const listener = () => onExit(child);
     child.once("exit", listener);
     removeExitListener = () => {

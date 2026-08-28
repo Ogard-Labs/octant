@@ -1168,16 +1168,36 @@ export class ChatService {
           try {
             reapAttempt(attempt);
           } catch (error) {
-            if (!(error instanceof ConcurrencyConflict)) throw error;
+            if (!(error instanceof ConcurrencyConflict)) {
+              // One unreapable attempt must not abort startup recovery.
+              try {
+                version = readAggregateVersion(
+                  this.#persistence.connection,
+                  "chat-thread",
+                  thread.id,
+                );
+              } catch {
+                // Keep the last known version for later attempts on this thread.
+              }
+              continue;
+            }
             // Reread once in-process. A leftover streaming attempt otherwise
             // blocks new sends, and there is no later sweep.
-            version = readAggregateVersion(this.#persistence.connection, "chat-thread", thread.id);
-            const latest = this.#persistence
-              .readChatThreadView(thread.id)
-              ?.turns.flatMap((candidateTurn) => candidateTurn.attempts)
-              .find((candidate) => String(candidate.id) === String(attempt.id));
-            if (latest === undefined) continue;
-            reapAttempt(latest);
+            try {
+              version = readAggregateVersion(
+                this.#persistence.connection,
+                "chat-thread",
+                thread.id,
+              );
+              const latest = this.#persistence
+                .readChatThreadView(thread.id)
+                ?.turns.flatMap((candidateTurn) => candidateTurn.attempts)
+                .find((candidate) => String(candidate.id) === String(attempt.id));
+              if (latest === undefined) continue;
+              reapAttempt(latest);
+            } catch {
+              // The next startup sweeps this attempt again.
+            }
           }
         }
       }
