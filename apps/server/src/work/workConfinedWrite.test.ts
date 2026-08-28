@@ -158,7 +158,7 @@ describe("writeConfinedWorkFile", () => {
     }
   });
 
-  it("keeps a create on the open parent after the parent name is swapped", async () => {
+  it("never lets a swapped parent name redirect a create", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-create-bound-"));
     const secret = await mkdtemp(join(tmpdir(), "octant-create-bound-secret-"));
     const assets = join(root, "assets");
@@ -188,9 +188,18 @@ describe("writeConfinedWorkFile", () => {
         },
         bytes: encoder.encode("png"),
       });
-      expect(written).toBe(true);
+      // Linux walks children relative to the held directory object, so the
+      // create keeps landing on the proven (now renamed) parent. macOS has no
+      // fd-relative walk; its child guard refuses the swapped-in symlink and
+      // the create fails closed. Both keep the swap from redirecting bytes.
+      if (process.platform === "linux") {
+        expect(written).toBe(true);
+        expect(decoder.decode(await readFile(join(assetsReal, "x.png")))).toBe("png");
+      } else {
+        expect(written).toBe(false);
+        expect(await readdir(assetsReal)).toEqual([]);
+      }
       expect(await readdir(secret)).toEqual([]);
-      expect(decoder.decode(await readFile(join(assetsReal, "x.png")))).toBe("png");
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(secret, { recursive: true, force: true });

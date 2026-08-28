@@ -2293,11 +2293,35 @@ describe("ChatWorkspace", () => {
   });
 
   it("does not show Create image when the image client is missing", () => {
+    // An eligible profile must be present, or this would pass for the wrong
+    // reason: with no profile the action stays hidden even with a client.
+    const snapshot = providerSnapshot();
+    const withEligibleImageProfile = {
+      ...snapshot,
+      instances: [
+        ...snapshot.instances,
+        {
+          id: "image-profile-1" as never,
+          displayName: "Studio images",
+          enabled: true,
+          environmentPolicy: "inherit-host" as const,
+          version: 1 as never,
+          createdAt: now as never,
+          updatedAt: now as never,
+          driverKind: "openai-image" as never,
+          configuration: {
+            kind: "openai-image-http",
+            modelAllowlist: ["gpt-image-2"],
+            defaultModel: "gpt-image-2",
+          } as never,
+        },
+      ],
+    };
     render(
       <ChatWorkspace
         controller={controllerFixture()}
         onOpenSettings={vi.fn()}
-        providerSnapshot={providerSnapshot()}
+        providerSnapshot={withEligibleImageProfile}
       />,
     );
     expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();

@@ -188,6 +188,7 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
   openDirectory: async (path) =>
     liveDirectory(
       await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW),
+      path,
     ),
   readFile: async (path) => await readFile(path),
   writeFile: async (path, bytes) => {
@@ -213,13 +214,31 @@ function confinedEntryName(name: string): string {
   return name;
 }
 
-function childFromDirectoryFd(handle: FileHandle, name: string): string {
-  const prefix =
-    process.platform === "linux" ? `/proc/self/fd/${handle.fd}` : `/dev/fd/${handle.fd}`;
-  return `${prefix}/${confinedEntryName(name)}`;
+// macOS has no fd-relative path surface: /dev/fd/N names the duplicated
+// descriptor itself, so appending a child (`/dev/fd/N/name`) fails ENOENT
+// (observed on Darwin: openDirectory, mkdir, and exclusive create all refuse).
+// Children are opened by the directory's tracked canonical path instead, with
+// O_NOFOLLOW_ANY (fcntl.h, macOS 11+) refusing a symlink in any component
+// atomically in-kernel. Resolution hands this port canonical paths, so the
+// flag only fires on a component swapped in after the containment proof — the
+// escape the Linux fd-relative walk refuses by construction. The two walks
+// diverge only on a benign race: a parent renamed mid-write keeps receiving
+// the Linux write through the held object, while macOS refuses and the caller
+// reports the write as refused.
+const darwinNoFollowAny = 0x20000000;
+
+// O_NOFOLLOW_ANY subsumes O_NOFOLLOW, and macOS refuses the pair with EINVAL
+// (observed), so the darwin child guard replaces the final-component flag
+// rather than adding to it.
+const childNoFollow = process.platform === "linux" ? constants.O_NOFOLLOW : darwinNoFollowAny;
+
+function childOpenPath(handle: FileHandle, directoryPath: string, name: string): string {
+  const entry = confinedEntryName(name);
+  if (process.platform === "linux") return `/proc/self/fd/${handle.fd}/${entry}`;
+  return `${directoryPath}/${entry}`;
 }
 
-function liveDirectory(handle: FileHandle): WorkOpenDirectory {
+function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirectory {
   return {
     stat: async () => {
       const info = await handle.stat({ bigint: true });
@@ -232,15 +251,20 @@ function liveDirectory(handle: FileHandle): WorkOpenDirectory {
     openDirectory: async (name) =>
       liveDirectory(
         await open(
-          childFromDirectoryFd(handle, name),
-          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+          childOpenPath(handle, directoryPath, name),
+          constants.O_RDONLY | constants.O_DIRECTORY | childNoFollow,
         ),
+        `${directoryPath}/${confinedEntryName(name)}`,
       ),
     mkdir: async (name) => {
-      await mkdir(childFromDirectoryFd(handle, name));
+      // On macOS a swapped-in symlinked ancestor could route this mkdir
+      // elsewhere, but it can only mint an empty directory: the child open
+      // that follows carries O_NOFOLLOW_ANY and refuses the swap, so no bytes
+      // are ever written through it.
+      await mkdir(childOpenPath(handle, directoryPath, name));
     },
     openWriteFile: async (name, options) =>
-      openLiveWriteFile(childFromDirectoryFd(handle, name), options),
+      openLiveWriteFile(childOpenPath(handle, directoryPath, name), options, childNoFollow),
     close: () => handle.close(),
   };
 }
@@ -248,10 +272,11 @@ function liveDirectory(handle: FileHandle): WorkOpenDirectory {
 async function openLiveWriteFile(
   path: string,
   options: { readonly exclusiveCreate: boolean },
+  noFollow: number = constants.O_NOFOLLOW,
 ): Promise<WorkOpenWriteFile> {
   const flags = options.exclusiveCreate
-    ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW
-    : constants.O_WRONLY | constants.O_NOFOLLOW;
+    ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow
+    : constants.O_WRONLY | noFollow;
   const handle = await open(path, flags, 0o600);
   return {
     stat: async () => {
