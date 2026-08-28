@@ -11,6 +11,7 @@ import {
   decodeProviderRegistryCommand,
   decodeProviderRegistryCommandResult,
   decodeProviderRegistrySnapshot,
+  type ProviderDriverKind,
   type ProviderFailure,
   type ProviderInstance,
   type ProviderInstanceId,
@@ -68,6 +69,7 @@ import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber, Schema, Stream } from "effect";
+import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import type { PersistenceService } from "../persistence/persistenceService";
@@ -152,6 +154,7 @@ export interface ProviderServiceOptions {
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly probe?: (instance: ProviderInstance) => Promise<unknown>;
   readonly driver?: (instance: ProviderInstance) => ProviderDriver;
+  readonly isDriverPluginEffective?: (driverKind: ProviderDriverKind) => boolean;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
   /** Clears process-local provider limit evidence when identity/configuration changes. */
   readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
@@ -175,6 +178,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #driverProvider: ProviderServiceOptions["driver"];
+  readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
 
@@ -195,6 +199,9 @@ export class ProviderService implements ProviderServiceApi {
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#driverProvider = options.driver;
+    this.#isDriverPluginEffective =
+      options.isDriverPluginEffective ??
+      ((driverKind) => admittedBundledProviderDriverKinds().has(driverKind));
     this.#clearResumeIdentities = options.clearResumeIdentities;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
   }
@@ -207,13 +214,24 @@ export class ProviderService implements ProviderServiceApi {
       const configuredIds = new Set(instances.map(({ id }) => id));
       const defaults = this.#persistence.readProviderDefaults();
       const orderedInstances = orderProviderInstances(instances, defaults.providerOrder ?? []);
+      const instanceById = new Map(
+        orderedInstances.map((instance) => [String(instance.id), instance]),
+      );
       const persistedCatalogs = this.#persistence
         .readProviderCatalogs?.()
         .filter(({ instanceId }) => configuredIds.has(instanceId))
-        .map((catalog) => ({
-          ...catalog,
-          models: orderProviderModels(catalog.models, catalog.manualModelOrder),
-        }));
+        .flatMap((catalog) => {
+          const instance = instanceById.get(String(catalog.instanceId));
+          if (instance === undefined || !this.#isDriverPluginEffective(instance.driverKind)) {
+            return [];
+          }
+          return [
+            {
+              ...catalog,
+              models: orderProviderModels(catalog.models, catalog.manualModelOrder),
+            },
+          ];
+        });
       const providerIndex = new Map(
         orderedInstances.map((instance, index) => [String(instance.id), index]),
       );
@@ -228,13 +246,27 @@ export class ProviderService implements ProviderServiceApi {
       const observedStates = this.#runtime
         .observedStates()
         .filter(({ instanceId }) => configuredIds.has(instanceId))
-        .map((state) => ({
-          ...state,
-          models: orderProviderModels(
-            state.models,
-            catalogByInstance.get(String(state.instanceId))?.manualModelOrder ?? [],
-          ),
-        }))
+        .map((state) => {
+          const instance = instanceById.get(String(state.instanceId));
+          if (instance === undefined || !this.#isDriverPluginEffective(instance.driverKind)) {
+            return decodeProviderObservedState({
+              instanceId: state.instanceId,
+              readiness: "unavailable",
+              processState: "stopped",
+              models: [],
+              capabilities: unavailableCapabilities,
+              message: "This provider driver is not available.",
+              observedAt: state.observedAt,
+            });
+          }
+          return {
+            ...state,
+            models: orderProviderModels(
+              state.models,
+              catalogByInstance.get(String(state.instanceId))?.manualModelOrder ?? [],
+            ),
+          };
+        })
         .sort(
           (left, right) =>
             (providerIndex.get(String(left.instanceId)) ?? Number.MAX_SAFE_INTEGER) -
@@ -313,6 +345,7 @@ export class ProviderService implements ProviderServiceApi {
       if (!instance.enabled) {
         throw this.#unsupported("Packaged provider smoke requires an enabled provider.");
       }
+      this.#assertDriverPluginEffective(instance);
       if (this.#driverProvider === undefined) throw this.#unavailable();
       const result = await runPackagedProviderSmokeTurn(this.#driverProvider(instance), {
         instanceId,
@@ -365,6 +398,7 @@ export class ProviderService implements ProviderServiceApi {
           if (!instance.enabled) {
             throw this.#invalid("Enable this provider before authenticating it.");
           }
+          this.#assertDriverPluginEffective(instance);
           if (this.#driverProvider === undefined) throw this.#unavailable();
           const driver = this.#driverProvider(instance);
           if (command.kind === "begin-provider-authentication") {
@@ -544,6 +578,7 @@ export class ProviderService implements ProviderServiceApi {
               });
               break;
           }
+          this.#assertDriverPluginEffective(instance);
           this.#appendInstance(command.expectedVersion, "provider.instance-created@1", instance);
           const authoritative = this.#authoritativeInstance(instance);
           this.#publishSelectedAuthenticationObservation(authoritative);
@@ -802,6 +837,11 @@ export class ProviderService implements ProviderServiceApi {
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#invalid("Enable this provider before probing it.");
         }
+        if (!this.#isDriverPluginEffective(instance.driverKind)) {
+          this.#runtime.clearObservedState(instanceId);
+          this.#clearRuntimeUsageLimits?.(instanceId);
+          throw this.#unsupported("This provider driver is not available.");
+        }
         // Do NOT clear the runtime observed state for a valid enabled probe:
         // the web client already clears its local snapshot for the "checking"
         // UI state, and clearing the server runtime state would race with
@@ -881,6 +921,7 @@ export class ProviderService implements ProviderServiceApi {
         throw this.#invalid("Tool verification is only available for Azure AI Foundry providers.");
       }
       if (!instance.enabled) throw this.#invalid("Enable this provider before verifying tools.");
+      this.#assertDriverPluginEffective(instance);
       // Validate the target modelId against the configured deployment IDs so
       // an authenticated renderer cannot probe and record an arbitrary
       // unconfigured model as verified. The Settings UI only exposes
@@ -1134,6 +1175,12 @@ export class ProviderService implements ProviderServiceApi {
   #assertVersion(actual: number, expected: number): void {
     if (actual !== expected)
       throw this.#invalid("Provider configuration changed; reload and retry.");
+  }
+
+  #assertDriverPluginEffective(instance: ProviderInstance): void {
+    if (!this.#isDriverPluginEffective(instance.driverKind)) {
+      throw this.#unsupported("This provider driver is not available.");
+    }
   }
 
   #assertReady(): void {

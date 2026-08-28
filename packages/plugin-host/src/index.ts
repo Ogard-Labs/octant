@@ -1,4 +1,5 @@
 export * from "./bundledSkills";
+export * from "./bundledProviderDrivers";
 export * from "./activation";
 export * from "./canvasSkillContributions";
 export * from "./addressing";

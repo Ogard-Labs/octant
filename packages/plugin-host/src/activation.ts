@@ -6,6 +6,7 @@ import type {
 import type { OctantMode } from "@octant/contracts/modes";
 
 const rendererKinds = ["ui-surface", "appearance-pack", "preview-viewer"] as const;
+const providerDriverKind = ["provider-driver"] as const;
 
 const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kind"]>>> = {
   chat: new Set([
@@ -15,6 +16,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "mcp-prompt",
     "mcp-resource",
     ...rendererKinds,
+    ...providerDriverKind,
   ]),
   work: new Set([
     "skill-instructions",
@@ -24,6 +26,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "mcp-resource",
     "app",
     ...rendererKinds,
+    ...providerDriverKind,
   ]),
   code: new Set([
     "skill-instructions",
@@ -38,6 +41,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "board",
     "integration",
     ...rendererKinds,
+    ...providerDriverKind,
   ]),
 };
 
