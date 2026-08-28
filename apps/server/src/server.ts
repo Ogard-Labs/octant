@@ -5626,8 +5626,9 @@ export function startOctantServer(
       const response = await dispatchProductRoutes(request);
       if (response === undefined) return undefined;
       // This measures time to produce the response; a streaming route that
-      // promptly returns its stream is not considered slow.
-      const durationMs = Math.max(0, performance.now() - startedAt);
+      // promptly returns its stream is not considered slow. Round once so the
+      // dashboard slowCount and this warning agree on the same millisecond.
+      const durationMs = Math.max(0, Math.round(performance.now() - startedAt));
       latencyStats.record(measurement, durationMs);
       const thresholdMs = latencyStats.slowThresholdMs(measurement);
       if (thresholdMs !== undefined && durationMs >= thresholdMs) {
