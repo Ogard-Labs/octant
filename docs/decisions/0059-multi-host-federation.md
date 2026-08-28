@@ -54,8 +54,8 @@ state conflict handling without inventing authority 0013 already forbade.
 
 ### Reviewable children
 
-Implementation splits into three children under the post-preview federation
-program. None invents host authority.
+The remaining federation scope has three implementation areas. None invents
+host authority.
 
 1. **All-hosts view completeness** — unavailable hosts, stale rows, honest
    environment filtering, and destination state only where create can succeed.
