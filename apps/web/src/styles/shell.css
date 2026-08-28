@@ -737,6 +737,51 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   min-width: 0;
 }
 
+/* Fork mark sits beside the status dot as its own control. Sizing only:
+   colour, focus, and hover stay on the ghost-icon recipe. */
+.sidebar-navigation__thread-lineage {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+}
+
+.thread-lineage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 12rem;
+  max-width: 18rem;
+}
+
+.thread-lineage__chain,
+.thread-lineage__forks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread-lineage__heading {
+  margin: 0;
+  font-size: var(--oct-text-xs);
+}
+
+.thread-lineage__entry {
+  width: 100%;
+  min-height: 26px;
+  padding-inline: 6px;
+  text-align: left;
+}
+
+.thread-lineage__unavailable {
+  padding-inline: 6px;
+  font-size: var(--oct-text-xs);
+}
+
 /* The trailing gutter reserves space so the row title does not jump when the
    actions appear. It is hidden by default and revealed on row hover or focus,
    and stays visible while any of its popups are open. */

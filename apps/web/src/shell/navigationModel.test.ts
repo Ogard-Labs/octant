@@ -220,6 +220,37 @@ describe("buildSidebarNavigation", () => {
     ]);
   });
 
+  it("passes lineageParentThreadId through when the source carries it", () => {
+    expect(
+      buildChatThreadNavigation([
+        {
+          lineageParentThreadId: "00000000-0000-4000-8000-000000000100",
+          readSequence: 0,
+          threadId: "00000000-0000-4000-8000-000000000101",
+          title: "Restored",
+        },
+      ]),
+    ).toEqual([
+      {
+        lineageParentThreadId: "00000000-0000-4000-8000-000000000100",
+        threadId: "00000000-0000-4000-8000-000000000101",
+        title: "Restored",
+      },
+    ]);
+  });
+
+  it("omits lineageParentThreadId when the source does not carry it", () => {
+    expect(
+      buildChatThreadNavigation([
+        {
+          readSequence: 0,
+          threadId: "00000000-0000-4000-8000-000000000101",
+          title: "Planning",
+        },
+      ])[0],
+    ).not.toHaveProperty("lineageParentThreadId");
+  });
+
   it("omits unread when lastSequence is absent", () => {
     expect(
       buildChatThreadNavigation([

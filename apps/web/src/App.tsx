@@ -2547,6 +2547,9 @@ function LaunchedShell(
           ...(thread.unread === undefined ? {} : { unread: thread.unread }),
           ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
           ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
+          ...(thread.lineageParentThreadId === undefined
+            ? {}
+            : { lineageParentThreadId: thread.lineageParentThreadId }),
         }))
       : [];
   const workProjectThreads = workNavigation.navigation;
