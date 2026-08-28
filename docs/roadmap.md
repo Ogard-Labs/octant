@@ -119,7 +119,8 @@ starts.
   (0058) sequences Windows after Linux + macOS parity; Work/Code stay
   `incompatible` until a Windows sandbox ADR exists.
 - **Mobile maturity** — device builds, live push notifications, native capture,
-  voice input, and public store distribution for the Expo client.
+  voice input, and public store distribution for the Expo client. Design:
+  [mobile-maturity-phases.md](mobile-maturity-phases.md).
 - **Hosted relay** — only if LAN, Tailscale, or SSH cannot satisfy a concrete
   reachability need; local-first remote access comes first.
 - **Connector / OAuth marketplace** — OAuth, revocation, publisher trust, and
