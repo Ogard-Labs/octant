@@ -15,6 +15,8 @@ import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
+import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import { listEligibleImageProfiles } from "@octant/domain";
 import type { CanvasInventoryEntry } from "@octant/contracts";
 import type { CanvasId } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -276,6 +278,7 @@ export interface WorkspaceViewProps {
   readonly projectWindowCapability?: string;
   readonly previewClient?: PreviewClient;
   readonly canvasClient?: CanvasClient;
+  readonly imageGenerationClient?: ImageGenerationClient;
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
   readonly draftProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
@@ -645,6 +648,16 @@ function renderCodeTab(
           ? {}
           : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+        {...(props.imageGenerationClient === undefined
+          ? {}
+          : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.providerController.snapshot === undefined
+          ? {}
+          : {
+              imageGenerationProfiles: listEligibleImageProfiles(
+                props.providerController.snapshot.instances,
+              ),
+            })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
@@ -862,6 +875,18 @@ function renderNonCodeTab(
           void props.onClosePane(paneId);
         }}
         {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
+        {...(props.providerController.snapshot === undefined ||
+        props.imageGenerationClient === undefined
+          ? {}
+          : {
+              imageGeneration: {
+                profiles: listEligibleImageProfiles(props.providerController.snapshot.instances),
+                client: props.imageGenerationClient,
+                ...(openProviderSettings === undefined
+                  ? {}
+                  : { onOpenSettings: openProviderSettings }),
+              },
+            })}
         {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
         {...(props.onDraftPendingMessage === undefined
           ? {}
@@ -897,6 +922,9 @@ function renderNonCodeTab(
           ? {}
           : { projectWindowCapability: props.projectWindowCapability })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+        {...(props.imageGenerationClient === undefined
+          ? {}
+          : { imageGenerationClient: props.imageGenerationClient })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvasReference === undefined
           ? {}
@@ -966,6 +994,19 @@ function renderNonCodeTab(
             title={tab.title}
             providerGroups={props.workProviderGroups ?? []}
             {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+            {...(props.imageGenerationClient === undefined
+              ? {}
+              : { imageGenerationClient: props.imageGenerationClient })}
+            {...(props.providerController.snapshot === undefined
+              ? {}
+              : {
+                  imageGenerationProfiles: listEligibleImageProfiles(
+                    props.providerController.snapshot.instances,
+                  ),
+                })}
+            {...(openProviderSettings === undefined
+              ? {}
+              : { onOpenSettings: openProviderSettings })}
             {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
             {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
             {...(props.projectWindowCapability === undefined
@@ -1543,6 +1584,7 @@ function ChatThreadWorkspace(props: {
   readonly projectServerUrl?: string;
   readonly projectWindowCapability?: string;
   readonly canvasClient?: CanvasClient;
+  readonly imageGenerationClient?: ImageGenerationClient;
   readonly hostId?: string;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
   /** Opens another Chat thread as a workspace tab — e.g. a branch just minted. */
@@ -1601,6 +1643,9 @@ function ChatThreadWorkspace(props: {
           ? {}
           : { providerSnapshot: props.providerController.snapshot })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+        {...(props.imageGenerationClient === undefined
+          ? {}
+          : { imageGenerationClient: props.imageGenerationClient })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
         {...(props.onOpenCanvasReference === undefined
           ? {}

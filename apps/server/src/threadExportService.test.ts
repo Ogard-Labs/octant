@@ -105,6 +105,9 @@ function service(
   options: {
     readonly chat?: ChatThreadView | undefined;
     readonly work?: { readonly thread: WorkThread; readonly turns: ReadonlyArray<WorkTurnState> };
+    readonly generatedImages?: {
+      readonly listByScope: (scopeId: string) => ReadonlyArray<unknown>;
+    };
   } = {},
 ) {
   return new ThreadExportService({
@@ -122,6 +125,9 @@ function service(
       },
     },
     canvases: { byThread: () => [] },
+    ...(options.generatedImages === undefined
+      ? {}
+      : { generatedImages: options.generatedImages as never }),
   });
 }
 
@@ -151,6 +157,53 @@ describe("ThreadExportService", () => {
     );
     expect(JSON.stringify(outcome.bundle)).not.toContain("credentials");
     expect(JSON.stringify(outcome.bundle)).not.toContain("resumeCursor");
+  });
+
+  it("includes generated images with provenance and omits their bytes", async () => {
+    const jobId = "a1000000-0000-4000-8000-000000000021";
+    const attachmentId = "a1000000-0000-4000-8000-000000000022";
+    const outcome = await service({
+      chat: chatView(),
+      generatedImages: {
+        listByScope: () => [
+          {
+            id: jobId,
+            status: "completed",
+            threadKind: "chat-thread",
+            scopeId: threadId,
+            profileInstanceId: "10000000-0000-4000-8000-000000000001",
+            modelId: "gpt-image-2",
+            promptHash: "d".repeat(64),
+            artifacts: [
+              {
+                attachmentId,
+                hash: "e".repeat(64),
+                size: 48,
+                mime: "image/png",
+                evidence: {
+                  profileInstanceId: "10000000-0000-4000-8000-000000000001",
+                  modelId: "gpt-image-2",
+                  promptHash: "d".repeat(64),
+                  jobId,
+                },
+              },
+            ],
+            version: 3,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      },
+    }).exportThread(windowId as never, "local-window", { mode: "chat", threadId });
+    expect(outcome.kind).toBe("exported");
+    if (outcome.kind !== "exported") return;
+    const generated = outcome.bundle.evidence.attachments.find(
+      (attachment) => attachment.generation?.jobId === jobId,
+    );
+    expect(generated?.displayName).toBe(`generated-${jobId}-1.png`);
+    expect(generated?.generation?.jobId).toBe(jobId);
+    expect(generated?.generation?.modelId).toBe("gpt-image-2");
+    expect(JSON.stringify(outcome.bundle)).not.toContain("iVBOR");
   });
 
   it("lets a paired device export a thread it can already read", async () => {

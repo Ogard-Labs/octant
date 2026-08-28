@@ -27,6 +27,9 @@ import type {
 } from "@octant/contracts/previews";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
+import type { ImageGenerationProfileView, ImageGenerationScopeId } from "@octant/contracts";
+import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { markInteraction, markInteractionAfterPaint } from "../polling/interactionTrace";
@@ -168,6 +171,12 @@ export interface ChatComposerProps {
   readonly sendDisabledReason?: string;
   readonly statusMessage?: string;
   readonly stopDisabledReason?: string;
+  readonly imageGeneration?: {
+    readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
+    readonly client?: ImageGenerationClient;
+    readonly scopeId?: ImageGenerationScopeId;
+    readonly onOpenSettings?: () => void;
+  };
 }
 
 /**
@@ -651,6 +660,22 @@ export function ChatComposer(props: ChatComposerProps) {
         >
           <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
         </OctantButton>
+        {props.imageGeneration === undefined ? null : (
+          <ImageGenerationAction
+            {...(props.imageGeneration.client === undefined
+              ? {}
+              : { client: props.imageGeneration.client })}
+            {...(props.imageGeneration.scopeId === undefined
+              ? {}
+              : { scopeId: props.imageGeneration.scopeId })}
+            {...(props.imageGeneration.onOpenSettings === undefined
+              ? {}
+              : { onOpenSettings: props.imageGeneration.onOpenSettings })}
+            disabled={settingsLocked}
+            profiles={props.imageGeneration.profiles}
+            threadKind="chat-thread"
+          />
+        )}
       </div>
       <div className="chat-composer__selectors">
         {props.providerGroups !== undefined && props.onSelectModel !== undefined ? (

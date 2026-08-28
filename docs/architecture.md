@@ -410,7 +410,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   bounded generated-image attachment scope, and usage rows attributed as
   `image-generation`; see
   [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
-  Invocation and thread preview are not part of that record.
+  Composer **Create image…** actions and an app-managed `octant_create_image`
+  tool invoke that job service through `/api/image/` when an enabled image
+  profile exists; generated images preview in the thread by opaque attachment
+  id, chain edits through `parentArtifactRef`, export with the thread, and
+  never grant Chat filesystem authority.
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;

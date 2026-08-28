@@ -348,9 +348,11 @@ export const OPENAI_IMAGE_MODEL_PRESETS = [
   "gpt-image-1",
   "gpt-image-1-mini",
 ] as const;
-export const OpenAiImageQuality = Schema.Literal("auto", "low", "medium", "high");
+export const OPENAI_IMAGE_QUALITIES = ["auto", "low", "medium", "high"] as const;
+export const OpenAiImageQuality = Schema.Literal(...OPENAI_IMAGE_QUALITIES);
 export type OpenAiImageQuality = typeof OpenAiImageQuality.Type;
-export const OpenAiImageSize = Schema.Literal("auto", "1024x1024", "1536x1024", "1024x1536");
+export const OPENAI_IMAGE_SIZES = ["auto", "1024x1024", "1536x1024", "1024x1536"] as const;
+export const OpenAiImageSize = Schema.Literal(...OPENAI_IMAGE_SIZES);
 export type OpenAiImageSize = typeof OpenAiImageSize.Type;
 const imageAllowlistContainsDefault = (configuration: {
   readonly modelAllowlist: ReadonlyArray<string>;
@@ -378,7 +380,7 @@ export const GEMINI_IMAGE_MODEL_PRESETS = [
   "gemini-3-pro-image",
   "gemini-2.5-flash-image",
 ] as const;
-export const GeminiImageAspectRatio = Schema.Literal(
+export const GEMINI_IMAGE_ASPECT_RATIOS = [
   "1:1",
   "2:3",
   "3:2",
@@ -389,9 +391,11 @@ export const GeminiImageAspectRatio = Schema.Literal(
   "9:16",
   "16:9",
   "21:9",
-);
+] as const;
+export const GeminiImageAspectRatio = Schema.Literal(...GEMINI_IMAGE_ASPECT_RATIOS);
 export type GeminiImageAspectRatio = typeof GeminiImageAspectRatio.Type;
-export const GeminiImageResolution = Schema.Literal("1K", "2K", "4K");
+export const GEMINI_IMAGE_RESOLUTIONS = ["1K", "2K", "4K"] as const;
+export const GeminiImageResolution = Schema.Literal(...GEMINI_IMAGE_RESOLUTIONS);
 export type GeminiImageResolution = typeof GeminiImageResolution.Type;
 export const GeminiImageProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("gemini-native-image-http"),
