@@ -63,7 +63,11 @@ function imageProfile(): ProviderInstance {
 
 function openHarness(
   adapter: ImageGenerationAdapter,
-  options: { readonly concurrency?: number; readonly failAppendAfter?: number } = {},
+  options: {
+    readonly concurrency?: number;
+    readonly failAppendAfter?: number;
+    readonly failToStatus?: "running";
+  } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-image-job-"));
   directories.push(directory);
@@ -77,13 +81,20 @@ function openHarness(
     clock: () => now,
   });
   let appendCount = 0;
+  let failedToStatus = false;
   const journal =
-    options.failAppendAfter === undefined
+    options.failAppendAfter === undefined && options.failToStatus === undefined
       ? innerJournal
       : {
           append: (input: unknown) => {
             appendCount += 1;
-            if (appendCount > options.failAppendAfter!) {
+            const failThisAppend =
+              (options.failAppendAfter !== undefined && appendCount > options.failAppendAfter) ||
+              (options.failToStatus !== undefined &&
+                !failedToStatus &&
+                appendToStatus(input) === options.failToStatus);
+            if (failThisAppend) {
+              failedToStatus = options.failToStatus !== undefined;
               throw new ConcurrencyConflict({
                 aggregateType: "image-job",
                 aggregateId: "a3000000-0000-4000-8000-000000000099",
@@ -313,6 +324,36 @@ describe("image job service", () => {
     expect(await attachments.hasTemporaryFiles()).toBe(false);
   });
 
+  it("fails a job when the running transition cannot be journaled", async () => {
+    const generate = vi.fn(async () => ({
+      status: "completed" as const,
+      images: [{ bytes: png, mediaType: "image/png" as const }],
+    }));
+    const { service } = openHarness({ generate }, { failToStatus: "running" });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "never start",
+      references: [{ bytes: png, mediaType: "image/png" }],
+    });
+    const failed = await service.whenTerminal(queued.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.artifacts).toEqual([]);
+    expect(generate).not.toHaveBeenCalled();
+    const later = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "a red cube",
+    });
+    const completed = await service.whenTerminal(later.id);
+    expect(completed.status).toBe("completed");
+    expect(generate).toHaveBeenCalledOnce();
+  });
+
   it("rejects waiters when a job failure cannot be journaled", async () => {
     const rejections: unknown[] = [];
     const onReject = (reason: unknown) => {
@@ -337,6 +378,7 @@ describe("image job service", () => {
       });
       await expect(service.whenTerminal(queued.id)).rejects.toBeInstanceOf(ImageJobServiceError);
       await expect(service.whenTerminal(queued.id)).rejects.toBeInstanceOf(ImageJobServiceError);
+      await Promise.resolve();
       await Promise.resolve();
       expect(rejections).toEqual([]);
     } finally {
@@ -439,6 +481,19 @@ describe("image job service", () => {
     void hangingResolve;
   });
 });
+
+function appendToStatus(input: unknown): string | undefined {
+  if (typeof input !== "object" || input === null || !("events" in input)) return undefined;
+  const events = input.events;
+  if (!Array.isArray(events)) return undefined;
+  for (const event of events) {
+    if (typeof event !== "object" || event === null || !("payload" in event)) continue;
+    const payload = event.payload;
+    if (typeof payload !== "object" || payload === null || !("toStatus" in payload)) continue;
+    if (typeof payload.toStatus === "string") return payload.toStatus;
+  }
+  return undefined;
+}
 
 function hasFinalizedImage(directory: string): boolean {
   const root = join(directory, "generated-images");

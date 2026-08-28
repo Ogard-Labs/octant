@@ -675,6 +675,7 @@ export class ImageJobService {
         },
       });
       this.#resolve(failed);
+      this.#work.delete(String(job.id));
     } catch (journalError) {
       this.#rejectWaiters(
         job.id,
@@ -721,8 +722,11 @@ export class ImageJobService {
 
   #resolve(job: ImageJob): void {
     if (!isImageJobTerminalStatus(job.status)) return;
-    this.#deferred(job.id).resolve(job);
-    this.#waiters.delete(String(job.id));
+    const key = String(job.id);
+    const waiter = this.#waiters.get(key);
+    if (waiter === undefined) return;
+    waiter.resolve(job);
+    this.#waiters.delete(key);
   }
 }
 
