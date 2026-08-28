@@ -5,6 +5,7 @@ import {
   decodeImageJobId,
   decodeImageJobQueued,
   decodeImageJobStatusChanged,
+  decodeImageGenerationScopeId,
   type EventEnvelope,
   type ImageArtifactId,
   type ImageGenerationScopeId,
@@ -104,6 +105,11 @@ export class ImageJobProjection implements Projection {
     return [...this.#byId.values()].sort((left, right) =>
       right.updatedAt.localeCompare(left.updatedAt),
     );
+  }
+
+  listByScope(scopeId: ImageGenerationScopeId): ReadonlyArray<ImageJob> {
+    const scope = String(decodeImageGenerationScopeId(scopeId));
+    return this.list().filter((job) => String(job.scopeId) === scope);
   }
 
   listRunning(): ReadonlyArray<ImageJob> {

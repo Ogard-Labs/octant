@@ -13,6 +13,10 @@ import {
 import { createWorkTurnClient, type WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import { createPreviewClient } from "@octant/client-runtime/preview-client";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
+import {
+  createImageGenerationClient,
+  type ImageGenerationClient,
+} from "@octant/client-runtime/image-generation-client";
 import { createWorkOverviewClient } from "@octant/client-runtime/work-overview-client";
 import { createWorkResearchClient } from "@octant/client-runtime/work-research-client";
 import { createGoalClient } from "@octant/client-runtime/goal-client";
@@ -1413,6 +1417,15 @@ function LaunchedShell(
         windowCapability: props.projectWindowCapability,
       }),
     [props.canvasClient, props.launch.serverUrl, props.projectWindowCapability],
+  );
+  const imageGenerationClient = useMemo(
+    (): ImageGenerationClient =>
+      createImageGenerationClient({
+        baseUrl: props.launch.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.projectWindowCapability,
+      }),
+    [props.launch.serverUrl, props.projectWindowCapability],
   );
   const contextSubject = useMemo(() => {
     if (activeMode === "chat" && activeChatThreadId !== undefined) {
@@ -4632,6 +4645,7 @@ function LaunchedShell(
                       : { projectWindowCapability: props.projectWindowCapability })}
                     previewClient={previewClient}
                     canvasClient={canvasClient}
+                    imageGenerationClient={imageGenerationClient}
                     onOpenCanvasReference={(card) =>
                       void controller.openCanvas({
                         mode: card.scope.mode,

@@ -17,6 +17,9 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
 import { ThreadComposer } from "../../composer/ThreadComposer";
+import type { ImageGenerationProfileView, ImageGenerationScopeId } from "@octant/contracts";
+import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import { ImageGenerationAction } from "../../image/ImageGenerationAction";
 import { selectedModelReadsImages, useWorkComposerImages } from "./useWorkComposerImages";
 import { WorkImageAttachmentChips } from "./WorkImageAttachmentChips";
 import {
@@ -61,6 +64,12 @@ export interface WorkComposerAdapterProps {
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
   readonly onCancelFirstTurn?: () => void;
+  readonly imageGeneration?: {
+    readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
+    readonly client?: ImageGenerationClient;
+    readonly scopeId?: ImageGenerationScopeId;
+    readonly onOpenSettings?: () => void;
+  };
 }
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
@@ -256,6 +265,22 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                   >
                     <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
                   </OctantButton>
+                  {props.imageGeneration === undefined ? null : (
+                    <ImageGenerationAction
+                      {...(props.imageGeneration.client === undefined
+                        ? {}
+                        : { client: props.imageGeneration.client })}
+                      {...(props.imageGeneration.scopeId === undefined
+                        ? {}
+                        : { scopeId: props.imageGeneration.scopeId })}
+                      {...(props.imageGeneration.onOpenSettings === undefined
+                        ? {}
+                        : { onOpenSettings: props.imageGeneration.onOpenSettings })}
+                      disabled={props.creating === true}
+                      profiles={props.imageGeneration.profiles}
+                      threadKind="work-thread"
+                    />
+                  )}
                   <span className="work-composer-adapter__context-picker">
                     <ComposerModelPicker
                       ariaLabel="Provider and model"

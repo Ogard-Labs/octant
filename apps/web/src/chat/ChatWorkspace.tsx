@@ -48,6 +48,10 @@ import { LinkedThreadParallelReviewFlow } from "../linkedThread/LinkedThreadPara
 import { useLinkedThreadParallelReview } from "../linkedThread/useLinkedThreadParallelReview";
 import { isReviewInParallelReference } from "../linkedThread/parseReviewInParallelDraft";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
+import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import { listEligibleImageProfiles } from "@octant/domain";
+import { GeneratedImageList } from "../image/GeneratedImageList";
+import { decodeImageGenerationScopeId } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
 import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
@@ -74,6 +78,7 @@ export interface ChatWorkspaceProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly canvasClient?: CanvasClient;
+  readonly imageGenerationClient?: ImageGenerationClient;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Injected thread-mention client; otherwise built from serverUrl. */
@@ -633,6 +638,33 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             />
           </section>
         )}
+        {props.imageGenerationClient === undefined ? null : (
+          <GeneratedImageList
+            client={props.imageGenerationClient}
+            onAttach={(file) => {
+              const displayName = file.name;
+              const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
+              void (async () => {
+                const buffer = await file.arrayBuffer();
+                await props.controller.upload({
+                  threadId: view.thread.id,
+                  attachmentId,
+                  displayName,
+                  mediaType: file.type || "image/png",
+                  bytes: new Uint8Array(buffer),
+                });
+                setPendingAttachments((current) => {
+                  const next = [...current, { id: attachmentId, displayName }];
+                  pendingAttachmentsRef.current = next;
+                  return next;
+                });
+              })();
+            }}
+            profiles={listEligibleImageProfiles(props.providerSnapshot?.instances ?? [])}
+            scopeId={decodeImageGenerationScopeId(String(thread.id))}
+            threadKind="chat-thread"
+          />
+        )}
         <ChatTranscript
           busy={isSending || branchPending}
           {...(checkpoints.available
@@ -764,6 +796,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         attachment={attachmentCapability}
         attachmentBusy={uploadingMessage !== undefined || attachmentStatus.kind === "removing"}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+        imageGeneration={{
+          profiles: listEligibleImageProfiles(props.providerSnapshot?.instances ?? []),
+          scopeId: decodeImageGenerationScopeId(String(thread.id)),
+          ...(props.imageGenerationClient === undefined
+            ? {}
+            : { client: props.imageGenerationClient }),
+          ...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings }),
+        }}
         draft={props.controller.pendingDraft}
         caretRestoreKey={String(thread.id)}
         {...(props.controller.pendingDraftCaret === undefined

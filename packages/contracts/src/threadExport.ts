@@ -10,6 +10,7 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
+import { ImageArtifactId, ImageJobId } from "./imageGeneration";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
@@ -79,11 +80,21 @@ export const ThreadExportArtifact = Schema.Struct({
 }).annotations(strict);
 export type ThreadExportArtifact = typeof ThreadExportArtifact.Type;
 
+export const ThreadExportAttachmentGeneration = Schema.Struct({
+  jobId: ImageJobId,
+  profileInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  promptHash: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  parentAttachmentId: Schema.optional(ImageArtifactId),
+}).annotations(strict);
+export type ThreadExportAttachmentGeneration = typeof ThreadExportAttachmentGeneration.Type;
+
 export const ThreadExportAttachment = Schema.Struct({
   displayName: Schema.NonEmptyTrimmedString,
   mediaType: Schema.NonEmptyTrimmedString,
   byteLength: NonNegativeInt,
   status: Schema.NonEmptyTrimmedString,
+  generation: Schema.optional(ThreadExportAttachmentGeneration),
 }).annotations(strict);
 export type ThreadExportAttachment = typeof ThreadExportAttachment.Type;
 

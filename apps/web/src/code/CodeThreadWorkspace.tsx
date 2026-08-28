@@ -15,6 +15,11 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { CirclePause, UserRoundCog } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type { ImageGenerationProfileView } from "@octant/contracts";
+import { decodeImageGenerationScopeId } from "@octant/contracts";
+import { ImageGenerationAction } from "../image/ImageGenerationAction";
+import { GeneratedImageList } from "../image/GeneratedImageList";
 import { useQueuedSend } from "../composer/useQueuedSend";
 import type { TurnSettlement } from "../composer/queuedSend";
 import {
@@ -91,6 +96,9 @@ export interface CodeThreadWorkspaceProps {
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly threadId: CodeThreadId;
   readonly canvasClient?: CanvasClient;
+  readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
+  readonly onOpenSettings?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /**
@@ -1019,6 +1027,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
       <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
 
+      {props.imageGenerationClient === undefined ||
+      props.imageGenerationProfiles === undefined ? null : (
+        <GeneratedImageList
+          canSaveToProject
+          client={props.imageGenerationClient}
+          onAttach={(file) => attachments.attach([file])}
+          onSaveToProject={(job, artifact) => {
+            void props.imageGenerationClient?.save({
+              jobId: job.id,
+              attachmentId: artifact.attachmentId,
+              relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+            });
+          }}
+          profiles={props.imageGenerationProfiles}
+          scopeId={decodeImageGenerationScopeId(String(thread.id))}
+          threadKind="code-thread"
+        />
+      )}
       <ThreadComposer
         className={`code-thread-workspace__composer thread-column${
           queued.state.status === "idle"
@@ -1179,6 +1205,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ariaLabel: "Thread context",
           leading: (
             <>
+              {props.imageGenerationProfiles === undefined ? null : (
+                <ImageGenerationAction
+                  {...(props.imageGenerationClient === undefined
+                    ? {}
+                    : { client: props.imageGenerationClient })}
+                  {...(props.onOpenSettings === undefined
+                    ? {}
+                    : { onOpenSettings: props.onOpenSettings })}
+                  disabled={busy}
+                  profiles={props.imageGenerationProfiles}
+                  scopeId={decodeImageGenerationScopeId(String(thread.id))}
+                  threadKind="code-thread"
+                />
+              )}
               <ComposerModelPicker
                 ariaLabel="Provider and model"
                 disabled={busy || providerChanging}

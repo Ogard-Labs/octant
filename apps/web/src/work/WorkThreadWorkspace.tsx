@@ -38,6 +38,11 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type { ImageGenerationProfileView } from "@octant/contracts";
+import { decodeImageGenerationScopeId } from "@octant/contracts";
+import { ImageGenerationAction } from "../image/ImageGenerationAction";
+import { GeneratedImageList } from "../image/GeneratedImageList";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
@@ -65,6 +70,9 @@ export interface WorkThreadWorkspaceProps {
   readonly onOpenBrowser?: () => void;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly canvasClient?: CanvasClient;
+  readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
+  readonly onOpenSettings?: () => void;
   readonly hostId?: HostId;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -627,6 +635,29 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               <p>{status}</p>
             </article>
           )}
+          {props.imageGenerationClient === undefined ||
+          props.imageGenerationProfiles === undefined ? null : (
+            <GeneratedImageList
+              canSaveToProject
+              client={props.imageGenerationClient}
+              onAttach={(file) => images.attach([file])}
+              onSaveToProject={(job, artifact) => {
+                void props.imageGenerationClient
+                  ?.save({
+                    jobId: job.id,
+                    attachmentId: artifact.attachmentId,
+                    relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+                  })
+                  .then((result) => {
+                    if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
+                    else setStatus(result.reason);
+                  });
+              }}
+              profiles={props.imageGenerationProfiles}
+              scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+              threadKind="work-thread"
+            />
+          )}
         </div>
       </div>
 
@@ -769,6 +800,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     >
                       <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
                     </OctantButton>
+                    {props.imageGenerationProfiles === undefined ? null : (
+                      <ImageGenerationAction
+                        {...(props.imageGenerationClient === undefined
+                          ? {}
+                          : { client: props.imageGenerationClient })}
+                        {...(props.onOpenSettings === undefined
+                          ? {}
+                          : { onOpenSettings: props.onOpenSettings })}
+                        disabled={creating || completionLocked}
+                        profiles={props.imageGenerationProfiles}
+                        scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                        threadKind="work-thread"
+                      />
+                    )}
                   </>
                 ),
               actions: {

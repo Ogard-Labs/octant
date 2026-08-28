@@ -22,7 +22,11 @@ import {
   decodeProviderModelId,
   decodeUsageReconciliationId,
   decodeUtcTimestamp,
+  type GeminiImageAspectRatio,
   type GeminiImageProviderInstance,
+  type GeminiImageResolution,
+  type ImageArtifactId,
+  type ImageArtifactMediaType,
   type ImageArtifactRecord,
   type ImageGenerationScopeId,
   type ImageJob,
@@ -30,6 +34,8 @@ import {
   type ImageJobStatus,
   type ImageJobThreadKind,
   type OpenAiImageProviderInstance,
+  type OpenAiImageQuality,
+  type OpenAiImageSize,
   type ProviderInstance,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -80,6 +86,10 @@ export interface EnqueueImageJobInput {
   readonly parentArtifactRef?: ImageJob["parentArtifactRef"];
   readonly references?: ImageAdapterRequest["references"];
   readonly variantCount?: number;
+  readonly quality?: OpenAiImageQuality;
+  readonly size?: OpenAiImageSize;
+  readonly aspectRatio?: GeminiImageAspectRatio;
+  readonly resolution?: GeminiImageResolution;
 }
 
 export interface ImageJobServiceOptions {
@@ -145,6 +155,32 @@ export class ImageJobService {
     return this.#projection.getById(jobId);
   }
 
+  listByScope(scopeId: ImageGenerationScopeId): ReadonlyArray<ImageJob> {
+    return this.#projection.listByScope(scopeId);
+  }
+
+  async readArtifact(
+    jobId: ImageJobId,
+    attachmentId: ImageArtifactId,
+  ): Promise<{ readonly bytes: Uint8Array; readonly mime: ImageArtifactMediaType } | undefined> {
+    const job = this.#projection.getById(jobId);
+    if (job === undefined || job.status !== "completed") return undefined;
+    const artifact = job.artifacts.find(
+      (candidate) => String(candidate.attachmentId) === String(attachmentId),
+    );
+    if (artifact === undefined) return undefined;
+    const bytes = await this.#attachments.read({
+      scopeId: job.scopeId,
+      attachmentId: artifact.attachmentId,
+      displayName: "generated.png",
+      size: artifact.size,
+      hash: artifact.hash,
+      mime: artifact.mime,
+      finalizedAt: job.updatedAt,
+    });
+    return { bytes, mime: artifact.mime };
+  }
+
   whenTerminal(jobId: ImageJobId): Promise<ImageJob> {
     const persistenceError = this.#terminalPersistenceErrors.get(String(jobId));
     if (persistenceError !== undefined) return Promise.reject(persistenceError);
@@ -174,6 +210,25 @@ export class ImageJobService {
       mediaType: reference.mediaType,
       bytes: Uint8Array.from(reference.bytes),
     }));
+    if (input.parentArtifactRef !== undefined && references.length === 0) {
+      try {
+        const parentBytes = await this.#attachments.read({
+          scopeId: decodeImageGenerationScopeId(input.scopeId),
+          attachmentId: input.parentArtifactRef.attachmentId,
+          displayName: "parent.png",
+          size: input.parentArtifactRef.size,
+          hash: input.parentArtifactRef.hash,
+          mime: input.parentArtifactRef.mime,
+          finalizedAt: this.#clock(),
+        });
+        references.push({
+          mediaType: input.parentArtifactRef.mime,
+          bytes: Uint8Array.from(parentBytes),
+        });
+      } catch {
+        throw new ImageJobServiceError("invalid", "The parent image is unavailable.");
+      }
+    }
     let referenceBytes = 0;
     for (const reference of references) {
       if (reference.bytes.length === 0) {
@@ -223,6 +278,10 @@ export class ImageJobService {
       prompt: input.prompt,
       references,
       variantCount,
+      ...(input.quality === undefined ? {} : { quality: input.quality }),
+      ...(input.size === undefined ? {} : { size: input.size }),
+      ...(input.aspectRatio === undefined ? {} : { aspectRatio: input.aspectRatio }),
+      ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
     });
     this.#pump();
     return job;
@@ -269,6 +328,10 @@ export class ImageJobService {
       readonly prompt: string;
       readonly references: NonNullable<ImageAdapterRequest["references"]>;
       readonly variantCount: number;
+      readonly quality?: OpenAiImageQuality;
+      readonly size?: OpenAiImageSize;
+      readonly aspectRatio?: GeminiImageAspectRatio;
+      readonly resolution?: GeminiImageResolution;
     }
   >();
 
@@ -412,6 +475,10 @@ export class ImageJobService {
       readonly prompt: string;
       readonly references: NonNullable<ImageAdapterRequest["references"]>;
       readonly variantCount: number;
+      readonly quality?: OpenAiImageQuality;
+      readonly size?: OpenAiImageSize;
+      readonly aspectRatio?: GeminiImageAspectRatio;
+      readonly resolution?: GeminiImageResolution;
     },
     signal: AbortSignal,
   ): ImageAdapterRequest {
@@ -425,20 +492,22 @@ export class ImageJobService {
     };
     if (instance.configuration.kind === "openai-image-http") {
       const configuration = (instance as OpenAiImageProviderInstance).configuration;
+      const quality = work.quality ?? configuration.quality;
+      const size = work.size ?? configuration.size;
       return {
         ...request,
-        ...(configuration.quality === undefined ? {} : { quality: configuration.quality }),
-        ...(configuration.size === undefined ? {} : { size: configuration.size }),
+        ...(quality === undefined ? {} : { quality }),
+        ...(size === undefined ? {} : { size }),
       };
     }
     if (instance.configuration.kind === "gemini-native-image-http") {
       const configuration = (instance as GeminiImageProviderInstance).configuration;
+      const aspectRatio = work.aspectRatio ?? configuration.aspectRatio;
+      const resolution = work.resolution ?? configuration.resolution;
       return {
         ...request,
-        ...(configuration.aspectRatio === undefined
-          ? {}
-          : { aspectRatio: configuration.aspectRatio }),
-        ...(configuration.resolution === undefined ? {} : { resolution: configuration.resolution }),
+        ...(aspectRatio === undefined ? {} : { aspectRatio }),
+        ...(resolution === undefined ? {} : { resolution }),
       };
     }
     return request;
