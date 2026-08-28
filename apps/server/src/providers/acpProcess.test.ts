@@ -695,7 +695,7 @@ describe("Kimi Code immutable managed profile", () => {
     }
   });
 
-  it("keeps immutable managed-profile confinement and fails closed on Linux without Bubblewrap", async () => {
+  it("keeps immutable managed-profile confinement and fails closed on Linux even with Bubblewrap", async () => {
     expect(kimi.process.confinement.kind).toBe("immutable-managed-profile");
 
     const target = fixture(kimi);
