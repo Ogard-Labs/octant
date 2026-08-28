@@ -1,5 +1,6 @@
 import {
   decodeIntegrationAuthenticationCommand,
+  decodeIntegrationCommand,
   type IntegrationAuthenticationCommand,
 } from "@octant/contracts/integration";
 import type { IntegrationService } from "./integration/integrationService";
@@ -34,14 +35,17 @@ export function createIntegrationRouteHandler(dependencies: {
     if (url.search !== "") return failure("invalid", 400, origin);
     const snapshotRoute = api.rest === "authentication";
     const commandRoute = api.rest === "authentication/commands";
+    const operationRoute = api.rest === "operations";
     const secretRoute = api.rest === "secrets";
     if (snapshotRoute && request.method !== "GET" && request.method !== "HEAD") {
       return failure("invalid", 400, origin);
     }
-    if ((commandRoute || secretRoute) && request.method !== "POST") {
+    if ((commandRoute || operationRoute || secretRoute) && request.method !== "POST") {
       return failure("invalid", 400, origin);
     }
-    if (!snapshotRoute && !commandRoute && !secretRoute) return failure("invalid", 400, origin);
+    if (!snapshotRoute && !commandRoute && !operationRoute && !secretRoute) {
+      return failure("invalid", 400, origin);
+    }
 
     let body: unknown = undefined;
     if (!snapshotRoute) {
@@ -62,7 +66,7 @@ export function createIntegrationRouteHandler(dependencies: {
     } catch {
       return failure("unauthorized", 401, origin);
     }
-    if (snapshotRoute) {
+    if (snapshotRoute || operationRoute) {
       if (context.principal.kind !== "local-window" && context.principal.kind !== "remote-device") {
         return failure("unauthorized", 403, origin);
       }
@@ -82,6 +86,20 @@ export function createIntegrationRouteHandler(dependencies: {
         }
         return response(
           await dependencies.service.execute(api.slug, command, request.signal),
+          200,
+          origin,
+        );
+      }
+      if (operationRoute) {
+        let command;
+        try {
+          command = decodeIntegrationCommand(body);
+        } catch {
+          return failure("invalid", 400, origin);
+        }
+        if (command.kind !== "operation") return failure("invalid", 400, origin);
+        return response(
+          await dependencies.service.executeOperation(api.slug, command, request.signal),
           200,
           origin,
         );

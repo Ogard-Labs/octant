@@ -186,13 +186,12 @@ not rewritten.
 Boards for Work and Code remain server-authoritative; Chat gets no board.
 Moving the board into a plugin does not create a general task Kanban.
 
-GitHub issue browse and create-from-issue, when implemented, stay on the
-existing first-party GitHub plugin: a second `sidebar.destination`
-(`github-issues`), catalogue reads gated by `issues-read` through
-`/api/github/catalogue/reads`, and create-from-issue framing that never writes
-back. That work must not take a shortcut a later GitHub plugin could not take,
-and it does not wait for step 5 extraction. Disabled GitHub contributes no
-Issues row. See
+GitHub issue browse stays on the existing first-party GitHub plugin: a second
+`sidebar.destination` (`github-issues`), catalogue reads gated by `issues-read`
+through `/api/github/catalogue/reads`. Create-from-issue frames that same read
+and never writes back. That work must not take a shortcut a later GitHub plugin
+could not take, and it does not wait for step 5 extraction. Disabled GitHub
+contributes no Issues row. See
 [github-repository-onboarding-threat-model.md](../security/github-repository-onboarding-threat-model.md).
 
 ### 4. Migration sequence
@@ -272,14 +271,13 @@ static first-party manifest catalog and the effective activation map; it does
 not decide availability. Bundled `@octant` appearance-pack and preview-viewer
 plugins prove those two points: the branded Octant theme preset and the
 structured preview viewers come from those contributions and disappear when
-the component is not effective. Settings sections still come from the
-host-compiled `octantSettingsRegistry`, and sidebar destinations other than
-`thread-board` and `pull-requests` are discarded, so plugin-provided Settings
-and navigation are not yet a published seam. Completing that seam, and
-publishing the Integration port, are step 4 and land before Linear. Step 4
-landed: `settings.section` and `sidebar.destination` render plugin modules,
-and the typed Integration host port and module loader exist. Extracting the
-thread board and GitHub remains step 5. Linear is not on that extraction
+the component is not effective. Host-compiled `octantSettingsRegistry` rows
+remain; GitHub and Linear Settings sections, and the `thread-board`,
+`pull-requests`, and `github-issues` sidebar destinations, render as plugin
+modules. Other sidebar destinations are discarded. Step 4 landed:
+`settings.section` and `sidebar.destination` render plugin modules, and the
+typed Integration host port and module loader exist.
+Extracting the thread board and GitHub packages remains step 5. Linear is not on that extraction
 list: it is added as a bundled-off plugin through the Integration kind after
 those host seams exist, and that Settings OAuth path is now the first
 Integration plugin on those ports. Packaging remaining zen/appearance assets and every

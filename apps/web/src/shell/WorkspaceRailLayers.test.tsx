@@ -30,6 +30,13 @@ import { decodeCodeThreadId } from "@octant/contracts/code";
 
 const codeThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000805");
 
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 const automationGate = vi.hoisted(() => ({ enabled: false }));
 vi.mock("../automation/automationCenterGate", () => ({
   get AUTOMATION_CENTER_NAVIGATION_ENABLED() {
@@ -61,6 +68,7 @@ describe("WorkspaceRailLayers", () => {
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Issues" })).not.toBeInTheDocument();
   });
 
   it("opens the Code pull-request workspace from the sidebar without refreshing GitHub", async () => {
@@ -84,6 +92,94 @@ describe("WorkspaceRailLayers", () => {
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
     expect(codeApi.queryProjectPullRequests).toHaveBeenCalledWith({ version: 1 });
     expect(codeApi.refreshProjectPullRequests).not.toHaveBeenCalled();
+  });
+
+  it("opens the host-scoped GitHub issue browser from the gated Issues row", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/api/github/authentication")) {
+          return jsonResponse({
+            state: "ready",
+            account: { login: "octocat", gitProtocol: "https", scopes: ["repo"] },
+            capabilities: [
+              { kind: "repository-catalogue", available: true },
+              { kind: "issues-read", available: true },
+              { kind: "pull-requests-read", available: true },
+              { kind: "projects-read", available: false },
+            ],
+          });
+        }
+        if (url.endsWith("/api/github/catalogue/reads")) {
+          const body = JSON.parse(String(init?.body ?? "{}")) as { readonly kind?: string };
+          if (body.kind === "recent-repositories") {
+            return jsonResponse({ kind: "recent-repositories", rows: [] });
+          }
+          if (body.kind === "repositories") {
+            return jsonResponse({
+              kind: "repositories",
+              page: {
+                rows: [
+                  {
+                    nodeId: "R_kgDOG8x1Aa",
+                    owner: "octant",
+                    name: "octant",
+                    visibility: "private",
+                    defaultBranch: "development",
+                    viewerPermission: "admin",
+                    capabilities: [{ kind: "issues-read", available: true }],
+                  },
+                ],
+                sort: "pushed-desc",
+                hasNextPage: false,
+                freshness: { status: "fresh" },
+              },
+            });
+          }
+          if (body.kind === "issues") {
+            return jsonResponse({
+              kind: "issues",
+              page: {
+                rows: [
+                  {
+                    number: 12,
+                    title: "Catalogue search",
+                    state: "open",
+                    author: "octocat",
+                    updatedAt: "2026-08-28T09:00:00.000Z",
+                    url: "https://github.com/octant/octant/issues/12",
+                  },
+                ],
+                sort: "updated-desc",
+                hasNextPage: false,
+                freshness: { status: "fresh" },
+              },
+            });
+          }
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Issues" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Issues" }));
+    expect(await screen.findByRole("region", { name: "GitHub issues" })).toBeVisible();
+    expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
+    expect(await screen.findByRole("option", { name: /octant\/octant/ })).toBeVisible();
   });
 
   it("opens the complete Automation Center from the sidebar once the release gate flips", async () => {

@@ -61,6 +61,7 @@
     "./host-control": "./src/hostControl.ts",
     "./host-data-map": "./src/hostDataMap.ts",
     "./integration": "./src/integration.ts",
+    "./linear-issues": "./src/linearIssues.ts",
     "./remote-access": "./src/remoteAccess.ts",
     "./remote-push-notifications": "./src/remotePushNotifications.ts",
     "./remote-request-proof": "./src/remoteRequestProof.ts",

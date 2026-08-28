@@ -238,12 +238,15 @@ cache. It stores only exact PR identities already produced by Code operations,
 so a restart can show an identity as stale and unknown until the next explicit
 refresh.
 
-**Approved GitHub issue browser, not yet implemented.** The first-party GitHub
-plugin contributes a second `sidebar.destination` (`github-issues`) that opens
-a host-scoped, read-only issue browser. The sidebar row is shown only when the
-contribution is present, its action is wired, and the authentication snapshot
-reports `issues-read` available. Catalogue reads stay on the existing
-`githubCatalogue` union over `/api/github/catalogue/reads`.
+**GitHub issue browser.** The first-party GitHub plugin contributes a second
+`sidebar.destination` (`github-issues`) that opens a host-scoped, read-only
+issue browser. The sidebar row is shown only when the contribution is present,
+its action is wired, and the authentication snapshot reports `issues-read`
+available. Catalogue reads stay on the existing `githubCatalogue` union over
+`/api/github/catalogue/reads`: `kind: "issues"` includes optional
+server-composed search, and `kind: "issue"` returns a bounded detail. The
+browser renders title, body, and comments as plain text; links stay inert full
+URLs.
 
 Create-from-issue is implemented. The composer `Create from…` Issues tab
 attaches only `{ owner, name, number }` to the draft. At creation the server
@@ -254,6 +257,19 @@ resulting thread is ordinary Chat, Work, or Code with no GitHub write-back.
 Disabled GitHub, missing capability, and unauthorized or rate-limited states
 fail closed. See
 [security/github-repository-onboarding-threat-model.md](security/github-repository-onboarding-threat-model.md).
+
+Code also has a host-scoped Linear issues workspace contributed by the
+bundled-off Linear plugin as `sidebar.destination` `linear-issues`, Code mode
+only. The sidebar row is shown only when that contribution is effective, its
+action is wired, and the Linear authentication snapshot reports `list-issues`
+available. Browse goes through the Integration port (`list-issues`,
+`get-issue`, `list-issue-filters`) over Linear GraphQL with bounded page size
+and description bytes. Issue bodies are a live projection, not Octant source of
+truth; credentials and raw API payloads never enter prompts or tool output.
+Open in Linear is an external `linear.app` URL. Disabled, untrusted,
+unauthorized, expired, or rate-limited Linear contributes no sidebar item,
+catalogue rows, or thread context. Create-from-issue, writes, and Chat/Work
+browse are not this surface.
 
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
@@ -388,6 +404,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
   (Kilo Code, Devin, Mistral Vibe, Kimi Code, Grok Build). Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
+  Generation itself is a journaled job with OpenAI and Gemini adapters, a
+  bounded generated-image attachment scope, and usage rows attributed as
+  `image-generation`; see
+  [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
+  Invocation and thread preview are not part of that record.
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;

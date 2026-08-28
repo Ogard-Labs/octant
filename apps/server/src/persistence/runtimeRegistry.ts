@@ -102,6 +102,10 @@ import {
   ThreadCheckpointRestored,
   GithubCloneRequested,
   GithubCloneTransitioned,
+  IMAGE_JOB_QUEUED,
+  IMAGE_JOB_STATUS_CHANGED,
+  ImageJobQueued,
+  ImageJobStatusChanged,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   ThreadRetentionWindowSet,
@@ -190,6 +194,7 @@ import {
   GITHUB_CLONE_TRANSITIONED,
   GithubCloneProjection,
 } from "./githubCloneProjection";
+import { ImageJobProjection } from "../image/imageJobProjection";
 
 const fixtureRecordedPayload = Schema.Struct({ value: Schema.String });
 
@@ -200,6 +205,7 @@ export interface Phase1RuntimeRegistries {
   readonly canvasProjection: CanvasProjection;
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
+  readonly imageJobProjection: ImageJobProjection;
   readonly hostIdentityMigrations: HostIdentityMigrationRegistry;
 }
 
@@ -330,6 +336,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(THREAD_CHECKPOINT_RESTORED, 1, ThreadCheckpointRestored)
     .register(GITHUB_CLONE_REQUESTED, 1, GithubCloneRequested)
     .register(GITHUB_CLONE_TRANSITIONED, 1, GithubCloneTransitioned)
+    .register(IMAGE_JOB_QUEUED, 1, ImageJobQueued)
+    .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload);
@@ -347,6 +355,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   const canvasProjection = new CanvasProjection();
   const automationProjection = new AutomationProjection();
   const githubCloneProjection = new GithubCloneProjection();
+  const imageJobProjection = new ImageJobProjection();
 
   return {
     events,
@@ -355,6 +364,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     canvasProjection,
     automationProjection,
     githubCloneProjection,
+    imageJobProjection,
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())
       .register(new ProjectProjection())
@@ -369,6 +379,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(canvasProjection)
       .register(automationProjection)
       .register(githubCloneProjection)
+      .register(imageJobProjection)
       .register(new ZenProjection())
       .register(new AgentProfileProjection())
       .register(new ValidationEvidenceProjection())

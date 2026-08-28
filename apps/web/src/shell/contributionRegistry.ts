@@ -52,7 +52,12 @@ function contributionsOf<T extends ExtensionContribution>(
 }
 
 function isSidebarDestinationId(value: string): value is SidebarNavigationDescriptorId {
-  return value === "thread-board" || value === "pull-requests";
+  return (
+    value === "thread-board" ||
+    value === "pull-requests" ||
+    value === "github-issues" ||
+    value === "linear-issues"
+  );
 }
 
 /**

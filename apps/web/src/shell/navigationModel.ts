@@ -22,6 +22,8 @@ export type SidebarNavigationDescriptorId =
   | "plugins"
   | "thread-board"
   | "pull-requests"
+  | "github-issues"
+  | "linear-issues"
   | "projects";
 
 export type SidebarAppMenuDescriptorId = "agents" | "automations" | "artifact-library" | "plugins";
@@ -37,6 +39,8 @@ export interface SidebarNavigationInput {
   readonly projects: NavigationAvailability;
   readonly threadBoard: NavigationAvailability;
   readonly pullRequests: NavigationAvailability;
+  readonly githubIssues: NavigationAvailability;
+  readonly linearIssues: NavigationAvailability;
   readonly plugins: NavigationAvailability;
   readonly automationsEnabled: boolean;
   readonly agentsCenterEnabled: boolean;
@@ -138,6 +142,8 @@ const descriptors = {
   plugins: { id: "plugins", label: "Plugins" },
   "thread-board": { id: "thread-board", label: "Thread board" },
   "pull-requests": { id: "pull-requests", label: "Pull requests" },
+  "github-issues": { id: "github-issues", label: "Issues" },
+  "linear-issues": { id: "linear-issues", label: "Linear" },
   projects: { id: "projects", label: "Projects" },
 } as const satisfies Record<SidebarNavigationDescriptorId, SidebarNavigationDescriptor>;
 
@@ -160,7 +166,9 @@ export function buildSidebarNavigation(
       return [
         ...(input.createThread === "available" ? [descriptors["new-code-thread"]] : []),
         ...(input.threadBoard === "available" ? [descriptors["thread-board"]] : []),
+        ...(input.githubIssues === "available" ? [descriptors["github-issues"]] : []),
         ...(input.pullRequests === "available" ? [descriptors["pull-requests"]] : []),
+        ...(input.linearIssues === "available" ? [descriptors["linear-issues"]] : []),
         ...(input.projects === "available" ? [descriptors.projects] : []),
       ];
   }
