@@ -101,6 +101,16 @@ describe("Linear issue context", () => {
     expect(authorization).not.toContain("Bearer");
   });
 
+  it("redacts an authorization header without consuming the following line", () => {
+    const redacted = redactLinearIssueContextText(
+      "authorization: Bearer secret-token-value\nIssue description stays",
+    );
+    expect(redacted).toContain("[redacted]");
+    expect(redacted).not.toContain("secret-token-value");
+    expect(redacted).not.toContain("Bearer");
+    expect(redacted).toContain("Issue description stays");
+  });
+
   it("frames prepared issue context as untrusted external workspace data", async () => {
     const { service: context } = service({});
     const prepared = await context.prepare(

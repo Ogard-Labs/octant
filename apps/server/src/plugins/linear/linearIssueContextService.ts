@@ -171,14 +171,15 @@ export class LinearIssueContextService {
 }
 
 export function redactLinearIssueContextText(value: string): string {
-  // oxlint-disable-next-line no-control-regex -- NUL, C0, and DEL must not reach the model.
-  let normalized = value.replaceAll(/[\u0000-\u001f\u007f]/g, " ");
+  // Redact while CR/LF still bound authorization values; then strip controls.
+  let normalized = value;
   for (let pass = 0; pass < 5; pass += 1) {
     SECRETISH.lastIndex = 0;
     if (!SECRETISH.test(normalized)) break;
     normalized = normalized.replaceAll(SECRETISH, "[redacted]");
   }
-  return normalized;
+  // oxlint-disable-next-line no-control-regex -- NUL, C0, and DEL must not reach the model.
+  return normalized.replaceAll(/[\u0000-\u001f\u007f]/g, " ");
 }
 
 export function composeLinearIssueContextBlock(fields: LinearIssueContextFields): string {
