@@ -631,6 +631,7 @@ function LaunchedShell(
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
   const [linearIssuesRead, setLinearIssuesRead] = useState(false);
+  const linearAvailabilityGenerationRef = useRef(0);
   const [selectedProjectPullRequest, setSelectedProjectPullRequest] = useState<
     CodeProjectPullRequestDetailQuery | undefined
   >();
@@ -1149,6 +1150,7 @@ function LaunchedShell(
   const linearClient = useMemo(
     () =>
       withLinearIssuesReadSync(linearTransport, (available) => {
+        linearAvailabilityGenerationRef.current += 1;
         setLinearIssuesRead(available);
         if (!available) setLinearIssuesOpen(false);
       }),
@@ -1177,16 +1179,18 @@ function LaunchedShell(
       setLinearIssuesOpen(false);
       return;
     }
+    const generation = linearAvailabilityGenerationRef.current + 1;
+    linearAvailabilityGenerationRef.current = generation;
     let cancelled = false;
     void linearTransport.authenticationSnapshot().then(
       (snapshot) => {
-        if (cancelled) return;
+        if (cancelled || generation !== linearAvailabilityGenerationRef.current) return;
         const available = linearIssuesReadAvailable(snapshot);
         setLinearIssuesRead(available);
         if (!available) setLinearIssuesOpen(false);
       },
       () => {
-        if (cancelled) return;
+        if (cancelled || generation !== linearAvailabilityGenerationRef.current) return;
         setLinearIssuesRead(false);
         setLinearIssuesOpen(false);
       },
