@@ -42,6 +42,9 @@ without over-trusting a surface that has not shipped.
 
 - [Remote access](/advanced/remote-access) — authenticated LAN and Tailscale access to one host.
 - [Privacy and security](/advanced/privacy-and-security) — local-first storage, credentials, approvals, confinement, and the two host-initiated HTTPS calls.
+- [Privacy notice](/advanced/privacy-notice) — draft: what data exists, where it lives, what leaves, and export or purge.
+- [Sub-processors](/advanced/sub-processors) — draft: BYO providers are the user's processors, not Octant's.
+- [Data residency](/advanced/data-residency) — draft: local-first means this machine, in its region.
 - [Recovery and troubleshooting](/advanced/recovery) — replay, rebuilds, conflict recovery, and diagnostic tooling.
 - [Release compatibility](/advanced/release-compatibility) — technical-preview boundaries, data location, and migration notes.
 
