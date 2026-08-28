@@ -11,6 +11,7 @@ import {
   IMAGE_JOB_QUEUED,
   IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE,
   IMAGE_JOB_STATUS_CHANGED,
+  MAX_GENERATED_IMAGE_BYTES,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_VARIANTS,
   decodeImageArtifactId,
@@ -166,6 +167,20 @@ export class ImageJobService {
     ) {
       throw new ImageJobServiceError("invalid", "The requested variant count is not supported.");
     }
+    const references = input.references ?? [];
+    let referenceBytes = 0;
+    for (const reference of references) {
+      if (reference.bytes.length === 0) {
+        throw new ImageJobServiceError("invalid", "A reference image must not be empty.");
+      }
+      if (reference.bytes.length > MAX_GENERATED_IMAGE_BYTES) {
+        throw new ImageJobServiceError("invalid", "A reference image exceeded the size limit.");
+      }
+      referenceBytes += reference.bytes.length;
+      if (referenceBytes > MAX_GENERATED_IMAGE_BYTES * 2) {
+        throw new ImageJobServiceError("invalid", "Reference images exceeded the size limit.");
+      }
+    }
     const instance = this.#readProviderInstance(input.profileInstanceId);
     if (instance === undefined) {
       throw new ImageJobServiceError("ineligible", "The image profile does not exist.");
@@ -200,7 +215,7 @@ export class ImageJobService {
     this.#pending.push(job.id);
     this.#work.set(String(job.id), {
       prompt: input.prompt,
-      references: input.references ?? [],
+      references,
       variantCount,
     });
     this.#pump();
@@ -213,6 +228,7 @@ export class ImageJobService {
     if (job.status === "queued") {
       const index = this.#pending.indexOf(job.id);
       if (index >= 0) this.#pending.splice(index, 1);
+      this.#work.delete(String(job.id));
       const next = this.#transition(job, "cancelled");
       this.#resolve(next);
       return next;
@@ -275,10 +291,14 @@ export class ImageJobService {
         const job = this.#projection.getById(jobId);
         if (job === undefined || job.status !== "queued") continue;
         this.#running += 1;
-        void this.#run(job).finally(() => {
-          this.#running -= 1;
-          this.#pump();
-        });
+        void this.#run(job)
+          .catch((error: unknown) => {
+            this.#recordUnhandledFailure(job, error);
+          })
+          .finally(() => {
+            this.#running -= 1;
+            this.#pump();
+          });
       }
     } finally {
       this.#pumping = false;
@@ -333,6 +353,16 @@ export class ImageJobService {
             ? this.#transition(running, toStatus, { failure: result.providerFailure })
             : this.#transition(running, toStatus);
         this.#resolve(next);
+        return;
+      }
+      if (result.images.length > work.variantCount) {
+        const failed = this.#transition(running, "failed", {
+          failure: {
+            category: "protocol",
+            message: "The provider returned more images than requested.",
+          },
+        });
+        this.#resolve(failed);
         return;
       }
       const artifacts = await this.#finalizeArtifacts(running, result.images);
@@ -594,6 +624,28 @@ export class ImageJobService {
       throw new ImageJobServiceError("invalid", "The image job does not exist.");
     }
     return job;
+  }
+
+  #recordUnhandledFailure(job: ImageJob, error: unknown): void {
+    void error;
+    const current = this.#projection.getById(job.id) ?? job;
+    if (isImageJobTerminalStatus(current.status)) {
+      this.#resolve(current);
+      return;
+    }
+    try {
+      const failed = this.#transition(current, "failed", {
+        failure: {
+          category: "provider-failed",
+          message: "The image job failed.",
+        },
+      });
+      this.#resolve(failed);
+    } catch {
+      this.#deferred(job.id).resolve(current);
+      this.#waiters.delete(String(job.id));
+      this.#work.delete(String(job.id));
+    }
   }
 
   #deferred(jobId: ImageJobId): Deferred<ImageJob> {

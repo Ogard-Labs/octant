@@ -5,12 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   IMAGE_GENERATION_REQUEST_SHAPE,
   IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE,
+  MAX_GENERATED_IMAGE_BYTES,
   decodeImageGenerationScopeId,
   decodeProviderInstanceId,
   decodeProviderModelId,
   type ProviderInstance,
 } from "@octant/contracts";
 import { Journal } from "../persistence/journal";
+import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
@@ -59,18 +61,39 @@ function imageProfile(): ProviderInstance {
   };
 }
 
-function openHarness(adapter: ImageGenerationAdapter) {
+function openHarness(
+  adapter: ImageGenerationAdapter,
+  options: { readonly concurrency?: number; readonly failAppendAfter?: number } = {},
+) {
   const directory = mkdtempSync(join(tmpdir(), "octant-image-job-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "octant.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => now);
   const runtime = createPhase1RuntimeRegistries();
-  const journal = new Journal({
+  const innerJournal = new Journal({
     connection,
     registry: runtime.events,
     projections: runtime.projections,
     clock: () => now,
   });
+  let appendCount = 0;
+  const journal =
+    options.failAppendAfter === undefined
+      ? innerJournal
+      : {
+          append: (input: unknown) => {
+            appendCount += 1;
+            if (appendCount > options.failAppendAfter!) {
+              throw new ConcurrencyConflict({
+                aggregateType: "image-job",
+                aggregateId: "a3000000-0000-4000-8000-000000000099",
+                expectedVersion: 2,
+                actualVersion: 3,
+              });
+            }
+            return innerJournal.append(input);
+          },
+        };
   const attachments = new GeneratedImageStore(directory);
   let clockMs = Date.parse(now);
   const service = new ImageJobService({
@@ -83,8 +106,9 @@ function openHarness(adapter: ImageGenerationAdapter) {
     clock: () => new Date(clockMs++).toISOString(),
     actor,
     createAdapter: () => adapter,
+    ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
   });
-  return { directory, connection, journal, runtime, attachments, service };
+  return { directory, connection, journal: innerJournal, runtime, attachments, service };
 }
 
 function successfulAdapter(): ImageGenerationAdapter {
@@ -178,6 +202,119 @@ describe("image job service", () => {
     expect(cancelled.artifacts).toEqual([]);
     expect(await attachments.hasTemporaryFiles()).toBe(false);
     void release;
+  });
+
+  it("cancels a queued job without later invoking the adapter", async () => {
+    const generate = vi.fn(
+      async (request) =>
+        new Promise<never>((_resolve, reject) => {
+          request.signal?.addEventListener("abort", () => {
+            reject({ category: "interrupted", message: "The provider request was cancelled." });
+          });
+        }),
+    );
+    const { service } = openHarness({ generate }, { concurrency: 1 });
+    const running = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "hold the slot",
+    });
+    await vi.waitFor(() => {
+      expect(service.get(running.id)?.status).toBe("running");
+    });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "do not keep this prompt",
+      references: [{ bytes: png, mediaType: "image/png" }],
+    });
+    expect(service.get(queued.id)?.status).toBe("queued");
+    const cancelled = await service.cancel(queued.id);
+    expect(cancelled.status).toBe("cancelled");
+    await service.cancel(running.id);
+    expect(generate).toHaveBeenCalledOnce();
+    expect(service.get(queued.id)?.status).toBe("cancelled");
+  });
+
+  it("refuses oversized reference images before they are forwarded", async () => {
+    const generate = vi.fn(async () => ({
+      status: "completed" as const,
+      images: [{ bytes: png, mediaType: "image/png" as const }],
+    }));
+    const { service } = openHarness({ generate });
+    await expect(
+      service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: profileId,
+        modelId,
+        prompt: "edit this",
+        references: [
+          {
+            bytes: new Uint8Array(MAX_GENERATED_IMAGE_BYTES + 1),
+            mediaType: "image/png",
+          },
+        ],
+      }),
+    ).rejects.toThrow("size limit");
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("rejects extra adapter images before staging artifacts", async () => {
+    const { service, attachments } = openHarness({
+      generate: async () => ({
+        status: "completed",
+        images: [
+          { bytes: png, mediaType: "image/png" },
+          { bytes: png, mediaType: "image/png" },
+        ],
+      }),
+    });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "one cube",
+    });
+    const failed = await service.whenTerminal(queued.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.artifacts).toEqual([]);
+    expect(await attachments.hasTemporaryFiles()).toBe(false);
+  });
+
+  it("records a terminal failure when job execution cannot journal its outcome", async () => {
+    const rejections: unknown[] = [];
+    const onReject = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on("unhandledRejection", onReject);
+    try {
+      const { service } = openHarness(
+        {
+          generate: async () => {
+            throw new Error("adapter exploded");
+          },
+        },
+        { failAppendAfter: 2 },
+      );
+      const queued = await service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: profileId,
+        modelId,
+        prompt: "explode",
+      });
+      await expect(service.whenTerminal(queued.id)).resolves.toBeDefined();
+      await Promise.resolve();
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onReject);
+    }
   });
 
   it("fails a job found running after restart without re-invoking the provider", async () => {

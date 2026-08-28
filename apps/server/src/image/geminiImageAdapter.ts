@@ -97,6 +97,21 @@ async function generateGeminiImage(input: {
       providerFailure: fail("invalid-configuration", "The selected model id is not valid."),
     };
   }
+  const variantCount = input.request.variantCount ?? 1;
+  if (
+    !Number.isSafeInteger(variantCount) ||
+    variantCount < 1 ||
+    variantCount > MAX_IMAGE_VARIANTS
+  ) {
+    return {
+      status: "failed",
+      providerFailure: fail(
+        "invalid-configuration",
+        "The requested variant count is not supported.",
+      ),
+    };
+  }
+  const maxImages = Math.min(variantCount, MAX_IMAGE_VARIANTS);
 
   const parts: Array<Record<string, unknown>> = [{ text: input.request.prompt }];
   for (const reference of input.request.references ?? []) {
@@ -112,6 +127,7 @@ async function generateGeminiImage(input: {
   if (input.request.resolution !== undefined) imageConfig.imageSize = input.request.resolution;
   const generationConfig: Record<string, unknown> = {
     responseModalities: ["TEXT", "IMAGE"],
+    candidateCount: maxImages,
     ...(Object.keys(imageConfig).length === 0 ? {} : { imageConfig }),
   };
   const body = {
@@ -158,6 +174,12 @@ async function generateGeminiImage(input: {
     return {
       status: "failed",
       providerFailure: fail("protocol", "The provider returned an invalid image response."),
+    };
+  }
+  if (decoded.images.length > maxImages) {
+    return {
+      status: "failed",
+      providerFailure: fail("protocol", "The provider returned more images than requested."),
     };
   }
 

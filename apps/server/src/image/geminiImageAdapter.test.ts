@@ -64,6 +64,40 @@ describe("Gemini image adapter", () => {
     expect(JSON.stringify(result)).not.toContain(SECRET);
   });
 
+  it("asks for the requested variant count and rejects extra inline images before completion", async () => {
+    const fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        generationConfig: { candidateCount: number };
+      };
+      expect(body.generationConfig.candidateCount).toBe(1);
+      return Response.json({
+        candidates: [
+          {
+            content: {
+              parts: [
+                { inlineData: { mimeType: "image/png", data: pngB64 } },
+                { inlineData: { mimeType: "image/png", data: pngB64 } },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+      });
+    });
+
+    const result = await adapter(fetch).generate({
+      instanceId,
+      modelId,
+      prompt: "one cube",
+      variantCount: 1,
+    });
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.providerFailure.category).toBe("protocol");
+      expect(result.providerFailure.message).toContain("more images");
+    }
+  });
+
   it("sends reference images as inline data for an edit", async () => {
     const fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body)) as {

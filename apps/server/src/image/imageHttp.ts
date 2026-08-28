@@ -66,6 +66,15 @@ export async function performImageHttpRequest(request: ImageHttpRequest): Promis
       }
       headers.set("content-type", "application/json");
     }
+    if (
+      request.form !== undefined &&
+      formPayloadBytes(request.form) > request.limits.requestBodyBytes
+    ) {
+      throw fail(
+        "invalid-configuration",
+        "The provider request exceeded the configured size limit.",
+      );
+    }
 
     let response: Response;
     try {
@@ -328,4 +337,22 @@ function parseContentLength(value: string | null): number | undefined {
 
 function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted ?? false;
+}
+
+function formPayloadBytes(form: FormData): number {
+  let total = 0;
+  for (const value of form.values()) {
+    const entry: unknown = value;
+    if (typeof entry === "string") {
+      total += Buffer.byteLength(entry, "utf8");
+    } else if (isFormBlob(entry)) {
+      total += entry.size;
+    }
+  }
+  return total;
+}
+
+function isFormBlob(value: unknown): value is Blob {
+  if (typeof value !== "object" || value === null || !("size" in value)) return false;
+  return typeof value.size === "number";
 }

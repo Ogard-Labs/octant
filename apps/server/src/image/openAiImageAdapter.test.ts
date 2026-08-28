@@ -23,7 +23,10 @@ function resolver(credential = SECRET): ProviderCredentialResolver {
   };
 }
 
-function adapter(fetch: ImageHttpFetch, limits?: { connectionTimeoutMs?: number }) {
+function adapter(
+  fetch: ImageHttpFetch,
+  limits?: { connectionTimeoutMs?: number; requestBodyBytes?: number },
+) {
   return makeOpenAiImageAdapter({
     instanceId,
     credentialResolver: resolver(),
@@ -75,6 +78,19 @@ describe("OpenAI image adapter", () => {
 
     const result = await adapter(fetch).generate(request({ references: png }));
     expect(result.status).toBe("completed");
+  });
+
+  it("rejects a multipart edit that exceeds the request body limit before fetch", async () => {
+    const fetch = vi.fn(async () => Response.json({ data: [{ b64_json: pngB64 }] }));
+    const oversized = new Uint8Array(200);
+    const result = await adapter(fetch, { requestBodyBytes: 50 }).generate(
+      request({ references: oversized }),
+    );
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.providerFailure.category).toBe("invalid-configuration");
+    }
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("surfaces a safety refusal as terminal and does not treat it as a retryable failure", async () => {
