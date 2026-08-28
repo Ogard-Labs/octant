@@ -43,7 +43,7 @@ Read the record that owns your change before editing, not all of them:
 | Provider drivers, capabilities, registry, harness   | `docs/decisions/0005`–`docs/decisions/0007`, `docs/decisions/0055`  |
 | Image generation jobs, adapters, and artifacts      | `docs/decisions/0055`, `docs/decisions/0056`                        |
 | Context limits, capacity, scheduling                | `docs/decisions/0008`                                               |
-| Usage spend ceilings (Project / thread)             | `docs/decisions/0059`                                               |
+| Usage spend ceilings (Project / thread)             | `docs/decisions/0060`                                               |
 | Sandbox, approvals, Plan mode, access postures      | `docs/decisions/0009`, `docs/decisions/0018`, `docs/decisions/0057` |
 | File preview and canvas artifacts                   | `docs/decisions/0010`                                               |
 | Canvas boards, comments, and layout revisions       | `docs/decisions/0052`                                               |
@@ -54,6 +54,7 @@ Read the record that owns your change before editing, not all of them:
 | Collaboration, shared host, git-mediated sharing    | `docs/decisions/0040`                                               |
 | Cross-platform desktop packaging and updates        | `docs/decisions/0034`, `docs/decisions/0058`                        |
 | Apple build and validation                          | `docs/decisions/0014`                                               |
+| Signed updates and in-app changelog                 | `docs/decisions/0034`, `docs/decisions/0061`                        |
 | Computer-use destinations                           | `docs/decisions/0053`                                               |
 | Shell, navigation, workspace layout                 | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`  |
 | Components and theme                                | `docs/decisions/0016`, `docs/decisions/0046`                        |
