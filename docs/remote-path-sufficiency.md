@@ -22,12 +22,12 @@ produces a concrete failure that LAN, Tailscale, or SSH cannot fix.
 
 Observed and expected shapes that look like "relay demand" but are not:
 
-| Symptom | Usually caused by | Prefer |
-| --- | --- | --- |
-| Phone cannot reach host off-home Wi-Fi | No mesh; CGNAT; host asleep | Tailscale (or similar) on host and phone; wake policy |
-| Browser on another LAN machine fails TLS | Wrong bind, cert trust, HTTP attempted | Existing remote listener rules in 0013 |
-| SSH tunnel works but is fiddly | User-managed tunnel UX | Docs and pairing polish; still not a relay |
-| Corporate laptop cannot join personal Tailscale | Policy, not product | Stay on that org's mesh or SSH; Octant must not become the bypass |
+| Symptom                                         | Usually caused by                      | Prefer                                                            |
+| ----------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------- |
+| Phone cannot reach host off-home Wi-Fi          | No mesh; CGNAT; host asleep            | Tailscale (or similar) on host and phone; wake policy             |
+| Browser on another LAN machine fails TLS        | Wrong bind, cert trust, HTTP attempted | Existing remote listener rules in 0013                            |
+| SSH tunnel works but is fiddly                  | User-managed tunnel UX                 | Docs and pairing polish; still not a relay                        |
+| Corporate laptop cannot join personal Tailscale | Policy, not product                    | Stay on that org's mesh or SSH; Octant must not become the bypass |
 
 A relay becomes interesting only when several independent dogfooders hit the
 same hard stop: reachable ciphertext path between an already-paired device and
