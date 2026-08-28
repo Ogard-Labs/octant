@@ -42,7 +42,15 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { Aperture, FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import {
   CodeComposerAdapter,
   type CodeComposerSubmitInput,
@@ -260,14 +268,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           displayName: selectedProject?.name ?? selectedProjectLabel ?? "Selected Project",
         };
   const projectEntries: ReadonlyArray<ComposerProjectEntry> = [
-    ...compatibleProjects.map(
-      (project): ComposerProjectEntry => ({
-        kind: "saved-project",
-        projectId: project.id,
-        displayName: project.name,
-        rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
-      }),
-    ),
+    ...compatibleProjects.map((project): ComposerProjectEntry => ({
+      kind: "saved-project",
+      projectId: project.id,
+      displayName: project.name,
+      rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
+    })),
     { kind: "add-folder" },
   ];
   const folderControl =
@@ -472,13 +478,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             : { imageGeneration: props.imageGeneration })}
           onCreateThread={(prompt, images, threadMentionIds) =>
             issueContext === undefined && linearIssueContext === undefined
-              ? props.onCreateThread(
-                  prompt,
-                  selectedProjectId,
-                  undefined,
-                  images,
-                  threadMentionIds,
-                )
+              ? props.onCreateThread(prompt, selectedProjectId, undefined, images, threadMentionIds)
               : props.onCreateThread(
                   prompt,
                   selectedProjectId,

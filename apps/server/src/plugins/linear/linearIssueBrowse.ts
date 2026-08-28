@@ -216,9 +216,7 @@ function readIssueDetail(body: unknown): LinearIssueDetail | undefined {
 const COMMENT_BODY_MAX_BYTES = 2 * 1024;
 const COMMENT_MAX_COUNT = 10;
 
-function readIssueComments(
-  value: unknown,
-):
+function readIssueComments(value: unknown):
   | ReadonlyArray<{
       readonly author: string;
       readonly createdAt: string;
@@ -241,8 +239,7 @@ function readIssueComments(
     const body = boundUtf8(bodySource, COMMENT_BODY_MAX_BYTES);
     const user = isRecord(node.user) ? node.user : undefined;
     const author = readName(user?.name, 128) ?? "Unknown";
-    const createdAt =
-      typeof node.createdAt === "string" ? readName(node.createdAt, 64) : undefined;
+    const createdAt = typeof node.createdAt === "string" ? readName(node.createdAt, 64) : undefined;
     if (createdAt === undefined) continue;
     comments.push({
       author,

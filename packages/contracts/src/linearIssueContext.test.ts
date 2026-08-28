@@ -3,9 +3,9 @@ import { decodeLinearIssueContextRequest } from "./linearIssueContext";
 
 describe("Linear issue context request", () => {
   it("accepts only an opaque Linear node id", () => {
-    expect(
-      decodeLinearIssueContextRequest({ id: "11111111-1111-4111-8111-111111111111" }),
-    ).toEqual({ id: "11111111-1111-4111-8111-111111111111" });
+    expect(decodeLinearIssueContextRequest({ id: "11111111-1111-4111-8111-111111111111" })).toEqual(
+      { id: "11111111-1111-4111-8111-111111111111" },
+    );
   });
 
   it("rejects assembled issue text fields a renderer must not send", () => {

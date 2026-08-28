@@ -53,9 +53,7 @@ function service(options: {
 }) {
   const reader = {
     snapshot: vi.fn(async () => options.snapshot ?? readySnapshot),
-    executeGetIssue: vi.fn(
-      async () => options.result ?? ({ kind: "ok" as const, value: detail }),
-    ),
+    executeGetIssue: vi.fn(async () => options.result ?? { kind: "ok" as const, value: detail }),
   };
   const ingestion = {
     record: vi.fn(() => ({

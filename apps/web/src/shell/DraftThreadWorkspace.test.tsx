@@ -53,13 +53,17 @@ const baseProps = {
   onCancel: vi.fn(),
 };
 
-
-function makeLinearClient(options: {
-  readonly snapshot?: {
-    readonly state: "ready" | "unauthorized";
-    readonly capabilities: ReadonlyArray<{ readonly operationId: string; readonly available: boolean }>;
-  };
-} = {}): IntegrationClient {
+function makeLinearClient(
+  options: {
+    readonly snapshot?: {
+      readonly state: "ready" | "unauthorized";
+      readonly capabilities: ReadonlyArray<{
+        readonly operationId: string;
+        readonly available: boolean;
+      }>;
+    };
+  } = {},
+): IntegrationClient {
   const snapshot = options.snapshot ?? {
     state: "ready" as const,
     capabilities: [{ operationId: "list-issues", available: true }],
@@ -801,7 +805,6 @@ describe("DraftThreadWorkspace", () => {
     );
     await waitFor(() => expect(screen.queryByRole("button", { name: "Create from…" })).toBeNull());
   });
-
 
   it("shows the Create from Linear tab when list-issues is available", async () => {
     const user = userEvent.setup();

@@ -2506,10 +2506,7 @@ export class CodeService {
     readonly linear: LinearIssueContextResult | { readonly status: "absent" };
   }> {
     if (command.issueContext !== undefined && command.linearIssueContext !== undefined) {
-      throw this.#failure(
-        "invalid",
-        "Choose either a GitHub issue or a Linear issue, not both.",
-      );
+      throw this.#failure("invalid", "Choose either a GitHub issue or a Linear issue, not both.");
     }
     const github = await prepareOptionalIssueContext(
       this.#issueContext,
