@@ -66,6 +66,7 @@ import {
   type WindowId,
   type ThreadWorkingDirectory,
   type GithubIssueContextRequest,
+  type LinearIssueContextRequest,
 } from "@octant/contracts";
 import type {
   AgentProfile,
@@ -91,9 +92,23 @@ import {
   type GithubIssueContextResult,
   type GithubIssueContextService,
 } from "../github/githubIssueContextService";
-
+import {
+  linearIssueContextFailureCategory,
+  prepareOptionalLinearIssueContext,
+  type LinearIssueContextResult,
+  type LinearIssueContextService,
+} from "../plugins/linear/linearIssueContextService";
 type GithubIssueContextPort = Pick<
   GithubIssueContextService,
+  | "prepare"
+  | "bindCreatedThread"
+  | "peekFramedForFirstTurn"
+  | "consumeFramedForFirstTurn"
+  | "takeFramedForFirstTurn"
+>;
+
+type LinearIssueContextPort = Pick<
+  LinearIssueContextService,
   | "prepare"
   | "bindCreatedThread"
   | "peekFramedForFirstTurn"
@@ -492,6 +507,7 @@ export interface CodeServiceOptions {
     readonly threadId: CodeThreadId;
   }) => Promise<void>;
   readonly issueContext?: GithubIssueContextPort;
+  readonly linearIssueContext?: LinearIssueContextPort;
 }
 
 /**
@@ -601,6 +617,7 @@ export class CodeService {
   readonly #workingDirectories: CodeServiceOptions["workingDirectories"];
   readonly #onWorkingDirectoryChanged: CodeServiceOptions["onWorkingDirectoryChanged"];
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #linearIssueContext?: LinearIssueContextPort;
   /**
    * Content staged by `openFile` for the editor, keyed by the staged content
    * id in least-recently-opened order. The reference, not the file, is the
@@ -641,6 +658,9 @@ export class CodeService {
     this.#onWorkingDirectoryChanged = options.onWorkingDirectoryChanged;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
+    }
+    if (options.linearIssueContext !== undefined) {
+      this.#linearIssueContext = options.linearIssueContext;
     }
   }
 
@@ -856,7 +876,7 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.threadId) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
-        const preparedIssue = await this.#requireIssueContext(command.issueContext);
+        const preparedIssueContexts = await this.#requireCreateIssueContexts(command);
         // The profile narrows the posture before any gate reads it, so a
         // profile that pulls the thread below Full access also removes the
         // confirmation Full access would have demanded.
@@ -1083,7 +1103,7 @@ export class CodeService {
         ) {
           this.#sessionAuthority.grantFullAccess(authenticatedWindowId, thread.id);
         }
-        this.#bindIssueContext(String(thread.id), preparedIssue, command.issueContext);
+        this.#bindCreateIssueContexts(String(thread.id), preparedIssueContexts, command);
         return {
           kind: "managed-thread-created",
           thread,
@@ -1194,7 +1214,7 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
-        const preparedIssue = await this.#requireIssueContext(command.issueContext);
+        const preparedIssueContexts = await this.#requireCreateIssueContexts(command);
         let prepared;
         try {
           prepared = await this.#checkouts.observe(authenticatedWindowId, command.thread.projectId);
@@ -1273,7 +1293,7 @@ export class CodeService {
         ) {
           this.#sessionAuthority.grantFullAccess(authenticatedWindowId, thread.id);
         }
-        this.#bindIssueContext(String(thread.id), preparedIssue, command.issueContext);
+        this.#bindCreateIssueContexts(String(thread.id), preparedIssueContexts, command);
         return { kind: "thread-created", thread };
       }
 
@@ -2478,34 +2498,70 @@ export class CodeService {
     });
   }
 
-  async #requireIssueContext(
-    request: GithubIssueContextRequest | undefined,
-  ): Promise<GithubIssueContextResult | { readonly status: "absent" }> {
-    const prepared = await prepareOptionalIssueContext(
+  async #requireCreateIssueContexts(command: {
+    readonly issueContext?: GithubIssueContextRequest;
+    readonly linearIssueContext?: LinearIssueContextRequest;
+  }): Promise<{
+    readonly github: GithubIssueContextResult | { readonly status: "absent" };
+    readonly linear: LinearIssueContextResult | { readonly status: "absent" };
+  }> {
+    if (command.issueContext !== undefined && command.linearIssueContext !== undefined) {
+      throw this.#failure(
+        "invalid",
+        "Choose either a GitHub issue or a Linear issue, not both.",
+      );
+    }
+    const github = await prepareOptionalIssueContext(
       this.#issueContext,
-      request,
+      command.issueContext,
       new AbortController().signal,
     );
-    if (prepared.status === "refused") {
-      throw this.#failure(issueContextFailureCategory(prepared.reason), prepared.message);
+    if (github.status === "refused") {
+      throw this.#failure(issueContextFailureCategory(github.reason), github.message);
     }
-    return prepared;
+    const linear = await prepareOptionalLinearIssueContext(
+      this.#linearIssueContext,
+      command.linearIssueContext,
+      new AbortController().signal,
+    );
+    if (linear.status === "refused") {
+      throw this.#failure(linearIssueContextFailureCategory(linear.reason), linear.message);
+    }
+    return { github, linear };
   }
 
-  #bindIssueContext(
+  #bindCreateIssueContexts(
     threadId: string,
-    prepared: GithubIssueContextResult | { readonly status: "absent" },
-    request: GithubIssueContextRequest | undefined,
+    prepared: {
+      readonly github: GithubIssueContextResult | { readonly status: "absent" };
+      readonly linear: LinearIssueContextResult | { readonly status: "absent" };
+    },
+    command: {
+      readonly issueContext?: GithubIssueContextRequest;
+      readonly linearIssueContext?: LinearIssueContextRequest;
+    },
   ): void {
-    if (prepared.status !== "ready" || request === undefined) return;
-    try {
-      this.#issueContext?.bindCreatedThread({
-        threadId,
-        framed: prepared.framed,
-        request,
-      });
-    } catch {
-      // The thread is already journaled; taint recording must not invert create.
+    if (prepared.github.status === "ready" && command.issueContext !== undefined) {
+      try {
+        this.#issueContext?.bindCreatedThread({
+          threadId,
+          framed: prepared.github.framed,
+          request: command.issueContext,
+        });
+      } catch {
+        // The thread is already journaled; taint recording must not invert create.
+      }
+    }
+    if (prepared.linear.status === "ready" && command.linearIssueContext !== undefined) {
+      try {
+        this.#linearIssueContext?.bindCreatedThread({
+          threadId,
+          framed: prepared.linear.framed,
+          request: command.linearIssueContext,
+        });
+      } catch {
+        // The thread is already journaled; taint recording must not invert create.
+      }
     }
   }
 
