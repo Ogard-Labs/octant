@@ -829,8 +829,9 @@ export function resolveDesktopDataDirectory(
   configuredDirectory: string | undefined,
   appDataDirectory: string,
   platform: NodeJS.Platform = process.platform,
+  env: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
-  return resolveDesktopHostRuntimePaths(configuredDirectory, appDataDirectory, platform)
+  return resolveDesktopHostRuntimePaths(configuredDirectory, appDataDirectory, platform, env)
     .dataDirectory;
 }
 
@@ -838,6 +839,7 @@ function resolveDesktopHostRuntimePaths(
   configuredDirectory: string | undefined,
   appDataDirectory: string,
   platform: NodeJS.Platform = process.platform,
+  env: Readonly<Record<string, string | undefined>> = process.env,
 ): HostRuntimePaths {
   if (platform !== "darwin" && platform !== "linux") {
     throw new Error(`Octant desktop does not support host paths on ${platform}.`);
@@ -848,7 +850,14 @@ function resolveDesktopHostRuntimePaths(
   const home =
     platform === "darwin" ? resolve(appDataDirectory, "..", "..") : resolve(appDataDirectory, "..");
   return resolveHostRuntimePaths({
-    env: { OCTANT_DATA_DIR: configuredDirectory },
+    env: {
+      OCTANT_DATA_DIR: configuredDirectory,
+      // Linux XDG overrides must reach the host-runtime resolver; otherwise a
+      // user with XDG_DATA_HOME set still lands under the default home path.
+      XDG_DATA_HOME: env.XDG_DATA_HOME,
+      XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
+      XDG_STATE_HOME: env.XDG_STATE_HOME,
+    },
     platform,
     home,
     temporaryDirectory: canonicalTemporaryDirectory(),
@@ -1103,7 +1112,9 @@ function lazyCredentialStore(): CredentialStore {
     },
     has: async (providerInstanceId) => {
       const backend = await getCredentialBackend();
-      if (backend.store === undefined) return false;
+      if (backend.store === undefined) {
+        throw new Error("unavailable");
+      }
       return await backend.store.has(providerInstanceId);
     },
     resolve: async (providerInstanceId) => {
@@ -2136,6 +2147,7 @@ function installIpcHandlers(): void {
           exists: existsSync,
           homeDirectory: homedir(),
           platform: process.platform,
+          pathEnv: process.env.PATH,
           shell,
           spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
         }),
@@ -2145,6 +2157,8 @@ function installIpcHandlers(): void {
   const previewHandoffExecutor = createNativePreviewHandoffExecutor({
     shell,
     platform: process.platform,
+    pathEnv: process.env.PATH,
+    exists: existsSync,
     spawn: (command, args) => spawn(command, [...args], { shell: false, stdio: "ignore" }),
   });
   ipcMain.handle(IPC_CHANNELS.previewHandoff, async (event, request: unknown) => {

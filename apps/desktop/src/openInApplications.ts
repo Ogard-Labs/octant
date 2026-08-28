@@ -1,5 +1,5 @@
 import type { SpawnOptions } from "node:child_process";
-import { isAbsolute, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 
 export interface OpenInApplicationDescriptor {
@@ -15,6 +15,7 @@ export interface OpenInApplicationRequest {
 
 interface SpawnedApplication {
   readonly unref?: () => void;
+  readonly once?: (event: "error" | "spawn", listener: (error?: Error) => void) => void;
 }
 
 type SpawnApplication = (
@@ -85,6 +86,8 @@ const OPEN_IN_APPLICATIONS: ReadonlyArray<CatalogueEntry> = [
   },
 ];
 
+const OPEN_FAILURE = "Octant could not open the selected application.";
+
 export function detectOpenInApplications(options: {
   readonly exists: (path: string) => boolean;
   readonly homeDirectory: string;
@@ -101,15 +104,16 @@ export function detectOpenInApplications(options: {
   }));
 }
 
-export function launchOpenInApplication(options: {
+export async function launchOpenInApplication(options: {
   readonly applicationId: OpenInApplicationId;
   readonly checkoutRoot: string;
   readonly exists: (path: string) => boolean;
   readonly homeDirectory: string;
   readonly platform?: NodeJS.Platform;
+  readonly pathEnv?: string;
   readonly shell: { readonly showItemInFolder: (path: string) => void };
   readonly spawn: SpawnApplication;
-}): void {
+}): Promise<void> {
   const platform = options.platform ?? "darwin";
   const entry = OPEN_IN_APPLICATIONS.find((candidate) => candidate.id === options.applicationId);
   if (
@@ -117,21 +121,13 @@ export function launchOpenInApplication(options: {
     !isAbsolute(options.checkoutRoot) ||
     options.checkoutRoot.includes("\0")
   ) {
-    throw new Error("Octant could not open the selected application.");
+    throw new Error(OPEN_FAILURE);
   }
   if (entry.id === "finder") {
     if (platform === "linux") {
-      try {
-        options
-          .spawn("/usr/bin/xdg-open", [options.checkoutRoot], {
-            detached: true,
-            shell: false,
-            stdio: "ignore",
-          })
-          .unref?.();
-      } catch {
-        throw new Error("Octant could not open the selected application.");
-      }
+      const xdgOpen = resolveExecutableOnPath("xdg-open", options.exists, options.pathEnv);
+      if (xdgOpen === undefined) throw new Error(OPEN_FAILURE);
+      await spawnDetachedApplication(options.spawn, xdgOpen, [options.checkoutRoot]);
       return;
     }
     options.shell.showItemInFolder(options.checkoutRoot);
@@ -139,29 +135,17 @@ export function launchOpenInApplication(options: {
   }
   const applicationPath = resolveApplicationPath(entry, options, platform);
   if (applicationPath === undefined) {
-    throw new Error("Octant could not open the selected application.");
+    throw new Error(OPEN_FAILURE);
   }
-  try {
-    if (platform === "linux") {
-      options
-        .spawn(applicationPath, [options.checkoutRoot], {
-          detached: true,
-          shell: false,
-          stdio: "ignore",
-        })
-        .unref?.();
-      return;
-    }
-    options
-      .spawn("/usr/bin/open", ["-a", applicationPath, options.checkoutRoot], {
-        detached: true,
-        shell: false,
-        stdio: "ignore",
-      })
-      .unref?.();
-  } catch {
-    throw new Error("Octant could not open the selected application.");
+  if (platform === "linux") {
+    await spawnDetachedApplication(options.spawn, applicationPath, [options.checkoutRoot]);
+    return;
   }
+  await spawnDetachedApplication(options.spawn, "/usr/bin/open", [
+    "-a",
+    applicationPath,
+    options.checkoutRoot,
+  ]);
 }
 
 export async function openCodeCheckoutInApplicationFromServer(options: {
@@ -173,7 +157,7 @@ export async function openCodeCheckoutInApplicationFromServer(options: {
   readonly launch: (input: {
     readonly applicationId: OpenInApplicationId;
     readonly checkoutRoot: string;
-  }) => void;
+  }) => void | Promise<void>;
 }): Promise<void> {
   try {
     const response = await options.fetch(
@@ -201,13 +185,80 @@ export async function openCodeCheckoutInApplicationFromServer(options: {
     ) {
       throw new Error("invalid");
     }
-    options.launch({
+    await options.launch({
       applicationId: options.request.applicationId,
       checkoutRoot: value.checkoutRoot,
     });
   } catch {
-    throw new Error("Octant could not open the selected application.");
+    throw new Error(OPEN_FAILURE);
   }
+}
+
+async function spawnDetachedApplication(
+  spawn: SpawnApplication,
+  executable: string,
+  arguments_: ReadonlyArray<string>,
+): Promise<void> {
+  let child: SpawnedApplication;
+  try {
+    child = spawn(executable, arguments_, {
+      detached: true,
+      shell: false,
+      stdio: "ignore",
+    });
+  } catch {
+    throw new Error(OPEN_FAILURE);
+  }
+  await awaitSpawnOutcome(child, OPEN_FAILURE);
+}
+
+/**
+ * Wait for the child to finish spawning. Missing executables emit `error`
+ * asynchronously (ENOENT); a bare try/catch around spawn never sees that.
+ */
+async function awaitSpawnOutcome(
+  child: {
+    readonly unref?: () => void;
+    readonly once?: (event: "error" | "spawn", listener: (error?: Error) => void) => void;
+  },
+  failureMessage: string,
+): Promise<void> {
+  if (child.once === undefined) {
+    child.unref?.();
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      child.unref?.();
+      resolve();
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(failureMessage));
+    };
+    child.once!("error", fail);
+    child.once!("spawn", succeed);
+  });
+}
+
+function resolveExecutableOnPath(
+  command: string,
+  exists: (path: string) => boolean,
+  pathEnv: string | undefined = process.env.PATH,
+): string | undefined {
+  if (command.includes("\0") || command.includes("/") || command.includes("\\")) {
+    return undefined;
+  }
+  for (const directory of (pathEnv ?? "").split(delimiter)) {
+    if (directory === "") continue;
+    const candidate = join(directory, command);
+    if (isAbsolute(candidate) && exists(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 function resolveApplicationPath(

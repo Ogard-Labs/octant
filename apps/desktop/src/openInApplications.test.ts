@@ -5,6 +5,17 @@ import {
   openCodeCheckoutInApplicationFromServer,
 } from "./openInApplications";
 
+function mockSpawnedChild(outcome: "spawn" | "error" = "spawn") {
+  return {
+    unref: vi.fn(),
+    once: (event: string, listener: (error?: Error) => void) => {
+      if (event === outcome) {
+        queueMicrotask(() => listener(outcome === "error" ? new Error("spawn ENOENT") : undefined));
+      }
+    },
+  };
+}
+
 describe("Open in applications", () => {
   it("reports the fixed catalogue in product order and marks only installed applications available", () => {
     const existing = new Set([
@@ -78,9 +89,9 @@ describe("Open in applications", () => {
     expect(launch).toHaveBeenCalledWith({ applicationId: "zed", checkoutRoot: "/private/repo" });
   });
 
-  it("opens an installed application without a shell against the confined checkout root", () => {
-    const spawn = vi.fn(() => ({ unref: vi.fn() }));
-    launchOpenInApplication({
+  it("opens an installed application without a shell against the confined checkout root", async () => {
+    const spawn = vi.fn(() => mockSpawnedChild());
+    await launchOpenInApplication({
       applicationId: "vscode",
       checkoutRoot: "/private/repo",
       exists: (path) => path === "/Applications/Visual Studio Code.app",
@@ -97,9 +108,9 @@ describe("Open in applications", () => {
     );
   });
 
-  it("opens Linux applications with the binary and reveals folders through xdg-open", () => {
-    const spawn = vi.fn(() => ({ unref: vi.fn() }));
-    launchOpenInApplication({
+  it("opens Linux applications with the binary and reveals folders through PATH-resolved xdg-open", async () => {
+    const spawn = vi.fn(() => mockSpawnedChild());
+    await launchOpenInApplication({
       applicationId: "vscode",
       checkoutRoot: "/home/example/repo",
       exists: (path) => path === "/usr/bin/code",
@@ -115,23 +126,54 @@ describe("Open in applications", () => {
     });
 
     spawn.mockClear();
-    launchOpenInApplication({
+    await launchOpenInApplication({
       applicationId: "finder",
       checkoutRoot: "/home/example/repo",
-      exists: () => false,
+      exists: (path) => path === "/usr/local/bin/xdg-open",
       homeDirectory: "/home/example",
       platform: "linux",
+      pathEnv: "/usr/local/bin:/usr/bin",
       shell: { showItemInFolder: vi.fn() },
       spawn,
     });
-    expect(spawn).toHaveBeenCalledWith("/usr/bin/xdg-open", ["/home/example/repo"], {
+    expect(spawn).toHaveBeenCalledWith("/usr/local/bin/xdg-open", ["/home/example/repo"], {
       detached: true,
       shell: false,
       stdio: "ignore",
     });
   });
 
-  it("reveals the checkout in Finder and refuses unavailable applications", () => {
+  it("rejects when Linux xdg-open is missing from PATH", async () => {
+    await expect(
+      launchOpenInApplication({
+        applicationId: "finder",
+        checkoutRoot: "/home/example/repo",
+        exists: () => false,
+        homeDirectory: "/home/example",
+        platform: "linux",
+        pathEnv: "/usr/bin",
+        shell: { showItemInFolder: vi.fn() },
+        spawn: vi.fn(),
+      }),
+    ).rejects.toThrow("Octant could not open the selected application.");
+  });
+
+  it("propagates asynchronous Linux spawn failures through the launch promise", async () => {
+    const spawn = vi.fn(() => mockSpawnedChild("error"));
+    await expect(
+      launchOpenInApplication({
+        applicationId: "vscode",
+        checkoutRoot: "/home/example/repo",
+        exists: (path) => path === "/usr/bin/code",
+        homeDirectory: "/home/example",
+        platform: "linux",
+        shell: { showItemInFolder: vi.fn() },
+        spawn,
+      }),
+    ).rejects.toThrow("Octant could not open the selected application.");
+  });
+
+  it("reveals the checkout in Finder and refuses unavailable applications", async () => {
     const showItemInFolder = vi.fn();
     const common = {
       checkoutRoot: "/private/repo",
@@ -139,12 +181,12 @@ describe("Open in applications", () => {
       homeDirectory: "/Users/example",
       platform: "darwin" as const,
       shell: { showItemInFolder },
-      spawn: vi.fn(),
+      spawn: vi.fn(() => mockSpawnedChild()),
     } as const;
 
-    launchOpenInApplication({ ...common, applicationId: "finder" });
+    await launchOpenInApplication({ ...common, applicationId: "finder" });
     expect(showItemInFolder).toHaveBeenCalledWith("/private/repo");
-    expect(() => launchOpenInApplication({ ...common, applicationId: "zed" })).toThrow(
+    await expect(launchOpenInApplication({ ...common, applicationId: "zed" })).rejects.toThrow(
       "Octant could not open the selected application.",
     );
   });

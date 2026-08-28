@@ -65,6 +65,14 @@ describe("packaged desktop storage identity", () => {
     );
   });
 
+  it("honors Linux XDG_DATA_HOME when resolving the data directory", () => {
+    expect(
+      resolveDesktopDataDirectory(undefined, "/home/test/.config", "linux", {
+        XDG_DATA_HOME: "/mnt/data",
+      }),
+    ).toBe("/mnt/data/octant");
+  });
+
   it("preserves an explicit isolated data directory", () => {
     expect(
       resolveDesktopDataDirectory(
