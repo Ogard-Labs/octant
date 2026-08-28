@@ -162,6 +162,10 @@ import {
   type SidebarThreadDragTargets,
 } from "./shell/useWorkspaceTabDrag";
 import type { ArchivedThreadEntry } from "./shell/ArchiveView";
+import {
+  githubIssuesReadAvailable as snapshotAllowsGithubIssuesRead,
+  withGithubIssuesReadSync,
+} from "./github/githubIssuesReadAvailable";
 import { WorkspaceRailLayers } from "./shell/WorkspaceRailLayers";
 import { BottomUtilityPanel } from "./shell/BottomUtilityPanel";
 import { ShellDialogHost } from "./shell/ShellDialogHost";
@@ -1113,7 +1117,7 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
-  const githubClient = useMemo(
+  const githubTransport = useMemo(
     () =>
       createGithubClient({
         baseUrl: props.launch.serverUrl,
@@ -1121,6 +1125,10 @@ function LaunchedShell(
         windowCapability: props.projectWindowCapability,
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
+  );
+  const githubClient = useMemo(
+    () => withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable),
+    [githubTransport],
   );
   const linearClient = useMemo(
     () =>
@@ -1134,15 +1142,11 @@ function LaunchedShell(
   );
   useEffect(() => {
     let cancelled = false;
-    void githubClient
+    void githubTransport
       .authenticationSnapshot()
       .then((snapshot) => {
         if (cancelled) return;
-        setGithubIssuesReadAvailable(
-          snapshot.capabilities.some(
-            (capability) => capability.kind === "issues-read" && capability.available,
-          ),
-        );
+        setGithubIssuesReadAvailable(snapshotAllowsGithubIssuesRead(snapshot));
       })
       .catch(() => {
         if (!cancelled) setGithubIssuesReadAvailable(false);
@@ -1150,7 +1154,7 @@ function LaunchedShell(
     return () => {
       cancelled = true;
     };
-  }, [githubClient]);
+  }, [githubTransport]);
   const githubCloneClient = useMemo(
     () =>
       createGithubCloneClient({

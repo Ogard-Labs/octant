@@ -108,6 +108,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
       if (repository === undefined) return;
       const operation = options.append === true ? listGeneration.current : ++listGeneration.current;
       if (options.append !== true) {
+        ++detailGeneration.current;
         setList({ kind: "loading" });
         setSelectedNumber(undefined);
         setDetail({ kind: "idle" });

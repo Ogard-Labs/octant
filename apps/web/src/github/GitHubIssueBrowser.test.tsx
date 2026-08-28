@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -235,6 +237,54 @@ describe("GitHubIssueBrowser", () => {
     expect(screen.getByText(/rate limit/)).toBeInTheDocument();
   });
 
+  it("does not restore a previous issue after the list resets", async () => {
+    const user = userEvent.setup();
+    let releaseDetail: ((value: GithubCatalogueReadResponse) => void) | undefined;
+    const pendingDetail = new Promise<GithubCatalogueReadResponse>((resolve) => {
+      releaseDetail = resolve;
+    });
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") return recents;
+      if (request.kind === "repositories") return repositories;
+      if (request.kind === "issues" && request.search === "login") {
+        return {
+          kind: "issues",
+          page: {
+            rows: [issueRow(2, { title: "Login timeout" })],
+            sort: "updated-desc",
+            hasNextPage: false,
+            freshness: { status: "fresh" },
+          },
+        } as GithubCatalogueReadResponse;
+      }
+      if (request.kind === "issues") return issuesPageOne;
+      if (request.kind === "issue") return pendingDetail;
+      throw new Error(`unexpected ${request.kind}`);
+    });
+    render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
+    await selectFirstRepository();
+    fireEvent.click(await screen.findByRole("button", { name: /#1 Issue 1/ }));
+    expect(await screen.findByText("Loading issue…")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("searchbox", { name: "Search GitHub issues" }), "login");
+    await waitFor(() =>
+      expect(readCatalogue).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "issues", search: "login" }),
+      ),
+    );
+    expect(await screen.findByRole("button", { name: /#2 Login timeout/ })).toBeInTheDocument();
+
+    releaseDetail?.({
+      kind: "issue",
+      issue: issueDetail(1),
+      freshness: { status: "fresh" },
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("article", { name: "Issue #1" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Select an issue to read its details.")).toBeInTheDocument();
+  });
+
   it("renders unavailable reason, remediation, and retry delay", async () => {
     const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
       if (request.kind === "recent-repositories") return recents;
@@ -256,5 +306,13 @@ describe("GitHubIssueBrowser", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Wait before reading issues again. Retry after 45 seconds.",
     );
+  });
+
+  it("keeps the contrast outline on the lowercase currentcolor keyword", () => {
+    const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles/github.css"), "utf8");
+    expect(stylesheet).toMatch(
+      /@media \(prefers-contrast: more\)[\s\S]*?box-shadow:[^;]*currentcolor/,
+    );
+    expect(stylesheet).not.toMatch(/\bcurrentColor\b/);
   });
 });
