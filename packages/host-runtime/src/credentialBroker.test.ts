@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 import { startCredentialBroker } from "./credentialBroker";
-import { CredentialPurgeFailure, type CredentialPurgeStore } from "./keychainCredentialStore";
+import { CredentialPurgeFailure, type CredentialPurgeStore } from "./credentialStore";
 
 const providerInstanceId = randomUUID();
 const credential = "fixture-provider-credential";

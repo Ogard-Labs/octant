@@ -522,8 +522,10 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   `apps/desktop/src` is newer, so `apps/desktop/src` edits need only a
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
-- A headless host: `bun --cwd packages/cli src/bin.ts server run`, then
-  `bun --cwd packages/cli src/bin.ts web` (or `web --dev` for Vite).
+- A headless Linux station: `octant server run`, then `octant web` (or
+  `octant web --dev` for Vite). Linux requires an unlocked freedesktop Secret
+  Service session and the `secret-tool` client; without both, the host fails
+  closed and provider credentials remain unavailable.
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be
   inspected with `bun run --cwd apps/server db:verify`.
 - Formatting is `oxfmt`, linting is `oxlint`; Turbo runs the per-package

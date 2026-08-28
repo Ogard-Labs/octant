@@ -285,10 +285,12 @@ window, or approves an action class the host policy reserves for the local user.
   `sandbox-exec` with `PATH=/usr/bin:/bin`, an explicit ready-handshake, bounded handshake bytes,
   durable process receipts, and stop/drain semantics
   (`apps/server/src/extensions/nodeExtensionProcessPort.ts`, `extensionSupervisor.ts`).
-- **Keychain credential broker.** Provider credentials live in the macOS Keychain
-  (`apps/desktop/src/keychainCredentialStore.ts`). The desktop exposes them only through a
-  loopback-only HTTP broker with a random bearer token, a closed route set (has/resolve/purge),
-  bounded bodies, and UUID-only credential references (`apps/desktop/src/credentialBroker.ts`).
+- **Host credential broker.** Provider credentials live in the host's OS secret store:
+  macOS Keychain (`apps/desktop/src/keychainCredentialStore.ts`) or Linux Secret Service through
+  `secret-tool`. The desktop or CLI host exposes them only through a loopback-only HTTP broker
+  with a random bearer token, a closed route set (has/resolve/purge), bounded bodies, and
+  UUID-only credential references (`packages/host-runtime/src/credentialBroker.ts`). The CLI
+  starts the broker only when Secret Service is available; otherwise the broker is absent.
   Tools and renderers see indirect references only; broker coordinates are stripped from child
   environments.
 - **Worktree and workspace isolation.** Code children require a verified isolated worktree receipt
@@ -447,24 +449,24 @@ crosses a server authority or sandbox boundary without additional local compromi
 
 ## Exists-Today Versus Newly-Specified Summary
 
-| Control                                                              | State           | Owner module(s)                                                                              |
-| -------------------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------------------- |
-| Strict tool contracts, closed capability tokens, bounded payloads    | Exists          | `packages/contracts/src/toolActions.ts` and sibling tool contracts                           |
-| Fail-closed authority comparison per tool action                     | Exists          | `packages/domain/src/toolActionPolicy.ts`                                                    |
-| Unified policy-engine resolution order and single server choke point | Newly specified | `packages/domain/src/toolCallPolicy.ts`, `apps/server/src/toolCallAuthorityService.ts` (new) |
-| Untrusted-content provenance, framing, and thread taint              | Newly specified | `packages/contracts` journal schemas, context assembly, policy engine step 7                 |
-| Work/Code path confinement and working-directory authority           | Exists          | `workConfinementPolicy.ts`, `workMutationService.ts`, `threadWorkingDirectoryAuthority.ts`   |
-| Provider subprocess Seatbelt profiles and env sanitization           | Exists          | `apps/server/src/providers/*Process.ts`, `childProcessEnvironment.ts`                        |
-| Seatbelt profiles for shell/test/Git tool subprocesses               | Newly specified | shared builder in `apps/server/src/process/`                                                 |
-| Per-thread network egress policy                                     | Newly specified | policy engine + Seatbelt profile materialization                                             |
-| Keychain broker with indirect references                             | Exists          | `apps/desktop/src/credentialBroker.ts`, `keychainCredentialStore.ts`                         |
-| Child authority clamps, depth/capacity, workspace receipts           | Exists          | `packages/domain/src/agentRunPolicy.ts`, `agentRunAuthorityCeiling.ts`                       |
-| Live-grant-derived child clamping and Code worktree children         | Exists today    | `agentRunLiveGrant.ts`, `clampAgentRunAuthorityAgainstLiveGrant`, Code receipt port          |
-| Extension quarantine, activation ladder, supervised processes        | Exists          | `packages/plugin-host/src/activation.ts`, `apps/server/src/extensions/`                      |
-| Declared-capability ceiling enforced at call resolution              | Newly specified | policy engine + extension manifest data                                                      |
-| Remote principal separation, closed action catalog, clamps           | Exists          | `remoteAccessPolicy.ts`, `clientPrincipal.ts`, `remoteRoutePolicy.ts`, `codePolicy.ts`       |
-| Consolidated audit taxonomy with principal attribution               | Newly specified | `packages/contracts/src/events.ts` or audit payload schemas + owning services                |
-| Escape suite fixtures and exit gate                                  | Newly specified | `apps/server/src/security/escapeSuite/` (new) + domain policy tests                          |
+| Control                                                              | State           | Owner module(s)                                                                                |
+| -------------------------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------- |
+| Strict tool contracts, closed capability tokens, bounded payloads    | Exists          | `packages/contracts/src/toolActions.ts` and sibling tool contracts                             |
+| Fail-closed authority comparison per tool action                     | Exists          | `packages/domain/src/toolActionPolicy.ts`                                                      |
+| Unified policy-engine resolution order and single server choke point | Newly specified | `packages/domain/src/toolCallPolicy.ts`, `apps/server/src/toolCallAuthorityService.ts` (new)   |
+| Untrusted-content provenance, framing, and thread taint              | Newly specified | `packages/contracts` journal schemas, context assembly, policy engine step 7                   |
+| Work/Code path confinement and working-directory authority           | Exists          | `workConfinementPolicy.ts`, `workMutationService.ts`, `threadWorkingDirectoryAuthority.ts`     |
+| Provider subprocess Seatbelt profiles and env sanitization           | Exists          | `apps/server/src/providers/*Process.ts`, `childProcessEnvironment.ts`                          |
+| Seatbelt profiles for shell/test/Git tool subprocesses               | Newly specified | shared builder in `apps/server/src/process/`                                                   |
+| Per-thread network egress policy                                     | Newly specified | policy engine + Seatbelt profile materialization                                               |
+| Keychain broker with indirect references                             | Exists          | `packages/host-runtime/src/credentialBroker.ts`, `apps/desktop/src/keychainCredentialStore.ts` |
+| Child authority clamps, depth/capacity, workspace receipts           | Exists          | `packages/domain/src/agentRunPolicy.ts`, `agentRunAuthorityCeiling.ts`                         |
+| Live-grant-derived child clamping and Code worktree children         | Exists today    | `agentRunLiveGrant.ts`, `clampAgentRunAuthorityAgainstLiveGrant`, Code receipt port            |
+| Extension quarantine, activation ladder, supervised processes        | Exists          | `packages/plugin-host/src/activation.ts`, `apps/server/src/extensions/`                        |
+| Declared-capability ceiling enforced at call resolution              | Newly specified | policy engine + extension manifest data                                                        |
+| Remote principal separation, closed action catalog, clamps           | Exists          | `remoteAccessPolicy.ts`, `clientPrincipal.ts`, `remoteRoutePolicy.ts`, `codePolicy.ts`         |
+| Consolidated audit taxonomy with principal attribution               | Newly specified | `packages/contracts/src/events.ts` or audit payload schemas + owning services                  |
+| Escape suite fixtures and exit gate                                  | Newly specified | `apps/server/src/security/escapeSuite/` (new) + domain policy tests                            |
 
 ## Approved Decisions (Henrik, 2026-08-12)
 

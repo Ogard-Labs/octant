@@ -32,14 +32,17 @@ import {
   readHostInfoReceipt,
   resolveHostRuntimePaths,
   ServicePolicyStore,
+  startCredentialBroker,
   writeBridgeSecretProjection,
+  type CredentialBroker,
+  type CredentialPurgeStore,
+  type CredentialStore,
   type HostRuntimePaths,
 } from "@octant/host-runtime";
 import {
   decodePreviewHandoffRequest,
   type PreviewHandoffRequest,
 } from "@octant/contracts/previews";
-import { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 import type { AppVersion } from "@octant/contracts/app-updates";
 import { createAppUpdateService } from "./appUpdateService";
 import { buildApplicationMenuTemplate } from "./applicationMenu";
@@ -68,11 +71,9 @@ import {
   type NativeCodeOperationApprovalRequest,
 } from "./codeOperationApproval";
 import { parseCodeDeepLink, type CodeDeepLink } from "./codeDeepLinks";
-import type { CredentialStore } from "./credentialStore";
 import {
   makeKeychainCredentialPurgeStore,
   makeKeychainCredentialStore,
-  type CredentialPurgeStore,
 } from "./keychainCredentialStore";
 import {
   HostIdentitySigningFailure,

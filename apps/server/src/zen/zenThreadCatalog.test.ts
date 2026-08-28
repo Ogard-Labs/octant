@@ -139,6 +139,7 @@ function catalog(
 ) {
   return new ZenThreadCatalog({
     localHostId: LOCAL_HOST_ID,
+    localHostDisplayName: "This computer",
     readSettings: () => options.settings ?? { chatEnabled: true, workEnabled: true },
     readProjects: async () => options.projects ?? projectBootstrap(),
     readChatThreads: () => [chatThread(), chatThread(ids.hiddenThread, ids.archivedProject)],

@@ -32,6 +32,7 @@ describe("platform capability probes", () => {
           return { stdout: "probe-ok\n", stderr: "" };
         },
       },
+      executable: async () => true,
     });
     expect(report.platform).toBe("linux");
     expect(report.capabilities.map((capability) => capability.name).sort()).toEqual([
@@ -71,6 +72,23 @@ describe("platform capability probes", () => {
     expect(
       report.capabilities.every((capability) => capability.detail === "tool-unavailable"),
     ).toBe(true);
+  });
+
+  it("fails closed when the Secret Service client executable is missing", async () => {
+    const report = await probeHostPlatformCapabilities({
+      platform: "linux",
+      uid: 1000,
+      runner: runnerFrom(() => "probe-ok\n"),
+      executable: async () => false,
+    });
+    const secretStore = report.capabilities.find(
+      (capability) => capability.name === "secret-store",
+    );
+    expect(secretStore).toEqual({
+      name: "secret-store",
+      state: "unavailable",
+      detail: "tool-unavailable",
+    });
   });
 
   it("fails closed when a probe fails or reports empty output", async () => {
@@ -133,6 +151,7 @@ describe("platform capability probes", () => {
           return { stdout: "probe-ok\n", stderr: "" };
         },
       },
+      executable: async () => true,
     });
     expect(availablePlatformCapabilityNames(report)).toEqual([
       "process-inspection",

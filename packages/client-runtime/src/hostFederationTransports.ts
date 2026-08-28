@@ -23,7 +23,7 @@ import type {
  * Concurrent direct host transports for Post-preview B2.
  *
  * Maintains an independent `hostId →` session/connection map. Reuses
- * `createRemoteSessionBridge` / `RemoteConnection` for remotes. Local/`This Mac`
+ * `createRemoteSessionBridge` / `RemoteConnection` for remotes. The local host
  * is always present when enabled and never blocked by remote failures.
  *
  * Non-goals: host-to-host communication, offline mutation queues.
@@ -76,7 +76,7 @@ export interface HostFederationTransports {
   readonly remoteTransportFor: (hostId: HostId | string) => FederatedRemoteTransport | undefined;
   /**
    * Disconnect and drop one host's transport without touching others.
-   * Local/`This Mac` cannot be removed this way — disable it via the registry.
+   * The local host cannot be removed this way — disable it via the registry.
    */
   readonly disconnectHost: (hostId: HostId | string) => Promise<void>;
   /**
@@ -294,7 +294,7 @@ export function createHostFederationTransports(
       const id = decodeHostId(hostId);
       if (id === LOCAL_HOST_ID) {
         throw new Error(
-          "Cannot disconnect the local This Mac transport via revoke; update the registry instead.",
+          "Cannot disconnect the local host transport via revoke; update the registry instead.",
         );
       }
       dropRemote(id);

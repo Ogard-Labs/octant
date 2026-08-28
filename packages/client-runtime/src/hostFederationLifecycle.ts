@@ -133,7 +133,7 @@ export interface HostFederationLifecycle {
   ) => Promise<HostFederationRevokeResult>;
   /**
    * Remove a remote host locally without host-side revoke. Never removes
-   * `This Mac`.
+   * the local host.
    */
   readonly removeLocal: (hostId: HostId | string) => Promise<HostFederationRemoveResult>;
   /** Authority-bearing mutation gate — never queues offline work. */
@@ -337,7 +337,7 @@ export function createHostFederationLifecycle(
     readonly localCredentialRemoved: boolean;
   }> => {
     if (hostId === LOCAL_HOST_ID) {
-      throw new Error("Cannot remove the local This Mac host from the federation lifecycle.");
+      throw new Error("Cannot remove the local host from the federation lifecycle.");
     }
     const registration = registrations.get(hostId) ?? (await options.registry.get(hostId));
     await options.transports.disconnectHost(hostId);
@@ -383,7 +383,7 @@ export function createHostFederationLifecycle(
         return {
           ok: false,
           hostId: id,
-          reason: "This Mac does not reconnect through the remote session bridge.",
+          reason: "The local host does not reconnect through the remote session bridge.",
         };
       }
       const snapshot = snapshots.find((entry) => entry.hostId === id);
@@ -418,7 +418,7 @@ export function createHostFederationLifecycle(
     async revoke(hostId, revokeOptions) {
       const id = decodeHostId(hostId);
       if (id === LOCAL_HOST_ID) {
-        throw new Error("Cannot revoke the local This Mac host.");
+        throw new Error("Cannot revoke the local host.");
       }
       const slot = options.transports.get(id);
       const bridge = slot?.bridge;

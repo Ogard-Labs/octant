@@ -15,6 +15,7 @@ import { decodeZenThreadCatalogEntry, decodeZenThreadCatalogRef } from "@octant/
 
 export interface ZenThreadCatalogDependencies {
   readonly localHostId: HostId;
+  readonly localHostDisplayName: string;
   readonly readSettings: () => ProductSurfaceSettings;
   readonly readProjects: (windowId: WindowId) => Promise<ProjectBootstrap>;
   readonly readChatThreads: () => ReadonlyArray<ChatThread>;
@@ -133,7 +134,7 @@ export class ZenThreadCatalog {
     return decodeZenThreadCatalogEntry({
       catalogRef: `${input.mode}:${input.thread.id}`,
       hostId: this.dependencies.localHostId,
-      hostLabel: "This Mac",
+      hostLabel: this.dependencies.localHostDisplayName,
       mode: input.mode,
       projectId: input.project?.id ?? null,
       projectLabel: input.projectLabel,
