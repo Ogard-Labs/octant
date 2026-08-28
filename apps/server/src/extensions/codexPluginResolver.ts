@@ -19,6 +19,7 @@ import {
   fetchPinnedUpstreamPackage,
   type PinnedUpstreamFetchInput,
 } from "./pinnedUpstreamPackageFetcher";
+import { createMarketplaceFetch } from "./marketplaceHttps";
 import type { CuratedBuildIosAppsCatalogSource } from "./curatedBuildIosAppsCatalog";
 
 export type PluginPackageInput = CodexPluginPackageInput | AgentPluginPackageInput;
@@ -38,6 +39,8 @@ export interface CodexPluginPackageResolverOptions {
   readonly fetch?: PinnedUpstreamFetchInput["fetch"];
   readonly appVersion?: string;
   readonly platform?: NodeJS.Platform;
+  /** When false, GitHub catalog inspect/install fetches are not made. */
+  readonly isMarketplaceFetchAllowed?: () => boolean;
 }
 
 export class CodexPluginPackageResolver implements ExtensionPackageResolverPort {
@@ -54,7 +57,15 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
     this.#catalog = options.catalog ?? [];
     this.#localFolders = options.localFolders ?? new Map();
     this.#localFolderRegistry = options.localFolderRegistry;
-    this.#fetch = options.fetch;
+    this.#fetch =
+      options.isMarketplaceFetchAllowed === undefined && options.fetch === undefined
+        ? undefined
+        : createMarketplaceFetch({
+            ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+            ...(options.isMarketplaceFetchAllowed === undefined
+              ? {}
+              : { isAllowed: options.isMarketplaceFetchAllowed }),
+          });
     this.#appVersion = options.appVersion ?? "1.0.0";
     this.#platform = options.platform ?? process.platform;
   }

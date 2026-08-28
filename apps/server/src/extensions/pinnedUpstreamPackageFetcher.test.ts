@@ -4,6 +4,7 @@ import {
   PinnedUpstreamFetchError,
   type PinnedUpstreamPackageReference,
 } from "./pinnedUpstreamPackageFetcher";
+import { MARKETPLACE_FETCH_USER_AGENT, marketplaceHeadersAreAllowlisted } from "./marketplaceHttps";
 
 const reference: PinnedUpstreamPackageReference = {
   owner: "openai",
@@ -42,11 +43,11 @@ function fakeFetch(
     readonly missingBlobs?: ReadonlyArray<string>;
   } = {},
 ) {
-  const calls: Array<string> = [];
+  const calls: Array<{ readonly url: string; readonly headers: Headers }> = [];
   const treePaths = Object.keys(files);
-  const fetch = async (input: string | URL | Request): Promise<Response> => {
+  const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = String(input);
-    calls.push(url);
+    calls.push({ url, headers: new Headers(init?.headers) });
     if (url.includes("/git/trees/")) {
       if (options.treeStatus !== undefined && options.treeStatus !== 200) {
         return new Response("nope", { status: options.treeStatus });
@@ -124,12 +125,16 @@ describe("pinned upstream package fetcher", () => {
       result.entries.reduce((total, entry) => total + (entry.content?.byteLength ?? 0), 0),
     );
     expect(result.manifest).toMatchObject({ name: "build-ios-apps", version: "0.1.2" });
-    const treeCalls = calls.filter((url) => url.includes("/git/trees/"));
+    const treeCalls = calls.filter((call) => call.url.includes("/git/trees/"));
     expect(treeCalls).toHaveLength(1);
-    expect(treeCalls[0]).toBe(
+    expect(treeCalls[0]?.url).toBe(
       `https://api.github.com/repos/openai/plugins/git/trees/${reference.commit}?recursive=1`,
     );
-    expect(calls.some((url) => url.includes("build-macos-apps"))).toBe(false);
+    expect(calls.some((call) => call.url.includes("build-macos-apps"))).toBe(false);
+    for (const call of calls) {
+      expect(marketplaceHeadersAreAllowlisted(call.headers)).toBe(true);
+      expect(call.headers.get("user-agent")).toBe(MARKETPLACE_FETCH_USER_AGENT);
+    }
   });
 
   it("falls back to a valid Codex manifest when root plugin.json is unrelated or malformed", async () => {
