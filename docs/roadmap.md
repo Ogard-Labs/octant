@@ -65,11 +65,14 @@ Hardening in progress for the preview:
   - `@octant/plugin-api` extracted as a narrow, curated re-export of
     `@octant/contracts/extensions` (manifest, component kinds, capabilities),
     plus `board`/`integration`/`ui-surface`/`appearance-pack`/`preview-viewer`
-    kinds and renderer contribution schemas (`sidebar.destination`,
+    /`provider-driver` kinds and renderer contribution schemas (`sidebar.destination`,
     `settings.section`, `workspace.tab`, `thread.pane`, `preview.viewer`,
     `appearance.preset`, `board.view`). The renderer registry resolves every
     point from a static first-party catalog; disabled components contribute
     no sidebar entry, settings section, appearance preset, or preview viewer.
+    In-tree vendor drivers register as bundled `provider-driver` plugins and
+    reach the host only through `provider-sdk`; the generic ACP stack stays a
+    host capability those plugins configure.
   - First bundled plugins: an appearance pack (Octant theme preset) and
     structured preview viewers, as proof those points work. Extracting the
     thread board and GitHub behind typed server ports remains later sequenced
