@@ -51,10 +51,12 @@ not a Mac app plus a thinner Linux/Windows shell.
 ## Consequences
 
 - Implementation is sequenced: Linux desktop shell (skip Swift, Secret Service,
-  unpackaged launch, tray), then signed Linux artifacts once the release
-  pipeline publishes them, then Windows confinement + credentials + packaging.
+  unpackaged launch, tray), then Ubuntu-dogfood AppImage packaging (unsigned,
+  fail-closed updates), then signed Linux artifacts once the release pipeline
+  publishes them, then Windows confinement + credentials + packaging.
 - `apps/desktop` build must not require `swiftc` on Linux/Windows. Packaging
-  scripts grow non-`.app` targets without deleting the Apple Silicon path.
+  scripts grow non-`.app` targets (Linux AppImage via the same
+  `package:desktop` entry) without deleting the Apple Silicon path.
 - Roadmap and the agent release boundary stop treating Linux/Windows desktop as
   unconditionally deferred; Windows Work/Code remain blocked on a future ADR.
 - Headless Station work (0048) stays separate from desktop Electron parity.
