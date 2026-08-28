@@ -56,7 +56,7 @@ Any relay must not break these invariants (ciphertext-only, no authority):
 
 ## Start gate (parent Later item)
 
-Leave Backlog until:
+Leave Later until:
 
 1. Written dogfood evidence names the concrete reachability failure and why
    LAN, Tailscale, and SSH each failed or were unavailable.
