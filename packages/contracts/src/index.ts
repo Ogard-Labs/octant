@@ -102,6 +102,7 @@ export * from "./validationRpc";
 export * from "./zen";
 export * from "./cursorAcp";
 export * from "./githubCatalogue";
+export * from "./trackerReference";
 export * from "./githubClone";
 export * from "./githubOnboarding";
 export * from "./codeProjectPullRequests";

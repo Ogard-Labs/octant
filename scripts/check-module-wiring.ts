@@ -111,6 +111,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Canvas board comment and layout-revision policy introduced for OCT-128; server journal wiring and renderer integration are out of scope for the contracts/domain slice. Remove once a server service or renderer calls admitCanvasCommentCommand or admitCanvasDiagramLayoutRevision.",
   ],
   [
+    "packages/domain/src/trackerReferencePolicy.ts",
+    "Tracker-reference recognizer is published ahead of the resolution route and renderer chips. Remove once a server route or transcript/composer caller imports recognizeTrackerReferences.",
+  ],
+  [
     "apps/server/src/integration/integrationHostPort.ts",
     "Typed Integration host port introduced for OCT-126; not yet wired to a product integration service because the first-party GitHub integration runtime is landing in a follow-up. Remove once a server service constructs the host port and dispatches commands to it.",
   ],
