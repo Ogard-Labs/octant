@@ -25,6 +25,7 @@ describe("first-party plugin catalog", () => {
     expect(FIRST_PARTY_PLUGIN_CATALOG.map((plugin) => plugin.slug)).toEqual([
       "board",
       "github",
+      "linear",
       "appearance",
       "preview-viewers",
     ]);
@@ -71,6 +72,23 @@ describe("resolveSettingsSectionContributions", () => {
         "github",
       ),
     ).toBe(false);
+  });
+
+  it("omits linear when the bundled-off plugin is not effective", () => {
+    expect(
+      resolveSettingsSectionContributions(effectiveMap({ "linear-integration": false })).has(
+        "linear",
+      ),
+    ).toBe(false);
+    expect(isSettingsSectionAvailable("linear", effectiveMap({}))).toBe(false);
+  });
+
+  it("includes linear only when the plugin is effective", () => {
+    expect(
+      resolveSettingsSectionContributions(effectiveMap({ "linear-integration": true })).has(
+        "linear",
+      ),
+    ).toBe(true);
   });
 
   it("keeps host-owned settings sections visible when no plugin contributes them", () => {

@@ -14,7 +14,14 @@ import {
 const BODY_LIMIT = 16 * 1_024;
 const TOKEN_HEADER = "x-octant-credential-broker-token";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const ROUTES = new Set(["/v1/credentials/has", "/v1/credentials/resolve", "/v1/credentials/purge"]);
+const ROUTES = new Set([
+  "/v1/credentials/has",
+  "/v1/credentials/resolve",
+  "/v1/credentials/set",
+  "/v1/credentials/delete",
+  "/v1/credentials/purge",
+]);
+const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
   locked: 423,
   unavailable: 503,
@@ -179,6 +186,18 @@ async function handleBrokerRequest(
     }
   }
 
+  if (url.pathname === "/v1/credentials/set") {
+    const decoded = await readSetJson(request);
+    if (decoded.kind === "too-large") return failure("too-large", 413);
+    if (decoded.kind === "invalid") return failure("invalid-request", 400);
+    try {
+      await store.set(decoded.providerInstanceId, decoded.credential);
+      return Response.json({ stored: true });
+    } catch {
+      return failure("credential-operation-failed", 503);
+    }
+  }
+
   const decoded = await readJson(request);
   if (decoded.kind === "too-large") return failure("too-large", 413);
   if (decoded.kind === "invalid") return failure("invalid-request", 400);
@@ -186,6 +205,10 @@ async function handleBrokerRequest(
   try {
     if (url.pathname === "/v1/credentials/has") {
       return Response.json({ present: await store.has(decoded.providerInstanceId) });
+    }
+    if (url.pathname === "/v1/credentials/delete") {
+      await store.delete(decoded.providerInstanceId);
+      return Response.json({ deleted: true });
     }
     return Response.json({ credential: await store.resolve(decoded.providerInstanceId) });
   } catch {
@@ -209,6 +232,41 @@ function tokensEqual(expected: string, actual: string): boolean {
 
 function isLoopbackPeer(address: string): boolean {
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+async function readSetJson(
+  request: Request,
+): Promise<
+  | { kind: "ok"; providerInstanceId: string; credential: string }
+  | { kind: "invalid" }
+  | { kind: "too-large" }
+> {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && /^\d+$/.test(declared) && BigInt(declared) > BigInt(BODY_LIMIT)) {
+    return { kind: "too-large" };
+  }
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength > BODY_LIMIT) return { kind: "too-large" };
+  try {
+    const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    if (!isRecord(value) || Object.keys(value).length !== 2) return { kind: "invalid" };
+    if (
+      typeof value.providerInstanceId !== "string" ||
+      !UUID_PATTERN.test(value.providerInstanceId) ||
+      typeof value.credential !== "string" ||
+      value.credential.length === 0 ||
+      Buffer.byteLength(value.credential, "utf8") > MAX_CREDENTIAL_BYTES
+    ) {
+      return { kind: "invalid" };
+    }
+    return {
+      kind: "ok",
+      providerInstanceId: value.providerInstanceId,
+      credential: value.credential,
+    };
+  } catch {
+    return { kind: "invalid" };
+  }
 }
 
 async function readJson(

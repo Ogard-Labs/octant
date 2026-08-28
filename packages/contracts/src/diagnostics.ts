@@ -71,6 +71,7 @@ const RAW_SECRET_PATTERNS: ReadonlyArray<RegExp> = [
   // Bearerless opaque credentials are common in copied provider diagnostics.
   // These formats do not need a preceding "token" label to be sensitive.
   /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/i,
+  /\blin_api_[A-Za-z0-9][A-Za-z0-9_-]{8,}[A-Za-z0-9]\b/,
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/,
   /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b/,
   // Google/Gemini API keys are accepted by the provider adapter and can appear

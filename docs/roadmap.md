@@ -80,9 +80,11 @@ Hardening in progress for the preview:
     through the Integration kind and must not be compiled into the host first.
     The shared integration port and a renderer seam that actually renders
     plugin Settings sections and sidebar destinations land before Linear.
+    Linear Settings OAuth now uses those ports as a bundled-off plugin; tokens
+    stay in the host credential service.
 - **Linear integration** — the first bundled-off integration plugin, after
   those host seams: Settings connection (OAuth tokens stored only as host
-  credential-service opaque refs, never in plugin state) and read-only issue
+  credential-service opaque refs, never in plugin state) is in; read-only issue
   browse in Code first, then issue intake and delivery-target sync, with the
   same authority model as GitHub. Chat or Work Linear browsing is a separate
   host mode-policy change, not a plugin side effect. Not a connector/OAuth

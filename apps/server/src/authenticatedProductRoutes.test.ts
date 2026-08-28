@@ -39,6 +39,18 @@ describe("authenticated product route dispatch", () => {
     ).toBe("settings.read-non-secret");
     expect(
       classifyProductAction(
+        new Request("https://octant.example/api/integrations/linear/authentication"),
+      ),
+    ).toBe("settings.read-non-secret");
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/integrations/linear/authentication/commands", {
+          method: "POST",
+        }),
+      ),
+    ).toBe("settings.read-non-secret");
+    expect(
+      classifyProductAction(
         new Request("https://octant.example/api/github/authentication/commands", {
           method: "POST",
         }),

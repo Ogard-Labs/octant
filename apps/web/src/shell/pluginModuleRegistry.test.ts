@@ -10,8 +10,14 @@ describe("plugin settings-section module registry", () => {
     expect(result.kind).toBe("ready");
   });
 
+  it("returns the built-in Linear settings section module", () => {
+    const result = loadPluginSettingsSectionModule("builtin:linear/settings");
+    expect(result.kind).toBe("ready");
+  });
+
   it("reports built-in entry points as registered", () => {
     expect(isPluginSettingsSectionEntryPoint("builtin:github/settings")).toBe(true);
+    expect(isPluginSettingsSectionEntryPoint("builtin:linear/settings")).toBe(true);
   });
 
   it("returns an unknown result for unregistered entry points", () => {

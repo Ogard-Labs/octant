@@ -88,6 +88,11 @@ const REDACTION_RULES: ReadonlyArray<RedactionRule> = [
     replacement: "[redacted-credential]",
   },
   {
+    pattern: /\blin_api_[A-Za-z0-9][A-Za-z0-9_-]{8,}[A-Za-z0-9]\b/g,
+    tag: "credential",
+    replacement: "[redacted-credential]",
+  },
+  {
     pattern: /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi,
     tag: "credential",
     replacement: "$1[redacted-credential]@",
@@ -106,6 +111,7 @@ const REDACTION_RULES: ReadonlyArray<RedactionRule> = [
 const RESIDUAL_SECRET_PATTERNS: ReadonlyArray<RegExp> = [
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/i,
   /\bsk-[A-Za-z0-9][A-Za-z0-9_-]{14,}[A-Za-z0-9]\b/,
+  /\blin_api_[A-Za-z0-9][A-Za-z0-9_-]{8,}[A-Za-z0-9]\b/,
   // Natural-language assignments are deliberately fail-closed. Redacting only
   // the keyword could leave the value behind (for example, "password is hunter2").
   /\b(?:password|secret|token|api[-_ ]?key|access[-_ ]?token|pairing[-_ ]?(?:code|token|ticket|secret))\b(?:['":=\s]+(?:is|was|for)\b)?['":=\s]+\S+/i,

@@ -114,14 +114,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/domain/src/trackerReferencePolicy.ts",
     "Tracker-reference recognizer is published ahead of the resolution route and renderer chips. Remove once a server route or transcript/composer caller imports recognizeTrackerReferences.",
   ],
-  [
-    "apps/server/src/integration/integrationHostPort.ts",
-    "Typed Integration host port introduced for OCT-126; not yet wired to a product integration service because the first-party GitHub integration runtime is landing in a follow-up. Remove once a server service constructs the host port and dispatches commands to it.",
-  ],
-  [
-    "apps/server/src/integration/integrationLoader.ts",
-    "Typed Integration module loader introduced for OCT-126; not yet wired to a product integration service because the first-party GitHub integration runtime is landing in a follow-up. Remove once a server service calls loadIntegrationModule.",
-  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */

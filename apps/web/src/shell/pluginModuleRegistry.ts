@@ -1,6 +1,8 @@
-import type { ComponentType } from "react";
+import { createElement, type ComponentType, type ReactElement } from "react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
+import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import GitHubSettingsSectionModule from "../settings/GitHubSettingsSectionModule";
+import LinearSettingsSectionModule from "../settings/LinearSettingsSectionModule";
 
 /**
  * Host surface props passed to every plugin-loaded settings section. A section
@@ -8,6 +10,7 @@ import GitHubSettingsSectionModule from "../settings/GitHubSettingsSectionModule
  */
 export interface PluginSettingsSectionProps {
   readonly githubClient?: GithubClient | undefined;
+  readonly integrationClient?: IntegrationClient | undefined;
 }
 
 export type PluginSettingsSectionModule = ComponentType<PluginSettingsSectionProps>;
@@ -16,8 +19,23 @@ export type PluginSettingsSectionModuleResult =
   | { readonly kind: "ready"; readonly module: PluginSettingsSectionModule }
   | { readonly kind: "unknown"; readonly entryPoint: string };
 
-const builtInSettingsSectionModules: ReadonlyMap<string, PluginSettingsSectionModule> = new Map([
-  ["builtin:github/settings", GitHubSettingsSectionModule],
+function GitHubSettingsAdapter(props: PluginSettingsSectionProps): ReactElement {
+  return createElement(
+    GitHubSettingsSectionModule,
+    props.githubClient === undefined ? {} : { githubClient: props.githubClient },
+  );
+}
+
+function LinearSettingsAdapter(props: PluginSettingsSectionProps): ReactElement {
+  return createElement(
+    LinearSettingsSectionModule,
+    props.integrationClient === undefined ? {} : { integrationClient: props.integrationClient },
+  );
+}
+
+const builtInSettingsSectionModules = new Map<string, PluginSettingsSectionModule>([
+  ["builtin:github/settings", GitHubSettingsAdapter],
+  ["builtin:linear/settings", LinearSettingsAdapter],
 ]);
 
 /**

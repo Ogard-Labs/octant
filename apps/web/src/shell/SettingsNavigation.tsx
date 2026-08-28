@@ -6,6 +6,7 @@ import {
   Code2,
   Compass,
   FolderGit2,
+  ListTodo,
   MessageCircle,
   Palette,
   Server,
@@ -50,6 +51,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
   usage: { group: "System", icon: ChartNoAxesColumnIncreasing },
   host: { group: "System", icon: Server },
   github: { group: "Integrations", icon: FolderGit2 },
+  linear: { group: "Integrations", icon: ListTodo },
   advanced: { group: "System", icon: SlidersHorizontal },
 };
 

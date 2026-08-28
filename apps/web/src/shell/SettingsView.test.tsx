@@ -964,6 +964,31 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("button", { name: "GitHub" })).not.toBeInTheDocument();
   });
 
+  it("omits Linear when the bundled-off plugin is not effective", () => {
+    renderSettings();
+    expect(screen.queryByRole("button", { name: "Linear" })).not.toBeInTheDocument();
+  });
+
+  it("shows Linear through the plugin Settings contribution when effective", async () => {
+    const integrationClient = {
+      authenticationSnapshot: vi.fn(async () => ({
+        state: "unauthorized",
+        capabilities: [],
+        remediation: "Connect Linear to authorize this host.",
+      })),
+      executeAuthenticationCommand: vi.fn(),
+      storePersonalCredential: vi.fn(),
+      deletePersonalCredential: vi.fn(),
+    };
+    renderSettings({
+      effectivePlugins: new Map([["linear-integration", true]]),
+      integrationClient: integrationClient as never,
+    });
+    expect(screen.getByRole("button", { name: "Linear" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Linear" }));
+    expect(await screen.findByRole("button", { name: "Connect" })).toBeEnabled();
+  });
+
   it("assigns the settings surface an explicit visual class contract", () => {
     const onSettingsChange = vi.fn();
     render(
