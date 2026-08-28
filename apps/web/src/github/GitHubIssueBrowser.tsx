@@ -59,6 +59,10 @@ type IssueDetailState =
       readonly freshness: GithubCatalogueFreshness;
     };
 
+type PaginationFailure =
+  | Extract<IssueListState, { readonly kind: "unavailable" }>
+  | { readonly kind: "error"; readonly message: string };
+
 const PAGE_SIZE = 30;
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -97,6 +101,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
   const debouncedSearch = useDebouncedValue(search.trim(), SEARCH_DEBOUNCE_MS);
   const [list, setList] = useState<IssueListState>({ kind: "idle" });
   const [loadingMore, setLoadingMore] = useState(false);
+  const [paginationFailure, setPaginationFailure] = useState<PaginationFailure>();
   const [selectedNumber, setSelectedNumber] = useState<number>();
   const [detail, setDetail] = useState<IssueDetailState>({ kind: "idle" });
   const [detailEpoch, setDetailEpoch] = useState(0);
@@ -109,6 +114,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
       const operation = options.append === true ? listGeneration.current : ++listGeneration.current;
       if (options.append !== true) {
         ++detailGeneration.current;
+        setPaginationFailure(undefined);
         setList({ kind: "loading" });
         setSelectedNumber(undefined);
         setDetail({ kind: "idle" });
@@ -125,15 +131,25 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
         });
         if (operation !== listGeneration.current) return;
         if (response.kind === "unavailable") {
-          if (options.append === true) return;
+          if (options.append === true) {
+            setPaginationFailure(unavailableState(response));
+            return;
+          }
           setList(unavailableState(response));
           return;
         }
         if (response.kind !== "issues") {
-          if (options.append === true) return;
+          if (options.append === true) {
+            setPaginationFailure({
+              kind: "error",
+              message: "GitHub returned an unexpected response.",
+            });
+            return;
+          }
           setList({ kind: "error", message: "GitHub returned an unexpected response." });
           return;
         }
+        setPaginationFailure(undefined);
         setList((current) => {
           const rows =
             options.append === true && current.kind === "ready"
@@ -151,7 +167,13 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
         });
       } catch (error) {
         if (operation !== listGeneration.current) return;
-        if (options.append === true) return;
+        if (options.append === true) {
+          setPaginationFailure({
+            kind: "error",
+            message: error instanceof Error ? error.message : "GitHub issues are unavailable.",
+          });
+          return;
+        }
         setList({
           kind: "error",
           message: error instanceof Error ? error.message : "GitHub issues are unavailable.",
@@ -221,6 +243,9 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
   };
 
   const selectRepository = (row: GithubRepositoryRow) => {
+    ++detailGeneration.current;
+    setSelectedNumber(undefined);
+    setDetail({ kind: "idle" });
     setRepository(row);
     setChangingRepository(false);
   };
@@ -362,6 +387,13 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
                       {loadingMore ? "Loading more…" : "Load more issues"}
                     </OctantButton>
                   ) : null}
+                  {paginationFailure === undefined ? null : (
+                    <UnavailableNotice
+                      message={paginationFailureMessage(paginationFailure)}
+                      onRetry={() => void loadMore()}
+                      role="alert"
+                    />
+                  )}
                 </>
               ) : null}
             </>
@@ -507,6 +539,11 @@ function unavailableMessage(state: {
   const base = state.remediation ?? UNAVAILABLE_FALLBACKS[state.reason];
   if (state.retryAfterSeconds === undefined) return base;
   return `${base} Retry after ${state.retryAfterSeconds} seconds.`;
+}
+
+function paginationFailureMessage(failure: PaginationFailure): string {
+  const detail = failure.kind === "unavailable" ? unavailableMessage(failure) : failure.message;
+  return `Could not load more issues. ${detail}`;
 }
 
 function isIssueStateFilter(value: string): value is GithubIssueStateFilter {

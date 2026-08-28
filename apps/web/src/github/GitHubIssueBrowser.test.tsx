@@ -212,6 +212,97 @@ describe("GitHubIssueBrowser", () => {
     );
   });
 
+  it("keeps loaded rows and explains a failed load-more request until retry succeeds", async () => {
+    const user = userEvent.setup();
+    let failMore = true;
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") return recents;
+      if (request.kind === "repositories") return repositories;
+      if (request.kind === "issues" && request.cursor === "cursor-issues-2") {
+        if (failMore) {
+          failMore = false;
+          return {
+            kind: "unavailable",
+            capability: "issues-read",
+            reason: "rate-limited",
+            remediation: "Wait before loading more issues.",
+            retryAfterSeconds: 20,
+          } as GithubCatalogueReadResponse;
+        }
+        return issuesPageTwo;
+      }
+      if (request.kind === "issues") return issuesPageOne;
+      throw new Error(`unexpected ${request.kind}`);
+    });
+    render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
+    await selectFirstRepository();
+    await screen.findByRole("button", { name: /#1 Issue 1/ });
+
+    await user.click(screen.getByRole("button", { name: "Load more issues" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not load more issues. Wait before loading more issues. Retry after 20 seconds.",
+    );
+    expect(screen.getByRole("button", { name: /#1 Issue 1/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /#3 Third page row/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: /#3 Third page row/ })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not read the previous issue from a newly selected repository", async () => {
+    const user = userEvent.setup();
+    const twoRepositories: GithubCatalogueReadResponse = {
+      kind: "repositories",
+      page: {
+        rows: [repositoryRow(1), repositoryRow(2)],
+        sort: "pushed-desc",
+        hasNextPage: false,
+        freshness: { status: "fresh" },
+      },
+    };
+    const repoTwoIssues: GithubCatalogueReadResponse = {
+      kind: "issues",
+      page: {
+        rows: [issueRow(9, { title: "Other repo" })],
+        sort: "updated-desc",
+        hasNextPage: false,
+        freshness: { status: "fresh" },
+      },
+    };
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") return recents;
+      if (request.kind === "repositories") return twoRepositories;
+      if (request.kind === "issues" && request.name === "repo-2") return repoTwoIssues;
+      if (request.kind === "issues") return issuesPageOne;
+      if (request.kind === "issue") {
+        return {
+          kind: "issue",
+          issue: issueDetail(request.number),
+          freshness: { status: "fresh" },
+        } as GithubCatalogueReadResponse;
+      }
+      throw new Error(`unexpected ${request.kind}`);
+    });
+    render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
+    await selectFirstRepository();
+    fireEvent.click(await screen.findByRole("button", { name: /#1 Issue 1/ }));
+    expect(await screen.findByRole("article", { name: "Issue #1" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Change repository" }));
+    fireEvent.click(await screen.findByRole("option", { name: /octant\/repo-2/ }));
+
+    expect(await screen.findByRole("button", { name: /#9 Other repo/ })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Issue #1" })).not.toBeInTheDocument();
+    expect(screen.getByText("Select an issue to read its details.")).toBeInTheDocument();
+    expect(
+      readCatalogue.mock.calls.some(
+        ([request]) =>
+          request.kind === "issue" && request.name === "repo-2" && request.number === 1,
+      ),
+    ).toBe(false);
+  });
+
   it("keeps the stale label on a served stale issue page", async () => {
     const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
       if (request.kind === "recent-repositories") return recents;
