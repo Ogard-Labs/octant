@@ -156,4 +156,8 @@ for how this sits next to marketplace fetches.
 
 ## Next steps
 
-After installation, continue with [First Run](/guide/first-run) to configure providers and create your first Project.
+After installation, continue with [First Run](/guide/first-run) to configure
+providers and create your first Project. Drafts of the
+[privacy notice](/advanced/privacy-notice) and
+[data residency](/advanced/data-residency) statements describe what the
+data directory holds and which requests leave the machine.
