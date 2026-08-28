@@ -127,6 +127,45 @@ describe("ShellSidebar", () => {
     expect(screen.queryByRole("button", { name: "Issues" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Automations" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Threads" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Linear" })).not.toBeInTheDocument();
+  });
+
+  it("omits Linear when the plugin is not effective even if an action is wired", () => {
+    render(
+      <ShellSidebar
+        automationsEnabled={false}
+        codeNavigation={{ actions: { "linear-issues": vi.fn() } }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Linear" })).not.toBeInTheDocument();
+  });
+
+  it("shows Linear in Code only when the plugin is effective and the action is wired", async () => {
+    const user = userEvent.setup();
+    const openLinear = vi.fn();
+    render(
+      <ShellSidebar
+        automationsEnabled={false}
+        codeNavigation={{ actions: { "linear-issues": openLinear } }}
+        firstPartyPluginsEffective={new Map([["linear-integration", true]])}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Linear" }));
+    expect(openLinear).toHaveBeenCalledOnce();
   });
 
   it("shows Issues only when the contribution, action, and issues-read capability are all present", async () => {

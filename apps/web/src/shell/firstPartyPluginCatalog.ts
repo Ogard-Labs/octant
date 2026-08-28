@@ -158,6 +158,14 @@ const linearPlugin = firstPartyManifest({
   ],
   contributions: [
     {
+      point: "sidebar.destination",
+      componentId: "linear-integration",
+      destinationId: "linear-issues",
+      label: "Linear",
+      modes: ["code"],
+      entryPoint: "builtin:linear/sidebar-destination",
+    },
+    {
       point: "settings.section",
       componentId: "linear-integration",
       sectionId: "linear",

@@ -136,6 +136,17 @@ Disabled GitHub or a missing capability hides the row entirely. Search, state
 filter, and pagination use the existing GitHub catalogue reads. Detail is
 plain text; URLs stay inert.
 
+## Linear issues workspace
+
+When the Linear plugin is enabled and a workspace is connected, Code's
+**Linear** destination lists issues from that workspace (identifier, title,
+state, assignee). Search and filters for team, state, assignee, and project
+fail closed on missing capability, expired authorization, rate limits, and
+network loss. Opening an issue shows its description and status. **Open in
+Linear** follows the issue's Linear URL in the system browser. The first slice
+is read-only: it does not create, edit, or comment, and it does not inject
+Linear bodies into threads.
+
 ## Next steps
 
 - [Code Thread Board](/advanced/code-board) for runtime-derived thread status

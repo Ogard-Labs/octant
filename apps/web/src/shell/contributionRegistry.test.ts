@@ -64,6 +64,21 @@ describe("resolveSidebarContributions", () => {
     expect(resolveSidebarContributions("code", effective).has("github-issues")).toBe(false);
   });
 
+  it("includes linear-issues only in code mode when Linear is effective", () => {
+    const effective = effectiveMap({ "linear-integration": true });
+    expect(resolveSidebarContributions("code", effective).has("linear-issues")).toBe(true);
+    expect(resolveSidebarContributions("work", effective).has("linear-issues")).toBe(false);
+    expect(resolveSidebarContributions("chat", effective).has("linear-issues")).toBe(false);
+  });
+
+  it("omits linear-issues when the bundled-off plugin is not effective", () => {
+    expect(
+      resolveSidebarContributions("code", effectiveMap({ "linear-integration": false })).has(
+        "linear-issues",
+      ),
+    ).toBe(false);
+  });
+
   it("treats an unlisted component as not effective", () => {
     expect(resolveSidebarContributions("code", effectiveMap({})).size).toBe(0);
   });

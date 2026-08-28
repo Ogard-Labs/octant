@@ -1,8 +1,13 @@
 import type {
   IntegrationAuthenticationCommand,
   IntegrationAuthenticationSnapshot,
+  IntegrationCommand,
+  IntegrationExecutionResult,
 } from "@octant/contracts/integration";
-import { decodeIntegrationAuthenticationSnapshot } from "@octant/contracts/integration";
+import {
+  decodeIntegrationAuthenticationSnapshot,
+  decodeIntegrationExecutionResult,
+} from "@octant/contracts/integration";
 import type { IntegrationRuntime } from "@octant/plugin-api/integration";
 import { createIntegrationHostPort } from "./integrationHostPort";
 import { constructIntegrationRuntime } from "./integrationLoader";
@@ -26,6 +31,11 @@ export interface IntegrationService {
     command: IntegrationAuthenticationCommand,
     signal: AbortSignal,
   ) => Promise<IntegrationAuthenticationSnapshot>;
+  readonly executeOperation: (
+    pluginSlug: string,
+    command: Extract<IntegrationCommand, { kind: "operation" }>,
+    signal: AbortSignal,
+  ) => Promise<IntegrationExecutionResult>;
   readonly completeAuthorization: (
     pluginSlug: string,
     request: { readonly state: string; readonly code: string },
@@ -129,6 +139,23 @@ function createBoundService(
       ),
     execute: (pluginSlug, command, signal) =>
       observationToSnapshot(pluginSlug, { kind: "authenticate", command }, signal, true),
+    executeOperation: async (pluginSlug, command, signal) => {
+      if (!requireLinear(pluginSlug)) {
+        return decodeIntegrationExecutionResult({
+          kind: "refused",
+          reason: "That integration is not available on this host.",
+        });
+      }
+      const observation = await runtime.execute(command, signal);
+      if (observation.kind !== "operation") {
+        return decodeIntegrationExecutionResult({
+          kind: "failed",
+          reason: "Linear issue browse is unavailable.",
+          retryable: false,
+        });
+      }
+      return decodeIntegrationExecutionResult(observation.result);
+    },
     completeAuthorization: async (pluginSlug, request) => {
       if (!requireLinear(pluginSlug)) {
         return { kind: "refused", reason: "That integration is not available on this host." };

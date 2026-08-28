@@ -119,7 +119,11 @@ describe("Linear integration plugin", () => {
     expect(observation.snapshot).toEqual({
       state: "ready",
       account: { login: "ogard-labs", source: "oauth", scopes: ["read"] },
-      capabilities: [],
+      capabilities: [
+        { operationId: "list-issues", available: true },
+        { operationId: "get-issue", available: true },
+        { operationId: "list-issue-filters", available: true },
+      ],
     });
     expect(serialized(observation)).not.toContain(accessToken);
     expect(fetch).toHaveBeenCalledOnce();
@@ -151,4 +155,222 @@ describe("Linear integration plugin", () => {
     if (observation.kind !== "authentication") return;
     expect(observation.snapshot.state).toBe("unauthorized");
   });
+
+  it("lists bounded issue rows and never returns token material", async () => {
+    const fetch = vi.fn(async (_input: Request) => graphqlResponse(issuesPayload()));
+    const runtime = connectedRuntime(fetch);
+    const observation = await runtime.execute({
+      kind: "operation",
+      operationId: "list-issues",
+      input: { search: "browse", filter: { teamId: "22222222-2222-4222-8222-222222222222" } },
+    });
+    expect(observation).toMatchObject({
+      kind: "operation",
+      result: {
+        kind: "ok",
+        value: {
+          rows: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              identifier: "ENG-12",
+              title: "Browse issues in the workspace",
+              state: { name: "In Progress", type: "started" },
+              assignee: "Ada",
+            },
+          ],
+          hasNextPage: false,
+        },
+      },
+    });
+    expect(serialized(observation)).not.toContain(accessToken);
+    expect(fetch).toHaveBeenCalledOnce();
+    const firstCall = fetch.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (firstCall === undefined) return;
+    const input = firstCall[0];
+    expect(input).toBeInstanceOf(Request);
+    if (!(input instanceof Request)) return;
+    expect(input.headers.get("authorization")).toBeNull();
+    const body = JSON.parse(await input.text()) as { variables: { filter: unknown } };
+    expect(body.variables.filter).toEqual({
+      and: [
+        { or: [{ title: { containsIgnoreCase: "browse" } }] },
+        { team: { id: { eq: "22222222-2222-4222-8222-222222222222" } } },
+      ],
+    });
+  });
+
+  it("opens an issue for description and status without storing the body as source of truth", async () => {
+    const fetch = vi.fn(async () =>
+      graphqlResponse({
+        data: {
+          issue: {
+            ...issueNode(),
+            description: "Read-only description.",
+          },
+        },
+      }),
+    );
+    const runtime = connectedRuntime(fetch);
+    const observation = await runtime.execute({
+      kind: "operation",
+      operationId: "get-issue",
+      input: { id: "11111111-1111-4111-8111-111111111111" },
+    });
+    expect(observation).toMatchObject({
+      kind: "operation",
+      result: {
+        kind: "ok",
+        value: {
+          identifier: "ENG-12",
+          description: "Read-only description.",
+          descriptionTruncated: false,
+          url: "https://linear.app/ogard-labs/issue/ENG-12",
+        },
+      },
+    });
+  });
+
+  it("fails closed on stale authorization, missing capability, rate limits, and network loss", async () => {
+    const unauthorized = createLinearIntegration(
+      createIntegrationHostPort({
+        requestCredential: async () => ({
+          kind: "refused" as const,
+          reason: "The authorization expired. Reconnect to continue.",
+        }),
+      }),
+      { clientId, redirectUri },
+    );
+    const unauthorizedObservation = await unauthorized.execute({
+      kind: "operation",
+      operationId: "list-issues",
+      input: {},
+    });
+    expect(unauthorizedObservation).toMatchObject({
+      kind: "operation",
+      result: { kind: "refused", reason: LINEAR_RECONNECT_REASON },
+    });
+
+    const rateLimited = connectedRuntime(async () => new Response("{}", { status: 429 }));
+    const rateLimitedObservation = await rateLimited.execute({
+      kind: "operation",
+      operationId: "list-issues",
+      input: {},
+    });
+    expect(rateLimitedObservation).toMatchObject({
+      kind: "operation",
+      result: {
+        kind: "failed",
+        retryable: true,
+        reason: "Linear is rate limited. Try again in a moment.",
+      },
+    });
+
+    const unavailable = connectedRuntime(async () => {
+      throw new Error("offline");
+    });
+    const unavailableObservation = await unavailable.execute({
+      kind: "operation",
+      operationId: "get-issue",
+      input: { id: "11111111-1111-4111-8111-111111111111" },
+    });
+    expect(unavailableObservation).toMatchObject({
+      kind: "operation",
+      result: { kind: "failed", retryable: true, reason: "Linear is unavailable." },
+    });
+
+    const unknown = connectedRuntime(async () =>
+      graphqlResponse({ data: { issues: { nodes: [] } } }),
+    );
+    const unknownObservation = await unknown.execute({
+      kind: "operation",
+      operationId: "create-issue",
+      input: {},
+    });
+    expect(unknownObservation).toMatchObject({
+      kind: "operation",
+      result: { kind: "refused" },
+    });
+  });
+
+  it("returns filter options including an unassigned choice", async () => {
+    const runtime = connectedRuntime(async () =>
+      graphqlResponse({
+        data: {
+          teams: {
+            nodes: [
+              { id: "22222222-2222-4222-8222-222222222222", name: "Engineering", key: "ENG" },
+            ],
+          },
+          users: { nodes: [{ id: "55555555-5555-4555-8555-555555555555", name: "Ada" }] },
+          workflowStates: {
+            nodes: [
+              {
+                id: "33333333-3333-4333-8333-333333333333",
+                name: "In Progress",
+                type: "started",
+                team: { key: "ENG" },
+              },
+            ],
+          },
+          projects: { nodes: [{ id: "44444444-4444-4444-8444-444444444444", name: "Octant" }] },
+        },
+      }),
+    );
+    const observation = await runtime.execute({
+      kind: "operation",
+      operationId: "list-issue-filters",
+      input: {},
+    });
+    expect(observation).toMatchObject({
+      kind: "operation",
+      result: {
+        kind: "ok",
+        value: {
+          assignees: [
+            { id: "unassigned", label: "Unassigned" },
+            { id: "55555555-5555-4555-8555-555555555555", label: "Ada" },
+          ],
+        },
+      },
+    });
+  });
 });
+
+function connectedRuntime(fetch: (input: Request) => Promise<Response>) {
+  return createLinearIntegration(
+    createIntegrationHostPort({
+      requestCredential: async () => ({ kind: "granted" as const, reference: "oauth-ref" }),
+      fetch,
+    }),
+    { clientId, redirectUri },
+  );
+}
+
+function graphqlResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function issueNode() {
+  return {
+    id: "11111111-1111-4111-8111-111111111111",
+    identifier: "ENG-12",
+    title: "Browse issues in the workspace",
+    url: "https://linear.app/ogard-labs/issue/ENG-12",
+    state: { name: "In Progress", type: "started" },
+    assignee: { name: "Ada" },
+  };
+}
+
+function issuesPayload() {
+  return {
+    data: {
+      issues: {
+        pageInfo: { hasNextPage: false, endCursor: null },
+        nodes: [issueNode()],
+      },
+    },
+  };
+}

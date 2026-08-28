@@ -37,6 +37,12 @@ function makeClient(
     authenticationSnapshot: overrides.authenticationSnapshot ?? (async () => readySnapshot),
     executeAuthenticationCommand:
       overrides.executeAuthenticationCommand ?? (async () => readySnapshot),
+    executeOperation: async () => ({ kind: "refused", reason: "Not used." }),
+    listIssues: async () => ({ rows: [], hasNextPage: false }),
+    getIssue: async () => {
+      throw new Error("Not used.");
+    },
+    listIssueFilters: async () => ({ teams: [], states: [], assignees: [], projects: [] }),
     storePersonalCredential: async () => {},
     deletePersonalCredential: async () => {},
   };

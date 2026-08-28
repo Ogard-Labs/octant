@@ -108,6 +108,7 @@ import {
   defaultShellSettings,
 } from "@octant/domain/shell-policy";
 import type { UserProfile } from "@octant/contracts/user-profile";
+import { linearIssueBrowseAvailable } from "@octant/contracts/linear-issues";
 import {
   enforceAccessibilitySettings,
   enforceSidebarBackgroundAccessibility,
@@ -625,6 +626,8 @@ function LaunchedShell(
   const [codePullRequestsOpen, setCodePullRequestsOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
+  const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
+  const [linearIssuesRead, setLinearIssuesRead] = useState(false);
   const [selectedProjectPullRequest, setSelectedProjectPullRequest] = useState<
     CodeProjectPullRequestDetailQuery | undefined
   >();
@@ -1155,6 +1158,32 @@ function LaunchedShell(
       cancelled = true;
     };
   }, [githubTransport]);
+  const linearPluginEffective = FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true;
+  useEffect(() => {
+    if (!linearPluginEffective) return;
+    if (activeMode !== "code") {
+      setLinearIssuesRead(false);
+      setLinearIssuesOpen(false);
+      return;
+    }
+    let cancelled = false;
+    void linearClient.authenticationSnapshot().then(
+      (snapshot) => {
+        if (cancelled) return;
+        const available = linearIssueBrowseAvailable(snapshot.capabilities);
+        setLinearIssuesRead(available);
+        if (!available) setLinearIssuesOpen(false);
+      },
+      () => {
+        if (cancelled) return;
+        setLinearIssuesRead(false);
+        setLinearIssuesOpen(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [linearPluginEffective, activeMode, linearClient]);
   const githubCloneClient = useMemo(
     () =>
       createGithubCloneClient({
@@ -2561,6 +2590,7 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     githubIssuesOpen ||
+    linearIssuesOpen ||
     workBoardOpen ||
     archiveOpen ||
     automationCenterVisible ||
@@ -2954,6 +2984,7 @@ function LaunchedShell(
     if (mode !== "code") setCodeBoardOpen(false);
     if (mode !== "code") setCodePullRequestsOpen(false);
     if (mode !== "code") setGithubIssuesOpen(false);
+    if (mode !== "code") setLinearIssuesOpen(false);
     if (mode !== "work") setWorkBoardOpen(false);
     // The Automation Center is one shared Work/Code surface; leaving both
     // work modes dismisses it.
@@ -2977,11 +3008,14 @@ function LaunchedShell(
       setCodeBoardOpen(false);
       setCodePullRequestsOpen(false);
       setGithubIssuesOpen(false);
+      setLinearIssuesOpen(false);
+      setArchiveOpen(false);
     },
     openThreadBoard:
       activeMode === "code" ? () => setCodeBoardOpen(true) : () => setWorkBoardOpen(true),
     openPullRequests: () => setCodePullRequestsOpen(true),
     openGithubIssues: () => setGithubIssuesOpen(true),
+    openLinearIssues: () => setLinearIssuesOpen(true),
   };
 
   const pluginSidebarDestinationActions: Record<string, () => void> = {};
@@ -2990,6 +3024,7 @@ function LaunchedShell(
     FIRST_PARTY_PLUGINS_EFFECTIVE,
   )) {
     if (contribution.entryPoint === undefined) continue;
+    if (contribution.destinationId === "linear-issues" && !linearIssuesRead) continue;
     const result = loadPluginSidebarDestinationAction(contribution.entryPoint);
     if (result.kind !== "ready") continue;
     pluginSidebarDestinationActions[contribution.destinationId] = () =>
@@ -4220,6 +4255,9 @@ function LaunchedShell(
                 codePullRequestsOpen={codePullRequestsOpen}
                 githubIssuesOpen={githubIssuesOpen}
                 githubClient={githubClient}
+                linearIssuesOpen={linearIssuesOpen}
+                linearClient={linearClient}
+                onCloseLinearIssues={() => setLinearIssuesOpen(false)}
                 workBoardOpen={workBoardOpen}
                 activeMode={activeMode}
                 codeClient={codeClient}
@@ -4436,6 +4474,7 @@ function LaunchedShell(
                       codeBoardOpen ||
                       codePullRequestsOpen ||
                       githubIssuesOpen ||
+                      linearIssuesOpen ||
                       workBoardOpen ||
                       archiveOpen ||
                       automationCenterVisible ||
