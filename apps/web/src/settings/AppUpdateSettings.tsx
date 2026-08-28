@@ -172,7 +172,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         <p className="app-update__disclosure">
           Turning this off stops Octant contacting the update service at all; you can still check by
           hand whenever you want to. A check is a plain request for a file listing the latest
-          version, and Octant compares it on this Mac. It sends:
+          version, and Octant compares it on this machine. It sends:
         </p>
         <ul className="app-update__disclosure-list">
           {OCTANT_UPDATE_CHECK_DISCLOSURE.map((item) => (
