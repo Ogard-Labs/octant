@@ -1,3 +1,4 @@
+import { CANVAS_CHART_PALETTE } from "@octant/theme";
 import type { CanvasBlock, CanvasChartSeries } from "@octant/contracts/canvas";
 import { computeYDomain, scaleX, scaleY, type ChartSeriesData } from "../chartGeometry";
 import { layoutCanvasDiagram } from "@octant/domain";
@@ -48,8 +49,6 @@ function TableBlock({ block }: { readonly block: Extract<Block, { readonly kind:
   );
 }
 
-const palette = ["#8ab4f8", "#7bc47f", "#f2b26b", "#e78fc3", "#7fd1c7", "#c7c7c7"] as const;
-
 function ChartBlock({ block }: { readonly block: Extract<Block, { readonly kind: "chart" }> }) {
   const data: ChartSeriesData[] = block.series.map((item) => ({
     seriesId: item.seriesId,
@@ -76,7 +75,10 @@ function ChartBlock({ block }: { readonly block: Extract<Block, { readonly kind:
             chartType={block.chartType}
             series={series}
             domain={domain}
-            color={palette[seriesIndex % palette.length] ?? "#8ab4f8"}
+            color={
+              CANVAS_CHART_PALETTE[seriesIndex % CANVAS_CHART_PALETTE.length] ??
+              CANVAS_CHART_PALETTE[0]
+            }
           />
         ))}
       </svg>

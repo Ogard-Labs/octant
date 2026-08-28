@@ -39,7 +39,7 @@ const KNOWN_HOSTS: ReadonlyMap<string, HostIdentity> = new Map([[LOCAL_HOST_ID, 
  * destination choice (Post-preview B4). This module remains the server-side
  * fail-closed registry until federation routes commands to remote hosts.
  *
- * - Returns exactly one healthy implicit host (`This Mac`) when no specific
+ * - Returns exactly one healthy implicit local host when no specific
  *   host is requested or when the local host is requested.
  * - An existing Project fixes the host: if `projectHostId` is present, the
  *   selection must match it.
@@ -70,10 +70,11 @@ export function selectHost(request: HostSelectionRequest): HostSelectionResult {
 
 /**
  * Returns the full list of known hosts for the v1 selector UI.
- * In v1 this is always exactly one healthy `This Mac` entry.
+ * In v1 this is always exactly one healthy local entry.
  */
-export function listHosts(): ReadonlyArray<HostIdentity> {
-  return [...KNOWN_HOSTS.values()];
+export function listHosts(displayName = LOCAL_HOST_DISPLAY_NAME): ReadonlyArray<HostIdentity> {
+  const localHost = KNOWN_HOSTS.get(LOCAL_HOST_ID);
+  return localHost === undefined ? [] : [{ ...localHost, displayName }];
 }
 
 /**

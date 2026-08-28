@@ -44,8 +44,8 @@ describe("LOCAL_HOST_ID", () => {
 });
 
 describe("LOCAL_HOST_DISPLAY_NAME", () => {
-  it("is 'This Mac'", () => {
-    expect(LOCAL_HOST_DISPLAY_NAME).toBe("This Mac");
+  it("is the neutral local-host fallback", () => {
+    expect(LOCAL_HOST_DISPLAY_NAME).toBe("This computer");
   });
 });
 

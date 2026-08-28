@@ -227,6 +227,10 @@ export interface PersistenceService {
     scopeRef: string,
   ) => ReadonlyArray<AgentProfile>;
   readonly status: () => DatabaseStatus;
+  readonly projectionCatchUp: ReadonlyArray<{
+    readonly projection: string;
+    readonly durationMs: number;
+  }>;
 }
 
 export class Persistence extends Context.Tag("@octant/server/Persistence")<
@@ -315,8 +319,17 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       });
     }
 
+    const projectionCatchUp: Array<{
+      readonly projection: string;
+      readonly durationMs: number;
+    }> = [];
     for (const projection of projections.all()) {
+      const startedAt = performance.now();
       catchUpProjection({ connection, journal, projection, clock });
+      projectionCatchUp.push({
+        projection: projection.name,
+        durationMs: Math.max(0, performance.now() - startedAt),
+      });
     }
     // After catch-up so heads and the checkout projection are current, and
     // before restart reconciliation so its append continues from the compacted
@@ -417,6 +430,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readProfilesForScope: (scopeKind, scopeRef) =>
         readProfilesForScope(connection, scopeKind, scopeRef),
       status: () => databaseStatus({ connection, journal, projections }),
+      projectionCatchUp,
     };
   } catch (error) {
     connection.close();

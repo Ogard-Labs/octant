@@ -1,4 +1,5 @@
 import type { ProviderDriverKind } from "@octant/contracts";
+import { providerGlyphColorForKind } from "@octant/theme";
 import type { ReactNode } from "react";
 
 export interface ProviderGlyphProps {
@@ -9,8 +10,6 @@ export interface ProviderGlyphProps {
 }
 
 interface GlyphSpec {
-  /** Brand-adjacent fallback color; overridable via `--octant-glyph-<kind>`. */
-  readonly color: string;
   readonly mark: ReactNode;
 }
 
@@ -18,7 +17,6 @@ interface GlyphSpec {
 // `currentColor` so the color token can be themed. These are not vendor logos.
 const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
   claude: {
-    color: "#d9885a",
     mark: (
       <g stroke="currentColor" strokeLinecap="round" strokeWidth="1.8">
         <path d="M8 2.5v11M2.5 8h11M4.1 4.1l7.8 7.8M11.9 4.1l-7.8 7.8" />
@@ -26,16 +24,14 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   "anthropic-compatible": {
-    color: "#d9885a",
     mark: (
       <g fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5">
         <path d="M8 3v10M3 8h10M4.5 4.5l7 7M11.5 4.5l-7 7" />
-        <circle cx="8" cy="8" r="2.4" fill="var(--octant-surface, #111)" />
+        <circle cx="8" cy="8" r="2.4" fill="var(--octant-surface)" />
       </g>
     ),
   },
   codex: {
-    color: "var(--octant-text-secondary)",
     mark: (
       <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
         <path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z" />
@@ -44,7 +40,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   "openai-compatible": {
-    color: "var(--octant-text-secondary)",
     mark: (
       <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
         <path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z" />
@@ -53,7 +48,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   opencode: {
-    color: "#7fa7c9",
     mark: (
       <g fill="none" stroke="currentColor" strokeWidth="1.5">
         <rect height="11.5" rx="3" width="11.5" x="2.25" y="2.25" />
@@ -62,7 +56,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   kilo: {
-    color: "#8b7cf6",
     mark: (
       <path
         d="M8 1.8l6.2 6.2L8 14.2 1.8 8z M8 5.4L5.4 8 8 10.6 10.6 8z"
@@ -72,7 +65,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   pi: {
-    color: "#4f8ef7",
     mark: (
       <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
         <circle cx="8" cy="8" r="6.2" />
@@ -82,7 +74,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   "oh-my-pi": {
-    color: "#e879b8",
     mark: (
       <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
         <circle cx="8" cy="8" r="6.2" strokeDasharray="2.6 1.9" />
@@ -92,7 +83,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   devin: {
-    color: "#2dbfa8",
     mark: (
       <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
         <path d="M8 2.2l6 10.6H2z" />
@@ -101,7 +91,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   "mistral-vibe": {
-    color: "#f6862b",
     mark: (
       <g fill="currentColor">
         <rect height="2.4" rx="0.8" width="12" x="2" y="2.6" />
@@ -111,7 +100,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   ollama: {
-    color: "var(--octant-text-secondary)",
     mark: (
       <g
         fill="none"
@@ -125,7 +113,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   "kimi-code": {
-    color: "#5b6cff",
     mark: (
       <g fill="currentColor">
         <path d="M2.2 9.2c0-3 2.4-5.2 5.4-5.2 2.9 0 5.2 2 5.6 4.6l.1.5c.1.7-.5 1.3-1.2 1.3H3.4c-.7 0-1.2-.5-1.2-1.2z" />
@@ -134,7 +121,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
     ),
   },
   "azure-foundry": {
-    color: "#2f88d8",
     mark: (
       <g fill="currentColor">
         <path d="M6.2 2.5h3.2L4.6 13.5H1.5z" opacity="0.65" />
@@ -145,8 +131,7 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
 };
 
 export function providerGlyphColor(driverKind: string): string {
-  const spec = GLYPHS[driverKind];
-  return `var(--octant-glyph-${driverKind}, ${spec?.color ?? "var(--octant-text-secondary)"})`;
+  return providerGlyphColorForKind(driverKind);
 }
 
 export function ProviderGlyph(props: ProviderGlyphProps) {

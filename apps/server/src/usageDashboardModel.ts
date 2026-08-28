@@ -5,11 +5,15 @@ import type {
   UsageAttributionEntry,
   UsageBreakdownGroup,
   UsageBreakdownRow,
+  UsageCacheStat,
+  UsageCacheStats,
   UsageCoverageSlice,
   UsageDashboardResponse,
   UsageDetailRow,
   UsageDimensionSource,
   UsageHostCoverage,
+  UsageLatencyStats,
+  UsageProviderTokenCacheStat,
   UsageQuality,
 } from "@octant/contracts";
 
@@ -51,6 +55,9 @@ export interface BuildUsageDashboardOptions {
   /** True when the durable scan hit its bound before exhausting the range. */
   readonly scanTruncated?: boolean;
   readonly staleThresholdMs?: number;
+  /** Read facts observed by the host's own caches since it started. */
+  readonly cacheStats?: ReadonlyArray<UsageCacheStat>;
+  readonly latencyStats?: UsageLatencyStats;
 }
 
 /** Matches `classifyUsageQuality`, so a host and a record age out together. */
@@ -120,6 +127,10 @@ export function buildUsageDashboard(
     string,
     { providerInstanceId: string; modelId: string; totals: Accumulator }
   >();
+  const providerTokenCaches = new Map<
+    string,
+    { requestCount: number; readTokens: number; writeTokens: number }
+  >();
   const detail: Array<UsageDetailRow> = [];
   const accepted: Array<UsageDashboardSourceRow> = [];
 
@@ -175,6 +186,20 @@ export function buildUsageDashboard(
       row,
       unavailable,
     );
+
+    // Only requests the provider reported prompt-cache facts for say anything
+    // about cache efficiency. A provider that never reports them would look
+    // perfectly inefficient if counted as zero reuse.
+    if (row.cacheReadInputTokens !== undefined || row.cacheWriteInputTokens !== undefined) {
+      const tokenCache = bucket(providerTokenCaches, row.providerInstanceId, () => ({
+        requestCount: 0,
+        readTokens: 0,
+        writeTokens: 0,
+      }));
+      tokenCache.requestCount += 1;
+      tokenCache.readTokens += row.cacheReadInputTokens ?? 0;
+      tokenCache.writeTokens += row.cacheWriteInputTokens ?? 0;
+    }
 
     const host = hosts.get(row.hostId);
     if (host === undefined) {
@@ -241,8 +266,10 @@ export function buildUsageDashboard(
     scanTruncated: options.scanTruncated ?? false,
     hosts: buildHostCoverage(hosts, options),
     dimensionSources: buildDimensionSources({ sawUnplacedProject, sawModelessSubject }),
+    cacheStats: buildCacheStats(providerTokenCaches, options.cacheStats ?? []),
     timeZone: options.timeZone,
     queryAt: options.queryAt as UsageDashboardResponse["queryAt"],
+    latencyStats: options.latencyStats ?? { measurements: [] },
   };
 }
 
@@ -550,6 +577,43 @@ function buildHostCoverage(
         status: Number.isFinite(age) && age > threshold ? "stale" : "contributing",
       };
     });
+}
+
+/**
+ * Join the host's own cache readings with prompt-cache efficiency read from the
+ * ledger. Prompt-cache reuse is expressed as cache-read tokens over read plus
+ * written tokens: writes are prompt work the provider had to store again, so a
+ * high ratio means the same context was mostly reused rather than re-sent.
+ */
+function buildCacheStats(
+  providerTokenCaches: ReadonlyMap<
+    string,
+    { requestCount: number; readTokens: number; writeTokens: number }
+  >,
+  caches: ReadonlyArray<UsageCacheStat>,
+): UsageCacheStats {
+  let readTokens = 0;
+  let writeTokens = 0;
+  const providers = [...providerTokenCaches.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([providerInstanceId, facts]): UsageProviderTokenCacheStat => {
+      readTokens += facts.readTokens;
+      writeTokens += facts.writeTokens;
+      const observed = facts.readTokens + facts.writeTokens;
+      return {
+        providerInstanceId: providerInstanceId as UsageProviderTokenCacheStat["providerInstanceId"],
+        requestCount: facts.requestCount,
+        cacheReadInputTokens: facts.readTokens,
+        cacheWriteInputTokens: facts.writeTokens,
+        ...(observed === 0 ? {} : { hitRatio: facts.readTokens / observed }),
+      };
+    });
+  const observedTokens = readTokens + writeTokens;
+  return {
+    caches,
+    providerTokenCaches: providers,
+    ...(observedTokens === 0 ? {} : { tokenCacheHitRatio: readTokens / observedTokens }),
+  };
 }
 
 /**

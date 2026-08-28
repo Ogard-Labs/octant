@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type {
   UsageAttributionDimension,
   UsageBreakdownGroup,
+  UsageCacheStats,
   UsageDashboardResponse,
   UsageDetailRow,
   UsageDimensionSource,
@@ -15,6 +16,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { UsageActivityHeatmap } from "./UsageActivityHeatmap";
+import { LatencyStatsSection } from "./LatencyStatsSection";
 import { useUsageDashboardController } from "./useUsageDashboardController";
 import "./usageWorkspace.css";
 
@@ -190,8 +192,14 @@ export function UsageWorkspace(props: UsageWorkspaceProps) {
               />
             </>
           )}
+          <CacheSection stats={dashboard.cacheStats} />
           <HostSection hosts={dashboard.hosts} />
           <AttributionSourceSection sources={dashboard.dimensionSources} />
+          <LatencyStatsSection
+            className="usage-workspace__section"
+            connectionLatencyMs={controller.connectionLatencyMs}
+            latencyStats={dashboard.latencyStats}
+          />
           <p className="usage-workspace__footer">
             Read from this host at {new Date(dashboard.queryAt).toLocaleString()}. Retention,
             export, and reset live in Settings under Usage and data.
@@ -376,6 +384,136 @@ function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardRespo
       ) : null}
     </section>
   );
+}
+
+/**
+ * Cache efficiency for this host.
+ *
+ * Rates are drawn as meters as well as written out, because a ratio is easier
+ * to compare at a glance than to read, and a reader who cannot see the meter
+ * still gets the same numbers. Freshness and pacing sit beside the rates: a
+ * high hit rate on contents nobody could refresh is not efficiency.
+ */
+function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
+  if (stats.caches.length === 0 && stats.providerTokenCaches.length === 0) return null;
+  const now = Date.now();
+  return (
+    <section aria-label="Cache efficiency" className="usage-workspace__section">
+      <h3>Cache efficiency</h3>
+      {stats.caches.length === 0 ? null : (
+        <div className="usage-table-scroll">
+          <table aria-label="Host cache hit and miss rates" className="usage-table">
+            <thead>
+              <tr>
+                <th scope="col">Cache</th>
+                <th scope="col">Hits</th>
+                <th scope="col">Misses</th>
+                <th scope="col">Hit rate</th>
+                <th scope="col">Miss rate</th>
+                <th scope="col">Last refresh</th>
+                <th scope="col">Refresh pacing</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.caches.map((cache) => (
+                <tr key={cache.key}>
+                  <th scope="row">{cache.label}</th>
+                  <td>{cache.hitCount.toLocaleString()}</td>
+                  <td>{cache.missCount.toLocaleString()}</td>
+                  <td>
+                    <RateMeter label={`${cache.label} hit rate`} ratio={cache.hitRatio} />
+                  </td>
+                  <td>
+                    <RateMeter
+                      label={`${cache.label} miss rate`}
+                      ratio={cache.hitRatio === undefined ? undefined : 1 - cache.hitRatio}
+                    />
+                  </td>
+                  <td>{freshnessWords(cache.lastRefreshAt, cache.stalenessMs)}</td>
+                  <td>{pacingWords(cache.failureStreak, cache.retryAt, now)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <h4 className="usage-workspace__subheading">Provider prompt cache</h4>
+      {stats.providerTokenCaches.length === 0 ? (
+        <p className="usage-workspace__note">
+          No provider reported prompt-cache tokens in this range, so reuse is unavailable rather
+          than zero.
+        </p>
+      ) : (
+        <>
+          <p className="usage-workspace__note">
+            Reuse across every provider instance in range:{" "}
+            <RateMeter label="Token cache hit ratio" ratio={stats.tokenCacheHitRatio} />
+          </p>
+          <div className="usage-table-scroll">
+            <table aria-label="Provider prompt cache reuse" className="usage-table">
+              <thead>
+                <tr>
+                  <th scope="col">Provider instance</th>
+                  <th scope="col">Requests</th>
+                  <th scope="col">Cache read tokens</th>
+                  <th scope="col">Cache write tokens</th>
+                  <th scope="col">Reuse</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.providerTokenCaches.map((provider) => (
+                  <tr key={provider.providerInstanceId}>
+                    <th scope="row">{provider.providerInstanceId}</th>
+                    <td>{provider.requestCount.toLocaleString()}</td>
+                    <td>{provider.cacheReadInputTokens.toLocaleString()}</td>
+                    <td>{provider.cacheWriteInputTokens.toLocaleString()}</td>
+                    <td>
+                      <RateMeter
+                        label={`${provider.providerInstanceId} prompt cache reuse`}
+                        ratio={provider.hitRatio}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      <p className="usage-workspace__note">
+        Hit and miss counts are what this host has observed since it started, so they begin again
+        after a restart. Prompt-cache tokens come from the requests in the selected range.
+      </p>
+    </section>
+  );
+}
+
+function RateMeter(props: { readonly label: string; readonly ratio: number | undefined }) {
+  if (props.ratio === undefined) return <span data-unavailable="true">Unavailable</span>;
+  const percent = `${Math.round(props.ratio * 100)}%`;
+  return (
+    <>
+      <meter aria-label={props.label} max={1} min={0} value={props.ratio} /> <span>{percent}</span>
+    </>
+  );
+}
+
+function freshnessWords(
+  lastRefreshAt: string | undefined,
+  stalenessMs: number | undefined,
+): string {
+  if (lastRefreshAt === undefined) return "Never refreshed";
+  const age =
+    stalenessMs === undefined ? "" : ` · ${Math.round(stalenessMs / 1000).toLocaleString()}s old`;
+  return `${new Date(lastRefreshAt).toLocaleString()}${age}`;
+}
+
+function pacingWords(failureStreak: number, retryAt: string | undefined, now: number): string {
+  if (failureStreak === 0) return "Not paced";
+  const streak = `${failureStreak} failure${failureStreak === 1 ? "" : "s"} in a row`;
+  if (retryAt === undefined) return `${streak} · next read may retry`;
+  const seconds = Math.max(0, Math.round((new Date(retryAt).getTime() - now) / 1000));
+  return `${streak} · automatic retry in ${seconds.toLocaleString()}s; refresh still works`;
 }
 
 function TotalItem(props: {

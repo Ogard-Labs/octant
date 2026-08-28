@@ -188,7 +188,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     transportForHost,
     refreshHosts,
     resumeHost: (origin) => {
-      hub.bridgeForOrigin(origin)?.resume(origin);
+      hub.supervisorForOrigin(origin)?.retryNow();
       bridge.resume(origin);
     },
     inboxHostFilter,

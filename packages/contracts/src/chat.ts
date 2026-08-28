@@ -263,6 +263,18 @@ export const ChatThread = Schema.Struct({
   .pipe(Schema.filter((thread) => thread.branchedFrom?.threadId !== thread.id));
 export type ChatThread = typeof ChatThread.Type;
 
+/**
+ * The route a turn may take when its own provider cannot serve it.
+ *
+ * Opt-in: absent means a turn refuses on the thread's own provider instead of
+ * moving the conversation to another one.
+ */
+export const ChatProviderFallback = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+}).annotations(strict);
+export type ChatProviderFallback = typeof ChatProviderFallback.Type;
+
 export const ChatSettings = Schema.Struct({
   defaultProviderInstanceId: Schema.optional(ProviderInstanceId),
   defaultModelId: Schema.optional(ProviderModelId),
@@ -270,6 +282,7 @@ export const ChatSettings = Schema.Struct({
   defaultResearchRouting: ChatResearchRouting,
   searxngBaseUrl: Schema.optional(Schema.NonEmptyTrimmedString),
   defaultPersonalityInstructions: Schema.NonEmptyTrimmedString,
+  providerFallback: Schema.optional(ChatProviderFallback),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 })
@@ -463,6 +476,7 @@ export const UpdateChatSettingsCommand = Schema.Struct({
   defaultResearchRouting: ChatResearchRouting,
   searxngBaseUrl: Schema.optional(Schema.NonEmptyTrimmedString),
   defaultPersonalityInstructions: Schema.NonEmptyTrimmedString,
+  providerFallback: Schema.optional(ChatProviderFallback),
 })
   .annotations(strict)
   .pipe(

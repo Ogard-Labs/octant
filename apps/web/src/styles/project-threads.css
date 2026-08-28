@@ -33,6 +33,11 @@
   padding-left: 0;
 }
 
+.project-threads__virtual-list {
+  position: relative;
+  min-width: 0;
+}
+
 .project-overview__threads .project-threads:focus-visible {
   outline: 2px solid var(--octant-focus-ring);
   outline-offset: 2px;
