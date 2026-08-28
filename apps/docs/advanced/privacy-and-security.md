@@ -158,6 +158,9 @@ federation and hosted relay models are post-preview.
 ## Next steps
 
 - [Privacy notice](/advanced/privacy-notice) for what exists, what leaves, and export or purge
+- Shared-host controller footing (repository draft at
+  `docs/legal/shared-host-controller.md`) for when several principals share
+  one host journal
 - [Installation](/guide/installation#updates) for what an update check sends
 - [Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses)
   for what a catalog fetch discloses
