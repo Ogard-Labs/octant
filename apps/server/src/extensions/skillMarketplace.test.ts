@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { decodeExtensionCommandResult } from "@octant/contracts/extension-rpc";
@@ -20,6 +20,11 @@ import {
 } from "./npmSkillMarketplace";
 import { createCompositeSkillMarketplace } from "./compositeSkillMarketplace";
 import { inspectExtensionPackage } from "./packageInspector";
+import {
+  MARKETPLACE_FETCH_USER_AGENT,
+  MarketplaceFetchesDisabledError,
+  marketplaceHeadersAreAllowlisted,
+} from "./marketplaceHttps";
 
 const FRONTEND_ENTRY_ID = encodeSkillCatalogEntryId({
   owner: "anthropics",
@@ -203,6 +208,21 @@ Body
 });
 
 describe("skills.sh marketplace", () => {
+  it("keeps search request headers on the marketplace allowlist", async () => {
+    let seen: HeadersInit | undefined;
+    const marketplace = new SkillsShMarketplace({
+      fetch: (async (_input, init) => {
+        seen = init?.headers;
+        return Response.json({ skills: [] });
+      }) as unknown as typeof fetch,
+      platform: "darwin",
+    });
+    await marketplace.search("review");
+    expect(marketplaceHeadersAreAllowlisted(seen)).toBe(true);
+    expect(new Headers(seen).get("user-agent")).toBe(MARKETPLACE_FETCH_USER_AGENT);
+    expect(new Headers(seen).get("user-agent")).not.toMatch(/\d/);
+  });
+
   it("preserves digit-prefixed public skill names in search results", async () => {
     const marketplace = new SkillsShMarketplace({
       fetch: (async () =>
@@ -1221,6 +1241,19 @@ function buildMinimalGzipTar(
 }
 
 describe("composite skill marketplace", () => {
+  it("makes no skills.sh or npm request when marketplace fetches are off", async () => {
+    const fetchSpy = vi.fn(async () => Response.json({ skills: [], objects: [] }));
+    const marketplace = createCompositeSkillMarketplace({
+      fetch: fetchSpy as unknown as typeof fetch,
+      isMarketplaceFetchAllowed: () => false,
+      platform: "darwin",
+    });
+    await expect(marketplace.search("review")).rejects.toBeInstanceOf(
+      MarketplaceFetchesDisabledError,
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("merges skills.sh and npm results and isolates source failures", async () => {
     const marketplace = createCompositeSkillMarketplace({
       skillsSh: {

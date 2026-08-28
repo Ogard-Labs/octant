@@ -2516,11 +2516,15 @@ export function startOctantServer(
       },
     };
     const skillDiscoveryService = new SkillDiscoveryService({ roots: extensionSkillRoots });
+    const isMarketplaceFetchAllowed = () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .marketplaceFetchesEnabled;
     const skillMarketplace =
       options.skillMarketplace ??
       createCompositeSkillMarketplace({
         appVersion: version,
         platform: process.platform,
+        isMarketplaceFetchAllowed,
       });
     const standaloneSkillService = new StandaloneSkillService({
       discovery: skillDiscoveryService,
@@ -2560,6 +2564,7 @@ export function startOctantServer(
       new CodexPluginPackageResolver({
         ...(options.codexPluginPackageSources ?? createDefaultCodexPluginPackageSources()),
         localFolderRegistry: localPluginFolderRegistry,
+        isMarketplaceFetchAllowed,
       });
     const agentPluginMcpSessionManager =
       options.agentPluginMcpSessionManager ??

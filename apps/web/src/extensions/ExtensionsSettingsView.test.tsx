@@ -1491,6 +1491,21 @@ describe("ExtensionsSettingsView", () => {
     expect(await screen.findByText("Search unavailable.")).toBeInTheDocument();
     expect(screen.queryByText("React Skill")).toBeNull();
   });
+
+  it("does not contact skill registries when marketplace fetches are off", async () => {
+    const snapshot = installedSnapshot({ activation: baseActivation({ installed: false }) });
+    const c = client({ snapshot });
+
+    render(<ExtensionsSettingsView client={c} marketplaceFetchesEnabled={false} scope={scope} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /marketplace/i }));
+    expect(
+      screen.getByText(/Marketplace fetches are off in Settings → General → Marketplace/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /search skills/i })).toBeDisabled();
+    expect(c.calls.map((command) => command.kind)).not.toContain("search-skills");
+    expect(c.calls.map((command) => command.kind)).not.toContain("inspect-package");
+    expect(c.calls.map((command) => command.kind)).not.toContain("preview-skill");
+  });
 });
 
 describe("local Agent Plugin import", () => {
