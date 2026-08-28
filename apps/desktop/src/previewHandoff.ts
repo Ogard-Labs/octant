@@ -1,4 +1,5 @@
-import { isAbsolute } from "node:path";
+import { existsSync } from "node:fs";
+import { delimiter, isAbsolute, join } from "node:path";
 
 /**
  * Maximum lifetime of a Quick Look child process. `qlmanage -p` blocks until
@@ -8,6 +9,8 @@ import { isAbsolute } from "node:path";
  * (abort signal) or superseded by a new handoff for the same target.
  */
 export const QUICK_LOOK_MAX_LIFETIME_MS = 5 * 60 * 1_000;
+
+const PREVIEW_OPEN_FAILURE = "Octant could not open the preview externally.";
 
 /**
  * The three authenticated external-application preview handoff kinds. The
@@ -48,6 +51,8 @@ export interface PreviewHandoffExecutor {
 
 interface SpawnedProcess {
   readonly on?: (event: "exit", listener: () => void) => void;
+  readonly once?: (event: "error" | "spawn", listener: (error?: Error) => void) => void;
+  readonly unref?: () => void;
   readonly kill?: () => void;
 }
 
@@ -98,16 +103,18 @@ export async function openPreviewHandoffFromServer(options: {
         break;
     }
   } catch {
-    throw new Error("Octant could not open the preview externally.");
+    throw new Error(PREVIEW_OPEN_FAILURE);
   }
 }
 
 /**
- * Native executor for the packaged Electron app. `shell.showItemInFolder`
+ * Native executor for the packaged Electron app. On macOS, `shell.showItemInFolder`
  * reveals in Finder, `qlmanage -p` opens Quick Look as an isolated child
  * process with a bounded lifetime, and `shell.openPath` opens the system
- * default application. No generic shell and no string interpolation reaches
- * a process boundary: the path is always one separate spawn argument.
+ * default application. On Linux, reveal and open go through `xdg-open` (and
+ * the desktop portals behind it); Quick Look stays macOS-only and no-ops.
+ * No generic shell and no string interpolation reaches a process boundary:
+ * the path is always one separate spawn argument.
  */
 export function createNativePreviewHandoffExecutor(options: {
   readonly shell: {
@@ -115,14 +122,24 @@ export function createNativePreviewHandoffExecutor(options: {
     readonly openPath: (path: string) => Promise<string>;
   };
   readonly spawn: SpawnProcess;
+  readonly platform?: NodeJS.Platform;
+  readonly pathEnv?: string;
+  readonly exists?: (path: string) => boolean;
   readonly quickLookLifetimeMs?: number;
 }): PreviewHandoffExecutor {
   const lifetimeMs = options.quickLookLifetimeMs ?? QUICK_LOOK_MAX_LIFETIME_MS;
+  const platform = options.platform ?? "darwin";
+  const exists = options.exists ?? existsSync;
   return {
     async revealInFinder(path) {
+      if (platform === "linux") {
+        await spawnLinuxXdgOpen(options.spawn, path, exists, options.pathEnv);
+        return;
+      }
       options.shell.showItemInFolder(path);
     },
     async quickLook(path, signal) {
+      if (platform !== "darwin") return;
       await new Promise<void>((resolve) => {
         let child: SpawnedProcess | undefined;
         try {
@@ -158,10 +175,78 @@ export function createNativePreviewHandoffExecutor(options: {
       });
     },
     async openExternal(path) {
+      if (platform === "linux") {
+        await spawnLinuxXdgOpen(options.spawn, path, exists, options.pathEnv);
+        return;
+      }
       const error = await options.shell.openPath(path);
-      if (error !== "") throw new Error("Octant could not open the preview externally.");
+      if (error !== "") throw new Error(PREVIEW_OPEN_FAILURE);
     },
   };
+}
+
+async function spawnLinuxXdgOpen(
+  spawn: SpawnProcess,
+  path: string,
+  exists: (path: string) => boolean,
+  pathEnv: string | undefined,
+): Promise<void> {
+  const xdgOpen = resolveExecutableOnPath("xdg-open", exists, pathEnv);
+  if (xdgOpen === undefined) throw new Error(PREVIEW_OPEN_FAILURE);
+  await spawnDetached(spawn, xdgOpen, [path]);
+}
+
+/**
+ * Detached openers must reject when spawn fails asynchronously (missing
+ * xdg-open). Node emits `error` rather than throwing synchronously.
+ */
+async function spawnDetached(
+  spawn: SpawnProcess,
+  command: string,
+  args: readonly string[],
+): Promise<void> {
+  let child: SpawnedProcess;
+  try {
+    child = spawn(command, args);
+  } catch {
+    throw new Error(PREVIEW_OPEN_FAILURE);
+  }
+  if (child.once === undefined) {
+    child.unref?.();
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      child.unref?.();
+      resolve();
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(PREVIEW_OPEN_FAILURE));
+    };
+    child.once!("error", fail);
+    child.once!("spawn", succeed);
+  });
+}
+
+function resolveExecutableOnPath(
+  command: string,
+  exists: (path: string) => boolean,
+  pathEnv: string | undefined = process.env.PATH,
+): string | undefined {
+  if (command.includes("\0") || command.includes("/") || command.includes("\\")) {
+    return undefined;
+  }
+  for (const directory of (pathEnv ?? "").split(delimiter)) {
+    if (directory === "") continue;
+    const candidate = join(directory, command);
+    if (isAbsolute(candidate) && exists(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 function decodeHandoffTarget(value: unknown): {
