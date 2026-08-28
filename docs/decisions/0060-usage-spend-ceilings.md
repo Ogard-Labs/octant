@@ -55,8 +55,12 @@ implementation change is authorized.
   only committed `UsageRecord` rows races concurrent admitted turns and under-
   counts in-flight spend. Admission must reserve remaining capacity for the
   scoped turn (commit on completion, release on cancel or failure, with a
-  defined retry path). A turn whose remaining reservation cannot cover its
-  declared or observed need is refused before provider side effects.
+  defined retry path). Every hard-ceiling turn needs a **pre-admission upper
+  bound** before the provider call: a declared estimate from the scheduler, or
+  a configured per-turn maximum for that dimension. Turns with no bound are
+  refused rather than admitted on hope. If observed spend still exceeds the
+  reservation, the host records the overrun, refuses further admission under
+  that scope, and surfaces recovery — it does not silently widen the ceiling.
 - **Unknown spend fails closed for the dimensions that are set.** If a token
   ceiling is set and recent rows are `unavailable` or would leave the total
   unknowable, the host refuses rather than treating missing tokens as zero.
