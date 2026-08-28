@@ -116,6 +116,7 @@ export class ImageJobService {
   readonly #concurrency: number;
   readonly #abort = new Map<string, AbortController>();
   readonly #waiters = new Map<string, Deferred<ImageJob>>();
+  readonly #terminalPersistenceErrors = new Map<string, Error>();
   readonly #pending = new Array<ImageJobId>();
   #running = 0;
   #pumping = false;
@@ -145,6 +146,8 @@ export class ImageJobService {
   }
 
   whenTerminal(jobId: ImageJobId): Promise<ImageJob> {
+    const persistenceError = this.#terminalPersistenceErrors.get(String(jobId));
+    if (persistenceError !== undefined) return Promise.reject(persistenceError);
     const current = this.#projection.getById(jobId);
     if (current !== undefined && isImageJobTerminalStatus(current.status)) {
       return Promise.resolve(current);
@@ -167,7 +170,10 @@ export class ImageJobService {
     ) {
       throw new ImageJobServiceError("invalid", "The requested variant count is not supported.");
     }
-    const references = input.references ?? [];
+    const references = (input.references ?? []).map((reference) => ({
+      mediaType: reference.mediaType,
+      bytes: Uint8Array.from(reference.bytes),
+    }));
     let referenceBytes = 0;
     for (const reference of references) {
       if (reference.bytes.length === 0) {
@@ -366,8 +372,19 @@ export class ImageJobService {
         return;
       }
       const artifacts = await this.#finalizeArtifacts(running, result.images);
-      const completed = this.#transition(running, "completed", { artifacts }, result);
-      this.#resolve(completed);
+      if (controller.signal.aborted) {
+        await this.#removeArtifacts(running, artifacts);
+        const cancelled = this.#transition(running, "cancelled");
+        this.#resolve(cancelled);
+        return;
+      }
+      try {
+        const completed = this.#transition(running, "completed", { artifacts }, result);
+        this.#resolve(completed);
+      } catch (error) {
+        await this.#removeArtifacts(running, artifacts);
+        throw error;
+      }
     } catch (error) {
       if (controller.signal.aborted) {
         const cancelled = this.#transition(running, "cancelled");
@@ -462,11 +479,28 @@ export class ImageJobService {
       }
       return records;
     } catch (error) {
-      await Promise.all(
-        stagedIds.map((attachmentId) => this.#attachments.remove(job.scopeId, attachmentId)),
-      );
+      await this.#removeArtifactIds(job, stagedIds);
       throw error;
     }
+  }
+
+  async #removeArtifacts(
+    job: ImageJob,
+    artifacts: ReadonlyArray<ImageArtifactRecord>,
+  ): Promise<void> {
+    await this.#removeArtifactIds(
+      job,
+      artifacts.map((artifact) => artifact.attachmentId),
+    );
+  }
+
+  async #removeArtifactIds(
+    job: ImageJob,
+    attachmentIds: ReadonlyArray<ImageJob["artifacts"][number]["attachmentId"]>,
+  ): Promise<void> {
+    await Promise.all(
+      attachmentIds.map((attachmentId) => this.#attachments.remove(job.scopeId, attachmentId)),
+    );
   }
 
   #appendQueued(job: ImageJob): void {
@@ -641,22 +675,46 @@ export class ImageJobService {
         },
       });
       this.#resolve(failed);
-    } catch {
-      this.#deferred(job.id).resolve(current);
-      this.#waiters.delete(String(job.id));
-      this.#work.delete(String(job.id));
+    } catch (journalError) {
+      this.#rejectWaiters(
+        job.id,
+        journalError instanceof Error
+          ? journalError
+          : new ImageJobServiceError("conflict", "The image job failed."),
+      );
     }
+  }
+
+  #rejectWaiters(jobId: ImageJobId, error: Error): void {
+    const key = String(jobId);
+    this.#terminalPersistenceErrors.set(key, error);
+    const waiter = this.#waiters.get(key);
+    if (waiter !== undefined) {
+      waiter.reject(error);
+      this.#waiters.delete(key);
+    }
+    this.#work.delete(key);
   }
 
   #deferred(jobId: ImageJobId): Deferred<ImageJob> {
     const key = String(jobId);
+    const persistenceError = this.#terminalPersistenceErrors.get(key);
+    if (persistenceError !== undefined) {
+      return {
+        promise: Promise.reject(persistenceError),
+        resolve: () => undefined,
+        reject: () => undefined,
+      };
+    }
     const existing = this.#waiters.get(key);
     if (existing !== undefined) return existing;
     let resolve: (job: ImageJob) => void = () => undefined;
-    const promise = new Promise<ImageJob>((res) => {
+    let reject: (reason: Error) => void = () => undefined;
+    const promise = new Promise<ImageJob>((res, rej) => {
       resolve = res;
+      reject = rej;
     });
-    const deferred = { promise, resolve };
+    const deferred = { promise, resolve, reject };
     this.#waiters.set(key, deferred);
     return deferred;
   }
@@ -671,6 +729,7 @@ export class ImageJobService {
 interface Deferred<T> {
   readonly promise: Promise<T>;
   readonly resolve: (value: T) => void;
+  readonly reject: (reason: Error) => void;
 }
 
 function hashPrompt(prompt: string): string {

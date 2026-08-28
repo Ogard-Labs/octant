@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +19,7 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { readUsageDashboard } from "../usageDashboardService";
 import { GeneratedImageStore } from "./generatedImageStore";
 import type { ImageGenerationAdapter } from "./imageAdapter";
-import { ImageJobService } from "./imageJobService";
+import { ImageJobService, ImageJobServiceError } from "./imageJobService";
 
 const now = "2026-08-28T12:00:00.000Z";
 const directories: Array<string> = [];
@@ -240,6 +240,32 @@ describe("image job service", () => {
     expect(service.get(queued.id)?.status).toBe("cancelled");
   });
 
+  it("snapshots reference image bytes so later mutation cannot bypass size checks", async () => {
+    const generate = vi.fn(async (request) => ({
+      status: "completed" as const,
+      images: [{ bytes: png, mediaType: "image/png" as const }],
+      references: request.references,
+    }));
+    const { service } = openHarness({ generate });
+    const bytes = Uint8Array.from(png);
+    const reference = { bytes, mediaType: "image/png" as const };
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "edit this",
+      references: [reference],
+    });
+    bytes.fill(9);
+    reference.bytes = new Uint8Array(MAX_GENERATED_IMAGE_BYTES + 1);
+    await service.whenTerminal(queued.id);
+    expect(generate).toHaveBeenCalledOnce();
+    const forwarded = generate.mock.calls[0]?.[0]?.references?.[0]?.bytes;
+    expect(forwarded).toEqual(png);
+    expect(forwarded).not.toBe(bytes);
+  });
+
   it("refuses oversized reference images before they are forwarded", async () => {
     const generate = vi.fn(async () => ({
       status: "completed" as const,
@@ -287,7 +313,7 @@ describe("image job service", () => {
     expect(await attachments.hasTemporaryFiles()).toBe(false);
   });
 
-  it("records a terminal failure when job execution cannot journal its outcome", async () => {
+  it("rejects waiters when a job failure cannot be journaled", async () => {
     const rejections: unknown[] = [];
     const onReject = (reason: unknown) => {
       rejections.push(reason);
@@ -309,12 +335,53 @@ describe("image job service", () => {
         modelId,
         prompt: "explode",
       });
-      await expect(service.whenTerminal(queued.id)).resolves.toBeDefined();
+      await expect(service.whenTerminal(queued.id)).rejects.toBeInstanceOf(ImageJobServiceError);
+      await expect(service.whenTerminal(queued.id)).rejects.toBeInstanceOf(ImageJobServiceError);
       await Promise.resolve();
       expect(rejections).toEqual([]);
     } finally {
       process.off("unhandledRejection", onReject);
     }
+  });
+
+  it("removes finalized attachments when completion cannot be journaled", async () => {
+    const { service, directory, attachments } = openHarness(successfulAdapter(), {
+      failAppendAfter: 2,
+    });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "a red cube",
+    });
+    await expect(service.whenTerminal(queued.id)).rejects.toBeInstanceOf(ImageJobServiceError);
+    expect(hasFinalizedImage(directory)).toBe(false);
+    expect(await attachments.hasTemporaryFiles()).toBe(false);
+  });
+
+  it("removes finalized attachments when cancelled after the adapter returns", async () => {
+    const { service, attachments, directory, runtime } = openHarness(successfulAdapter());
+    const originalFinalize = attachments.finalize.bind(attachments);
+    vi.spyOn(attachments, "finalize").mockImplementation(async (staged) => {
+      const finalized = await originalFinalize(staged);
+      for (const job of runtime.imageJobProjection.listRunning()) {
+        void service.cancel(job.id);
+      }
+      return finalized;
+    });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "a red cube",
+    });
+    const cancelled = await service.whenTerminal(queued.id);
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.artifacts).toEqual([]);
+    expect(hasFinalizedImage(directory)).toBe(false);
+    expect(await attachments.hasTemporaryFiles()).toBe(false);
   });
 
   it("fails a job found running after restart without re-invoking the provider", async () => {
@@ -372,3 +439,12 @@ describe("image job service", () => {
     void hangingResolve;
   });
 });
+
+function hasFinalizedImage(directory: string): boolean {
+  const root = join(directory, "generated-images");
+  if (!existsSync(root)) return false;
+  return readdirSync(root, { recursive: true }).some((entry) => {
+    const name = String(entry);
+    return name === "finalized.bin" || name.endsWith("/finalized.bin");
+  });
+}
