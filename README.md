@@ -130,6 +130,7 @@ inspection). That AppImage is an unsigned dogfood artifact: Electron still owns
 the local server as a peer Machine, but Linux has no signed update channel yet,
 so the updater refuses to install updates rather than auto-updating from an
 unsigned package. Mark the AppImage executable and launch it directly.
+
 On first run, the welcome surface collects a name and optional workspace
 choices, then reports provider, Project, and a mode-valid default model
 separately. One action starts a real thread when those facts are true; a
