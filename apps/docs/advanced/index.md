@@ -45,6 +45,9 @@ without over-trusting a surface that has not shipped.
 - [Privacy notice](/advanced/privacy-notice) — draft: what data exists, where it lives, what leaves, and export or purge.
 - [Sub-processors](/advanced/sub-processors) — draft: BYO providers are the user's processors, not Octant's.
 - [Data residency](/advanced/data-residency) — draft: local-first means this machine, in its region.
+- [DPA template](/advanced/dpa-template) — draft: processor clauses if an Octant-hosted component ships.
+- [SCC position](/advanced/scc-position) — draft: transfers for BYO inference vs Octant-operated surfaces.
+- [EULA placeholders](/advanced/eula-placeholders) — draft: governing law and venue blanks for a future EULA.
 - [Recovery and troubleshooting](/advanced/recovery) — replay, rebuilds, conflict recovery, and diagnostic tooling.
 - [Release compatibility](/advanced/release-compatibility) — technical-preview boundaries, data location, and migration notes.
 
