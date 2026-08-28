@@ -304,6 +304,7 @@ describe("GitHubIssueBrowser", () => {
   });
 
   it("keeps the stale label on a served stale issue page", async () => {
+    const user = userEvent.setup();
     const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
       if (request.kind === "recent-repositories") return recents;
       if (request.kind === "repositories") return repositories;
@@ -326,6 +327,11 @@ describe("GitHubIssueBrowser", () => {
     expect(await screen.findByRole("button", { name: /#1 Issue 1/ })).toBeInTheDocument();
     expect(screen.getByText(/Results may be stale/)).toBeInTheDocument();
     expect(screen.getByText(/rate limit/)).toBeInTheDocument();
+    const issuesCalls = () =>
+      readCatalogue.mock.calls.filter(([request]) => request.kind === "issues").length;
+    expect(issuesCalls()).toBe(1);
+    await user.click(screen.getByRole("button", { name: "Refresh issues" }));
+    await waitFor(() => expect(issuesCalls()).toBe(2));
   });
 
   it("does not restore a previous issue after the list resets", async () => {

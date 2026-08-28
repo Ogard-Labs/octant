@@ -341,12 +341,21 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
               {list.kind === "ready" ? (
                 <>
                   {list.freshness.status === "stale" ? (
-                    <p className="github-issue-browser__note" role="status">
-                      Results may be stale —{" "}
-                      {STALE_REASON_LABELS[list.freshness.staleReason ?? ""] ??
-                        "the catalogue could not be refreshed."}{" "}
-                      Refresh to retry.
-                    </p>
+                    <>
+                      <p className="github-issue-browser__note" role="status">
+                        Results may be stale —{" "}
+                        {STALE_REASON_LABELS[list.freshness.staleReason ?? ""] ??
+                          "the catalogue could not be refreshed."}
+                      </p>
+                      <OctantButton
+                        onClick={() => void loadList()}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Refresh issues
+                      </OctantButton>
+                    </>
                   ) : null}
                   {list.rows.length === 0 ? (
                     <p className="github-issue-browser__note" role="status">
