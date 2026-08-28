@@ -549,6 +549,71 @@ describe("ProviderService", () => {
     expect(fixture.append).not.toHaveBeenCalled();
   });
 
+  it("keeps Settings instances but contributes no models, tools, or capabilities when the driver plugin is not effective", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+      isDriverPluginEffective: (driverKind) => driverKind !== "opencode",
+    });
+    fixture.runtime.setObservedState(observation());
+    await expect(fixture.service.bootstrap(windowId)).resolves.toEqual({
+      instances: [provider()],
+      defaults: { permissionPersistence: "current-session", version: 0 },
+      observedStates: [
+        {
+          instanceId,
+          readiness: "unavailable",
+          processState: "stopped",
+          models: [],
+          capabilities: {
+            streaming: "unavailable",
+            resume: "unavailable",
+            interruption: "unavailable",
+            approvals: "unavailable",
+            userQuestions: "unavailable",
+            reasoning: "unavailable",
+            usage: "unavailable",
+            toolActivity: "unavailable",
+            fileChanges: "unavailable",
+            diffs: "unavailable",
+            taskProgress: "unavailable",
+            nativeChildAgents: "unavailable",
+            nativeAttachments: "unavailable",
+            nativeWebResearch: "unavailable",
+            appManagedTools: "unavailable",
+            citations: "unavailable",
+          },
+          message: "This provider driver is not available.",
+          observedAt: now,
+        },
+      ],
+    });
+  });
+
+  it("refuses to probe or create a provider whose driver plugin is not effective", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      isDriverPluginEffective: () => false,
+    });
+    await expect(fixture.service.probe(windowId, instanceId)).rejects.toThrow(/not available/);
+    expect(fixture.probe).not.toHaveBeenCalled();
+
+    const createFixture = serviceFixture({
+      isDriverPluginEffective: () => false,
+    });
+    await expect(
+      createFixture.service.execute(windowId, {
+        kind: "create-opencode-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "OpenCode local",
+        binaryPath: "/opt/homebrew/bin/opencode",
+      }),
+    ).rejects.toThrow(/not available/);
+    expect(createFixture.append).not.toHaveBeenCalled();
+  });
+
   it("creates providers with optimistic versions and unique active names", async () => {
     const fixture = serviceFixture();
     await expect(
@@ -2221,6 +2286,7 @@ function serviceFixture(
     readonly clearRuntimeUsageLimits?: (providerId: typeof instanceId) => void;
     readonly withCatalogPersistence?: boolean;
     readonly initialCatalog?: ProviderCatalogSnapshot;
+    readonly isDriverPluginEffective?: (driverKind: ProviderInstance["driverKind"]) => boolean;
   } = {},
 ) {
   let instances = [...(options.instances ?? [])];
@@ -2296,6 +2362,9 @@ function serviceFixture(
       ...(options.clearRuntimeUsageLimits === undefined
         ? {}
         : { clearRuntimeUsageLimits: options.clearRuntimeUsageLimits }),
+      ...(options.isDriverPluginEffective === undefined
+        ? {}
+        : { isDriverPluginEffective: options.isDriverPluginEffective }),
       uuid: () => crypto.randomUUID(),
       clock: () => now,
     }),

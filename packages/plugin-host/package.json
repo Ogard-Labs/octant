@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./activation": "./src/activation.ts",
+    "./provider-drivers": "./src/bundledProviderDrivers.ts",
     "./agent-plugins": "./src/agentPlugins/index.ts",
     "./canvas-skill-contributions": "./src/canvasSkillContributions.ts",
     "./addressing": "./src/addressing.ts",
