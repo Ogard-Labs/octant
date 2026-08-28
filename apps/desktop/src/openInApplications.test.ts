@@ -45,20 +45,32 @@ describe("Open in applications", () => {
     expect(result.find((entry) => entry.id === "cursor")?.available).toBe(false);
   });
 
-  it("detects Linux editor binaries and always offers the file manager reveal", () => {
-    const result = detectOpenInApplications({
-      exists: (path) => path === "/usr/bin/code",
+  it("detects Linux editor binaries and offers Files only when xdg-open is on PATH", () => {
+    const withXdg = detectOpenInApplications({
+      exists: (path) => path === "/usr/bin/code" || path === "/usr/bin/xdg-open",
       homeDirectory: "/home/example",
       platform: "linux",
+      pathEnv: "/usr/bin",
     });
-    expect(result.find((entry) => entry.id === "vscode")).toMatchObject({
+    expect(withXdg.find((entry) => entry.id === "vscode")).toMatchObject({
       available: true,
     });
-    expect(result.find((entry) => entry.id === "finder")).toMatchObject({
+    expect(withXdg.find((entry) => entry.id === "finder")).toMatchObject({
       label: "Files",
       available: true,
     });
-    expect(result.find((entry) => entry.id === "xcode")?.available).toBe(false);
+    expect(withXdg.find((entry) => entry.id === "xcode")?.available).toBe(false);
+
+    const withoutXdg = detectOpenInApplications({
+      exists: (path) => path === "/usr/bin/code",
+      homeDirectory: "/home/example",
+      platform: "linux",
+      pathEnv: "/usr/bin",
+    });
+    expect(withoutXdg.find((entry) => entry.id === "finder")).toMatchObject({
+      label: "Files",
+      available: false,
+    });
   });
 
   it("resolves the checkout through the authenticated desktop route before launching", async () => {
@@ -140,6 +152,73 @@ describe("Open in applications", () => {
       detached: true,
       shell: false,
       stdio: "ignore",
+    });
+  });
+
+  it("opens Linux terminals with working-directory flags instead of a positional path", async () => {
+    const spawn = vi.fn(() => mockSpawnedChild());
+    await launchOpenInApplication({
+      applicationId: "terminal",
+      checkoutRoot: "/home/example/repo",
+      exists: (path) => path === "/usr/bin/gnome-terminal",
+      homeDirectory: "/home/example",
+      platform: "linux",
+      shell: { showItemInFolder: vi.fn() },
+      spawn,
+    });
+    expect(spawn).toHaveBeenCalledWith(
+      "/usr/bin/gnome-terminal",
+      ["--working-directory=/home/example/repo"],
+      { detached: true, shell: false, stdio: "ignore" },
+    );
+
+    spawn.mockClear();
+    await launchOpenInApplication({
+      applicationId: "terminal",
+      checkoutRoot: "/home/example/repo",
+      exists: (path) => path === "/usr/bin/konsole",
+      homeDirectory: "/home/example",
+      platform: "linux",
+      shell: { showItemInFolder: vi.fn() },
+      spawn,
+    });
+    expect(spawn).toHaveBeenCalledWith("/usr/bin/konsole", ["--workdir", "/home/example/repo"], {
+      detached: true,
+      shell: false,
+      stdio: "ignore",
+    });
+
+    spawn.mockClear();
+    await launchOpenInApplication({
+      applicationId: "ghostty",
+      checkoutRoot: "/home/example/repo",
+      exists: (path) => path === "/usr/bin/ghostty",
+      homeDirectory: "/home/example",
+      platform: "linux",
+      shell: { showItemInFolder: vi.fn() },
+      spawn,
+    });
+    expect(spawn).toHaveBeenCalledWith(
+      "/usr/bin/ghostty",
+      ["--working-directory=/home/example/repo"],
+      { detached: true, shell: false, stdio: "ignore" },
+    );
+
+    spawn.mockClear();
+    await launchOpenInApplication({
+      applicationId: "terminal",
+      checkoutRoot: "/home/example/repo",
+      exists: (path) => path === "/usr/bin/x-terminal-emulator",
+      homeDirectory: "/home/example",
+      platform: "linux",
+      shell: { showItemInFolder: vi.fn() },
+      spawn,
+    });
+    expect(spawn).toHaveBeenCalledWith("/usr/bin/x-terminal-emulator", [], {
+      detached: true,
+      shell: false,
+      stdio: "ignore",
+      cwd: "/home/example/repo",
     });
   });
 
