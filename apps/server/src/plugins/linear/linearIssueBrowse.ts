@@ -53,6 +53,13 @@ const ISSUE_QUERY = `query IssueDetail($id: String!) {
     url
     state { name type }
     assignee { name }
+    comments(first: 10) {
+      nodes {
+        body
+        createdAt
+        user { name }
+      }
+    }
   }
 }`;
 
@@ -196,11 +203,52 @@ function readIssueDetail(body: unknown): LinearIssueDetail | undefined {
   if (row === undefined) return undefined;
   const descriptionSource = typeof issue.description === "string" ? issue.description : "";
   const description = boundUtf8(descriptionSource, ISSUE_BODY_MAX_BYTES);
+  const comments = readIssueComments(issue.comments);
+  if (comments === undefined) return undefined;
   return {
     ...row,
     description: description.text,
     descriptionTruncated: description.truncated,
+    comments,
   };
+}
+
+const COMMENT_BODY_MAX_BYTES = 2 * 1024;
+const COMMENT_MAX_COUNT = 10;
+
+function readIssueComments(value: unknown):
+  | ReadonlyArray<{
+      readonly author: string;
+      readonly createdAt: string;
+      readonly body: string;
+      readonly truncated: boolean;
+    }>
+  | undefined {
+  if (value === undefined || value === null) return [];
+  if (!isRecord(value) || !Array.isArray(value.nodes)) return undefined;
+  const comments: Array<{
+    author: string;
+    createdAt: string;
+    body: string;
+    truncated: boolean;
+  }> = [];
+  for (const node of value.nodes) {
+    if (comments.length >= COMMENT_MAX_COUNT) break;
+    if (!isRecord(node)) continue;
+    const bodySource = typeof node.body === "string" ? node.body : "";
+    const body = boundUtf8(bodySource, COMMENT_BODY_MAX_BYTES);
+    const user = isRecord(node.user) ? node.user : undefined;
+    const author = readName(user?.name, 128) ?? "Unknown";
+    const createdAt = typeof node.createdAt === "string" ? readName(node.createdAt, 64) : undefined;
+    if (createdAt === undefined) continue;
+    comments.push({
+      author,
+      createdAt,
+      body: body.text,
+      truncated: body.truncated,
+    });
+  }
+  return comments;
 }
 
 function readIssueRow(value: unknown): LinearIssueRow | undefined {

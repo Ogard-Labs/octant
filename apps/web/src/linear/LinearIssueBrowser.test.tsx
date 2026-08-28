@@ -39,6 +39,7 @@ const detail: LinearIssueDetail = {
   ...row,
   description: "Read-only description.",
   descriptionTruncated: false,
+  comments: [],
 };
 
 const filters: LinearIssueFilterOptions = {
@@ -157,6 +158,7 @@ describe("Linear issue browser", () => {
         ...later,
         description: "Later description.",
         descriptionTruncated: false,
+        comments: [],
       };
     });
     renderBrowser({

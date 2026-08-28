@@ -15,6 +15,7 @@ import {
 import { PreviewContextSelection } from "./previews";
 import { CanvasContextSelection, MAX_CHAT_TURN_CANVAS_SELECTIONS } from "./canvasContext";
 import { GithubIssueContextRequest } from "./githubIssueContext";
+import { LinearIssueContextRequest } from "./linearIssueContext";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -313,6 +314,7 @@ export const CreateChatThreadCommand = Schema.Struct({
   hostId: Schema.optional(HostId),
   projectId: Schema.optional(ProjectId),
   issueContext: Schema.optional(GithubIssueContextRequest),
+  linearIssueContext: Schema.optional(LinearIssueContextRequest),
 }).annotations(strict);
 
 export const MAX_CHAT_NDJSON_LINE_BYTES = 1_048_576;

@@ -505,11 +505,31 @@ describe("chat contracts", () => {
       kind: "create-chat-thread",
       issueContext: { owner: "octant", name: "octant", number: 7 },
     });
+    expect(
+      decodeChatCommand({
+        kind: "create-chat-thread",
+        title: "From a Linear issue",
+        linearIssueContext: { id: "11111111-1111-4111-8111-111111111111" },
+      }),
+    ).toMatchObject({
+      kind: "create-chat-thread",
+      linearIssueContext: { id: "11111111-1111-4111-8111-111111111111" },
+    });
     expect(() =>
       decodeChatCommand({
         kind: "create-chat-thread",
         title: "From an issue",
         issueContext: { owner: "octant", name: "octant", number: 7, body: "assembled" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeChatCommand({
+        kind: "create-chat-thread",
+        title: "From a Linear issue",
+        linearIssueContext: {
+          id: "11111111-1111-4111-8111-111111111111",
+          title: "assembled",
+        },
       }),
     ).toThrow();
   });
