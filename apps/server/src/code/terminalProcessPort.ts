@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as nodePty from "node-pty";
@@ -231,6 +231,15 @@ export class TerminalProcessPort {
       input.stateScope,
     );
     mkdirSync(shellState, { recursive: true, mode: 0o700 });
+    // A fresh HOME with no .zshrc triggers zsh's first-run configuration wizard
+    // on Ubuntu, which consumes keystrokes and can make the terminal appear to
+    // swallow commands. Provide a minimal rc so the shell starts predictably.
+    const shellRc = join(shellState, ".zshrc");
+    if (!existsSync(shellRc)) {
+      writeFileSync(shellRc, "# Octant-managed minimal zsh rc\nPS1='%# '\n", {
+        mode: 0o600,
+      });
+    }
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
       const shellDirectory = dirname(input.shell);
