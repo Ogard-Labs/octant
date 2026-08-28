@@ -220,8 +220,13 @@ selected tool — never the previous pane's content. Hiding a Browser or Termina
 tool does not stop its server-owned lifecycle. The iOS Simulator dock tab
 shows a thread-bound live frame from host-held screenshot evidence, with
 honest setup, unavailable, booting, live, interrupted, and stale-after-restart
-states; closing the tab does not shut down the destination. At narrow widths the dock
-becomes an overlay drawer. Environment belongs to a thread as a compact header
+states; closing the tab does not shut down the destination. Planned tap, typed
+text, and hardware-key input extends the same Apple workbench control channel
+as boot and screenshot, with XCTest-less host injection behind that channel
+only, computer-use-style actor attribution, and the same remote/headless
+fail-closed attach gate (see
+[decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
+At narrow widths the dock becomes an overlay drawer. Environment belongs to a thread as a compact header
 summary with a transient disclosure whose open state is renderer-only. It may
 summarize the active thread's server-authored child AgentRuns, including their
 lifecycle, resolved model, and retained final result; full AgentRun control
