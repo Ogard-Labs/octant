@@ -144,9 +144,8 @@ registries. Opening **Settings → Skills & Extensions** or the Marketplace tab
 does not. Extension catalog **search** is local; **Inspect** and install fetch
 a pinned GitHub tree. Standalone skill **Search skills** queries skills.sh
 and the npm registry with the text you typed; preview and install then fetch
-the package. There is no Settings switch that disables those registries —
-not searching, not inspecting, and not installing is how you keep the calls
-from happening. Details live under
+the package. Turn marketplace fetches off in
+**Settings → General → Marketplace**; off means no request is made. Details live under
 [Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 
 ## Boundaries

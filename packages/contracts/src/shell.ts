@@ -313,6 +313,15 @@ export const ShellSettings = Schema.Struct({
    */
   automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
+   * Whether Skills & Extensions marketplace search, inspect, and install may
+   * contact skills.sh, the npm registry, or GitHub for catalog packages. Off
+   * means no request is made — opening the Marketplace tab still does not
+   * fetch, and Search / Inspect / install refuse rather than calling out. A
+   * store persisted before this preference shipped decodes to on, matching the
+   * prior always-on fetch posture when the person searched or inspected.
+   */
+  marketplaceFetchesEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
    * The release ring to follow, once someone has chosen one.
    *
    * Deliberately without a default. A build already knows its own ring from

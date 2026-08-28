@@ -3,7 +3,11 @@ import type { SkillMarketplaceEntry } from "@octant/contracts/extension-rpc";
 import type { ResolvedExtensionPackage } from "./packageInspector";
 import type { SkillMarketplacePort } from "./standaloneSkillService";
 import { readBoundedResponseBody } from "./boundedResponseBody";
-import { withMarketplaceRequest } from "./marketplaceRequestSignal";
+import {
+  MARKETPLACE_FETCH_USER_AGENT,
+  withMarketplaceRequest,
+  type MarketplaceFetch,
+} from "./marketplaceRequestSignal";
 import {
   SKILLS_SH_CATALOG_ID,
   buildStandaloneSkillPackage,
@@ -37,7 +41,7 @@ interface SkillsShSearchHit {
 }
 
 export interface SkillsShMarketplaceOptions {
-  readonly fetch?: typeof globalThis.fetch;
+  readonly fetch?: MarketplaceFetch;
   readonly searchUrl?: string;
   readonly appVersion?: string;
   readonly platform?: NodeJS.Platform;
@@ -51,7 +55,7 @@ export interface SkillsShMarketplaceOptions {
  * for the skill's declared repository. Repo-root walks are not attempted.
  */
 export class SkillsShMarketplace implements SkillMarketplacePort {
-  readonly #fetch: typeof globalThis.fetch;
+  readonly #fetch: MarketplaceFetch;
   readonly #searchUrl: string;
   readonly #appVersion: string;
   readonly #platform: NodeJS.Platform;
@@ -99,7 +103,7 @@ export class SkillsShMarketplace implements SkillMarketplacePort {
     url.searchParams.set("q", trimmed);
     url.searchParams.set("limit", String(DEFAULT_LIMIT));
     const response = await this.#fetch(url.toString(), {
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", "user-agent": MARKETPLACE_FETCH_USER_AGENT },
       redirect: "error",
       ...(signal === undefined ? {} : { signal }),
     });
@@ -230,7 +234,7 @@ export class SkillsShMarketplace implements SkillMarketplacePort {
       {
         headers: {
           accept: "application/vnd.github+json",
-          "user-agent": "octant-skill-marketplace",
+          "user-agent": MARKETPLACE_FETCH_USER_AGENT,
         },
         redirect: "error",
         ...(signal === undefined ? {} : { signal }),
@@ -262,7 +266,7 @@ export class SkillsShMarketplace implements SkillMarketplacePort {
       {
         headers: {
           accept: "application/vnd.github+json",
-          "user-agent": "octant-skill-marketplace",
+          "user-agent": MARKETPLACE_FETCH_USER_AGENT,
         },
         redirect: "error",
         ...(signal === undefined ? {} : { signal }),
@@ -336,7 +340,7 @@ export class SkillsShMarketplace implements SkillMarketplacePort {
       {
         headers: {
           accept: "application/vnd.github+json",
-          "user-agent": "octant-skill-marketplace",
+          "user-agent": MARKETPLACE_FETCH_USER_AGENT,
         },
         redirect: "error",
         ...(signal === undefined ? {} : { signal }),
@@ -434,7 +438,7 @@ export class SkillsShMarketplace implements SkillMarketplacePort {
       {
         headers: {
           accept: "application/vnd.github+json",
-          "user-agent": "octant-skill-marketplace",
+          "user-agent": MARKETPLACE_FETCH_USER_AGENT,
         },
         redirect: "error",
         ...(signal === undefined ? {} : { signal }),
@@ -573,7 +577,7 @@ export class SkillsShMarketplace implements SkillMarketplacePort {
       throw new Error("Skill download host is not allowed.");
     }
     const response = await this.#fetch(url, {
-      headers: { "user-agent": "octant-skill-marketplace" },
+      headers: { "user-agent": MARKETPLACE_FETCH_USER_AGENT },
       redirect: "error",
       ...(signal === undefined ? {} : { signal }),
     });
