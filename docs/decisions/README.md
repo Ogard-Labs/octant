@@ -63,6 +63,7 @@ distilled successor of the earlier long-form design specifications.
 | [0053](0053-computer-use-destinations.md)                     | Computer-use destinations                                         | Accepted           |
 | [0054](0054-headless-host-credential-store.md)                | The credential broker is a host capability, not a desktop one     | Accepted           |
 | [0055](0055-image-generation-provider-profiles.md)            | Image generation provider profiles                                | Accepted           |
+| [0056](0056-image-generation-jobs-and-adapters.md)            | Image generation jobs, adapters, and artifact scope               | Accepted           |
 
 ## Adding an ADR
 

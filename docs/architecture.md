@@ -391,6 +391,11 @@ modelId }`, and the model picker is provider-first. Discovery can find
   OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
   (Kilo Code, Devin, Mistral Vibe, Kimi Code, Grok Build). Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
+  Generation itself is a journaled job with OpenAI and Gemini adapters, a
+  bounded generated-image attachment scope, and usage rows attributed as
+  `image-generation`; see
+  [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
+  Invocation and thread preview are not part of that record.
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;
