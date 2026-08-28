@@ -1,12 +1,15 @@
 # GitHub Repository Onboarding Threat Model
 
-**Status:** Proposed for Henrik review
+**Status:** Approved by Henrik (2026-08-28)
 
-**Date:** 2026-08-07
+**Date:** 2026-08-07 (issue-browser delta approved 2026-08-28)
 
-**Scope:** Host-scoped GitHub authentication, normalized reads, managed clone, and Code Project binding
+**Scope:** Host-scoped GitHub authentication, normalized catalogue reads (including issue list,
+search, and detail), managed clone, Code Project binding, and create-from-issue thread context
 
-**Design:** [`../specs/2026-08-07-host-scoped-github-repository-onboarding-design.md`](../specs/2026-08-07-host-scoped-github-repository-onboarding-design.md)
+**Design:** Implemented onboarding lives behind `/api/github/*` and is summarized in
+[`../architecture.md`](../architecture.md). The approved issue-browser and create-from-issue shape
+is recorded in this document.
 
 ## Overview
 
@@ -15,11 +18,18 @@ host use its installed, authenticated GitHub CLI to discover accessible reposito
 metadata, and clone one user-confirmed repository into a managed inventory before binding it as an
 ordinary Code Project.
 
+The same host-scoped connection also feeds an approved, not-yet-implemented issue browser and
+create-from-issue flow.
+Issue list, search, and detail reads reuse the existing catalogue route and the `issues-read`
+capability. Creating a thread from an issue injects bounded, redacted GitHub issue text as
+untrusted external content. Those surfaces do not clone, bind, or write back to GitHub.
+
 The high-value assets are the host's GitHub authorization, private repository contents, managed
-repository inventory, Code Project authority, local paths, normalized GitHub metadata, and the
-integrity of clone/recovery receipts. A compromise that exposes a token, clones an unapproved
-repository, writes outside the inventory, binds the wrong repository, or grants an agent broader
-GitHub visibility violates the product's core security model.
+repository inventory, Code Project authority, local paths, normalized GitHub metadata, the
+integrity of clone/recovery receipts, and the integrity of thread context assembled from GitHub
+issue text. A compromise that exposes a token, clones an unapproved repository, writes outside the
+inventory, binds the wrong repository, grants an agent broader GitHub visibility, or lets
+attacker-authored issue text become instructions violates the product's core security model.
 
 ## Threat Model, Trust Boundaries, and Assumptions
 
@@ -34,6 +44,9 @@ GitHub visibility violates the product's core security model.
   discovery.
 - **GitHub and network:** return attacker-influenced names, descriptions, branches, API errors,
   pagination, clone content, redirects, and transport failures.
+- **GitHub issue authors:** anyone who can file or comment on an accessible repository the
+  principal can read. Their text is untrusted by definition and may enter Octant when the user
+  creates a thread from that issue.
 - **Repository content:** is untrusted after clone. Git configuration, attributes, hooks, submodules,
   filenames, symlinks, and working-tree content may be malicious.
 - **Local attacker:** may race filesystem paths or replace directories when they already possess
@@ -49,6 +62,7 @@ GitHub visibility violates the product's core security model.
 5. Clone process to the managed inventory filesystem.
 6. Verified checkout to Code Project binding and later Code tools.
 7. One host to another host in a multi-host client; credentials and mutable state never cross.
+8. GitHub issue and comment text to context assembly and the issue-browser renderer.
 
 ### Assumptions and invariants
 
@@ -139,6 +153,36 @@ automatic; Project binding grants only the ordinary approval-gated Code posture;
 terminal, Git, test, provider, extension, and tool policies remain in force; Plan stays read-only;
 executable actions require their normal approvals.
 
+### Prompt injection via issue bodies and comments
+
+**Stories:** Anyone can author an issue or comment on an accessible repository, so create-from-issue
+ingests attacker-authored text by design. A body or comment that looks like a system instruction,
+approval grant, or tool invocation tries to become commands; a token-shaped string tries to persist
+in context; a huge body tries to exhaust the first-turn budget.
+
+**Controls:** the renderer attaches only `{ owner, name, number }` to the draft and never assembles
+issue text. At creation the server reauthorizes `issues-read` against a fresh snapshot, reads the
+issue through the catalogue, redacts SECRETISH material, strips NUL and terminal-control sequences,
+and injects the bounded block only through
+`apps/server/src/context/externalContentFraming.ts` data-delimited framing. That framing asserts
+external content never reaches instruction sections. The server appends
+`thread.external-content-ingested@1` (origin `external-content`, opaque source label) so the
+thread-lifetime taint projection and irreversible-approval reconfirmation apply from turn one.
+Field and whole-block sizes are capped and truncation is disclosed. Content can become action only
+through a model-proposed tool call that then passes full policy, per the untrusted-content policy
+in [`security-architecture-threat-model.md`](security-architecture-threat-model.md).
+
+### Issue-browser rendering
+
+**Stories:** Markdown or HTML in an issue body smuggles a non-github.com URL, spoofs Octant chrome,
+or navigates the app from attacker-authored link text; an issue URL carries userinfo or a surprise
+host.
+
+**Controls:** the issue browser renders title, body, and comments as plain text — no markdown-to-HTML.
+URLs are github.com-pinned, credential-free, and shown as inert full strings. Issue content never
+drives in-app navigation. Those rules close link-smuggling and UI-spoofing paths the onboarding
+model never considered.
+
 ### Revocation, rate limit, and partial failure
 
 **Stories:** local logout is presented as OAuth revocation; a revoked credential leaves cached
@@ -148,6 +192,68 @@ hosts or leaks its state to another.
 **Controls:** distinguish local logout from GitHub-side revocation; re-probe before authority-bearing
 actions; stale caches are read-only and host-local; bounded retry/backoff with explicit reset facts;
 independent host capability states and credentials; no host-to-host synchronization.
+
+## Approved issue-browser and create-from-issue design
+
+This shape is approved and not yet implemented. It extends the existing GitHub catalogue; it does
+not replace Code pull-request surfaces, clone, or Project binding. Credential disclosure,
+confused-deputy, and rate-limit controls above apply unchanged to issue search and detail reads.
+
+### Catalogue contracts and capability gate
+
+`packages/contracts/src/githubCatalogue.ts` remains the only client-visible GitHub read surface.
+The existing `kind: "issues"` request gains optional `search: safeText(160)` matching title text,
+`#number`, or `author:` terms. The server composes the upstream query; the client never sends raw
+query syntax. A new `kind: "issue"` request `{ owner, name, number }` returns `GithubIssueDetail`:
+`number`, `title`, `state`, `author`, `createdAt`, `updatedAt`, github.com-pinned `url`, labels
+(≤20, ≤50 chars each), bounded `body` with `bodyTruncated`, and ≤10 most recent comments (author,
+`createdAt`, bounded body, truncated flag). All text fields pass the existing `safeText`/SECRETISH
+filters. Failure remains `GithubCatalogueUnavailable` with capability `issues-read` — no new error
+shape.
+
+Server reads stay on `apps/server/src/github/ghRepositoryCataloguePort.ts` and
+`apps/server/src/github/githubCatalogueService.ts`. Both list and detail are gated by the existing
+`decideGithubCatalogueRead` policy (`packages/domain/src/githubCapabilityPolicy.ts`) with
+capability `issues-read`, and they reuse the existing TTL/stale labels, bounded decoders,
+`MAX_OUTPUT_BYTES`, sanitized environment, and central redaction. There is no new route:
+`/api/github/catalogue/reads` already transports the union; the renderer uses `readCatalogue` on
+`packages/client-runtime/src/githubClient.ts`.
+
+### Plugin-shaped sidebar destination
+
+The first-party GitHub plugin contributes a second `sidebar.destination`
+(`destinationId: "github-issues"`, label "Issues", entry point
+`builtin:github/issues-destination`). Availability is contribution present AND wired action AND
+`issues-read` `available` in the authentication snapshot. Disabling the plugin removes the row;
+missing capability hides it. The destination joins the existing sidebar-destination allowlist; it
+is not a host-compiled Code-only branch. Full GitHub plugin extraction remains later sequenced
+work and is not a prerequisite.
+
+The browser is host-scoped, not Project-bound. Repository selection reuses the recents/search
+patterns of the existing repository picker. The list supports state filter, search, and cursor
+pagination. Unavailable responses render reason, remediation, and `retryAfterSeconds`; stale pages
+carry the existing stale label. This surface is distinct from
+`packages/contracts/src/codeProjectPullRequests.ts` and the Project-bound pull-request workspace.
+
+### Create-from-issue framing
+
+The composer `Create from…` control gains an Issues tab, hidden when `issues-read` is unavailable
+or the plugin is disabled. Selecting an issue attaches only `{ owner, name, number }` to the draft.
+
+A new `packages/contracts/src/githubIssueContext.ts` carries that reference as optional
+`issueContext` on the mode creation requests the draft workspace already submits. At creation the
+server reauthorizes `issues-read`, performs the issue detail read, and returns
+`{ status: "ready", framed } | { status: "refused", reason }`. Refusal fails creation visibly.
+The block enters the first turn only through `externalContentFraming.ts` and the server appends
+`thread.external-content-ingested@1` via `apps/server/src/context/externalContentIngestionStore.ts`.
+The thread is ordinary Chat, Work, or Code with normal authority. Nothing links back to GitHub;
+no write-back path exists in the contracts.
+
+Injected fields, exactly: repository `owner`/`name`, issue `number`, `state`, `title` (≤256 chars),
+`author` login (≤128), `createdAt`/`updatedAt`, github.com-pinned `url`, labels (≤20 × ≤50 chars),
+body (≤8 KiB UTF-8, explicit truncated marker), ≤10 most recent comments (author ≤128, body ≤2 KiB
+each, per-comment truncated). The whole framed block is hard-capped at 32 KiB
+(`MAX_NEW_THREAD_DRAFT_INTENT_BYTES`); truncation is disclosed, never silent.
 
 ## Severity Calibration
 
@@ -175,6 +281,9 @@ independent host capability states and credentials; no host-to-host synchronizat
 - Leaking private repository names or host paths in non-secret diagnostics to an unauthorized
   client.
 - A destination collision that blocks onboarding but cannot overwrite or grant authority.
+- Prompt injection through ingested issue text that causes a model to propose an irreversible
+  action. Framing, taint, and the untrusted-content policy still require a fresh confirmation
+  before that proposal can execute.
 
 ### Low
 
@@ -183,6 +292,8 @@ independent host capability states and credentials; no host-to-host synchronizat
   already list.
 - Cosmetic progress, responsive, or accessibility defects that do not alter authority or conceal a
   required confirmation.
+- Markdown or HTML in issue text that cannot navigate, execute, or spoof chrome because the
+  browser renders plain text and does not follow issue links.
 
 Security severity is lower when exploitation requires an already fully compromised host user and
 cannot expand access, persist beyond that account, cross hosts, or expose a new credential. It is
