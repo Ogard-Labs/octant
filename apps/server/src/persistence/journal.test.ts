@@ -179,6 +179,7 @@ describe("Journal", () => {
         contextSidebarWidth: 640,
         firstRunOnboarding: "pending",
         automaticUpdateChecks: true,
+        marketplaceFetchesEnabled: true,
         lastContextSurface: "project-memory",
         sidebarMaterial: "system",
         workspaceMaterial: "opaque",
