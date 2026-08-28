@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ProviderDriverKind } from "@octant/contracts";
 import {
   makeDiscoveryService,
   type DiscoveryExecPort,
@@ -424,5 +425,32 @@ describe("discoveryService", () => {
     expect(snapshot.candidates.find((c) => c.driverKind === "codex")).toBeDefined();
     expect(snapshot.candidates.find((c) => c.driverKind === "claude")).toBeDefined();
     expect(snapshot.candidates.find((c) => c.driverKind === "opencode")).toBeDefined();
+  });
+
+  it("does not discover a runtime whose provider-driver plugin is not admitted", async () => {
+    const fs = makeFakeFs(
+      new Map([
+        ["/usr/local/bin/codex", { file: true }],
+        ["/usr/local/bin/claude", { file: true }],
+      ]),
+    );
+    const exec = makeFakeExec(
+      new Map([
+        ["/usr/local/bin/codex --version", { stdout: "codex-cli 0.1.0\n", stderr: "" }],
+        ["/usr/local/bin/codex login status", { stdout: "Logged in", stderr: "" }],
+        ["/usr/local/bin/claude --version", { stdout: "claude 1.0.0\n", stderr: "" }],
+      ]),
+    );
+    const service = makeDiscoveryService({
+      exec,
+      fs,
+      environment: baseEnvironment,
+      now: () => 1753430400000,
+      hostId: "local",
+      admittedDriverKinds: new Set<ProviderDriverKind>(["codex"]),
+    });
+
+    const snapshot = await service.scan();
+    expect(snapshot.candidates.map((candidate) => candidate.driverKind)).toEqual(["codex"]);
   });
 });

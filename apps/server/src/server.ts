@@ -29,6 +29,7 @@ import {
   type WorkspaceLayoutNode,
   type CodeCheckoutIdentity,
   type PermissionPersistence,
+  type ProviderDriverKind,
   type ProviderInstance,
   type ProviderRuntimeEvent,
   type WindowId,
@@ -53,7 +54,10 @@ import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
 import { createChatRouteHandler } from "./chatRoutes";
 import { createScaffoldRouteHandler } from "./scaffoldRoutes";
-import { filterSkillCatalogForScope } from "@octant/plugin-host";
+import {
+  admittedBundledProviderDriverKinds,
+  filterSkillCatalogForScope,
+} from "@octant/plugin-host";
 import {
   decodeLayoutNodeId,
   decodeMentionableThreadId,
@@ -671,6 +675,7 @@ interface ConfiguredProviderDriverOptions {
   readonly fetch?: CompatibleFetch;
   readonly ollamaHistoryStore?: OllamaHistoryStore;
   readonly onRuntimeEvent?: (event: ProviderRuntimeEvent) => void;
+  readonly admittedDriverKinds?: ReadonlySet<ProviderDriverKind>;
 }
 
 export function makeConfiguredProviderDriver(
@@ -679,6 +684,10 @@ export function makeConfiguredProviderDriver(
 ): ProviderDriver {
   if (!instance.enabled) {
     throw new Error("Provider instance is disabled.");
+  }
+  const admitted = options.admittedDriverKinds ?? admittedBundledProviderDriverKinds();
+  if (!admitted.has(instance.driverKind)) {
+    throw new Error("Provider driver plugin is not effective.");
   }
   let driver: ProviderDriver;
   if (instance.driverKind === "openai-compatible") {

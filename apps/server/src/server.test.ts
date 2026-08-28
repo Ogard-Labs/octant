@@ -10,6 +10,7 @@ import {
   decodeWorkThreadBootstrap,
   decodeProviderInstance,
   decodeStableHostId,
+  type ProviderDriverKind,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
 } from "@octant/contracts";
 import { PersistenceStartupFailed, makePersistenceLive } from "./persistence/persistenceService";
@@ -212,6 +213,30 @@ describe("startOctantServer", () => {
         permissionPersistence: () => "current-session",
       }),
     ).toThrow(/disabled/i);
+  });
+
+  it("rejects constructing a driver when its provider-driver plugin is not effective", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000410",
+      displayName: "Codex local",
+      driverKind: "codex",
+      configuration: { kind: "codex-cli", binaryPath: "/missing/codex" },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-15T10:00:00.000Z",
+      updatedAt: "2026-07-15T10:00:00.000Z",
+    });
+
+    expect(() =>
+      makeConfiguredProviderDriver(instance, {
+        openCodeProcess: { start: () => Effect.die("must not start OpenCode") },
+        codexProcess: { start: () => Effect.die("must not start Codex") },
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        permissionPersistence: () => "current-session",
+        admittedDriverKinds: new Set<ProviderDriverKind>(),
+      }),
+    ).toThrow(/not effective/i);
   });
 
   it("rejects existing and future paths that escape through a Project symlink", () => {
