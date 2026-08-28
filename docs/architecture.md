@@ -573,7 +573,11 @@ mechanisms are:
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal.
 - **Hosts never trust each other.** Multi-host views merge read models
-  client-side; credentials and mutable authority never cross hosts.
+  client-side; credentials and mutable authority never cross hosts. Completing
+  all-hosts honesty, pairing at scale, and conflict presentation is client
+  registry work under
+  [decisions/0059-multi-host-federation.md](decisions/0059-multi-host-federation.md),
+  not a new trust boundary.
 
 ## Package map
 
