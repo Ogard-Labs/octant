@@ -20,9 +20,10 @@ The design rests on a small set of invariants that every package obeys:
 - **Local-first.** No Octant cloud account, relay, or telemetry is required.
   Remote access is host-to-device over the user's own network. Two host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, and
-  server marketplace fetches when the person searches or inspects the catalog.
-  An in-app changelog, when implemented, rides that update path and bundled
-  notes rather than adding a third call
+server marketplace fetches when the person searches, inspects, previews, or
+  installs from the catalog. Both have a Settings off switch that means no
+  request is made. An in-app changelog, when implemented, rides that update
+  path and bundled notes rather than adding a third call
   ([decisions/0059-in-app-changelog.md](decisions/0059-in-app-changelog.md)).
 - **The server is the authority.** Every authority check (mode, Project,
   thread, provider, approval, remote principal) runs in `apps/server` before a
