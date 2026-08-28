@@ -2147,7 +2147,7 @@ function installIpcHandlers(): void {
           exists: existsSync,
           homeDirectory: homedir(),
           platform: process.platform,
-          pathEnv: process.env.PATH,
+          ...(process.env.PATH === undefined ? {} : { pathEnv: process.env.PATH }),
           shell,
           spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
         }),
@@ -2157,7 +2157,7 @@ function installIpcHandlers(): void {
   const previewHandoffExecutor = createNativePreviewHandoffExecutor({
     shell,
     platform: process.platform,
-    pathEnv: process.env.PATH,
+    ...(process.env.PATH === undefined ? {} : { pathEnv: process.env.PATH }),
     exists: existsSync,
     spawn: (command, args) => spawn(command, [...args], { shell: false, stdio: "ignore" }),
   });
