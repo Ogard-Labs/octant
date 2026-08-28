@@ -91,7 +91,7 @@ export async function graphqlWithReference(
   if (!response.ok) return { kind: "unavailable" };
   const body = await readJson(response);
   if (body === undefined) return { kind: "unavailable" };
-  const graphqlError = readGraphqlFailure(body);
+  const graphqlError = readGraphqlFailure(body, source);
   if (graphqlError !== undefined) return graphqlError;
   return { kind: "ok", body };
 }
@@ -125,7 +125,10 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
-function readGraphqlFailure(body: unknown): LinearGraphqlResult | undefined {
+function readGraphqlFailure(
+  body: unknown,
+  source: "oauth" | "personal-api-key",
+): LinearGraphqlResult | undefined {
   if (!isRecord(body) || !Array.isArray(body.errors) || body.errors.length === 0) {
     return undefined;
   }
@@ -134,7 +137,7 @@ function readGraphqlFailure(body: unknown): LinearGraphqlResult | undefined {
     const extensions = isRecord(entry.extensions) ? entry.extensions : undefined;
     const code = typeof extensions?.code === "string" ? extensions.code.toUpperCase() : "";
     if (code.includes("AUTH") || code === "UNAUTHENTICATED" || code === "INVALID_TOKEN") {
-      return { kind: "unauthorized", reconnect: true };
+      return { kind: "unauthorized", reconnect: source === "oauth" };
     }
     if (code === "FORBIDDEN" || code === "SSO_REQUIRED" || code.includes("SCOPE")) {
       return { kind: "forbidden" };

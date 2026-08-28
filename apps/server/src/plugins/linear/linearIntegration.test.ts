@@ -293,8 +293,34 @@ describe("Linear integration plugin", () => {
     });
   });
 
+  it("does not ask to reconnect OAuth when a personal API key GraphQL auth error arrives", async () => {
+    const runtime = createLinearIntegration(
+      createIntegrationHostPort({
+        requestCredential: async (scope: string) =>
+          scope === "personal-api-key"
+            ? { kind: "granted" as const, reference: "personal-ref" }
+            : { kind: "unavailable" as const, reason: "none" },
+        fetch: async () =>
+          graphqlResponse({
+            errors: [{ extensions: { code: "UNAUTHENTICATED" } }],
+          }),
+      }),
+      { clientId, redirectUri },
+    );
+    const observation = await runtime.execute({
+      kind: "operation",
+      operationId: "list-issues",
+      input: {},
+    });
+    expect(observation).toMatchObject({
+      kind: "operation",
+      result: { kind: "refused", reason: "Connect Linear to authorize this host." },
+    });
+    expect(serialized(observation)).not.toContain("Reconnect");
+  });
+
   it("returns filter options including an unassigned choice", async () => {
-    const runtime = connectedRuntime(async () =>
+    const fetch = vi.fn(async (_input: Request) =>
       graphqlResponse({
         data: {
           teams: {
@@ -317,6 +343,7 @@ describe("Linear integration plugin", () => {
         },
       }),
     );
+    const runtime = connectedRuntime(fetch);
     const observation = await runtime.execute({
       kind: "operation",
       operationId: "list-issue-filters",
@@ -334,6 +361,13 @@ describe("Linear integration plugin", () => {
         },
       },
     });
+    const firstCall = fetch.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (firstCall === undefined) return;
+    const input = firstCall[0];
+    expect(input).toBeInstanceOf(Request);
+    if (!(input instanceof Request)) return;
+    expect(await input.text()).toContain("users(first: 49)");
   });
 });
 

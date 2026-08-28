@@ -2,7 +2,7 @@ import { Schema } from "effect";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const SECRETISH =
-  /(?:lin_api_[A-Za-z0-9_]+|bearer\s+|token=|authorization|refresh_token|access_token)/i;
+  /(?:lin_api_[A-Za-z0-9_]+|bearer\s+[A-Za-z0-9._\-]+|(?:refresh_token|access_token)\s*[=:]|token=)/i;
 const safeText = (limit: number) =>
   Schema.NonEmptyTrimmedString.pipe(
     Schema.maxLength(limit),

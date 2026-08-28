@@ -8604,13 +8604,15 @@ p.board-col-empty {
   cursor: pointer;
 }
 
-.linear-issues__row[aria-pressed="true"] {
-  background: var(--accent);
-}
-
 .linear-issues__row:hover,
 .linear-issues__row:focus-visible {
   background: var(--oct-surface-muted);
+}
+
+.linear-issues__row[aria-pressed="true"],
+.linear-issues__row[aria-pressed="true"]:hover,
+.linear-issues__row[aria-pressed="true"]:focus-visible {
+  background: var(--accent);
 }
 
 .linear-issues__icon {

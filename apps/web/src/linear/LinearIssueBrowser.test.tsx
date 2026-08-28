@@ -1,6 +1,8 @@
 import type {
   LinearIssueDetail,
   LinearIssueFilterOptions,
+  LinearIssueGetInput,
+  LinearIssueListInput,
   LinearIssueListPage,
   LinearIssueRow,
 } from "@octant/contracts/linear-issues";
@@ -48,13 +50,14 @@ const filters: LinearIssueFilterOptions = {
 
 function renderBrowser(
   options: {
-    readonly listIssues?: () => Promise<LinearIssueListPage>;
-    readonly getIssue?: () => Promise<LinearIssueDetail>;
+    readonly listIssues?: (input?: LinearIssueListInput) => Promise<LinearIssueListPage>;
+    readonly getIssue?: (input: LinearIssueGetInput) => Promise<LinearIssueDetail>;
     readonly listIssueFilters?: () => Promise<LinearIssueFilterOptions>;
     readonly isNarrow?: boolean;
+    readonly page?: LinearIssueListPage;
   } = {},
 ) {
-  const listIssues = options.listIssues ?? vi.fn(async () => page);
+  const listIssues = options.listIssues ?? vi.fn(async () => options.page ?? page);
   const getIssue = options.getIssue ?? vi.fn(async () => detail);
   const listIssueFilters = options.listIssueFilters ?? vi.fn(async () => filters);
   render(
@@ -116,5 +119,63 @@ describe("Linear issue browser", () => {
   it("keeps list rows wrapping at a narrow width", () => {
     const meta = ruleBody(stylesheet, '.linear-issues[data-narrow="true"] .linear-issues__meta');
     expect(meta).toContain("flex-wrap: wrap");
+  });
+
+  it("caps search length and retains the last valid query when decoding fails", async () => {
+    const user = userEvent.setup();
+    const { listIssues } = renderBrowser();
+    const search = await screen.findByRole("searchbox", { name: "Search Linear issues" });
+    expect(search).toHaveAttribute("maxLength", "128");
+    await user.type(search, "browse");
+    await waitFor(() =>
+      expect(listIssues).toHaveBeenCalledWith(expect.objectContaining({ search: "browse" })),
+    );
+    await user.clear(search);
+    await user.type(search, "lin_api_abcdefghijklmnop");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(listIssues).not.toHaveBeenCalledWith(
+      expect.objectContaining({ search: "lin_api_abcdefghijklmnop" }),
+    );
+  });
+
+  it("ignores a slower detail response after a later issue is selected", async () => {
+    const user = userEvent.setup();
+    const later: LinearIssueRow = {
+      ...row,
+      id: "22222222-2222-4222-8222-222222222222",
+      identifier: "ENG-13",
+      title: "Later issue",
+      url: "https://linear.app/ogard-labs/issue/ENG-13",
+    };
+    let releaseFirst: ((value: LinearIssueDetail) => void) | undefined;
+    const firstDetail = new Promise<LinearIssueDetail>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const getIssue = vi.fn(async (input: LinearIssueGetInput) => {
+      if (input.id === row.id) return firstDetail;
+      return {
+        ...later,
+        description: "Later description.",
+        descriptionTruncated: false,
+      };
+    });
+    renderBrowser({
+      getIssue,
+      page: { rows: [row, later], hasNextPage: false },
+    });
+    await user.click(await screen.findByRole("button", { name: /ENG-12/ }));
+    await user.click(await screen.findByRole("button", { name: /ENG-13/ }));
+    expect(await screen.findByRole("article", { name: "ENG-13" })).toBeVisible();
+    expect(screen.getByText("Later description.")).toBeVisible();
+    releaseFirst?.({ ...detail });
+    await Promise.resolve();
+    expect(screen.getByRole("article", { name: "ENG-13" })).toBeVisible();
+    expect(screen.queryByText("Read-only description.")).not.toBeInTheDocument();
+  });
+
+  it("keeps the selected row background under hover and focus", () => {
+    expect(stylesheet).toMatch(
+      /\.linear-issues__row\[aria-pressed="true"\]:hover,\s*\.linear-issues__row\[aria-pressed="true"\]:focus-visible\s*\{\s*background:\s*var\(--accent\)/,
+    );
   });
 });

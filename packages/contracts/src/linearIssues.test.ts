@@ -72,6 +72,16 @@ describe("Linear issue contracts", () => {
     ).toThrow();
   });
 
+  it("accepts ordinary issue text that uses the word authorization", () => {
+    expect(
+      decodeLinearIssueListPage({
+        rows: [{ ...row, title: "Fix authorization for the settings card" }],
+        hasNextPage: false,
+      }).rows[0]?.title,
+    ).toBe("Fix authorization for the settings card");
+    expect(decodeLinearIssueListInput({ search: "authorization" }).search).toBe("authorization");
+  });
+
   it("accepts a bounded issue detail and filter options", () => {
     expect(
       decodeLinearIssueDetail({

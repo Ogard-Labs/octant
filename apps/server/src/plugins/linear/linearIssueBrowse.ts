@@ -58,7 +58,7 @@ const ISSUE_QUERY = `query IssueDetail($id: String!) {
 
 const FILTERS_QUERY = `query IssueFilters {
   teams(first: 50) { nodes { id name key } }
-  users(first: 50) { nodes { id name } }
+  users(first: 49) { nodes { id name } }
   workflowStates(first: 100) { nodes { id name type team { key } } }
   projects(first: 50) { nodes { id name } }
 }`;

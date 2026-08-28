@@ -59,16 +59,23 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
   const listIssuesRef = useRef(props.listIssues);
   const getIssueRef = useRef(props.getIssue);
   const listIssueFiltersRef = useRef(props.listIssueFilters);
+  const lastValidQueryRef = useRef<LinearIssueListInput>({});
+  const detailGenerationRef = useRef(0);
   useEffect(() => {
     listIssuesRef.current = props.listIssues;
     getIssueRef.current = props.getIssue;
     listIssueFiltersRef.current = props.listIssueFilters;
   });
 
-  const query = useMemo(
-    () => buildQuery(debouncedSearch, teamId, stateId, assigneeId, projectId),
-    [debouncedSearch, teamId, stateId, assigneeId, projectId],
-  );
+  const query = useMemo(() => {
+    try {
+      const next = buildQuery(debouncedSearch, teamId, stateId, assigneeId, projectId);
+      lastValidQueryRef.current = next;
+      return next;
+    } catch {
+      return lastValidQueryRef.current;
+    }
+  }, [debouncedSearch, teamId, stateId, assigneeId, projectId]);
 
   useEffect(() => {
     let active = true;
@@ -87,6 +94,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
 
   useEffect(() => {
     let active = true;
+    detailGenerationRef.current += 1;
     setList({ status: "loading" });
     setDetail({ status: "idle" });
     listIssuesRef.current(query).then(
@@ -122,11 +130,14 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
   }
 
   async function openIssue(row: LinearIssueRow): Promise<void> {
+    const generation = ++detailGenerationRef.current;
     setDetail({ status: "loading", id: row.id });
     try {
       const loaded = await getIssueRef.current({ id: row.id });
+      if (generation !== detailGenerationRef.current) return;
       setDetail({ status: "ready", detail: loaded });
     } catch (error: unknown) {
+      if (generation !== detailGenerationRef.current) return;
       setDetail({ status: "error", message: failureMessage(error) });
     }
   }
@@ -172,6 +183,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
           <span className="sr-only">Search Linear issues</span>
           <OctantInput
             aria-label="Search Linear issues"
+            maxLength={128}
             onChange={(event) => setSearch(event.currentTarget.value)}
             placeholder="Search issues"
             type="search"
