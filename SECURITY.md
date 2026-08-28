@@ -44,8 +44,8 @@ branches.
   host. There is no telemetry, analytics, or crash reporting, and no cloud
   dependency by default. Network traffic is the providers you configure,
   remote access you enable, update checks when automatic checking is on or
-  you check by hand, and marketplace fetches when you search or inspect the
-  catalog.
+  you check by hand, marketplace fetches when you search or inspect the
+  catalog, and an optional Gravatar lookup.
 - **Server-side authority.** Chat, Work, and Code are enforced by the server
   before any side effect; the renderer never grants itself capability. Chat
   Projects have no filesystem or shell authority. Work binds one confined
