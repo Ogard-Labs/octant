@@ -202,5 +202,7 @@ cleanup as not integrated rather than writing secrets to disk.
 
 - [Sub-processors](/advanced/sub-processors) for BYO-key and BYO-subscription
 - [Data residency](/advanced/data-residency) for "your machine, your region"
+- Shared-host controller footing (repository draft at
+  `docs/legal/shared-host-controller.md`) when a team shares one host
 - [Privacy and security](/advanced/privacy-and-security) for approvals and confinement
 - [Recovery](/advanced/recovery) for journal-based recovery
