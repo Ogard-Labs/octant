@@ -5,7 +5,11 @@ import type { SkillMarketplaceEntry } from "@octant/contracts/extension-rpc";
 import type { ResolvedExtensionPackage } from "./packageInspector";
 import type { SkillMarketplacePort } from "./standaloneSkillService";
 import { readBoundedResponseBody } from "./boundedResponseBody";
-import { withMarketplaceRequest } from "./marketplaceRequestSignal";
+import {
+  MARKETPLACE_FETCH_USER_AGENT,
+  withMarketplaceRequest,
+  type MarketplaceFetch,
+} from "./marketplaceRequestSignal";
 import {
   NPM_SKILLS_CATALOG_ID,
   buildStandaloneSkillPackage,
@@ -27,7 +31,7 @@ const NPM_VERSION_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 export interface NpmSkillMarketplaceOptions {
-  readonly fetch?: typeof globalThis.fetch;
+  readonly fetch?: MarketplaceFetch;
   readonly registryUrl?: string;
   readonly appVersion?: string;
   readonly platform?: NodeJS.Platform;
@@ -45,7 +49,7 @@ type ExtractedSkill = {
  * the package tarball into the shared standalone skill package model.
  */
 export class NpmSkillMarketplace implements SkillMarketplacePort {
-  readonly #fetch: typeof globalThis.fetch;
+  readonly #fetch: MarketplaceFetch;
   readonly #registryUrl: string;
   readonly #appVersion: string;
   readonly #platform: NodeJS.Platform;
@@ -84,7 +88,7 @@ export class NpmSkillMarketplace implements SkillMarketplacePort {
     url.searchParams.set("text", `${trimmed} keywords:agent-skills`);
     url.searchParams.set("size", String(DEFAULT_LIMIT));
     const response = await this.#fetch(url.toString(), {
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", "user-agent": MARKETPLACE_FETCH_USER_AGENT },
       redirect: "error",
       ...(signal === undefined ? {} : { signal }),
     });
@@ -175,7 +179,7 @@ export class NpmSkillMarketplace implements SkillMarketplacePort {
     const response = await this.#fetch(
       new URL(`/${encodeNpmName(packageName)}`, this.#registryUrl).toString(),
       {
-        headers: { accept: "application/json" },
+        headers: { accept: "application/json", "user-agent": MARKETPLACE_FETCH_USER_AGENT },
         redirect: "error",
         ...(signal === undefined ? {} : { signal }),
       },
@@ -236,7 +240,7 @@ export class NpmSkillMarketplace implements SkillMarketplacePort {
   async #downloadTarball(url: string, signal?: AbortSignal): Promise<Uint8Array> {
     assertAllowedTarballUrl(url, this.#registryUrl);
     const response = await this.#fetch(url, {
-      headers: { "user-agent": "octant-skill-marketplace" },
+      headers: { "user-agent": MARKETPLACE_FETCH_USER_AGENT },
       redirect: "error",
       ...(signal === undefined ? {} : { signal }),
     });
