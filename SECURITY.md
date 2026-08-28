@@ -42,8 +42,10 @@ branches.
 
 - **Local-first.** Projects, threads, memory, events, and layouts stay on the
   host. There is no telemetry, analytics, or crash reporting, and no cloud
-  dependency by default. Network traffic is limited to the providers you
-  configure and remote access you enable.
+  dependency by default. Network traffic is the providers you configure,
+  remote access you enable, update checks when automatic checking is on or
+  you check by hand, and marketplace fetches when you search or inspect the
+  catalog.
 - **Server-side authority.** Chat, Work, and Code are enforced by the server
   before any side effect; the renderer never grants itself capability. Chat
   Projects have no filesystem or shell authority. Work binds one confined
