@@ -14,7 +14,10 @@ Work, and Code, and remote access when you enable pairing. Two HTTPS calls
 Octant makes on its own behalf are the exception: [update checks](/guide/installation#updates)
 and [marketplace fetches](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 Neither is a telemetry channel. This page states the posture of those two
-calls; it is not a product-wide privacy notice.
+calls. Drafts of the [privacy notice](/advanced/privacy-notice),
+[sub-processor position](/advanced/sub-processors), and
+[data residency](/advanced/data-residency) statements describe the broader
+boundary for legal review; they are not published notices.
 
 ## Local storage
 
@@ -145,6 +148,7 @@ federation and hosted relay models are post-preview.
 
 ## Next steps
 
+- [Privacy notice](/advanced/privacy-notice) for what exists, what leaves, and export or purge
 - [Installation](/guide/installation#updates) for what an update check sends
 - [Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses)
   for what a catalog fetch discloses
