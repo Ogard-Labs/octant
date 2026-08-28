@@ -64,7 +64,11 @@ items are on the turn's context menu, so right-click is never the only route.
 Retrying a failed or interrupted response stays on the turn itself.
 
 A checkpoint marker stays on the turn only when that point is marked. Restoring
-it starts a second thread; it does not rewind this one.
+it starts a second thread; it does not rewind this one. The restored thread's
+sidebar row carries a fork mark — as does the thread it came from — so you can
+see the origin chain and any direct forks and switch to one of them. If the
+origin has been archived or deleted, the lineage says the origin is no longer
+available rather than hiding that the thread is a fork.
 
 ## Export
 
