@@ -9,6 +9,7 @@ import type {
   HostRestoreOutcome,
 } from "@octant/contracts/host-control";
 import type { PurgeThreadsOutcome } from "@octant/contracts/thread-retention";
+import { localHostDisplayName } from "@octant/client-runtime";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import { HostSettingsSection } from "./HostSettingsSection";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
@@ -80,7 +81,7 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
     readDataMap: async () => ({
       host: {
         hostId: "host-1",
-        displayName: "This host",
+        displayName: localHostDisplayName(),
         kind: "headless",
         serviceMode: "service",
         journal: { kind: "unknown" },

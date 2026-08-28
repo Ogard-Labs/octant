@@ -4,7 +4,7 @@ import { decodeHostDataMap, MAX_HOST_DATA_MAP_PROJECTS } from "./hostDataMap";
 const populated = {
   host: {
     hostId: "host-a",
-    displayName: "This Mac",
+    displayName: "This computer",
     kind: "desktop",
     serviceMode: "desktop",
     journal: {
@@ -89,7 +89,7 @@ describe("HostDataMap", () => {
     const decoded = decodeHostDataMap({
       host: {
         hostId: "host-a",
-        displayName: "This host",
+        displayName: "This computer",
         kind: "headless",
         serviceMode: "service",
         journal: { kind: "unknown" },

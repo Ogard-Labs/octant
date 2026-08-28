@@ -1,12 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { localHostDisplayName } from "@octant/client-runtime";
 import type { HostDataMap } from "@octant/contracts/host-data-map";
 import { HostDataMapView } from "./HostDataMap";
 
 const populated: HostDataMap = {
   host: {
     hostId: "host-1",
-    displayName: "This Mac",
+    displayName: localHostDisplayName(),
     kind: "desktop",
     serviceMode: "desktop",
     journal: {
@@ -108,7 +109,7 @@ describe("HostDataMapView", () => {
     render(<HostDataMapView report={populated} />);
 
     expect(screen.getByText("Data map")).toBeInTheDocument();
-    expect(screen.getByText("This Mac")).toBeInTheDocument();
+    expect(screen.getByText(localHostDisplayName())).toBeInTheDocument();
     expect(screen.getByText("Desktop app")).toBeInTheDocument();
     expect(
       screen.getAllByText("/Users/ada/Library/Application Support/Octant/octant.sqlite3").length,
@@ -128,7 +129,7 @@ describe("HostDataMapView", () => {
     const unknown: HostDataMap = {
       host: {
         hostId: "host-1",
-        displayName: "This host",
+        displayName: localHostDisplayName(),
         kind: "headless",
         serviceMode: "service",
         journal: { kind: "unknown" },
@@ -152,7 +153,7 @@ describe("HostDataMapView", () => {
     const headless: HostDataMap = {
       host: {
         hostId: "host-1",
-        displayName: "This host",
+        displayName: localHostDisplayName(),
         kind: "headless",
         serviceMode: "web",
         journal: { kind: "known", path: "/var/lib/octant/octant.sqlite3" },
@@ -175,7 +176,7 @@ describe("HostDataMapView", () => {
     render(<HostDataMapView report={headless} />);
 
     expect(screen.getByText("Headless host")).toBeInTheDocument();
-    expect(screen.getByText("This host")).toBeInTheDocument();
+    expect(screen.getByText(localHostDisplayName())).toBeInTheDocument();
     expect(screen.getByText(/Does not leave this machine/)).toBeInTheDocument();
     expect(screen.getByText("No Projects on this host.")).toBeInTheDocument();
     expect(screen.queryByText("Keychain")).not.toBeInTheDocument();

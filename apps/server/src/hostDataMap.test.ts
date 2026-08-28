@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decodeHostDataMap } from "@octant/contracts/host-data-map";
 import { composeHostDataMap, desktopCredentialStore } from "./hostDataMap";
+import { localHostDisplayName } from "./localHostDisplayName";
 
 const dataDirectory = "/Users/ada/Library/Application Support/Octant";
 
@@ -23,7 +24,7 @@ describe("composeHostDataMap", () => {
       ],
     });
     const decoded = decodeHostDataMap(report);
-    expect(decoded.host.displayName).toBe("This Mac");
+    expect(decoded.host.displayName).toBe(localHostDisplayName("darwin"));
     expect(decoded.host.kind).toBe("desktop");
     expect(decoded.host.journal).toEqual({
       kind: "known",
@@ -62,7 +63,7 @@ describe("composeHostDataMap", () => {
     });
     const decoded = decodeHostDataMap(report);
     expect(decoded.host.kind).toBe("headless");
-    expect(decoded.host.displayName).toBe("This host");
+    expect(decoded.host.displayName).toBe(localHostDisplayName("linux"));
     expect(decoded.host.journal).toEqual({ kind: "unknown" });
     expect(decoded.host.credentials).toEqual({ kind: "unknown" });
     expect(decoded.projects).toEqual({ kind: "unknown" });

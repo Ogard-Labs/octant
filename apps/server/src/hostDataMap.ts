@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { decodeProjectId, LOCAL_HOST_DISPLAY_NAME } from "@octant/contracts";
+import { decodeProjectId } from "@octant/contracts";
+import { localHostDisplayName } from "./localHostDisplayName";
 import type {
   HostDataMap,
   HostDataMapCredentials,
@@ -76,8 +77,7 @@ export function composeHostDataMap(input: ComposeHostDataMapInput): HostDataMap 
   return {
     host: {
       hostId: input.hostId,
-      displayName:
-        input.platform === "darwin" && kind === "desktop" ? LOCAL_HOST_DISPLAY_NAME : "This host",
+      displayName: localHostDisplayName(input.platform ?? process.platform),
       kind,
       serviceMode: input.serviceMode,
       journal,

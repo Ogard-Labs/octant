@@ -58,7 +58,7 @@ describe("createHostControlClient", () => {
     const dataMapBody = {
       host: {
         hostId: "host-1",
-        displayName: "This Mac",
+        displayName: "This computer",
         kind: "desktop",
         serviceMode: "desktop",
         journal: {
