@@ -104,6 +104,7 @@ export * from "./cursorAcpPolicy";
 export * from "./githubCapabilityPolicy";
 export * from "./githubRepositoryReadPolicy";
 export * from "./githubRemoteIdentity";
+export * from "./trackerReferencePolicy";
 export * from "./codeProjectPullRequestPolicy";
 export * from "./managedRepositoryPolicy";
 export * from "./canvasShareSnapshotPolicy";
