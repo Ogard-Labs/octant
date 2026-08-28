@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
-import { makeSeatbeltConfinementLive } from "../process/seatbeltProfile";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 
 const directories: string[] = [];
@@ -109,7 +108,7 @@ describe("RepositoryTestProcessPort", () => {
     const linuxSpawn = vi.fn();
     const linux = new RepositoryTestProcessPort({
       platform: "linux",
-      confinement: makeSeatbeltConfinementLive({ platform: "linux" }),
+      sandboxPath: join(fake.root, "missing-bwrap"),
       temporaryDirectory: fake.temporaryDirectory,
       spawn: linuxSpawn,
     });

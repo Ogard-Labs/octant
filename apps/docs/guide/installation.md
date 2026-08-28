@@ -58,6 +58,27 @@ bun --cwd packages/cli src/bin.ts server run
 
 The foreground command drains on SIGINT/SIGTERM and reports an existing owner instead of opening a second store.
 
+### Headless Linux for ADE testing
+
+The packaged desktop app is macOS-only. A Linux host can run the same server and browser client to exercise Chat, Work, and Code. Install Bun 1.3.14 or later first (same requirement as the macOS system requirements above), then:
+
+```sh
+sudo apt-get install -y bubblewrap libsecret-tools gnome-keyring dbus-user-session zsh
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+bun --cwd packages/cli src/bin.ts server run
+bun --cwd packages/cli src/bin.ts web
+```
+
+`bwrap` is the confinement runtime. Provider credentials need an unlocked user D-Bus session and Secret Service before `secret-tool` works. On a graphical login that is usually already true. On a headless host, start a user session bus (for example via `dbus-user-session` / `systemd --user`), start `gnome-keyring-daemon` so the secrets component is available, and confirm with `secret-tool store --label=octant-probe service octant key probe <<<probe` then `secret-tool lookup service octant key probe`. On a host with no login keyring, point the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a prompt:
+
+```sh
+busctl --user call org.freedesktop.secrets /org/freedesktop/secrets \
+  org.freedesktop.Secret.Service SetAlias so default \
+  /org/freedesktop/secrets/collection/session
+```
+
+Provider CLIs are ordinary host binaries. Keep `~/.local/bin` on `PATH`, install a CLI there (this host used the official Codex installer), and point the provider instance at that absolute path. Kimi Code's managed-profile confinement stays macOS-only and reports `incompatible`.
+
 Do not remove or corrupt the default directory. Removing the native window-state file changes the window ID, while removing the SQLite file discards all local journal and shell data.
 
 ## Iterate with the browser client
@@ -99,11 +120,31 @@ Because the bytes are verified rather than the host, the download may be
 served from anywhere the release notice points, and pointing Octant at a
 different update service does not lower the bar an update has to clear.
 
+### Release rings
+
+Octant publishes two streams, and you pick one in
+**Settings → General → Updates**:
+
+- **Stable** — the released build. This is where a normal install stays.
+- **Preview** — a nightly build of whatever has been merged. Newer, less
+  settled, and a separate download.
+
+A preview version reads like `0.2.0-preview.20260828.4`, and it sorts _below_
+the `0.2.0` it leads to. That is what makes the handover work without any
+special case: a preview install moves onto stable the day stable catches up,
+and Octant never offers you an older version than the one you are running. So
+switching from preview back to stable leaves you where you are until the next
+stable release passes you.
+
+Each ring is its own signed feed, and the ring is inside the signature. A
+preview release published at the stable address is refused, not installed.
+
 ### Pointing Octant at a different update service
 
-The default feed is `https://octant.sh/updates/darwin-arm64.json`. Set
-`OCTANT_UPDATE_FEED_URL` to an HTTPS URL to use your own — useful if you
-mirror releases inside a team. Octant refuses a non-HTTPS value rather than
+Feeds live at `<base>/<ring>/<platform>-<arch>.json`, and the default base is
+`https://octant.sh/updates`. Set `OCTANT_UPDATE_FEED_BASE_URL` to an HTTPS URL
+to use your own — useful if you mirror releases inside a team; mirror the same
+directory layout underneath it. Octant refuses a non-HTTPS value rather than
 quietly falling back to the default, and a release served from your endpoint
 still has to carry a signature Octant's built-in key accepts.
 

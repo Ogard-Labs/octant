@@ -1,8 +1,10 @@
 import {
+  type AppReleaseRing,
   AppUpdateFeed,
   type AppUpdateRefusal,
   type AppUpdateRelease,
   type AppVersion,
+  PREVIEW_PRERELEASE_TAG,
 } from "@octant/contracts/app-updates";
 import { Schema } from "effect";
 
@@ -13,6 +15,27 @@ export interface RunningApp {
   readonly version: AppVersion;
   readonly platform: string;
   readonly arch: string;
+  /** The ring this app is following, and therefore the ring its feed must name. */
+  readonly ring: AppReleaseRing;
+}
+
+/**
+ * The ring a build belongs to, read from its own version.
+ *
+ * A preview build is one whose version carries the preview prerelease tag.
+ * Deriving it rather than storing it beside the version means a build cannot
+ * be a preview that thinks it is stable, which is the failure that would put
+ * unreviewed `main` in front of everyone on the stable ring.
+ *
+ * This is the *default* ring, not a lock: a person may follow either ring, and
+ * the version ordering already makes both directions safe — a stable release
+ * outranks the previews leading to it, and no ring can offer a version that is
+ * not strictly newer.
+ */
+export function ringForVersion(version: AppVersion): AppReleaseRing {
+  const [, prerelease] = splitOnce(String(version), "-");
+  if (prerelease === undefined) return "stable";
+  return prerelease.split(".")[0] === PREVIEW_PRERELEASE_TAG ? "preview" : "stable";
 }
 
 export type UpdateOffer =
@@ -33,6 +56,7 @@ export function canonicalReleaseBytes(release: AppUpdateRelease): Uint8Array {
     arch: release.arch,
     platform: release.platform,
     releasedAt: String(release.releasedAt),
+    ring: release.ring,
     sha256: release.sha256,
     url: release.url,
     version: String(release.version),
@@ -82,6 +106,13 @@ export function resolveUpdateOffer(input: {
 
   if (feed.release.platform !== input.app.platform || feed.release.arch !== input.app.arch) {
     return { kind: "refuse", refusal: "wrong-platform" };
+  }
+  if (feed.release.ring !== input.app.ring) {
+    // Both rings are signed by one key, so the signature alone cannot tell a
+    // stable feed from a preview one served at the stable address. Checking
+    // the signed ring against the ring we asked for is what makes the two
+    // streams actually separate.
+    return { kind: "refuse", refusal: "wrong-ring" };
   }
   if (compareAppVersions(feed.release.version, input.app.version) <= 0) {
     // Equal is not newer, and older is a downgrade. Refusing both is what stops

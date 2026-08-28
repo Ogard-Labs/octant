@@ -87,9 +87,9 @@ describe("live Work filesystem directory chain", () => {
         const identity = await opened.stat();
         expect(identity.device).toBe(String(original.dev));
         expect(identity.inode).toBe(String(original.ino));
-        expect(
-          identity.device === String(decoy.dev) && identity.inode === String(decoy.ino),
-        ).toBe(false);
+        expect(identity.device === String(decoy.dev) && identity.inode === String(decoy.ino)).toBe(
+          false,
+        );
       } finally {
         await opened.close();
       }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as nodePty from "node-pty";
@@ -157,6 +157,7 @@ export class TerminalProcessPort {
     readonly processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
     readonly ensurePtyHelperExecutable: () => void;
     readonly confinement: SeatbeltConfinementPort;
+    readonly platform: NodeJS.Platform;
     readonly temporaryDirectory: string;
     readonly shellStateDirectory: string;
     readonly networkEgress: OsNetworkEgress;
@@ -181,6 +182,7 @@ export class TerminalProcessPort {
       gracefulTimeoutMs: dependencies.gracefulTimeoutMs ?? 1_000,
       receiptDirectory: dependencies.receiptDirectory,
       processIdentity: dependencies.processIdentity,
+      platform,
       ensurePtyHelperExecutable:
         dependencies.ensurePtyHelperExecutable ??
         (dependencies.spawn !== undefined || nativeBunPtyAvailable
@@ -229,6 +231,15 @@ export class TerminalProcessPort {
       input.stateScope,
     );
     mkdirSync(shellState, { recursive: true, mode: 0o700 });
+    // A fresh HOME with no .zshrc triggers zsh's first-run configuration wizard
+    // on Ubuntu, which consumes keystrokes and can make the terminal appear to
+    // swallow commands. Provide a minimal rc so the shell starts predictably.
+    const shellRc = join(shellState, ".zshrc");
+    if (!existsSync(shellRc)) {
+      writeFileSync(shellRc, "# Octant-managed minimal zsh rc\nPS1='%# '\n", {
+        mode: 0o600,
+      });
+    }
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
       const shellDirectory = dirname(input.shell);
@@ -265,10 +276,15 @@ export class TerminalProcessPort {
         "Terminal Seatbelt confinement could not be prepared.",
       );
     }
+    const baseEnv = shellStateEnvironment(shellState);
     const pty = this.#dependencies.spawn(launch.command, launch.args, {
       name: "xterm-256color",
       cwd: input.cwd,
-      env: { ...shellStateEnvironment(shellState), ...input.environment },
+      env: {
+        ...baseEnv,
+        ...input.environment,
+        ...(this.#dependencies.platform === "darwin" ? {} : { HOME: shellState }),
+      },
       cols: input.columns,
       rows: input.rows,
     });

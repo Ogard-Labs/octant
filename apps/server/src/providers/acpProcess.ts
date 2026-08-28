@@ -23,9 +23,10 @@ import type { AcpProviderProfile, AcpSessionMode } from "./acpProfiles";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
-  buildDenyDefaultSeatbeltProfile,
   escapeSeatbeltPath,
+  makeSeatbeltConfinementLive,
   requireSandboxExec,
+  SeatbeltConfinementError,
   seatbeltAllowRule,
   seatbeltDenyRule,
   wrapCommandInSandboxExec,
@@ -291,17 +292,13 @@ function prepareImmutableConfiguration(
 
 export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): AcpConfinementPort {
   const platform = options.platform ?? process.platform;
-  const sandboxPath = options.sandboxPath ?? "/usr/bin/sandbox-exec";
+  const sandboxPath =
+    options.sandboxPath ?? (platform === "darwin" ? "/usr/bin/sandbox-exec" : "/usr/bin/bwrap");
   return {
     prepare: (input) =>
       Effect.gen(function* () {
         const { profile } = input;
         const name = profile.displayName;
-        if (platform !== "darwin") {
-          return yield* Effect.fail(
-            failure("incompatible", `${name} confinement is currently available only on macOS.`),
-          );
-        }
         const invalidBinary = validateBinaryPath(profile, input.binaryPath);
         if (invalidBinary !== undefined) return yield* Effect.fail(invalidBinary);
         const managedHome = yield* canonicalManagedDirectory(
@@ -310,6 +307,14 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         );
         const strategy = profile.process.confinement;
         if (strategy.kind === "immutable-managed-profile") {
+          if (platform !== "darwin") {
+            return yield* Effect.fail(
+              failure(
+                "incompatible",
+                `${name} immutable managed profile is only available on macOS.`,
+              ),
+            );
+          }
           const syntheticHome = yield* canonicalManagedDirectory(
             join(managedHome, "home"),
             `${name} synthetic home`,
@@ -431,64 +436,63 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         if (input.executionPolicy === "full-access") {
           return { command: input.binaryPath, args, cwd: root, environment: input.environment };
         }
-        try {
-          requireSandboxExec({ platform, sandboxPath });
-        } catch {
-          return yield* Effect.fail(
-            failure("incompatible", `${name} requires the macOS Seatbelt runtime.`),
-          );
-        }
         const binaryDirectory = dirname(realpathSync(input.binaryPath));
         const binaryRuntimeDirectory = dirname(binaryDirectory);
         const configuredBinaryDirectory = dirname(input.binaryPath);
-        try {
-          const networkEgress = materializeOsNetworkEgress(
-            resolveDefaultThreadEgressPolicy({
-              mode: input.mode,
-              executionPolicy: input.executionPolicy,
-            }),
-          );
-          const seatbeltProfile = buildDenyDefaultSeatbeltProfile({
-            boundRoot: root,
-            temporaryDirectory,
-            writeBoundRoot: input.executionPolicy !== "plan",
-            additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
-            allowFileReadStar: true,
-            networkEgress,
-            readRoots: [
-              root,
-              managedHome,
-              ...hostAuthentication.readPaths,
-              binaryDirectory,
-              binaryRuntimeDirectory,
-              configuredBinaryDirectory,
+        const networkEgress = materializeOsNetworkEgress(
+          resolveDefaultThreadEgressPolicy({
+            mode: input.mode,
+            executionPolicy: input.executionPolicy,
+          }),
+        );
+        const confinement = makeSeatbeltConfinementLive({
+          platform,
+          sandboxPath,
+        });
+        const launch = yield* Effect.try({
+          try: () =>
+            confinement.prepare({
+              executable: input.binaryPath,
+              args,
+              boundRoot: root,
               temporaryDirectory,
-            ],
-            privateHomeAllowPaths: [
-              root,
-              managedHome,
-              ...hostAuthentication.readPaths,
-              binaryRuntimeDirectory,
-              configuredBinaryDirectory,
-            ],
-          });
-          const launch = wrapCommandInSandboxExec({
-            sandboxPath,
-            profile: seatbeltProfile,
-            executable: input.binaryPath,
-            args,
-          });
-          return {
-            command: launch.command,
-            args: launch.args,
-            cwd: root,
-            environment: input.environment,
-          };
-        } catch {
-          return yield* Effect.fail(
-            failure("incompatible", `${name} private-path confinement could not be prepared.`),
-          );
-        }
+              networkEgress,
+              writeBoundRoot: input.executionPolicy !== "plan",
+              additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
+              allowFileReadStar: true,
+              readRoots: [
+                root,
+                managedHome,
+                ...hostAuthentication.readPaths,
+                binaryDirectory,
+                binaryRuntimeDirectory,
+                configuredBinaryDirectory,
+                temporaryDirectory,
+              ],
+              privateHomeAllowPaths: [
+                root,
+                managedHome,
+                ...hostAuthentication.readPaths,
+                binaryRuntimeDirectory,
+                configuredBinaryDirectory,
+              ],
+            }),
+          catch: (error) =>
+            failure(
+              error instanceof SeatbeltConfinementError && error.reason === "invalid-configuration"
+                ? "invalid-configuration"
+                : "incompatible",
+              error instanceof SeatbeltConfinementError
+                ? error.message
+                : `${name} private-path confinement could not be prepared.`,
+            ),
+        });
+        return {
+          command: launch.command,
+          args: launch.args,
+          cwd: root,
+          environment: input.environment,
+        };
       }),
   };
 }

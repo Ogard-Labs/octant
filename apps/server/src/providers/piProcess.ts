@@ -18,11 +18,7 @@ import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts
 import { Effect, type Scope } from "effect";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
-import {
-  buildDenyDefaultSeatbeltProfile,
-  requireSandboxExec,
-  wrapCommandInSandboxExec,
-} from "../process/seatbeltProfile";
+import { makeSeatbeltConfinementLive, SeatbeltConfinementError } from "../process/seatbeltProfile";
 import {
   materializeOsNetworkEgress,
   resolveDefaultThreadEgressPolicy,
@@ -289,7 +285,8 @@ function lstatExists(path: string): boolean {
 
 export function makePiConfinementLive(options: PiConfinementOptions = {}): PiConfinementPort {
   const platform = options.platform ?? process.platform;
-  const sandboxPath = options.sandboxPath ?? "/usr/bin/sandbox-exec";
+  const sandboxPath =
+    options.sandboxPath ?? (platform === "darwin" ? "/usr/bin/sandbox-exec" : "/usr/bin/bwrap");
   const credentialPath = options.credentialPath ?? join(homedir(), ".pi/agent/auth.json");
   const modelsPath = options.modelsPath ?? join(homedir(), ".pi/agent/models.json");
   return {
@@ -337,75 +334,69 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
         if (input.executionPolicy === "full-access") {
           return { command: input.binaryPath, args, cwd: root, environment };
         }
-        if (platform !== "darwin") {
-          return yield* Effect.fail(
-            failure("incompatible", "Pi bounded execution is currently available only on macOS."),
-          );
-        }
-        try {
-          requireSandboxExec({ platform, sandboxPath });
-        } catch {
-          return yield* Effect.fail(
-            failure("incompatible", "Pi requires the macOS Seatbelt runtime."),
-          );
-        }
         const temporaryDirectoryPath = yield* temporaryDirectory(
           options.temporaryDirectory ?? input.environment.TMPDIR ?? "/tmp",
         );
         const binaryDirectory = dirname(realpathSync(input.binaryPath));
         const runtimeDirectory = dirname(binaryDirectory);
-        try {
-          const networkEgress = materializeOsNetworkEgress(
-            resolveDefaultThreadEgressPolicy({
-              mode: input.mode,
-              executionPolicy: input.executionPolicy,
+        const networkEgress = materializeOsNetworkEgress(
+          resolveDefaultThreadEgressPolicy({
+            mode: input.mode,
+            executionPolicy: input.executionPolicy,
+          }),
+        );
+        const credentialPaths = [
+          ...(existsSync(credentialPath) ? [credentialPath] : []),
+          ...(existsSync(modelsPath) ? [modelsPath] : []),
+        ];
+        const confinement = makeSeatbeltConfinementLive({
+          platform,
+          sandboxPath,
+        });
+        const launch = yield* Effect.try({
+          try: () =>
+            confinement.prepare({
+              executable: input.binaryPath,
+              args,
+              boundRoot: root,
+              temporaryDirectory: temporaryDirectoryPath,
+              networkEgress,
+              writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
+              additionalWriteRoots: [piHome],
+              allowFileReadStar: true,
+              allowProcessFork: !(input.executionPolicy === "plan" || input.mode === "chat"),
+              readRoots: [
+                root,
+                piHome,
+                binaryDirectory,
+                runtimeDirectory,
+                temporaryDirectoryPath,
+                ...credentialPaths,
+              ],
+              privateHomeAllowPaths: [
+                root,
+                piHome,
+                binaryDirectory,
+                runtimeDirectory,
+                ...credentialPaths,
+              ],
             }),
-          );
-          const credentialPaths = [
-            ...(existsSync(credentialPath) ? [credentialPath] : []),
-            ...(existsSync(modelsPath) ? [modelsPath] : []),
-          ];
-          const profile = buildDenyDefaultSeatbeltProfile({
-            boundRoot: root,
-            temporaryDirectory: temporaryDirectoryPath,
-            writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
-            additionalWriteRoots: [piHome],
-            allowFileReadStar: true,
-            allowProcessFork: !(input.executionPolicy === "plan" || input.mode === "chat"),
-            networkEgress,
-            readRoots: [
-              root,
-              piHome,
-              binaryDirectory,
-              runtimeDirectory,
-              temporaryDirectoryPath,
-              ...credentialPaths,
-            ],
-            privateHomeAllowPaths: [
-              root,
-              piHome,
-              binaryDirectory,
-              runtimeDirectory,
-              ...credentialPaths,
-            ],
-          });
-          const launch = wrapCommandInSandboxExec({
-            sandboxPath,
-            profile,
-            executable: input.binaryPath,
-            args,
-          });
-          return {
-            command: launch.command,
-            args: launch.args,
-            cwd: root,
-            environment,
-          };
-        } catch {
-          return yield* Effect.fail(
-            failure("incompatible", "Pi private-path confinement could not be prepared."),
-          );
-        }
+          catch: (error) =>
+            failure(
+              error instanceof SeatbeltConfinementError && error.reason === "invalid-configuration"
+                ? "invalid-configuration"
+                : "incompatible",
+              error instanceof SeatbeltConfinementError
+                ? error.message
+                : "Pi private-path confinement could not be prepared.",
+            ),
+        });
+        return {
+          command: launch.command,
+          args: launch.args,
+          cwd: root,
+          environment,
+        };
       }),
   };
 }
