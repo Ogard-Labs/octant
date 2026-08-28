@@ -68,7 +68,7 @@ distilled successor of the earlier long-form design specifications.
 | [0058](0058-cross-platform-desktop.md)                        | One desktop app across macOS, Linux, and Windows                                            | Proposed           |
 | [0059](0059-multi-host-federation.md)                         | Multi-host federation completes without new host authority                                  | Proposed           |
 | [0060](0060-usage-spend-ceilings.md)                          | Usage spend ceilings                                                                        | Proposed           |
-| [0061](0061-in-app-changelog.md)                      | In-app changelog rides the update path                                                  | Proposed           |
+| [0061](0061-in-app-changelog.md)                              | In-app changelog rides the update path                                                      | Proposed           |
 
 ## Adding an ADR
 
