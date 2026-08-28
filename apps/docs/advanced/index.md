@@ -41,7 +41,7 @@ without over-trusting a surface that has not shipped.
 ## Remote, privacy, and recovery
 
 - [Remote access](/advanced/remote-access) — authenticated LAN and Tailscale access to one host.
-- [Privacy and security](/advanced/privacy-and-security) — local-first storage, credentials, approvals, and confinement.
+- [Privacy and security](/advanced/privacy-and-security) — local-first storage, credentials, approvals, confinement, and the two host-initiated HTTPS calls.
 - [Recovery and troubleshooting](/advanced/recovery) — replay, rebuilds, conflict recovery, and diagnostic tooling.
 - [Release compatibility](/advanced/release-compatibility) — technical-preview boundaries, data location, and migration notes.
 
