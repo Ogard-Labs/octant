@@ -347,6 +347,10 @@ describe("serverSpawnSpec", () => {
   });
 
   it("uses the packaged Electron executable in Node mode without Bun", () => {
+    const packagedPath =
+      process.platform === "darwin"
+        ? "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin"
+        : "/usr/bin:/bin";
     expect(
       serverSpawnSpec({
         browserBrokerToken: "browser-token",
@@ -367,7 +371,7 @@ describe("serverSpawnSpec", () => {
       command: "/Applications/Octant.app/Contents/MacOS/Octant",
       args: ["/repo/apps/server/dist/main.mjs"],
       env: {
-        PATH: "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin",
+        PATH: packagedPath,
         ELECTRON_RUN_AS_NODE: "1",
         OCTANT_BROWSER_BROKER_TOKEN: "browser-token",
         OCTANT_BROWSER_BROKER_URL: "http://127.0.0.1:42000/",

@@ -144,7 +144,8 @@ describe("Code file helper build", () => {
   });
 });
 
-describe.runIf(shouldBuildCodeFileHelper())("Code file helper native fixture", () => {
+const describeNativeFixture = shouldBuildCodeFileHelper() ? describe : describe.skip;
+describeNativeFixture("Code file helper native fixture", () => {
   it("inspects through a retained root descriptor and rejects final/intermediate symlinks and hardlinks", async () => {
     const root = join(fixtureRoot, "inspect-root");
     const movedRoot = join(fixtureRoot, "inspect-root-moved");

@@ -763,6 +763,7 @@ describe("managed server credential broker lifecycle", () => {
         return broker;
       },
       startServer: (startedBroker) => {
+        if (startedBroker === undefined) throw new Error("expected broker");
         order.push(`server:${startedBroker.url}`);
         return child;
       },

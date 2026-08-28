@@ -842,8 +842,11 @@ function resolveDesktopHostRuntimePaths(
   if (platform !== "darwin" && platform !== "linux") {
     throw new Error(`Octant desktop does not support host paths on ${platform}.`);
   }
+  // Electron appData is ~/Library/Application Support on macOS and ~/.config on
+  // Linux; walk up to the home directory from that path so tests can inject a
+  // synthetic appData without depending on the process home.
   const home =
-    platform === "darwin" ? resolve(appDataDirectory, "..", "..") : resolve(homedir());
+    platform === "darwin" ? resolve(appDataDirectory, "..", "..") : resolve(appDataDirectory, "..");
   return resolveHostRuntimePaths({
     env: { OCTANT_DATA_DIR: configuredDirectory },
     platform,
