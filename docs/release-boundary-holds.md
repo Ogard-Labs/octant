@@ -50,7 +50,7 @@ primary for Code.
    language-tooling extension model is the existing plugin ladder or a distinct
    host ([0001](decisions/0001-plugin-architecture.md),
    [0011](decisions/0011-extensions-activation-ladder.md)).
-2. Language services and debugger acts cannot escalate mode, Project, or thread
+2. Language services and debugger actions cannot escalate mode, Project, or thread
    authority, and they take no path around sandbox and approval policy.
 3. An explicit maintainer request authorizes the scoped work against those
    records.
