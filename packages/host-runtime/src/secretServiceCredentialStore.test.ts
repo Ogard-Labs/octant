@@ -65,6 +65,29 @@ describe("Secret Service credential store", () => {
     expect(commands.every(({ args }) => !args.includes(credential))).toBe(true);
   });
 
+  it("keeps whitespace-only credentials present after lookup", async () => {
+    const values = new Map<string, string>();
+    const execute: SecretToolCommandExecutor = async (spec) => {
+      const account = spec.args.at(-1);
+      if (spec.args[0] === "store" && account !== undefined) {
+        values.set(account, spec.stdin ?? "");
+        return result();
+      }
+      if (spec.args[0] === "lookup" && account !== undefined) {
+        const value = values.get(account);
+        return value === undefined
+          ? result({ exitCode: 1, stderr: "No such secret" })
+          : result({ stdout: `${value}\n` });
+      }
+      throw new Error("unexpected command");
+    };
+    const store = makeSecretServiceCredentialStore({ execute });
+
+    await store.set(providerInstanceId, " ");
+    await expect(store.has(providerInstanceId)).resolves.toBe(true);
+    await expect(store.resolve(providerInstanceId)).resolves.toBe(" ");
+  });
+
   it("maps missing tools, locked stores, nonzero exits, and empty output to typed failures", async () => {
     const unavailable = makeSecretServiceCredentialStore({
       execute: async () => {
@@ -94,6 +117,10 @@ describe("Secret Service credential store", () => {
 
     const empty = makeSecretServiceCredentialStore({
       execute: async () => result(),
+    });
+    await expect(empty.has(providerInstanceId)).rejects.toMatchObject({
+      name: "CredentialStoreFailure",
+      category: "failed",
     });
     await expect(empty.resolve(providerInstanceId)).rejects.toMatchObject({
       name: "CredentialStoreFailure",

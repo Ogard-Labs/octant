@@ -138,7 +138,9 @@ export function makeSecretServiceCredentialStore(
         if (result.stderr === "" || isMissingSecret(result.stderr)) return false;
         throw commandFailure(result);
       }
-      if (result.stderr !== "" || result.stdout.trim() === "") {
+      // secret-tool lookup prints the secret plus a newline; stored bytes do not include it.
+      const credential = result.stdout.endsWith("\n") ? result.stdout.slice(0, -1) : result.stdout;
+      if (result.stderr !== "" || credential.length === 0) {
         throw new CredentialStoreFailure("failed");
       }
       return true;
@@ -258,6 +260,7 @@ const executeSecretTool: SecretToolCommandExecutor = (spec, limits) =>
       clearTimeout(timer);
       finish({ exitCode, stdout, stderr });
     });
+    child.stdin?.on("error", fail);
     if (spec.stdin === undefined) {
       child.stdin?.end();
     } else {
