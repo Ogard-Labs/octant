@@ -71,10 +71,7 @@ import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
 import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
 import { enabledModes } from "@octant/domain/mode-policy";
-import {
-  defaultEnvironmentPresentationState,
-  defaultShellSettings,
-} from "@octant/domain/shell-policy";
+import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
   enforceAccessibilitySettings,
@@ -4462,12 +4459,6 @@ function LaunchedShell(
                     onDismissCrossContextOffer={controller.dismissCrossContextOffer}
                     onOpenCrossContextInNewWindow={() =>
                       void controller.openCrossContextInNewWindow()
-                    }
-                    environmentPresentation={
-                      controller.environmentPresentation ?? defaultEnvironmentPresentationState()
-                    }
-                    onSetEnvironmentPresentation={(next) =>
-                      void controller.setEnvironmentPresentation(next)
                     }
                     projectClient={projectController.client}
                     projectServerUrl={props.launch.serverUrl}
