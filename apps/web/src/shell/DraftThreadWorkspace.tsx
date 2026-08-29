@@ -35,10 +35,11 @@ import {
   CreateFromLinearIssuePicker,
   useLinearIssuesCreateAvailable,
 } from "../linear/CreateFromLinearIssuePicker";
-import { draftThreadModePresentation, type DraftIntentCard } from "@octant/contracts/thread-draft";
 import {
+  draftThreadModePresentation,
   resolveCodeNewThreadWorkspace,
   type CreateHostViewScope,
+  type DraftIntentCard,
   type PickerGroup,
 } from "@octant/domain";
 import { Aperture, FolderOpen, GitBranch, ShieldCheck } from "lucide-react";

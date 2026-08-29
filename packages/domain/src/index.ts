@@ -82,6 +82,7 @@ export * from "./artifactMirrorPolicy";
 export * from "./scaffoldPolicy";
 export * from "./threadCheckpointPolicy";
 export * from "./threadWorkPolicy";
+export * from "./threadDraftPresentation";
 export * from "./threadMentionPolicy";
 export * from "./fileMentionPolicy";
 export * from "./usagePolicy";
