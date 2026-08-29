@@ -796,8 +796,6 @@ export class AppleToolchainService {
 
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const onParentAbort = () => controller.abort(parent.reason);
-    parent.addEventListener("abort", onParentAbort, { once: true });
 
     const deadline = new Promise<AppleProcessResult>((resolve) => {
       timer = setTimeout(() => {
@@ -826,7 +824,6 @@ export class AppleToolchainService {
       throw error;
     } finally {
       if (timer !== undefined) clearTimeout(timer);
-      parent.removeEventListener("abort", onParentAbort);
     }
   }
 
