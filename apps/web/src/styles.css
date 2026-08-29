@@ -6817,7 +6817,14 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.5rem 0.75rem;
+  gap: 0.35rem 0.75rem;
+}
+
+.federated-hosts-lifecycle__facts {
+  flex: 1 1 100%;
+  font-size: 0.75rem;
+  color: var(--octant-muted, #94a3b8);
+  overflow-wrap: anywhere;
 }
 
 .federated-hosts-lifecycle__state {

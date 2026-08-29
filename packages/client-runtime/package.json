@@ -33,6 +33,7 @@
     "./host-federation-transports": "./src/hostFederationTransports.ts",
     "./host-federation-merged-reads": "./src/hostFederationMergedReads.ts",
     "./host-federation-lifecycle": "./src/hostFederationLifecycle.ts",
+    "./register-paired-remote-host": "./src/registerPairedRemoteHost.ts",
     "./linked-thread-client": "./src/linkedThreadClient.ts",
     "./work-overview-client": "./src/workOverviewClient.ts",
     "./work-research-client": "./src/workResearchClient.ts",
