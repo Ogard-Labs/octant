@@ -149,7 +149,8 @@ describe("image job service", () => {
     const replayed = journal.replay({ afterSequence: 0, limit: 100 } as never);
     const payload = JSON.stringify(replayed.map((event) => event.payload));
     expect(payload).not.toContain("iVBOR");
-    expect(payload).not.toContain("b64");
+    // JSON keys only — bare "b64" matches random UUID hex (e.g. ab2b64ad).
+    expect(payload).not.toMatch(/"b64[_a-z]*"\s*:/);
     expect(payload).not.toContain("sk-test");
     expect(payload).not.toContain("https://");
 
