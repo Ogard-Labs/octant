@@ -361,16 +361,55 @@ describe("shared Seatbelt profile builder", () => {
       additionalWriteRoots: [providerHome],
       allowFileReadStar: true,
       networkEgress: "allow",
+      allowProcessExec: false,
       allowProcessFork: false,
       privateHomeAllowPaths: [boundRoot, temporaryDirectory, providerHome],
       homeDirectory: root,
       usersDirectory: root,
     });
 
+    expect(profile).not.toContain("(allow process-exec)");
     expect(profile).not.toContain("(allow process-fork)");
     expect(profile).not.toContain(seatbeltAllowRule("file-write*", boundRoot));
     expect(profile).toContain(seatbeltAllowRule("file-write*", providerHome));
     expect(profile).toContain(seatbeltAllowRule("file-write*", temporaryDirectory));
+  });
+
+  it("prepares a Plan launch without process-exec, process-fork, or bound-root writes", () => {
+    const root = temporaryRoot();
+    const boundRoot = join(root, "project");
+    const temporaryDirectory = join(root, "tmp");
+    const providerHome = join(root, "provider-home");
+    const sandboxPath = join(root, "sandbox-exec");
+    mkdirSync(boundRoot);
+    mkdirSync(temporaryDirectory);
+    mkdirSync(providerHome);
+    writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
+    chmodSync(sandboxPath, 0o700);
+
+    const launch = makeSeatbeltConfinementLive({
+      platform: "darwin",
+      sandboxPath,
+      homeDirectory: root,
+      usersDirectory: root,
+    }).prepare({
+      executable: "/usr/bin/true",
+      args: [],
+      boundRoot,
+      temporaryDirectory,
+      networkEgress: "none",
+      writeBoundRoot: false,
+      allowProcessExec: false,
+      allowProcessFork: false,
+      additionalWriteRoots: [providerHome],
+    });
+
+    const profile = launch.args[1];
+    expect(profile).not.toContain("(allow process-exec)");
+    expect(profile).not.toContain("(allow process-fork)");
+    expect(profile).not.toContain(seatbeltAllowRule("file-write*", boundRoot));
+    expect(profile).toContain(seatbeltAllowRule("file-write*", temporaryDirectory));
+    expect(profile).toContain(seatbeltAllowRule("file-write*", providerHome));
   });
 });
 

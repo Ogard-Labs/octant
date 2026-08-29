@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ProviderExecutionPolicy } from "@octant/contracts";
 import * as nodePty from "node-pty";
 import {
   persistProcessReceipt,
@@ -81,6 +82,7 @@ export interface TerminalLaunchInput {
   readonly environment: Readonly<Record<string, string>>;
   readonly columns: number;
   readonly rows: number;
+  readonly executionPolicy?: ProviderExecutionPolicy;
 }
 
 interface TerminalProcessDependencies {
@@ -224,6 +226,12 @@ export class TerminalProcessPort {
 
   start(input: TerminalLaunchInput): TerminalProcessHandle {
     validateLaunch(input);
+    if (input.executionPolicy === "plan") {
+      throw new SeatbeltConfinementError(
+        "invalid-configuration",
+        "Plan mode cannot start a terminal.",
+      );
+    }
     this.#dependencies.ensurePtyHelperExecutable();
     const shellState = shellStateDirectoryForRoot(
       this.#dependencies.shellStateDirectory,

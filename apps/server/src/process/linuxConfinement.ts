@@ -84,6 +84,14 @@ export function buildLinuxConfinementLaunch(
   }
 
   const baseSystemDirs = ["/bin", "/sbin", "/usr", "/lib", "/lib64", "/etc", "/opt", "/sys"];
+  const hostExecutableSearchPaths = [
+    "/bin",
+    "/sbin",
+    "/usr/bin",
+    "/usr/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+  ];
   const mounts = new Map<string, Mount>();
 
   function addMount(kind: Mount["kind"], source: string, target: string) {
@@ -154,6 +162,16 @@ export function buildLinuxConfinementLaunch(
   }
   for (const path of input.additionalWriteRoots ?? []) {
     tryBindWritable(path);
+  }
+  // Bubblewrap applies seccomp before execve of the command, so a filter that
+  // blocked execve would prevent the launch itself. Overlaying host executable
+  // search paths, then re-binding this launch's binary, is what keeps Plan and
+  // other read-only sessions from spawning a host shell.
+  if (input.allowProcessExec === false || input.allowProcessFork === false) {
+    for (const path of hostExecutableSearchPaths) {
+      if (existsSync(path)) addMount("tmpfs", "", path);
+    }
+    tryBindReadOnly(input.executable);
   }
 
   const writeTargets = [

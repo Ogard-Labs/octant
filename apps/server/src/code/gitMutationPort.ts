@@ -2,13 +2,14 @@ import { execFile as nodeExecFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, copyFile, rm } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
   prepareGitSeatbeltLaunch,
   type GitSeatbeltPortOptions,
 } from "../process/gitSeatbeltLaunch";
-import { SeatbeltConfinementError } from "../process/seatbeltProfile";
+import { SeatbeltConfinementError, type SeatbeltConfinementPort } from "../process/seatbeltProfile";
 import type { GitStatusEntry } from "./gitObservationPort";
 
 interface CommandResult {
@@ -101,11 +102,18 @@ export class GitMutationPort {
 
   constructor(
     dependencies: GitMutationDependencies = liveDependencies,
-    options: { readonly commandTimeoutMs?: number } & GitSeatbeltPortOptions = {},
+    options: {
+      readonly commandTimeoutMs?: number;
+      readonly executionPolicy?: ProviderExecutionPolicy;
+    } & GitSeatbeltPortOptions = {},
   ) {
     this.#dependencies = dependencies;
     this.#commandTimeoutMs = options.commandTimeoutMs ?? 15_000;
-    this.#confinement = createGitSeatbeltConfinement(options);
+    const confinement = createGitSeatbeltConfinement(options);
+    this.#confinement =
+      options.executionPolicy === "plan"
+        ? { ...confinement, confinement: planGitMutationConfinement(confinement.confinement) }
+        : confinement;
   }
 
   async stage(
@@ -658,6 +666,18 @@ export class GitMutationPort {
       parentSignal?.removeEventListener("abort", abort);
     }
   }
+}
+
+function planGitMutationConfinement(confinement: SeatbeltConfinementPort): SeatbeltConfinementPort {
+  return {
+    prepare: (input) =>
+      confinement.prepare({
+        ...input,
+        writeBoundRoot: false,
+        allowProcessExec: false,
+        allowProcessFork: false,
+      }),
+  };
 }
 
 /**

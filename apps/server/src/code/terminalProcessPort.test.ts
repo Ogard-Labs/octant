@@ -138,6 +138,33 @@ describe("TerminalProcessPort", () => {
     expect(profile).not.toContain("(allow network*)");
   });
 
+  it("refuses to start a Plan mode terminal rather than spawning a writable shell", () => {
+    const spawn = vi.fn(() => fakePty());
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const port = new TerminalProcessPort({
+      spawn,
+      killProcessGroup: vi.fn(),
+      confinement: fake.confinement,
+      temporaryDirectory: fake.temporaryDirectory,
+      shellStateDirectory: join(fake.root, "terminal-shell"),
+      platform: "darwin",
+    });
+
+    expect(() =>
+      port.start({
+        shell: "/bin/zsh",
+        cwd: "/private/repo",
+        stateScope: "repo_test",
+        environment: { PATH: "/usr/bin" },
+        columns: 80,
+        rows: 24,
+        executionPolicy: "plan",
+      }),
+    ).toThrow(SeatbeltConfinementError);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("keeps shell history and caches separate for every bound root", async () => {
     const fake = createFakeSandboxConfinement();
     directories.push(fake.root);
