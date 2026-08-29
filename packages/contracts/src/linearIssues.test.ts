@@ -29,6 +29,12 @@ describe("Linear issue contracts", () => {
     expect(decoded.hasNextPage).toBe(true);
   });
 
+  it("accepts the reserved viewer assignee so a client can ask for its own issues", () => {
+    expect(decodeLinearIssueListInput({ filter: { assigneeId: "me" } })).toMatchObject({
+      filter: { assigneeId: "me" },
+    });
+  });
+
   it("accepts search and basic filters on a list request", () => {
     expect(
       decodeLinearIssueListInput({

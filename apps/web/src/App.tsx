@@ -123,7 +123,9 @@ import { loadPluginSidebarDestinationAction } from "./shell/pluginSidebarDestina
 import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDestinationRegistry";
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
+import { buildInboxAttentionItems } from "./inbox/inboxModel";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
+import { evaluateThreadAttention } from "./notifications/threadAttention";
 import { useThreadAttentionNotifications } from "./notifications/useThreadAttentionNotifications";
 import { useShellController, type NativeShellHost } from "./shell/useShellController";
 import { useHostObservation } from "./shell/useHostObservation";
@@ -621,6 +623,9 @@ function LaunchedShell(
   }>();
   const [codeBoardOpen, setCodeBoardOpen] = useState(false);
   const [codePullRequestsOpen, setCodePullRequestsOpen] = useState(false);
+  // Deliberately not cleared on mode switch: what waits on the user spans
+  // every mode, so the Inbox survives moving between them.
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
@@ -1247,6 +1252,17 @@ function LaunchedShell(
     signals: attentionSignals,
     ...(watchedThreadId === undefined ? {} : { watchedThreadId }),
   });
+  // The row count mirrors the dock badge: distinct threads waiting, minus the
+  // one the user is looking at, whose signal the open thread already answers.
+  const inboxCount = useMemo(
+    () =>
+      evaluateThreadAttention({
+        signals: attentionSignals,
+        windowFocused: true,
+        ...(watchedThreadId === undefined ? {} : { watchedThreadId }),
+      }).badgeCount,
+    [attentionSignals, watchedThreadId],
+  );
   const activeProjectId =
     selectedProjectTabId ??
     (activeMode === "code"
@@ -1301,6 +1317,14 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  const inboxAttentionItems = useMemo(
+    () =>
+      buildInboxAttentionItems(
+        attentionSignals,
+        new Map(projectController.projects.map((project) => [String(project.id), project.name])),
+      ),
+    [attentionSignals, projectController.projects],
+  );
   useEffect(() => {
     const target = props.hostBridge?.initialProjectTarget;
     if (
@@ -2457,6 +2481,7 @@ function LaunchedShell(
     railPlaceholder !== undefined ||
     codeBoardOpen ||
     codePullRequestsOpen ||
+    inboxOpen ||
     githubIssuesOpen ||
     linearIssuesOpen ||
     workBoardOpen ||
@@ -2876,6 +2901,7 @@ function LaunchedShell(
       setWorkBoardOpen(false);
       setCodeBoardOpen(false);
       setCodePullRequestsOpen(false);
+      setInboxOpen(false);
       setGithubIssuesOpen(false);
       setLinearIssuesOpen(false);
       setArchiveOpen(false);
@@ -2886,6 +2912,11 @@ function LaunchedShell(
     openGithubIssues: () => setGithubIssuesOpen(true),
     openLinearIssues: () => setLinearIssuesOpen(true),
   };
+
+  function openInbox() {
+    pluginSidebarDestinationActionContext.closeOverlays();
+    setInboxOpen(true);
+  }
 
   const pluginSidebarDestinationActions: Record<string, () => void> = {};
   for (const contribution of resolveSidebarDestinationContributions(
@@ -3955,6 +3986,7 @@ function LaunchedShell(
                   chatNavigation: {
                     actions: {
                       "new-chat": createChat,
+                      inbox: openInbox,
                       agents: openAgentsCenter,
                       "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
@@ -3967,6 +3999,7 @@ function LaunchedShell(
                   codeNavigation: {
                     actions: {
                       "new-code-thread": () => openDraftInActiveProject("code"),
+                      inbox: openInbox,
                       agents: openAgentsCenter,
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
@@ -3981,6 +4014,7 @@ function LaunchedShell(
                   workNavigation: {
                     actions: {
                       "new-work-thread": () => openDraftInActiveProject("work"),
+                      inbox: openInbox,
                       agents: openAgentsCenter,
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
@@ -4007,6 +4041,7 @@ function LaunchedShell(
             onRetryChat={() => void chatController.retry()}
             onSelectMode={handleSelectMode}
             {...(githubIssuesReadAvailable ? { githubIssuesReadAvailable: true } : {})}
+            inboxCount={inboxCount}
             settings={presentedShellSettings ?? controller.settings}
             workspace={controller.workspace}
             resolvedSidebarBackground={resolvedSidebarBackground}
@@ -4166,6 +4201,32 @@ function LaunchedShell(
               <WorkspaceRailLayers
                 {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
                 onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
+                inboxOpen={inboxOpen}
+                onCloseInbox={() => setInboxOpen(false)}
+                inboxAttentionItems={inboxAttentionItems}
+                onOpenInboxThread={(signal) => {
+                  setInboxOpen(false);
+                  if (signal.source === "chat") {
+                    void controller.openChatThread(
+                      decodeChatThreadId(signal.threadId),
+                      signal.title,
+                    );
+                    return;
+                  }
+                  void controller.openCodeThread(decodeCodeThreadId(signal.threadId), signal.title);
+                }}
+                {...(githubIssuesReadAvailable
+                  ? {
+                      loadAssignedGithubWork: () =>
+                        githubClient.readCatalogue({ kind: "assigned-work" }),
+                    }
+                  : {})}
+                {...(linearIssuesRead
+                  ? {
+                      loadAssignedLinearIssues: () =>
+                        linearClient.listIssues({ filter: { assigneeId: "me" }, pageSize: 50 }),
+                    }
+                  : {})}
                 codeBoardOpen={codeBoardOpen}
                 codePullRequestsOpen={codePullRequestsOpen}
                 githubIssuesOpen={githubIssuesOpen}
@@ -4403,6 +4464,7 @@ function LaunchedShell(
                       railPlaceholder !== undefined ||
                       codeBoardOpen ||
                       codePullRequestsOpen ||
+                      inboxOpen ||
                       githubIssuesOpen ||
                       linearIssuesOpen ||
                       workBoardOpen ||

@@ -5,13 +5,13 @@ import {
   Box,
   Briefcase,
   Bug,
+  Bell,
   Clock3,
   Code,
   Flag,
   Folder,
   FolderOpen,
   FolderGit,
-  Inbox,
   Layers,
   ListFilter,
   ListTree,
@@ -908,7 +908,9 @@ function ActivityViewToggle(props: { readonly enabled: boolean; readonly onToggl
     <IconButton
       aria-pressed={props.enabled}
       className="project-nav__activity-toggle"
-      icon={Inbox}
+      // The inbox glyph now belongs to the Inbox destination; activity keeps
+      // its recency-feed behavior under a bell so the two never read as one.
+      icon={Bell}
       label={props.enabled ? "Turn off activity view" : "Turn on activity view"}
       onClick={props.onToggle}
     />

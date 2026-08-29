@@ -20,6 +20,7 @@ export type SidebarNavigationDescriptorId =
   | "automations"
   | "artifact-library"
   | "plugins"
+  | "inbox"
   | "thread-board"
   | "pull-requests"
   | "github-issues"
@@ -36,6 +37,13 @@ export interface SidebarNavigationDescriptor {
 export interface SidebarNavigationInput {
   readonly activeMode: OctantMode;
   readonly createThread: NavigationAvailability;
+  /**
+   * The Inbox converges what already waits on the user — blocked and finished
+   * threads, plus assigned GitHub and Linear work where those reads are
+   * connected. It renders in every mode because an agent blocked in one mode
+   * still needs the user who is working in another.
+   */
+  readonly inbox: NavigationAvailability;
   readonly projects: NavigationAvailability;
   readonly threadBoard: NavigationAvailability;
   readonly pullRequests: NavigationAvailability;
@@ -149,6 +157,7 @@ const descriptors = {
   "new-chat": { id: "new-chat", label: "New chat" },
   "new-work-thread": { id: "new-work-thread", label: "New thread" },
   "new-code-thread": { id: "new-code-thread", label: "New thread" },
+  inbox: { id: "inbox", label: "Inbox" },
   automations: { id: "automations", label: "Automations" },
   agents: { id: "agents", label: "Agents" },
   "artifact-library": { id: "artifact-library", label: "Artifacts" },
@@ -167,17 +176,20 @@ export function buildSidebarNavigation(
     case "chat":
       return [
         ...(input.createThread === "available" ? [descriptors["new-chat"]] : []),
+        ...(input.inbox === "available" ? [descriptors.inbox] : []),
         ...(input.projects === "available" ? [descriptors.projects] : []),
       ];
     case "work":
       return [
         ...(input.createThread === "available" ? [descriptors["new-work-thread"]] : []),
+        ...(input.inbox === "available" ? [descriptors.inbox] : []),
         ...(input.threadBoard === "available" ? [descriptors["thread-board"]] : []),
         ...(input.projects === "available" ? [descriptors.projects] : []),
       ];
     case "code":
       return [
         ...(input.createThread === "available" ? [descriptors["new-code-thread"]] : []),
+        ...(input.inbox === "available" ? [descriptors.inbox] : []),
         ...(input.threadBoard === "available" ? [descriptors["thread-board"]] : []),
         ...(input.githubIssues === "available" ? [descriptors["github-issues"]] : []),
         ...(input.pullRequests === "available" ? [descriptors["pull-requests"]] : []),

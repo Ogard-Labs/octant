@@ -10,10 +10,6 @@ export interface ThreadAttentionSources {
   readonly activeCodeThreadId?: string;
 }
 
-function codeThreadTitle(sources: ThreadAttentionSources, threadId: string): string | undefined {
-  return sources.codeThreads.find((thread) => String(thread.threadId) === threadId)?.title;
-}
-
 /**
  * Collects every thread state the user is expected to act on. Chat surfaces a
  * finished turn as unread and a durable question as a follow-up; Code surfaces
@@ -25,10 +21,16 @@ export function collectThreadAttentionSignals(
 ): ReadonlyArray<ThreadAttentionSignal> {
   const signals: ThreadAttentionSignal[] = [];
   for (const thread of sources.chatThreads) {
+    const shared = {
+      threadId: thread.threadId,
+      title: thread.title,
+      source: "chat" as const,
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    };
     if (thread.followUp === true) {
-      signals.push({ threadId: thread.threadId, reason: "question-asked", title: thread.title });
+      signals.push({ ...shared, reason: "question-asked" });
     } else if (thread.unread === true) {
-      signals.push({ threadId: thread.threadId, reason: "turn-finished", title: thread.title });
+      signals.push({ ...shared, reason: "turn-finished" });
     }
   }
   for (const thread of sources.codeThreads) {
@@ -37,26 +39,29 @@ export function collectThreadAttentionSignals(
       threadId: String(thread.threadId),
       reason: "question-asked",
       title: thread.title,
+      source: "code",
+      ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
     });
   }
   const activeCodeThreadId = sources.activeCodeThreadId;
   if (activeCodeThreadId !== undefined) {
-    const title = codeThreadTitle(sources, activeCodeThreadId) ?? "Code thread";
+    const activeThread = sources.codeThreads.find(
+      (thread) => String(thread.threadId) === activeCodeThreadId,
+    );
+    const title = activeThread?.title ?? "Code thread";
+    const shared = {
+      threadId: activeCodeThreadId,
+      title,
+      source: "code" as const,
+      ...(activeThread?.projectId === undefined
+        ? {}
+        : { projectId: String(activeThread.projectId) }),
+    };
     for (const request of sources.codeProviderRequests ?? []) {
       signals.push(
         request.kind === "approval"
-          ? {
-              threadId: activeCodeThreadId,
-              reason: "approval-required",
-              title,
-              detail: request.summary,
-            }
-          : {
-              threadId: activeCodeThreadId,
-              reason: "question-asked",
-              title,
-              detail: request.prompt,
-            },
+          ? { ...shared, reason: "approval-required", detail: request.summary }
+          : { ...shared, reason: "question-asked", detail: request.prompt },
       );
     }
   }

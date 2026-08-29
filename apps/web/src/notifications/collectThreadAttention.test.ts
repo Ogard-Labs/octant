@@ -15,8 +15,8 @@ describe("collecting thread attention", () => {
         codeThreads: [],
       }),
     ).toEqual([
-      { threadId: "chat-a", reason: "turn-finished", title: "Unread thread" },
-      { threadId: "chat-b", reason: "question-asked", title: "Asked thread" },
+      { threadId: "chat-a", reason: "turn-finished", title: "Unread thread", source: "chat" },
+      { threadId: "chat-b", reason: "question-asked", title: "Asked thread", source: "chat" },
     ]);
   });
 
@@ -51,12 +51,16 @@ describe("collecting thread attention", () => {
         reason: "approval-required",
         title: "Diff pane",
         detail: "Run bun run verify",
+        source: "code",
+        projectId: "project-1",
       },
       {
         threadId: "code-a",
         reason: "question-asked",
         title: "Diff pane",
         detail: "Which branch?",
+        source: "code",
+        projectId: "project-1",
       },
     ]);
   });

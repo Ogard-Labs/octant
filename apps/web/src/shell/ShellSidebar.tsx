@@ -82,6 +82,8 @@ export interface ShellSidebarProps {
   readonly firstPartyPluginsEffective?: ReadonlyMap<FirstPartyPluginComponentId, boolean>;
   /** Snapshot `issues-read` availability. Absent or false hides the Issues row. */
   readonly githubIssuesReadAvailable?: boolean;
+  /** Threads waiting on the user right now; mirrors the dock badge count. */
+  readonly inboxCount?: number;
 }
 
 export function ShellSidebar(props: ShellSidebarProps) {
@@ -114,6 +116,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
   };
   const navigationInput: SidebarNavigationInput = {
     activeMode,
+    inbox: navigationActions.inbox === undefined ? "unavailable" : "available",
     artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
     automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
     agentsCenterEnabled: props.agentsCenterEnabled ?? AGENTS_CENTER_NAVIGATION_ENABLED,
@@ -215,6 +218,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
         />
         <SidebarNavigation
           actions={navigationActions}
+          {...(props.inboxCount === undefined || props.inboxCount === 0
+            ? {}
+            : { counts: { inbox: props.inboxCount } })}
           input={navigationInput}
           projectSection={props.projectSection}
         />

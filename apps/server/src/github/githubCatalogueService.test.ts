@@ -81,6 +81,21 @@ function fakePort(overrides: Partial<Record<string, unknown>> = {}) {
       kind: "ok" as const,
       value: { rows: [], hasNextPage: false },
     })),
+    listAssignedWork: vi.fn(async () => ({
+      kind: "ok" as const,
+      value: [
+        {
+          category: "review-request" as const,
+          owner: "octant",
+          name: "octant",
+          number: 12,
+          title: "Confine Plan git per call",
+          author: "octocat",
+          updatedAt: "2026-08-28T10:00:00Z",
+          url: "https://github.com/octant/octant/pull/12",
+        },
+      ],
+    })),
     ...overrides,
   };
 }
@@ -172,6 +187,35 @@ describe("GithubCatalogueService", () => {
       reason: "unauthorized",
     });
     expect(port.listRepositories).not.toHaveBeenCalled();
+  });
+
+  it("serves the viewer's assigned work as one fresh cross-repository page", async () => {
+    const { service: catalogue } = service();
+    expect(await catalogue.read({ kind: "assigned-work" }, signal())).toMatchObject({
+      kind: "assigned-work",
+      page: {
+        freshness: { status: "fresh" },
+        items: [{ category: "review-request", owner: "octant", name: "octant", number: 12 }],
+      },
+    });
+  });
+
+  it("refuses assigned work when the issues read capability is gone", async () => {
+    const issuesGone: GithubAuthenticationSnapshot = {
+      ...readySnapshot,
+      capabilities: [
+        { kind: "repository-catalogue", available: true },
+        { kind: "issues-read", available: false },
+        { kind: "pull-requests-read", available: true },
+        { kind: "projects-read", available: true },
+      ],
+    };
+    const { service: catalogue, port } = service({ snapshot: issuesGone });
+    expect(await catalogue.read({ kind: "assigned-work" }, signal())).toMatchObject({
+      kind: "unavailable",
+      capability: "issues-read",
+    });
+    expect(port.listAssignedWork).not.toHaveBeenCalled();
   });
 
   it("serves a cached page while fresh instead of refetching", async () => {

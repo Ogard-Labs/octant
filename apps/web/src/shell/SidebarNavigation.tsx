@@ -4,6 +4,7 @@ import {
   FileStack,
   GitFork,
   GitPullRequest,
+  Inbox,
   ListTodo,
   Puzzle,
   SquarePen,
@@ -19,6 +20,8 @@ import { OctantButton } from "../ui/base/OctantButton";
 
 export interface SidebarNavigationProps {
   readonly actions: Partial<Readonly<Record<SidebarNavigationDescriptorId, () => void>>>;
+  /** Row counts (e.g. threads waiting in the Inbox); zero and absent render nothing. */
+  readonly counts?: Partial<Readonly<Record<SidebarNavigationDescriptorId, number>>>;
   readonly input: SidebarNavigationInput;
   readonly projectAction?: ReactNode;
   readonly projectSection?: ReactNode;
@@ -43,6 +46,7 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
         if (action === undefined) return null;
         const Icon = navigationIcon(descriptor.id);
         if (Icon === undefined) return null;
+        const count = props.counts?.[descriptor.id] ?? 0;
         return (
           <OctantButton
             className="sidebar-item window-no-drag justify-start"
@@ -53,9 +57,15 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
             onClick={() => action()}
             type="button"
             variant="ghost"
+            {...(count > 0 ? { "aria-label": `${descriptor.label}, ${count} waiting` } : {})}
           >
             <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
             <span className="sidebar-label">{descriptor.label}</span>
+            {count > 0 ? (
+              <span aria-hidden="true" className="count">
+                {count}
+              </span>
+            ) : null}
           </OctantButton>
         );
       })}
@@ -75,6 +85,8 @@ function navigationIcon(id: SidebarNavigationDescriptorId) {
       return GitFork;
     case "plugins":
       return Puzzle;
+    case "inbox":
+      return Inbox;
     case "artifact-library":
       return FileStack;
     case "thread-board":
