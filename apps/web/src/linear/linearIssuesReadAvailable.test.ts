@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IntegrationAuthenticationSnapshot } from "@octant/contracts/integration";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
-import { linearIssuesReadAvailable, withLinearIssuesReadSync } from "./linearIssuesReadAvailable";
+import {
+  linearIssuesReadAvailable,
+  shouldProbeLinearAuthentication,
+  withLinearIssuesReadSync,
+} from "./linearIssuesReadAvailable";
 
 const readySnapshot: IntegrationAuthenticationSnapshot = {
   state: "ready",
@@ -29,6 +33,13 @@ function makeClient(snapshot: IntegrationAuthenticationSnapshot): IntegrationCli
 }
 
 describe("Linear issues-read capability sync", () => {
+  it("probes Linear authentication only in Code when the plugin is effective", () => {
+    expect(shouldProbeLinearAuthentication(true, "code")).toBe(true);
+    expect(shouldProbeLinearAuthentication(true, "chat")).toBe(false);
+    expect(shouldProbeLinearAuthentication(true, "work")).toBe(false);
+    expect(shouldProbeLinearAuthentication(false, "code")).toBe(false);
+  });
+
   it("treats a snapshot as available only when list-issues is present and true", () => {
     expect(linearIssuesReadAvailable(readySnapshot)).toBe(true);
     expect(linearIssuesReadAvailable(unauthorizedSnapshot)).toBe(false);

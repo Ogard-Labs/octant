@@ -7,6 +7,17 @@ export function linearIssuesReadAvailable(snapshot: IntegrationAuthenticationSna
 }
 
 /**
+ * Integration stays Code-mode-safe. Tracker chips must not probe Linear from
+ * Chat or Work, and a disabled plugin contributes no authentication request.
+ */
+export function shouldProbeLinearAuthentication(
+  pluginEffective: boolean,
+  mode: "chat" | "work" | "code",
+): boolean {
+  return pluginEffective && mode === "code";
+}
+
+/**
  * Settings authentication commands return a fresh snapshot. The App-level
  * Linear issues row has to see that snapshot, because the integration client
  * identity itself does not change on setup or logout.

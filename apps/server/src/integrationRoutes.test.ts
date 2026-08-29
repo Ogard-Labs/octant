@@ -39,6 +39,18 @@ function bindLocalWindow(value: Request) {
 describe("integration authentication routes", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it("falls through when the Linear integration is not effective", async () => {
+    const handler = createIntegrationRouteHandler({
+      service: service as never,
+      windowAuthorityStore: store as never,
+      isEffective: (slug) => slug !== "linear",
+    });
+    const value = request();
+    bindLocalWindow(value);
+    expect(await handler(value)).toBeUndefined();
+    expect(service.snapshot).not.toHaveBeenCalled();
+  });
+
   it("returns a snapshot to the authenticated local window", async () => {
     const handler = createHandler();
     const value = request();

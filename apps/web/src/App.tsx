@@ -134,6 +134,7 @@ import {
 } from "./github/githubIssuesReadAvailable";
 import {
   linearIssuesReadAvailable,
+  shouldProbeLinearAuthentication,
   withLinearIssuesReadSync,
 } from "./linear/linearIssuesReadAvailable";
 import { createTrackerReferenceClientPorts } from "./tracker/trackerReferenceClientPorts";
@@ -974,16 +975,15 @@ function LaunchedShell(
     };
   }, [githubTransport]);
   const linearPluginEffective = FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true;
+  const probeLinearAuthentication = shouldProbeLinearAuthentication(
+    linearPluginEffective,
+    activeMode,
+  );
   useEffect(() => {
-    if (!linearPluginEffective) {
+    if (!probeLinearAuthentication) {
       setLinearIssuesRead(false);
       setLinearIssuesOpen(false);
       return;
-    }
-    // The Issues sidebar stays Code-only; availability still probes in every
-    // mode so composer/transcript tracker tags can resolve when connected.
-    if (activeMode !== "code") {
-      setLinearIssuesOpen(false);
     }
     const generation = linearAvailabilityGenerationRef.current + 1;
     linearAvailabilityGenerationRef.current = generation;
@@ -1004,7 +1004,7 @@ function LaunchedShell(
     return () => {
       cancelled = true;
     };
-  }, [linearPluginEffective, activeMode, linearTransport]);
+  }, [probeLinearAuthentication, linearTransport]);
   const trackerReferencePorts = useMemo(
     () =>
       createTrackerReferenceClientPorts({
@@ -1012,7 +1012,7 @@ function LaunchedShell(
           available: githubIssuesReadAvailable,
           client: githubClient,
         },
-        ...(linearPluginEffective
+        ...(probeLinearAuthentication
           ? {
               linear: {
                 available: linearIssuesRead,
@@ -1024,7 +1024,7 @@ function LaunchedShell(
     [
       githubIssuesReadAvailable,
       githubClient,
-      linearPluginEffective,
+      probeLinearAuthentication,
       linearIssuesRead,
       linearClient,
     ],
