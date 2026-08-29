@@ -165,6 +165,7 @@ describe("applyMigrations", () => {
         "chat_search_projection",
         "chat_settings_projection",
         "chat_thread_projection",
+        "chat_transcript_search_projection",
         "chat_turn_projection",
         "chat_turn_route_projection",
         "code_checkout_projection",

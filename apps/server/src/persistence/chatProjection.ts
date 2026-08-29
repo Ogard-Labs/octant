@@ -17,11 +17,14 @@ import {
   decodeChatThreadView,
   decodeChatTurn,
   decodeChatTurnCreated,
+  decodeChatTurnId,
   decodeChatTurnRouteDecided,
   decodeChatTurnRouteDecision,
   decodeContextSubjectRef,
   decodeThreadFollowUpUpdated,
   decodeThreadWorkUpdated,
+  MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
+  MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
   ThreadFollowUp as ThreadFollowUpSchema,
   ThreadWorkItem as ThreadWorkItemSchema,
   type ChatSettings,
@@ -29,6 +32,8 @@ import {
   type ChatThread,
   type ChatThreadId,
   type ChatThreadView,
+  type ChatTranscriptSearchHit,
+  type ChatTurn,
   type ChatTurnRouteDecision,
   type EventEnvelope,
   type ThreadFollowUp,
@@ -93,6 +98,7 @@ export class ChatProjection implements Projection {
       DELETE FROM chat_purge_projection;
       DELETE FROM thread_follow_up_projection;
       DELETE FROM thread_work_item_projection;
+      DELETE FROM chat_transcript_search_projection;
       DELETE FROM chat_search_projection;
       DELETE FROM chat_citation_projection;
       DELETE FROM chat_attachment_projection;
@@ -216,6 +222,7 @@ export class ChatProjection implements Projection {
         event.globalSequence,
       );
     }
+    indexTranscriptSearchForTurn(connection, turn, event.globalSequence, turn.createdAt);
   }
 
   #applyAttemptUpdated(connection: SqliteConnection, event: EventEnvelope): void {
@@ -252,6 +259,12 @@ export class ChatProjection implements Projection {
       event.aggregateVersion,
       updatedTurn.createdAt,
       event.globalSequence,
+    );
+    indexTranscriptSearchForTurn(
+      connection,
+      updatedTurn,
+      event.globalSequence,
+      attempt.updatedAt,
     );
   }
 
@@ -438,6 +451,7 @@ export function purgeThreadContent(connection: SqliteConnection, threadId: strin
   purgeAgentRunSubjectContent(connection, subject);
   connection.prepare("DELETE FROM chat_attachment_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM chat_citation_projection WHERE thread_id = ?").run(threadId);
+  connection.prepare("DELETE FROM chat_transcript_search_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM chat_search_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM thread_work_item_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM thread_follow_up_projection WHERE thread_id = ?").run(threadId);
@@ -778,6 +792,77 @@ export function searchChatThreads(
   });
 }
 
+export interface ChatTranscriptSearchRows {
+  readonly hits: ReadonlyArray<ChatTranscriptSearchHit>;
+  readonly truncated: boolean;
+}
+
+/**
+ * Message-body search over per-content projection rows. Returns active and
+ * archived threads only; the caller still filters hidden sidecars. Snippets
+ * are clipped around the first hit in the stored body text.
+ */
+export function searchChatTranscript(
+  connection: SqliteConnection,
+  query: string,
+  limit: number = MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
+): ChatTranscriptSearchRows {
+  const normalized = normalizeSearchText(query);
+  if (normalized.length === 0 || limit <= 0) {
+    return { hits: [], truncated: false };
+  }
+  const fetchLimit = limit + 1;
+  const rows = connection
+    .prepare(`
+      SELECT
+        search.schema_version AS search_schema_version,
+        search.content_id AS content_id,
+        search.turn_id AS turn_id,
+        search.search_text AS search_text,
+        thread.schema_version AS thread_schema_version,
+        thread.thread_json AS thread_json,
+        content.body_text AS body_text
+      FROM chat_transcript_search_projection AS search
+      INNER JOIN chat_thread_projection AS thread
+        ON thread.thread_id = search.thread_id
+      INNER JOIN chat_content_store AS content
+        ON content.content_id = search.content_id
+      WHERE search.search_text LIKE '%' || ? || '%' ESCAPE '\\'
+        AND thread.lifecycle IN ('active', 'archived')
+      ORDER BY thread.updated_at DESC, search.turn_id ASC, search.content_id ASC
+      LIMIT ?
+    `)
+    .all(escapeLikePattern(normalized), fetchLimit) as ReadonlyArray<{
+    readonly search_schema_version: number;
+    readonly content_id: string;
+    readonly turn_id: string;
+    readonly search_text: string;
+    readonly thread_schema_version: number;
+    readonly thread_json: string;
+    readonly body_text: string;
+  }>;
+
+  const truncated = rows.length > limit;
+  const hits: ChatTranscriptSearchHit[] = [];
+  for (const row of rows.slice(0, limit)) {
+    assertChatProjectionSchema(row.search_schema_version);
+    assertChatProjectionSchema(row.thread_schema_version);
+    const thread = decodeChatThread(JSON.parse(row.thread_json));
+    if (thread.lifecycle !== "active" && thread.lifecycle !== "archived") continue;
+    const clipped = clipTranscriptSearchSnippet(row.body_text, normalized);
+    hits.push({
+      threadId: thread.id,
+      title: thread.title,
+      lifecycle: thread.lifecycle,
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      turnId: decodeChatTurnId(row.turn_id),
+      snippet: clipped.snippet,
+      ...(clipped.matchRanges.length === 0 ? {} : { matchRanges: clipped.matchRanges }),
+    });
+  }
+  return { hits, truncated };
+}
+
 export interface ProjectedThreadWorkState {
   readonly workList: ThreadWorkList;
   readonly followUpVersion: AggregateVersion;
@@ -947,6 +1032,107 @@ function readRawThread(connection: SqliteConnection, threadId: string): ChatThre
 
 function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase();
+}
+
+/** Escape LIKE metacharacters so a user needle cannot widen into every row. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+function indexTranscriptSearchForTurn(
+  connection: SqliteConnection,
+  turn: ChatTurn,
+  lastSequence: number,
+  updatedAt: string,
+): void {
+  const refs: Array<{ contentId: string }> = [
+    { contentId: String(turn.userMessageRef.contentId) },
+  ];
+  for (const attempt of turn.attempts) {
+    for (const responseRef of attempt.responseRefs) {
+      refs.push({ contentId: String(responseRef.contentId) });
+    }
+    if (attempt.researchRef !== undefined) {
+      refs.push({ contentId: String(attempt.researchRef.contentId) });
+    }
+  }
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    if (seen.has(ref.contentId)) continue;
+    seen.add(ref.contentId);
+    upsertTranscriptSearchContent(connection, {
+      contentId: ref.contentId,
+      turnId: String(turn.id),
+      threadId: String(turn.threadId),
+      lastSequence,
+      updatedAt,
+    });
+  }
+}
+
+function upsertTranscriptSearchContent(
+  connection: SqliteConnection,
+  input: {
+    readonly contentId: string;
+    readonly turnId: string;
+    readonly threadId: string;
+    readonly lastSequence: number;
+    readonly updatedAt: string;
+  },
+): void {
+  const content = readChatContent(connection, input.contentId);
+  if (content === undefined) return;
+  const searchText = normalizeSearchText(content.body);
+  if (searchText.length === 0) return;
+  upsertTranscriptSearch(connection).run(
+    input.contentId,
+    input.turnId,
+    input.threadId,
+    content.role,
+    CHAT_PROJECTION_SCHEMA_VERSION,
+    searchText,
+    input.updatedAt,
+    input.lastSequence,
+  );
+}
+
+/**
+ * Clip a body around the first case-insensitive hit so the overlay can show
+ * context without shipping the whole message.
+ */
+export function clipTranscriptSearchSnippet(
+  body: string,
+  needle: string,
+  maxLength: number = MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
+): {
+  readonly snippet: string;
+  readonly matchRanges: ReadonlyArray<{ readonly start: number; readonly end: number }>;
+} {
+  if (maxLength <= 0) return { snippet: "", matchRanges: [] };
+  const haystack = body.toLocaleLowerCase();
+  const normalizedNeedle = needle.trim().toLocaleLowerCase();
+  if (normalizedNeedle.length === 0) {
+    return { snippet: body.slice(0, maxLength), matchRanges: [] };
+  }
+  const index = haystack.indexOf(normalizedNeedle);
+  if (index < 0) {
+    return { snippet: body.slice(0, maxLength), matchRanges: [] };
+  }
+  const matchLength = Math.min(normalizedNeedle.length, maxLength);
+  const pad = Math.max(0, Math.floor((maxLength - matchLength) / 2));
+  let start = Math.max(0, index - pad);
+  let end = Math.min(body.length, start + maxLength);
+  if (end - start < maxLength) {
+    start = Math.max(0, end - maxLength);
+  }
+  const snippet = body.slice(start, end);
+  const matchStart = index - start;
+  if (matchStart < 0 || matchStart >= snippet.length) {
+    return { snippet, matchRanges: [] };
+  }
+  const matchEnd = Math.min(snippet.length, matchStart + matchLength);
+  if (matchEnd <= matchStart) return { snippet, matchRanges: [] };
+  return { snippet, matchRanges: [{ start: matchStart, end: matchEnd }] };
 }
 
 function decodeProjection<T>(decode: () => T): T {

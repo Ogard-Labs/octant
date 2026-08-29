@@ -1226,6 +1226,99 @@ CREATE INDEX chat_turn_route_thread_idx
 `;
 
 /**
+ * Per-content Chat transcript search rows. Bodies live in chat_content_store;
+ * this projection keeps a normalized search_text plus the turn id that owns
+ * the content so a hit can deep-link. Rebuildable from journal turn/attempt
+ * events once content rows exist (written in the same append beforeEvents).
+ */
+const CHAT_TRANSCRIPT_SEARCH_PROJECTION_SQL = `
+CREATE TABLE chat_transcript_search_projection (
+  content_id TEXT PRIMARY KEY CHECK(length(trim(content_id)) > 0),
+  turn_id TEXT NOT NULL CHECK(length(trim(turn_id)) > 0),
+  thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+  content_role TEXT NOT NULL CHECK(content_role IN ('user', 'assistant', 'research', 'snippet')),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  search_text TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+  FOREIGN KEY (thread_id) REFERENCES chat_thread_projection(thread_id)
+) STRICT;
+
+CREATE INDEX chat_transcript_search_thread_idx
+  ON chat_transcript_search_projection(thread_id);
+
+CREATE INDEX chat_transcript_search_turn_idx
+  ON chat_transcript_search_projection(turn_id);
+
+INSERT INTO chat_transcript_search_projection (
+  content_id, turn_id, thread_id, content_role, schema_version,
+  search_text, updated_at, last_sequence
+)
+SELECT
+  json_extract(turn.turn_json, '$.userMessageRef.contentId'),
+  turn.turn_id,
+  turn.thread_id,
+  content.content_role,
+  1,
+  lower(trim(content.body_text)),
+  thread.updated_at,
+  turn.last_sequence
+FROM chat_turn_projection AS turn
+INNER JOIN chat_thread_projection AS thread
+  ON thread.thread_id = turn.thread_id
+INNER JOIN chat_content_store AS content
+  ON content.content_id = json_extract(turn.turn_json, '$.userMessageRef.contentId')
+WHERE length(trim(content.body_text)) > 0;
+
+INSERT INTO chat_transcript_search_projection (
+  content_id, turn_id, thread_id, content_role, schema_version,
+  search_text, updated_at, last_sequence
+)
+SELECT
+  json_extract(ref.value, '$.contentId'),
+  turn.turn_id,
+  turn.thread_id,
+  content.content_role,
+  1,
+  lower(trim(content.body_text)),
+  thread.updated_at,
+  turn.last_sequence
+FROM chat_turn_projection AS turn
+INNER JOIN chat_thread_projection AS thread
+  ON thread.thread_id = turn.thread_id,
+json_each(turn.turn_json, '$.attempts') AS attempt,
+json_each(attempt.value, '$.responseRefs') AS ref
+INNER JOIN chat_content_store AS content
+  ON content.content_id = json_extract(ref.value, '$.contentId')
+WHERE json_extract(ref.value, '$.contentId') IS NOT NULL
+  AND length(trim(content.body_text)) > 0
+ON CONFLICT (content_id) DO NOTHING;
+
+INSERT INTO chat_transcript_search_projection (
+  content_id, turn_id, thread_id, content_role, schema_version,
+  search_text, updated_at, last_sequence
+)
+SELECT
+  json_extract(attempt.value, '$.researchRef.contentId'),
+  turn.turn_id,
+  turn.thread_id,
+  content.content_role,
+  1,
+  lower(trim(content.body_text)),
+  thread.updated_at,
+  turn.last_sequence
+FROM chat_turn_projection AS turn
+INNER JOIN chat_thread_projection AS thread
+  ON thread.thread_id = turn.thread_id,
+json_each(turn.turn_json, '$.attempts') AS attempt
+INNER JOIN chat_content_store AS content
+  ON content.content_id = json_extract(attempt.value, '$.researchRef.contentId')
+WHERE json_extract(attempt.value, '$.researchRef.contentId') IS NOT NULL
+  AND length(trim(content.body_text)) > 0
+ON CONFLICT (content_id) DO NOTHING;
+`;
+
+/**
  * Bounded receipt state for one authenticated diagnostics export.
  * Only identifiers, the closed redaction-tag set, and a content digest are
  * ever written here — no summary, recovery text, correlation, or version
@@ -1592,6 +1685,11 @@ ALTER TABLE code_runtime_projection
     version: 54,
     name: "create_code_planner_projections",
     sql: CODE_PLANNER_PROJECTIONS_SQL,
+  },
+  {
+    version: 55,
+    name: "create_chat_transcript_search_projection",
+    sql: CHAT_TRANSCRIPT_SEARCH_PROJECTION_SQL,
   },
 ];
 

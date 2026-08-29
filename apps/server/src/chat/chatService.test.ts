@@ -1097,6 +1097,67 @@ describe("ChatService", () => {
     expect(service.read(sidecar.thread.id).thread.title).toBe("Side Chat about Release notes");
   });
 
+
+  it("finds a phrase that lives only in an archived message body", async () => {
+    const { service } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Quiet title",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "The agent explained that migration in detail.",
+    });
+    const current = service.read(created.thread.id);
+    await service.execute({
+      kind: "change-chat-thread-lifecycle",
+      threadId: created.thread.id,
+      expectedVersion: current.thread.version,
+      lifecycle: "archived",
+    });
+
+    expect(service.search("migration")).toEqual([]);
+    const result = service.searchTranscript("migration");
+    expect(result.hits).toHaveLength(1);
+    expect(result.hits[0]).toMatchObject({
+      threadId: created.thread.id,
+      title: "Quiet title",
+      lifecycle: "archived",
+    });
+    expect(result.hits[0]?.snippet.toLowerCase()).toContain("migration");
+    expect(result.hits[0]?.turnId).toBeDefined();
+    expect(result.truncated).toBe(false);
+  });
+
+  it("never returns a hidden sidecar thread from transcript search", async () => {
+    const hidden = new Set<string>();
+    const { service } = openFixture({ hiddenThreadIds: () => hidden });
+    const sidecar = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Ordinary title",
+    });
+    if (sidecar.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: sidecar.thread.id,
+      expectedVersion: sidecar.thread.version,
+      prompt: "secret phrase only in this sidecar body",
+    });
+    hidden.add(String(sidecar.thread.id));
+
+    expect(service.searchTranscript("secret phrase").hits).toEqual([]);
+  });
+
+  it("refuses an overlong transcript search query", () => {
+    const { service } = openFixture();
+    expect(() => service.searchTranscript("x".repeat(201))).toThrow(ChatServiceError);
+  });
+
   it("carries the source thread's context on a sidecar's first ordinary send", async () => {
     const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
     const asked: Array<{ sidecarThreadId: string; windowId?: string }> = [];

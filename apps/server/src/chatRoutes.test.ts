@@ -93,6 +93,60 @@ describe("Chat routes", () => {
     expect(navigation).not.toHaveBeenCalled();
   });
 
+
+  it("returns authenticated transcript search hits", async () => {
+    const payload = {
+      query: "migration",
+      hits: [
+        {
+          threadId,
+          title: "Release notes",
+          lifecycle: "archived" as const,
+          turnId: "00000000-0000-4000-8000-000000000804",
+          snippet: "explained that migration",
+          matchRanges: [{ start: 14, end: 23 }],
+        },
+      ],
+      truncated: false,
+    };
+    const searchTranscript = vi.fn(() => payload);
+    const route = routeFixture({ searchTranscript });
+    const response = await route(request("/api/chat/transcript-search?q=migration"));
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual(payload);
+    expect(searchTranscript).toHaveBeenCalledWith("migration");
+  });
+
+  it("returns an empty transcript search when the service found nothing the caller may see", async () => {
+    // Authority filtering is server-owned: a hidden or otherwise unlisted
+    // thread never appears here even when its body would match the needle.
+    const searchTranscript = vi.fn(() => ({
+      query: "secret phrase",
+      hits: [],
+      truncated: false,
+    }));
+    const route = routeFixture({ searchTranscript });
+    const response = await route(request("/api/chat/transcript-search?q=secret%20phrase"));
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({
+      query: "secret phrase",
+      hits: [],
+      truncated: false,
+    });
+    expect(searchTranscript).toHaveBeenCalledWith("secret phrase");
+  });
+
+  it("rejects transcript search with unexpected query keys", async () => {
+    const searchTranscript = vi.fn();
+    const route = routeFixture({ searchTranscript });
+    const response = await route(request("/api/chat/transcript-search?q=a&scope=all"));
+
+    expect(response?.status).toBe(400);
+    expect(searchTranscript).not.toHaveBeenCalled();
+  });
+
   it("rejects oversized command bodies with 413", async () => {
     const route = routeFixture({}, 16);
     const response = await route(
@@ -282,6 +336,7 @@ function routeFixture(overrides: Record<string, unknown> = {}, maxJsonBodySize?:
     })),
     navigation: vi.fn(() => ({ threads: [] })),
     search: vi.fn(() => []),
+    searchTranscript: vi.fn(() => ({ query: "", hits: [], truncated: false })),
     read: vi.fn(() => ({
       thread: threadFixture,
       turns: [],
