@@ -42,6 +42,22 @@ function bindLocalWindow(value: Request) {
 
 describe("GitHub authentication routes", () => {
   beforeEach(() => vi.clearAllMocks());
+  it("falls through when the GitHub integration is not effective", async () => {
+    const handler = createGithubRouteHandler({
+      service,
+      catalogue,
+      windowAuthorityStore: store,
+      isEffective: () => false,
+    });
+    const value = request();
+    bindPrincipalRouteContext(value, {
+      principal: { kind: "local-window", windowId: "window", capabilityGeneration: 1 },
+      scopeId: "window" as any,
+    });
+    expect(await handler(value)).toBeUndefined();
+    expect(service.snapshot).not.toHaveBeenCalled();
+  });
+
   it("returns a normalized snapshot to the authenticated local window", async () => {
     const handler = createHandler();
     const value = request();
