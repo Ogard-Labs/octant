@@ -21,6 +21,10 @@ import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { OctantHostBridge } from "./shell/hostBridge";
 import { App } from "./App";
 import {
+  threadUtilityDockKey,
+  writeUtilityDockPresentation,
+} from "./shell/rightUtilityDockSelection";
+import {
   archivedChatThread,
   bindingReceipt,
   bootstrap,
@@ -77,6 +81,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
   try {
     window.sessionStorage.clear();
+  } catch {
+    // ignore
+  }
+  try {
+    window.localStorage.clear();
   } catch {
     // ignore
   }
@@ -3368,6 +3377,38 @@ describe("App", () => {
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
     expect(screen.getByRole("region", { name: "Workspace pane: Second thread" })).toBeVisible();
+  });
+
+  it("restores a thread's dock tools after the window reloads", async () => {
+    writeUtilityDockPresentation(globalThis, String(windowId), {
+      open: true,
+      threads: new Map([
+        [
+          threadUtilityDockKey("code", String(codeThreadId)),
+          { tabs: ["terminal", "browser"], active: "browser" },
+        ],
+      ]),
+    });
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(within(dock).getByRole("tab", { name: "Browser" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(dock).getByRole("tab", { name: "Terminal" })).toBeVisible();
   });
 
   it("moves the active thread Terminal into a remembered bottom panel", async () => {

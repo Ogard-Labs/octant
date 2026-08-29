@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
-import { decodeProjectId, decodeWindowId, type WorkMutationRequest } from "@octant/contracts";
+import {
+  decodeProjectId,
+  decodeWindowId,
+  decodeWorkMutationReply,
+  type WorkMutationRequest,
+} from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
 import { decodePreviewHostId } from "@octant/contracts/previews";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
@@ -106,6 +111,125 @@ describe("Work mutation routes", () => {
     expect(body.outcome.artifact.displayName).toBe("Brief.docx");
     expect(body.outcome.previewTarget.kind).toBe("artifact-version");
     expect(JSON.stringify(body)).not.toMatch(/\/work|file:|\\\\/i);
+  });
+
+  it("refuses a destructive delete until confirmation is recorded", async () => {
+    const route = createRoute();
+    const created = await route(
+      new Request("http://127.0.0.1/api/work/mutations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify(validCreateRequest()),
+      }),
+    );
+    expect(created?.status).toBe(200);
+    const createdBody = decodeWorkMutationReply(await created?.json());
+    expect(createdBody.outcome.kind).toBe("created");
+    if (createdBody.outcome.kind !== "created") return;
+
+    const response = await route(
+      new Request("http://127.0.0.1/api/work/mutations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({
+          kind: "delete-artifact",
+          requestId: "00000000-0000-4000-8000-000000000816",
+          projectId,
+          artifactId: createdBody.outcome.artifact.artifactId,
+          expectedArtifactVersion: 1,
+        }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    const body = decodeWorkMutationReply(await response?.json());
+    expect(body.outcome.kind).toBe("unauthorized");
+  });
+
+  it("refuses a lossy transform until confirmation is recorded", async () => {
+    const route = createRoute();
+    const created = await route(
+      new Request("http://127.0.0.1/api/work/mutations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify(validCreateRequest()),
+      }),
+    );
+    const createdBody = decodeWorkMutationReply(await created?.json());
+    expect(createdBody.outcome.kind).toBe("created");
+    if (createdBody.outcome.kind !== "created") return;
+
+    const response = await route(
+      new Request("http://127.0.0.1/api/work/mutations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({
+          kind: "transform-artifact",
+          requestId: "00000000-0000-4000-8000-000000000818",
+          projectId,
+          artifactId: createdBody.outcome.artifact.artifactId,
+          targetFormat: "markdown",
+          expectedArtifactVersion: 1,
+        }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    const body = decodeWorkMutationReply(await response?.json());
+    expect(body.outcome.kind).toBe("unauthorized");
+  });
+
+  it("deletes a Work artifact when confirmation is recorded", async () => {
+    const route = createRoute();
+    const created = await route(
+      new Request("http://127.0.0.1/api/work/mutations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify(validCreateRequest()),
+      }),
+    );
+    const createdBody = decodeWorkMutationReply(await created?.json());
+    expect(createdBody.outcome.kind).toBe("created");
+    if (createdBody.outcome.kind !== "created") return;
+
+    const response = await route(
+      new Request("http://127.0.0.1/api/work/mutations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({
+          kind: "delete-artifact",
+          requestId: "00000000-0000-4000-8000-000000000817",
+          projectId,
+          artifactId: createdBody.outcome.artifact.artifactId,
+          expectedArtifactVersion: 1,
+          confirmed: true,
+        }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    const body = decodeWorkMutationReply(await response?.json());
+    expect(body.outcome.kind).toBe("deleted");
+    if (body.outcome.kind !== "deleted") return;
+    expect(body.outcome.artifactId).toBe(createdBody.outcome.artifact.artifactId);
   });
 });
 

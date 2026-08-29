@@ -364,6 +364,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
               additionalWriteRoots: [piHome],
               allowFileReadStar: true,
+              allowProcessExec: !(input.executionPolicy === "plan" || input.mode === "chat"),
               allowProcessFork: !(input.executionPolicy === "plan" || input.mode === "chat"),
               readRoots: [
                 root,

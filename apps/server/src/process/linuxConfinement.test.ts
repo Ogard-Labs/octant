@@ -119,6 +119,35 @@ describe("Linux Bubblewrap confinement", () => {
     expect(hasFlagValue(launch.args, "--remount-ro", denied)).toBe(true);
   });
 
+  it("keeps Plan from writing the bound root or spawning host processes", () => {
+    const { boundRoot, temporaryDirectory, bwrapPath, root } = fixture();
+    const executable = join(root, "true");
+    writeFileSync(executable, "#!/bin/sh\n", { mode: 0o700 });
+    chmodSync(executable, 0o700);
+    const launch = buildLinuxConfinementLaunch(
+      {
+        executable,
+        args: [],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+        writeBoundRoot: false,
+        allowProcessExec: false,
+        allowProcessFork: false,
+      },
+      { bwrapPath },
+    );
+
+    expect(boundPairs(launch.args, "--bind")).not.toContainEqual([boundRoot, boundRoot]);
+    expect(boundPairs(launch.args, "--ro-bind")).toContainEqual([boundRoot, boundRoot]);
+    expect(boundPairs(launch.args, "--bind")).toContainEqual([
+      temporaryDirectory,
+      temporaryDirectory,
+    ]);
+    expect(tmpfsTargets(launch.args)).toContain("/bin");
+    expect(boundPairs(launch.args, "--ro-bind")).toContainEqual([executable, executable]);
+  });
+
   it("fails closed when bubblewrap is missing", () => {
     const { boundRoot, temporaryDirectory, root } = fixture();
     expect(() =>
