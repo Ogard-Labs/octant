@@ -16,12 +16,14 @@ export function createIntegrationRouteHandler(dependencies: {
   readonly service: IntegrationService;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
+  readonly isEffective?: (slug: string) => boolean;
 }) {
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const api = matchApi(url.pathname);
     if (api === undefined) return undefined;
+    if (dependencies.isEffective?.(api.slug) === false) return undefined;
     const origin = request.headers.get("origin");
     if (
       !isLoopbackHostname(url.hostname) ||

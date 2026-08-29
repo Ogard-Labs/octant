@@ -50,6 +50,7 @@ function service(options: {
     | { readonly kind: "ok"; readonly value: unknown }
     | { readonly kind: "refused"; readonly reason: string }
     | { readonly kind: "failed"; readonly reason: string; readonly retryable: boolean };
+  readonly isEffective?: () => boolean;
 }) {
   const reader = {
     snapshot: vi.fn(async () => options.snapshot ?? readySnapshot),
@@ -68,6 +69,7 @@ function service(options: {
       reader,
       ingestion,
       uuid: () => "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      ...(options.isEffective === undefined ? {} : { isEffective: options.isEffective }),
     }),
   };
 }
@@ -125,6 +127,22 @@ describe("Linear issue context", () => {
     expect(prepared.framed.text).toContain(EXTERNAL_CONTENT_FRAME_CLOSE);
     expect(prepared.framed.text).toContain("ENG-12");
     expect(prepared.framed.text).toContain("Still happening");
+  });
+
+  it("refuses create-from-issue without framed content when the Linear integration is not effective", async () => {
+    const { service: context, reader } = service({ isEffective: () => false });
+    const prepared = await context.prepare(
+      { id: "11111111-1111-4111-8111-111111111111" },
+      new AbortController().signal,
+    );
+    expect(prepared).toEqual({
+      status: "refused",
+      reason: "unavailable",
+      message: LINEAR_ISSUE_CONTEXT_REFUSED_MESSAGE,
+    });
+    expect(reader.snapshot).not.toHaveBeenCalled();
+    expect(reader.executeGetIssue).not.toHaveBeenCalled();
+    expect(context.peekFramedForFirstTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).toBeUndefined();
   });
 
   it("refuses when Linear issue browse is unavailable", async () => {

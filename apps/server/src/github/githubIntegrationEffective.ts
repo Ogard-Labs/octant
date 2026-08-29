@@ -3,6 +3,7 @@ import { resolveExtensionActivation } from "@octant/plugin-host/activation";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 
 const GITHUB_INTEGRATION_COMPONENT_ID = "github-integration";
+const LINEAR_INTEGRATION_COMPONENT_ID = "linear-integration";
 
 const emptyGithubReadToolSet: AppManagedToolSet = {
   definitions: [],
@@ -46,6 +47,18 @@ export function isGithubIntegrationEffective(
 ): boolean {
   return isFirstPartyIntegrationEffective(snapshot, GITHUB_INTEGRATION_COMPONENT_ID, {
     missingRow: "effective",
+  });
+}
+
+/**
+ * Bundled Linear is off until the store row is installed, trusted, and
+ * desired. A missing row must not construct GraphQL, OAuth, or issue-context.
+ */
+export function isLinearIntegrationEffective(
+  snapshot: Pick<ExtensionSnapshot, "packages">,
+): boolean {
+  return isFirstPartyIntegrationEffective(snapshot, LINEAR_INTEGRATION_COMPONENT_ID, {
+    missingRow: "ineffective",
   });
 }
 

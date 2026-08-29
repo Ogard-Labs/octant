@@ -264,6 +264,7 @@ import { GithubReadToolService } from "./github/githubReadToolService";
 import {
   githubReadToolSetIfEffective,
   isGithubIntegrationEffective,
+  isLinearIntegrationEffective,
 } from "./github/githubIntegrationEffective";
 import { ManagedCloneProcessPort, createOwnedGitContext } from "./github/managedCloneProcessPort";
 import { ManagedCloneService } from "./github/managedCloneService";
@@ -1840,6 +1841,8 @@ export function startOctantServer(
     };
     const githubIntegrationIsEffective = () =>
       isGithubIntegrationEffective(githubExtensionSnapshot.read());
+    const linearIntegrationIsEffective = () =>
+      isLinearIntegrationEffective(githubExtensionSnapshot.read());
     const githubIssueContextService = new GithubIssueContextService({
       catalogue: githubCatalogueService,
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
@@ -1876,6 +1879,7 @@ export function startOctantServer(
           ? {}
           : { clientId: options.linearOAuthClientId }),
       },
+      isEffective: linearIntegrationIsEffective,
     });
     const linearIssueContextService = new LinearIssueContextService({
       reader: {
@@ -1889,6 +1893,7 @@ export function startOctantServer(
       },
       ingestion: externalContentIngestionStore,
       uuid: randomUUID,
+      isEffective: linearIntegrationIsEffective,
     });
     const peekCreateFromIssueFramed = (threadId: string) =>
       githubIssueContextService.peekFramedForFirstTurn(threadId) ??
@@ -1900,6 +1905,7 @@ export function startOctantServer(
     const integrationRoutes = createIntegrationRouteHandler({
       windowAuthorityStore,
       service: integrationService,
+      isEffective: (slug) => slug !== "linear" || linearIntegrationIsEffective(),
     });
     const zenEventStore = new ZenEventStore({
       journal: persistence.journal,
