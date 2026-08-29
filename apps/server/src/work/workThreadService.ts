@@ -121,6 +121,14 @@ export interface WorkThreadServiceDependencies {
     readonly projectId: ProjectId;
     readonly threadId: WorkThreadId;
   }) => Promise<void>;
+  /**
+   * Live run-state fold used by the Work board. Optional so unit tests that
+   * only exercise thread CRUD need not wire turns; an absent observer leaves
+   * the bootstrap runtime list empty.
+   */
+  readonly observeRuntime?: (threadId: WorkThreadId) =>
+    | { readonly executing: boolean }
+    | Promise<{ readonly executing: boolean }>;
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
 }
@@ -142,6 +150,7 @@ export class WorkThreadService {
   readonly #clock: () => string;
   readonly #workingDirectories: WorkThreadServiceDependencies["workingDirectories"];
   readonly #onWorkingDirectoryChanged: WorkThreadServiceDependencies["onWorkingDirectoryChanged"];
+  readonly #observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
   readonly #issueContext?: GithubIssueContextPort;
   readonly #linearIssueContext?: LinearIssueContextPort;
 
@@ -154,6 +163,9 @@ export class WorkThreadService {
     this.#clock = dependencies.clock;
     this.#workingDirectories = dependencies.workingDirectories;
     this.#onWorkingDirectoryChanged = dependencies.onWorkingDirectoryChanged;
+    if (dependencies.observeRuntime !== undefined) {
+      this.#observeRuntime = dependencies.observeRuntime;
+    }
     if (dependencies.issueContext !== undefined) {
       this.#issueContext = dependencies.issueContext;
     }
@@ -166,11 +178,18 @@ export class WorkThreadService {
     this.#assertReady();
     try {
       const accessible = await this.#activeWorkProjectIds(authenticatedWindowId);
-      return decodeWorkThreadBootstrap({
-        threads: this.#projection
-          .list()
-          .filter((thread) => accessible.has(String(thread.projectId))),
-      });
+      const threads = this.#projection
+        .list()
+        .filter((thread) => accessible.has(String(thread.projectId)));
+      const runtime = [];
+      if (this.#observeRuntime !== undefined) {
+        for (const thread of threads) {
+          if (thread.lifecycle === "archived" || thread.lifecycle === "deleted") continue;
+          const activity = await this.#observeRuntime(thread.id);
+          runtime.push({ threadId: thread.id, executing: activity.executing });
+        }
+      }
+      return decodeWorkThreadBootstrap({ threads, runtime });
     } catch (error) {
       throw this.#mapFailure(error);
     }

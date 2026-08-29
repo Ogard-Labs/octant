@@ -2456,6 +2456,7 @@ function LaunchedShell(
           // said "active" beside almost every thread and told the reader
           // nothing. The status dot carries it instead.
           activity: codeThreadActivity(thread),
+          ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
           ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
           ...(thread.unread === undefined ? {} : { unread: thread.unread }),
           ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),

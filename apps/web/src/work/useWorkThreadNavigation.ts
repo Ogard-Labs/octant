@@ -7,10 +7,17 @@ export type WorkThreadNavigationStatus = "loading" | "ready" | "unavailable";
 
 export function buildWorkThreadNavigation(
   threads: ReadonlyArray<WorkThread>,
+  runtime: ReadonlyArray<{ readonly threadId: WorkThread["id"]; readonly executing: boolean }> = [],
 ): ReadonlyArray<ChatThreadNavigationItem> {
+  const executingByThread = new Map(
+    runtime.map((entry) => [String(entry.threadId), entry.executing] as const),
+  );
   return threads
     .filter((thread) => thread.lifecycle !== "archived" && thread.lifecycle !== "deleted")
     .map((thread) => ({
+      ...(executingByThread.get(String(thread.id)) === true
+        ? { activity: "working" as const }
+        : {}),
       threadId: String(thread.id),
       title: thread.title,
       projectId: String(thread.projectId),
@@ -58,7 +65,7 @@ export function useWorkThreadNavigation(client: Pick<WorkThreadClient, "bootstra
   }, [refresh]);
 
   const navigation = useMemo(
-    () => buildWorkThreadNavigation(bootstrap?.threads ?? []),
+    () => buildWorkThreadNavigation(bootstrap?.threads ?? [], bootstrap?.runtime ?? []),
     [bootstrap],
   );
 

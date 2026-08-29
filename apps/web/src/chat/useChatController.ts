@@ -238,6 +238,9 @@ export function useChatController(options: ChatControllerOptions) {
     readCursorStore.getMarkedUnread,
   );
   const [followUpByThread, setFollowUpByThread] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const [executingByThread, setExecutingByThread] = useState<ReadonlyMap<string, boolean>>(
+    new Map(),
+  );
   const [sequenceByThread, setSequenceByThread] = useState<ReadonlyMap<string, number>>(new Map());
   const [updatedAtByThread, setUpdatedAtByThread] = useState<ReadonlyMap<string, string>>(
     new Map(),
@@ -328,6 +331,18 @@ export function useChatController(options: ChatControllerOptions) {
         const key = String(thread.id);
         if (current.get(key) !== thread.followUpOpen) {
           next.set(key, thread.followUpOpen);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+    setExecutingByThread((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const thread of threads) {
+        const key = String(thread.id);
+        if (current.get(key) !== thread.executing) {
+          next.set(key, thread.executing);
           changed = true;
         }
       }
@@ -565,6 +580,7 @@ export function useChatController(options: ChatControllerOptions) {
     for (const thread of bootstrap.threads) {
       if (thread.lifecycle === "active") {
         items.push({
+          ...(executingByThread.get(String(thread.id)) === true ? { executing: true } : {}),
           ...(followUpByThread.get(String(thread.id)) === undefined
             ? {}
             : { followUpOpen: followUpByThread.get(String(thread.id))! }),
@@ -592,6 +608,7 @@ export function useChatController(options: ChatControllerOptions) {
     );
   }, [
     bootstrap,
+    executingByThread,
     followUpByThread,
     markedUnreadThreads,
     readCursors,

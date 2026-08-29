@@ -115,6 +115,9 @@ function threadRowFacts(props: {
   if (props.thread.pinned === true) facts.push("Pinned");
   if (props.thread.unread === true) facts.push("Unread");
   if (props.thread.followUp === true) facts.push("Follow-up");
+  if (props.thread.checkoutChip !== undefined) {
+    facts.push(`Worktree ${props.thread.checkoutChip.label}`);
+  }
   if (props.thread.provider !== undefined) facts.push(props.thread.provider.displayName);
   if (props.projectName !== undefined) facts.push(props.projectName);
   if (props.lineageParentTitle !== undefined) {
@@ -505,6 +508,17 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       )}
       <span className="sidebar-navigation__thread-copy">
         <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
+        {props.thread.checkoutChip === undefined ? null : (
+          <span
+            className="sidebar-navigation__thread-checkout"
+            title={props.thread.checkoutChip.label}
+          >
+            <GitBranch aria-hidden="true" size={11} strokeWidth={2} />
+            <span className="sidebar-navigation__thread-checkout-label">
+              {props.thread.checkoutChip.label}
+            </span>
+          </span>
+        )}
       </span>
     </OctantButton>
   );

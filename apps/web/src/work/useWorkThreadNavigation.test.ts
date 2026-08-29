@@ -33,4 +33,31 @@ describe("buildWorkThreadNavigation", () => {
       },
     ]);
   });
+
+  it("marks a Work row working when the host projects the thread as executing", () => {
+    const active = decodeWorkThread({
+      id: threadId,
+      projectId: "20000000-0000-4000-8000-000000000101",
+      title: "Research brief",
+      lifecycle: "active",
+      providerInstanceId: "80000000-0000-4000-8000-0000000000b1",
+      modelId: "model-one",
+      version: 2,
+      createdAt: "2026-08-01T20:00:00.000Z",
+      updatedAt: "2026-08-01T20:00:00.000Z",
+    });
+
+    expect(
+      buildWorkThreadNavigation([active], [{ threadId, executing: true }]),
+    ).toEqual([
+      {
+        activity: "working",
+        threadId: String(threadId),
+        title: "Research brief",
+        projectId: "20000000-0000-4000-8000-000000000101",
+        providerInstanceId: "80000000-0000-4000-8000-0000000000b1",
+        updatedAt: "2026-08-01T20:00:00.000Z",
+      },
+    ]);
+  });
 });

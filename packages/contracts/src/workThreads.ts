@@ -156,8 +156,25 @@ export const WorkThreadCommandResult = Schema.Union(
 );
 export type WorkThreadCommandResult = typeof WorkThreadCommandResult.Type;
 
+/**
+ * Live run state for one Work sidebar row. Kept off durable {@link WorkThread}:
+ * executing is runtime-derived the same way board reasons are.
+ */
+export const WorkThreadNavigationRuntime = Schema.Struct({
+  threadId: WorkThreadId,
+  executing: Schema.Boolean,
+}).annotations(strict);
+export type WorkThreadNavigationRuntime = typeof WorkThreadNavigationRuntime.Type;
+
 export const WorkThreadBootstrap = Schema.Struct({
   threads: Schema.Array(WorkThread),
+  /**
+   * Optional so a remote client talking to an older host still bootstraps; an
+   * empty list means no thread is reported executing.
+   */
+  runtime: Schema.optionalWith(Schema.Array(WorkThreadNavigationRuntime), {
+    default: () => [],
+  }),
 }).annotations(strict);
 export type WorkThreadBootstrap = typeof WorkThreadBootstrap.Type;
 
@@ -172,3 +189,6 @@ export const decodeWorkThread = Schema.decodeUnknownSync(WorkThread);
 export const decodeWorkThreadCommand = Schema.decodeUnknownSync(WorkThreadCommand);
 export const decodeWorkThreadCommandResult = Schema.decodeUnknownSync(WorkThreadCommandResult);
 export const decodeWorkThreadBootstrap = Schema.decodeUnknownSync(WorkThreadBootstrap);
+export const decodeWorkThreadNavigationRuntime = Schema.decodeUnknownSync(
+  WorkThreadNavigationRuntime,
+);

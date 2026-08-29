@@ -87,6 +87,26 @@ describe("ProjectThreadRows", () => {
     expect(provider?.compareDocumentPosition(title ?? row)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
+  it("shows a compact worktree chip only when the host projected one", () => {
+    const { rerender } = render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            checkoutChip: { checkoutKind: "managed-worktree", label: "feature/x" },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("feature/x")).toBeVisible();
+    expect(screen.getByTitle("feature/x")).toBeVisible();
+
+    rerender(<ProjectThreadRows onSelectThread={vi.fn()} threads={[thread]} />);
+    expect(screen.queryByText("feature/x")).toBeNull();
+  });
+
   it("says a thread needs attention through a labelled dot rather than a badge", () => {
     render(
       <ProjectThreadRows

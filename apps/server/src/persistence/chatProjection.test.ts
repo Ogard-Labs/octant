@@ -217,6 +217,7 @@ describe("ChatProjection", () => {
         updatedAt: now,
         lastSequence: expect.any(Number),
         followUpOpen: false,
+        executing: false,
       },
     ]);
     expect(readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns).toHaveLength(1);
@@ -527,6 +528,12 @@ describe("ChatProjection", () => {
         ({ id }) => id,
       ),
     ).toEqual([ids.attempt, ids.retryAttempt]);
+    expect(readChatNavigation(connection)).toEqual([
+      expect.objectContaining({
+        id: decodeChatThreadId(ids.thread),
+        executing: true,
+      }),
+    ]);
     connection.close();
   });
 
