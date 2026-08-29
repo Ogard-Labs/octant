@@ -18,6 +18,10 @@ import type {
   ClientHostRegistration,
   ClientHostRegistry,
 } from "./hostFederationRegistry";
+import {
+  freshnessFromTransportState,
+  rejectQueuedAuthorityMutation,
+} from "./hostFederationMergedReads";
 
 /**
  * Concurrent direct host transports for Post-preview B2.
@@ -159,16 +163,28 @@ export function federatedEntityRefsCollide(
 }
 
 /**
- * Execute against only the owning/selected host. Never fans out a command.
+ * Execute against only the owning/selected host transport. Never fans out a
+ * command. Refuses when the destination slot is missing or not ready so a
+ * stale read model cannot authorize a mutation on that host (0059 / 0013).
  */
 export async function routeToOwningHost<T>(input: {
   readonly transports: HostFederationTransports;
   readonly ref: GlobalEntityReference;
+  readonly action?: string;
   readonly execute: (slot: FederatedHostTransportSlot) => Promise<T>;
 }): Promise<T> {
   const slot = input.transports.get(input.ref.hostId);
   if (slot === undefined) {
     throw new Error(`No transport for owning host ${input.ref.hostId}.`);
+  }
+  const freshness = freshnessFromTransportState(slot.state);
+  const decision = rejectQueuedAuthorityMutation({
+    hostId: input.ref.hostId,
+    freshness,
+    action: input.action ?? "mutate",
+  });
+  if (!decision.allowed) {
+    throw new Error(decision.reason);
   }
   return input.execute(slot);
 }

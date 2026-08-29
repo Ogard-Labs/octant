@@ -47,7 +47,8 @@ state conflict handling without inventing authority 0013 already forbade.
 - **Conflict is honesty, not arbitration.** When two hosts disagree, the client
   shows both truths under their owning host; it never picks a winner, merges
   journals, or lets one host's facts authorize action on another. Create and
-  mutation routing always name one destination host first.
+  mutation routing always name one destination host first and refuse when that
+  host is missing or not ready — mutations are never queued for later.
 - **Out of scope here.** Hosted relay, public ingress, host-to-host trust,
   Station capsules, disposable desktops, and shared-team-host grants (0040
   layer 2) stay on their own records.

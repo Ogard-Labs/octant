@@ -102,6 +102,18 @@ export function preselectCreateHost(request: PreselectCreateHostRequest): HostSe
     if (filtered === undefined) {
       return { kind: "rejected", reason: "unknown-host" };
     }
+    // Filters hide other hosts for viewing; they do not make an unhealthy host
+    // a creatable destination. Keep the host visible via listCreateHostOptions.
+    if (!isRoutableForCreate(filtered, request.requiredCapability)) {
+      return {
+        kind: "rejected",
+        reason:
+          request.requiredCapability !== undefined &&
+          !filtered.capabilities.includes(request.requiredCapability)
+            ? "host-incompatible"
+            : healthToRejection(filtered.health),
+      };
+    }
     return { kind: "selected", host: filtered };
   }
 
