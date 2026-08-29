@@ -169,6 +169,29 @@ export function toggleAllEnvironments(selection: EnvironmentSelection): Environm
 }
 
 /**
+ * Drop host ids that are no longer registered. When nothing selected remains,
+ * restore `all` so create destination preselect is not stuck on a removed host.
+ */
+export function pruneEnvironmentSelection(
+  selection: EnvironmentSelection,
+  knownHostIds: ReadonlyArray<string>,
+): EnvironmentSelection {
+  if (selection.kind === "all") return selection;
+  const known = new Set(knownHostIds);
+  const remaining = new Set([...selection.hostIds].filter((hostId) => known.has(hostId)));
+  if (remaining.size === 0) return ALL_ENVIRONMENTS;
+  if (
+    knownHostIds.length > 0 &&
+    knownHostIds.every((hostId) => remaining.has(hostId)) &&
+    remaining.size === known.size
+  ) {
+    return ALL_ENVIRONMENTS;
+  }
+  if (remaining.size === selection.hostIds.size) return selection;
+  return { kind: "some", hostIds: remaining };
+}
+
+/**
  * The items the chosen environments contribute.
  *
  * An item from an unreachable environment is kept when its environment is

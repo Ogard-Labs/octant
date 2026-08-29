@@ -13,9 +13,11 @@ import {
 } from "./hostFederationRegistry";
 import type { FederatedTransportState, HostFederationTransports } from "./hostFederationTransports";
 import {
+  mergeAllHostsReadModels,
   rejectQueuedAuthorityMutation,
   type AuthorityMutationDecision,
   type FederatedHostReadFreshness,
+  type FederatedHostState,
   type HostReadModelCache,
 } from "./hostFederationMergedReads";
 import type { RemoteDeviceKeyStore } from "./remotePairingClient";
@@ -139,6 +141,11 @@ export interface HostFederationLifecycle {
   /** Authority-bearing mutation gate — never queues offline work. */
   readonly mutationDecision: (hostId: HostId | string, action: string) => AuthorityMutationDecision;
   readonly toHostIdentities: () => ReadonlyArray<HostIdentity>;
+  /**
+   * All-hosts completeness: every registered host gets a row, connected or
+   * not. A host that has never been fetched is empty rather than absent.
+   */
+  readonly toFederatedHostStates: () => ReadonlyArray<FederatedHostState>;
   readonly subscribe: (listener: () => void) => () => void;
 }
 
@@ -292,14 +299,41 @@ export function createHostFederationLifecycle(
     for (const listener of listeners) listener();
   };
 
-  const markCacheForState = (hostId: HostId, state: FederatedHostLifecycleState) => {
+  /**
+   * Every registered host gets a cache row, connected or not, so it never
+   * drops out of `hostStates`. A host with fetched items presents `stale` on
+   * disconnect regardless of the specific cause (existing behavior); a host
+   * that has never been fetched seeds an empty row at its own lifecycle
+   * freshness so a person can see it waiting rather than see nothing.
+   */
+  const markCacheForState = (input: {
+    readonly hostId: HostId;
+    readonly displayName: string;
+    readonly state: FederatedHostLifecycleState;
+  }) => {
     if (options.cache === undefined) return;
-    if (state === "ready") return;
-    const cause =
-      state === "stale" || state === "connecting"
-        ? undefined
-        : (state as Exclude<FederatedHostReadFreshness, "ready" | "stale">);
-    options.cache.markStale(hostId, cause);
+    if (input.state === "ready") {
+      const existing = options.cache.get(input.hostId);
+      options.cache.put({
+        hostId: input.hostId,
+        hostDisplayName: input.displayName,
+        freshness: "ready",
+        items: existing?.items ?? [],
+      });
+      return;
+    }
+    const existing = options.cache.get(input.hostId);
+    if (existing !== undefined && existing.items.length > 0) {
+      options.cache.markStale(input.hostId);
+      return;
+    }
+    // Ready-empty → unavailable must refresh freshness, not keep "ready".
+    options.cache.put({
+      hostId: input.hostId,
+      hostDisplayName: input.displayName,
+      freshness: freshnessForLifecycle(input.state),
+      items: existing?.items ?? [],
+    });
   };
 
   const rebuildFromTransports = () => {
@@ -311,9 +345,11 @@ export function createHostFederationLifecycle(
         transportState: slot?.state,
       });
       next.push(snapshot);
-      if (snapshot.state !== "ready") {
-        markCacheForState(snapshot.hostId, snapshot.state);
-      }
+      markCacheForState({
+        hostId: snapshot.hostId,
+        displayName: snapshot.displayName,
+        state: snapshot.state,
+      });
     }
     next.sort((left, right) => {
       if (left.hostId === LOCAL_HOST_ID) return -1;
@@ -484,6 +520,18 @@ export function createHostFederationLifecycle(
           entry.kind === "local"
             ? ["chat", "work", "code"]
             : (registrations.get(entry.hostId)?.lastKnownCapabilities ?? ["chat", "work", "code"]),
+      }));
+    },
+
+    toFederatedHostStates() {
+      if (options.cache !== undefined) {
+        return mergeAllHostsReadModels(options.cache.list()).hostStates;
+      }
+      return snapshots.map((entry) => ({
+        hostId: entry.hostId,
+        hostDisplayName: entry.displayName,
+        freshness: freshnessForLifecycle(entry.state),
+        itemCount: 0,
       }));
     },
 

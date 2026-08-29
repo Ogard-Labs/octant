@@ -156,6 +156,14 @@ function CodeProjectViewGlyph(props: {
   );
 }
 
+/**
+ * A search/filter that hides every thread is a view state, not a deletion —
+ * this explains that explicitly rather than leaving "no matching threads" to
+ * read as data loss.
+ */
+const FILTERED_THREADS_EMPTY_MESSAGE =
+  "No threads match the current filters. Nothing was deleted — clear search or change environment filters to see more.";
+
 const PROJECT_SORT_ITEMS: ReadonlyArray<OctantMenuItem> = [
   {
     description: "Keep your saved Project order",
@@ -283,6 +291,10 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           projectViewState.activeViewId,
           allProjectsPreferences,
         );
+  // Search and environment filters both hide threads without deleting them.
+  const filteringThreads =
+    searching || (currentFilters !== undefined && currentFilters.environmentIds.length > 0);
+  const threadsReady = props.threadStatus === undefined || props.threadStatus === "ready";
   const timeFilteredThreads =
     currentFilters === undefined || listedThreads === undefined
       ? listedThreads
@@ -364,6 +376,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       (unfiled.length > 0 ||
         [...threadsByProject.byProjectId.values()].some((group) => group.length > 0))) ||
     activity.groups.some((group) => group.threads.length > 0);
+  const showFilteredThreadsEmpty = filteringThreads && threadsReady && !hasVisibleThreads;
 
   useEffect(() => {
     setActivityView(readActivityViewEnabled(undefined, globalThis, activityMode));
@@ -544,15 +557,19 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           status={props.threadStatus}
         />
       ) : null}
-      {searching && !hasVisibleThreads ? (
-        <p className="project-nav__empty">No matching threads.</p>
+      {showFilteredThreadsEmpty ? (
+        <p className="project-nav__empty" role="status">
+          {FILTERED_THREADS_EMPTY_MESSAGE}
+        </p>
       ) : visibleProjects.length === 0 && unfiled.length === 0 ? (
         <p className="project-nav__empty">No Projects in this mode.</p>
       ) : null}
-      {searching && !hasVisibleThreads ? null : nestThreads && activityView ? (
+      {showFilteredThreadsEmpty ? null : nestThreads && activityView ? (
         <ActivityThreadList
           {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
-          {...(searching ? { emptyLabel: "No matching threads." } : {})}
+          {...(filteringThreads && threadsReady
+            ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
+            : {})}
           groups={activity.groups}
           onSelectThread={props.onSelectThread!}
         />
@@ -906,7 +923,13 @@ function ActivityThreadList(props: {
   readonly onSelectThread: (threadId: string) => void;
 }) {
   if (props.groups.length === 0) {
-    return <p className="project-nav__empty">{props.emptyLabel ?? "No threads in this mode."}</p>;
+    return props.emptyLabel === undefined ? (
+      <p className="project-nav__empty">No threads in this mode.</p>
+    ) : (
+      <p className="project-nav__empty" role="status">
+        {props.emptyLabel}
+      </p>
+    );
   }
   return (
     <div className="activity-nav">

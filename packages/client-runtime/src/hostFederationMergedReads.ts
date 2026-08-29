@@ -104,6 +104,8 @@ export interface HostReadRefreshRejected {
   readonly reason?: unknown;
   readonly category?: FederatedHostFailureCategory;
   readonly message?: string;
+  /** Known display name for a host that has never been cached before. */
+  readonly hostDisplayName?: string;
 }
 
 export type HostReadRefreshResult = HostReadRefreshFulfilled | HostReadRefreshRejected;
@@ -121,6 +123,19 @@ export interface HostReadModelCache {
   ) => HostReadModelContribution | undefined;
   readonly remove: (hostId: HostId | string) => HostReadModelContribution | undefined;
   readonly list: () => ReadonlyArray<HostReadModelContribution>;
+  /**
+   * Guarantee a cache row exists for a registered host so it stays visible
+   * in `hostStates` even when it has never been fetched. Seeds an empty
+   * contribution when absent; when present, only renames the display name
+   * if one was given, leaving freshness and items untouched.
+   */
+  readonly ensureHost: (
+    hostId: HostId | string,
+    input?: {
+      readonly hostDisplayName?: string;
+      readonly freshness?: FederatedHostReadFreshness;
+    },
+  ) => HostReadModelContribution;
   /**
    * Apply fan-out refresh results with isolation: fulfilled hosts update the
    * cache; rejected hosts keep (or create) stale cache rows and appear in
@@ -397,12 +412,14 @@ export async function refreshAllHostsReadModels(input: {
         ? normalizeFailureCategory((reason as { category: string }).category)
         : "unavailable";
     const message = reason instanceof Error ? reason.message : undefined;
+    const slot = input.transports.get?.(result.hostId);
     return {
       hostId: result.hostId,
       status: "rejected" as const,
       reason,
       category,
       ...(message !== undefined ? { message } : {}),
+      ...(slot?.displayName !== undefined ? { hostDisplayName: slot.displayName } : {}),
     };
   });
 
@@ -459,6 +476,32 @@ export function createHostReadModelCache(): HostReadModelCache {
       return existing;
     },
 
+    ensureHost(hostId, input) {
+      const id = decodeHostId(hostId);
+      const existing = byHost.get(id);
+      if (existing === undefined) {
+        const freshness = input?.freshness ?? "stale";
+        const seeded = withHostFreshness(
+          { hostId: id, hostDisplayName: input?.hostDisplayName ?? id, freshness, items: [] },
+          freshness,
+        );
+        byHost.set(id, seeded);
+        return seeded;
+      }
+      if (
+        input?.hostDisplayName !== undefined &&
+        input.hostDisplayName !== existing.hostDisplayName
+      ) {
+        const renamed = withHostFreshness(
+          { ...existing, hostDisplayName: input.hostDisplayName },
+          existing.freshness,
+        );
+        byHost.set(id, renamed);
+        return renamed;
+      }
+      return existing;
+    },
+
     list() {
       return [...byHost.values()].sort((left, right) =>
         left.hostId < right.hostId ? -1 : left.hostId > right.hostId ? 1 : 0,
@@ -477,6 +520,11 @@ export function createHostReadModelCache(): HostReadModelCache {
         const existing = byHost.get(hostId);
         if (existing !== undefined) {
           this.markStale(hostId);
+        } else {
+          this.ensureHost(hostId, {
+            hostDisplayName: result.hostDisplayName ?? hostId,
+            freshness: "stale",
+          });
         }
         failures.push({
           hostId,
