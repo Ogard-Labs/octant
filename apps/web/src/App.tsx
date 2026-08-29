@@ -37,6 +37,7 @@ import {
   decodeCodeTerminalId,
   decodeCodeThread,
   decodeCodeRelativePath,
+  decodeCodeTestRunId,
   decodeCodeThreadId,
   type CodeDeliveryOutcomeKind,
 } from "@octant/contracts/code";
@@ -49,6 +50,7 @@ import {
   decodeWorkThreadId,
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
+  decodeThreadWorkingDirectory,
   type SideChatSidecar,
   type WorkAttachmentId,
   type WorkThreadId,
@@ -69,6 +71,7 @@ import type { ShellClient } from "@octant/client-runtime/shell-client";
 import type { ThemeClient } from "@octant/client-runtime/theme-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
+import { decodeAppleProjectPath } from "@octant/contracts/apple-toolchain";
 import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
@@ -1404,7 +1407,7 @@ function LaunchedShell(
         kind: "code-test",
         threadId: thread.id,
         title: `${thread.title} tests`,
-        testRunId: target.testRunId as never,
+        testRunId: decodeCodeTestRunId(target.testRunId),
       });
     }
   }, [codeController.bootstrap, controller, pendingCodeDeepLink, projectController.allProjects]);
@@ -2892,7 +2895,7 @@ function LaunchedShell(
         modelId,
         hostId: destinationHostId,
         bindingRevisionId,
-        workingDirectory: "." as never,
+        workingDirectory: decodeThreadWorkingDirectory("."),
       });
       if (!("kind" in created) || created.kind !== "thread-created") return false;
       // A successful create is durable even if the first turn fails. Open the
@@ -2915,7 +2918,7 @@ function LaunchedShell(
           hostId: destinationHostId,
           projectId: project.id,
           bindingRevisionId,
-          workingDirectory: created.thread.workingDirectory ?? ("." as never),
+          workingDirectory: created.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
           confinementPosture: "project-root-confined",
           providerInstanceId,
           modelId,
@@ -3399,7 +3402,7 @@ function LaunchedShell(
           modelId,
           hostId: destinationHostId,
           bindingRevisionId,
-          workingDirectory: "." as never,
+          workingDirectory: decodeThreadWorkingDirectory("."),
           ...(issueContext === undefined ? {} : { issueContext }),
           ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
         });
@@ -3425,7 +3428,7 @@ function LaunchedShell(
             hostId: destinationHostId,
             projectId: project.id,
             bindingRevisionId,
-            workingDirectory: created.thread.workingDirectory ?? ("." as never),
+            workingDirectory: created.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
             confinementPosture: "project-root-confined",
             providerInstanceId,
             modelId,
@@ -3600,7 +3603,7 @@ function LaunchedShell(
         kind: "apple-workbench",
         threadId: view.thread.id,
         title: "Apple workbench",
-        projectPath: project.projectPath as never,
+        projectPath: decodeAppleProjectPath(project.projectPath),
       });
     },
   });
@@ -4468,14 +4471,16 @@ function LaunchedShell(
                     previewClient={previewClient}
                     canvasClient={canvasClient}
                     imageGenerationClient={imageGenerationClient}
-                    onOpenCanvasReference={(card) =>
+                    onOpenCanvasReference={(card) => {
+                      const projectId = card.scope.workspace.projectId;
+                      if (projectId === null) return;
                       void controller.openCanvas({
                         mode: card.scope.mode,
                         title: card.title,
                         canvasId: card.canvasId,
-                        projectId: card.scope.workspace.projectId as never,
-                      })
-                    }
+                        projectId,
+                      });
+                    }}
                     onOpenCanvas={(entry) =>
                       void controller.openCanvas({
                         mode: entry.mode,
