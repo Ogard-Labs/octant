@@ -798,7 +798,7 @@ describe("AppleToolchainService Simulator input", () => {
     expect(first.outcome).toBe("interrupted");
     const second = await service.execute(request, context);
     expect(second.outcome).toBe("interrupted");
-    expect(second.diagnostics.some((d) => d.message.includes("Issue a new actionId"))).toBe(true);
+    expect(JSON.stringify(second.diagnostics)).toContain("Issue a new actionId");
     expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
   });
 

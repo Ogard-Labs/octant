@@ -1228,17 +1228,18 @@ function evidence(
   });
 }
 
-function withInputMustReissueNote(evidence: AppleBuildEvidence): AppleBuildEvidence {
-  const alreadyNoted = evidence.diagnostics.some(
+function withInputMustReissueNote(value: AppleBuildEvidence): AppleBuildEvidence {
+  const alreadyNoted = value.diagnostics.some(
     (diagnostic) => diagnostic.message === APPLE_INPUT_MUST_REISSUE_NOTE,
   );
-  if (alreadyNoted) return evidence;
+  if (alreadyNoted) return value;
+  const note: AppleBuildEvidence["diagnostics"][number] = {
+    severity: "note",
+    message: APPLE_INPUT_MUST_REISSUE_NOTE,
+  };
   return {
-    ...evidence,
-    diagnostics: [
-      ...evidence.diagnostics,
-      { severity: "note", message: APPLE_INPUT_MUST_REISSUE_NOTE },
-    ].slice(0, MAX_DIAGNOSTICS),
+    ...value,
+    diagnostics: [...value.diagnostics, note].slice(0, MAX_DIAGNOSTICS),
   };
 }
 
