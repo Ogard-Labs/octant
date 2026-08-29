@@ -1,3 +1,4 @@
+import type { CodeProjectPullRequestRow } from "@octant/contracts";
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { CodeOperationEvent, CodeThreadFollowUp } from "@octant/contracts/code-operations";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
@@ -198,4 +199,68 @@ export function deriveCodeFollowUpTrigger(
     default:
       return undefined;
   }
+}
+
+/**
+ * The last definitively observed checks summary for one linked pull request on
+ * one owning thread. `unknown` is deliberately not representable: an unknown
+ * observation says the snapshot lost sight of the checks, not that they
+ * changed, so it never advances this state.
+ */
+export type LinkedPullRequestDefinitiveChecks = "pending" | "passing" | "failing";
+
+export interface FailingChecksFollowUpTrigger {
+  readonly threadId: CodeThreadId;
+  readonly reason: string;
+  readonly origin: "automatic";
+  /**
+   * Opaque identity of the (thread, pull request) pair whose edge produced
+   * this trigger. A caller that fails to persist the trigger restores this
+   * key's previous entry in `lastDefinitiveChecks` so the edge re-fires on the
+   * next observation instead of being lost.
+   */
+  readonly observationKey: string;
+}
+
+function linkedPullRequestChecksKey(threadId: string, row: CodeProjectPullRequestRow): string {
+  return `${threadId}|${String(row.projectId)}:${row.repositoryOwner}/${row.repositoryName}:${row.number}`;
+}
+
+/**
+ * Edge detection for "a linked pull request's checks started failing", fed by
+ * successive read-only snapshot observations. A trigger fires per owning
+ * thread when a pull request's checks are observed `failing` and the pair's
+ * last definitive state was anything else (including never observed, so a
+ * first observation of `unknown → failing` and a pull request already failing
+ * when its thread link first appears both count). Re-observing the same
+ * failing state, non-failing checks, unlinked pull requests, and `unknown`
+ * observations never trigger. The returned map is the caller's next
+ * `lastDefinitiveChecks`; it is process-local by design, matching the snapshot
+ * it observes.
+ */
+export function deriveFailingChecksFollowUpTriggers(input: {
+  readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
+  readonly lastDefinitiveChecks: ReadonlyMap<string, LinkedPullRequestDefinitiveChecks>;
+}): {
+  readonly triggers: ReadonlyArray<FailingChecksFollowUpTrigger>;
+  readonly lastDefinitiveChecks: ReadonlyMap<string, LinkedPullRequestDefinitiveChecks>;
+} {
+  const next = new Map(input.lastDefinitiveChecks);
+  const triggers: FailingChecksFollowUpTrigger[] = [];
+  for (const row of input.rows) {
+    if (row.checks === "unknown") continue;
+    for (const linked of row.linkedThreads) {
+      const key = linkedPullRequestChecksKey(String(linked.threadId), row);
+      if (row.checks === "failing" && next.get(key) !== "failing") {
+        triggers.push({
+          threadId: linked.threadId,
+          origin: "automatic",
+          reason: `CI is failing on PR #${row.number}: ${row.title}`,
+          observationKey: key,
+        });
+      }
+      next.set(key, row.checks);
+    }
+  }
+  return { triggers, lastDefinitiveChecks: next };
 }

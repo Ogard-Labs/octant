@@ -1,4 +1,4 @@
-import { decodeProjectId, decodeWindowId } from "@octant/contracts";
+import { decodeProjectId, decodeWindowId, type CodeProjectPullRequestRow } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { describe, expect, it, vi } from "vitest";
 import { CacheStatsProjection, type CacheStatsRecorder } from "../cacheStatsProjection";
@@ -86,6 +86,7 @@ function serviceFixture(options: {
   }>;
   readonly clock?: () => string;
   readonly cacheStats?: CacheStatsRecorder;
+  readonly onSnapshotRefreshed?: (rows: ReadonlyArray<CodeProjectPullRequestRow>) => void;
 }) {
   const listActive = vi.fn(
     options.list ??
@@ -141,6 +142,9 @@ function serviceFixture(options: {
     },
     clock: options.clock ?? (() => now),
     ...(options.cacheStats === undefined ? {} : { cacheStats: options.cacheStats }),
+    ...(options.onSnapshotRefreshed === undefined
+      ? {}
+      : { onSnapshotRefreshed: options.onSnapshotRefreshed }),
   });
   return { service, listActive, observeReviewByIdentity, journal };
 }
@@ -812,6 +816,36 @@ describe("CodeProjectPullRequestService", () => {
     const cached = await service.query(windowId, { version: 1 });
     expect(cached.rows[0]?.title).toBe("List active pull requests");
     expect(cached.freshness.status).toBe("stale");
+  });
+
+  it("notifies the snapshot observer with the refreshed rows after a successful refresh", async () => {
+    const observed: Array<ReadonlyArray<CodeProjectPullRequestRow>> = [];
+    const { service } = serviceFixture({
+      list: async () => ({ status: "ok", rows: [ghRow({ checks: "failing" })] }),
+      onSnapshotRefreshed: (rows) => observed.push(rows),
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toHaveLength(1);
+    expect(observed[0]?.[0]).toMatchObject({
+      number: 12,
+      checks: "failing",
+      linkedThreads: [{ threadId, title: "Manual refresh" }],
+    });
+  });
+
+  it("does not notify the snapshot observer when a refresh fails", async () => {
+    const observed: Array<ReadonlyArray<CodeProjectPullRequestRow>> = [];
+    const { service } = serviceFixture({
+      list: async () => ({ status: "timeout" }),
+      onSnapshotRefreshed: (rows) => observed.push(rows),
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+
+    expect(observed).toHaveLength(0);
   });
 
   it("drops private pull-request facts when GitHub authority is revoked", async () => {
