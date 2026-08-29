@@ -294,6 +294,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   // Search and environment filters both hide threads without deleting them.
   const filteringThreads =
     searching || (currentFilters !== undefined && currentFilters.environmentIds.length > 0);
+  const threadsReady = props.threadStatus === undefined || props.threadStatus === "ready";
   const timeFilteredThreads =
     currentFilters === undefined || listedThreads === undefined
       ? listedThreads
@@ -375,6 +376,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       (unfiled.length > 0 ||
         [...threadsByProject.byProjectId.values()].some((group) => group.length > 0))) ||
     activity.groups.some((group) => group.threads.length > 0);
+  const showFilteredThreadsEmpty = filteringThreads && threadsReady && !hasVisibleThreads;
 
   useEffect(() => {
     setActivityView(readActivityViewEnabled(undefined, globalThis, activityMode));
@@ -555,17 +557,19 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           status={props.threadStatus}
         />
       ) : null}
-      {filteringThreads && !hasVisibleThreads ? (
+      {showFilteredThreadsEmpty ? (
         <p className="project-nav__empty" role="status">
           {FILTERED_THREADS_EMPTY_MESSAGE}
         </p>
       ) : visibleProjects.length === 0 && unfiled.length === 0 ? (
         <p className="project-nav__empty">No Projects in this mode.</p>
       ) : null}
-      {filteringThreads && !hasVisibleThreads ? null : nestThreads && activityView ? (
+      {showFilteredThreadsEmpty ? null : nestThreads && activityView ? (
         <ActivityThreadList
           {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
-          {...(filteringThreads ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE } : {})}
+          {...(filteringThreads && threadsReady
+            ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
+            : {})}
           groups={activity.groups}
           onSelectThread={props.onSelectThread!}
         />
