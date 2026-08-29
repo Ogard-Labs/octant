@@ -24,6 +24,8 @@ import {
   APPLE_HOST_RESTART_RECONCILIATION_NOTE,
   evaluateAppleBuildRequest,
   evaluateAppleSimulatorRequest,
+  isAppleSimulatorInputKind,
+  redactedAppleInputDiagnostic,
   type AppleExecutionScope,
 } from "@octant/domain";
 
@@ -73,12 +75,24 @@ export interface AppleToolchainServiceOptions {
     },
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
+  /**
+   * Optional XCTest-less Simulator input injector. Tests and reviewed host
+   * adapters supply this; when absent, Darwin hosts attempt Simulator.app
+   * Accessibility via osascript and other hosts report unavailable.
+   */
+  readonly injectSimulatorInput?: (
+    request: AppleSimulatorRequest,
+    context: AppleExecutionContext,
+    signal?: AbortSignal,
+  ) => Promise<AppleProcessResult>;
   readonly realpath: (path: string) => Promise<string>;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;
   readonly readArtifact?: (reference: string) => Promise<Uint8Array | undefined>;
   readonly persistReceipts?: (receipts: ReadonlyArray<AppleRuntimeReceipt>) => Promise<void>;
   readonly now: () => string;
   readonly newId: () => string;
+  /** Override for tests; production uses `process.platform`. */
+  readonly platform?: NodeJS.Platform;
 }
 
 interface DiscoveryCacheEntry {
@@ -108,6 +122,9 @@ const DISCOVERY_TIMEOUT_MS = 30_000;
 const MAX_DIAGNOSTICS = 64;
 const MAX_DIAGNOSTIC_LENGTH = 2_048;
 const MAX_RECENT_EVIDENCE = 64;
+
+export const APPLE_INPUT_MUST_REISSUE_NOTE =
+  "Interrupted or unknown Simulator input cannot be retried under the same action id. Issue a new actionId.";
 
 export class AppleToolchainService {
   readonly #options: AppleToolchainServiceOptions;
@@ -215,6 +232,10 @@ export class AppleToolchainService {
     context: AppleExecutionContext,
   ): Promise<AppleBuildEvidence> {
     const startedAt = this.#options.now();
+    if (!isBuildRequest(request) && isAppleSimulatorInputKind(request.kind)) {
+      const prior = this.#findCompletedInput(request, context);
+      if (prior !== undefined) return prior;
+    }
     const cached = this.#findDiscovery(request);
     const decision = isBuildRequest(request)
       ? evaluateAppleBuildRequest(
@@ -502,6 +523,37 @@ export class AppleToolchainService {
           request.timeoutMs,
           signal,
         );
+      } else if (
+        request.kind === "tap" ||
+        request.kind === "type-text" ||
+        request.kind === "key-press"
+      ) {
+        this.#advance(active, "injecting-input");
+        terminal = await this.#injectInput(request, context, signal);
+        // Typed text must never land in stdout/stderr artifacts or diagnostics.
+        // Success is verified by a later screenshot, log, or assertion.
+        const redacted = redactedAppleInputDiagnostic(request);
+        const note =
+          request.kind === "type-text" && !succeeded(terminal)
+            ? {
+                severity: "note" as const,
+                message: `type-text ${outcomeFor(terminal)} (text redacted)`,
+              }
+            : redacted;
+        cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
+        const logReference = `apple-log-${request.actionId}`;
+        await this.#writeArtifact(logReference, [new TextEncoder().encode(`${note.message}\n`)]);
+        artifacts = [{ kind: "log", reference: logReference }];
+        this.#advance(active, "completed", "completed");
+        return evidence(
+          request,
+          outcomeFor(terminal),
+          startedAt,
+          this.#options.now(),
+          [note],
+          artifacts,
+          cleanup,
+        );
       } else if (isBuildRequest(request)) {
         const projectPath = await confinedProjectPath(
           context.checkoutRoot,
@@ -654,6 +706,44 @@ export class AppleToolchainService {
     );
     if (succeeded(result)) this.#setSimulatorState(simulatorId, "booted");
     return result;
+  }
+
+  #findCompletedInput(
+    request: AppleSimulatorRequest,
+    context: AppleExecutionContext,
+  ): AppleBuildEvidence | undefined {
+    for (let index = this.#recent.length - 1; index >= 0; index -= 1) {
+      const entry = this.#recent[index];
+      if (entry === undefined) continue;
+      if (String(entry.evidence.actionId) !== String(request.actionId)) continue;
+      if (!recentEvidenceMatches(entry, context)) continue;
+      if (entry.evidence.kind !== request.kind) continue;
+      // A finished actionId returns stored evidence and never re-injects.
+      // Interrupted evidence also refuses re-exec so callers mint a new actionId.
+      return entry.evidence;
+    }
+    return undefined;
+  }
+
+  async #injectInput(
+    request: AppleSimulatorRequest,
+    context: AppleExecutionContext,
+    signal: AbortSignal,
+  ): Promise<AppleProcessResult> {
+    if (this.#options.injectSimulatorInput !== undefined) {
+      return this.#options.injectSimulatorInput(request, context, signal);
+    }
+    const platform = this.#options.platform ?? process.platform;
+    if (platform !== "darwin") {
+      return unavailableInputResult(
+        "Simulator input injection is unavailable on this host. Open the thread on the Mac that owns the destination.",
+      );
+    }
+    const argv = darwinSimulatorInputArgv(request);
+    if (argv === undefined) {
+      return unavailableInputResult("Simulator input request is incomplete for host injection.");
+    }
+    return this.#command(argv, context, request.timeoutMs, signal);
   }
 
   #progress(
@@ -1057,12 +1147,15 @@ function evidence(
   artifacts: AppleBuildEvidence["artifacts"],
   cleanup: AppleBuildEvidence["cleanup"],
 ): AppleBuildEvidence {
+  const requestedBy =
+    !isBuildRequest(request) && request.requestedBy !== undefined ? request.requestedBy : undefined;
   return decodeAppleBuildEvidence({
     actionId: request.actionId,
     correlationId: request.correlationId,
     authority: request.authority,
     kind: request.kind,
     ...(request.simulatorId === undefined ? {} : { simulatorId: request.simulatorId }),
+    ...(requestedBy === undefined ? {} : { requestedBy }),
     outcome,
     diagnostics,
     artifacts,
@@ -1148,4 +1241,101 @@ function unauthorizedFailure(): AppleDiscoveryResult {
 
 function invalidFailure(message: string): AppleDiscoveryResult {
   return { kind: "failure", failure: { category: "invalid", message } };
+}
+
+function unavailableInputResult(message: string): AppleProcessResult {
+  return {
+    termination: "unavailable",
+    exitCode: null,
+    stdout: new Uint8Array(),
+    stderr: new TextEncoder().encode(message),
+    parserFailed: false,
+    cleanupUncertain: false,
+  };
+}
+
+/**
+ * XCTest-less Darwin injection via Simulator.app Accessibility. Typed text is
+ * passed only as an osascript argument for execution — never mirrored into
+ * durable logs by the caller. Prefer a reviewed injectSimulatorInput adapter
+ * when one is configured on the host.
+ */
+function darwinSimulatorInputArgv(
+  request: AppleSimulatorRequest,
+): ReadonlyArray<string> | undefined {
+  if (request.kind === "tap") {
+    if (request.target !== undefined) {
+      const target = escapeAppleScriptString(request.target);
+      return [
+        "osascript",
+        "-e",
+        'tell application "Simulator" to activate',
+        "-e",
+        `tell application "System Events" to tell process "Simulator" to click UI element "${target}" of window 1`,
+      ];
+    }
+    if (request.point !== undefined) {
+      const x = Math.round(request.point.x);
+      const y = Math.round(request.point.y);
+      return [
+        "osascript",
+        "-e",
+        'tell application "Simulator" to activate',
+        "-e",
+        `tell application "System Events" to click at {${x}, ${y}}`,
+      ];
+    }
+    return undefined;
+  }
+  if (request.kind === "type-text") {
+    if (request.text === undefined) return undefined;
+    const text = escapeAppleScriptString(request.text);
+    return [
+      "osascript",
+      "-e",
+      'tell application "Simulator" to activate',
+      "-e",
+      `tell application "System Events" to keystroke "${text}"`,
+    ];
+  }
+  if (request.kind === "key-press") {
+    if (request.key === undefined) return undefined;
+    const code = appleScriptKeyCode(request.key);
+    if (code === undefined) return undefined;
+    return [
+      "osascript",
+      "-e",
+      'tell application "Simulator" to activate',
+      "-e",
+      `tell application "System Events" to key code ${code}`,
+    ];
+  }
+  return undefined;
+}
+
+function escapeAppleScriptString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function appleScriptKeyCode(key: string): number | undefined {
+  switch (key.toLowerCase()) {
+    case "return":
+    case "enter":
+      return 36;
+    case "escape":
+    case "esc":
+      return 53;
+    case "tab":
+      return 48;
+    case "delete":
+    case "backspace":
+      return 51;
+    case "space":
+      return 49;
+    case "home":
+      // Hardware Home is not a keystroke; callers should prefer a reviewed injector.
+      return undefined;
+    default:
+      return undefined;
+  }
 }

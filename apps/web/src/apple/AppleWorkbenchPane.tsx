@@ -31,6 +31,22 @@ export type AppleWorkbenchIntent =
   | {
       readonly kind: "run" | "boot" | "shutdown" | "screenshot";
       readonly simulatorId: AppleSimulatorId;
+    }
+  | {
+      readonly kind: "tap";
+      readonly simulatorId: AppleSimulatorId;
+      readonly point: { readonly x: number; readonly y: number };
+      readonly target?: string;
+    }
+  | {
+      readonly kind: "type-text";
+      readonly simulatorId: AppleSimulatorId;
+      readonly text: string;
+    }
+  | {
+      readonly kind: "key-press";
+      readonly simulatorId: AppleSimulatorId;
+      readonly key: string;
     };
 
 export interface AppleWorkbenchPaneProps {
@@ -106,11 +122,46 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
   );
 }
 
-function LiveFrame(props: Pick<AppleWorkbenchPaneProps, "liveFrame" | "screenUrl">) {
+function LiveFrame(
+  props: Pick<AppleWorkbenchPaneProps, "liveFrame" | "screenUrl" | "onRun" | "busy">,
+) {
   if (props.liveFrame === undefined) return null;
+  const frame = props.liveFrame;
+  const inputEnabled =
+    props.onRun !== undefined && frame.status === "live" && props.liveFrame !== undefined;
   return (
     <AppleSimulatorLiveFrameView
-      frame={props.liveFrame}
+      busy={props.busy === true}
+      frame={frame}
+      inputEnabled={inputEnabled}
+      {...(props.onRun === undefined || frame.status !== "live"
+        ? {}
+        : {
+            onInput: (intent) => {
+              if (frame.status !== "live") return;
+              if (intent.kind === "tap") {
+                props.onRun!({
+                  kind: "tap",
+                  simulatorId: frame.simulatorId,
+                  point: intent.point,
+                });
+                return;
+              }
+              if (intent.kind === "type-text") {
+                props.onRun!({
+                  kind: "type-text",
+                  simulatorId: frame.simulatorId,
+                  text: intent.text,
+                });
+                return;
+              }
+              props.onRun!({
+                kind: "key-press",
+                simulatorId: frame.simulatorId,
+                key: intent.key,
+              });
+            },
+          })}
       {...(props.screenUrl === undefined ? {} : { screenUrl: props.screenUrl })}
     />
   );

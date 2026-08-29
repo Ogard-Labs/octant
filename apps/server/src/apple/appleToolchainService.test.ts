@@ -737,3 +737,124 @@ describe("AppleToolchainService lifecycle", () => {
     ]);
   });
 });
+
+describe("AppleToolchainService Simulator input", () => {
+  const actor = {
+    kind: "local-user" as const,
+    actorId: "30000000-0000-4000-8000-000000000099" as never,
+  };
+
+  it("injects tap through the workbench channel and never re-runs a finished actionId", async () => {
+    const execute = discoveryExecutor();
+    const injectSimulatorInput = vi.fn(async () => processResult("ok\n"));
+    const service = new AppleToolchainService({
+      execute,
+      injectSimulatorInput,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const request = simulatorRequest({
+      kind: "tap",
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      point: { x: 10, y: 20 },
+      approval: { kind: "approved", approvalId: ids.approval as never },
+    });
+    const first = await service.execute(request, context);
+    expect(first.outcome).toBe("succeeded");
+    expect(first.requestedBy).toEqual(actor);
+    expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
+
+    const second = await service.execute(request, context);
+    expect(second).toEqual(first);
+    expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to re-inject interrupted input under the same actionId", async () => {
+    const execute = discoveryExecutor();
+    const injectSimulatorInput = vi.fn(async () =>
+      processResult("", { cleanupUncertain: true, termination: "exited", exitCode: 0 }),
+    );
+    const service = new AppleToolchainService({
+      execute,
+      injectSimulatorInput,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const request = simulatorRequest({
+      kind: "key-press",
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      key: "return",
+      approval: { kind: "approved", approvalId: ids.approval as never },
+    });
+    const first = await service.execute(request, context);
+    expect(first.outcome).toBe("interrupted");
+    const second = await service.execute(request, context);
+    expect(second.outcome).toBe("interrupted");
+    expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
+  });
+
+  it("never stores typed text in diagnostics or log artifacts", async () => {
+    const execute = discoveryExecutor();
+    const artifacts = new Map<string, Uint8Array>();
+    const secret = "hunter2-should-not-persist";
+    const service = new AppleToolchainService({
+      execute,
+      injectSimulatorInput: async () => processResult(`echoed:${secret}\n`),
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "type-text",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        text: secret,
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      context,
+    );
+    expect(evidence.outcome).toBe("succeeded");
+    expect(JSON.stringify(evidence)).not.toContain(secret);
+    expect(evidence.diagnostics[0]?.message).toContain("redacted");
+    for (const bytes of artifacts.values()) {
+      expect(new TextDecoder().decode(bytes)).not.toContain(secret);
+    }
+  });
+
+  it("reports unavailable input honestly off Darwin when no injector is configured", async () => {
+    const execute = discoveryExecutor();
+    const service = new AppleToolchainService({
+      execute,
+      platform: "linux",
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "tap",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        point: { x: 1, y: 2 },
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      context,
+    );
+    expect(evidence.outcome).toBe("unavailable");
+  });
+});

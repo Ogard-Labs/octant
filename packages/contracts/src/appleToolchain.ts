@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeThreadId } from "./code";
-import { CorrelationId, UtcTimestamp } from "./events";
+import { CorrelationId, EventActor, UtcTimestamp } from "./events";
 import { ToolActionApproval, ToolActionAuthority, ToolActionId } from "./toolActions";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -92,6 +92,9 @@ export const AppleSimulatorActionKind = Schema.Literal(
   "terminate",
   "logs",
   "screenshot",
+  "tap",
+  "type-text",
+  "key-press",
 );
 export type AppleSimulatorActionKind = typeof AppleSimulatorActionKind.Type;
 
@@ -106,8 +109,18 @@ export const AppleActionKind = Schema.Literal(
   "terminate",
   "logs",
   "screenshot",
+  "tap",
+  "type-text",
+  "key-press",
 );
 export type AppleActionKind = typeof AppleActionKind.Type;
+
+/** Point in the live Simulator frame's image pixel space (origin top-left). */
+export const AppleSimulatorPoint = Schema.Struct({
+  x: Schema.Number.pipe(Schema.finite()),
+  y: Schema.Number.pipe(Schema.finite()),
+}).annotations(strict);
+export type AppleSimulatorPoint = typeof AppleSimulatorPoint.Type;
 
 /** Build/run/test request for Apple toolchain actions.
  *  `simulatorId` is optional; when omitted for `run` or `test` on non-macOS
@@ -145,16 +158,45 @@ export const AppleSimulatorRequest = Schema.Struct({
       Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9.-]+$/),
     ),
   ),
+  /**
+   * Who petitioned this Simulator action. Required for tap, type-text, and
+   * key-press so a pane click is never confused with an agent tool call.
+   */
+  requestedBy: Schema.optional(EventActor),
+  /** Prefer a stable accessibility identifier or role when the destination names one. */
+  target: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
+  /** Coordinate tap in live-frame image pixels when no semantic target is named. */
+  point: Schema.optional(AppleSimulatorPoint),
+  /** Typed text for `type-text`. Never copied into durable evidence verbatim. */
+  text: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096))),
+  /** Hardware or named key for `key-press` (for example `return`, `escape`, `home`). */
+  key: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
   approval: ToolActionApproval,
 })
   .annotations(strict)
   .pipe(
-    Schema.filter(
-      (request) =>
-        (request.kind !== "terminate" && request.kind !== "logs") ||
-        request.bundleIdentifier !== undefined,
-    ),
+    Schema.filter((request) => {
+      if (
+        (request.kind === "terminate" || request.kind === "logs") &&
+        request.bundleIdentifier === undefined
+      ) {
+        return false;
+      }
+      if (request.kind === "tap") {
+        return (
+          request.requestedBy !== undefined &&
+          (request.target !== undefined || request.point !== undefined)
+        );
+      }
+      if (request.kind === "type-text") {
+        return request.requestedBy !== undefined && request.text !== undefined;
+      }
+      if (request.kind === "key-press") {
+        return request.requestedBy !== undefined && request.key !== undefined;
+      }
+      return true;
+    }),
   );
 export type AppleSimulatorRequest = typeof AppleSimulatorRequest.Type;
 
@@ -227,6 +269,7 @@ export const AppleBuildEvidence = Schema.Struct({
   kind: AppleActionKind,
   outcome: AppleBuildOutcome,
   simulatorId: Schema.optional(AppleSimulatorId),
+  requestedBy: Schema.optional(EventActor),
   diagnostics: Schema.Array(AppleDiagnostic).pipe(Schema.maxItems(64)),
   artifacts: Schema.Array(AppleEvidenceArtifact).pipe(Schema.maxItems(16)),
   cleanup: AppleCleanupState,
@@ -252,6 +295,7 @@ export const AppleActionProgress = Schema.Struct({
     "terminating",
     "collecting-logs",
     "capturing-screen",
+    "injecting-input",
     "cleaning-up",
     "completed",
   ),
@@ -313,6 +357,7 @@ export const decodeAppleSimulatorRecord = Schema.decodeUnknownSync(AppleSimulato
 export const decodeAppleBuildActionKind = Schema.decodeUnknownSync(AppleBuildActionKind);
 export const decodeAppleSimulatorActionKind = Schema.decodeUnknownSync(AppleSimulatorActionKind);
 export const decodeAppleActionKind = Schema.decodeUnknownSync(AppleActionKind);
+export const decodeAppleSimulatorPoint = Schema.decodeUnknownSync(AppleSimulatorPoint);
 export const decodeAppleBuildRequest = Schema.decodeUnknownSync(AppleBuildRequest);
 export const decodeAppleSimulatorRequest = Schema.decodeUnknownSync(AppleSimulatorRequest);
 export const decodeAppleActionRequest = Schema.decodeUnknownSync(AppleActionRequest);

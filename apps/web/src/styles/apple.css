@@ -37,6 +37,48 @@
   background: var(--oct-bg);
 }
 
+.apple-simulator-frame__screen {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: crosshair;
+  text-align: left;
+}
+
+.apple-simulator-frame__screen:disabled {
+  cursor: default;
+}
+
+.apple-simulator-frame__input {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.apple-simulator-frame__type {
+  display: grid;
+  gap: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+}
+
+.apple-simulator-frame__type input {
+  min-width: 0;
+  padding: var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-bg);
+  color: var(--oct-fg);
+}
+
+.apple-simulator-frame__keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
 .apple-simulator-frame--unavailable,
 .apple-simulator-frame--interrupted,
 .apple-simulator-frame--stale-after-restart {

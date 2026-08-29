@@ -930,6 +930,27 @@ describe("the Apple capability as an agent tool", () => {
     expect(JSON.stringify(outcome.result)).not.toContain("PNG");
   });
 
+  it("attributes Simulator input to the agent actor on the workbench channel", async () => {
+    const { execute, tools } = appleTools();
+    await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({
+        operation: "tap",
+        simulatorId: "80000000-0000-4000-8000-000000000001",
+        x: 40,
+        y: 80,
+      }),
+    } as never);
+    const request = execute.mock.calls[0]?.[1] as unknown as {
+      readonly kind: string;
+      readonly requestedBy: { readonly kind: string };
+      readonly point: { readonly x: number; readonly y: number };
+    };
+    expect(request.kind).toBe("tap");
+    expect(request.requestedBy.kind).toBe("agent");
+    expect(request.point).toEqual({ x: 40, y: 80 });
+  });
+
   it("refuses an action whose destination or project the caller did not name", async () => {
     const { execute, tools } = appleTools();
 
