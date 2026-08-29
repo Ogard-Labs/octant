@@ -763,6 +763,100 @@ describe("ProjectService", () => {
     }
   });
 
+  it("refuses background pull-request refresh on a Chat Project and a stale expected version", async () => {
+    const fixture = fixtureService({ projects: [chatProject(), codeProject()] });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-code-project-pull-request-background-refresh",
+        projectId: chatId,
+        expectedVersion: 1,
+        pullRequestBackgroundRefresh: "enabled",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-code-project-pull-request-background-refresh",
+        projectId: workId,
+        expectedVersion: 0,
+        pullRequestBackgroundRefresh: "enabled",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "conflict" } });
+  });
+
+  it("enables background pull-request refresh through the authoritative command and journals one event", async () => {
+    const fixture = fixtureService({ projects: [codeProject()] });
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-code-project-pull-request-background-refresh",
+      projectId: workId,
+      expectedVersion: 1,
+      pullRequestBackgroundRefresh: "enabled",
+    });
+    expect(result).toMatchObject({
+      kind: "code-project-pull-request-background-refresh-changed",
+      project: { pullRequestBackgroundRefresh: "enabled", version: 2 },
+    });
+    expect(fixture.append).toHaveBeenCalledTimes(1);
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.code-pull-request-background-refresh-changed@1",
+    );
+  });
+
+  it("replays the pull-request background refresh opt-in across persistence restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-project-pr-cadence-service-"));
+    const codeId = decodeProjectId("00000000-0000-4000-8000-000000000698");
+    const receiptId = `${"A".repeat(42)}A` as never;
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const persistence = yield* Persistence;
+            const service = persistentService(persistence);
+            yield* Effect.promise(() =>
+              service.executeProject(windowId, {
+                kind: "create-code-project",
+                projectId: codeId,
+                expectedVersion: 0,
+                name: "Persistent cadence",
+                receiptId,
+                hostId: "local",
+              }),
+            );
+            yield* Effect.promise(() =>
+              service.executeProject(windowId, {
+                kind: "change-code-project-pull-request-background-refresh",
+                projectId: codeId,
+                expectedVersion: 1,
+                pullRequestBackgroundRefresh: "enabled",
+              }),
+            );
+          }).pipe(
+            Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+          ),
+        ),
+      );
+
+      const restored = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const persistence = yield* Persistence;
+            return yield* Effect.promise(() => persistentService(persistence).bootstrap(windowId));
+          }).pipe(
+            Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+          ),
+        ),
+      );
+      expect(restored.active).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: codeId, pullRequestBackgroundRefresh: "enabled" }),
+        ]),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("replays a Code Project access policy across persistence restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-project-access-service-"));
     const codeId = decodeProjectId("00000000-0000-4000-8000-000000000699");

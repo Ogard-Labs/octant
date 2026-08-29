@@ -69,7 +69,11 @@ export function ThreadBoardPullRequestSummaries(props: ThreadBoardPullRequestSum
           checksLabel(summary.checks),
           reviewLabel(summary.review),
           mergeabilityLabel(summary.mergeability),
-          summary.freshness === "stale" ? "Stale snapshot" : undefined,
+          summary.freshness === "stale"
+            ? "Stale snapshot"
+            : summary.freshness === "unavailable"
+              ? "GitHub unavailable"
+              : undefined,
           summary.readyToMerge ? "Ready to merge" : undefined,
           relationshipLabel(summary.relationship),
         ].filter((value): value is string => value !== undefined);

@@ -6,6 +6,7 @@ import {
   type CanonicalProjectBinding,
   type ChatProject,
   type CodeProject,
+  type CodeProjectPullRequestBackgroundRefresh,
   type CodeAccessPersistence,
   type WorkProject,
   type Project,
@@ -191,6 +192,34 @@ export function changeCodeProjectAccess(
   };
 }
 
+/**
+ * Toggle the opt-in background refresh of the Project's pull-request snapshot.
+ * Rejects a non-Code Project and a no-op change so the journal never carries
+ * an event that changed nothing. Absence of the field reads as disabled — the
+ * default every Project had before the setting existed.
+ */
+export function changeCodeProjectPullRequestBackgroundRefresh(
+  project: Project,
+  pullRequestBackgroundRefresh: CodeProjectPullRequestBackgroundRefresh,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject(
+      "binding-not-allowed",
+      "Only Code Projects have a pull-request background refresh setting",
+    );
+  }
+  if ((project.pullRequestBackgroundRefresh ?? "disabled") === pullRequestBackgroundRefresh) {
+    reject("invalid-lifecycle", "Code Project pull-request background refresh is already selected");
+  }
+  return {
+    ...project,
+    pullRequestBackgroundRefresh,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
 export function changeProjectLifecycle(
   project: Project,
   lifecycle: ProjectLifecycle,
@@ -245,15 +274,16 @@ export function relinkProject(project: Project, input: RelinkProjectInput): Boun
 }
 
 export function rankBetween(left?: ProjectRank, right?: ProjectRank): ProjectRank {
-  if (left === undefined && right === undefined) return decodeProjectRank("0/1");
+  if (right === undefined) {
+    if (left === undefined) return decodeProjectRank("0/1");
+    const leftValue = parseRank(left);
+    return normalizeRank(leftValue.numerator + leftValue.denominator, leftValue.denominator);
+  }
   if (left === undefined) {
-    const rightValue = parseRank(right!);
+    const rightValue = parseRank(right);
     return normalizeRank(rightValue.numerator - rightValue.denominator, rightValue.denominator);
   }
   const leftValue = parseRank(left);
-  if (right === undefined) {
-    return normalizeRank(leftValue.numerator + leftValue.denominator, leftValue.denominator);
-  }
   const rightValue = parseRank(right);
   if (compareRank(left, right) >= 0) {
     reject("invalid-rank", "Project rank neighbors must be strictly ascending");

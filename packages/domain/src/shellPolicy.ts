@@ -1457,12 +1457,14 @@ export function applyWorkspaceOperation(
         // source pane collapses and its surface object survives the move so
         // per-surface state keyed by its id (environment presentation) does.
         const removed = removePane(layout, source.paneId);
-        if (removed.pane === undefined || removed.layout === undefined) {
+        const removedPane = removed.pane;
+        const remainingLayout = removed.layout;
+        if (removedPane === undefined || remainingLayout === undefined) {
           reject("missing-pane", "source pane could not be removed");
         }
-        const mapped = mapPane(removed.layout, operation.paneId, (pane) => ({
+        const mapped = mapPane(remainingLayout, operation.paneId, (pane) => ({
           ...pane,
-          surface: removed.pane!.surface,
+          surface: removedPane.surface,
         }));
         if (!mapped.found) reject("missing-pane", "target pane became unreachable");
         return finishOperation(

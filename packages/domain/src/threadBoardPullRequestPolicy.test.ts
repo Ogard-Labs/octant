@@ -163,6 +163,21 @@ describe("thread board pull-request policy", () => {
     });
   });
 
+  it("reports a snapshot that cannot reach GitHub as unavailable rather than stale", () => {
+    const known = row({ state: "unknown", mergeability: "unknown" });
+    const summaries = composeThreadBoardPullRequestSummaries({
+      rows: [known],
+      snapshotFreshness: { status: "stale", staleReason: "disconnected" },
+      githubRevoked: false,
+      matches: [{ row: known }],
+    });
+
+    expect(summaries.items[0]).toMatchObject({
+      freshness: "unavailable",
+      readyToMerge: false,
+    });
+  });
+
   it("drops private pull-request evidence when GitHub is revoked", () => {
     const summaries = composeThreadBoardPullRequestSummaries({
       rows: [row({})],

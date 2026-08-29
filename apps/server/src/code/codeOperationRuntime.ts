@@ -1451,6 +1451,7 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
         checkoutId: input.checkoutRoot,
         checkoutRoot: input.checkoutRoot,
         branch: input.branch,
+        executionPolicy: input.executionPolicy,
       });
       return result.status === "applied"
         ? { status: "applied", ...(result.oid === undefined ? {} : { oid: result.oid }) }

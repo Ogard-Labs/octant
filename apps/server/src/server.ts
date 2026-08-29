@@ -195,11 +195,13 @@ import {
 } from "./code/codeThreadBoardService";
 import { createCodeBoardPlanProgressSource } from "./code/codeBoardPlanProgress";
 import { CodeFollowUpService } from "./code/codeFollowUpService";
+import { FailingChecksFollowUps } from "./code/failingChecksFollowUps";
 import {
   CodeProjectPullRequestService,
   type CodeProjectPullRequestDetailPort,
   type CodeProjectPullRequestListPort,
 } from "./code/codeProjectPullRequestService";
+import { CodeProjectPullRequestCadence } from "./code/codeProjectPullRequestCadence";
 import { createGhCommandPort, GhPullRequestPort } from "./code/ghPullRequestPort";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
@@ -549,6 +551,7 @@ import {
   decodeImageGenerationScopeId,
   decodeMultiModelRoutingVendorId,
   type ChatThreadView,
+  type CodeProjectPullRequestRow,
   type CodeWorktreeRemoteFacts,
   type ImageGenerationSaveResult,
   type MentionableThreadId,
@@ -804,6 +807,11 @@ export interface StartOctantServerOptions {
   readonly platformCapabilities?: ReadonlyArray<string>;
   readonly desktopBridgeSecret?: string;
   readonly developmentWebBootstrap?: true;
+  /**
+   * HTTP origin the local renderer may present. `null` is packaged
+   * (`file://` only). Omitted keeps loopback-any-port for tests.
+   */
+  readonly allowedRendererHttpOrigin?: string | null;
   /**
    * Host control wiring for the shared web Settings host card. The
    * service policy port persists the automatic-startup policy and
@@ -1260,11 +1268,18 @@ function withCodeOperationRuntime(
 function createProjectPullRequestPorts(ghExecutable: string | undefined): {
   readonly list: CodeProjectPullRequestListPort;
   readonly detail: CodeProjectPullRequestDetailPort;
+  /**
+   * False when `gh` is missing or refused validation. The background refresh
+   * cadence fails closed on this instead of polling ports that can only
+   * answer `disconnected`.
+   */
+  readonly ghAvailable: boolean;
 } {
   if (ghExecutable === undefined) {
     return {
       list: { listActive: async () => ({ status: "disconnected" }) },
       detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
+      ghAvailable: false,
     };
   }
   try {
@@ -1279,11 +1294,13 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
       detail: {
         observeReviewByIdentity: (request, signal) => port.observeReviewByIdentity(request, signal),
       },
+      ghAvailable: true,
     };
   } catch {
     return {
       list: { listActive: async () => ({ status: "disconnected" }) },
       detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
+      ghAvailable: false,
     };
   }
 }
@@ -2005,6 +2022,9 @@ export function startOctantServer(
       ...(options.developmentWebBootstrap === undefined
         ? {}
         : { developmentWebBootstrap: options.developmentWebBootstrap }),
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
       launchSessionStore,
       windowAuthorityStore,
     });
@@ -2077,9 +2097,11 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
     });
     revokeShellWindow = (windowId) => shellService.revokeWindow(windowId);
+    const allowedRendererHttpOrigin = options.allowedRendererHttpOrigin;
     const shellRoutes = createShellRouteHandler(shellService, {
       windowAuthorityStore,
       now: Date.now,
+      ...(allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin }),
     });
     const themeService = new ThemeService({
       persistence,
@@ -2437,6 +2459,45 @@ export function startOctantServer(
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     const projectPullRequestPorts = createProjectPullRequestPorts(options.ghExecutable);
+    // Late-bound because the follow-up service that consumes refreshed
+    // snapshots is constructed further down, alongside the other Code thread
+    // services (same pattern as recordExtensionRuntimeEvidence).
+    let observeRefreshedPullRequestRows:
+      | ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void)
+      | undefined;
+    const listProjectPullRequestThreadFacts = async (windowId: WindowId) => {
+      const bootstrap = await codeService.bootstrap(windowId);
+      const facts: Array<{
+        readonly threadId: string;
+        readonly projectId: string;
+        readonly title: string;
+        readonly repository: { readonly owner: string; readonly name: string };
+        readonly deliveryBranch: string;
+        readonly pullRequestNumbers: ReadonlyArray<{
+          readonly number: number;
+          readonly observedAt: string;
+        }>;
+      }> = [];
+      for (const thread of bootstrap.threads) {
+        const repository = thread.deliveryTarget.proposedBaseRepository;
+        const slash = repository.indexOf("/");
+        if (slash <= 0 || repository.includes("/", slash + 1)) continue;
+        const owner = repository.slice(0, slash);
+        const name = repository.slice(slash + 1);
+        if (owner === undefined || name === undefined) continue;
+        facts.push({
+          threadId: String(thread.id),
+          projectId: String(thread.projectId),
+          title: thread.title,
+          repository: { owner, name },
+          deliveryBranch: thread.deliveryTarget.branchIntent,
+          pullRequestNumbers: pullRequestIdentitiesFromHistory(
+            codeBoardEventStore.historyForThread(thread.id),
+          ),
+        });
+      }
+      return facts;
+    };
     const projectPullRequestService = new CodeProjectPullRequestService({
       projects: projectService,
       remotes: {
@@ -2448,43 +2509,50 @@ export function startOctantServer(
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
       cacheStats,
+      onSnapshotRefreshed: (rows) => observeRefreshedPullRequestRows?.(rows),
       threads: {
-        list: async (windowId) => {
-          const bootstrap = await codeService.bootstrap(windowId);
-          const facts: Array<{
-            readonly threadId: string;
-            readonly projectId: string;
-            readonly title: string;
-            readonly repository: { readonly owner: string; readonly name: string };
-            readonly deliveryBranch: string;
-            readonly pullRequestNumbers: ReadonlyArray<{
-              readonly number: number;
-              readonly observedAt: string;
-            }>;
-          }> = [];
-          for (const thread of bootstrap.threads) {
-            const repository = thread.deliveryTarget.proposedBaseRepository;
-            const slash = repository.indexOf("/");
-            if (slash <= 0 || repository.includes("/", slash + 1)) continue;
-            const owner = repository.slice(0, slash);
-            const name = repository.slice(slash + 1);
-            if (owner === undefined || name === undefined) continue;
-            facts.push({
-              threadId: String(thread.id),
-              projectId: String(thread.projectId),
-              title: thread.title,
-              repository: { owner, name },
-              deliveryBranch: thread.deliveryTarget.branchIntent,
-              pullRequestNumbers: pullRequestIdentitiesFromHistory(
-                codeBoardEventStore.historyForThread(thread.id),
-              ),
-            });
-          }
-          return facts;
-        },
+        list: (windowId) => listProjectPullRequestThreadFacts(windowId),
       },
     });
     revokeProjectPullRequests = () => projectPullRequestService.revokeGithub();
+    // The cadence acts as the host, not as any renderer window. The window
+    // identity below exists only to satisfy window-shaped read signatures;
+    // on this host `projectService.bootstrap` and Code Project access checks
+    // do not branch on it, so no renderer authority is borrowed or widened.
+    const pullRequestCadenceWindowId = decodeWindowId(randomUUID());
+    // Refreshed once per cadence pass by the projects callback below, so the
+    // per-Project identity check is a set lookup instead of a journal replay
+    // repeated for every Project on every wake.
+    let pullRequestCadenceProjectsWithIdentities: ReadonlySet<string> = new Set();
+    const projectPullRequestCadence = new CodeProjectPullRequestCadence({
+      projects: async () => {
+        const projects = persistence
+          .readProjects({ lifecycle: "active" })
+          .filter((project) => project.type === "code")
+          .map((project) => ({
+            projectId: project.id,
+            enabled: project.pullRequestBackgroundRefresh === "enabled",
+          }));
+        // A fleet with nothing enabled must cost nothing per wake: skip the
+        // thread-fact read entirely rather than replaying journals for a
+        // feature that is off.
+        pullRequestCadenceProjectsWithIdentities = projects.some((project) => project.enabled)
+          ? new Set(
+              (await listProjectPullRequestThreadFacts(pullRequestCadenceWindowId)).map(
+                (fact) => fact.projectId,
+              ),
+            )
+          : new Set();
+        return projects;
+      },
+      hasBoardRelevantIdentities: (projectId) =>
+        pullRequestCadenceProjectsWithIdentities.has(String(projectId)),
+      observe: (projectId, signal) =>
+        projectPullRequestService.observeForCadence(pullRequestCadenceWindowId, projectId, signal),
+      onState: (state) => projectPullRequestService.recordBackgroundRefreshState(state),
+      ghAvailable: projectPullRequestPorts.ghAvailable,
+    });
+    projectPullRequestCadence.start();
     let codeOperationRuntime = options.codeOperationRuntime;
     const providerDataDirectory = persistence.dataDirectory;
     const providerRuntimeRegistry =
@@ -2630,6 +2698,7 @@ export function startOctantServer(
                 ...tool,
                 ...(signal === undefined ? {} : { signal }),
               }),
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         ...(extensionSupervisor instanceof ExtensionSupervisor
           ? { stdioSupervisor: extensionSupervisor }
           : {}),
@@ -3341,6 +3410,18 @@ export function startOctantServer(
       createThread: async (windowId, creation, signal) =>
         baseRouteCodeService.execute(windowId, creation, signal),
     });
+    // A linked pull request's checks turning red is a user obligation, not an
+    // agent event: every snapshot refresh feeds the durable follow-up marker on
+    // the owning thread. Read-only toward GitHub; only an explicit completion
+    // clears the marker.
+    const failingChecksFollowUps = new FailingChecksFollowUps({
+      followUps: codeFollowUpService,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    observeRefreshedPullRequestRows = (rows) => {
+      void failingChecksFollowUps.observe(rows);
+    };
     const boardRouteCodeService: CodeRouteService = withCodeBoard(
       baseRouteCodeService,
       async (windowId, query) => {
@@ -3395,12 +3476,20 @@ export function startOctantServer(
         codePlannerService.resolveProposal(windowId, command, signal),
       queryProjectPullRequests: (windowId, query) =>
         projectPullRequestService.query(windowId, query),
-      refreshProjectPullRequests: (windowId, command, signal) =>
-        projectPullRequestService.refresh(
+      refreshProjectPullRequests: async (windowId, command, signal) => {
+        const view = await projectPullRequestService.refresh(
           windowId,
           command,
           signal ?? new AbortController().signal,
-        ),
+        );
+        // A fresh explicit refresh proves gh works again; it is one of the
+        // two documented signals that restart a cadence stopped by an
+        // unauthorized observation.
+        if (view.freshness.status === "fresh") {
+          projectPullRequestCadence.noteExplicitRefreshSucceeded();
+        }
+        return view;
+      },
       queryProjectPullRequestDetail: (windowId, query) =>
         projectPullRequestService.queryDetail(windowId, query),
       refreshProjectPullRequestDetail: (windowId, command, signal) =>
@@ -6205,7 +6294,10 @@ export function startOctantServer(
                 if (url.pathname === "/api/hosts") {
                   const origin = request.headers.get("origin");
                   const headers = new Headers({ vary: "Origin" });
-                  if (origin !== null && isAllowedRendererOrigin(origin)) {
+                  if (
+                    origin !== null &&
+                    isAllowedRendererOrigin(origin, options.allowedRendererHttpOrigin)
+                  ) {
                     headers.set("access-control-allow-origin", origin);
                   }
                   return Response.json({ hosts: listHosts(localHostDisplayName()) }, { headers });
@@ -6318,6 +6410,11 @@ export function startOctantServer(
             // journal connection goes away; a pass is one synchronous section,
             // so shutdown can never interrupt a partial occurrence claim.
             await automationScheduler.stop();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
+          try {
+            projectPullRequestCadence.stop();
           } catch (error) {
             shutdownFailure ??= error;
           }

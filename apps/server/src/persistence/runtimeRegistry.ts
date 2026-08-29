@@ -17,6 +17,7 @@ import {
   ChatTurnRouteDecided,
   CodeProjectAccessChanged,
   CodeProjectNewThreadWorkspaceChanged,
+  CodeProjectPullRequestBackgroundRefreshChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
   CodeFileReferenceUpdated,
@@ -231,6 +232,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       "project.code-new-thread-workspace-changed@1",
       1,
       CodeProjectNewThreadWorkspaceChanged,
+    )
+    .register(
+      "project.code-pull-request-background-refresh-changed@1",
+      1,
+      CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register("memory.entry-created@1", 1, MemoryEntryCreated)
     .register("memory.entry-superseded@1", 1, MemoryEntrySuperseded)

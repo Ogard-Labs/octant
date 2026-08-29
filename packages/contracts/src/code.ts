@@ -929,6 +929,7 @@ export const decodeCodeThreadId = Schema.decodeUnknownSync(CodeThreadId);
 export const decodeCodeCheckoutId = Schema.decodeUnknownSync(CodeCheckoutId);
 export const decodeWorktreeReceiptId = Schema.decodeUnknownSync(WorktreeReceiptId);
 export const decodeCodeTerminalId = Schema.decodeUnknownSync(CodeTerminalId);
+export const decodeCodeTestRunId = Schema.decodeUnknownSync(CodeTestRunId);
 export const decodeCodeFileId = Schema.decodeUnknownSync(CodeFileId);
 export const decodeCodeReviewFindingId = Schema.decodeUnknownSync(CodeReviewFindingId);
 export const decodeCodeEvidenceContentId = Schema.decodeUnknownSync(CodeEvidenceContentId);

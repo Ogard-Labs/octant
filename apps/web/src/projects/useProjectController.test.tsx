@@ -485,6 +485,42 @@ describe("useProjectController", () => {
     expect(server.api.executeProject).not.toHaveBeenCalled();
   });
 
+  it("opts a Code Project into background pull-request refresh as a versioned command", async () => {
+    const server = client();
+    vi.mocked(server.api.executeProject).mockResolvedValue({} as never);
+    const { result } = renderHook(() =>
+      useProjectController({ activeMode: "code", activeProjectId: codeId, client: server.api }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.setCodePullRequestBackgroundRefresh(codeId, "enabled");
+    });
+    expect(server.api.executeProject).toHaveBeenCalledWith({
+      kind: "change-code-project-pull-request-background-refresh",
+      projectId: codeId,
+      expectedVersion: 1,
+      pullRequestBackgroundRefresh: "enabled",
+    });
+
+    vi.mocked(server.api.executeProject).mockClear();
+    let refused: boolean | undefined;
+    await act(async () => {
+      refused = await result.current.setCodePullRequestBackgroundRefresh(chatId, "enabled");
+    });
+    expect(refused).toBe(false);
+    let alreadyDisabled: boolean | undefined;
+    await act(async () => {
+      // Absence of the setting reads as disabled: no command for a no-op.
+      alreadyDisabled = await result.current.setCodePullRequestBackgroundRefresh(
+        codeId,
+        "disabled",
+      );
+    });
+    expect(alreadyDisabled).toBe(true);
+    expect(server.api.executeProject).not.toHaveBeenCalled();
+  });
+
   it("creates virtual and receipt-bound Projects without accepting renderer paths", async () => {
     const server = client();
     vi.mocked(server.api.executeProject).mockResolvedValue({} as never);

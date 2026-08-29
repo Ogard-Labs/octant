@@ -38,6 +38,7 @@ import {
   createTrustedRendererRequestRegistry,
   decorateTrustedRendererHeaders,
   prepareDevelopmentRendererUrl,
+  preparePackagedRendererQuery,
   createDesktopWindowContextRegistry,
   createProjectWindowAuthorityLifecycle,
   createProjectWindowPreparationCleanup,
@@ -122,6 +123,12 @@ describe("development renderer startup", () => {
     expect(url.searchParams.get("developmentWebBootstrap")).toBe("1");
   });
 
+  it("loads the packaged renderer with the server URL and no caller-selected window identity", () => {
+    expect(preparePackagedRendererQuery("http://127.0.0.1:13773")).toEqual({
+      serverUrl: "http://127.0.0.1:13773",
+    });
+  });
+
   it("strips forged renderer identity and injects it only for the trusted shell frame", () => {
     const context = {
       serverOrigin: "http://127.0.0.1:13773",
@@ -183,6 +190,7 @@ describe("Project window BrowserWindow construction", () => {
     const options = createMainBrowserWindowOptions({
       bounds: { x: 10, y: 20, width: 1000, height: 720 },
       capability: "A".repeat(43),
+      windowId: "00000000-0000-4000-8000-000000000201",
       preloadPath: "/app/preload.mjs",
       browserWindow: {
         backgroundColor: "#00000000",
@@ -205,8 +213,13 @@ describe("Project window BrowserWindow construction", () => {
       vibrancy: "sidebar",
       visualEffectState: "followWindow",
       webPreferences: {
-        additionalArguments: [`--octant-project-capability=${"A".repeat(43)}`],
+        additionalArguments: [
+          `--octant-project-capability=${"A".repeat(43)}`,
+          "--octant-window-id=00000000-0000-4000-8000-000000000201",
+        ],
         preload: "/app/preload.mjs",
+        sandbox: true,
+        webSecurity: true,
       },
     });
   });
@@ -216,6 +229,7 @@ describe("Project window BrowserWindow construction", () => {
       createMainBrowserWindowOptions({
         bounds: { x: 10, y: 20, width: 1000, height: 720 },
         capability: "A".repeat(43),
+        windowId: "00000000-0000-4000-8000-000000000201",
         initialProjectId: "00000000-0000-4000-8000-000000000203",
         preloadPath: "/app/preload.mjs",
         browserWindow: {
@@ -226,6 +240,7 @@ describe("Project window BrowserWindow construction", () => {
       }).webPreferences?.additionalArguments,
     ).toEqual([
       `--octant-project-capability=${"A".repeat(43)}`,
+      "--octant-window-id=00000000-0000-4000-8000-000000000201",
       "--octant-initial-project-id=00000000-0000-4000-8000-000000000203",
     ]);
   });
@@ -235,6 +250,7 @@ describe("Project window BrowserWindow construction", () => {
       createMainBrowserWindowOptions({
         bounds: { x: 10, y: 20, width: 1000, height: 720 },
         capability: "A".repeat(43),
+        windowId: "00000000-0000-4000-8000-000000000201",
         initialProjectId: "00000000-0000-4000-8000-000000000203",
         initialThreadMode: "code",
         initialThreadId: "00000000-0000-4000-8000-000000000204",
@@ -247,6 +263,7 @@ describe("Project window BrowserWindow construction", () => {
       }).webPreferences?.additionalArguments,
     ).toEqual([
       `--octant-project-capability=${"A".repeat(43)}`,
+      "--octant-window-id=00000000-0000-4000-8000-000000000201",
       "--octant-initial-project-id=00000000-0000-4000-8000-000000000203",
       "--octant-initial-thread-mode=code",
       "--octant-initial-thread-id=00000000-0000-4000-8000-000000000204",
@@ -258,6 +275,7 @@ describe("Project window BrowserWindow construction", () => {
       createMainBrowserWindowOptions({
         bounds: { x: 10, y: 20, width: 1000, height: 720 },
         capability: "A".repeat(43),
+        windowId: "00000000-0000-4000-8000-000000000201",
         initialThreadMode: "code",
         initialThreadId: "00000000-0000-4000-8000-000000000204",
         preloadPath: "/app/preload.mjs",

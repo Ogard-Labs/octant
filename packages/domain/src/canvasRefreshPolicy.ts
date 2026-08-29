@@ -198,11 +198,13 @@ function refreshedSourceManifest(
   manifest: ReadonlyArray<CanvasSourceManifestEntry>,
   sources: ReadonlyArray<CanvasRefreshSourceResult>,
 ): ReadonlyArray<CanvasSourceManifestEntry> {
-  const observations = new Map(
-    sources
-      .filter((source) => source.status === "ready" && source.observedVersion !== undefined)
-      .map((source) => [String(source.sourceId), source.observedVersion!]),
-  );
+  const observations = new Map<string, NonNullable<CanvasRefreshSourceResult["observedVersion"]>>();
+  for (const source of sources) {
+    if (source.status !== "ready") continue;
+    const observedVersion = source.observedVersion;
+    if (observedVersion === undefined) continue;
+    observations.set(String(source.sourceId), observedVersion);
+  }
   return manifest.map((entry) => {
     const observedVersion = observations.get(String(entry.sourceId));
     return observedVersion === undefined ? entry : { ...entry, sourceVersion: observedVersion };

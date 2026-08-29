@@ -74,6 +74,13 @@ function renderWorkspace(
     ) => Promise<CodeProjectPullRequestView>;
     readonly isNarrow?: boolean;
     readonly onSelectRow?: (row: import("@octant/contracts").CodeProjectPullRequestRow) => void;
+    readonly backgroundRefresh?: {
+      readonly enabledFor: (projectId: import("@octant/contracts").ProjectId) => boolean;
+      readonly setEnabled: (
+        projectId: import("@octant/contracts").ProjectId,
+        enabled: boolean,
+      ) => Promise<boolean>;
+    };
   } = {},
 ) {
   const load = options.load ?? vi.fn(async () => view());
@@ -85,6 +92,9 @@ function renderWorkspace(
       refresh={refresh}
       onClose={() => undefined}
       {...(options.onSelectRow === undefined ? {} : { onSelectRow: options.onSelectRow })}
+      {...(options.backgroundRefresh === undefined
+        ? {}
+        : { backgroundRefresh: options.backgroundRefresh })}
     />,
   );
   return { load, refresh };
@@ -120,6 +130,43 @@ describe("CodeProjectPullRequests", () => {
       ),
     ).toBeVisible();
     expect(octant.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("toggles a connected Project's background refresh through the authoritative setter", async () => {
+    const user = userEvent.setup();
+    const setEnabled = vi.fn(async () => true);
+    renderWorkspace({
+      backgroundRefresh: { enabledFor: () => false, setEnabled },
+    });
+    await screen.findByText("List active pull requests");
+
+    const toggle = screen.getByRole("button", { name: "Background refresh for Octant" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveTextContent("Background refresh off");
+    // The unconnected Project has nothing to refresh, so it gets no toggle.
+    expect(
+      screen.queryByRole("button", { name: "Background refresh for Local notes" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(setEnabled).toHaveBeenCalledWith(projectA, true);
+  });
+
+  it("explains an unavailable background refresh instead of pretending cards will update", async () => {
+    renderWorkspace({
+      load: vi.fn(async () =>
+        view({
+          backgroundRefresh: [{ projectId: projectA, state: "unavailable" }],
+        }),
+      ),
+      backgroundRefresh: { enabledFor: () => true, setEnabled: vi.fn(async () => true) },
+    });
+
+    expect(
+      await screen.findByText(
+        "Background refresh is unavailable: the GitHub CLI is missing or not authenticated.",
+      ),
+    ).toBeVisible();
   });
 
   it("refreshes all Projects or one Project only when those buttons are used", async () => {

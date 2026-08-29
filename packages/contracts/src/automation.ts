@@ -594,14 +594,21 @@ export const AutomationOccurrenceKeyText = boundedText(512).pipe(
   Schema.brand("AutomationOccurrenceKeyText"),
 );
 export type AutomationOccurrenceKeyText = typeof AutomationOccurrenceKeyText.Type;
+export const decodeAutomationOccurrenceKeyText = Schema.decodeUnknownSync(
+  AutomationOccurrenceKeyText,
+);
 
 export function deriveAutomationOccurrenceKey(
   occurrence: AutomationOccurrence,
 ): AutomationOccurrenceKeyText {
   if (occurrence.kind === "scheduled") {
-    return `scheduled:${String(occurrence.automationId)}:${occurrence.definitionRevision}:${occurrence.triggerKind}:${String(occurrence.scheduledAt)}` as AutomationOccurrenceKeyText;
+    return decodeAutomationOccurrenceKeyText(
+      `scheduled:${String(occurrence.automationId)}:${occurrence.definitionRevision}:${occurrence.triggerKind}:${String(occurrence.scheduledAt)}`,
+    );
   }
-  return `manual:${String(occurrence.automationId)}:${occurrence.definitionRevision}:${String(occurrence.runNowRequestId)}` as AutomationOccurrenceKeyText;
+  return decodeAutomationOccurrenceKeyText(
+    `manual:${String(occurrence.automationId)}:${occurrence.definitionRevision}:${String(occurrence.runNowRequestId)}`,
+  );
 }
 
 function occurrenceKeyMatches(input: {
@@ -611,176 +618,32 @@ function occurrenceKeyMatches(input: {
   return input.occurrenceKey === deriveAutomationOccurrenceKey(input.occurrence);
 }
 
-const AUTOMATION_DAY_MS = 24 * 60 * 60 * 1_000;
 const AUTOMATION_MINUTE_MS = 60 * 1_000;
-const AUTOMATION_LOCAL_OFFSET_SAMPLE_RADIUS_HOURS = 48;
-const AUTOMATION_LOCAL_OFFSET_SAMPLE_STEP_HOURS = 6;
-const AUTOMATION_LOCAL_TRANSITION_PROBE_HOURS = 36;
-
-interface AutomationLocalDateTimeParts {
-  readonly year: number;
-  readonly month: number;
-  readonly day: number;
-  readonly hour: number;
-  readonly minute: number;
-  readonly second: number;
-}
-
-function automationLocalDateTimeParts(
-  epochMs: number,
-  timeZone: string,
-): AutomationLocalDateTimeParts {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    calendar: "iso8601",
-    numberingSystem: "latn",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(epochMs));
-  const values = new Map(
-    parts.filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]),
-  );
-  return {
-    year: values.get("year")!,
-    month: values.get("month")!,
-    day: values.get("day")!,
-    hour: values.get("hour")!,
-    minute: values.get("minute")!,
-    second: values.get("second")!,
-  };
-}
-
-function automationLocalWallAsUtc(parts: AutomationLocalDateTimeParts): number {
-  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
-}
-
-function automationOffsetMinutesAt(epochMs: number, timeZone: string): number {
-  const local = automationLocalDateTimeParts(epochMs, timeZone);
-  return (automationLocalWallAsUtc(local) - epochMs) / AUTOMATION_MINUTE_MS;
-}
-
-function automationLocalPartsMatch(
-  left: AutomationLocalDateTimeParts,
-  right: AutomationLocalDateTimeParts,
-): boolean {
-  return (
-    left.year === right.year &&
-    left.month === right.month &&
-    left.day === right.day &&
-    left.hour === right.hour &&
-    left.minute === right.minute &&
-    left.second === right.second
-  );
-}
-
-function automationLocalPartsAtOrAfter(
-  left: AutomationLocalDateTimeParts,
-  right: AutomationLocalDateTimeParts,
-): boolean {
-  return automationLocalWallAsUtc(left) >= automationLocalWallAsUtc(right);
-}
-
-function automationWeeklyOccurrenceForDate(
-  trigger: Extract<AutomationTrigger, { readonly kind: "weekly-local" }>,
-  dateMs: number,
-): number | undefined {
-  const date = new Date(dateMs);
-  const [hourText, minuteText] = trigger.localTime.split(":") as [string, string];
-  const desired: AutomationLocalDateTimeParts = {
-    year: date.getUTCFullYear(),
-    month: date.getUTCMonth() + 1,
-    day: date.getUTCDate(),
-    hour: Number(hourText),
-    minute: Number(minuteText),
-    second: 0,
-  };
-  const nominal = automationLocalWallAsUtc(desired);
-  const offsets = new Set<number>();
-  for (
-    let hours = -AUTOMATION_LOCAL_OFFSET_SAMPLE_RADIUS_HOURS;
-    hours <= AUTOMATION_LOCAL_OFFSET_SAMPLE_RADIUS_HOURS;
-    hours += AUTOMATION_LOCAL_OFFSET_SAMPLE_STEP_HOURS
-  ) {
-    offsets.add(
-      automationOffsetMinutesAt(nominal + hours * 60 * AUTOMATION_MINUTE_MS, trigger.timeZone),
-    );
-  }
-
-  const candidates: number[] = [];
-  for (const offset of offsets) {
-    const candidate = nominal - offset * AUTOMATION_MINUTE_MS;
-    if (
-      automationLocalPartsMatch(automationLocalDateTimeParts(candidate, trigger.timeZone), desired)
-    ) {
-      candidates.push(candidate);
-    }
-  }
-  if (candidates.length > 0) return Math.min(...candidates);
-
-  const gapCandidates: number[] = [];
-  for (const offset of offsets) {
-    const transitionProbe = nominal - offset * AUTOMATION_MINUTE_MS;
-    const beforeOffset = automationOffsetMinutesAt(
-      transitionProbe - AUTOMATION_LOCAL_TRANSITION_PROBE_HOURS * 60 * AUTOMATION_MINUTE_MS,
-      trigger.timeZone,
-    );
-    const afterOffset = automationOffsetMinutesAt(
-      transitionProbe + AUTOMATION_LOCAL_TRANSITION_PROBE_HOURS * 60 * AUTOMATION_MINUTE_MS,
-      trigger.timeZone,
-    );
-    if (afterOffset <= beforeOffset) continue;
-    const candidate =
-      nominal +
-      (afterOffset - beforeOffset) * AUTOMATION_MINUTE_MS -
-      afterOffset * AUTOMATION_MINUTE_MS;
-    if (
-      automationLocalPartsAtOrAfter(
-        automationLocalDateTimeParts(candidate, trigger.timeZone),
-        desired,
-      )
-    ) {
-      gapCandidates.push(candidate);
-    }
-  }
-  return gapCandidates.length > 0 ? Math.min(...gapCandidates) : undefined;
-}
 
 function automationScheduledAtMatchesTrigger(
   trigger: AutomationTrigger,
   scheduledAt: UtcTimestamp,
 ): boolean {
-  const scheduledMs = new Date(scheduledAt).getTime();
   switch (trigger.kind) {
     case "once":
       return scheduledAt === trigger.scheduledAt;
     case "interval": {
+      const scheduledMs = new Date(scheduledAt).getTime();
       const anchorMs = new Date(trigger.anchorAt).getTime();
       const intervalMs = trigger.intervalMinutes * AUTOMATION_MINUTE_MS;
       return scheduledMs >= anchorMs && (scheduledMs - anchorMs) % intervalMs === 0;
     }
-    case "weekly-local": {
-      const local = automationLocalDateTimeParts(scheduledMs, trigger.timeZone);
-      const localDateMs = Date.UTC(local.year, local.month - 1, local.day);
-      for (let dayOffset = -2; dayOffset <= 2; dayOffset += 1) {
-        const candidateDateMs = localDateMs + dayOffset * AUTOMATION_DAY_MS;
-        const weekday = new Date(candidateDateMs).getUTCDay() || 7;
-        if (!trigger.weekdays.includes(weekday as (typeof trigger.weekdays)[number])) continue;
-        if (automationWeeklyOccurrenceForDate(trigger, candidateDateMs) === scheduledMs) {
-          return true;
-        }
-      }
+    case "weekly-local":
       return false;
-    }
   }
 }
 
-function automationLocalTimeMinutes(localTime: string): number {
-  const [hour = 0, minute = 0] = localTime.split(":").map(Number);
+function automationLocalTimeMinutes(localTime: string): number | undefined {
+  const [hourText, minuteText] = localTime.split(":");
+  if (hourText === undefined || minuteText === undefined) return undefined;
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return undefined;
   return hour * 60 + minute;
 }
 
@@ -796,21 +659,15 @@ function automationWeeklyResolutionMatchesTrigger(
   ) {
     return false;
   }
-  const resolvedLocal = new Date(
-    new Date(scheduledAt).getTime() + evidence.utcOffsetMinutes * AUTOMATION_MINUTE_MS,
-  );
-  if (
-    resolvedLocal.toISOString().slice(0, 10) !== evidence.resolvedLocalDate ||
-    resolvedLocal.toISOString().slice(11, 16) !== evidence.resolvedLocalTime
-  ) {
-    return false;
-  }
-  const weekday = resolvedLocal.getUTCDay() || 7;
-  if (!trigger.weekdays.includes(weekday as (typeof trigger.weekdays)[number])) return false;
+  const weekday = new Date(`${evidence.resolvedLocalDate}T00:00:00.000Z`).getUTCDay() || 7;
+  if (!trigger.weekdays.some((value) => value === weekday)) return false;
   if (evidence.resolution === "gap-forward") {
+    const resolvedMinutes = automationLocalTimeMinutes(evidence.resolvedLocalTime);
+    const triggerMinutes = automationLocalTimeMinutes(trigger.localTime);
     return (
-      automationLocalTimeMinutes(evidence.resolvedLocalTime) >=
-      automationLocalTimeMinutes(trigger.localTime)
+      resolvedMinutes !== undefined &&
+      triggerMinutes !== undefined &&
+      resolvedMinutes >= triggerMinutes
     );
   }
   return evidence.resolvedLocalTime === trigger.localTime;

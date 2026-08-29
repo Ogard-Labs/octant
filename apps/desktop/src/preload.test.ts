@@ -10,6 +10,7 @@ import {
   createHostBridge,
   decodeInitialProjectTarget,
   decodeProjectWindowCapability,
+  decodeWindowIdArgument,
   installHostBridge,
   type ContextBridgePort,
   type IpcRendererPort,
@@ -63,7 +64,14 @@ describe("desktop preload bridge", () => {
     const exposeInMainWorld = vi.fn();
     const context: ContextBridgePort = { exposeInMainWorld };
 
-    installHostBridge(context, ipc, projectWindowCapability, { kind: "project", projectId });
+    installHostBridge(
+      context,
+      ipc,
+      projectWindowCapability,
+      { kind: "project", projectId },
+      "darwin",
+      "00000000-0000-4000-8000-000000000201",
+    );
 
     expect(exposeInMainWorld).toHaveBeenCalledOnce();
     const [key, bridge] = exposeInMainWorld.mock.calls[0] as [string, Record<string, unknown>];
@@ -125,10 +133,12 @@ describe("desktop preload bridge", () => {
       "tabBrowserSurface",
       "updateBrowserSurfaceBounds",
       "windowChrome",
+      "windowId",
     ]);
     expect(bridge).not.toHaveProperty("invoke");
     expect(bridge).not.toHaveProperty("send");
     expect(bridge.projectWindowCapability).toBe(projectWindowCapability);
+    expect(bridge.windowId).toBe("00000000-0000-4000-8000-000000000201");
     expect(bridge.initialProjectTarget).toEqual({ kind: "project", projectId });
     expect(Object.isFrozen(bridge.initialProjectTarget)).toBe(true);
     expect(JSON.stringify(bridge)).not.toContain("desktop-secret");
@@ -439,6 +449,23 @@ describe("desktop preload bridge", () => {
       TypeError,
     );
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("strictly decodes the window identity from the Electron launch arguments", () => {
+    const windowId = "00000000-0000-4000-8000-000000000201";
+    expect(
+      decodeWindowIdArgument([
+        "/Applications/Octant.app/Contents/MacOS/Octant",
+        `--octant-window-id=${windowId}`,
+      ]),
+    ).toBe(windowId);
+    for (const args of [
+      [],
+      ["--octant-window-id=not-a-window"],
+      [`--octant-window-id=${windowId}`, `--octant-window-id=${"1".repeat(36)}`],
+    ]) {
+      expect(() => decodeWindowIdArgument(args)).toThrow(TypeError);
+    }
   });
 
   it("strictly decodes one scoped capability from the Electron launch arguments", () => {

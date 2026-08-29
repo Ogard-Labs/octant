@@ -1,11 +1,15 @@
-import { draftThreadModePresentation } from "@octant/contracts/thread-draft";
 import { Aperture, Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
-import type { CreateHostViewScope, ModelPickerSelection, PickerGroup } from "@octant/domain";
+import {
+  draftThreadModePresentation,
+  type CreateHostViewScope,
+  type ModelPickerSelection,
+  type PickerGroup,
+} from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";

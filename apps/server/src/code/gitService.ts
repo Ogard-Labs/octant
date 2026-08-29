@@ -1,3 +1,4 @@
+import type { ProviderExecutionPolicy } from "@octant/contracts";
 import type { GitMutationPort, GitMutationResult, GitTreeSnapshot } from "./gitMutationPort";
 import type {
   GitBranchComparisonResult,
@@ -140,6 +141,7 @@ export class GitService {
       readonly checkoutId: string;
       readonly checkoutRoot: string;
       readonly branch: string;
+      readonly executionPolicy?: ProviderExecutionPolicy;
     },
     signal?: AbortSignal,
   ): Promise<GitServiceResult> {
@@ -149,7 +151,14 @@ export class GitService {
       if (current.changedPaths.length > 0) return { status: "rejected", reason: "dirty-checkout" };
       const merge = this.#mutation.mergeBranch;
       if (merge === undefined) return { status: "unavailable" };
-      return merge({ checkoutRoot: current.checkoutRoot, branch: input.branch }, signal);
+      return merge(
+        {
+          checkoutRoot: current.checkoutRoot,
+          branch: input.branch,
+          ...mutationPolicy(input.executionPolicy),
+        },
+        signal,
+      );
     });
   }
 
@@ -159,6 +168,7 @@ export class GitService {
       readonly checkoutRoot: string;
       readonly paths: readonly string[];
       readonly expectedStateToken: string;
+      readonly executionPolicy?: ProviderExecutionPolicy;
     },
     signal?: AbortSignal,
   ): Promise<GitServiceResult> {
@@ -171,7 +181,11 @@ export class GitService {
       if (input.paths.some((path) => !changed.has(path)))
         return { status: "rejected", reason: "unlisted-path" };
       return this.#mutation.stage(
-        { checkoutRoot: current.checkoutRoot, paths: input.paths },
+        {
+          checkoutRoot: current.checkoutRoot,
+          paths: input.paths,
+          ...mutationPolicy(input.executionPolicy),
+        },
         signal,
       );
     });
@@ -188,6 +202,7 @@ export class GitService {
       readonly checkoutRoot: string;
       readonly paths: readonly string[];
       readonly expectedStateToken: string;
+      readonly executionPolicy?: ProviderExecutionPolicy;
     },
     signal?: AbortSignal,
   ): Promise<GitServiceResult> {
@@ -207,7 +222,11 @@ export class GitService {
       if (input.paths.some((path) => !staged.has(path)))
         return { status: "rejected", reason: "unlisted-path" };
       return this.#mutation.unstage(
-        { checkoutRoot: current.checkoutRoot, paths: input.paths },
+        {
+          checkoutRoot: current.checkoutRoot,
+          paths: input.paths,
+          ...mutationPolicy(input.executionPolicy),
+        },
         signal,
       );
     });
@@ -225,6 +244,7 @@ export class GitService {
       readonly checkoutRoot: string;
       readonly paths: readonly string[];
       readonly expectedStateToken: string;
+      readonly executionPolicy?: ProviderExecutionPolicy;
     },
     signal?: AbortSignal,
   ): Promise<GitServiceResult> {
@@ -244,7 +264,11 @@ export class GitService {
       if (input.paths.some((path) => untracked.has(path)))
         return { status: "rejected", reason: "untracked-path" };
       return this.#mutation.discard(
-        { checkoutRoot: current.checkoutRoot, paths: input.paths },
+        {
+          checkoutRoot: current.checkoutRoot,
+          paths: input.paths,
+          ...mutationPolicy(input.executionPolicy),
+        },
         signal,
       );
     });
@@ -257,6 +281,7 @@ export class GitService {
       readonly message: string;
       readonly expectedStateToken: string;
       readonly stagedSummary: readonly GitStatusEntry[];
+      readonly executionPolicy?: ProviderExecutionPolicy;
     },
     signal?: AbortSignal,
   ): Promise<GitServiceResult> {
@@ -272,6 +297,7 @@ export class GitService {
           checkoutRoot: current.checkoutRoot,
           message: input.message,
           stagedSummary: input.stagedSummary,
+          ...mutationPolicy(input.executionPolicy),
         },
         signal,
       );
@@ -291,12 +317,20 @@ export class GitService {
    * turn stays restorable; only removing the checkout retires them.
    */
   checkpoint(
-    input: { readonly checkoutId: string; readonly checkoutRoot: string },
+    input: {
+      readonly checkoutId: string;
+      readonly checkoutRoot: string;
+      readonly executionPolicy?: ProviderExecutionPolicy;
+    },
     signal?: AbortSignal,
   ): Promise<GitCheckpointResult> {
     return this.#serialized(input.checkoutId, async () => {
       const snapshot = await this.#mutation.snapshotWorkingTree(
-        { checkoutRoot: input.checkoutRoot, checkoutId: input.checkoutId },
+        {
+          checkoutRoot: input.checkoutRoot,
+          checkoutId: input.checkoutId,
+          ...mutationPolicy(input.executionPolicy),
+        },
         signal,
       );
       return snapshot.status === "captured"
@@ -318,6 +352,7 @@ export class GitService {
       readonly checkoutId: string;
       readonly checkoutRoot: string;
       readonly snapshot: GitTreeSnapshot;
+      readonly executionPolicy?: ProviderExecutionPolicy;
     },
     signal?: AbortSignal,
   ): Promise<GitServiceResult & { readonly undo?: GitTreeSnapshot }> {
@@ -325,12 +360,20 @@ export class GitService {
       const current = await this.#ready(input.checkoutRoot, signal);
       if (!current) return { status: "unavailable" };
       const undo = await this.#mutation.snapshotWorkingTree(
-        { checkoutRoot: current.checkoutRoot, checkoutId: input.checkoutId },
+        {
+          checkoutRoot: current.checkoutRoot,
+          checkoutId: input.checkoutId,
+          ...mutationPolicy(input.executionPolicy),
+        },
         signal,
       );
       if (undo.status !== "captured") return { status: "unavailable" };
       const restored = await this.#mutation.restoreWorkingTree(
-        { checkoutRoot: current.checkoutRoot, snapshot: input.snapshot },
+        {
+          checkoutRoot: current.checkoutRoot,
+          snapshot: input.snapshot,
+          ...mutationPolicy(input.executionPolicy),
+        },
         signal,
       );
       // A rejection is refused before the checkout is touched, so it alone
@@ -346,6 +389,7 @@ export class GitService {
           checkoutRoot: current.checkoutRoot,
           checkoutId: input.checkoutId,
           anchorId: undo.anchorId,
+          ...mutationPolicy(input.executionPolicy),
         },
         signal,
       );
@@ -359,6 +403,7 @@ export class GitService {
       readonly checkoutRoot: string;
       readonly oid: string;
       readonly expectedStateToken: string;
+      readonly executionPolicy?: ProviderExecutionPolicy;
     },
     signal?: AbortSignal,
   ): Promise<GitServiceResult> {
@@ -369,7 +414,11 @@ export class GitService {
         return { status: "rejected", reason: "stale-state" };
       if (current.statusEntries.length > 0) return { status: "rejected", reason: "dirty-checkout" };
       return this.#mutation.revertCommit(
-        { checkoutRoot: current.checkoutRoot, oid: input.oid },
+        {
+          checkoutRoot: current.checkoutRoot,
+          oid: input.oid,
+          ...mutationPolicy(input.executionPolicy),
+        },
         signal,
       );
     });
@@ -389,6 +438,7 @@ export class GitService {
       readonly expectedHeadOid: string;
       readonly expectedStateToken: string;
       readonly authority: "plan" | "approval-gated" | "approved" | "full-access";
+      readonly executionPolicy?: ProviderExecutionPolicy;
     },
     signal?: AbortSignal,
   ): Promise<GitServiceResult> {
@@ -416,6 +466,7 @@ export class GitService {
           localRef: input.localRef,
           remoteRef: input.remoteRef,
           confirmation: input.confirmation,
+          ...mutationPolicy(input.executionPolicy),
         },
         signal,
       );
@@ -448,4 +499,10 @@ export class GitService {
 
 function sameSummary(left: readonly GitStatusEntry[], right: readonly GitStatusEntry[]): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function mutationPolicy(executionPolicy: ProviderExecutionPolicy | undefined): {
+  readonly executionPolicy?: ProviderExecutionPolicy;
+} {
+  return executionPolicy === undefined ? {} : { executionPolicy };
 }

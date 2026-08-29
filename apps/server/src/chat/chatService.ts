@@ -722,7 +722,15 @@ export class ChatService {
     }
     // The pool's first candidate is the request only where mixed routing is
     // enabled.  With it disabled, the persisted thread route is the parent.
-    const parentCandidate = inheritedCandidate ?? pool.candidates[0]!;
+    const parentCandidate = inheritedCandidate ?? pool.candidates[0];
+    if (parentCandidate === undefined) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "invalid",
+          message: "A multi-model pool must include at least one candidate.",
+        }),
+      );
+    }
     const runtimeFacts = await this.#gatherMultiModelRuntimeFacts({ pool, mode, activeHostId });
     const parentFacts = runtimeFacts.find(
       (entry) => poolCandidateKey(entry.candidate) === poolCandidateKey(parentCandidate),

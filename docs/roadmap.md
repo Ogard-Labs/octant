@@ -158,7 +158,7 @@ Intentionally out of scope; changing this requires an approved design change.
   boards only; Chat has no board and work-list items never become cards.
 - **Swarm, Dispatch, race, or model-comparison launch surfaces** — replaced by
   unified subagents. The one authorized exception is the Project planner
-  thread ([0064](decisions/0064-project-planner-thread.md)): a single
+  thread ([0065](decisions/0065-project-planner-thread.md)): a single
   designated Code thread per Code Project that reads the Project's board and
   proposes work the user must explicitly confirm. It launches and redirects
   nothing.

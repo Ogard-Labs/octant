@@ -1,4 +1,4 @@
-# 0064. A Project-scoped planner thread surveys the board and proposes work
+# 0065. A Project-scoped planner thread surveys the board and proposes work
 
 **Status:** Accepted
 

@@ -2,6 +2,7 @@ import type { AppleSimulatorLiveFrame } from "@octant/domain";
 import { canOfferAppleSimulatorFrameInput } from "@octant/domain";
 import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 
 export type AppleSimulatorFrameInputIntent =
   | { readonly kind: "tap"; readonly point: { readonly x: number; readonly y: number } }
@@ -73,6 +74,10 @@ function LiveScreen(props: {
   readonly busy: boolean;
 }) {
   return (
+    // The screen is a coordinate hit region: taps translate to Simulator
+    // device points, so the Octant button recipe (fixed height, padding)
+    // cannot host it without distorting the mapped geometry.
+    /* ui-boundary-exception: specialized-editor-surface */
     <button
       aria-label={
         props.offerInput
@@ -109,7 +114,7 @@ function FrameInputControls(props: {
     <div className="apple-simulator-frame__input" role="group" aria-label="Simulator input">
       <label className="apple-simulator-frame__type" htmlFor={textId}>
         Type into Simulator
-        <input
+        <OctantInput
           autoComplete="off"
           disabled={props.busy}
           id={textId}
