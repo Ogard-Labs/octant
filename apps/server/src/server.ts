@@ -1823,16 +1823,17 @@ export function startOctantServer(
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
       cacheStats,
     });
-    const githubReadToolService = new GithubReadToolService({
-      catalogue: githubCatalogueService,
-      snapshot: (signal) => githubCapabilityService.snapshot(signal),
-    });
     const externalContentIngestionStore = new ExternalContentIngestionStore({
       journal: persistence.journal,
       connection: persistence.connection,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const githubReadToolService = new GithubReadToolService({
+      catalogue: githubCatalogueService,
+      snapshot: (signal) => githubCapabilityService.snapshot(signal),
+      ingestion: externalContentIngestionStore,
     });
     const githubIssueContextService = new GithubIssueContextService({
       catalogue: githubCatalogueService,

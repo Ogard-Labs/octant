@@ -25,17 +25,15 @@ const effectiveActivation: ExtensionActivationState = {
 
 function snapshotWithGithub(
   activation: ExtensionActivationState = effectiveActivation,
-): ExtensionSnapshot {
+): Pick<ExtensionSnapshot, "packages"> {
   return {
-    sequence: 1 as never,
-    snapshotAt: "2026-08-29T00:00:00.000Z" as never,
     packages: [
       {
         extensionId: "10000000-0000-4000-8000-0000000000c1",
         packageId: "20000000-0000-4000-8000-0000000000c1",
         slug: "github",
         displayName: "GitHub",
-        stateVersion: 1 as never,
+        stateVersion: 1,
         version: "1.0.0",
         digest,
         source: { kind: "bundled", sourceRef: "app:github" },
@@ -63,21 +61,13 @@ function snapshotWithGithub(
         ],
         diagnostics: [],
       },
-    ],
-    collisions: [],
+    ] as never,
   };
 }
 
 describe("isGithubIntegrationEffective", () => {
   it("treats bundled GitHub as effective when the extension store has no row", () => {
-    expect(
-      isGithubIntegrationEffective({
-        sequence: 0 as never,
-        snapshotAt: "2026-08-29T00:00:00.000Z" as never,
-        packages: [],
-        collisions: [],
-      }),
-    ).toBe(true);
+    expect(isGithubIntegrationEffective({ packages: [] })).toBe(true);
   });
 
   it("stays effective when the store row is installed, trusted, and desired", () => {
@@ -123,15 +113,7 @@ describe("isGithubIntegrationEffective", () => {
     };
     expect(githubReadToolSetIfEffective(snapshotWithGithub(), () => created)).toBe(created);
     expect(
-      githubReadToolSetIfEffective(
-        {
-          sequence: 0 as never,
-          snapshotAt: "2026-08-29T00:00:00.000Z" as never,
-          packages: [],
-          collisions: [],
-        },
-        () => created,
-      ),
+      githubReadToolSetIfEffective({ packages: [] }, () => created),
     ).toBe(created);
   });
 });

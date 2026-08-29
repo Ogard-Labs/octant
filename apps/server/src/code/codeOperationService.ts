@@ -158,6 +158,7 @@ export interface CodeOperationTerminalPort {
       readonly environmentName: string;
       readonly reference: string;
     }[];
+    readonly executionPolicy?: CodeThread["executionPolicy"];
   }) => Promise<CodeOperationTerminalSnapshot>;
   readonly attach: (terminalId: string) => CodeOperationTerminalSnapshot;
   readonly observe?: (
@@ -1232,6 +1233,7 @@ export class CodeOperationService {
           columns: command.columns,
           rows: command.rows,
           credentialReferences,
+          executionPolicy: thread.executionPolicy,
         });
         this.#terminalOwners.set(command.terminalId, {
           windowId: String(windowId),

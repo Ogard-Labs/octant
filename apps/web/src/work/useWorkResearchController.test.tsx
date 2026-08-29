@@ -492,6 +492,7 @@ describe("useWorkResearchController", () => {
       projectId,
       artifactId,
       expectedArtifactVersion: 1,
+      confirmed: true,
     });
     expect(outcome).toEqual({
       kind: "rejected",

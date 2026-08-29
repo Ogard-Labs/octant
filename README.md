@@ -56,9 +56,9 @@ approval.
 - Semantic themes, presets, and font controls.
 - Native macOS shell: borderless window, a split-tree workspace with one
   surface per pane, translucent sidebar, command palette, and slash commands.
-  The approved interaction model — an active-pane dock of live thread tools, a
-  transient Environment disclosure, and a composer context meter — is recorded
-  in the decision records and is not yet the renderer.
+  The right dock holds live thread-owned tools and restores them per window and
+  thread; Environment is a transient disclosure; context usage sits on the
+  composer meter.
 
 Not everything above is equally polished; this is a technical preview. See the
 user guide in `apps/docs` for the current honest boundaries of each area.

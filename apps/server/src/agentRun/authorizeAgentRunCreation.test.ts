@@ -12,9 +12,13 @@ import {
   decodeWorkspaceTabId,
   decodeWorkThread,
   decodeWorkThreadId,
+  type ChatThreadId,
+  type CodeThreadId,
   type Project,
   type WindowWorkspace,
+  type WorkThreadId,
   type WorkspaceLayoutNode,
+  type WorkspaceTab,
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { contextKeyForProject, defaultWindowWorkspace } from "@octant/domain";
@@ -44,9 +48,7 @@ function parentId(threadId: string) {
   return decodeAgentRunParentThreadId(threadId);
 }
 
-function paneWith(
-  surface: WindowWorkspace["layouts"]["chat"] extends { surface: infer S } ? S : never,
-): WorkspaceLayoutNode {
+function paneWith(surface: WorkspaceTab): WorkspaceLayoutNode {
   return {
     kind: "pane",
     nodeId: ids.node,
@@ -163,18 +165,18 @@ function authorize(input: {
         input.workspace === undefined
           ? undefined
           : { workspace: input.workspace, aggregateVersion: 0 as never },
-      readChatThread: (threadId) =>
+      readChatThread: (threadId: ChatThreadId) =>
         input.chat !== undefined && String(input.chat.id) === String(threadId)
           ? input.chat
           : undefined,
-      readCodeThread: (threadId) =>
+      readCodeThread: (threadId: CodeThreadId) =>
         input.code !== undefined && String(input.code.id) === String(threadId)
           ? input.code
           : undefined,
       readProject: () => input.project,
     } as never,
     workThreadProjection: {
-      read: (threadId) =>
+      read: (threadId: WorkThreadId) =>
         input.work !== undefined && String(input.work.id) === String(threadId)
           ? input.work
           : undefined,

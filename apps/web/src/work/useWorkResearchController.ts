@@ -288,6 +288,9 @@ async function removeReportArtifact(input: {
       projectId: input.projectId,
       artifactId: input.artifact.artifactId,
       expectedArtifactVersion: input.artifact.sequence,
+      // The host refused to finalize; removing the orphan is recovery for
+      // that same user-initiated write, not a new destructive intent.
+      confirmed: true,
     });
     return reply.outcome.kind === "deleted";
   } catch {
