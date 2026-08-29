@@ -666,9 +666,10 @@ describe("RemoteProtocolService negotiation", () => {
     expect(negotiated.origin).toBe(ORIGIN);
     expect(negotiated.capabilityDigest).toBe(REMOTE_AUTHENTICATION_ONLY_CAPABILITY_DIGEST);
     expect(negotiated.expiresAt).toBe(challenge.expiresAt);
-    expect(JSON.stringify(negotiated)).not.toMatch(/nonce|proof|secret|cookie|csrf|private/i);
 
     const { hostSignature, ...sans } = negotiated;
+    // Exclude hostSignature: random base64url can substring-match csrf/proof/etc.
+    expect(JSON.stringify(sans)).not.toMatch(/nonce|proof|secret|cookie|csrf|private/i);
     expect(
       verify(
         "sha256",
