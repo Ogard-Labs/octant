@@ -293,6 +293,36 @@ describe("HostFederationMergedReads (Post-preview B3)", () => {
     expect(merged.hostStates.find((state) => state.hostId === HOST_A)?.freshness).toBe("stale");
   });
 
+  it("ensureHost seeds an empty stale row when missing and only renames when present", () => {
+    const cache = createHostReadModelCache();
+
+    const seeded = cache.ensureHost(HOST_A, { hostDisplayName: "Studio" });
+    expect(seeded.freshness).toBe("stale");
+    expect(seeded.items).toEqual([]);
+    expect(cache.get(HOST_A)?.hostDisplayName).toBe("Studio");
+
+    cache.put(
+      contribution({
+        hostId: HOST_B,
+        displayName: "Laptop",
+        freshness: "ready",
+        items: [
+          item({
+            hostId: HOST_B,
+            entityId: "thread-b",
+            kind: "thread",
+            title: "Laptop thread",
+            sortKey: NOW,
+          }),
+        ],
+      }),
+    );
+    const renamed = cache.ensureHost(HOST_B, { hostDisplayName: "Laptop (renamed)" });
+    expect(renamed.hostDisplayName).toBe("Laptop (renamed)");
+    expect(renamed.freshness).toBe("ready");
+    expect(renamed.items).toHaveLength(1);
+  });
+
   it("rejects queued authority-bearing mutations while a host is stale", () => {
     expect(allowAuthorityBearingMutation("ready")).toBe(true);
     expect(allowAuthorityBearingMutation("stale")).toBe(false);
@@ -400,6 +430,26 @@ describe("HostFederationMergedReads (Post-preview B3)", () => {
     expect(
       allowAuthorityBearingMutation(result.hostStates.find((s) => s.hostId === HOST_B)!.freshness),
     ).toBe(false);
+  });
+
+  it("keeps a never-fetched rejected host visible as an empty stale row rather than absent", () => {
+    const cache = createHostReadModelCache();
+
+    const result = cache.applyRefreshResults([
+      {
+        hostId: HOST_B,
+        status: "rejected",
+        reason: "never connected",
+        category: "unavailable",
+        hostDisplayName: "Laptop",
+      },
+    ]);
+
+    expect(result.hostStates).toEqual([
+      expect.objectContaining({ hostId: HOST_B, hostDisplayName: "Laptop", freshness: "stale" }),
+    ]);
+    expect(result.hostStates.find((state) => state.hostId === HOST_B)?.itemCount).toBe(0);
+    expect(cache.get(HOST_B)?.items).toEqual([]);
   });
 
   it("removes only the revoked host cache and never invents ownership merge", () => {

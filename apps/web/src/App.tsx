@@ -66,7 +66,11 @@ import {
   type AppleToolchainClient,
 } from "@octant/client-runtime/apple-toolchain-client";
 import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
-import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
+import { LOCAL_HOST_ID, decodeHostId, type HostId } from "@octant/contracts/host";
+import {
+  ALL_ENVIRONMENTS,
+  type EnvironmentSelection,
+} from "@octant/client-runtime/environment-selection";
 import {
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
@@ -1299,15 +1303,45 @@ function LaunchedShell(
       createHostClient({ baseUrl: props.launch.serverUrl, fetch: globalThis.fetch }),
     [props.hostClient, props.launch.serverUrl],
   );
-  const hosts = useHostObservation(hostClient);
+  const observedHosts = useHostObservation(hostClient);
   const hostFederationLifecycle = useHostFederationLifecycle();
+  const [federationRevision, setFederationRevision] = useState(0);
+  useEffect(() => {
+    if (hostFederationLifecycle === undefined) return;
+    return hostFederationLifecycle.subscribe(() =>
+      setFederationRevision((revision) => revision + 1),
+    );
+  }, [hostFederationLifecycle]);
+  // The federation lifecycle registry is All-Hosts complete — an unhealthy or
+  // never-fetched host stays listed — so it wins over the host client's own
+  // observation whenever it has anything to say.
+  const lifecycleHostIdentities = useMemo(
+    () => hostFederationLifecycle?.toHostIdentities() ?? [],
+    [hostFederationLifecycle, federationRevision],
+  );
+  const hosts = lifecycleHostIdentities.length > 0 ? lifecycleHostIdentities : observedHosts;
+  const federatedHostStates = useMemo(
+    () => hostFederationLifecycle?.toFederatedHostStates() ?? [],
+    [hostFederationLifecycle, federationRevision],
+  );
+  const [environmentSelection, setEnvironmentSelection] =
+    useState<EnvironmentSelection>(ALL_ENVIRONMENTS);
   const [lastSelectedHealthyHostId, setLastSelectedHealthyHostId] = useState<HostId | undefined>(
     () => readLastSelectedHealthyHostId(),
   );
   const [createHostId, setCreateHostId] = useState<HostId>(() => defaultCreateHostId());
-  // Until B3 ships host-filtered shell views, create uses All Hosts preselect
-  // (last healthy → first healthy). The selector still accepts multi-host input.
-  const createHostViewScope = useMemo<CreateHostViewScope>(() => ({ kind: "all-hosts" }), []);
+  // A single selected environment fixes create's destination to that host;
+  // otherwise create keeps the All Hosts preselect (last healthy → first
+  // healthy). The selector still accepts multi-host input either way.
+  const createHostViewScope = useMemo<CreateHostViewScope>(() => {
+    if (environmentSelection.kind === "some" && environmentSelection.hostIds.size === 1) {
+      const onlyHostId = [...environmentSelection.hostIds][0];
+      if (onlyHostId !== undefined) {
+        return { kind: "host-filter", hostId: decodeHostId(onlyHostId) };
+      }
+    }
+    return { kind: "all-hosts" };
+  }, [environmentSelection]);
   useEffect(() => {
     if (hosts.length === 0) return;
     const result = preselectCreateHost({
@@ -4088,6 +4122,16 @@ function LaunchedShell(
         transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
           <ShellSidebar
+            {...(federatedHostStates.length < 2
+              ? {}
+              : {
+                  environments: {
+                    hostStates: federatedHostStates,
+                    selection: environmentSelection,
+                    localHostId: String(LOCAL_HOST_ID),
+                    onSelectionChange: setEnvironmentSelection,
+                  },
+                })}
             {...(activeMode === "chat"
               ? {
                   ...(chatController.errorMessage === undefined

@@ -80,6 +80,7 @@ function createLifecycle(
       reason: "Host is not ready.",
     })),
     toHostIdentities: () => [],
+    toFederatedHostStates: () => [],
     subscribe: (listener) => {
       listeners.add(listener);
       return () => {

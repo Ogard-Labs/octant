@@ -1339,10 +1339,12 @@ describe("ProjectSidebarSection search", () => {
     expect(screen.getByRole("heading", { name: "Unfiled" })).toBeVisible();
   });
 
-  it("says so when nothing matches", () => {
+  it("explains that filters hid every thread rather than implying deletion", () => {
     render(<ProjectSidebarSection {...sharedProps} searchQuery="no such thread" />);
 
-    expect(screen.getByText("No matching threads.")).toBeVisible();
+    const empty = screen.getByRole("status");
+    expect(empty).toHaveTextContent(/nothing was deleted/i);
+    expect(empty).toHaveTextContent(/clear search or change environment filters/i);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
   });
@@ -1360,7 +1362,7 @@ describe("ProjectSidebarSection search", () => {
       expect(screen.getByRole("heading", { name: "Wednesday" })).toBeVisible();
 
       rerender(<ProjectSidebarSection {...sharedProps} searchQuery="aurora" />);
-      expect(screen.getByText("No matching threads.")).toBeVisible();
+      expect(screen.getByRole("status")).toHaveTextContent(/nothing was deleted/i);
       expect(screen.queryByRole("heading", { name: "Today" })).not.toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Yesterday" })).not.toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Wednesday" })).not.toBeInTheDocument();
