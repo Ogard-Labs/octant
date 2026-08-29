@@ -5675,7 +5675,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transform: rotate(90deg);
 }
 
-
 .code-transcript-row__disclosure--toolchain > summary .code-transcript-row__name {
   color: var(--oct-muted);
   font-family: var(--oct-font-mono);

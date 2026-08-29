@@ -37,10 +37,7 @@ import {
 } from "./ChatComposer";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ChatTranscript } from "./ChatTranscript";
-import {
-  formatOutgoingMessageWithQuotes,
-  type TranscriptQuoteChip,
-} from "./quoteSelection";
+import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
