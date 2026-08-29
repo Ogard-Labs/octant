@@ -1339,12 +1339,64 @@ describe("ProjectSidebarSection search", () => {
     expect(screen.getByRole("heading", { name: "Unfiled" })).toBeVisible();
   });
 
-  it("says so when nothing matches", () => {
+  it("explains that filters hid every thread rather than implying deletion", () => {
     render(<ProjectSidebarSection {...sharedProps} searchQuery="no such thread" />);
 
-    expect(screen.getByText("No matching threads.")).toBeVisible();
+    const empty = screen.getByRole("status");
+    expect(empty).toHaveTextContent(/nothing was deleted/i);
+    expect(empty).toHaveTextContent(/clear search or change environment filters/i);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
+  });
+
+  it("explains that an environment-only filter hid every thread rather than implying deletion", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-view-preferences.v1",
+      JSON.stringify({
+        filters: {
+          lifecycle: "active",
+          environmentIds: ["devbox"],
+          showEmptyProjects: true,
+          grouping: "project",
+          sorting: "recency",
+          activity: "all",
+        },
+      }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        now={now}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewEnvironmentOptions={[
+          { id: "local", name: "Local" },
+          { id: "devbox", name: "Devbox" },
+        ]}
+        projectViewsEnabled
+        projects={[codeProjectA]}
+        threads={[
+          {
+            projectId: String(codeProjectA.id),
+            threadId: "thread-planning",
+            title: "Planning",
+            updatedAt: "2026-08-14T12:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    const empty = screen.getByRole("status");
+    expect(empty).toHaveTextContent(/nothing was deleted/i);
+    expect(empty).toHaveTextContent(/change environment filters/i);
+    expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
   });
 
   it("hides activity-view groups with no matches and restores them when search clears", async () => {
@@ -1360,7 +1412,7 @@ describe("ProjectSidebarSection search", () => {
       expect(screen.getByRole("heading", { name: "Wednesday" })).toBeVisible();
 
       rerender(<ProjectSidebarSection {...sharedProps} searchQuery="aurora" />);
-      expect(screen.getByText("No matching threads.")).toBeVisible();
+      expect(screen.getByRole("status")).toHaveTextContent(/nothing was deleted/i);
       expect(screen.queryByRole("heading", { name: "Today" })).not.toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Yesterday" })).not.toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Wednesday" })).not.toBeInTheDocument();

@@ -1,5 +1,7 @@
 import { decodeWindowId } from "@octant/contracts/shell";
 import { defaultShellSettings, defaultWindowWorkspace } from "@octant/domain/shell-policy";
+import { ALL_ENVIRONMENTS } from "@octant/client-runtime/environment-selection";
+import type { FederatedHostState } from "@octant/client-runtime";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -469,6 +471,66 @@ describe("ShellSidebar", () => {
     expect(activity.querySelector("svg")).toHaveAttribute("width", "16");
     expect(activity).not.toHaveTextContent("Turn on activity view");
     expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar-item");
+  });
+
+  it("offers the environments filter once at least two hosts are known", async () => {
+    const user = userEvent.setup();
+    const hostStates = [
+      { hostId: "host-local", hostDisplayName: "This Mac", freshness: "ready", itemCount: 3 },
+      { hostId: "host-devbox", hostDisplayName: "Devbox", freshness: "unavailable", itemCount: 0 },
+    ] as unknown as ReadonlyArray<FederatedHostState>;
+    const onSelectionChange = vi.fn();
+
+    render(
+      <ShellSidebar
+        environments={{
+          hostStates,
+          selection: ALL_ENVIRONMENTS,
+          localHostId: "host-local",
+          onSelectionChange,
+        }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={defaultShellSettings()}
+        workspace={defaultWindowWorkspace(windowId)}
+      />,
+    );
+
+    expect(screen.getByText("All environments")).toBeVisible();
+    // The filter menu starts closed; open the toggle to see the host rows.
+    await user.click(screen.getByRole("button", { name: "All environments" }));
+    expect(screen.getByText("Local")).toBeVisible();
+    expect(screen.getByText("Devbox")).toBeVisible();
+    expect(screen.getByText("unreachable")).toBeVisible();
+  });
+
+  it("hides the environments filter when fewer than two hosts are known", () => {
+    const hostStates = [
+      { hostId: "host-local", hostDisplayName: "This Mac", freshness: "ready", itemCount: 3 },
+    ] as unknown as ReadonlyArray<FederatedHostState>;
+
+    render(
+      <ShellSidebar
+        environments={{
+          hostStates,
+          selection: ALL_ENVIRONMENTS,
+          localHostId: "host-local",
+          onSelectionChange: vi.fn(),
+        }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={defaultShellSettings()}
+        workspace={defaultWindowWorkspace(windowId)}
+      />,
+    );
+
+    expect(screen.queryByText("All environments")).not.toBeInTheDocument();
   });
 
   it("routes sidebar Search to the App-level overlay", async () => {

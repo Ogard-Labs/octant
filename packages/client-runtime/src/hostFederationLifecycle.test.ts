@@ -333,6 +333,50 @@ describe("HostFederationLifecycle (Post-preview B6)", () => {
     expect(mutation.queued).toBe(false);
   });
 
+  it("keeps an unavailable, never-fetched host visible in toFederatedHostStates rather than absent", async () => {
+    const { lifecycle, bridges, cache } = await seedTwoRemotes();
+    cache.remove(HOST_B);
+    bridges.get(HOST_B)!.setState({
+      kind: "unavailable",
+      reason: "Laptop transport dropped.",
+      hostId: HOST_B,
+      displayName: "Laptop",
+    });
+    lifecycle.observeTransportChange();
+
+    const states = lifecycle.toFederatedHostStates();
+    expect(states.map((state) => state.hostId)).toEqual(
+      expect.arrayContaining([LOCAL_HOST_ID, HOST_A, HOST_B]),
+    );
+    const laptop = states.find((state) => state.hostId === HOST_B);
+    expect(laptop?.itemCount).toBe(0);
+    expect(cache.get(HOST_B)?.items).toEqual([]);
+    expect(cache.get(HOST_B)?.hostDisplayName).toBe("Laptop");
+  });
+
+  it("marks a ready-empty host unavailable instead of leaving freshness ready", async () => {
+    const { lifecycle, bridges, cache } = await seedTwoRemotes();
+    cache.put({
+      hostId: decodeHostId(HOST_B),
+      hostDisplayName: "Laptop",
+      freshness: "ready",
+      items: [],
+    });
+    expect(cache.get(HOST_B)?.freshness).toBe("ready");
+
+    bridges.get(HOST_B)!.setState({
+      kind: "unavailable",
+      reason: "Laptop transport dropped.",
+      hostId: HOST_B,
+      displayName: "Laptop",
+    });
+    lifecycle.observeTransportChange();
+
+    expect(cache.get(HOST_B)?.freshness).toBe("unavailable");
+    expect(cache.get(HOST_B)?.items).toEqual([]);
+    expect(lifecycle.get(HOST_B)?.state).toBe("unavailable");
+  });
+
   it("surfaces expiry as unauthorized with actionable reconnect disabled until re-pair", async () => {
     const { lifecycle, bridges } = await seedTwoRemotes();
     bridges.get(HOST_B)!.setState({
