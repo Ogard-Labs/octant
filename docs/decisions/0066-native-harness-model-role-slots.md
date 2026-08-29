@@ -21,7 +21,11 @@ rejection reasons, and journaled route receipts.
   define custom slots. Every model call the harness makes names a slot.
 - A slot is an ordered candidate list built on the multi-model pool contract.
   Each entry names a provider instance, a model id, and an optional reasoning
-  level. The first entry is the primary; the rest are fallbacks.
+  level. The first entry is the primary; the rest are fallbacks. Slot
+  resolution filters candidates through the same clamps as any routing —
+  0012's mixed-vendor setting, spend ceilings, and parent and mode authority —
+  before any call or fallback, so a list entry never widens what routing
+  policy allows.
 - Jobs resolve to slots through an editable mapping. Defaults: Lead and
   Implementer to `default`, Planner to `plan`, Reviewer to `slow`, Explorer and
   Researcher to `task`, titles, summaries, and compaction to `smol`, image
@@ -49,9 +53,11 @@ rejection reasons, and journaled route receipts.
 
 This record supersedes one rule of 0012, which otherwise stands: mixed-vendor
 role cards for Research, Implementation, and Review with an explicit fallback
-per role are replaced by slot configuration. A child inherits its model by
-resolving its job's slot; all other 0012 rules — authority clamps, bounds,
-journaling, capacity scheduling — are unchanged.
+per role are replaced by slot configuration. The job's slot replaces
+inherit-the-parent as the _default_ source of a child's model; 0012's one-off
+child selection and explicit per-request routing still take precedence over
+the mapping. All other 0012 rules — authority clamps, bounds, journaling,
+capacity scheduling — are unchanged.
 
 ## Consequences
 
