@@ -623,7 +623,43 @@ function appleActionRequest(input: {
       return { ...base, kind: "shutdown", simulatorId: intent.simulatorId, timeoutMs: 30_000 };
     case "screenshot":
       return { ...base, kind: "screenshot", simulatorId: intent.simulatorId, timeoutMs: 30_000 };
+    case "tap":
+      return {
+        ...base,
+        kind: "tap",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        point: intent.point,
+        ...(intent.target === undefined ? {} : { target: intent.target }),
+        timeoutMs: 30_000,
+      };
+    case "type-text":
+      return {
+        ...base,
+        kind: "type-text",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        text: intent.text,
+        timeoutMs: 30_000,
+      };
+    case "key-press":
+      return {
+        ...base,
+        kind: "key-press",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        key: intent.key,
+        timeoutMs: 30_000,
+      };
   }
+}
+
+/** Matches the local host principal used elsewhere on this Mac. */
+function localUserActor(): { readonly kind: "local-user"; readonly actorId: never } {
+  return {
+    kind: "local-user",
+    actorId: "00000000-0000-4000-8000-000000000002" as never,
+  };
 }
 
 function GitWorkspaceSurface(

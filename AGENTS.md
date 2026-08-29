@@ -55,6 +55,7 @@ Read the record that owns your change before editing, not all of them:
 | Collaboration, shared host, git-mediated sharing    | `docs/decisions/0040`                                               |
 | Cross-platform desktop packaging and updates        | `docs/decisions/0034`, `docs/decisions/0058`                        |
 | Apple build and validation                          | `docs/decisions/0014`                                               |
+| Simulator frame input transport                     | `docs/decisions/0062`                                               |
 | Signed updates and in-app changelog                 | `docs/decisions/0034`, `docs/decisions/0061`                        |
 | Computer-use destinations                           | `docs/decisions/0053`                                               |
 | Shell, navigation, workspace layout                 | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`  |

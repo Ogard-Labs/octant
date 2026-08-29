@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { decodeAppleSimulatorId } from "@octant/contracts/apple-toolchain";
 import type { AppleSimulatorLiveFrame } from "@octant/domain";
@@ -96,5 +96,47 @@ describe("AppleSimulatorLiveFrameView", () => {
       "blob:https://octant.local/screen",
     );
     expect(document.querySelector("video")).toBeNull();
+  });
+
+  it("offers tap, type, and key controls only when the live frame is input-enabled", () => {
+    const frame: AppleSimulatorLiveFrame = {
+      status: "live",
+      simulatorId,
+      name: "iPhone 16",
+      screen: { kind: "screenshot", reference: "apple-screenshot-live" },
+      title: "Live · iPhone 16",
+      message: "Showing the latest host-held screen capture for this thread.",
+    };
+    const { rerender } = render(
+      <AppleSimulatorLiveFrameView frame={frame} screenUrl="blob:https://octant.local/screen" />,
+    );
+    expect(screen.queryByLabelText("Simulator input")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Tap on iPhone 16 Simulator screen")).not.toBeInTheDocument();
+
+    const onInput = vi.fn();
+    rerender(
+      <AppleSimulatorLiveFrameView
+        frame={frame}
+        inputEnabled
+        onInput={onInput}
+        screenUrl="blob:https://octant.local/screen"
+      />,
+    );
+    expect(screen.getByLabelText("Simulator input")).toBeVisible();
+    expect(screen.getByLabelText("Tap on iPhone 16 Simulator screen")).toBeEnabled();
+    expect(screen.getByLabelText("Type into Simulator")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Return" })).toBeVisible();
+  });
+
+  it("keeps unavailable frames read-only even when input is requested", () => {
+    const frame: AppleSimulatorLiveFrame = {
+      status: "unavailable",
+      reason: "not-attachable",
+      title: "Simulator frame is not attachable",
+      message:
+        "This client cannot attach a live Simulator frame. Open the thread on the Mac that owns the destination.",
+    };
+    render(<AppleSimulatorLiveFrameView frame={frame} inputEnabled onInput={vi.fn()} />);
+    expect(screen.queryByLabelText("Simulator input")).not.toBeInTheDocument();
   });
 });

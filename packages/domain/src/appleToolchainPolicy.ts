@@ -23,6 +23,14 @@ export interface AppleExecutionScope {
   readonly approvalValid: boolean;
 }
 
+const SIMULATOR_INPUT_KINDS = new Set(["tap", "type-text", "key-press"]);
+
+export function isAppleSimulatorInputKind(
+  kind: AppleSimulatorRequest["kind"] | AppleBuildEvidence["kind"],
+): boolean {
+  return SIMULATOR_INPUT_KINDS.has(kind);
+}
+
 export function evaluateAppleBuildRequest(
   request: AppleBuildRequest,
   toolchain: AppleToolchainDiscovery,
@@ -58,12 +66,15 @@ export function evaluateAppleSimulatorRequest(
   simulators: ReadonlyArray<AppleSimulatorRecord>,
 ): AppleToolchainPolicyDecision {
   // Reading a running Simulator's logs or its screen changes nothing, so both
-  // stay available under a read-only posture. Booting, shutting down, and
-  // terminating an app do change it, and go through approval like any other
-  // Code effect.
+  // stay available under a read-only posture. Booting, shutting down,
+  // terminating an app, and injecting tap/text/keys do change it, and go
+  // through approval like any other Code effect.
   const readOnly = request.kind === "logs" || request.kind === "screenshot";
   const scoped = evaluateScope(request, scope, !readOnly);
   if (scoped.kind === "denied") return scoped;
+  if (isAppleSimulatorInputKind(request.kind) && request.requestedBy === undefined) {
+    return { kind: "denied", reason: "actor-required" };
+  }
   const simulator = simulators.find((candidate) => candidate.simulatorId === request.simulatorId);
   if (simulator === undefined) return { kind: "denied", reason: "invalid-destination" };
   if (simulator.state === "unavailable") {
@@ -76,7 +87,8 @@ export function evaluateAppleSimulatorRequest(
     (request.kind === "shutdown" ||
       request.kind === "terminate" ||
       request.kind === "logs" ||
-      request.kind === "screenshot") &&
+      request.kind === "screenshot" ||
+      isAppleSimulatorInputKind(request.kind)) &&
     simulator.state !== "booted"
   ) {
     return { kind: "denied", reason: "destination-not-booted" };
@@ -158,4 +170,39 @@ export function isCoreAppleCapability(): boolean {
  *  adapter at build time. */
 export function isToolchainAvailable(toolchain: AppleToolchainDiscovery): boolean {
   return toolchain.available;
+}
+
+/**
+ * Typed text must never land in durable diagnostics. Length and kind stay so
+ * evidence still shows that an input ran; the characters do not.
+ */
+export function redactedAppleInputDiagnostic(
+  request: Pick<AppleSimulatorRequest, "kind" | "text" | "key" | "target" | "point">,
+): { readonly severity: "note"; readonly message: string } {
+  if (request.kind === "type-text") {
+    const length = request.text?.length ?? 0;
+    return {
+      severity: "note",
+      message: `type-text completed (length=${length}; redacted)`,
+    };
+  }
+  if (request.kind === "key-press") {
+    return {
+      severity: "note",
+      message: `key-press completed (key=${request.key ?? "unknown"})`,
+    };
+  }
+  if (request.target !== undefined) {
+    return {
+      severity: "note",
+      message: `tap completed (target=${request.target})`,
+    };
+  }
+  if (request.point !== undefined) {
+    return {
+      severity: "note",
+      message: `tap completed (x=${request.point.x}, y=${request.point.y})`,
+    };
+  }
+  return { severity: "note", message: `${request.kind} completed` };
 }

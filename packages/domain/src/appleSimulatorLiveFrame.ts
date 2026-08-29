@@ -121,6 +121,15 @@ export function latestAppleScreenshotEvidence(evidence: ReadonlyArray<AppleBuild
   return undefined;
 }
 
+/**
+ * Interactive tap/text/keys are offered only when the frame would already be
+ * attachable and live on Darwin desktop — the same fail-closed gate as the
+ * screenshot surface. Remote and headless clients stay read-only.
+ */
+export function canOfferAppleSimulatorFrameInput(frame: AppleSimulatorLiveFrame): boolean {
+  return frame.status === "live";
+}
+
 export function presentAppleSimulatorLiveFrame(
   input: AppleSimulatorLiveFrameInput,
 ): AppleSimulatorLiveFrame {

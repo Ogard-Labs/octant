@@ -5,6 +5,7 @@ import type {
   CodeOperationResult,
   CodeTerminalId,
   CodeThread,
+  EventActor,
   ToolActionAuthority,
   ToolActionRequest,
   WindowId,
@@ -82,12 +83,29 @@ const appleDefinition = {
     properties: {
       operation: {
         type: "string",
-        enum: ["discover", "status", "build", "test", "run", "boot", "shutdown", "screenshot"],
+        enum: [
+          "discover",
+          "status",
+          "build",
+          "test",
+          "run",
+          "boot",
+          "shutdown",
+          "screenshot",
+          "tap",
+          "type-text",
+          "key-press",
+        ],
       },
       projectPath: { type: "string" },
       scheme: { type: "string" },
       platform: { type: "string", enum: ["ios", "macos", "watchos", "tvos", "visionos"] },
       simulatorId: { type: "string" },
+      target: { type: "string" },
+      x: { type: "number" },
+      y: { type: "number" },
+      text: { type: "string" },
+      key: { type: "string" },
     },
     required: ["operation"],
   },
@@ -602,9 +620,64 @@ function appleActionRequest(
         timeoutMs: input.operation === "boot" ? APPLE_BOOT_TIMEOUT_MS : APPLE_SIMULATOR_TIMEOUT_MS,
       } as AppleActionRequest;
     }
+    case "tap":
+    case "type-text":
+    case "key-press": {
+      if (input.simulatorId === undefined) return undefined;
+      const requestedBy = agentEventActor(scope.authority, scope.threadId, uuid);
+      if (input.operation === "tap") {
+        if (input.target === undefined && (input.x === undefined || input.y === undefined)) {
+          return undefined;
+        }
+        return {
+          ...base,
+          kind: "tap",
+          simulatorId: input.simulatorId as never,
+          requestedBy,
+          ...(input.target === undefined ? {} : { target: input.target }),
+          ...(input.x === undefined || input.y === undefined
+            ? {}
+            : { point: { x: input.x, y: input.y } }),
+          timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
+        } as AppleActionRequest;
+      }
+      if (input.operation === "type-text") {
+        if (input.text === undefined) return undefined;
+        return {
+          ...base,
+          kind: "type-text",
+          simulatorId: input.simulatorId as never,
+          requestedBy,
+          text: input.text,
+          timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
+        } as AppleActionRequest;
+      }
+      if (input.key === undefined) return undefined;
+      return {
+        ...base,
+        kind: "key-press",
+        simulatorId: input.simulatorId as never,
+        requestedBy,
+        key: input.key,
+        timeoutMs: APPLE_SIMULATOR_TIMEOUT_MS,
+      } as AppleActionRequest;
+    }
     default:
       return undefined;
   }
+}
+
+function agentEventActor(
+  authority: ToolActionAuthority,
+  threadId: CodeThread["id"],
+  uuid: () => string,
+): EventActor {
+  return {
+    kind: "agent",
+    actorId: uuid() as never,
+    providerInstanceId: authority.providerInstanceId as never,
+    threadId: threadId as never,
+  };
 }
 
 async function guardedBrowserEffect(
@@ -805,11 +878,19 @@ interface AppleToolInput {
     | "run"
     | "boot"
     | "shutdown"
-    | "screenshot";
+    | "screenshot"
+    | "tap"
+    | "type-text"
+    | "key-press";
   readonly projectPath?: string;
   readonly scheme?: string;
   readonly platform?: string;
   readonly simulatorId?: string;
+  readonly target?: string;
+  readonly x?: number;
+  readonly y?: number;
+  readonly text?: string;
+  readonly key?: string;
 }
 
 type BrowserToolInput =
@@ -864,7 +945,18 @@ function parseBrowserInput(value: string): BrowserToolInput | undefined {
 function parseAppleInput(value: string): AppleToolInput | undefined {
   const parsed = parseObject(
     value,
-    new Set(["operation", "projectPath", "scheme", "platform", "simulatorId"]),
+    new Set([
+      "operation",
+      "projectPath",
+      "scheme",
+      "platform",
+      "simulatorId",
+      "target",
+      "x",
+      "y",
+      "text",
+      "key",
+    ]),
   );
   if (parsed === undefined) return undefined;
   const operation = parsed.operation;
@@ -876,12 +968,32 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     operation !== "run" &&
     operation !== "boot" &&
     operation !== "shutdown" &&
-    operation !== "screenshot"
+    operation !== "screenshot" &&
+    operation !== "tap" &&
+    operation !== "type-text" &&
+    operation !== "key-press"
   ) {
     return undefined;
   }
-  for (const field of ["projectPath", "scheme", "platform", "simulatorId"] as const) {
+  for (const field of [
+    "projectPath",
+    "scheme",
+    "platform",
+    "simulatorId",
+    "target",
+    "text",
+    "key",
+  ] as const) {
     if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
+  }
+  for (const field of ["x", "y"] as const) {
+    if (parsed[field] !== undefined && typeof parsed[field] !== "number") return undefined;
+  }
+  if (
+    typeof parsed.text === "string" &&
+    Buffer.byteLength(parsed.text, "utf8") > MAX_TOOL_INPUT_BYTES
+  ) {
+    return undefined;
   }
   return parsed as unknown as AppleToolInput;
 }

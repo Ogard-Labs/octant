@@ -8,6 +8,7 @@ import {
   type ValidationPlan,
   type ValidationReport,
 } from "@octant/contracts";
+import { isAppleSimulatorInputKind } from "@octant/domain";
 
 export interface ComposedAppleValidationEvents {
   readonly plan: ValidationPlan;
@@ -22,6 +23,7 @@ export function composeAppleValidationEvents(input: {
 }): ComposedAppleValidationEvents {
   const stepId = `apple-${input.evidence.kind}`;
   const outcome = validationOutcome(input.evidence.outcome);
+  const redactTyped = input.evidence.kind === "type-text";
   const plan = decodeValidationPlan({
     planId: input.evidence.actionId,
     authority: input.evidence.authority,
@@ -36,6 +38,17 @@ export function composeAppleValidationEvents(input: {
     createdAt: input.startedAt,
     budgetMs: Math.max(1, Math.min(600_000, input.evidence.durationMs || 1)),
   });
+  const detail = redactTyped
+    ? input.evidence.diagnostics
+        .map(({ severity, message }) => `${severity}: ${redactPossibleTypedText(message)}`)
+        .join("\n")
+        .slice(0, 8192)
+    : input.evidence.diagnostics.length === 0
+      ? undefined
+      : input.evidence.diagnostics
+          .map(({ severity, message }) => `${severity}: ${message}`)
+          .join("\n")
+          .slice(0, 8192);
   const record = decodeValidationEvidenceRecord({
     evidenceId: input.newId(),
     planId: plan.planId,
@@ -44,15 +57,9 @@ export function composeAppleValidationEvents(input: {
     outcome,
     authority: input.evidence.authority,
     observedAt: input.evidence.completedAt,
-    ...(input.evidence.diagnostics.length === 0
-      ? {}
-      : {
-          detail: input.evidence.diagnostics
-            .map(({ severity, message }) => `${severity}: ${message}`)
-            .join("\n")
-            .slice(0, 8192),
-        }),
-    redacted: false,
+    ...(detail === undefined || detail.length === 0 ? {} : { detail }),
+    // Typed Simulator input never stores characters in durable evidence.
+    redacted: redactTyped || isAppleSimulatorInputKind(input.evidence.kind),
   });
   const report = decodeValidationReport({
     planId: plan.planId,
@@ -91,4 +98,9 @@ function validationOutcome(outcome: AppleBuildEvidence["outcome"]): ValidationOu
     case "invalid-destination":
       return "unavailable";
   }
+}
+
+function redactPossibleTypedText(message: string): string {
+  if (message.includes("redacted") || message.startsWith("type-text")) return message;
+  return "type-text detail redacted";
 }

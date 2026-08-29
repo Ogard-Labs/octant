@@ -203,6 +203,29 @@ describe("AppleBuildEvidence", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects Simulator input evidence without requestedBy", () => {
+    expect(() =>
+      decodeAppleBuildEvidence({
+        actionId: "00000000-0000-4000-8000-000000000002",
+        correlationId: "00000000-0000-4000-8000-000000000003",
+        authority: {
+          hostId: "00000000-0000-4000-8000-000000000004",
+          mode: "code",
+          projectId: "00000000-0000-4000-8000-000000000005",
+          providerInstanceId: "00000000-0000-4000-8000-000000000006",
+          extension: { kind: "core" },
+        },
+        kind: "tap",
+        outcome: "succeeded",
+        diagnostics: [{ severity: "note", message: "tap completed (x=1, y=2)" }],
+        artifacts: [],
+        cleanup: "complete",
+        durationMs: 10,
+        completedAt: "2026-07-24T12:01:00.000Z",
+      }),
+    ).toThrow();
+  });
 });
 
 describe("AppleToolchainFailure", () => {
@@ -272,6 +295,39 @@ describe("Apple runtime contracts", () => {
         approval: { kind: "approved", approvalId: "10000000-0000-4000-8000-000000000011" },
       }),
     ).toThrow();
+  });
+
+  it("decodes tap, type-text, and key-press with actor attribution", () => {
+    const decode = contracts.decodeAppleSimulatorRequest as (value: unknown) => any;
+    const base = {
+      actionId: "10000000-0000-4000-8000-000000000001",
+      correlationId: "10000000-0000-4000-8000-000000000002",
+      authority: {
+        hostId: "10000000-0000-4000-8000-000000000003",
+        mode: "code",
+        projectId: "10000000-0000-4000-8000-000000000004",
+        providerInstanceId: "10000000-0000-4000-8000-000000000007",
+        extension: { kind: "core" },
+      },
+      threadId: "10000000-0000-4000-8000-000000000008",
+      checkoutId: "10000000-0000-4000-8000-000000000009",
+      simulatorId: "10000000-0000-4000-8000-000000000010",
+      timeoutMs: 30000,
+      approval: { kind: "approved", approvalId: "10000000-0000-4000-8000-000000000011" },
+      requestedBy: {
+        kind: "local-user",
+        actorId: "10000000-0000-4000-8000-000000000012",
+      },
+    };
+    expect(decode({ ...base, kind: "tap", point: { x: 1, y: 2 } }).kind).toBe("tap");
+    expect(decode({ ...base, kind: "type-text", text: "hello" }).text).toBe("hello");
+    expect(decode({ ...base, kind: "type-text", text: " spaced " }).text).toBe(" spaced ");
+    expect(decode({ ...base, kind: "key-press", key: "return" }).key).toBe("return");
+    expect(() => decode({ ...base, kind: "tap" })).toThrow();
+    expect(() =>
+      decode({ ...base, kind: "type-text", text: "hello", requestedBy: undefined }),
+    ).toThrow();
+    expect(() => decode({ ...base, kind: "type-text", text: "   " })).toThrow();
   });
 
   it("decodes replay-safe progress and bounded runtime snapshots", () => {

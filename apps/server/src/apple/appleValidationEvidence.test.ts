@@ -57,4 +57,19 @@ describe("composeAppleValidationEvents", () => {
     });
     expect(JSON.stringify(composed)).not.toContain("/private/");
   });
+
+  it("marks typed Simulator input evidence as redacted", () => {
+    const composed = composeAppleValidationEvents({
+      evidence: {
+        ...evidence,
+        kind: "type-text",
+        diagnostics: [{ severity: "note", message: "type-text completed (length=4; redacted)" }],
+        artifacts: [{ kind: "log", reference: "apple-log-safe" }],
+      },
+      startedAt: "2026-07-27T20:00:00.000Z",
+      newId: () => "b1000000-0000-4000-8000-000000000005",
+    });
+    expect(composed.record.redacted).toBe(true);
+    expect(JSON.stringify(composed)).not.toContain("secret");
+  });
 });

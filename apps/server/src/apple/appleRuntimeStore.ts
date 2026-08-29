@@ -6,6 +6,7 @@ import {
   decodeAppleSimulatorId,
   decodeCodeCheckoutId,
   decodeCodeThreadId,
+  decodeEventActor,
   decodeToolActionAuthority,
   decodeToolActionId,
 } from "@octant/contracts";
@@ -97,6 +98,7 @@ function validateReceipt(value: unknown): AppleRuntimeReceipt {
     "kind",
     "simulatorId",
     "bundleIdentifier",
+    "requestedBy",
     "startedAt",
   ]);
   if (Object.keys(input).some((key) => !allowed.has(key))) {
@@ -113,6 +115,8 @@ function validateReceipt(value: unknown): AppleRuntimeReceipt {
   if (input.bundleIdentifier !== undefined && bundleIdentifier === undefined) {
     throw new Error("Apple runtime receipt is invalid.");
   }
+  const requestedBy =
+    input.requestedBy === undefined ? undefined : decodeEventActor(input.requestedBy);
   return {
     actionId: decodeToolActionId(input.actionId),
     correlationId: decodeCorrelationId(input.correlationId),
@@ -122,6 +126,7 @@ function validateReceipt(value: unknown): AppleRuntimeReceipt {
     kind,
     ...(simulatorId === undefined ? {} : { simulatorId }),
     ...(bundleIdentifier === undefined ? {} : { bundleIdentifier }),
+    ...(requestedBy === undefined ? {} : { requestedBy }),
     startedAt: decodeTimestamp(input.startedAt),
   };
 }

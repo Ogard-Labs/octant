@@ -9,6 +9,8 @@ import {
   requiresSimulatorForAction,
   isCoreAppleCapability,
   isToolchainAvailable,
+  isAppleSimulatorInputKind,
+  redactedAppleInputDiagnostic,
 } from "./appleToolchainPolicy";
 import type {
   AppleBuildEvidence,
@@ -379,6 +381,77 @@ describe("a Simulator screenshot", () => {
         [booted],
       ),
     ).toMatchObject({ kind: "denied", reason: "approval-denied" });
+  });
+});
+
+describe("Simulator frame input", () => {
+  const booted: AppleSimulatorRecord = {
+    simulatorId: "10000000-0000-4000-8000-000000000003" as never,
+    name: "iPhone 16",
+    platform: "ios",
+    runtimeVersion: "18.0",
+    state: "booted",
+    udid: "ABCD-1234",
+  };
+  const actor = {
+    kind: "local-user" as const,
+    actorId: "10000000-0000-4000-8000-000000000099" as never,
+  };
+  const tap = {
+    actionId: "10000000-0000-4000-8000-000000000001" as never,
+    correlationId: "10000000-0000-4000-8000-000000000002" as never,
+    authority,
+    threadId: makeRequest().threadId,
+    checkoutId: makeRequest().checkoutId,
+    kind: "tap" as const,
+    simulatorId: booted.simulatorId,
+    requestedBy: actor,
+    point: { x: 12, y: 34 },
+    timeoutMs: 30_000,
+    approval: {
+      kind: "approved" as const,
+      approvalId: "10000000-0000-4000-8000-000000000009" as never,
+    },
+  };
+  const scope = {
+    authority,
+    threadId: tap.threadId,
+    checkoutId: tap.checkoutId,
+    executionPolicy: "approval-gated" as const,
+    approvalValid: true,
+  };
+
+  it("treats tap, type-text, and key-press as destination effects that need a booted Simulator", () => {
+    expect(isAppleSimulatorInputKind("tap")).toBe(true);
+    expect(evaluateAppleSimulatorRequest(tap, scope, [booted])).toEqual({ kind: "allowed" });
+    expect(
+      evaluateAppleSimulatorRequest(tap, scope, [{ ...booted, state: "shutdown" }]),
+    ).toMatchObject({ kind: "denied", reason: "destination-not-booted" });
+  });
+
+  it("refuses Plan mode and missing actor attribution for injected input", () => {
+    expect(
+      evaluateAppleSimulatorRequest(tap, { ...scope, executionPolicy: "plan" }, [booted]),
+    ).toMatchObject({ kind: "denied", reason: "read-only-policy" });
+    const { requestedBy: _omit, ...withoutActor } = tap;
+    expect(
+      evaluateAppleSimulatorRequest(withoutActor as typeof tap, scope, [booted]),
+    ).toMatchObject({ kind: "denied", reason: "actor-required" });
+  });
+
+  it("redacts typed characters from durable diagnostic copy", () => {
+    expect(
+      redactedAppleInputDiagnostic({
+        kind: "type-text",
+        text: "super-secret-password",
+      }).message,
+    ).toBe("type-text completed (length=21; redacted)");
+    expect(
+      redactedAppleInputDiagnostic({
+        kind: "type-text",
+        text: "super-secret-password",
+      }).message,
+    ).not.toContain("super-secret");
   });
 });
 

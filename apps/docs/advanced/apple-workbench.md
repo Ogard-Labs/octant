@@ -69,11 +69,13 @@ say the native frame is not attachable instead of hanging or inventing a
 picture. Closing the tab unmounts the view only; it does not shut down,
 erase, or transfer the destination.
 
-Orientation, accessibility hierarchy, recording, and logs are not part of this
-surface yet. Typed input, tap, and hardware keys are planned to ride the same
-workbench control channel as Boot and Capture screen, not a parallel desktop
-injector; they are not built yet. Destination actions remain on the workbench
-list: each Simulator offers only what its reported state can perform.
+Orientation, accessibility hierarchy, and recording are not part of this
+surface yet. Typed input, tap, and hardware keys ride the same workbench
+control channel as Boot and Capture screen: the renderer posts structured
+requests; the host injects XCTest-less input behind that channel. Remote,
+Linux, and headless clients stay read-only. Typed characters never land in
+durable evidence. Destination actions remain on the workbench list: each
+Simulator offers only what its reported state can perform.
 
 States also include loading the toolchain, waiting for Apple evidence,
 toolchain unavailable, action interrupted, and action failed, with **Retry**.
@@ -86,7 +88,8 @@ and **Process died**.
 **Build** and **Test** run against the workspace scheme and name no
 Simulator. Each Simulator destination offers only what its reported state
 can do: a shut-down Simulator offers **Boot**; a booted one offers **Run**,
-**Capture screen**, and **Shut down**. **Run** is limited to destinations
+**Capture screen**, and **Shut down**. A live attachable frame also accepts
+**tap**, typed text, and hardware keys. **Run** is limited to destinations
 whose platform matches the first discovered Simulator. Anything already
 running can be **Cancel**led from **Current progress**.
 
@@ -104,13 +107,15 @@ no such command. `Package.swift` is not listed.
 
 A Code thread on **Full access** also reaches these actions through the
 app-managed `octant_apple` tool, so an agent can discover the toolchain, read
-Simulator state, build, test, run, boot, shut down, and capture the screen.
-The host binds both to the same thread and checkout and refuses them with
-the same policy; the tool is unavailable under Plan and approval-gated
-postures. The workbench never treats Boot as a side effect of Run: a
-shut-down Simulator only offers **Boot**. The tool's `run` operation
-currently boots a named Simulator that is shut down, then installs and
-launches; that is today's toolchain behavior, not a workbench control.
+Simulator state, build, test, run, boot, shut down, capture the screen, and
+inject tap, typed text, and hardware keys. Pane-driven input journals as
+`local-user`; tool-driven input journals as `agent`. The host binds both to
+the same thread and checkout and refuses them with the same policy; the tool
+is unavailable under Plan and approval-gated postures. The workbench never
+treats Boot as a side effect of Run: a shut-down Simulator only offers
+**Boot**. The tool's `run` operation currently boots a named Simulator that
+is shut down, then installs and launches; that is today's toolchain behavior,
+not a workbench control.
 
 ## Honest verification
 
