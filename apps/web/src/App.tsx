@@ -1403,11 +1403,17 @@ function LaunchedShell(
       void controller.openCodeThread(thread.id, thread.title, undefined, thread.projectId);
       openReviewForThread(String(thread.id));
     } else {
+      let testRunId;
+      try {
+        testRunId = decodeCodeTestRunId(target.testRunId);
+      } catch {
+        return;
+      }
       void controller.openCodeSurface({
         kind: "code-test",
         threadId: thread.id,
         title: `${thread.title} tests`,
-        testRunId: decodeCodeTestRunId(target.testRunId),
+        testRunId,
       });
     }
   }, [codeController.bootstrap, controller, pendingCodeDeepLink, projectController.allProjects]);
@@ -3599,11 +3605,19 @@ function LaunchedShell(
       // reader binds to no thread and so knows no checkout to open against.
       const view = activeCodeThreadView;
       if (view === undefined) return;
+      // The listing can name a Code-relative path longer than an Apple
+      // project path. Refuse rather than throw on a branded decode.
+      let projectPath;
+      try {
+        projectPath = decodeAppleProjectPath(project.projectPath);
+      } catch {
+        return;
+      }
       void controller.openCodeSurface({
         kind: "apple-workbench",
         threadId: view.thread.id,
         title: "Apple workbench",
-        projectPath: decodeAppleProjectPath(project.projectPath),
+        projectPath,
       });
     },
   });
