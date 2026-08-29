@@ -110,6 +110,8 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
   const hits = flattenThreadSearchHits(results);
   const active = hits.length === 0 ? -1 : Math.min(activeIndex, hits.length - 1);
   const hasQuery = query.trim() !== "";
+  // A pending or refused archived/content listing must never read as "no matches":
+  // that would claim the incomplete half of Search is empty.
   const statusMessage = !hasQuery
     ? ""
     : hits.length === 0
@@ -117,7 +119,11 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
         ? "No matching threads yet; more results are still loading."
         : archivedListing === "unavailable" && contentListing === "unavailable"
           ? "No matching live threads; archived and message search are unavailable."
-          : "No matching threads."
+          : archivedListing === "unavailable"
+            ? "No matching live threads; archived threads are unavailable."
+            : contentListing === "unavailable"
+              ? "No matching threads; message search is unavailable."
+              : "No matching threads."
       : `${hits.length} matching thread${hits.length === 1 ? "" : "s"}.${
           results.truncated ? " Showing the most recent matches." : ""
         }`;
