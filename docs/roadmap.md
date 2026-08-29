@@ -122,7 +122,8 @@ starts.
 - **Mobile maturity** — device builds, live push notifications, native capture,
   voice input, and public store distribution for the Expo client.
 - **Hosted relay** — only if LAN, Tailscale, or SSH cannot satisfy a concrete
-  reachability need; local-first remote access comes first.
+  reachability need; local-first remote access comes first. Research:
+  [remote-path-sufficiency.md](remote-path-sufficiency.md).
 - **Connector / OAuth marketplace** — OAuth, revocation, publisher trust, and
   data boundaries are much larger than plugin distribution. Start gates:
   [release-boundary holds](release-boundary-holds.md#connector--oauth-marketplace).
