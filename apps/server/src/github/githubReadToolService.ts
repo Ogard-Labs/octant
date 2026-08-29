@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   CodeThread,
   GithubAuthenticationSnapshot,
@@ -11,6 +12,11 @@ import {
   isToolAllowedByAllowlist,
   type GithubAgentReadOperation,
 } from "@octant/domain";
+import { originTaintsThread } from "@octant/domain/untrusted-content-policy";
+import type {
+  ExternalContentIngestionResult,
+  ExternalContentIngestionStore,
+} from "../context/externalContentIngestionStore";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 
 const MAX_TOOL_INPUT_BYTES = 4 * 1024;
@@ -58,13 +64,20 @@ export interface GithubReadToolContext {
 export class GithubReadToolService {
   readonly #catalogue: CatalogueReadPort;
   readonly #snapshot: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>;
+  readonly #ingestion: Pick<ExternalContentIngestionStore, "record"> | undefined;
+  readonly #uuid: () => string;
 
   constructor(options: {
     readonly catalogue: CatalogueReadPort;
     readonly snapshot: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>;
+    /** Optional until the host injects the ingestion store; absent means this read cannot journal taint. */
+    readonly ingestion?: Pick<ExternalContentIngestionStore, "record">;
+    readonly uuid?: () => string;
   }) {
     this.#catalogue = options.catalogue;
     this.#snapshot = options.snapshot;
+    this.#ingestion = options.ingestion;
+    this.#uuid = options.uuid ?? randomUUID;
   }
 
   createToolSet(context: GithubReadToolContext): AppManagedToolSet {
@@ -137,6 +150,17 @@ export class GithubReadToolService {
           response.kind === "repositories" ||
           response.kind === "issue"
         ) {
+          return failure("tool-unavailable");
+        }
+        const ingested = recordGithubReadIngestion({
+          ingestion: this.#ingestion,
+          uuid: this.#uuid,
+          threadId: context.thread.id,
+          operation: input.operation,
+          owner: decision.repository.owner,
+          name: decision.repository.name,
+        });
+        if (ingested?.kind === "refused") {
           return failure("tool-unavailable");
         }
         return {
@@ -254,4 +278,33 @@ function clampPageSize(pageSize: number | undefined): number {
 
 function failure(error: string, message?: string) {
   return { result: { error, ...(message === undefined ? {} : { message }) }, isError: true };
+}
+
+const GITHUB_READ_SOURCE_LABEL = {
+  issues: "github-issues",
+  "pull-requests": "github-pull-requests",
+  projects: "github-projects",
+} as const;
+
+function recordGithubReadIngestion(input: {
+  readonly ingestion: Pick<ExternalContentIngestionStore, "record"> | undefined;
+  readonly uuid: () => string;
+  readonly threadId: CodeThread["id"];
+  readonly operation: GithubReadToolInput["operation"];
+  readonly owner: string;
+  readonly name: string;
+}): ExternalContentIngestionResult | undefined {
+  if (input.ingestion === undefined) return undefined;
+  const provenance = {
+    origin: "tool-result" as const,
+    sourceLabel: GITHUB_READ_SOURCE_LABEL[input.operation],
+  };
+  if (!originTaintsThread(provenance.origin)) return undefined;
+  return input.ingestion.record({
+    threadId: input.threadId,
+    provenance,
+    contentReference: `github-${input.operation}-${input.owner}-${input.name}`,
+    correlationId: input.uuid(),
+    authorized: true,
+  });
 }
