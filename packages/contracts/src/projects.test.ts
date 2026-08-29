@@ -462,6 +462,7 @@ describe("Project and memory event payload contracts", () => {
       "project.binding-relinked@1",
       "project.code-access-changed@1",
       "project.code-new-thread-workspace-changed@1",
+      "project.code-pull-request-background-refresh-changed@1",
       "memory.entry-created@1",
       "memory.entry-superseded@1",
       "memory.entry-retracted@1",

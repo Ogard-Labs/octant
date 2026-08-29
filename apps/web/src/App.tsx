@@ -4164,6 +4164,20 @@ function LaunchedShell(
                 onCloseGithubIssues={() => setGithubIssuesOpen(false)}
                 onSelectProjectPullRequest={selectProjectPullRequest}
                 onSelectBoardPullRequest={selectProjectPullRequestIdentity}
+                pullRequestBackgroundRefresh={{
+                  enabledFor: (projectId) =>
+                    projectController.projects.some(
+                      (project) =>
+                        String(project.id) === String(projectId) &&
+                        project.type === "code" &&
+                        project.pullRequestBackgroundRefresh === "enabled",
+                    ),
+                  setEnabled: (projectId, enabled) =>
+                    projectController.setCodePullRequestBackgroundRefresh(
+                      projectId,
+                      enabled ? "enabled" : "disabled",
+                    ),
+                }}
                 {...(selectedProjectPullRequest === undefined
                   ? {}
                   : {

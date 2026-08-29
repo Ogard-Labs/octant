@@ -439,6 +439,140 @@ describe("CodeProjectPullRequestService", () => {
     });
   });
 
+  it("a cadence observation skips re-observing identities the snapshot already knows are merged or closed", async () => {
+    const fixture = serviceFixture({
+      knownPullRequests: [{ number: 11, observedAt: "2026-08-21T08:00:00Z" }],
+      list: async () => ({ status: "ok", rows: [] }),
+      detail: async () => ({
+        ...observedDetail,
+        pullRequest: {
+          ...observedDetail.pullRequest,
+          number: 11,
+          url: "https://github.com/octant/octant/pull/11",
+          title: "Merged pull request",
+          state: "merged",
+          mergeability: "unknown",
+          updatedAt: "2026-08-22T07:30:00Z",
+        },
+      }),
+    });
+    await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    expect(fixture.observeReviewByIdentity).toHaveBeenCalledTimes(1);
+
+    const outcome = await fixture.service.observeForCadence(
+      windowId,
+      projectA,
+      new AbortController().signal,
+    );
+
+    expect(outcome).toEqual({ status: "fresh" });
+    expect(fixture.observeReviewByIdentity).toHaveBeenCalledTimes(1);
+    expect((await fixture.service.boardSnapshot(windowId)).rows[0]).toMatchObject({
+      number: 11,
+      state: "merged",
+    });
+  });
+
+  it("a cadence observation alone freshens the board join after a restart, with no explicit refresh", async () => {
+    const fixture = serviceFixture({
+      knownPullRequests: [{ number: 11, observedAt: "2026-08-21T08:00:00Z" }],
+      list: async () => ({ status: "ok", rows: [] }),
+      detail: async () => ({
+        ...observedDetail,
+        pullRequest: {
+          ...observedDetail.pullRequest,
+          number: 11,
+          url: "https://github.com/octant/octant/pull/11",
+          title: "Merged pull request",
+          state: "merged",
+          mergeability: "unknown",
+          updatedAt: "2026-08-22T07:30:00Z",
+        },
+      }),
+    });
+    expect((await fixture.service.boardSnapshot(windowId)).freshness).toEqual({ status: "stale" });
+
+    const outcome = await fixture.service.observeForCadence(
+      windowId,
+      projectA,
+      new AbortController().signal,
+    );
+
+    expect(outcome).toEqual({ status: "fresh" });
+    const board = await fixture.service.boardSnapshot(windowId);
+    expect(board.freshness).toMatchObject({ status: "fresh" });
+    expect(board.rows[0]).toMatchObject({ number: 11, state: "merged" });
+  });
+
+  it("explicit refresh still re-observes identities a cadence observation would skip", async () => {
+    const fixture = serviceFixture({
+      knownPullRequests: [{ number: 11, observedAt: "2026-08-21T08:00:00Z" }],
+      list: async () => ({ status: "ok", rows: [] }),
+      detail: async () => ({
+        ...observedDetail,
+        pullRequest: {
+          ...observedDetail.pullRequest,
+          number: 11,
+          url: "https://github.com/octant/octant/pull/11",
+          title: "Merged pull request",
+          state: "merged",
+          mergeability: "unknown",
+          updatedAt: "2026-08-22T07:30:00Z",
+        },
+      }),
+    });
+    await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    expect(fixture.observeReviewByIdentity).toHaveBeenCalledTimes(2);
+  });
+
+  it("a failed cadence observation reports failure as a value and keeps the last snapshot", async () => {
+    let reachable = true;
+    const fixture = serviceFixture({
+      list: async () =>
+        reachable
+          ? ({ status: "ok", rows: [ghRow()] } satisfies GhActivePullRequestListResult)
+          : ({ status: "timeout" } satisfies GhActivePullRequestListResult),
+    });
+    await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    reachable = false;
+
+    const outcome = await fixture.service.observeForCadence(
+      windowId,
+      projectA,
+      new AbortController().signal,
+    );
+
+    expect(outcome).toEqual({ status: "failed", reason: "timeout" });
+    const view = await fixture.service.query(windowId, { version: 1 });
+    expect(view.rows).toHaveLength(1);
+    expect(view.freshness).toMatchObject({ status: "stale", staleReason: "timeout" });
+  });
+
+  it("an unauthorized cadence observation reports the full stop and revokes cached GitHub facts", async () => {
+    const fixture = serviceFixture({
+      list: async () => ({ status: "unauthorized" }) satisfies GhActivePullRequestListResult,
+    });
+
+    const outcome = await fixture.service.observeForCadence(
+      windowId,
+      projectA,
+      new AbortController().signal,
+    );
+
+    expect(outcome).toEqual({ status: "unauthorized" });
+    expect((await fixture.service.boardSnapshot(windowId)).githubRevoked).toBe(true);
+  });
+
+  it("labels each Project's recorded background refresh state on the list view", async () => {
+    const { service } = serviceFixture({});
+    service.recordBackgroundRefreshState({ projectId: projectA, state: "scheduled" });
+
+    const view = await service.query(windowId, { version: 1 });
+
+    expect(view.backgroundRefresh).toEqual([{ projectId: projectA, state: "scheduled" }]);
+  });
+
   it("keeps an unresolved known identity unknown and stale after refresh", async () => {
     const fixture = serviceFixture({
       knownPullRequests: [{ number: 11, observedAt: "2026-08-21T08:00:00Z" }],

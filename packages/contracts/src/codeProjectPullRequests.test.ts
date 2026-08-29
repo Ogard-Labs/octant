@@ -133,6 +133,35 @@ describe("Code Project pull-request contracts", () => {
     });
   });
 
+  it("labels each Project's background refresh state and refuses duplicate entries", () => {
+    expect(
+      decodeCodeProjectPullRequestView({
+        ...connectedView,
+        backgroundRefresh: [
+          { projectId, state: "scheduled", nextObservationAt: "2026-08-22T08:02:00.000Z" },
+          {
+            projectId: "10000000-0000-4000-8000-000000000002",
+            state: "unavailable",
+          },
+        ],
+      }),
+    ).toMatchObject({
+      backgroundRefresh: [
+        { projectId, state: "scheduled" },
+        { projectId: "10000000-0000-4000-8000-000000000002", state: "unavailable" },
+      ],
+    });
+    expect(() =>
+      decodeCodeProjectPullRequestView({
+        ...connectedView,
+        backgroundRefresh: [
+          { projectId, state: "scheduled" },
+          { projectId, state: "backing-off" },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("labels a stale retained snapshot with reason, last success, and retry time", () => {
     expect(
       decodeCodeProjectPullRequestView({

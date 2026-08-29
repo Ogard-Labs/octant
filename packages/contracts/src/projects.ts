@@ -134,6 +134,15 @@ export const WorkProject = Schema.Struct({
 }).annotations(strict);
 export type WorkProject = typeof WorkProject.Type;
 
+/**
+ * Whether the host may keep this Project's pull-request snapshot current on a
+ * bounded background cadence. Absent means disabled: only an explicit refresh
+ * reaches GitHub, exactly the behavior Projects had before the setting existed.
+ */
+export const CodeProjectPullRequestBackgroundRefresh = Schema.Literal("enabled", "disabled");
+export type CodeProjectPullRequestBackgroundRefresh =
+  typeof CodeProjectPullRequestBackgroundRefresh.Type;
+
 export const CodeProject = Schema.Struct({
   ...ProjectFields,
   type: Schema.Literal("code"),
@@ -146,6 +155,7 @@ export const CodeProject = Schema.Struct({
    * rather than treating absence as an error.
    */
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
+  pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
 }).annotations(strict);
 export type CodeProject = typeof CodeProject.Type;
 
@@ -169,6 +179,7 @@ const CodeProjectSummary = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   codeAccessPersistence: CodeAccessPersistence,
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
+  pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   connectedRepository: Schema.optional(ConnectedGitHubRepository),
 }).annotations(strict);
 
@@ -338,6 +349,11 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     newThreadWorkspace: CodeNewThreadWorkspace,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-code-project-pull-request-background-refresh"),
+    ...ProjectCommandFields,
+    pullRequestBackgroundRefresh: CodeProjectPullRequestBackgroundRefresh,
+  }).annotations(strict),
 );
 export type ProjectCommand = typeof ProjectCommand.Type;
 
@@ -367,6 +383,10 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("code-project-new-thread-workspace-changed"),
+    project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-project-pull-request-background-refresh-changed"),
     project: CodeProject,
   }).annotations(strict),
 );
@@ -470,6 +490,16 @@ export const CodeProjectNewThreadWorkspaceChanged = Schema.Struct({
   project: CodeProject,
 }).annotations(strict);
 export type CodeProjectNewThreadWorkspaceChanged = typeof CodeProjectNewThreadWorkspaceChanged.Type;
+/**
+ * Journaled once per user toggle so the opt-in survives a host restart. The
+ * background cadence itself never journals: per-poll observations stay in the
+ * in-memory snapshot.
+ */
+export const CodeProjectPullRequestBackgroundRefreshChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectPullRequestBackgroundRefreshChanged =
+  typeof CodeProjectPullRequestBackgroundRefreshChanged.Type;
 
 export const MemoryEntryCreated = Schema.Struct({ entry: ActiveMemoryEntry }).annotations(strict);
 export type MemoryEntryCreated = typeof MemoryEntryCreated.Type;
@@ -495,6 +525,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.binding-relinked@1",
   "project.code-access-changed@1",
   "project.code-new-thread-workspace-changed@1",
+  "project.code-pull-request-background-refresh-changed@1",
   "memory.entry-created@1",
   "memory.entry-superseded@1",
   "memory.entry-retracted@1",
@@ -526,6 +557,9 @@ export const decodeProjectBindingRelinked = Schema.decodeUnknownSync(ProjectBind
 export const decodeCodeProjectAccessChanged = Schema.decodeUnknownSync(CodeProjectAccessChanged);
 export const decodeCodeProjectNewThreadWorkspaceChanged = Schema.decodeUnknownSync(
   CodeProjectNewThreadWorkspaceChanged,
+);
+export const decodeCodeProjectPullRequestBackgroundRefreshChanged = Schema.decodeUnknownSync(
+  CodeProjectPullRequestBackgroundRefreshChanged,
 );
 export const decodeMemoryEntryCreated = Schema.decodeUnknownSync(MemoryEntryCreated);
 export const decodeMemoryEntrySuperseded = Schema.decodeUnknownSync(MemoryEntrySuperseded);

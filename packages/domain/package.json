@@ -66,6 +66,7 @@
     "./github-remote-identity": "./src/githubRemoteIdentity.ts",
     "./tracker-reference-policy": "./src/trackerReferencePolicy.ts",
     "./code-project-pull-request-policy": "./src/codeProjectPullRequestPolicy.ts",
+    "./code-project-pull-request-cadence-policy": "./src/codeProjectPullRequestCadencePolicy.ts",
     "./canvas-share-snapshot-policy": "./src/canvasShareSnapshotPolicy.ts",
     "./canvas-share-access-log-policy": "./src/canvasShareAccessLogPolicy.ts",
     "./audit-policy": "./src/auditPolicy.ts"

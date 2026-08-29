@@ -66,7 +66,8 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS = 32;
 /**
  * Cached read of the in-memory Project-scoped active pull-request projection.
  * There is no refresh flag: GitHub is reached only by an explicit refresh
- * command.
+ * command or, for Projects that opted in, the bounded background refresh
+ * cadence.
  */
 export const CodeProjectPullRequestQuery = Schema.Struct({
   version: Schema.Literal(1),
@@ -128,6 +129,20 @@ export const CodeProjectPullRequestProjectFreshness = Schema.Struct({
 }).annotations(strict);
 export type CodeProjectPullRequestProjectFreshness =
   typeof CodeProjectPullRequestProjectFreshness.Type;
+
+/**
+ * Honest per-Project state of the opt-in background refresh cadence.
+ * `unavailable` is a full stop — `gh` is missing or unauthenticated — that
+ * only a successful explicit refresh or a re-enable can clear. `backing-off`
+ * keeps the last sync position: a failed observation never advances it.
+ */
+export const CodeProjectPullRequestBackgroundRefreshState = Schema.Struct({
+  projectId: ProjectId,
+  state: Schema.Literal("disabled", "scheduled", "backing-off", "unavailable"),
+  nextObservationAt: Schema.optional(UtcTimestamp),
+}).annotations(strict);
+export type CodeProjectPullRequestBackgroundRefreshState =
+  typeof CodeProjectPullRequestBackgroundRefreshState.Type;
 
 export const CodeProjectPullRequestChecksSummary = Schema.Literal(
   "unknown",
@@ -206,6 +221,15 @@ export const CodeProjectPullRequestView = Schema.Struct({
   freshness: CodeProjectPullRequestFreshness,
   projectFreshness: Schema.optional(
     Schema.Array(CodeProjectPullRequestProjectFreshness).pipe(
+      Schema.filter(
+        (entries) =>
+          entries.length <= MAX_CODE_PROJECT_PULL_REQUEST_PROJECTS &&
+          new Set(entries.map((entry) => String(entry.projectId))).size === entries.length,
+      ),
+    ),
+  ),
+  backgroundRefresh: Schema.optional(
+    Schema.Array(CodeProjectPullRequestBackgroundRefreshState).pipe(
       Schema.filter(
         (entries) =>
           entries.length <= MAX_CODE_PROJECT_PULL_REQUEST_PROJECTS &&

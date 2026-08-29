@@ -6,6 +6,7 @@ import {
   type CanonicalProjectBinding,
   type ChatProject,
   type CodeProject,
+  type CodeProjectPullRequestBackgroundRefresh,
   type CodeAccessPersistence,
   type WorkProject,
   type Project,
@@ -186,6 +187,34 @@ export function changeCodeProjectAccess(
   return {
     ...project,
     codeAccessPersistence,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Toggle the opt-in background refresh of the Project's pull-request snapshot.
+ * Rejects a non-Code Project and a no-op change so the journal never carries
+ * an event that changed nothing. Absence of the field reads as disabled — the
+ * default every Project had before the setting existed.
+ */
+export function changeCodeProjectPullRequestBackgroundRefresh(
+  project: Project,
+  pullRequestBackgroundRefresh: CodeProjectPullRequestBackgroundRefresh,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject(
+      "binding-not-allowed",
+      "Only Code Projects have a pull-request background refresh setting",
+    );
+  }
+  if ((project.pullRequestBackgroundRefresh ?? "disabled") === pullRequestBackgroundRefresh) {
+    reject("invalid-lifecycle", "Code Project pull-request background refresh is already selected");
+  }
+  return {
+    ...project,
+    pullRequestBackgroundRefresh,
     version: nextVersion(project),
     updatedAt,
   };

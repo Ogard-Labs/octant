@@ -77,6 +77,35 @@ describe("ThreadBoardPullRequestSummaries", () => {
     });
   });
 
+  it("labels a summary whose snapshot cannot reach GitHub as unavailable", () => {
+    render(
+      <ThreadBoardPullRequestSummaries
+        summaries={{
+          items: [
+            {
+              identity: {
+                projectId,
+                repositoryOwner: "octant",
+                repositoryName: "octant",
+                number: 12,
+              },
+              title: "Board pull request",
+              state: "unknown",
+              checks: "unknown",
+              review: "unknown",
+              mergeability: "unknown",
+              freshness: "unavailable",
+              readyToMerge: false,
+            },
+          ],
+          hiddenCount: 0,
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/GitHub unavailable/i)).toBeInTheDocument();
+  });
+
   it("shows conflicts and never labels them ready to merge", () => {
     render(
       <ThreadBoardPullRequestSummaries

@@ -2,7 +2,11 @@ import type { AutomationClient } from "@octant/client-runtime";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { GithubClient } from "@octant/client-runtime/github-client";
-import type { CodeProjectPullRequestRow, ThreadBoardPullRequestIdentity } from "@octant/contracts";
+import type {
+  CodeProjectPullRequestRow,
+  ProjectId,
+  ThreadBoardPullRequestIdentity,
+} from "@octant/contracts";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -83,6 +87,10 @@ export interface WorkspaceRailLayersProps {
   readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
   readonly onOpenWorkBoardThread: (target: WorkThreadOpenTarget) => void;
   readonly onSelectProjectPullRequest?: (row: CodeProjectPullRequestRow) => void;
+  readonly pullRequestBackgroundRefresh?: {
+    readonly enabledFor: (projectId: ProjectId) => boolean;
+    readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  };
   readonly onSelectBoardPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly selectedProjectPullRequestKey?: string;
   readonly unreadThreadIds?: ReadonlySet<string>;
@@ -164,6 +172,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               load={(query) => props.codeClient.queryProjectPullRequests(query)}
               onClose={props.onCloseCodePullRequests}
               refresh={(command) => props.codeClient.refreshProjectPullRequests(command)}
+              {...(props.pullRequestBackgroundRefresh === undefined
+                ? {}
+                : { backgroundRefresh: props.pullRequestBackgroundRefresh })}
               {...(props.onSelectProjectPullRequest === undefined
                 ? {}
                 : { onSelectRow: props.onSelectProjectPullRequest })}
