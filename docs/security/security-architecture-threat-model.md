@@ -25,7 +25,8 @@ fork/checkpoint/pause behavior, and CLI/GUI security ownership copy are further 
 [`github-repository-onboarding-threat-model.md`](github-repository-onboarding-threat-model.md),
 [`mobile-remote-control-threat-model.md`](mobile-remote-control-threat-model.md),
 [`canvas-share-authenticated-snapshot-threat-model.md`](canvas-share-authenticated-snapshot-threat-model.md),
-[`canvas-share-static-export-threat-model.md`](canvas-share-static-export-threat-model.md)
+[`canvas-share-static-export-threat-model.md`](canvas-share-static-export-threat-model.md),
+[`agent-to-agent-messaging-threat-model.md`](agent-to-agent-messaging-threat-model.md)
 
 ## Overview
 

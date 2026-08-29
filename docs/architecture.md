@@ -184,6 +184,16 @@ exactly one source thread: ordinary Chat with that thread's bounded context,
 no inherited Work or Code authority, and no path that approves, steers, or
 appends to the source.
 
+Broader structured messaging between AgentRuns and threads, beyond mention
+excerpts and beyond that Chat one-hop tool, is designed in
+[decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md)
+and
+[security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md).
+It is Proposed only: the host would admit, clamp, journal, and deliver; bodies
+would taint the recipient as untrusted external content; messaging must never
+bypass sandbox, approvals, or mode authority. Implementation waits on
+acceptance of that record **and** sign-off of the companion threat model.
+
 ## Workspace shell
 
 The window is mode-first: a persistent left sidebar with the Chat, Work, and

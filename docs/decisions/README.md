@@ -70,6 +70,7 @@ distilled successor of the earlier long-form design specifications.
 | [0060](0060-usage-spend-ceilings.md)                          | Usage spend ceilings                                                                        | Proposed           |
 | [0061](0061-in-app-changelog.md)                              | In-app changelog rides the update path                                                      | Proposed           |
 | [0062](0062-simulator-frame-input-transport.md)               | Simulator frame input rides the Apple workbench channel                                     | Proposed           |
+| [0063](0063-agent-to-agent-messaging.md)                      | Agent-to-agent messaging authority                                                          | Proposed           |
 
 ## Adding an ADR
 
