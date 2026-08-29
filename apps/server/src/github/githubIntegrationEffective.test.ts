@@ -3,6 +3,7 @@ import type { ExtensionActivationState } from "@octant/contracts/extensions";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import {
   githubReadToolSetIfEffective,
+  isFirstPartyIntegrationEffective,
   isGithubIntegrationEffective,
 } from "./githubIntegrationEffective";
 
@@ -64,6 +65,21 @@ function snapshotWithGithub(
     ] as never,
   };
 }
+
+describe("isFirstPartyIntegrationEffective", () => {
+  it("treats a missing store row as the caller-supplied bundled default", () => {
+    expect(
+      isFirstPartyIntegrationEffective({ packages: [] }, "github-integration", {
+        missingRow: "effective",
+      }),
+    ).toBe(true);
+    expect(
+      isFirstPartyIntegrationEffective({ packages: [] }, "linear-integration", {
+        missingRow: "ineffective",
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("isGithubIntegrationEffective", () => {
   it("treats bundled GitHub as effective when the extension store has no row", () => {

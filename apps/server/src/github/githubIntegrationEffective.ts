@@ -9,18 +9,21 @@ const emptyGithubReadToolSet: AppManagedToolSet = {
   execute: async () => ({ result: { error: "tool-unavailable" }, isError: true }),
 };
 
+export type FirstPartyIntegrationMissingRow = "effective" | "ineffective";
+
 /**
- * Bundled GitHub is enabled by default. A missing extension-store row must
- * keep today's routes and tools; a stored disable, untrusted, or not-desired
- * row is not effective.
+ * First-party integrations share the activation ladder. A missing store row
+ * is the bundled default: GitHub on, Linear off.
  */
-export function isGithubIntegrationEffective(
+export function isFirstPartyIntegrationEffective(
   snapshot: Pick<ExtensionSnapshot, "packages">,
+  componentId: string,
+  options: { readonly missingRow: FirstPartyIntegrationMissingRow },
 ): boolean {
   const component = snapshot.packages
     .flatMap((pkg) => pkg.components)
-    .find((entry) => String(entry.component.id) === GITHUB_INTEGRATION_COMPONENT_ID);
-  if (component === undefined) return true;
+    .find((entry) => String(entry.component.id) === componentId);
+  if (component === undefined) return options.missingRow === "effective";
   return (
     resolveExtensionActivation({
       ...component.activation,
@@ -31,6 +34,19 @@ export function isGithubIntegrationEffective(
       catalogCurrent: true,
     }).kind === "effective"
   );
+}
+
+/**
+ * Bundled GitHub is enabled by default. A missing extension-store row must
+ * keep today's routes and tools; a stored disable, untrusted, or not-desired
+ * row is not effective.
+ */
+export function isGithubIntegrationEffective(
+  snapshot: Pick<ExtensionSnapshot, "packages">,
+): boolean {
+  return isFirstPartyIntegrationEffective(snapshot, GITHUB_INTEGRATION_COMPONENT_ID, {
+    missingRow: "effective",
+  });
 }
 
 export function githubReadToolSetIfEffective(

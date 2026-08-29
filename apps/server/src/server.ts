@@ -1835,17 +1835,18 @@ export function startOctantServer(
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
       ingestion: externalContentIngestionStore,
     });
-    const githubIssueContextService = new GithubIssueContextService({
-      catalogue: githubCatalogueService,
-      snapshot: (signal) => githubCapabilityService.snapshot(signal),
-      ingestion: externalContentIngestionStore,
-      uuid: randomUUID,
-    });
     const githubExtensionSnapshot = {
       read: (): Pick<ExtensionSnapshot, "packages"> => ({ packages: [] }),
     };
     const githubIntegrationIsEffective = () =>
       isGithubIntegrationEffective(githubExtensionSnapshot.read());
+    const githubIssueContextService = new GithubIssueContextService({
+      catalogue: githubCatalogueService,
+      snapshot: (signal) => githubCapabilityService.snapshot(signal),
+      ingestion: externalContentIngestionStore,
+      uuid: randomUUID,
+      isEffective: githubIntegrationIsEffective,
+    });
     const githubRoutes = createGithubRouteHandler({
       windowAuthorityStore,
       service: githubCapabilityService,
