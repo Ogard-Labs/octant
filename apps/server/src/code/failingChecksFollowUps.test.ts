@@ -135,6 +135,30 @@ describe("FailingChecksFollowUps", () => {
     expect(observations[1]?.sourceSequence).toBe(2);
   });
 
+  it("serializes overlapping refresh observations so one failing edge persists exactly once", async () => {
+    const { sink, observations } = sinkFixture();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gatedSink: FailingChecksFollowUpSink = {
+      read: (readThreadId) => sink.read(readThreadId),
+      observeTrigger: async (input) => {
+        await gate;
+        return sink.observeTrigger(input);
+      },
+    };
+    const followUps = followUpsFixture(gatedSink);
+
+    // The second refresh lands while the first observation is still persisting.
+    const first = followUps.observe([snapshotRow()]);
+    const second = followUps.observe([snapshotRow()]);
+    release?.();
+    await Promise.all([first, second]);
+
+    expect(observations).toHaveLength(1);
+  });
+
   it("keeps the edge armed when persisting the trigger fails so the next refresh retries", async () => {
     const { sink, observations } = sinkFixture({ failObservationsBeforeSucceeding: 1 });
     const followUps = followUpsFixture(sink);

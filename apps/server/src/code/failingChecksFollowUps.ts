@@ -28,6 +28,7 @@ export class FailingChecksFollowUps {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   #lastDefinitiveChecks: ReadonlyMap<string, LinkedPullRequestDefinitiveChecks> = new Map();
+  #tail: Promise<void> = Promise.resolve();
 
   constructor(options: {
     readonly followUps: FailingChecksFollowUpSink;
@@ -39,7 +40,22 @@ export class FailingChecksFollowUps {
     this.#clock = options.clock;
   }
 
-  async observe(rows: ReadonlyArray<CodeProjectPullRequestRow>): Promise<void> {
+  /**
+   * Observations are serialized: each one starts only after the previous one
+   * has finished persisting its triggers and advancing the edge state.
+   * Overlapping refreshes would otherwise both read the same previous state
+   * and open duplicate triggers for a single failing edge. The returned
+   * promise resolves when this observation (and everything queued before it)
+   * has completed.
+   */
+  observe(rows: ReadonlyArray<CodeProjectPullRequestRow>): Promise<void> {
+    const run = this.#tail.then(() => this.#observeNow(rows));
+    // A failed observation must not wedge every later one.
+    this.#tail = run.catch(() => undefined);
+    return run;
+  }
+
+  async #observeNow(rows: ReadonlyArray<CodeProjectPullRequestRow>): Promise<void> {
     const previous = this.#lastDefinitiveChecks;
     const derived = deriveFailingChecksFollowUpTriggers({
       rows,
