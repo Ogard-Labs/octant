@@ -71,6 +71,7 @@ distilled successor of the earlier long-form design specifications.
 | [0061](0061-in-app-changelog.md)                              | In-app changelog rides the update path                                                      | Proposed           |
 | [0062](0062-simulator-frame-input-transport.md)               | Simulator frame input rides the Apple workbench channel                                     | Accepted           |
 | [0063](0063-agent-to-agent-messaging.md)                      | Agent-to-agent messaging authority                                                          | Proposed           |
+| [0064](0064-project-planner-thread.md)                        | A Project-scoped planner thread surveys the board and proposes work                         | Accepted           |
 
 ## Adding an ADR
 

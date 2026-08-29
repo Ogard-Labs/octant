@@ -800,6 +800,158 @@ describe("Code board route", () => {
   });
 });
 
+describe("Code planner routes", () => {
+  const plannerView = {
+    designation: { kind: "none" as const, projectId, updatedAt: now },
+    designationVersion: 0,
+    proposals: [],
+  };
+
+  it("authenticates the planner view and hands the Project to the planner service", async () => {
+    const readPlanner = vi.fn(() => plannerView);
+    const route = routeFixture({ readPlanner });
+
+    const unauthenticated = await route(
+      new Request(`http://127.0.0.1/api/code/planner/${projectId}`),
+    );
+    expect(unauthenticated?.status).toBe(401);
+    expect(readPlanner).not.toHaveBeenCalled();
+
+    const authorized = await route(request(`/api/code/planner/${projectId}`));
+    expect(authorized?.status).toBe(200);
+    expect(await authorized!.json()).toEqual(plannerView);
+    expect(readPlanner).toHaveBeenCalledWith(windowId, projectId);
+  });
+
+  it("returns a designation refusal as an ordinary answer, not an error", async () => {
+    const executePlanner = vi.fn(() => ({
+      status: "refused" as const,
+      reason: "thread-in-another-project" as const,
+      message: "A planner thread must belong to the Project it plans.",
+    }));
+    const route = routeFixture({ executePlanner });
+
+    const response = await route(
+      request("/api/code/planner/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "designate-code-planner-thread",
+          projectId,
+          threadId,
+          expectedVersion: 0,
+        }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toMatchObject({
+      status: "refused",
+      reason: "thread-in-another-project",
+    });
+  });
+
+  it("rejects a malformed planner command and one that supplies window identity", async () => {
+    const executePlanner = vi.fn();
+    const route = routeFixture({ executePlanner });
+
+    const invalid = await route(
+      request("/api/code/planner/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "designate-code-planner-thread", projectId }),
+      }),
+    );
+    const spoofed = await route(
+      request("/api/code/planner/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "undesignate-code-planner-thread",
+          projectId,
+          expectedVersion: 0,
+          windowId,
+        }),
+      }),
+    );
+
+    expect(invalid?.status).toBe(400);
+    expect(spoofed?.status).toBe(400);
+    expect(executePlanner).not.toHaveBeenCalled();
+  });
+
+  it("routes a proposal decline through the planner proposal command", async () => {
+    const proposalId = "00000000-0000-4000-8000-000000000910";
+    const executePlannerProposal = vi.fn(() => ({
+      status: "declined" as const,
+      proposal: {
+        id: proposalId,
+        projectId,
+        plannerThreadId: threadId,
+        title: "Harden the replay path",
+        intent: "Investigate the out-of-order checkout observation.",
+        status: "declined" as const,
+        proposedAt: now,
+        resolvedAt: now,
+      },
+    }));
+    const route = routeFixture({ executePlannerProposal });
+
+    const response = await route(
+      request("/api/code/planner/proposals/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "decline-planner-work-proposal",
+          proposalId,
+          expectedVersion: 1,
+        }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toMatchObject({ status: "declined" });
+    expect(executePlannerProposal).toHaveBeenCalledWith(
+      windowId,
+      { kind: "decline-planner-work-proposal", proposalId, expectedVersion: 1 },
+      expect.anything(),
+    );
+  });
+
+  it("reports the planner unavailable on a host without the planner capability", async () => {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const route = createCodeRouteHandler({
+      service: {
+        bootstrap: vi.fn(),
+        read: vi.fn(),
+        execute: vi.fn(),
+        subscribe: vi.fn(async function* () {}),
+        readContent: vi.fn(),
+        saveFile: vi.fn(),
+      } as never,
+      windowAuthorityStore: store,
+      now: () => 1,
+    });
+
+    const view = await route(request(`/api/code/planner/${projectId}`));
+    const command = await route(
+      request("/api/code/planner/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "undesignate-code-planner-thread",
+          projectId,
+          expectedVersion: 0,
+        }),
+      }),
+    );
+
+    expect(view?.status).toBe(503);
+    expect(command?.status).toBe(503);
+  });
+});
+
 describe("Code project pull-request routes", () => {
   const view = {
     version: 1 as const,

@@ -391,6 +391,70 @@ export const CodeWorktreeRef = Schema.Struct({
 }).annotations(strict);
 export type CodeWorktreeRef = typeof CodeWorktreeRef.Type;
 
+/**
+ * The managed-worktree creation command, exported as a named member so the
+ * planner proposal confirmation can reuse the exact command the create dialog
+ * sends: a confirmed proposal creates its thread through this same contract,
+ * never through a parallel creation path.
+ */
+export const CreateManagedCodeThreadCommand = Schema.Struct({
+  kind: Schema.Literal("create-managed-code-thread"),
+  threadId: CodeThreadId,
+  projectId: ProjectId,
+  bindingRevisionId: BindingRevisionId,
+  title: Schema.NonEmptyTrimmedString,
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  executionPolicy: ProviderExecutionPolicy,
+  permissionPersistence: PermissionPersistence,
+  deliveryTarget: CodeDeliveryTarget,
+  sourceBranch: WorktreeSourceBranch,
+  startFromOrigin: Schema.Boolean,
+  remoteName: Schema.optional(WorktreeSourceRemote),
+  /**
+   * Start the worktree from this exact revision instead of the tip of
+   * `sourceBranch`. Present when the thread is taking up a recorded point in
+   * another thread's history, where the branch tip has since moved on and
+   * only the revision names what the user asked to return to. A revision
+   * source never fetches: the object is already in the repository, or the
+   * creation fails closed.
+   */
+  sourceRevision: Schema.optional(GitObjectId),
+  /**
+   * The thread and turn this one continues, so the new thread's first turn
+   * carries that history as read-only context. The source thread is never
+   * touched.
+   */
+  forkedFrom: Schema.optional(CodeThreadForkOrigin),
+  /**
+   * The profile the thread starts under. Optional because a thread may run
+   * with no profile at all; when present it narrows the requested posture
+   * before any authority gate runs.
+   */
+  profileId: Schema.optional(AgentProfileId),
+  approvalId: Schema.optional(CodeApprovalId),
+  issueContext: Schema.optional(GithubIssueContextRequest),
+  linearIssueContext: Schema.optional(LinearIssueContextRequest),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((command) => command.sourceRevision === undefined || !command.startFromOrigin),
+  );
+export type CreateManagedCodeThreadCommand = typeof CreateManagedCodeThreadCommand.Type;
+
+/**
+ * The prepared-checkout creation command, exported for the same reason as
+ * {@link CreateManagedCodeThreadCommand}.
+ */
+export const CreateCodeThreadCommand = Schema.Struct({
+  kind: Schema.Literal("create-code-thread"),
+  thread: CodeThread,
+  approvalId: Schema.optional(CodeApprovalId),
+  issueContext: Schema.optional(GithubIssueContextRequest),
+  linearIssueContext: Schema.optional(LinearIssueContextRequest),
+}).annotations(strict);
+export type CreateCodeThreadCommand = typeof CreateCodeThreadCommand.Type;
+
 export const CodeCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("prepare-code-project-checkout"),
@@ -413,49 +477,7 @@ export const CodeCommand = Schema.Union(
     startFromOrigin: Schema.Boolean,
     remoteName: Schema.optional(WorktreeSourceRemote),
   }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-managed-code-thread"),
-    threadId: CodeThreadId,
-    projectId: ProjectId,
-    bindingRevisionId: BindingRevisionId,
-    title: Schema.NonEmptyTrimmedString,
-    providerInstanceId: ProviderInstanceId,
-    modelId: ProviderModelId,
-    executionPolicy: ProviderExecutionPolicy,
-    permissionPersistence: PermissionPersistence,
-    deliveryTarget: CodeDeliveryTarget,
-    sourceBranch: WorktreeSourceBranch,
-    startFromOrigin: Schema.Boolean,
-    remoteName: Schema.optional(WorktreeSourceRemote),
-    /**
-     * Start the worktree from this exact revision instead of the tip of
-     * `sourceBranch`. Present when the thread is taking up a recorded point in
-     * another thread's history, where the branch tip has since moved on and
-     * only the revision names what the user asked to return to. A revision
-     * source never fetches: the object is already in the repository, or the
-     * creation fails closed.
-     */
-    sourceRevision: Schema.optional(GitObjectId),
-    /**
-     * The thread and turn this one continues, so the new thread's first turn
-     * carries that history as read-only context. The source thread is never
-     * touched.
-     */
-    forkedFrom: Schema.optional(CodeThreadForkOrigin),
-    /**
-     * The profile the thread starts under. Optional because a thread may run
-     * with no profile at all; when present it narrows the requested posture
-     * before any authority gate runs.
-     */
-    profileId: Schema.optional(AgentProfileId),
-    approvalId: Schema.optional(CodeApprovalId),
-    issueContext: Schema.optional(GithubIssueContextRequest),
-    linearIssueContext: Schema.optional(LinearIssueContextRequest),
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter((command) => command.sourceRevision === undefined || !command.startFromOrigin),
-    ),
+  CreateManagedCodeThreadCommand,
   Schema.Struct({
     kind: Schema.Literal("update-code-settings"),
     expectedVersion: AggregateVersion,
@@ -463,13 +485,7 @@ export const CodeCommand = Schema.Union(
     defaultPermissionPersistence: PermissionPersistence,
     externalEditor: Schema.optional(CodeExternalEditor),
   }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-code-thread"),
-    thread: CodeThread,
-    approvalId: Schema.optional(CodeApprovalId),
-    issueContext: Schema.optional(GithubIssueContextRequest),
-    linearIssueContext: Schema.optional(LinearIssueContextRequest),
-  }).annotations(strict),
+  CreateCodeThreadCommand,
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-lifecycle"),
     ...CodeThreadCommandFields,

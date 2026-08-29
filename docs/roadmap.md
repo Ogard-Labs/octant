@@ -157,7 +157,11 @@ Intentionally out of scope; changing this requires an approved design change.
 - **General task Kanban** — boards are runtime-derived Work and Code thread
   boards only; Chat has no board and work-list items never become cards.
 - **Swarm, Dispatch, race, or model-comparison launch surfaces** — replaced by
-  unified subagents.
+  unified subagents. The one authorized exception is the Project planner
+  thread ([0064](decisions/0064-project-planner-thread.md)): a single
+  designated Code thread per Code Project that reads the Project's board and
+  proposes work the user must explicitly confirm. It launches and redirects
+  nothing.
 - **Features that mutate pull requests** (merge, force-push, review approval)
   from the desktop, unless a specific design authorizes them.
 - **Octant-operated cloud accounts or telemetry** — the product stays

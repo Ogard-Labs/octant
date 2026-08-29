@@ -36,6 +36,11 @@ import {
   decodeCodeFileOpenResultEnvelope,
   decodeCodeFileSaveResultEnvelope,
   decodeCodeFollowUpCommand,
+  decodeCodePlannerCommand,
+  decodeCodePlannerCommandOutcome,
+  decodeCodePlannerProposalCommand,
+  decodeCodePlannerProposalOutcome,
+  decodeCodePlannerView,
   decodeCodeRepositoryTestListing,
   decodeCodeRelativePath,
   decodeCodeThreadFollowUpUpdated,
@@ -60,6 +65,11 @@ import {
   type CodeEventFrame,
   type CodeFailure,
   type CodeFollowUpCommand,
+  type CodePlannerCommand,
+  type CodePlannerCommandOutcome,
+  type CodePlannerProposalCommand,
+  type CodePlannerProposalOutcome,
+  type CodePlannerView,
   type CodeOperationCommand,
   type CodeOperationEventFrame,
   type CodeOperationId,
@@ -227,6 +237,23 @@ export interface CodeRouteService {
     command: CodeProjectPullRequestDetailRefreshCommand,
     signal?: AbortSignal,
   ) => Promise<CodeProjectPullRequestDetailView> | CodeProjectPullRequestDetailView;
+  /**
+   * The Project's planner designation and proposals. Optional like the board:
+   * a host without the planner capability answers `unavailable`, not 404.
+   */
+  readonly readPlanner?: (
+    authenticatedWindowId: WindowId,
+    projectId: string,
+  ) => Promise<CodePlannerView> | CodePlannerView;
+  readonly executePlanner?: (
+    authenticatedWindowId: WindowId,
+    command: CodePlannerCommand,
+  ) => Promise<CodePlannerCommandOutcome> | CodePlannerCommandOutcome;
+  readonly executePlannerProposal?: (
+    authenticatedWindowId: WindowId,
+    command: CodePlannerProposalCommand,
+    signal?: AbortSignal,
+  ) => Promise<CodePlannerProposalOutcome> | CodePlannerProposalOutcome;
   readonly readFollowUp?: (
     authenticatedWindowId: WindowId,
     threadId: CodeThreadId,
@@ -649,6 +676,81 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "planner": {
+          requireMethodAndEmptyQuery(request, url, "GET");
+          if (dependencies.service.readPlanner === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code planner is unavailable." },
+              503,
+              origin,
+            );
+          }
+          return jsonResponse(
+            decodeCodePlannerView(
+              await dependencies.service.readPlanner(authenticatedWindowId, route.projectId),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "planner-commands": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.executePlanner === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code planner is unavailable." },
+              503,
+              origin,
+            );
+          }
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
+          refuseRendererAuthoredIdentity(value);
+          let command: CodePlannerCommand;
+          try {
+            command = decodeCodePlannerCommand(value);
+          } catch {
+            throw new CodeRouteRejected("Code planner command is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodePlannerCommandOutcome(
+              await dependencies.service.executePlanner(authenticatedWindowId, command),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "planner-proposal-commands": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.executePlannerProposal === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code planner is unavailable." },
+              503,
+              origin,
+            );
+          }
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
+          refuseRendererAuthoredIdentity(value);
+          let command: CodePlannerProposalCommand;
+          try {
+            command = decodeCodePlannerProposalCommand(value);
+          } catch {
+            throw new CodeRouteRejected("Code planner proposal command is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodePlannerProposalOutcome(
+              await dependencies.service.executePlannerProposal(
+                authenticatedWindowId,
+                command,
+                request.signal,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
         case "project-pull-requests": {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
@@ -1056,11 +1158,14 @@ type MatchedRoute =
         | "stage-evidence"
         | "attachment"
         | "board"
+        | "planner-commands"
+        | "planner-proposal-commands"
         | "project-pull-requests"
         | "project-pull-requests-refresh"
         | "project-pull-requests-detail"
         | "project-pull-requests-detail-refresh";
     }>
+  | Readonly<{ kind: "planner"; projectId: string }>
   | Readonly<{ kind: "thread" | "events" | "conversation" | "follow-up"; threadId: string }>
   | Readonly<{ kind: "operation-events"; threadId: string; operationId: string }>
   | Readonly<{
@@ -1168,6 +1273,12 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/commands") return { kind: "commands" };
   if (pathname === "/api/code/terminals/inspect") return { kind: "terminal-inspection" };
   if (pathname === "/api/code/board") return { kind: "board" };
+  if (pathname === "/api/code/planner/commands") return { kind: "planner-commands" };
+  if (pathname === "/api/code/planner/proposals/commands") {
+    return { kind: "planner-proposal-commands" };
+  }
+  const planner = /^\/api\/code\/planner\/([^/]+)$/.exec(pathname);
+  if (planner !== null) return { kind: "planner", projectId: planner[1]! };
   if (pathname === "/api/code/project-pull-requests") return { kind: "project-pull-requests" };
   if (pathname === "/api/code/project-pull-requests/refresh") {
     return { kind: "project-pull-requests-refresh" };

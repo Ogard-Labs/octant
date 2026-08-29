@@ -175,6 +175,7 @@ import {
   type ManagedCodeThreadCreationPort,
 } from "./code/codeService";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
+import { CodePlannerService } from "./code/codePlannerService";
 import {
   createCodeProfileSkillResolver,
   createStoredCodeProfileSkillTextLoader,
@@ -3203,6 +3204,34 @@ export function startOctantServer(
         }),
         githubReadTools: ({ windowId, thread, readThread }) =>
           githubReadToolService.createToolSet({ windowId, thread, readThread }),
+        // Planner tools resolve their designation on every call through the
+        // services declared after this runtime; the closures run only once a
+        // turn is live, well after startup finishes wiring them.
+        planner: {
+          isPlannerThread: (threadId) => codePlannerService.isPlannerThread(threadId),
+          board: async (windowId, threadId) => {
+            const scope = codePlannerService.boardScope(threadId);
+            if (scope.status === "refused") return scope;
+            const queryBoard = routeCodeService.queryBoard;
+            if (queryBoard === undefined) {
+              return {
+                status: "refused",
+                reason: "planner-unavailable",
+                message: "The Code Thread Board is unavailable on this host.",
+              };
+            }
+            // The planner reads the same server-authoritative board read-model
+            // the UI queries, scoped strictly to its own Project. No GitHub
+            // call happens here; cached PR facts arrive with their freshness.
+            const board = await queryBoard(windowId, {
+              version: 1,
+              projectIds: [scope.projectId],
+            });
+            return { status: "ok", board };
+          },
+          propose: async (_windowId, threadId, draft) =>
+            codePlannerService.propose(threadId, draft),
+        },
         resolvePullRequestTarget: async (threadId) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return undefined;
@@ -3273,6 +3302,17 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    // The Project planner: one designated Code thread per Code Project that
+    // may read the Project's board and propose work. A confirmed proposal
+    // creates its thread through the ordinary creation command path below;
+    // the planner has no creation authority of its own.
+    const codePlannerService = new CodePlannerService({
+      persistence,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      createThread: async (windowId, creation, signal) =>
+        baseRouteCodeService.execute(windowId, creation, signal),
+    });
     const boardRouteCodeService: CodeRouteService = withCodeBoard(
       baseRouteCodeService,
       async (windowId, query) => {
@@ -3321,6 +3361,10 @@ export function startOctantServer(
       ...boardRouteCodeService,
       readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
       executeFollowUp: (_windowId, command) => codeFollowUpService.execute(command),
+      readPlanner: (_windowId, projectId) => codePlannerService.readView(projectId),
+      executePlanner: (_windowId, command) => codePlannerService.execute(command),
+      executePlannerProposal: (windowId, command, signal) =>
+        codePlannerService.resolveProposal(windowId, command, signal),
       queryProjectPullRequests: (windowId, query) =>
         projectPullRequestService.query(windowId, query),
       refreshProjectPullRequests: (windowId, command, signal) =>
