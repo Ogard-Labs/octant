@@ -171,40 +171,48 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
     </>
   );
 
+  // Live turns keep every row in one stable list so a tool finishing does not
+  // remount its disclosure (and clear the open state the user just set). The
+  // pinned/foldable split only applies once the outer settled fold is active.
   return (
     <div className="code-transcript-row" {...(running ? { "data-live": "true" } : {})}>
       {activity.truncated === true ? (
         <p className="code-transcript-row__truncated">Earliest steps kept</p>
       ) : null}
-      {pinnedRows.map(renderDisclosure)}
       {foldSettledToolchain ? (
-        <details
-          className="code-transcript-row__disclosure code-transcript-row__disclosure--toolchain"
-          onToggle={(event) => setToolchainOpen(event.newState === "open")}
-          open={toolchainOpen}
-        >
-          <summary
-            aria-expanded={toolchainOpen}
-            aria-label={summary}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" && event.key !== " ") return;
-              event.preventDefault();
-              setToolchainOpen((current) => !current);
-            }}
-            role="button"
+        <>
+          {pinnedRows.map(renderDisclosure)}
+          <details
+            className="code-transcript-row__disclosure code-transcript-row__disclosure--toolchain"
+            onToggle={(event) => setToolchainOpen(event.newState === "open")}
+            open={toolchainOpen}
           >
-            <ChevronRight
-              aria-hidden="true"
-              className="code-transcript-row__chevron"
-              size={14}
-              strokeWidth={2}
-            />
-            <span className="code-transcript-row__name">{summary}</span>
-          </summary>
-          <div className="code-transcript-row__toolchain">{foldableBody}</div>
-        </details>
+            <summary
+              aria-expanded={toolchainOpen}
+              aria-label={summary}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                setToolchainOpen((current) => !current);
+              }}
+              role="button"
+            >
+              <ChevronRight
+                aria-hidden="true"
+                className="code-transcript-row__chevron"
+                size={14}
+                strokeWidth={2}
+              />
+              <span className="code-transcript-row__name">{summary}</span>
+            </summary>
+            <div className="code-transcript-row__toolchain">{foldableBody}</div>
+          </details>
+        </>
       ) : (
-        foldableBody
+        <>
+          {thinkingDisclosure}
+          {activity.rows.map(renderDisclosure)}
+        </>
       )}
     </div>
   );
