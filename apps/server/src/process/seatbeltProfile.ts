@@ -90,6 +90,7 @@ export interface SeatbeltConfinementPrepareInput {
   readonly networkEgress: OsNetworkEgress;
   readonly additionalWriteRoots?: ReadonlyArray<string>;
   readonly readRoots?: ReadonlyArray<string>;
+  readonly allowProcessExec?: boolean;
   readonly allowProcessFork?: boolean;
   readonly allowFileReadStar?: boolean;
   readonly writeBoundRoot?: boolean;
@@ -360,6 +361,7 @@ function prepareDarwinSeatbelt(
       ? {}
       : { additionalWriteRoots: input.additionalWriteRoots }),
     ...(input.readRoots === undefined ? {} : { readRoots: input.readRoots }),
+    ...(input.allowProcessExec === undefined ? {} : { allowProcessExec: input.allowProcessExec }),
     ...(input.allowProcessFork === undefined ? {} : { allowProcessFork: input.allowProcessFork }),
     ...(input.allowFileReadStar === undefined
       ? {}

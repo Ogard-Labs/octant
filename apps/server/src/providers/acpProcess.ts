@@ -457,7 +457,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               boundRoot: root,
               temporaryDirectory,
               networkEgress,
-              writeBoundRoot: input.executionPolicy !== "plan",
+              writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
+              allowProcessExec: !(input.executionPolicy === "plan" || input.mode === "chat"),
+              allowProcessFork: !(input.executionPolicy === "plan" || input.mode === "chat"),
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
               allowFileReadStar: true,
               readRoots: [

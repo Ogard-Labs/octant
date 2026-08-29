@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 import { GitMutationPort, type GitMutationDependencies } from "./gitMutationPort";
 
 const directories: string[] = [];
@@ -472,6 +473,28 @@ describe("GitMutationPort", () => {
     expect(gitOutput(repository, "for-each-ref", "--format=%(refname)", "refs/octant").trim()).toBe(
       "",
     );
+  });
+
+  it("does not give Plan git mutations bound-root writes or process execution", async () => {
+    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const port = new GitMutationPort(undefined, {
+      confinement: {
+        prepare: (input) => {
+          captured = input;
+          return fake.confinement.prepare(input);
+        },
+      },
+      temporaryDirectory: fake.temporaryDirectory,
+      gitExecutable: "/usr/bin/git",
+      executionPolicy: "plan",
+    });
+
+    await port.stage({ checkoutRoot: temporaryDirectory(), paths: ["README.md"] });
+    expect(captured?.writeBoundRoot).toBe(false);
+    expect(captured?.allowProcessExec).toBe(false);
+    expect(captured?.allowProcessFork).toBe(false);
   });
 
   it("fails closed when Seatbelt confinement is unavailable", async () => {

@@ -155,6 +155,29 @@ describe("Pi process boundary", () => {
       }),
     );
     expect(planLaunch.args[1]).not.toContain("(allow process-fork)");
+    expect(planLaunch.args[1]).not.toContain("(allow process-exec)");
+    expect(planLaunch.args[1]).not.toContain(`(allow file-write* (subpath "${plan.root}"))`);
+
+    const chat = fixture();
+    const chatLaunch = await Effect.runPromise(
+      makePiConfinementLive({
+        platform: "darwin",
+        sandboxPath: chat.sandbox,
+        temporaryDirectory: chat.base,
+      }).prepare({
+        binaryPath: chat.binary,
+        root: chat.root,
+        piHome: chat.home,
+        sessionDirectory: join(chat.home, "sessions"),
+        sessionId: "chat-1",
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, chat.home),
+      }),
+    );
+    expect(chatLaunch.args[1]).not.toContain("(allow process-fork)");
+    expect(chatLaunch.args[1]).not.toContain("(allow process-exec)");
+    expect(chatLaunch.args[1]).not.toContain(`(allow file-write* (subpath "${chat.root}"))`);
   });
 
   it("fails closed for non-macOS bounded modes and pre-existing provider-owned targets", async () => {
