@@ -475,10 +475,14 @@ describe("GitMutationPort", () => {
     );
   });
 
-  it("does not give Plan git mutations bound-root writes or process execution", async () => {
+  it("refuses Plan git mutations the same sandbox flags as a Plan provider launch", async () => {
     let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
     const fake = createFakeSandboxConfinement();
     directories.push(fake.root);
+    // Production constructs one shared port with no executionPolicy. Plan
+    // confinement has to be a per-call flag, or a later non-Plan thread would
+    // inherit a read-only git child — or a Plan thread would inherit a writable
+    // one.
     const port = new GitMutationPort(undefined, {
       confinement: {
         prepare: (input) => {
@@ -488,13 +492,22 @@ describe("GitMutationPort", () => {
       },
       temporaryDirectory: fake.temporaryDirectory,
       gitExecutable: "/usr/bin/git",
-      executionPolicy: "plan",
     });
 
-    await port.stage({ checkoutRoot: temporaryDirectory(), paths: ["README.md"] });
+    await port.stage({
+      checkoutRoot: temporaryDirectory(),
+      paths: ["README.md"],
+      executionPolicy: "plan",
+    });
     expect(captured?.writeBoundRoot).toBe(false);
     expect(captured?.allowProcessExec).toBe(false);
     expect(captured?.allowProcessFork).toBe(false);
+
+    captured = undefined;
+    await port.stage({ checkoutRoot: temporaryDirectory(), paths: ["README.md"] });
+    expect(captured?.writeBoundRoot).not.toBe(false);
+    expect(captured?.allowProcessExec).not.toBe(false);
+    expect(captured?.allowProcessFork).not.toBe(false);
   });
 
   it("fails closed when Seatbelt confinement is unavailable", async () => {
