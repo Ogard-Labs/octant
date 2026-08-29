@@ -173,6 +173,7 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
   }) => AppManagedToolSet | undefined;
+  readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   /** Reads the `@file` mentions a turn names against this thread's bound root. */
@@ -1111,6 +1112,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     thread: active.thread,
                     readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
                     uuid: this.#options.uuid,
+                    ...(this.#options.recordExternalContentIngestion === undefined
+                      ? {}
+                      : {
+                          recordExternalContentIngestion:
+                            this.#options.recordExternalContentIngestion,
+                        }),
                     executeOperation: (windowId, command) =>
                       this.#service!.execute(windowId, command),
                     terminal: {

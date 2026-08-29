@@ -2110,9 +2110,12 @@ export class ChatService {
         const responses = attempt.responseRefs.map((reference) =>
           contentById.get(String(reference.contentId)),
         );
-        if (responses.length === 0 || responses.some((content) => content === undefined)) continue;
-        const copiedResponses = responses.map((content) =>
-          this.#prepareContent(branchThreadId, "assistant", content!.body),
+        const definedResponses = responses.filter(
+          (content): content is NonNullable<typeof content> => content !== undefined,
+        );
+        if (definedResponses.length === 0 || definedResponses.length !== responses.length) continue;
+        const copiedResponses = definedResponses.map((content) =>
+          this.#prepareContent(branchThreadId, "assistant", content.body),
         );
         copiedContent.push(...copiedResponses);
         attempts.push(
@@ -2988,8 +2991,12 @@ export class ChatService {
     return {
       definitions,
       execute: (input) => {
-        if (extensionNames.has(input.name)) return extension!.execute(input);
-        if (appManagedNames.has(input.name)) return appManaged!.execute(input);
+        if (extension !== undefined && extensionNames.has(input.name)) {
+          return extension.execute(input);
+        }
+        if (appManaged !== undefined && appManagedNames.has(input.name)) {
+          return appManaged.execute(input);
+        }
         return Promise.reject(new Error("Tool definition is unavailable."));
       },
     };
