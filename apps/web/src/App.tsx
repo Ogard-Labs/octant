@@ -275,12 +275,16 @@ import {
   closeUtilityTabState,
   openThreadUtilityTab,
   openUtilityTabState,
+  readBottomPanelToolPresentation,
+  readUtilityDockPresentation,
   removeUtilityTabs,
   retainAvailableUtilityTabs,
   selectThreadUtilityTab,
   selectUtilityTabState,
   threadUtilityDockState,
   threadUtilityDockKey,
+  writeBottomPanelToolPresentation,
+  writeUtilityDockPresentation,
   type ThreadUtilityDockState,
   type ThreadUtilityDockKey,
   type ThreadUtilityDockStates,
@@ -682,7 +686,9 @@ function LaunchedShell(
   const [chatProjectThreadListRequest, setChatProjectThreadListRequest] = useState<
     { readonly projectId: ProjectId; readonly sequence: number } | undefined
   >(undefined);
-  const [dockVisible, setDockVisible] = useState(false);
+  const [dockVisible, setDockVisible] = useState(
+    () => readUtilityDockPresentation(globalThis, String(props.launch.windowId)).open,
+  );
   const [bottomPanelPresentation, setBottomPanelPresentation] = useState(() =>
     readBottomPanelPresentation(globalThis, String(props.launch.windowId)),
   );
@@ -690,7 +696,9 @@ function LaunchedShell(
     tabs: [],
   });
   const [bottomPanelStatesByThread, setBottomPanelStatesByThread] =
-    useState<ThreadUtilityDockStates>(new Map());
+    useState<ThreadUtilityDockStates>(() =>
+      readBottomPanelToolPresentation(globalThis, String(props.launch.windowId)),
+    );
   const [previewBottomPanelHeight, setPreviewBottomPanelHeight] = useState<number>();
   const persistBottomPanelPresentation = useCallback(
     (next: typeof bottomPanelPresentation) => {
@@ -702,7 +710,22 @@ function LaunchedShell(
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
   const [fallbackDockState, setFallbackDockState] = useState<ThreadUtilityDockState>({ tabs: [] });
-  const [dockStatesByThread, setDockStatesByThread] = useState<ThreadUtilityDockStates>(new Map());
+  const [dockStatesByThread, setDockStatesByThread] = useState<ThreadUtilityDockStates>(
+    () => readUtilityDockPresentation(globalThis, String(props.launch.windowId)).threads,
+  );
+  useEffect(() => {
+    writeUtilityDockPresentation(globalThis, String(props.launch.windowId), {
+      open: dockVisible,
+      threads: dockStatesByThread,
+    });
+  }, [dockStatesByThread, dockVisible, props.launch.windowId]);
+  useEffect(() => {
+    writeBottomPanelToolPresentation(
+      globalThis,
+      String(props.launch.windowId),
+      bottomPanelStatesByThread,
+    );
+  }, [bottomPanelStatesByThread, props.launch.windowId]);
   const [addAgentInvokedByThread, setAddAgentInvokedByThread] = useState(() => new Set<string>());
   const [dockSidecarsByThread, setDockSidecarsByThread] = useState<
     ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>
