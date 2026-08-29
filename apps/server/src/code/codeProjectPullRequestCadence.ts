@@ -94,6 +94,20 @@ export class CodeProjectPullRequestCadence {
     this.#abort.abort();
   }
 
+  /**
+   * A successful explicit refresh proved the `gh` connection works, which is
+   * the second documented signal (besides re-enabling the Project) that may
+   * clear an `unauthorized` stop. It clears every stopped Project: the refusal
+   * was a host-level `gh` condition, not a per-Project one.
+   */
+  noteExplicitRefreshSucceeded(): void {
+    for (const [key, state] of this.#states) {
+      if (state.stopped !== undefined) {
+        this.#states.set(key, restartPullRequestCadence(state));
+      }
+    }
+  }
+
   /** One reconciliation over every active Code Project. Passes never overlap: the timer chain schedules the next only after this one settles. */
   async pass(): Promise<void> {
     if (this.#stopped) return;

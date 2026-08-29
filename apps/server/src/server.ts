@@ -2510,19 +2510,33 @@ export function startOctantServer(
     // on this host `projectService.bootstrap` and Code Project access checks
     // do not branch on it, so no renderer authority is borrowed or widened.
     const pullRequestCadenceWindowId = decodeWindowId(randomUUID());
+    // Refreshed once per cadence pass by the projects callback below, so the
+    // per-Project identity check is a set lookup instead of a journal replay
+    // repeated for every Project on every wake.
+    let pullRequestCadenceProjectsWithIdentities: ReadonlySet<string> = new Set();
     const projectPullRequestCadence = new CodeProjectPullRequestCadence({
-      projects: () =>
-        persistence
+      projects: async () => {
+        const projects = persistence
           .readProjects({ lifecycle: "active" })
           .filter((project) => project.type === "code")
           .map((project) => ({
             projectId: project.id,
             enabled: project.pullRequestBackgroundRefresh === "enabled",
-          })),
-      hasBoardRelevantIdentities: async (projectId) => {
-        const facts = await listProjectPullRequestThreadFacts(pullRequestCadenceWindowId);
-        return facts.some((fact) => fact.projectId === String(projectId));
+          }));
+        // A fleet with nothing enabled must cost nothing per wake: skip the
+        // thread-fact read entirely rather than replaying journals for a
+        // feature that is off.
+        pullRequestCadenceProjectsWithIdentities = projects.some((project) => project.enabled)
+          ? new Set(
+              (await listProjectPullRequestThreadFacts(pullRequestCadenceWindowId)).map(
+                (fact) => fact.projectId,
+              ),
+            )
+          : new Set();
+        return projects;
       },
+      hasBoardRelevantIdentities: (projectId) =>
+        pullRequestCadenceProjectsWithIdentities.has(String(projectId)),
       observe: (projectId, signal) =>
         projectPullRequestService.observeForCadence(pullRequestCadenceWindowId, projectId, signal),
       onState: (state) => projectPullRequestService.recordBackgroundRefreshState(state),
@@ -3397,12 +3411,20 @@ export function startOctantServer(
       executeFollowUp: (_windowId, command) => codeFollowUpService.execute(command),
       queryProjectPullRequests: (windowId, query) =>
         projectPullRequestService.query(windowId, query),
-      refreshProjectPullRequests: (windowId, command, signal) =>
-        projectPullRequestService.refresh(
+      refreshProjectPullRequests: async (windowId, command, signal) => {
+        const view = await projectPullRequestService.refresh(
           windowId,
           command,
           signal ?? new AbortController().signal,
-        ),
+        );
+        // A fresh explicit refresh proves gh works again; it is one of the
+        // two documented signals that restart a cadence stopped by an
+        // unauthorized observation.
+        if (view.freshness.status === "fresh") {
+          projectPullRequestCadence.noteExplicitRefreshSucceeded();
+        }
+        return view;
+      },
       queryProjectPullRequestDetail: (windowId, query) =>
         projectPullRequestService.queryDetail(windowId, query),
       refreshProjectPullRequestDetail: (windowId, command, signal) =>

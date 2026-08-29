@@ -104,6 +104,16 @@ describe("pull-request cadence policy", () => {
     expect(
       decidePullRequestCadenceObservation({ ...base, enabled: false, state: {}, nowMs: 0 }),
     ).toEqual({ kind: "idle", reason: "disabled" });
+    // A disabled Project on a gh-less host is idle, not a gh problem.
+    expect(
+      decidePullRequestCadenceObservation({
+        ...base,
+        enabled: false,
+        ghAvailable: false,
+        state: {},
+        nowMs: 0,
+      }),
+    ).toEqual({ kind: "idle", reason: "disabled" });
     expect(
       decidePullRequestCadenceObservation({
         ...base,

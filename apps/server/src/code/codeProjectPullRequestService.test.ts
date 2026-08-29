@@ -549,6 +549,41 @@ describe("CodeProjectPullRequestService", () => {
     expect(view.freshness).toMatchObject({ status: "stale", staleReason: "timeout" });
   });
 
+  it("a cadence observation still in flight cannot overwrite an explicit refresh that follows it", async () => {
+    let releaseCadenceRead: () => void = () => undefined;
+    const cadenceReadGate = new Promise<void>((resolve) => {
+      releaseCadenceRead = resolve;
+    });
+    let listCalls = 0;
+    const fixture = serviceFixture({
+      list: async () => {
+        listCalls += 1;
+        if (listCalls === 1) {
+          // Stand in for a slow GitHub read racing a user's explicit refresh.
+          await cadenceReadGate;
+          return { status: "ok", rows: [ghRow({ title: "Older cadence read" })] };
+        }
+        return { status: "ok", rows: [ghRow({ title: "Newer explicit read" })] };
+      },
+    });
+
+    const cadence = fixture.service.observeForCadence(
+      windowId,
+      projectA,
+      new AbortController().signal,
+    );
+    const explicit = fixture.service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+    releaseCadenceRead();
+    await Promise.all([cadence, explicit]);
+
+    const view = await fixture.service.query(windowId, { version: 1 });
+    expect(view.rows.map((row) => row.title)).toEqual(["Newer explicit read"]);
+  });
+
   it("an unauthorized cadence observation reports the full stop and revokes cached GitHub facts", async () => {
     const fixture = serviceFixture({
       list: async () => ({ status: "unauthorized" }) satisfies GhActivePullRequestListResult,

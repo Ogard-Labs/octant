@@ -62,11 +62,14 @@ export function decidePullRequestCadenceObservation(input: {
   readonly nowMs: number;
   readonly intervalMs?: number;
 }): PullRequestCadenceDecision {
+  // A Project that never opted in is idle, full stop — reporting a missing
+  // `gh` for a feature the user switched off would flag the normal state of
+  // every gh-less host as a problem.
+  if (!input.enabled) return { kind: "idle", reason: "disabled" };
   if (!input.ghAvailable) return { kind: "stopped", reason: "gh-unavailable" };
   if (input.state.stopped !== undefined) {
     return { kind: "stopped", reason: input.state.stopped };
   }
-  if (!input.enabled) return { kind: "idle", reason: "disabled" };
   if (!input.hasBoardRelevantIdentities) return { kind: "idle", reason: "no-identities" };
   const backoff = input.state.backoff;
   if (backoff !== undefined && cacheBackoffHolds(backoff, input.nowMs)) {

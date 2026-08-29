@@ -144,6 +144,8 @@ export class CodeProjectPullRequestService {
   #freshness: CodeProjectPullRequestFreshness = { status: "empty" };
   readonly #detailFreshness = new Map<string, CodeProjectPullRequestFreshness>();
   readonly #backgroundRefresh = new Map<string, CodeProjectPullRequestBackgroundRefreshState>();
+  /** Tail of the serialized refresh chain; see `#refreshCore`. */
+  #refreshQueue: Promise<unknown> = Promise.resolve();
   #githubRevoked = false;
 
   constructor(options: {
@@ -352,7 +354,32 @@ export class CodeProjectPullRequestService {
     return outcome;
   }
 
-  async #refreshCore(
+  /**
+   * Explicit and cadence refreshes commit to one shared cache. Running them
+   * one at a time keeps commit order equal to start order, so a background
+   * observation whose reads were still in flight can never overwrite the
+   * result of an explicit refresh that started after it.
+   */
+  #refreshCore(
+    windowId: WindowId,
+    command: CodeProjectPullRequestRefreshCommand,
+    signal: AbortSignal,
+    options: { readonly skipSettledKnownIdentities: boolean },
+  ): Promise<{
+    readonly view: CodeProjectPullRequestView;
+    readonly outcome: CodeProjectPullRequestCadenceObservation;
+  }> {
+    const run = this.#refreshQueue.then(() =>
+      this.#refreshExclusive(windowId, command, signal, options),
+    );
+    this.#refreshQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  async #refreshExclusive(
     windowId: WindowId,
     command: CodeProjectPullRequestRefreshCommand,
     signal: AbortSignal,

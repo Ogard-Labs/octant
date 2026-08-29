@@ -125,6 +125,24 @@ describe("pull-request background refresh cadence", () => {
     expect(observed).toHaveLength(2);
   });
 
+  it("a successful explicit refresh restarts a cadence stopped by an unauthorized observation", async () => {
+    const { cadence, observed, states, clock } = fixture({
+      projects: () => [{ projectId: projectA, enabled: true }],
+      outcomes: [{ status: "unauthorized" }, { status: "fresh" }],
+    });
+    await cadence.pass();
+    expect(states.at(-1)).toMatchObject({ state: "unavailable" });
+
+    clock.nowMs += 10_000_000;
+    await cadence.pass();
+    expect(observed).toHaveLength(1);
+
+    cadence.noteExplicitRefreshSucceeded();
+    await cadence.pass();
+    expect(observed).toHaveLength(2);
+    expect(states.at(-1)).toMatchObject({ state: "scheduled" });
+  });
+
   it("reports unavailable without observing when gh is missing", async () => {
     const { cadence, observed, states } = fixture({
       projects: () => [{ projectId: projectA, enabled: true }],
