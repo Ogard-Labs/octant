@@ -312,6 +312,8 @@ describe("applyMigrations", () => {
         "chat_purge_pending_idx",
         "chat_thread_lifecycle_updated_idx",
         "chat_thread_project_idx",
+        "chat_transcript_search_thread_idx",
+        "chat_transcript_search_turn_idx",
         "chat_turn_route_thread_idx",
         "chat_turn_thread_sequence_idx",
         "thread_checkpoint_thread_idx",

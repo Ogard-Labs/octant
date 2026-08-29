@@ -1262,6 +1262,24 @@ function upsertSearch(connection: SqliteConnection): SqliteStatement {
   `);
 }
 
+function upsertTranscriptSearch(connection: SqliteConnection): SqliteStatement {
+  return connection.prepare(`
+    INSERT INTO chat_transcript_search_projection (
+      content_id, turn_id, thread_id, content_role, schema_version,
+      search_text, updated_at, last_sequence
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (content_id) DO UPDATE SET
+      turn_id = excluded.turn_id,
+      thread_id = excluded.thread_id,
+      content_role = excluded.content_role,
+      schema_version = excluded.schema_version,
+      search_text = excluded.search_text,
+      updated_at = excluded.updated_at,
+      last_sequence = excluded.last_sequence
+    WHERE excluded.last_sequence >= chat_transcript_search_projection.last_sequence
+  `);
+}
+
 function upsertWorkItem(connection: SqliteConnection): SqliteStatement {
   return connection.prepare(`
     INSERT INTO thread_work_item_projection (
