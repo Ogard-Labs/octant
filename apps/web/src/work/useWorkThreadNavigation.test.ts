@@ -47,9 +47,7 @@ describe("buildWorkThreadNavigation", () => {
       updatedAt: "2026-08-01T20:00:00.000Z",
     });
 
-    expect(
-      buildWorkThreadNavigation([active], [{ threadId, executing: true }]),
-    ).toEqual([
+    expect(buildWorkThreadNavigation([active], [{ threadId, executing: true }])).toEqual([
       {
         activity: "working",
         threadId: String(threadId),

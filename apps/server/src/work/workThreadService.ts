@@ -126,9 +126,9 @@ export interface WorkThreadServiceDependencies {
    * only exercise thread CRUD need not wire turns; an absent observer leaves
    * the bootstrap runtime list empty.
    */
-  readonly observeRuntime?: (threadId: WorkThreadId) =>
-    | { readonly executing: boolean }
-    | Promise<{ readonly executing: boolean }>;
+  readonly observeRuntime?: (
+    threadId: WorkThreadId,
+  ) => { readonly executing: boolean } | Promise<{ readonly executing: boolean }>;
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
 }

@@ -4117,8 +4117,7 @@ export function startOctantServer(
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
       onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
-      observeRuntime: (threadId) =>
-        observeWorkThreadRuntime?.(threadId) ?? { executing: false },
+      observeRuntime: (threadId) => observeWorkThreadRuntime?.(threadId) ?? { executing: false },
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
     });
@@ -5906,8 +5905,7 @@ export function startOctantServer(
         turns: workTurnProjection.listForThread(threadId),
         pendingRequest: pending,
         childActive: childRuns.filter(
-          (run) =>
-            isAgentRunActiveStatus(run.lifecycleStatus) && run.lifecycleStatus !== "waiting",
+          (run) => isAgentRunActiveStatus(run.lifecycleStatus) && run.lifecycleStatus !== "waiting",
         ).length,
         childWaiting: childRuns.filter((run) => run.lifecycleStatus === "waiting").length,
       });

@@ -3312,7 +3312,9 @@ function serviceFixture(
     readCodeThreadActivity: vi.fn(
       () => options.activity ?? ([] as ReturnType<CodePersistencePort["readCodeThreadActivity"]>),
     ),
-    readCodeRuntimeWorks: vi.fn(() => [] as ReturnType<CodePersistencePort["readCodeRuntimeWorks"]>),
+    readCodeRuntimeWorks: vi.fn(
+      () => [] as ReturnType<CodePersistencePort["readCodeRuntimeWorks"]>,
+    ),
     readCodeCheckout: vi.fn((checkoutId: string) =>
       checkoutList.find((candidate) => String(candidate.id) === checkoutId),
     ),

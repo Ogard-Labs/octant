@@ -886,6 +886,26 @@ export const CodeThreadActivity = Schema.Struct({
 }).annotations(strict);
 export type CodeThreadActivity = typeof CodeThreadActivity.Type;
 
+/**
+ * Live run state and optional checkout chip for one Code sidebar row.
+ *
+ * Kept off durable {@link CodeThread}: executing is runtime-derived the same
+ * way board reasons are, and the chip is a projection over the persisted
+ * checkout identity (no filesystem probe on a navigation tick). `checkoutChip`
+ * is absent for the Project's default checkout so the row stays quiet there.
+ */
+export const CodeNavigationRuntime = Schema.Struct({
+  threadId: CodeThreadId,
+  executing: Schema.Boolean,
+  checkoutChip: Schema.optional(
+    Schema.Struct({
+      checkoutKind: Schema.Literal("managed-worktree"),
+      label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type CodeNavigationRuntime = typeof CodeNavigationRuntime.Type;
+
 export const CodeBootstrap = Schema.Struct({
   settings: CodeSettings,
   threads: Schema.Array(CodeThread),
@@ -910,26 +930,6 @@ export const CodeBootstrap = Schema.Struct({
   runtime: Schema.optionalWith(Schema.Array(CodeNavigationRuntime), { default: () => [] }),
 }).annotations(strict);
 export type CodeBootstrap = typeof CodeBootstrap.Type;
-
-/**
- * Live run state and optional checkout chip for one Code sidebar row.
- *
- * Kept off durable {@link CodeThread}: executing is runtime-derived the same
- * way board reasons are, and the chip is a projection over the persisted
- * checkout identity (no filesystem probe on a navigation tick). `checkoutChip`
- * is absent for the Project's default checkout so the row stays quiet there.
- */
-export const CodeNavigationRuntime = Schema.Struct({
-  threadId: CodeThreadId,
-  executing: Schema.Boolean,
-  checkoutChip: Schema.optional(
-    Schema.Struct({
-      checkoutKind: Schema.Literal("managed-worktree"),
-      label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-    }).annotations(strict),
-  ),
-}).annotations(strict);
-export type CodeNavigationRuntime = typeof CodeNavigationRuntime.Type;
 
 /**
  * The bounded read used to keep the Code sidebar current. It carries only
