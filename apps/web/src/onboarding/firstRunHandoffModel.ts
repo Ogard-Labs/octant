@@ -7,7 +7,7 @@ import type { FirstRunReadinessOverall } from "./firstRunReadinessModel";
 
 /**
  * The three facts the end of first run has to report, and the one next action
- * they produce (`BOOT-01` journey, OCT-97).
+ * they produce.
  *
  * Setup stays the five steps 0019 named. This model is the handoff after them:
  * whether a real thread can start in the selected mode, and if not, which
