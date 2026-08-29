@@ -1,5 +1,4 @@
 import type {
-  EnvironmentPresentationState,
   LayoutNodeId,
   PaneId,
   WindowWorkspace,
@@ -264,12 +263,6 @@ export interface WorkspaceViewProps {
   readonly statusBar?: ReactNode;
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
-  /**
-   * Bootstrap still carries presentation for journal compatibility. Open or
-   * closed is renderer state; these fields are not read.
-   */
-  readonly environmentPresentation: EnvironmentPresentationState;
-  readonly onSetEnvironmentPresentation: (next: EnvironmentPresentationState) => void;
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
   readonly onNewThreadInProject?: (projectId: ProjectSummary["id"]) => void;
   readonly projectClient?: ProjectClient;

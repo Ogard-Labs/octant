@@ -1,7 +1,6 @@
 import type { ProjectAvailability, ProjectSummary } from "@octant/contracts/projects";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/chat";
-import { defaultEnvironmentPresentationState } from "@octant/domain/shell-policy";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -1810,10 +1809,6 @@ describe("WorkspaceView Chat thread Environment", () => {
       title: "Release plan",
     } as WorkspaceTab;
     const base = propsFor(tab);
-    const floatingChat = {
-      ...defaultEnvironmentPresentationState(),
-      byMode: { ...defaultEnvironmentPresentationState().byMode, chat: "floating" as const },
-    };
 
     render(
       <WorkspaceView
@@ -1821,7 +1816,6 @@ describe("WorkspaceView Chat thread Environment", () => {
         chatClient={chatClient as never}
         chatReadCursorStore={createChatReadCursorStore()}
         canvasClient={canvasClient}
-        environmentPresentation={floatingChat}
         mode="chat"
         projects={[project]}
       />,
@@ -1968,8 +1962,6 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
       },
       version: 1,
     } as never,
-    environmentPresentation: defaultEnvironmentPresentationState(),
-    onSetEnvironmentPresentation: vi.fn(),
     projectServerUrl: "http://localhost:0",
     projectWindowCapability: "test-capability",
   } as WorkspaceViewProps;
