@@ -112,8 +112,6 @@ describe("isGithubIntegrationEffective", () => {
       execute: async () => ({ result: { from: "octant_github" } }),
     };
     expect(githubReadToolSetIfEffective(snapshotWithGithub(), () => created)).toBe(created);
-    expect(
-      githubReadToolSetIfEffective({ packages: [] }, () => created),
-    ).toBe(created);
+    expect(githubReadToolSetIfEffective({ packages: [] }, () => created)).toBe(created);
   });
 });
