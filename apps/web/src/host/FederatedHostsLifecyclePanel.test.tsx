@@ -23,6 +23,7 @@ const LAPTOP: FederatedHostLifecycleSnapshot = {
   hostId: decodeHostId("11111111-1111-4111-8111-111111111111"),
   kind: "remote",
   displayName: "Laptop",
+  origin: "https://laptop.tailnet:8443",
   state: "unauthorized",
   health: "unauthorized",
   reasonCode: "expired",
@@ -34,6 +35,7 @@ const OFFICE: FederatedHostLifecycleSnapshot = {
   hostId: decodeHostId("22222222-2222-4222-8222-222222222222"),
   kind: "remote",
   displayName: "Office",
+  origin: "https://office.tailnet:8443",
   state: "stale",
   health: "stale",
   actions: { canReconnect: true, canRevoke: false, canRemove: true },
@@ -98,7 +100,8 @@ describe("FederatedHostsLifecyclePanel", () => {
     expect(await screen.findByRole("heading", { name: "Federated hosts" })).toBeInTheDocument();
     expect(screen.getByText("This Mac")).toBeInTheDocument();
     expect(screen.getByText(/Ready/)).toBeInTheDocument();
-    expect(screen.getByText(/Session expired/i)).toBeInTheDocument();
+    expect(screen.getByText(/device credential expired/i)).toBeInTheDocument();
+    expect(screen.getByText(/https:\/\/laptop\.tailnet:8443/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(2);
 
@@ -127,6 +130,21 @@ describe("FederatedHostsLifecyclePanel", () => {
     await waitFor(() => {
       expect(lifecycle.revoke).toHaveBeenCalledWith(readyRemote.hostId);
     });
+  });
+
+  it("offers reconnect guidance when a session ended but the device key remains", async () => {
+    const recoverable: FederatedHostLifecycleSnapshot = {
+      ...OFFICE,
+      state: "unauthorized",
+      health: "unauthorized",
+      actions: { canReconnect: true, canRevoke: false, canRemove: true },
+    };
+    const lifecycle = createLifecycle([LOCAL, recoverable]);
+    render(<FederatedHostsLifecyclePanel lifecycle={lifecycle} />);
+    expect(
+      await screen.findByText(/Reconnect renews from this browser's device key/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
   });
 });
 

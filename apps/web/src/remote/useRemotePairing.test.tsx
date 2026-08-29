@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { decodeHostId } from "@octant/contracts/host";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import {
+  createClientHostRegistry,
+  createInMemoryClientHostRegistryStorage,
   createInMemoryDeviceKeyStore,
   createRemotePairingClient,
   createRemoteSessionBridge,
@@ -240,5 +243,94 @@ describe("useRemotePairing resume", () => {
     expect(pollPairingStatus).toHaveBeenCalledTimes(2);
     expect(pollPairingStatus.mock.calls[1]?.[0].ticket.ticketId).toBe(TICKET_ID);
     expect(pollPairingStatus.mock.calls[1]?.[0].claim).toBe(claim);
+  });
+
+  it("writes the approved host into the federation registry", async () => {
+    const claim = {
+      ticketId: TICKET_ID,
+      hostId,
+      hostDisplayName: "Studio",
+      hostKeyFingerprint: "a".repeat(64),
+      origin: ORIGIN,
+      comparisonCode: "123456",
+      deviceKeyFingerprint: "b".repeat(64),
+      deviceKeyId: "00000000-0000-4000-8000-000000000003",
+      deviceLabel: "Browser",
+      sourceClass: "lan-private",
+      claimedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    } as Awaited<ReturnType<RemotePairingClient["claimPairing"]>>;
+    const hostHello = {
+      productId: "octant",
+      hostId,
+      displayName: "Studio",
+      hostKeyFingerprint: "a".repeat(64),
+      serverBuildVersion: "0.1.0",
+      supportedProtocolRange: { min: 1, max: 1 },
+      authenticationProtocolVersions: [1],
+      securityFloor: 1,
+      remoteOrigin: ORIGIN,
+      nonce: "nonce1234567890",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      signature: "sig_123",
+    } as unknown as Awaited<ReturnType<RemotePairingClient["requestHostHello"]>>;
+    const approval = {
+      ticketId: TICKET_ID,
+      hostId,
+      deviceId,
+      credentialGeneration: 1,
+      deviceKeyId: claim.deviceKeyId,
+      origin: ORIGIN,
+    };
+    const client: RemotePairingClient = {
+      requestHostHello: vi.fn(async () => hostHello),
+      claimPairing: vi.fn(async () => claim),
+      pollPairingStatus: vi.fn(async () => ({ kind: "approved" as const, approval })),
+      removeDeviceKey: vi.fn(async () => undefined),
+    };
+    const sessionClient = {
+      getState: () => ({ kind: "idle" as const }),
+      subscribe: () => () => undefined,
+      connect: vi.fn(),
+      resume: vi.fn(),
+      reconnect: vi.fn(),
+      disconnect: vi.fn(),
+      connection: () => undefined,
+      forgetDeviceKey: vi.fn(async () => undefined),
+      stageDeviceKeyRotation: vi.fn(async () => {
+        throw new Error("Device key rotation is not part of this test double.");
+      }),
+    } as unknown as RemoteSessionBridge;
+    const hostRegistry = createClientHostRegistry(createInMemoryClientHostRegistryStorage());
+
+    const { result } = renderHook(() =>
+      useRemotePairing({
+        baseUrl: ORIGIN,
+        ticket: { ticketId: TICKET_ID, ticketProof: "ticket_proof_1234567890" },
+        client,
+        sessionClient,
+        hostRegistry,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.screen.kind).toBe("confirm"));
+    act(() => result.current.confirmPairing("Browser"));
+    await waitFor(() => expect(result.current.screen.kind).toBe("approved"));
+
+    const remote = await hostRegistry.get(HOST_ID);
+    expect(remote).toMatchObject({
+      hostId: decodeHostId(HOST_ID),
+      kind: "remote",
+      displayName: "Studio",
+      origin: ORIGIN,
+      enabled: true,
+      credential: {
+        keyId: claim.deviceKeyId,
+        credentialGeneration: 1,
+        hostKeyFingerprint: "a".repeat(64),
+        deviceId,
+      },
+    });
+    expect(sessionClient.connect).toHaveBeenCalledWith(approval);
   });
 });

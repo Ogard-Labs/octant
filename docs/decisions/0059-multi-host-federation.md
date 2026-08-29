@@ -40,10 +40,10 @@ state conflict handling without inventing authority 0013 already forbade.
   fetch that host's facts and route the create command (0031).
 - **Pairing UX at scale.** Pairing, reconnect, revoke, and remove stay the
   0013 gestures, surfaced for many hosts: durable host identity the person can
-  recognize, recovery that renews from the device key rather than a new pair
-  when the session merely expired, and revocation that drops sessions before
-  the response completes. Inventory and host-key rotation remain
-  local-host-required on each owning Machine.
+  recognize (display name plus origin and host id), recovery that renews from
+  the device key rather than a new pair when the session merely expired, and
+  revocation that drops sessions before the response completes. Inventory and
+  host-key rotation remain local-host-required on each owning Machine.
 - **Conflict is honesty, not arbitration.** When two hosts disagree, the client
   shows both truths under their owning host; it never picks a winner, merges
   journals, or lets one host's facts authorize action on another. Create and

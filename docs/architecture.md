@@ -379,7 +379,11 @@ flowchart LR
   crash-safe
   append, explicit terminal reasons for turns, tools, terminals, and subagents,
   preservation of partial provider output, and recovery of outstanding
-  approvals and user-input requests after restart.
+  approvals and user-input requests after restart. Multi-host Settings uses the
+  same rule per registered host: reconnect renews from that host's device key;
+  only a revoked, expired, lost, or host-changed credential forces a new pair.
+  Revoke-self drops that host's sessions and streams before the client clears
+  the local registry entry.
 - **Data lifecycle.** Reset, remove-all, delete-remote-host, and thread
   retention/purge operations are explicit, reported per scope, and never run
   implicitly. Removing a paired host or Project deletes what it owns and

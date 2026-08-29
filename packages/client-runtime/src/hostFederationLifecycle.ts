@@ -65,6 +65,8 @@ export interface FederatedHostLifecycleSnapshot {
   readonly hostId: HostId;
   readonly kind: ClientHostKind;
   readonly displayName: string;
+  /** Remote origin the person paired; absent for the local host. */
+  readonly origin?: string;
   readonly state: FederatedHostLifecycleState;
   /** Shared HostHealth vocabulary (`ready` → `healthy`). */
   readonly health: HostHealth;
@@ -210,22 +212,38 @@ function reasonCodeFromTransport(
   return undefined;
 }
 
+/**
+ * Terminal device-credential failures require a new pair. A bare
+ * `unauthorized` without reasonCode is treated as a recoverable session
+ * rejection (key retained) so reconnect can renew from the device key.
+ */
+function isTerminalAuthFailure(
+  state: FederatedHostLifecycleState,
+  reasonCode: FederatedHostLifecycleReasonCode | undefined,
+): boolean {
+  if (state !== "unauthorized") return false;
+  return (
+    reasonCode === "expired" ||
+    reasonCode === "revoked" ||
+    reasonCode === "lost-key" ||
+    reasonCode === "host-changed"
+  );
+}
+
 function actionsFor(input: {
   readonly kind: ClientHostKind;
   readonly state: FederatedHostLifecycleState;
   readonly reasonCode?: FederatedHostLifecycleReasonCode;
 }): FederatedHostLifecycleActions {
   const canRemove = input.kind === "remote";
-  const terminalAuth =
-    input.state === "unauthorized" &&
-    (input.reasonCode === "expired" ||
-      input.reasonCode === "revoked" ||
-      input.reasonCode === "lost-key" ||
-      input.reasonCode === "host-changed");
+  const terminalAuth = isTerminalAuthFailure(input.state, input.reasonCode);
   const canReconnect =
     input.kind === "remote" &&
     !terminalAuth &&
-    (input.state === "stale" || input.state === "unavailable" || input.state === "connecting");
+    (input.state === "stale" ||
+      input.state === "unavailable" ||
+      input.state === "connecting" ||
+      input.state === "unauthorized");
   const canRevoke = input.kind === "remote" && input.state === "ready";
   return { canReconnect, canRevoke, canRemove };
 }
@@ -272,6 +290,7 @@ function snapshotFrom(input: {
     hostId: input.registration.hostId,
     kind: input.registration.kind,
     displayName: input.registration.displayName,
+    ...(input.registration.origin !== undefined ? { origin: input.registration.origin } : {}),
     state,
     health: mapLifecycleStateToHostHealth(state),
     ...(reason !== undefined ? { reason } : {}),
@@ -431,7 +450,10 @@ export function createHostFederationLifecycle(
           ok: false,
           hostId: id,
           reason:
-            snapshot.reasonCode === "expired" || snapshot.reasonCode === "revoked"
+            snapshot.reasonCode === "expired" ||
+            snapshot.reasonCode === "revoked" ||
+            snapshot.reasonCode === "lost-key" ||
+            snapshot.reasonCode === "host-changed"
               ? `Host ${id} requires re-pairing (${snapshot.reasonCode}).`
               : `Host ${id} is ${snapshot.state} and cannot reconnect.`,
         };
@@ -441,8 +463,22 @@ export function createHostFederationLifecycle(
       if (bridge === undefined) {
         return { ok: false, hostId: id, reason: `No transport bridge for host ${id}.` };
       }
+      const registration = registrations.get(id);
       const replayCursor = snapshot.replayCursor;
-      bridge.reconnect();
+      // An active connection reconnects in place (renews the session from the
+      // device key). After a terminal session drop that cleared the connection
+      // but retained the key, resume from the registered origin instead.
+      if (bridge.connection() !== undefined) {
+        bridge.reconnect();
+      } else if (registration?.origin !== undefined) {
+        bridge.resume(registration.origin);
+      } else {
+        return {
+          ok: false,
+          hostId: id,
+          reason: `Host ${id} has no session to reconnect and no registered origin to resume.`,
+        };
+      }
       rebuildFromTransports();
       return {
         ok: true,

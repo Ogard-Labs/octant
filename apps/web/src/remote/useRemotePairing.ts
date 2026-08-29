@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  createClientHostRegistry,
   createDefaultDeviceKeyStore,
   createRemotePairingClient,
   createRemoteSessionBridge,
   isRemotePairingFailure,
   parseTypedPairingCode,
   readPairingFragment,
+  registerPairedRemoteHost,
+  type ClientHostRegistry,
   type RemotePairingApproval,
   type RemotePairingClaim,
   type RemotePairingClient,
@@ -14,6 +17,7 @@ import {
   type RemoteSessionBridge,
 } from "@octant/client-runtime";
 import type { HostHelloV1 } from "@octant/contracts/remote-access";
+import { createBrowserHostRegistryStorage } from "../host/browserHostRegistryStorage";
 
 const REMOTE_WEB_BUILD_VERSION = "0.1.0";
 const POLL_INTERVAL_MS = 1_000;
@@ -51,6 +55,8 @@ export interface UseRemotePairingOptions {
   readonly client?: RemotePairingClient;
   readonly sessionClient?: RemoteSessionBridge;
   readonly deviceKeyStore?: ReturnType<typeof createDefaultDeviceKeyStore>;
+  /** Defaults to the shared browser federation registry storage. */
+  readonly hostRegistry?: ClientHostRegistry;
   readonly replaceFragment?: ((href: string) => void) | undefined;
 }
 
@@ -66,6 +72,8 @@ export interface UseRemotePairingResult {
 
 export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePairingResult {
   const deviceKeyStore = options.deviceKeyStore ?? createDefaultDeviceKeyStore();
+  const hostRegistry =
+    options.hostRegistry ?? createClientHostRegistry(createBrowserHostRegistryStorage());
   const client =
     options.client ??
     createRemotePairingClient({
@@ -208,6 +216,23 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
     }
   }, [screen.kind, requestHello]);
 
+  const recordApprovedHost = useCallback(
+    async (approval: RemotePairingApproval, claim: RemotePairingClaim) => {
+      try {
+        await registerPairedRemoteHost({
+          registry: hostRegistry,
+          approval,
+          displayName: claim.hostDisplayName,
+          hostKeyFingerprint: claim.hostKeyFingerprint,
+        });
+      } catch {
+        // Pairing still succeeded; Settings may miss this host until the next
+        // successful pair. Do not fail the session for a registry write miss.
+      }
+    },
+    [hostRegistry],
+  );
+
   const pollStatus = useCallback(
     async (ticket: RemotePairingTicket, claim: RemotePairingClaim) => {
       try {
@@ -217,6 +242,8 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
         if (status.kind === "approved") {
           stopPolling();
           lastClaimRef.current = undefined;
+          await recordApprovedHost(status.approval, claim);
+          if (!isMountedRef.current) return;
           setScreen({ kind: "approved", approval: status.approval });
           sessionClient.connect(status.approval);
           return;
@@ -238,7 +265,7 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
         }
       }
     },
-    [client, sessionClient, setFailed, stopPolling],
+    [client, recordApprovedHost, sessionClient, setFailed, stopPolling],
   );
 
   useEffect(() => {

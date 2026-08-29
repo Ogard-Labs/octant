@@ -25,9 +25,9 @@ const STATE_LABELS: Readonly<Record<FederatedHostLifecycleSnapshot["state"], str
   unavailable: "Unavailable",
 };
 
-function expiryCopy(snapshot: FederatedHostLifecycleSnapshot): string | undefined {
+function guidanceCopy(snapshot: FederatedHostLifecycleSnapshot): string | undefined {
   if (snapshot.reasonCode === "expired" || snapshot.expiry?.expired === true) {
-    return "Session expired. Re-pair this browser to restore access.";
+    return "This browser's device credential expired. Re-pair to restore access.";
   }
   if (snapshot.reasonCode === "revoked") {
     return "Access was revoked on the host. Re-pair or remove this entry.";
@@ -38,7 +38,18 @@ function expiryCopy(snapshot: FederatedHostLifecycleSnapshot): string | undefine
   if (snapshot.reasonCode === "host-changed") {
     return "The host identity changed. Re-pair before reconnecting.";
   }
+  if (snapshot.state === "unauthorized" && snapshot.actions.canReconnect) {
+    return "Session ended. Reconnect renews from this browser's device key without pairing again.";
+  }
   return undefined;
+}
+
+function identityFacts(snapshot: FederatedHostLifecycleSnapshot): string {
+  const parts: string[] = [snapshot.hostId];
+  if (snapshot.origin !== undefined) {
+    parts.push(snapshot.origin);
+  }
+  return parts.join(" · ");
 }
 
 function useLifecycleSnapshots(
@@ -117,8 +128,9 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
     >
       <h2 className="host-settings__heading">Federated hosts</h2>
       <p className="host-settings__note">
-        Each host keeps its own connection state. Expiry, revoke, or failure on one host never
-        blocks the local host or other healthy hosts.
+        Each host keeps its own connection state. Device credential expiry, revoke, or failure on
+        one host never blocks the local host or other healthy hosts. A spent session reconnects from
+        the paired device key; only a lost, revoked, or expired credential needs a new pair.
       </p>
       {message !== undefined ? (
         <p className="federated-hosts-lifecycle__message" role="status">
@@ -127,7 +139,7 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
       ) : null}
       <ul className="federated-hosts-lifecycle__list">
         {snapshots.map((snapshot) => {
-          const guidance = expiryCopy(snapshot);
+          const guidance = guidanceCopy(snapshot);
           const busy = busyHostId === snapshot.hostId;
           const isLocal = snapshot.hostId === LOCAL_HOST_ID;
           return (
@@ -139,6 +151,7 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
             >
               <div className="federated-hosts-lifecycle__identity">
                 <strong>{snapshot.displayName}</strong>
+                <span className="federated-hosts-lifecycle__facts">{identityFacts(snapshot)}</span>
                 <span className="federated-hosts-lifecycle__state">
                   {STATE_LABELS[snapshot.state]}
                   {snapshot.reasonCode !== undefined ? ` · ${snapshot.reasonCode}` : ""}

@@ -39,6 +39,7 @@ export * from "./environmentSelection";
 export * from "./listArrangement";
 export * from "./hostFederationMergedReads";
 export * from "./hostFederationLifecycle";
+export * from "./registerPairedRemoteHost";
 export * from "./linkedThreadClient";
 export * from "./localServerClient";
 export * from "./navigatorAssistantClient";

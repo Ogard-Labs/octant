@@ -43,6 +43,10 @@ function createControllableBridge(
   displayName: string,
 ): RemoteSessionBridge & {
   readonly setState: (next: RemoteSessionBridgeState) => void;
+  readonly reconnect: ReturnType<typeof vi.fn>;
+  readonly resume: ReturnType<typeof vi.fn>;
+  readonly connection: ReturnType<typeof vi.fn>;
+  readonly disconnect: ReturnType<typeof vi.fn>;
 } {
   let state: RemoteSessionBridgeState = {
     kind: "ready",
@@ -377,7 +381,7 @@ describe("HostFederationLifecycle (Post-preview B6)", () => {
     expect(lifecycle.get(HOST_B)?.state).toBe("unavailable");
   });
 
-  it("surfaces expiry as unauthorized with actionable reconnect disabled until re-pair", async () => {
+  it("surfaces device credential expiry as unauthorized with reconnect disabled until re-pair", async () => {
     const { lifecycle, bridges } = await seedTwoRemotes();
     bridges.get(HOST_B)!.setState({
       kind: "unauthorized",
@@ -396,6 +400,72 @@ describe("HostFederationLifecycle (Post-preview B6)", () => {
     expect(laptop.actions.canRemove).toBe(true);
     expect(laptop.reason).toMatch(/expired/i);
     expect(lifecycle.get(HOST_A)?.state).toBe("ready");
+  });
+
+  it("reconnects a recoverable unauthorized host by resuming from the device key origin", async () => {
+    const { lifecycle, bridges } = await seedTwoRemotes();
+    const laptop = bridges.get(HOST_B)!;
+    laptop.setState({
+      kind: "unauthorized",
+      reason: "Remote device is not authorized.",
+      hostId: HOST_B,
+      displayName: "Laptop",
+    });
+    // Session drop cleared the live connection; the paired key remains.
+    laptop.connection.mockReturnValue(undefined);
+    laptop.resume.mockClear();
+    laptop.reconnect.mockClear();
+    bridges.get(HOST_A)!.resume.mockClear();
+    lifecycle.observeTransportChange();
+
+    expect(lifecycle.get(HOST_B)?.actions.canReconnect).toBe(true);
+    const result = await lifecycle.reconnect(HOST_B);
+    expect(result.ok).toBe(true);
+    expect(laptop.resume).toHaveBeenCalledWith("https://laptop.tailnet:8443");
+    expect(laptop.reconnect).not.toHaveBeenCalled();
+    expect(bridges.get(HOST_A)!.resume).not.toHaveBeenCalled();
+    expect(lifecycle.get(HOST_A)?.state).toBe("ready");
+  });
+
+  it("refuses reconnect when the device credential was revoked", async () => {
+    const { lifecycle, bridges } = await seedTwoRemotes();
+    const studio = bridges.get(HOST_A)!;
+    studio.setState({
+      kind: "unauthorized",
+      reason: "revoked",
+      reasonCode: "revoked",
+      hostId: HOST_A,
+      displayName: "Studio",
+    });
+    studio.resume.mockClear();
+    studio.reconnect.mockClear();
+    lifecycle.observeTransportChange();
+
+    const result = await lifecycle.reconnect(HOST_A);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/re-pairing/);
+    expect(studio.reconnect).not.toHaveBeenCalled();
+    expect(studio.resume).not.toHaveBeenCalled();
+  });
+
+  it("awaits host revoke-self before clearing the local credential", async () => {
+    const { lifecycle, registry, deviceKeyStore, keyIdA } = await seedTwoRemotes();
+    const order: string[] = [];
+    const revokeSelf = vi.fn(async () => {
+      order.push("revoke-self");
+      expect(await registry.get(HOST_A)).toBeDefined();
+      expect(await deviceKeyStore.get(keyIdA)).toBeDefined();
+      return { localCredentialRemoved: true };
+    });
+
+    const result = await lifecycle.revoke(HOST_A, { revokeSelf });
+    order.push("cleared");
+
+    expect(result.ok).toBe(true);
+    expect(revokeSelf).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["revoke-self", "cleared"]);
+    expect(await registry.get(HOST_A)).toBeUndefined();
+    expect(await deviceKeyStore.get(keyIdA)).toBeUndefined();
   });
 
   it("reconnects one host from its durable replay cursor without touching others", async () => {
