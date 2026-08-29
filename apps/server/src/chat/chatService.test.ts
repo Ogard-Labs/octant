@@ -64,6 +64,7 @@ import {
   readChatThreadView,
   readPendingChatPurges,
   searchChatThreads,
+  searchChatTranscript,
 } from "../persistence/chatProjection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
@@ -370,6 +371,7 @@ function openFixture(options?: {
     readChatThreadView: (threadId: ChatThreadId) => readChatThreadView(connection, threadId),
     readChatContent: (contentId: string) => readChatContent(connection, contentId),
     searchChatThreads: (query: string) => searchChatThreads(connection, query),
+    searchChatTranscript: (query: string) => searchChatTranscript(connection, query),
     readPendingChatPurges: () => readPendingChatPurges(connection),
     status: () => ({ state: "current", integrity: "ok" }),
   } as unknown as PersistenceService;
