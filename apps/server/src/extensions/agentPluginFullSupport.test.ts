@@ -25,6 +25,7 @@ import {
   EXTERNAL_CONTENT_FRAME_CLOSE,
   EXTERNAL_CONTENT_FRAME_OPEN_PREFIX,
 } from "../context/externalContentFraming";
+import type { ExternalContentIngestionResult } from "../context/externalContentIngestionStore";
 import { AgentPluginMcpSessionManager } from "./agentPluginMcpSessionManager";
 import { LocalPluginFolderRegistry } from "./localPluginFolderRegistry";
 import { CodexPluginPackageResolver } from "./codexPluginResolver";
@@ -1551,10 +1552,12 @@ describe("Agent Plugin MCP session manager", () => {
     }) as typeof fetch;
     const threadId = "17000000-0000-4000-8000-000000000099";
     const correlationId = "17000000-0000-4000-8000-000000000088";
-    const record = vi.fn(() => ({
-      kind: "recorded" as const,
-      taint: { externalContentIngested: true, ingestedSources: ["mcp-tool"] },
-    }));
+    const record = vi.fn(
+      (): ExternalContentIngestionResult => ({
+        kind: "recorded",
+        taint: { externalContentIngested: true, ingestedSources: ["mcp-tool"] },
+      }),
+    );
     const manager = new AgentPluginMcpSessionManager({
       store: {
         contentRoot: () => "/tmp/plugin",

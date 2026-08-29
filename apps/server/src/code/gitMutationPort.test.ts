@@ -499,15 +499,17 @@ describe("GitMutationPort", () => {
       paths: ["README.md"],
       executionPolicy: "plan",
     });
-    expect(captured?.writeBoundRoot).toBe(false);
-    expect(captured?.allowProcessExec).toBe(false);
-    expect(captured?.allowProcessFork).toBe(false);
+    const planFlags = captured;
+    expect(planFlags?.writeBoundRoot).toBe(false);
+    expect(planFlags?.allowProcessExec).toBe(false);
+    expect(planFlags?.allowProcessFork).toBe(false);
 
     captured = undefined;
     await port.stage({ checkoutRoot: temporaryDirectory(), paths: ["README.md"] });
-    expect(captured?.writeBoundRoot).not.toBe(false);
-    expect(captured?.allowProcessExec).not.toBe(false);
-    expect(captured?.allowProcessFork).not.toBe(false);
+    const defaultFlags = captured;
+    expect(defaultFlags?.writeBoundRoot).not.toBe(false);
+    expect(defaultFlags?.allowProcessExec).not.toBe(false);
+    expect(defaultFlags?.allowProcessFork).not.toBe(false);
   });
 
   it("fails closed when Seatbelt confinement is unavailable", async () => {
