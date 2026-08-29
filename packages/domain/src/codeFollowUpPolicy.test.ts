@@ -1,3 +1,4 @@
+import { decodeCodeProjectPullRequestRow, type CodeProjectPullRequestRow } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import type { CodeOperationEvent } from "@octant/contracts/code-operations";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
@@ -6,7 +7,9 @@ import {
   CodeFollowUpPolicyRejected,
   completeCodeFollowUp,
   deriveCodeFollowUpTrigger,
+  deriveFailingChecksFollowUpTriggers,
   evaluateCodeFollowUpTrigger,
+  type LinkedPullRequestDefinitiveChecks,
 } from "./codeFollowUpPolicy";
 
 const threadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000001");
@@ -221,5 +224,130 @@ describe("code follow-up automatic trigger derivation", () => {
     expect(
       deriveCodeFollowUpTrigger(event({ kind: "operation-state", state: "running" })),
     ).toBeUndefined();
+  });
+});
+
+describe("failing checks follow-up trigger derivation", () => {
+  const otherThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000002");
+  const emptyState: ReadonlyMap<string, LinkedPullRequestDefinitiveChecks> = new Map();
+
+  function checksRow(
+    overrides: Partial<Parameters<typeof decodeCodeProjectPullRequestRow>[0] & object> = {},
+  ): CodeProjectPullRequestRow {
+    return decodeCodeProjectPullRequestRow({
+      projectId: "10000000-0000-4000-8000-000000000001",
+      projectName: "Octant",
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+      title: "Ship the board join",
+      draft: false,
+      state: "open",
+      mergeability: "mergeable",
+      author: "octocat",
+      baseBranch: "main",
+      headBranch: "feature/board-join",
+      updatedAt: "2026-08-22T07:00:00Z",
+      checks: "failing",
+      review: "pending",
+      linkedThreads: [{ threadId: String(threadId), title: "Board join" }],
+      ...overrides,
+    });
+  }
+
+  it("opens a follow-up trigger for each owning thread when a linked pull request's checks start failing", () => {
+    const { triggers } = deriveFailingChecksFollowUpTriggers({
+      rows: [
+        checksRow({
+          linkedThreads: [
+            { threadId: String(threadId), title: "Board join" },
+            { threadId: String(otherThreadId), title: "Board join follow-on" },
+          ],
+        }),
+      ],
+      lastDefinitiveChecks: emptyState,
+    });
+    expect(triggers).toHaveLength(2);
+    expect(triggers[0]).toMatchObject({
+      threadId,
+      origin: "automatic",
+      reason: "CI is failing on PR #12: Ship the board join",
+    });
+    expect(triggers[1]).toMatchObject({ threadId: otherThreadId, origin: "automatic" });
+  });
+
+  it("re-observing the same failing checks triggers nothing new", () => {
+    const first = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow()],
+      lastDefinitiveChecks: emptyState,
+    });
+    expect(first.triggers).toHaveLength(1);
+
+    const again = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow()],
+      lastDefinitiveChecks: first.lastDefinitiveChecks,
+    });
+    expect(again.triggers).toHaveLength(0);
+  });
+
+  it("a pull request that recovers to passing and fails again triggers a new follow-up", () => {
+    const failed = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow()],
+      lastDefinitiveChecks: emptyState,
+    });
+    const recovered = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow({ checks: "passing" })],
+      lastDefinitiveChecks: failed.lastDefinitiveChecks,
+    });
+    expect(recovered.triggers).toHaveLength(0);
+
+    const failedAgain = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow()],
+      lastDefinitiveChecks: recovered.lastDefinitiveChecks,
+    });
+    expect(failedAgain.triggers).toHaveLength(1);
+    expect(failedAgain.triggers[0]?.reason).toBe("CI is failing on PR #12: Ship the board join");
+  });
+
+  it("pull requests with no linked thread, or without failing checks, never trigger", () => {
+    const { triggers } = deriveFailingChecksFollowUpTriggers({
+      rows: [
+        checksRow({ linkedThreads: [] }),
+        checksRow({ number: 13, checks: "passing" }),
+        checksRow({ number: 14, checks: "pending" }),
+        checksRow({ number: 15, checks: "unknown" }),
+      ],
+      lastDefinitiveChecks: emptyState,
+    });
+    expect(triggers).toHaveLength(0);
+  });
+
+  it("a failing pull request that dips to unknown and fails again does not re-trigger", () => {
+    // An unknown observation says the snapshot lost sight of the checks, not
+    // that they changed, so the last definitive state stays armed and the same
+    // failure never duplicates within one process. Across a host restart this
+    // state is gone by design — the snapshot itself is process-local and the
+    // journal deliberately never sees pull-request rows — so the first failing
+    // observation after a restart re-triggers: the same underlying failure is
+    // not cheaply distinguishable from a new one, an already-open marker simply
+    // absorbs the trigger, and a marker the user completed before the restart
+    // points at a pull request that is still red and still needs attention.
+    const failed = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow()],
+      lastDefinitiveChecks: emptyState,
+    });
+    expect(failed.triggers).toHaveLength(1);
+
+    const lostSight = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow({ checks: "unknown" })],
+      lastDefinitiveChecks: failed.lastDefinitiveChecks,
+    });
+    expect(lostSight.triggers).toHaveLength(0);
+
+    const failingAgain = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow()],
+      lastDefinitiveChecks: lostSight.lastDefinitiveChecks,
+    });
+    expect(failingAgain.triggers).toHaveLength(0);
   });
 });

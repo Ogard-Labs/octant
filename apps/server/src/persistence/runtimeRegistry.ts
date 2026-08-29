@@ -17,11 +17,14 @@ import {
   ChatTurnRouteDecided,
   CodeProjectAccessChanged,
   CodeProjectNewThreadWorkspaceChanged,
+  CodeProjectPullRequestBackgroundRefreshChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
   CodeFileReferenceUpdated,
   CodeRuntimeWorkUpdated,
   CodeReviewFindingUpdated,
+  CodePlannerDesignationUpdated,
+  CodePlannerProposalUpdated,
   CodeThreadFollowUpUpdated,
   PersistedCodeThreadFollowUpUpdated,
   CodeOperationEventFrame,
@@ -230,6 +233,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       CodeProjectNewThreadWorkspaceChanged,
     )
+    .register(
+      "project.code-pull-request-background-refresh-changed@1",
+      1,
+      CodeProjectPullRequestBackgroundRefreshChanged,
+    )
     .register("memory.entry-created@1", 1, MemoryEntryCreated)
     .register("memory.entry-superseded@1", 1, MemoryEntrySuperseded)
     .register("memory.entry-retracted@1", 1, MemoryEntryRetracted)
@@ -281,6 +289,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       persistedSchema: PersistedCodeThreadFollowUpUpdated,
     })
     .register("code.operation-event-recorded@1", 1, CodeOperationEventFrame)
+    .register("code.planner-designation-updated@1", 1, CodePlannerDesignationUpdated)
+    .register("code.planner-proposal-updated@1", 1, CodePlannerProposalUpdated)
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)

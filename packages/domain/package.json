@@ -18,6 +18,7 @@
     "./thread-board-policy": "./src/threadBoardPolicy.ts",
     "./thread-board-pull-request-policy": "./src/threadBoardPullRequestPolicy.ts",
     "./code-follow-up-policy": "./src/codeFollowUpPolicy.ts",
+    "./code-planner-policy": "./src/codePlannerPolicy.ts",
     "./code-worktree-source-policy": "./src/codeWorktreeSourcePolicy.ts",
     "./delivery-target-policy": "./src/deliveryTargetPolicy.ts",
     "./push-notification-policy": "./src/pushNotificationPolicy.ts",
@@ -66,6 +67,7 @@
     "./github-remote-identity": "./src/githubRemoteIdentity.ts",
     "./tracker-reference-policy": "./src/trackerReferencePolicy.ts",
     "./code-project-pull-request-policy": "./src/codeProjectPullRequestPolicy.ts",
+    "./code-project-pull-request-cadence-policy": "./src/codeProjectPullRequestCadencePolicy.ts",
     "./canvas-share-snapshot-policy": "./src/canvasShareSnapshotPolicy.ts",
     "./canvas-share-access-log-policy": "./src/canvasShareAccessLogPolicy.ts",
     "./audit-policy": "./src/auditPolicy.ts"

@@ -1,8 +1,10 @@
 import type {
   BrowserAutomationSnapshot,
   BrowserThreadId,
+  CodeBoardView,
   CodeOperationCommand,
   CodeOperationResult,
+  CodePlannerWorkProposal,
   CodeTerminalId,
   CodeThread,
   EventActor,
@@ -40,6 +42,15 @@ const TERMINAL_COMPLETION_POLL_MS = 50;
 export const CODE_BROWSER_TOOL_NAME = "octant_browser";
 export const CODE_TERMINAL_TOOL_NAME = "octant_terminal";
 export const CODE_APPLE_TOOL_NAME = "octant_apple";
+export const CODE_BOARD_TOOL_NAME = "octant_board";
+export const CODE_PROPOSE_THREAD_TOOL_NAME = "octant_propose_thread";
+
+/**
+ * Ceiling on cards one board read hands the provider. The board is ordered by
+ * most recent meaningful activity, so the planner always sees the live end of
+ * a Project that has outgrown the bound.
+ */
+const MAX_BOARD_TOOL_CARDS = 100;
 
 /** How long one agent-driven Apple action may run before it is given up on. */
 const APPLE_BUILD_TIMEOUT_MS = 15 * 60_000;
@@ -61,6 +72,28 @@ const browserDefinition = {
       text: { type: "string" },
     },
     required: ["operation"],
+  },
+} as const;
+
+const boardDefinition = {
+  name: CODE_BOARD_TOOL_NAME,
+  inputSchema: {
+    type: "object",
+    properties: { operation: { type: "string", enum: ["read"] } },
+    required: ["operation"],
+  },
+} as const;
+
+const proposeThreadDefinition = {
+  name: CODE_PROPOSE_THREAD_TOOL_NAME,
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      intent: { type: "string" },
+      rationale: { type: "string" },
+    },
+    required: ["title", "intent"],
   },
 } as const;
 
@@ -223,7 +256,39 @@ export interface CodeAppManagedToolsOptions {
     ) => Promise<BrowserAutomationSnapshot>;
   };
   readonly apple?: CodeAppleToolPort;
+  /**
+   * What the planner capability lends one thread's agent: a read of its own
+   * Project's server-authoritative board, and an advisory work proposal that
+   * waits for the user. Both re-resolve the planner designation on every call,
+   * so only the currently designated planner thread ever gets an answer, and
+   * neither can mutate a thread, a checkout, or GitHub.
+   */
+  readonly planner?: CodePlannerToolPort;
   readonly wait?: (milliseconds: number) => Promise<void>;
+}
+
+export interface CodePlannerToolPort {
+  /**
+   * Whether this thread is currently its Project's designated planner. Used
+   * only to decide whether the planner tools are advertised at all; every
+   * call still re-validates through {@link board} and {@link propose}.
+   */
+  readonly isPlannerThread: (threadId: CodeThread["id"]) => boolean;
+  readonly board: (
+    windowId: WindowId,
+    threadId: CodeThread["id"],
+  ) => Promise<
+    | { readonly status: "ok"; readonly board: CodeBoardView }
+    | { readonly status: "refused"; readonly reason: string; readonly message: string }
+  >;
+  readonly propose: (
+    windowId: WindowId,
+    threadId: CodeThread["id"],
+    draft: { readonly title: string; readonly intent: string; readonly rationale?: string },
+  ) => Promise<
+    | { readonly status: "proposed"; readonly proposal: CodePlannerWorkProposal }
+    | { readonly status: "refused"; readonly reason: string; readonly message: string }
+  >;
 }
 
 export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): AppManagedToolSet {
@@ -233,15 +298,32 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       browserDefinition,
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
+      // The planner tools appear only in the currently designated planner
+      // thread. Any other thread that calls them anyway is refused by name
+      // below with a value, never a throw.
+      ...(options.planner !== undefined && options.planner.isPlannerThread(options.thread.id)
+        ? [boardDefinition, proposeThreadDefinition]
+        : []),
     ].filter((definition) => isToolAllowedByAllowlist(allowlist, definition.name)),
     execute: async ({ name, inputJson, signal }) => {
       if (signal?.aborted) return failure("tool-interrupted");
-      const authorityFailure = currentAuthorityFailure(options);
-      if (authorityFailure !== undefined) return failure(authorityFailure);
+      const stalenessFailure = currentThreadIdentityFailure(options);
+      if (stalenessFailure !== undefined) return failure(stalenessFailure);
       const profileFailure = profileToolConstraintFailure(options.thread, name);
       if (profileFailure !== undefined) {
         return failure("profile-tool-refused", profileFailure);
       }
+      // The planner tools sit before the posture gate: a board read and an
+      // advisory proposal work under any posture, because neither has an
+      // effect an approval could gate. Designation is re-validated inside.
+      if (name === CODE_BOARD_TOOL_NAME && options.planner !== undefined) {
+        return plannerBoardTool(options, parseBoardInput(inputJson));
+      }
+      if (name === CODE_PROPOSE_THREAD_TOOL_NAME && options.planner !== undefined) {
+        return plannerProposeTool(options, parseProposeThreadInput(inputJson));
+      }
+      const postureFailure = currentAuthorityFailure(options);
+      if (postureFailure !== undefined) return failure(postureFailure);
       if (name === CODE_TERMINAL_TOOL_NAME) {
         return terminalTool(options, parseTerminalInput(inputJson), signal);
       }
@@ -253,6 +335,73 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       }
       return failure("tool-unavailable");
     },
+  };
+}
+
+async function plannerBoardTool(
+  options: CodeAppManagedToolsOptions,
+  input: { readonly operation: "read" } | undefined,
+) {
+  if (input === undefined || options.planner === undefined) return failure("invalid-board-input");
+  let outcome: Awaited<ReturnType<CodePlannerToolPort["board"]>>;
+  try {
+    outcome = await options.planner.board(options.windowId, options.thread.id);
+  } catch {
+    return failure("planner-unavailable");
+  }
+  if (outcome.status === "refused") return failure(outcome.reason, outcome.message);
+  const cards = outcome.board.cards.slice(0, MAX_BOARD_TOOL_CARDS);
+  return {
+    result: {
+      generatedAt: String(outcome.board.generatedAt),
+      cards: cards.map((card) => ({
+        threadId: String(card.threadId),
+        title: card.title,
+        status: card.status,
+        statusReason: card.statusReason,
+        outcomeKind: card.outcomeKind,
+        deliverySatisfaction: card.deliverySatisfaction,
+        executing: card.executing,
+        changedFiles: card.changedFiles,
+        linkedPullRequest: card.linkedPullRequest,
+        checks: card.checks,
+        reviewState: card.reviewState,
+        childAgents: card.childAgents,
+        planProgress: card.planProgress,
+        followUp: card.followUp,
+        ...(card.blockingReason === undefined ? {} : { blockingReason: card.blockingReason }),
+        lastMeaningfulActivityAt: card.lastMeaningfulActivityAt,
+      })),
+      ...(outcome.board.cards.length > cards.length ? { truncated: true } : {}),
+    },
+    isError: false,
+  };
+}
+
+async function plannerProposeTool(
+  options: CodeAppManagedToolsOptions,
+  input: ProposeThreadToolInput | undefined,
+) {
+  if (input === undefined || options.planner === undefined) {
+    return failure("invalid-proposal-input");
+  }
+  let outcome: Awaited<ReturnType<CodePlannerToolPort["propose"]>>;
+  try {
+    outcome = await options.planner.propose(options.windowId, options.thread.id, input);
+  } catch {
+    return failure("planner-unavailable");
+  }
+  if (outcome.status === "refused") return failure(outcome.reason, outcome.message);
+  return {
+    result: {
+      status: "pending-user-confirmation",
+      proposalId: String(outcome.proposal.id),
+      title: outcome.proposal.title,
+      // The proposal executes nothing; only the user's explicit confirmation
+      // creates the thread, through the ordinary creation command.
+      note: "Proposed. The user decides whether this thread is created.",
+    },
+    isError: false,
   };
 }
 
@@ -893,6 +1042,30 @@ interface AppleToolInput {
   readonly key?: string;
 }
 
+interface ProposeThreadToolInput {
+  readonly title: string;
+  readonly intent: string;
+  readonly rationale?: string;
+}
+
+function parseBoardInput(value: string): { readonly operation: "read" } | undefined {
+  const parsed = parseObject(value, new Set(["operation"]));
+  if (parsed === undefined || parsed.operation !== "read") return undefined;
+  return { operation: "read" };
+}
+
+function parseProposeThreadInput(value: string): ProposeThreadToolInput | undefined {
+  const parsed = parseObject(value, new Set(["title", "intent", "rationale"]));
+  if (parsed === undefined) return undefined;
+  if (typeof parsed.title !== "string" || typeof parsed.intent !== "string") return undefined;
+  if (parsed.rationale !== undefined && typeof parsed.rationale !== "string") return undefined;
+  return {
+    title: parsed.title,
+    intent: parsed.intent,
+    ...(typeof parsed.rationale === "string" ? { rationale: parsed.rationale } : {}),
+  };
+}
+
 type BrowserToolInput =
   | { readonly operation: "navigate"; readonly url?: string }
   | { readonly operation: "read-page" | "scroll" | "screenshot" | "stop" }
@@ -1008,6 +1181,24 @@ function profileToolConstraintFailure(thread: CodeThread, toolName: string): str
 }
 
 function currentAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {
+  const staleness = currentThreadIdentityFailure(options);
+  if (staleness !== undefined) return staleness;
+  const current = options.readThread(options.windowId, options.thread.id);
+  const posture = clampTurnAccessPosture({
+    requested: options.thread.executionPolicy,
+    thread: current?.executionPolicy ?? options.thread.executionPolicy,
+  });
+  return posture === "full-access" ? undefined : "full-access-required";
+}
+
+/**
+ * Staleness alone, without the full-access posture requirement. The planner
+ * tools read a server projection and record an advisory proposal; neither
+ * touches the checkout, so demanding Full access would only push a planner
+ * thread into a wider posture than its work needs. Identity staleness still
+ * refuses: a rebased, re-homed, or archived thread speaks for nothing.
+ */
+function currentThreadIdentityFailure(options: CodeAppManagedToolsOptions): string | undefined {
   const current = options.readThread(options.windowId, options.thread.id);
   if (
     current === undefined ||
@@ -1022,11 +1213,7 @@ function currentAuthorityFailure(options: CodeAppManagedToolsOptions): string | 
   ) {
     return "tool-authority-stale";
   }
-  const posture = clampTurnAccessPosture({
-    requested: options.thread.executionPolicy,
-    thread: current.executionPolicy,
-  });
-  return posture === "full-access" ? undefined : "full-access-required";
+  return undefined;
 }
 
 function boundedUtf8(value: string, maxBytes: number): string {

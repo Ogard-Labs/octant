@@ -162,6 +162,11 @@ export interface CodeOperationRuntimeOptions {
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
   /** The app-managed Apple capability, when this host has an Apple toolchain. */
   readonly appleToolchain?: CodeAppManagedToolsOptions["apple"];
+  /**
+   * The planner capability: a Project-board read and an advisory work
+   * proposal, both answered only for the Project's designated planner thread.
+   */
+  readonly planner?: CodeAppManagedToolsOptions["planner"];
   /** Optional Project-fixed, read-only GitHub tools composed per active turn. */
   readonly githubReadTools?: (input: {
     readonly windowId: WindowId;
@@ -1121,6 +1126,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     ...(this.#options.appleToolchain === undefined
                       ? {}
                       : { apple: this.#options.appleToolchain }),
+                    ...(this.#options.planner === undefined
+                      ? {}
+                      : { planner: this.#options.planner }),
                   }),
                   this.#options.githubReadTools?.({
                     windowId: active.windowId,

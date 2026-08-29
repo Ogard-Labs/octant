@@ -22,7 +22,12 @@ export interface ThreadBoardPullRequestJoinInput {
 function summaryFreshness(
   snapshotFreshness: CodeProjectPullRequestFreshness,
 ): ThreadBoardPullRequestFreshness {
-  return snapshotFreshness.status === "fresh" ? "fresh" : "stale";
+  if (snapshotFreshness.status === "fresh") return "fresh";
+  // A snapshot that cannot reach GitHub at all is a different promise than a
+  // reachable-but-old one: the rows below are journal-known identities that no
+  // refresh — explicit or background — can currently confirm.
+  if (snapshotFreshness.staleReason === "disconnected") return "unavailable";
+  return "stale";
 }
 
 export function deriveThreadBoardPullRequestState(input: {

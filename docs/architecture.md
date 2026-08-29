@@ -252,13 +252,21 @@ Work and Code have server-authoritative thread boards
 Chat has no board. Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
 Projects. The list is a cached read of an in-memory snapshot: opening it,
-navigating, and ordinary board queries do not call GitHub. Only an explicit
-Refresh all or per-Project refresh talks to the installed authenticated `gh`
-CLI. Independent repository reads run concurrently, results reconcile in stable
-Project order, and the refresh remains within preview bounds. The journal never stores that
-cache. It stores only exact PR identities already produced by Code operations,
-so a restart can show an identity as stale and unknown until the next explicit
-refresh.
+navigating, and ordinary board queries do not call GitHub. GitHub is reached
+only by an explicit Refresh all or per-Project refresh, or — for Projects that
+opted in — by a bounded background refresh cadence, all through the installed
+authenticated `gh` CLI. The cadence is a journaled per-Project setting, off by
+default, floored at 30 seconds with a conservative default interval, backs off
+on failure without advancing its per-Project sync position, skips re-observing
+cached merged/closed identities, and stops with an honest `unavailable` state
+when `gh` is missing or unauthenticated. Independent repository reads run
+concurrently, results reconcile in stable Project order, and every refresh path
+remains within preview bounds. The journal never stores that cache and never
+sees a per-poll event; it stores only the user's opt-in toggle and exact PR
+identities already produced by Code operations, so a restart can show an
+identity as stale and unknown until the next explicit or background refresh
+(see
+[decisions/0064-pull-request-observation-cadence.md](decisions/0064-pull-request-observation-cadence.md)).
 
 **GitHub issue browser.** The first-party GitHub plugin contributes a second
 `sidebar.destination` (`github-issues`) that opens a host-scoped, read-only

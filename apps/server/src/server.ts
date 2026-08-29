@@ -178,6 +178,7 @@ import {
   type ManagedCodeThreadCreationPort,
 } from "./code/codeService";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
+import { CodePlannerService } from "./code/codePlannerService";
 import {
   createCodeProfileSkillResolver,
   createStoredCodeProfileSkillTextLoader,
@@ -194,11 +195,13 @@ import {
 } from "./code/codeThreadBoardService";
 import { createCodeBoardPlanProgressSource } from "./code/codeBoardPlanProgress";
 import { CodeFollowUpService } from "./code/codeFollowUpService";
+import { FailingChecksFollowUps } from "./code/failingChecksFollowUps";
 import {
   CodeProjectPullRequestService,
   type CodeProjectPullRequestDetailPort,
   type CodeProjectPullRequestListPort,
 } from "./code/codeProjectPullRequestService";
+import { CodeProjectPullRequestCadence } from "./code/codeProjectPullRequestCadence";
 import { createGhCommandPort, GhPullRequestPort } from "./code/ghPullRequestPort";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
@@ -548,6 +551,7 @@ import {
   decodeImageGenerationScopeId,
   decodeMultiModelRoutingVendorId,
   type ChatThreadView,
+  type CodeProjectPullRequestRow,
   type CodeWorktreeRemoteFacts,
   type ImageGenerationSaveResult,
   type MentionableThreadId,
@@ -1264,11 +1268,18 @@ function withCodeOperationRuntime(
 function createProjectPullRequestPorts(ghExecutable: string | undefined): {
   readonly list: CodeProjectPullRequestListPort;
   readonly detail: CodeProjectPullRequestDetailPort;
+  /**
+   * False when `gh` is missing or refused validation. The background refresh
+   * cadence fails closed on this instead of polling ports that can only
+   * answer `disconnected`.
+   */
+  readonly ghAvailable: boolean;
 } {
   if (ghExecutable === undefined) {
     return {
       list: { listActive: async () => ({ status: "disconnected" }) },
       detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
+      ghAvailable: false,
     };
   }
   try {
@@ -1283,11 +1294,13 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
       detail: {
         observeReviewByIdentity: (request, signal) => port.observeReviewByIdentity(request, signal),
       },
+      ghAvailable: true,
     };
   } catch {
     return {
       list: { listActive: async () => ({ status: "disconnected" }) },
       detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
+      ghAvailable: false,
     };
   }
 }
@@ -2446,6 +2459,45 @@ export function startOctantServer(
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     const projectPullRequestPorts = createProjectPullRequestPorts(options.ghExecutable);
+    // Late-bound because the follow-up service that consumes refreshed
+    // snapshots is constructed further down, alongside the other Code thread
+    // services (same pattern as recordExtensionRuntimeEvidence).
+    let observeRefreshedPullRequestRows:
+      | ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void)
+      | undefined;
+    const listProjectPullRequestThreadFacts = async (windowId: WindowId) => {
+      const bootstrap = await codeService.bootstrap(windowId);
+      const facts: Array<{
+        readonly threadId: string;
+        readonly projectId: string;
+        readonly title: string;
+        readonly repository: { readonly owner: string; readonly name: string };
+        readonly deliveryBranch: string;
+        readonly pullRequestNumbers: ReadonlyArray<{
+          readonly number: number;
+          readonly observedAt: string;
+        }>;
+      }> = [];
+      for (const thread of bootstrap.threads) {
+        const repository = thread.deliveryTarget.proposedBaseRepository;
+        const slash = repository.indexOf("/");
+        if (slash <= 0 || repository.includes("/", slash + 1)) continue;
+        const owner = repository.slice(0, slash);
+        const name = repository.slice(slash + 1);
+        if (owner === undefined || name === undefined) continue;
+        facts.push({
+          threadId: String(thread.id),
+          projectId: String(thread.projectId),
+          title: thread.title,
+          repository: { owner, name },
+          deliveryBranch: thread.deliveryTarget.branchIntent,
+          pullRequestNumbers: pullRequestIdentitiesFromHistory(
+            codeBoardEventStore.historyForThread(thread.id),
+          ),
+        });
+      }
+      return facts;
+    };
     const projectPullRequestService = new CodeProjectPullRequestService({
       projects: projectService,
       remotes: {
@@ -2457,43 +2509,50 @@ export function startOctantServer(
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
       cacheStats,
+      onSnapshotRefreshed: (rows) => observeRefreshedPullRequestRows?.(rows),
       threads: {
-        list: async (windowId) => {
-          const bootstrap = await codeService.bootstrap(windowId);
-          const facts: Array<{
-            readonly threadId: string;
-            readonly projectId: string;
-            readonly title: string;
-            readonly repository: { readonly owner: string; readonly name: string };
-            readonly deliveryBranch: string;
-            readonly pullRequestNumbers: ReadonlyArray<{
-              readonly number: number;
-              readonly observedAt: string;
-            }>;
-          }> = [];
-          for (const thread of bootstrap.threads) {
-            const repository = thread.deliveryTarget.proposedBaseRepository;
-            const slash = repository.indexOf("/");
-            if (slash <= 0 || repository.includes("/", slash + 1)) continue;
-            const owner = repository.slice(0, slash);
-            const name = repository.slice(slash + 1);
-            if (owner === undefined || name === undefined) continue;
-            facts.push({
-              threadId: String(thread.id),
-              projectId: String(thread.projectId),
-              title: thread.title,
-              repository: { owner, name },
-              deliveryBranch: thread.deliveryTarget.branchIntent,
-              pullRequestNumbers: pullRequestIdentitiesFromHistory(
-                codeBoardEventStore.historyForThread(thread.id),
-              ),
-            });
-          }
-          return facts;
-        },
+        list: (windowId) => listProjectPullRequestThreadFacts(windowId),
       },
     });
     revokeProjectPullRequests = () => projectPullRequestService.revokeGithub();
+    // The cadence acts as the host, not as any renderer window. The window
+    // identity below exists only to satisfy window-shaped read signatures;
+    // on this host `projectService.bootstrap` and Code Project access checks
+    // do not branch on it, so no renderer authority is borrowed or widened.
+    const pullRequestCadenceWindowId = decodeWindowId(randomUUID());
+    // Refreshed once per cadence pass by the projects callback below, so the
+    // per-Project identity check is a set lookup instead of a journal replay
+    // repeated for every Project on every wake.
+    let pullRequestCadenceProjectsWithIdentities: ReadonlySet<string> = new Set();
+    const projectPullRequestCadence = new CodeProjectPullRequestCadence({
+      projects: async () => {
+        const projects = persistence
+          .readProjects({ lifecycle: "active" })
+          .filter((project) => project.type === "code")
+          .map((project) => ({
+            projectId: project.id,
+            enabled: project.pullRequestBackgroundRefresh === "enabled",
+          }));
+        // A fleet with nothing enabled must cost nothing per wake: skip the
+        // thread-fact read entirely rather than replaying journals for a
+        // feature that is off.
+        pullRequestCadenceProjectsWithIdentities = projects.some((project) => project.enabled)
+          ? new Set(
+              (await listProjectPullRequestThreadFacts(pullRequestCadenceWindowId)).map(
+                (fact) => fact.projectId,
+              ),
+            )
+          : new Set();
+        return projects;
+      },
+      hasBoardRelevantIdentities: (projectId) =>
+        pullRequestCadenceProjectsWithIdentities.has(String(projectId)),
+      observe: (projectId, signal) =>
+        projectPullRequestService.observeForCadence(pullRequestCadenceWindowId, projectId, signal),
+      onState: (state) => projectPullRequestService.recordBackgroundRefreshState(state),
+      ghAvailable: projectPullRequestPorts.ghAvailable,
+    });
+    projectPullRequestCadence.start();
     let codeOperationRuntime = options.codeOperationRuntime;
     const providerDataDirectory = persistence.dataDirectory;
     const providerRuntimeRegistry =
@@ -3242,6 +3301,34 @@ export function startOctantServer(
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             githubReadToolService.createToolSet({ windowId, thread, readThread }),
           ),
+        // Planner tools resolve their designation on every call through the
+        // services declared after this runtime; the closures run only once a
+        // turn is live, well after startup finishes wiring them.
+        planner: {
+          isPlannerThread: (threadId) => codePlannerService.isPlannerThread(threadId),
+          board: async (windowId, threadId) => {
+            const scope = codePlannerService.boardScope(threadId);
+            if (scope.status === "refused") return scope;
+            const queryBoard = routeCodeService.queryBoard;
+            if (queryBoard === undefined) {
+              return {
+                status: "refused",
+                reason: "planner-unavailable",
+                message: "The Code Thread Board is unavailable on this host.",
+              };
+            }
+            // The planner reads the same server-authoritative board read-model
+            // the UI queries, scoped strictly to its own Project. No GitHub
+            // call happens here; cached PR facts arrive with their freshness.
+            const board = await queryBoard(windowId, {
+              version: 1,
+              projectIds: [scope.projectId],
+            });
+            return { status: "ok", board };
+          },
+          propose: async (_windowId, threadId, draft) =>
+            codePlannerService.propose(threadId, draft),
+        },
         resolvePullRequestTarget: async (threadId) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return undefined;
@@ -3312,6 +3399,30 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    // The Project planner: one designated Code thread per Code Project that
+    // may read the Project's board and propose work. A confirmed proposal
+    // creates its thread through the ordinary creation command path below;
+    // the planner has no creation authority of its own.
+    const codePlannerService = new CodePlannerService({
+      persistence,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      canAccessProject: canAccessCodeProject,
+      createThread: async (windowId, creation, signal) =>
+        baseRouteCodeService.execute(windowId, creation, signal),
+    });
+    // A linked pull request's checks turning red is a user obligation, not an
+    // agent event: every snapshot refresh feeds the durable follow-up marker on
+    // the owning thread. Read-only toward GitHub; only an explicit completion
+    // clears the marker.
+    const failingChecksFollowUps = new FailingChecksFollowUps({
+      followUps: codeFollowUpService,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    observeRefreshedPullRequestRows = (rows) => {
+      void failingChecksFollowUps.observe(rows);
+    };
     const boardRouteCodeService: CodeRouteService = withCodeBoard(
       baseRouteCodeService,
       async (windowId, query) => {
@@ -3360,14 +3471,26 @@ export function startOctantServer(
       ...boardRouteCodeService,
       readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
       executeFollowUp: (_windowId, command) => codeFollowUpService.execute(command),
+      readPlanner: (windowId, projectId) => codePlannerService.readView(windowId, projectId),
+      executePlanner: (windowId, command) => codePlannerService.execute(windowId, command),
+      executePlannerProposal: (windowId, command, signal) =>
+        codePlannerService.resolveProposal(windowId, command, signal),
       queryProjectPullRequests: (windowId, query) =>
         projectPullRequestService.query(windowId, query),
-      refreshProjectPullRequests: (windowId, command, signal) =>
-        projectPullRequestService.refresh(
+      refreshProjectPullRequests: async (windowId, command, signal) => {
+        const view = await projectPullRequestService.refresh(
           windowId,
           command,
           signal ?? new AbortController().signal,
-        ),
+        );
+        // A fresh explicit refresh proves gh works again; it is one of the
+        // two documented signals that restart a cadence stopped by an
+        // unauthorized observation.
+        if (view.freshness.status === "fresh") {
+          projectPullRequestCadence.noteExplicitRefreshSucceeded();
+        }
+        return view;
+      },
       queryProjectPullRequestDetail: (windowId, query) =>
         projectPullRequestService.queryDetail(windowId, query),
       refreshProjectPullRequestDetail: (windowId, command, signal) =>
@@ -6288,6 +6411,11 @@ export function startOctantServer(
             // journal connection goes away; a pass is one synchronous section,
             // so shutdown can never interrupt a partial occurrence claim.
             await automationScheduler.stop();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
+          try {
+            projectPullRequestCadence.stop();
           } catch (error) {
             shutdownFailure ??= error;
           }

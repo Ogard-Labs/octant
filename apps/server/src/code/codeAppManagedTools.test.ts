@@ -8,7 +8,9 @@ import type {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
+  CODE_BOARD_TOOL_NAME,
   CODE_BROWSER_TOOL_NAME,
+  CODE_PROPOSE_THREAD_TOOL_NAME,
   CODE_TERMINAL_TOOL_NAME,
   createCodeAppManagedTools,
 } from "./codeAppManagedTools";
@@ -1050,6 +1052,176 @@ function appleDiscovery() {
     simulators: [],
   } as never;
 }
+
+describe("the planner board and proposal as agent tools", () => {
+  function plannerTools(
+    planner: NonNullable<Parameters<typeof createCodeAppManagedTools>[0]["planner"]>,
+    overrides: Partial<CodeThread> = {},
+  ) {
+    return createCodeAppManagedTools({
+      windowId,
+      thread: thread(overrides),
+      readThread: () => thread(overrides),
+      uuid: uuidFactory(),
+      executeOperation: async () => {
+        throw new Error("The planner tools must not reach the operation runtime.");
+      },
+      terminal: {
+        read: async () => {
+          throw new Error("The planner tools must not read the terminal.");
+        },
+      },
+      planner,
+    });
+  }
+
+  function boardCard(index: number): Record<string, unknown> {
+    return {
+      threadId: `90000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      title: `Card ${String(index)}`,
+      status: "ready",
+      statusReason: "idle",
+      outcomeKind: "opened-pr",
+      deliverySatisfaction: "pending",
+      executing: false,
+      changedFiles: { kind: "none" },
+      linkedPullRequest: { kind: "none" },
+      checks: { state: "unknown" },
+      reviewState: { state: "none" },
+      childAgents: { active: 0 },
+      planProgress: { kind: "none" },
+      followUp: false,
+      lastMeaningfulActivityAt: null,
+    };
+  }
+
+  function boardView(cardCount: number) {
+    return {
+      version: 1,
+      query: { version: 1 },
+      cards: Array.from({ length: cardCount }, (_unused, index) => boardCard(index)),
+      generatedAt: "2026-08-29T12:00:00.000Z",
+    } as never;
+  }
+
+  it("offers the planner tools only in the designated planner thread", () => {
+    const port = {
+      isPlannerThread: (id: CodeThread["id"]) => String(id) === threadId,
+      board: async () => ({ status: "ok" as const, board: boardView(0) }),
+      propose: async () => ({
+        status: "refused" as const,
+        reason: "no-planner-designated",
+        message: "No planner.",
+      }),
+    };
+    const designated = plannerTools(port);
+    expect(designated.definitions.map((definition) => definition.name)).toContain(
+      CODE_BOARD_TOOL_NAME,
+    );
+    const undesignated = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: async () => ({ kind: "operation-failed" }) as never,
+      terminal: { read: async () => ({ status: "exited" }) as never },
+      planner: { ...port, isPlannerThread: () => false },
+    });
+    expect(undesignated.definitions.map((definition) => definition.name)).not.toContain(
+      CODE_BOARD_TOOL_NAME,
+    );
+    expect(undesignated.definitions.map((definition) => definition.name)).not.toContain(
+      CODE_PROPOSE_THREAD_TOOL_NAME,
+    );
+  });
+
+  it("refuses the board tool from a thread that is not the Project's planner", async () => {
+    const tools = plannerTools({
+      isPlannerThread: () => false,
+      board: async () => ({
+        status: "refused",
+        reason: "not-the-planner-thread",
+        message: "Only the Project's designated planner thread may read the board.",
+      }),
+      propose: async () => {
+        throw new Error("unused");
+      },
+    });
+    const result = await tools.execute({
+      name: CODE_BOARD_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read" }),
+    });
+    expect(result).toEqual({
+      result: {
+        error: "not-the-planner-thread",
+        message: "Only the Project's designated planner thread may read the board.",
+      },
+      isError: true,
+    });
+  });
+
+  it("reads the Project board for the planner even under an approval-gated posture", async () => {
+    const tools = plannerTools(
+      {
+        isPlannerThread: () => true,
+        board: async () => ({ status: "ok", board: boardView(2) }),
+        propose: async () => {
+          throw new Error("unused");
+        },
+      },
+      { executionPolicy: "approval-gated" as never },
+    );
+    const result = await tools.execute({
+      name: CODE_BOARD_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read" }),
+    });
+    expect(result.isError).toBe(false);
+    expect((result.result as { cards: unknown[] }).cards).toHaveLength(2);
+  });
+
+  it("bounds the cards a single board read hands the provider", async () => {
+    const tools = plannerTools({
+      isPlannerThread: () => true,
+      board: async () => ({ status: "ok", board: boardView(150) }),
+      propose: async () => {
+        throw new Error("unused");
+      },
+    });
+    const result = await tools.execute({
+      name: CODE_BOARD_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read" }),
+    });
+    const payload = result.result as { cards: unknown[]; truncated?: boolean };
+    expect(payload.cards).toHaveLength(100);
+    expect(payload.truncated).toBe(true);
+  });
+
+  it("keeps a proposal advisory: the tool result names a pending proposal, not a thread", async () => {
+    const tools = plannerTools({
+      isPlannerThread: () => true,
+      board: async () => {
+        throw new Error("unused");
+      },
+      propose: async (_windowId, _threadId, draft) => ({
+        status: "proposed",
+        proposal: {
+          id: "a0000000-0000-4000-8000-000000000001",
+          title: draft.title,
+          status: "pending",
+        } as never,
+      }),
+    });
+    const result = await tools.execute({
+      name: CODE_PROPOSE_THREAD_TOOL_NAME,
+      inputJson: JSON.stringify({ title: "Fix the flake", intent: "Find and fix the root cause." }),
+    });
+    expect(result.isError).toBe(false);
+    expect(result.result).toMatchObject({
+      status: "pending-user-confirmation",
+      proposalId: "a0000000-0000-4000-8000-000000000001",
+    });
+  });
+});
 
 function thread(overrides: Partial<CodeThread> = {}): CodeThread {
   return {

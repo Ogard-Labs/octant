@@ -110,6 +110,25 @@ export interface CodeReviewProjectionRow {
   readonly last_sequence: number;
 }
 
+export interface CodePlannerProjectionRow {
+  readonly project_id: string;
+  readonly planner_thread_id: string | null;
+  readonly schema_version: number;
+  readonly designation_json: string;
+  readonly aggregate_version: number;
+  readonly last_sequence: number;
+}
+
+export interface CodePlannerProposalProjectionRow {
+  readonly proposal_id: string;
+  readonly project_id: string;
+  readonly status: "pending" | "confirmed" | "declined";
+  readonly schema_version: number;
+  readonly proposal_json: string;
+  readonly aggregate_version: number;
+  readonly last_sequence: number;
+}
+
 export function assertCodeProjectionSchema(schemaVersion: number): void {
   if (schemaVersion !== CODE_PROJECTION_SCHEMA_VERSION) {
     throw new Error("unsupported Code projection schema version");

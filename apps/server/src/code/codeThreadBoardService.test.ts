@@ -558,6 +558,43 @@ describe("CodeThreadBoardService derivation", () => {
     expect(view.cards[0]?.threadId).toBe(ids.waiting);
   });
 
+  it("cards show unavailable pull-request facts when GitHub cannot be reached", async () => {
+    const board = service({
+      threads: [boardThread({ thread: thread({ id: ids.ready, outcomeKind: "opened-pr" }) })],
+      pullRequests: {
+        rows: [
+          {
+            projectId: ids.projectA,
+            projectName: "Project A",
+            repositoryOwner: "octant",
+            repositoryName: "octant",
+            number: 12,
+            title: "Board pull request",
+            draft: false,
+            state: "unknown",
+            mergeability: "unknown",
+            author: "octocat",
+            baseBranch: "main",
+            headBranch: "feature/x",
+            updatedAt: "2026-08-22T08:00:00Z",
+            checks: "unknown",
+            review: "unknown",
+            linkedThreads: [{ threadId: ids.ready, title: "Board thread" }],
+          },
+        ],
+        freshness: { status: "stale", staleReason: "disconnected" },
+        githubRevoked: false,
+      },
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    const card = cardFor(view.cards, ids.ready);
+    expect(card.pullRequestSummaries.items[0]).toMatchObject({
+      freshness: "unavailable",
+      readyToMerge: false,
+    });
+  });
+
   it("joins cached project pull-request summaries onto board cards without GitHub calls", async () => {
     const board = service({
       threads: [boardThread({ thread: thread({ id: ids.ready, outcomeKind: "opened-pr" }) })],

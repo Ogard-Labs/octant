@@ -1,10 +1,12 @@
 import type {
+  CodeProjectPullRequestBackgroundRefreshState,
   CodeProjectPullRequestConnection,
   CodeProjectPullRequestFreshness,
   CodeProjectPullRequestQuery,
   CodeProjectPullRequestRefreshCommand,
   CodeProjectPullRequestRow,
   CodeProjectPullRequestView,
+  ProjectId,
 } from "@octant/contracts";
 import { GitPullRequest, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -28,6 +30,14 @@ export interface CodeProjectPullRequestsProps {
   readonly isNarrow?: boolean;
   readonly selectedRowKey?: string;
   readonly onSelectRow?: (row: CodeProjectPullRequestRow) => void;
+  /**
+   * Present when the shell can toggle the opt-in background refresh for a
+   * Project. The server owns the setting; this only issues the command.
+   */
+  readonly backgroundRefresh?: {
+    readonly enabledFor: (projectId: ProjectId) => boolean;
+    readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  };
 }
 
 type WorkspaceState =
@@ -217,24 +227,31 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             </OctantEmptyStateRoot>
           ) : null}
           <div className="code-project-pull-requests__groups">
-            {view.projects.map((project) => (
-              <ProjectGroup
-                key={String(project.projectId)}
-                busy={workspace.status === "refreshing"}
-                onRefresh={() =>
-                  void runRefresh({ kind: "refresh-project", projectId: project.projectId })
-                }
-                project={project}
-                rows={visibleRows.filter(
-                  (row) => String(row.projectId) === String(project.projectId),
-                )}
-                freshness={projectFreshnessFor(view, project.projectId)}
-                {...(props.onSelectRow === undefined ? {} : { onSelectRow: props.onSelectRow })}
-                {...(props.selectedRowKey === undefined
-                  ? {}
-                  : { selectedRowKey: props.selectedRowKey })}
-              />
-            ))}
+            {view.projects.map((project) => {
+              const backgroundRefreshState = backgroundRefreshStateFor(view, project.projectId);
+              return (
+                <ProjectGroup
+                  key={String(project.projectId)}
+                  busy={workspace.status === "refreshing"}
+                  onRefresh={() =>
+                    void runRefresh({ kind: "refresh-project", projectId: project.projectId })
+                  }
+                  project={project}
+                  rows={visibleRows.filter(
+                    (row) => String(row.projectId) === String(project.projectId),
+                  )}
+                  freshness={projectFreshnessFor(view, project.projectId)}
+                  {...(props.backgroundRefresh === undefined
+                    ? {}
+                    : { backgroundRefresh: props.backgroundRefresh })}
+                  {...(backgroundRefreshState === undefined ? {} : { backgroundRefreshState })}
+                  {...(props.onSelectRow === undefined ? {} : { onSelectRow: props.onSelectRow })}
+                  {...(props.selectedRowKey === undefined
+                    ? {}
+                    : { selectedRowKey: props.selectedRowKey })}
+                />
+              );
+            })}
           </div>
         </>
       )}
@@ -250,8 +267,16 @@ function ProjectGroup(props: {
   readonly onRefresh: () => void;
   readonly selectedRowKey?: string;
   readonly onSelectRow?: (row: CodeProjectPullRequestRow) => void;
+  readonly backgroundRefresh?: {
+    readonly enabledFor: (projectId: ProjectId) => boolean;
+    readonly setEnabled: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  };
+  readonly backgroundRefreshState?: CodeProjectPullRequestBackgroundRefreshState;
 }) {
   const repositories = groupByRepository(props.rows);
+  const backgroundRefresh =
+    props.project.kind === "connected" ? props.backgroundRefresh : undefined;
+  const backgroundRefreshEnabled = backgroundRefresh?.enabledFor(props.project.projectId) ?? false;
   return (
     <section
       aria-label={`Project ${props.project.projectName}`}
@@ -266,6 +291,20 @@ function ProjectGroup(props: {
             </span>
           ) : null}
         </div>
+        {backgroundRefresh === undefined ? null : (
+          <OctantButton
+            aria-label={`Background refresh for ${props.project.projectName}`}
+            aria-pressed={backgroundRefreshEnabled}
+            onClick={() =>
+              void backgroundRefresh.setEnabled(props.project.projectId, !backgroundRefreshEnabled)
+            }
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {backgroundRefreshEnabled ? "Background refresh on" : "Background refresh off"}
+          </OctantButton>
+        )}
         <OctantButton
           disabled={props.busy}
           onClick={props.onRefresh}
@@ -276,6 +315,11 @@ function ProjectGroup(props: {
           Refresh {props.project.projectName}
         </OctantButton>
       </header>
+      {backgroundRefreshCopy(props.backgroundRefreshState) === undefined ? null : (
+        <p className="code-project-pull-requests__background-refresh" role="status">
+          {backgroundRefreshCopy(props.backgroundRefreshState)}
+        </p>
+      )}
       {props.project.kind === "unconnected" ? (
         <p className="code-project-pull-requests__unconnected">
           No github.com origin detected. Add one to this Project to enable pull-request refresh.
@@ -390,6 +434,32 @@ function projectFreshnessFor(
     (candidate) => String(candidate.projectId) === String(projectId),
   );
   return entry?.freshness ?? view.freshness;
+}
+
+function backgroundRefreshStateFor(
+  view: CodeProjectPullRequestView,
+  projectId: CodeProjectPullRequestConnection["projectId"],
+): CodeProjectPullRequestBackgroundRefreshState | undefined {
+  return view.backgroundRefresh?.find(
+    (candidate) => String(candidate.projectId) === String(projectId),
+  );
+}
+
+/**
+ * Only exceptional cadence states earn copy: an enabled cadence quietly doing
+ * its job needs no banner, and "disabled" is already the toggle's own label.
+ */
+function backgroundRefreshCopy(
+  state: CodeProjectPullRequestBackgroundRefreshState | undefined,
+): string | undefined {
+  if (state === undefined) return undefined;
+  if (state.state === "unavailable") {
+    return "Background refresh is unavailable: the GitHub CLI is missing or not authenticated.";
+  }
+  if (state.state === "backing-off") {
+    return "Background refresh is backing off after a failed observation.";
+  }
+  return undefined;
 }
 
 function checksStatus(
