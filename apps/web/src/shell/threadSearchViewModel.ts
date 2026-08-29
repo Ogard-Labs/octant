@@ -199,9 +199,7 @@ function toContentHit(
   unfiledLabel: ThreadSearchUnfiledLabel,
 ): ThreadSearchHit {
   const folderLabel =
-    hit.projectId === undefined
-      ? unfiledLabel
-      : (projectNames.get(hit.projectId) ?? unfiledLabel);
+    hit.projectId === undefined ? unfiledLabel : (projectNames.get(hit.projectId) ?? unfiledLabel);
   return {
     threadId: hit.threadId,
     mode: "chat",

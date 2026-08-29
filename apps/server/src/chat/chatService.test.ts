@@ -1099,7 +1099,6 @@ describe("ChatService", () => {
     expect(service.read(sidecar.thread.id).thread.title).toBe("Side Chat about Release notes");
   });
 
-
   it("finds a phrase that lives only in an archived message body", async () => {
     const { service } = openFixture();
     const created = await service.execute({

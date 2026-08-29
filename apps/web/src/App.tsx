@@ -4359,9 +4359,7 @@ function LaunchedShell(
                     chatClient={chatClient}
                     chatController={chatController}
                     chatReadCursorStore={chatReadCursorStore}
-                    {...(revealChatTurn === undefined
-                      ? {}
-                      : { revealChatTurn })}
+                    {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
                     onPinTerminal={(request) => void zen.pinTerminal(request)}
                     onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
                     onDockResearch={(request) =>

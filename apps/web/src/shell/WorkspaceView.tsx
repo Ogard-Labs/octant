@@ -995,10 +995,10 @@ function renderNonCodeTab(
               ? {}
               : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
             threadId={tab.threadId}
-          {...(props.revealChatTurn !== undefined &&
-          String(props.revealChatTurn.threadId) === String(tab.threadId)
-            ? { revealTurnId: props.revealChatTurn.turnId }
-            : {})}
+            {...(props.revealChatTurn !== undefined &&
+            String(props.revealChatTurn.threadId) === String(tab.threadId)
+              ? { revealTurnId: props.revealChatTurn.turnId }
+              : {})}
             title={tab.title}
             providerGroups={props.workProviderGroups ?? []}
             {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}

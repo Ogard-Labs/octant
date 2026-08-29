@@ -39,11 +39,7 @@ export function threadSearchArchivedListingForStatus(
 export function threadSearchContentListingForStatus(
   status: "idle" | "loading" | "ready" | "unavailable" | string,
 ): ThreadSearchListingStatus {
-  return status === "loading"
-    ? "loading"
-    : status === "unavailable"
-      ? "unavailable"
-      : "ready";
+  return status === "loading" ? "loading" : status === "unavailable" ? "unavailable" : "ready";
 }
 
 export function projectThreadsAccessForMode(input: {

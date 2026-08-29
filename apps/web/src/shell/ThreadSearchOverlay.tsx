@@ -105,9 +105,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
     projects: props.projects,
     ...(props.unfiledLabel === undefined ? {} : { unfiledLabel: props.unfiledLabel }),
     ...(props.contentHits === undefined ? {} : { contentHits: props.contentHits }),
-    ...(props.contentTruncated === undefined
-      ? {}
-      : { contentTruncated: props.contentTruncated }),
+    ...(props.contentTruncated === undefined ? {} : { contentTruncated: props.contentTruncated }),
   });
   const hits = flattenThreadSearchHits(results);
   const active = hits.length === 0 ? -1 : Math.min(activeIndex, hits.length - 1);

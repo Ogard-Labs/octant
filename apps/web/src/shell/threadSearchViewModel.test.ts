@@ -228,5 +228,4 @@ describe("buildThreadSearchResults", () => {
     });
     expect(results.hitCount).toBe(0);
   });
-
 });

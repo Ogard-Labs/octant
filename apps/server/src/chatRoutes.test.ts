@@ -93,7 +93,6 @@ describe("Chat routes", () => {
     expect(navigation).not.toHaveBeenCalled();
   });
 
-
   it("returns authenticated transcript search hits", async () => {
     const payload = {
       query: "migration",

@@ -260,12 +260,7 @@ export class ChatProjection implements Projection {
       updatedTurn.createdAt,
       event.globalSequence,
     );
-    indexTranscriptSearchForTurn(
-      connection,
-      updatedTurn,
-      event.globalSequence,
-      attempt.updatedAt,
-    );
+    indexTranscriptSearchForTurn(connection, updatedTurn, event.globalSequence, attempt.updatedAt);
   }
 
   #applyTurnRouteDecided(connection: SqliteConnection, event: EventEnvelope): void {
@@ -451,7 +446,9 @@ export function purgeThreadContent(connection: SqliteConnection, threadId: strin
   purgeAgentRunSubjectContent(connection, subject);
   connection.prepare("DELETE FROM chat_attachment_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM chat_citation_projection WHERE thread_id = ?").run(threadId);
-  connection.prepare("DELETE FROM chat_transcript_search_projection WHERE thread_id = ?").run(threadId);
+  connection
+    .prepare("DELETE FROM chat_transcript_search_projection WHERE thread_id = ?")
+    .run(threadId);
   connection.prepare("DELETE FROM chat_search_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM thread_work_item_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM thread_follow_up_projection WHERE thread_id = ?").run(threadId);
@@ -1045,9 +1042,7 @@ function indexTranscriptSearchForTurn(
   lastSequence: number,
   updatedAt: string,
 ): void {
-  const refs: Array<{ contentId: string }> = [
-    { contentId: String(turn.userMessageRef.contentId) },
-  ];
+  const refs: Array<{ contentId: string }> = [{ contentId: String(turn.userMessageRef.contentId) }];
   for (const attempt of turn.attempts) {
     for (const responseRef of attempt.responseRefs) {
       refs.push({ contentId: String(responseRef.contentId) });
