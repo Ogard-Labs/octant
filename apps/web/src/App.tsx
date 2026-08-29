@@ -63,7 +63,12 @@ import type {
   CodeProjectPullRequestRow,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
-import { decodeWorkspaceTabId, type WindowId, type WorkspaceTab } from "@octant/contracts/shell";
+import {
+  decodeWindowId,
+  decodeWorkspaceTabId,
+  type WindowId,
+  type WorkspaceTab,
+} from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ThemeTypography } from "@octant/contracts/theme";
@@ -297,6 +302,15 @@ interface InspectorOpener {
   readonly logicalTarget: "dock";
 }
 
+function windowIdFromHostBridge(hostBridge: OctantHostBridge | undefined): WindowId | undefined {
+  if (hostBridge?.windowId === undefined) return undefined;
+  try {
+    return decodeWindowId(hostBridge.windowId);
+  } catch {
+    return undefined;
+  }
+}
+
 export interface AppProps {
   readonly agentProfileClient?: AgentProfileClient;
   readonly agentRunClient?: AgentRunClient;
@@ -338,6 +352,7 @@ export function App(props: AppProps) {
   const launch = props.launch ?? locationLaunch;
   const injectedCapability =
     props.projectWindowCapability ?? props.hostBridge?.projectWindowCapability;
+  const hostWindowId = windowIdFromHostBridge(props.hostBridge);
   const launchSession = useLaunchSession({
     ...(injectedCapability === undefined && launch !== undefined
       ? { serverUrl: launch.serverUrl }
@@ -389,7 +404,7 @@ export function App(props: AppProps) {
       );
     }
     if (launchSession.status === "ready" && isProjectWindowCapability(launchSession.capability)) {
-      const resolvedWindowId = launchSession.windowId ?? launch.windowId;
+      const resolvedWindowId = launchSession.windowId ?? launch.windowId ?? hostWindowId;
       if (resolvedWindowId === undefined) {
         return (
           <main className="shell-boundary">
@@ -442,7 +457,8 @@ export function App(props: AppProps) {
       </main>
     );
   }
-  if (launch.windowId === undefined) {
+  const desktopWindowId = launch.windowId ?? hostWindowId;
+  if (desktopWindowId === undefined) {
     return (
       <main className="shell-boundary">
         <ShellState
@@ -456,7 +472,7 @@ export function App(props: AppProps) {
   }
   const desktopLaunch: ShellLaunch & { windowId: WindowId } = {
     serverUrl: launch.serverUrl,
-    windowId: launch.windowId,
+    windowId: desktopWindowId,
   };
   return (
     <LaunchedShell {...props} launch={desktopLaunch} projectWindowCapability={injectedCapability} />
