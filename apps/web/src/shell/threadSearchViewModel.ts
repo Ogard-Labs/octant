@@ -4,8 +4,9 @@ export type ThreadSearchLifecycle = "active" | "archived" | "deleting" | "delete
 
 /**
  * One thread the host already listed for this window. The caller maps the
- * current mode's server-authoritative thread list into this shape; Search never
- * discovers threads of its own, so it can only ever show what the host listed.
+ * current mode's server-authoritative thread list into this shape; title Search
+ * never discovers threads of its own, so it can only ever show what the host
+ * listed. Message-body hits arrive separately from the host transcript search.
  */
 export interface ThreadSearchThread {
   readonly mode: SidebarActivityMode;
@@ -24,6 +25,16 @@ export interface ThreadSearchProject {
 /** The folder word shown beside a thread. A label, never a filter. */
 export type ThreadSearchUnfiledLabel = "Unfiled" | "Recents";
 
+export interface ThreadSearchMatchRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * One Search row. Title hits come from the host's listed threads; content hits
+ * come from the authenticated transcript-search route and carry a snippet plus
+ * the turn to reveal.
+ */
 export interface ThreadSearchHit {
   readonly threadId: string;
   readonly mode: SidebarActivityMode;
@@ -36,6 +47,21 @@ export interface ThreadSearchHit {
   readonly projectId?: string;
   readonly folderLabel: string;
   readonly archived: boolean;
+  readonly turnId?: string;
+  readonly snippet?: string;
+  readonly matchRanges?: ReadonlyArray<ThreadSearchMatchRange>;
+}
+
+/** One authorized message-body hit from the host transcript search. */
+export interface ThreadSearchContentHit {
+  readonly threadId: string;
+  readonly title: string;
+  readonly projectId?: string;
+  readonly lifecycle: "active" | "archived";
+  readonly turnId: string;
+  readonly snippet: string;
+  readonly matchRanges?: ReadonlyArray<ThreadSearchMatchRange>;
+  readonly updatedAt?: string;
 }
 
 export type ThreadSearchGroupId = "threads" | "archived";
@@ -61,6 +87,8 @@ export interface BuildThreadSearchResultsInput {
   readonly query: string;
   readonly threads: ReadonlyArray<ThreadSearchThread>;
   readonly projects: ReadonlyArray<ThreadSearchProject>;
+  readonly contentHits?: ReadonlyArray<ThreadSearchContentHit>;
+  readonly contentTruncated?: boolean;
   readonly unfiledLabel?: ThreadSearchUnfiledLabel;
   readonly limit?: number;
 }
@@ -68,13 +96,10 @@ export interface BuildThreadSearchResultsInput {
 /**
  * Current-mode thread search.
  *
- * Search finds threads, not Project records: a Project name, `Recents`, and
- * `Unfiled` are folder words printed on a hit, never a filter and never an
- * authority boundary — a thread outside every Project, or in a Project the
- * current sidebar view does not show, still matches. The only exclusions are
- * the other modes (Chat, Work, and Code never mix) and threads the host has
- * already retired, so a named Code view or a collapsed section cannot hide a
- * hit. Archived matches are grouped after live ones rather than dropped.
+ * Title matches use only the threads the host already listed for this window.
+ * When Chat supplies contentHits from transcript search, those rows join the
+ * same live/archived groups with snippets and turn deep-links. Project,
+ * `Recents`, and `Unfiled` remain folder words on a hit, never filters.
  */
 export function buildThreadSearchResults(
   input: BuildThreadSearchResultsInput,
@@ -84,31 +109,47 @@ export function buildThreadSearchResults(
   const projectNames = new Map(input.projects.map((project) => [project.id, project.name]));
   const unfiledLabel = input.unfiledLabel ?? "Unfiled";
 
-  const matches = input.threads
+  const titleMatches = input.threads
     .filter((thread) => thread.mode === input.mode)
     .filter((thread) => thread.lifecycle === "active" || thread.lifecycle === "archived")
     .filter((thread) => needle === "" || normalize(thread.title).includes(needle))
     .sort(compareThreads);
 
-  const live = matches.filter((thread) => thread.lifecycle !== "archived");
-  const archived = matches.filter((thread) => thread.lifecycle === "archived");
+  const contentMatches =
+    input.mode === "chat" && needle !== ""
+      ? (input.contentHits ?? []).filter(
+          (hit) => hit.lifecycle === "active" || hit.lifecycle === "archived",
+        )
+      : [];
+
+  const liveTitle = titleMatches.filter((thread) => thread.lifecycle !== "archived");
+  const archivedTitle = titleMatches.filter((thread) => thread.lifecycle === "archived");
+  const liveContent = contentMatches.filter((hit) => hit.lifecycle !== "archived");
+  const archivedContent = contentMatches.filter((hit) => hit.lifecycle === "archived");
+
   const groups: ThreadSearchGroup[] = [];
-  if (live.length > 0) {
-    groups.push({
-      id: "threads",
-      label: "Threads",
-      hits: live.slice(0, limit).map((thread) => toHit(thread, projectNames, unfiledLabel)),
-    });
+  const liveHits = mergeGroupHits(liveTitle, liveContent, projectNames, unfiledLabel, limit);
+  if (liveHits.hits.length > 0) {
+    groups.push({ id: "threads", label: "Threads", hits: liveHits.hits });
   }
-  if (archived.length > 0) {
-    groups.push({
-      id: "archived",
-      label: "Archived",
-      hits: archived.slice(0, limit).map((thread) => toHit(thread, projectNames, unfiledLabel)),
-    });
+  const archivedHits = mergeGroupHits(
+    archivedTitle,
+    archivedContent,
+    projectNames,
+    unfiledLabel,
+    limit,
+  );
+  if (archivedHits.hits.length > 0) {
+    groups.push({ id: "archived", label: "Archived", hits: archivedHits.hits });
   }
   const hitCount = groups.reduce((total, group) => total + group.hits.length, 0);
-  return { groups, hitCount, truncated: hitCount < live.length + archived.length };
+  const truncated =
+    liveHits.truncated ||
+    archivedHits.truncated ||
+    input.contentTruncated === true ||
+    hitCount <
+      liveTitle.length + archivedTitle.length + liveContent.length + archivedContent.length;
+  return { groups, hitCount, truncated };
 }
 
 /** Flat hit order for arrow-key navigation across both groups. */
@@ -118,7 +159,22 @@ export function flattenThreadSearchHits(
   return results.groups.flatMap((group) => group.hits);
 }
 
-function toHit(
+function mergeGroupHits(
+  titleThreads: ReadonlyArray<ThreadSearchThread>,
+  contentHits: ReadonlyArray<ThreadSearchContentHit>,
+  projectNames: ReadonlyMap<string, string>,
+  unfiledLabel: ThreadSearchUnfiledLabel,
+  limit: number,
+): { readonly hits: ReadonlyArray<ThreadSearchHit>; readonly truncated: boolean } {
+  const titleHits = titleThreads.map((thread) => toTitleHit(thread, projectNames, unfiledLabel));
+  const bodyHits = contentHits.map((hit) => toContentHit(hit, projectNames, unfiledLabel));
+  // Title rows first so a known thread stays easy to open; content rows follow
+  // with their snippets rather than replacing the title match.
+  const merged = [...titleHits, ...bodyHits];
+  return { hits: merged.slice(0, limit), truncated: merged.length > limit };
+}
+
+function toTitleHit(
   thread: ThreadSearchThread,
   projectNames: ReadonlyMap<string, string>,
   unfiledLabel: ThreadSearchUnfiledLabel,
@@ -134,6 +190,30 @@ function toHit(
     ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
     folderLabel,
     archived: thread.lifecycle === "archived",
+  };
+}
+
+function toContentHit(
+  hit: ThreadSearchContentHit,
+  projectNames: ReadonlyMap<string, string>,
+  unfiledLabel: ThreadSearchUnfiledLabel,
+): ThreadSearchHit {
+  const folderLabel =
+    hit.projectId === undefined
+      ? unfiledLabel
+      : (projectNames.get(hit.projectId) ?? unfiledLabel);
+  return {
+    threadId: hit.threadId,
+    mode: "chat",
+    title: hit.title,
+    ...(hit.projectId === undefined ? {} : { projectId: hit.projectId }),
+    folderLabel,
+    archived: hit.lifecycle === "archived",
+    turnId: hit.turnId,
+    snippet: hit.snippet,
+    ...(hit.matchRanges === undefined || hit.matchRanges.length === 0
+      ? {}
+      : { matchRanges: hit.matchRanges }),
   };
 }
 

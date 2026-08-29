@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   Archive,
   FolderPlus,
@@ -15,7 +15,9 @@ import type { SidebarActivityMode } from "./activityViewModel";
 import {
   buildThreadSearchResults,
   flattenThreadSearchHits,
+  type ThreadSearchContentHit,
   type ThreadSearchHit,
+  type ThreadSearchMatchRange,
   type ThreadSearchProject,
   type ThreadSearchUnfiledLabel,
   type ThreadSearchThread,
@@ -25,7 +27,7 @@ export type ThreadSearchListingStatus = "ready" | "loading" | "unavailable";
 
 export interface ThreadSearchOverlayProps {
   readonly mode: SidebarActivityMode;
-  /** Every current-mode thread the host listed for this window, live and archived. */
+  /** Every current-mode thread the host already listed for this window, live and archived. */
   readonly threads: ReadonlyArray<ThreadSearchThread>;
   readonly projects: ReadonlyArray<ThreadSearchProject>;
   readonly unfiledLabel?: ThreadSearchUnfiledLabel;
@@ -36,7 +38,14 @@ export interface ThreadSearchOverlayProps {
    * printed as an empty Archived group.
    */
   readonly archivedListing?: ThreadSearchListingStatus;
-  /** Reports the typed query so the host can list its archived matches. */
+  /**
+   * Chat message-body hits from the host transcript-search route. Work and Code
+   * leave this empty in the first slice.
+   */
+  readonly contentHits?: ReadonlyArray<ThreadSearchContentHit>;
+  readonly contentListing?: ThreadSearchListingStatus;
+  readonly contentTruncated?: boolean;
+  /** Reports the typed query so the host can list its archived and content matches. */
   readonly onQueryChange?: (query: string) => void;
   readonly onClose: () => void;
   readonly onNewThread?: () => void;
@@ -61,6 +70,11 @@ const ARCHIVED_LISTING_COPY: Record<Exclude<ThreadSearchListingStatus, "ready">,
   unavailable: "Archived threads are unavailable, so no Archived group can be shown.",
 };
 
+const CONTENT_LISTING_COPY: Record<Exclude<ThreadSearchListingStatus, "ready">, string> = {
+  loading: "Message search is still loading, so body matches may be incomplete.",
+  unavailable: "Message search is unavailable, so only thread titles are matched.",
+};
+
 const RESULTS_ID = "thread-search-results";
 
 function optionId(index: number): string {
@@ -70,13 +84,10 @@ function optionId(index: number): string {
 /**
  * One current-mode thread Search overlay.
  *
- * The overlay matches only the threads the host already listed for this window,
- * so it can never reveal a thread this window is not authorized to see. Project,
- * `Recents`, and `Unfiled` are printed as folder words on a row, never as
- * filters — searching stays scoped to the active mode and nothing else. The
- * combobox keeps focus while Up/Down move an active option, Enter opens it, and
- * Escape dismisses, so the surface is fully keyboard operable; archived rows are
- * marked with an icon *and* the word "Archived" rather than colour alone.
+ * Title matches use only the threads the host already listed for this window.
+ * In Chat, contentHits from the host transcript-search route add snippet rows
+ * that deep-link to a turn. Project, `Recents`, and `Unfiled` are printed as
+ * folder words on a row, never as filters.
  */
 export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -85,6 +96,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
 
   const listing = props.listing ?? "ready";
   const archivedListing = props.archivedListing ?? "ready";
+  const contentListing = props.contentListing ?? "ready";
   const modeLabel = MODE_LABEL[props.mode];
   const results = buildThreadSearchResults({
     mode: props.mode,
@@ -92,6 +104,10 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
     threads: props.threads,
     projects: props.projects,
     ...(props.unfiledLabel === undefined ? {} : { unfiledLabel: props.unfiledLabel }),
+    ...(props.contentHits === undefined ? {} : { contentHits: props.contentHits }),
+    ...(props.contentTruncated === undefined
+      ? {}
+      : { contentTruncated: props.contentTruncated }),
   });
   const hits = flattenThreadSearchHits(results);
   const active = hits.length === 0 ? -1 : Math.min(activeIndex, hits.length - 1);
@@ -99,14 +115,16 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
   const statusMessage = !hasQuery
     ? ""
     : hits.length === 0
-      ? archivedListing === "loading"
-        ? "No matching threads yet; archived threads are still loading."
-        : archivedListing === "unavailable"
-          ? "No matching live threads; archived threads are unavailable."
+      ? archivedListing === "loading" || contentListing === "loading"
+        ? "No matching threads yet; more results are still loading."
+        : archivedListing === "unavailable" && contentListing === "unavailable"
+          ? "No matching live threads; archived and message search are unavailable."
           : "No matching threads."
       : `${hits.length} matching thread${hits.length === 1 ? "" : "s"}.${
           results.truncated ? " Showing the most recent matches." : ""
         }`;
+  const placeholder =
+    props.mode === "chat" ? "Search thread titles and messages" : "Search thread titles";
 
   function open(hit: ThreadSearchHit | undefined): void {
     if (hit === undefined) return;
@@ -171,7 +189,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
             props.onQueryChange?.(event.target.value);
           }}
           onKeyDown={handleKeyDown}
-          placeholder="Search thread titles"
+          placeholder={placeholder}
           ref={inputRef}
           role="combobox"
           value={query}
@@ -187,6 +205,12 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
         <p className="thread-search__listing" data-listing={archivedListing} role="note">
           <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>{ARCHIVED_LISTING_COPY[archivedListing]}</span>
+        </p>
+      ) : null}
+      {hasQuery && props.mode === "chat" && contentListing !== "ready" ? (
+        <p className="thread-search__listing" data-listing={contentListing} role="note">
+          <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
+          <span>{CONTENT_LISTING_COPY[contentListing]}</span>
         </p>
       ) : null}
       <p
@@ -222,8 +246,13 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                   className="thread-search__result"
                   data-active={index === active}
                   data-archived={hit.archived}
+                  data-content={hit.snippet !== undefined}
                   id={optionId(index)}
-                  key={`${hit.mode}:${hit.threadId}`}
+                  key={
+                    hit.turnId === undefined
+                      ? `${hit.mode}:${hit.threadId}`
+                      : `${hit.mode}:${hit.threadId}:${hit.turnId}`
+                  }
                   onClick={() => open(hit)}
                   onMouseMove={() => setActiveIndex(index)}
                   role="option"
@@ -233,7 +262,14 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                   ) : (
                     <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
                   )}
-                  <span className="thread-search__result-title">{hit.title}</span>
+                  <span className="thread-search__result-main">
+                    <span className="thread-search__result-title">{hit.title}</span>
+                    {hit.snippet === undefined ? null : (
+                      <span className="thread-search__result-snippet">
+                        {renderHighlightedSnippet(hit.snippet, hit.matchRanges)}
+                      </span>
+                    )}
+                  </span>
                   <span className="thread-search__result-label">{hit.folderLabel}</span>
                   {hit.archived ? (
                     <span className="thread-search__result-state">Archived</span>
@@ -289,4 +325,27 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
       </p>
     </OctantDialog>
   );
+}
+
+function renderHighlightedSnippet(
+  snippet: string,
+  ranges: ReadonlyArray<ThreadSearchMatchRange> | undefined,
+): ReactNode {
+  if (ranges === undefined || ranges.length === 0) return snippet;
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const [index, range] of ranges.entries()) {
+    if (range.start < cursor || range.end > snippet.length || range.end <= range.start) continue;
+    if (range.start > cursor) {
+      parts.push(snippet.slice(cursor, range.start));
+    }
+    parts.push(
+      <mark className="thread-search__result-mark" key={`mark-${index}`}>
+        {snippet.slice(range.start, range.end)}
+      </mark>,
+    );
+    cursor = range.end;
+  }
+  if (cursor < snippet.length) parts.push(snippet.slice(cursor));
+  return parts.length === 0 ? snippet : parts;
 }

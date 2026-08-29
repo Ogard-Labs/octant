@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildThreadSearchResults,
   flattenThreadSearchHits,
+  type ThreadSearchContentHit,
   type ThreadSearchThread,
 } from "./threadSearchViewModel";
 
@@ -180,4 +181,52 @@ describe("buildThreadSearchResults", () => {
 
     expect(results.hitCount).toBe(1);
   });
+
+  it("merges Chat message-body hits with snippets after title matches", () => {
+    const contentHits: ReadonlyArray<ThreadSearchContentHit> = [
+      {
+        threadId: "t9",
+        title: "Quiet title",
+        lifecycle: "archived",
+        turnId: "turn-1",
+        snippet: "explained that migration",
+        matchRanges: [{ start: 14, end: 23 }],
+      },
+    ];
+    const results = buildThreadSearchResults({
+      mode: "chat",
+      query: "migration",
+      threads: [thread({ threadId: "t1", title: "Migration plan" })],
+      projects,
+      contentHits,
+    });
+
+    const hits = flattenThreadSearchHits(results);
+    expect(hits.map((hit) => hit.threadId)).toEqual(["t1", "t9"]);
+    expect(hits[1]).toMatchObject({
+      turnId: "turn-1",
+      snippet: "explained that migration",
+      archived: true,
+    });
+  });
+
+  it("ignores content hits outside Chat mode", () => {
+    const results = buildThreadSearchResults({
+      mode: "work",
+      query: "migration",
+      threads: [],
+      projects,
+      contentHits: [
+        {
+          threadId: "t9",
+          title: "Quiet title",
+          lifecycle: "active",
+          turnId: "turn-1",
+          snippet: "migration",
+        },
+      ],
+    });
+    expect(results.hitCount).toBe(0);
+  });
+
 });
