@@ -1,4 +1,4 @@
-import { ZEN_BACKGROUND_MEDIA_TYPES, type ZenBackgroundMediaType } from "./zen";
+import { ZEN_BACKGROUND_MEDIA_TYPES, type ZenBackgroundMediaType } from "@octant/contracts/zen";
 
 export const MAX_ZEN_BACKGROUND_WIDTH = 4096;
 export const MAX_ZEN_BACKGROUND_HEIGHT = 4096;
@@ -21,7 +21,7 @@ export interface ZenBackgroundMediaInspection {
 }
 
 export function isZenBackgroundMediaType(value: string): value is ZenBackgroundMediaType {
-  return (ZEN_BACKGROUND_MEDIA_TYPES as readonly string[]).includes(value);
+  return ZEN_BACKGROUND_MEDIA_TYPES.some((mediaType) => mediaType === value);
 }
 
 export function sniffZenBackgroundMedia(bytes: Uint8Array): ZenBackgroundMediaType | null {

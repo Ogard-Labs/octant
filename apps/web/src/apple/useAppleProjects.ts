@@ -1,4 +1,5 @@
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts";
+import { decodeAppleProjectPath } from "@octant/contracts/apple-toolchain";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useMemo } from "react";
 import { useCodeFileListingController } from "../code/useCodeFileListingController";
@@ -49,9 +50,14 @@ export function useAppleProjects(
         .filter((entry) =>
           APPLE_PROJECT_SUFFIXES.some((suffix) => String(entry.path).endsWith(suffix)),
         )
-        .map((entry) => {
-          const projectPath = String(entry.path);
-          return { projectPath, name: projectPath.split("/").at(-1) ?? projectPath };
+        .flatMap((entry) => {
+          const listed = String(entry.path);
+          try {
+            const projectPath = decodeAppleProjectPath(listed);
+            return [{ projectPath, name: listed.split("/").at(-1) ?? listed }];
+          } catch {
+            return [];
+          }
         }),
     [entries],
   );

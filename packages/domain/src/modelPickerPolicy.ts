@@ -230,12 +230,13 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       instance.driverKind,
       observed.verifiedToolModelIds ?? [],
     );
+    const currentSelection = input.currentSelection;
     const unavailableCurrent =
-      input.currentSelection !== undefined &&
-      input.currentSelection.providerInstanceId === instance.id &&
-      !orderedModels.some((m) => m.id === input.currentSelection!.modelId)
+      currentSelection !== undefined &&
+      currentSelection.providerInstanceId === instance.id &&
+      !orderedModels.some((m) => m.id === currentSelection.modelId)
         ? unavailableCurrentModel(
-            input.currentSelection.modelId,
+            currentSelection.modelId,
             observed,
             instance.driverKind,
             observed.verifiedToolModelIds ?? [],

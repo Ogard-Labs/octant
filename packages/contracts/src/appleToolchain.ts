@@ -364,6 +364,7 @@ export const AppleToolchainFailure = Schema.Union(
 ).annotations(strict);
 export type AppleToolchainFailure = typeof AppleToolchainFailure.Type;
 
+export const decodeAppleProjectPath = Schema.decodeUnknownSync(AppleProjectPath);
 export const decodeAppleToolchainId = Schema.decodeUnknownSync(AppleToolchainId);
 export const decodeAppleSimulatorId = Schema.decodeUnknownSync(AppleSimulatorId);
 export const decodeApplePlatform = Schema.decodeUnknownSync(ApplePlatform);

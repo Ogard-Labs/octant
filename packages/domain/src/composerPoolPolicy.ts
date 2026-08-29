@@ -1,10 +1,11 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import type {
-  MultiModelCandidateRejectionReason,
-  MultiModelPoolCandidate,
-  MultiModelRoutingVendorId,
+import {
+  decodeMultiModelPoolCandidate,
+  decodeMultiModelRoutingVendorId,
+  type MultiModelCandidateRejectionReason,
+  type MultiModelPoolCandidate,
+  type MultiModelRoutingVendorId,
 } from "@octant/contracts/multi-model-pool";
-import { decodeMultiModelRoutingVendorId } from "@octant/contracts/multi-model-pool";
 import type {
   ProviderInstanceId,
   ProviderModelId,
@@ -58,7 +59,8 @@ export interface BuildComposerPoolModelInput {
 
 export function buildComposerPoolModel(input: BuildComposerPoolModelInput): ComposerPoolModel {
   if (input.snapshot === undefined) return { kind: "loading" };
-  const eligibleDefaults = input.snapshot.defaults.agentEligibleModels ?? [];
+  const snapshot = input.snapshot;
+  const eligibleDefaults = snapshot.defaults.agentEligibleModels ?? [];
   if (eligibleDefaults.length === 0) {
     return {
       kind: "unavailable",
@@ -74,28 +76,38 @@ export function buildComposerPoolModel(input: BuildComposerPoolModelInput): Comp
     };
   }
 
-  const candidates = eligibleDefaults.map(
-    (ref): MultiModelPoolCandidate =>
-      ({
-        hostId: input.hostId,
-        providerInstanceId: ref.providerInstanceId,
-        modelId: ref.modelId,
-      }) as MultiModelPoolCandidate,
+  const candidates = eligibleDefaults.map((ref) =>
+    decodeMultiModelPoolCandidate({
+      hostId: input.hostId,
+      providerInstanceId: ref.providerInstanceId,
+      modelId: ref.modelId,
+    }),
   );
-  const runtimeFacts = candidates.map((candidate) => candidateFacts(candidate, input));
+  const runtimeFacts = candidates.map((candidate) =>
+    candidateFacts(candidate, snapshot, input.mode),
+  );
   const currentCandidate =
     input.current === undefined
       ? undefined
-      : ({
+      : decodeMultiModelPoolCandidate({
           hostId: input.hostId,
           providerInstanceId: input.current.providerInstanceId,
           modelId: input.current.modelId,
-        } as MultiModelPoolCandidate);
-  const parentCandidate =
-    (currentCandidate !== undefined &&
-      candidates.find((candidate) => candidateKey(candidate) === candidateKey(currentCandidate))) ||
-    candidates[0]!;
-  const parentVendor = vendorOf(parentCandidate.providerInstanceId, input.snapshot);
+        });
+  const firstCandidate = candidates[0];
+  if (firstCandidate === undefined) {
+    return {
+      kind: "unavailable",
+      reason:
+        "No agent-eligible models are defined in Provider Settings. Define a default pool there first.",
+    };
+  }
+  const matchedCurrent =
+    currentCandidate === undefined
+      ? undefined
+      : candidates.find((candidate) => candidateKey(candidate) === candidateKey(currentCandidate));
+  const parentCandidate = matchedCurrent ?? firstCandidate;
+  const parentVendor = vendorOf(parentCandidate.providerInstanceId, snapshot);
 
   // Mixed-vendor is enabled in the display request so baseline eligibility is
   // shown per candidate; the composer gates cross-vendor candidates behind the
@@ -126,11 +138,11 @@ export function buildComposerPoolModel(input: BuildComposerPoolModelInput): Comp
     const eligibility = eligibilityByKey.get(candidateKey(candidate));
     const selectable = eligibility?.eligible === true;
     const firstReason = eligibility?.reasons[0];
-    const vendor = vendorOf(candidate.providerInstanceId, input.snapshot!);
+    const vendor = vendorOf(candidate.providerInstanceId, snapshot);
     return {
       candidate,
-      providerName: providerNameOf(candidate.providerInstanceId, input.snapshot!),
-      modelName: modelNameOf(candidate, input.snapshot!),
+      providerName: providerNameOf(candidate.providerInstanceId, snapshot),
+      modelName: modelNameOf(candidate, snapshot),
       selectable,
       ...(selectable || firstReason === undefined
         ? {}
@@ -182,9 +194,9 @@ export function poolRejectionLabel(reason: MultiModelCandidateRejectionReason): 
 
 function candidateFacts(
   candidate: MultiModelPoolCandidate,
-  input: BuildComposerPoolModelInput,
+  snapshot: ProviderRegistrySnapshot,
+  mode: OctantMode,
 ): MultiModelCandidateRuntimeFacts {
-  const snapshot = input.snapshot!;
   const instance = snapshot.instances.find(
     (entry) => String(entry.id) === String(candidate.providerInstanceId),
   );
@@ -212,7 +224,7 @@ function candidateFacts(
     readiness: observed?.readiness ?? "unavailable",
     modelAvailable:
       observed?.models.some((model) => String(model.id) === String(candidate.modelId)) ?? false,
-    compatibleModes: observed === undefined ? [] : [input.mode],
+    compatibleModes: observed === undefined ? [] : [mode],
     projectAllowed: true,
     profileAllowed: true,
     supportedCapabilities: [],
