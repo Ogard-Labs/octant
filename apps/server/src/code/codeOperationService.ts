@@ -324,18 +324,21 @@ export interface CodeOperationGitPort {
     readonly checkoutRoot: string;
     readonly paths: readonly string[];
     readonly expectedStateToken: string;
+    readonly executionPolicy: CodeThread["executionPolicy"];
   }) => Promise<GitMutationOutcome>;
   readonly unstage: (input: {
     readonly checkoutId: string;
     readonly checkoutRoot: string;
     readonly paths: readonly string[];
     readonly expectedStateToken: string;
+    readonly executionPolicy: CodeThread["executionPolicy"];
   }) => Promise<GitMutationOutcome>;
   readonly discard: (input: {
     readonly checkoutId: string;
     readonly checkoutRoot: string;
     readonly paths: readonly string[];
     readonly expectedStateToken: string;
+    readonly executionPolicy: CodeThread["executionPolicy"];
   }) => Promise<GitMutationOutcome>;
   readonly commit: (input: {
     readonly checkoutId: string;
@@ -348,6 +351,7 @@ export interface CodeOperationGitPort {
       readonly index: string;
       readonly worktree: string;
     }[];
+    readonly executionPolicy: CodeThread["executionPolicy"];
   }) => Promise<GitMutationOutcome>;
   readonly push: (input: {
     readonly checkoutId: string;
@@ -359,6 +363,7 @@ export interface CodeOperationGitPort {
     readonly expectedHeadOid: string;
     readonly expectedStateToken: string;
     readonly authority: "approved" | "full-access";
+    readonly executionPolicy: CodeThread["executionPolicy"];
   }) => Promise<GitMutationOutcome>;
   /**
    * Measure one branch against another and say whether the base could take it.
@@ -401,6 +406,7 @@ export interface CodeOperationGitPort {
     readonly checkoutRoot: string;
     readonly branch: string;
     readonly authority: "approved" | "full-access";
+    readonly executionPolicy: CodeThread["executionPolicy"];
   }) => Promise<GitMutationOutcome & { readonly undo?: CodeCheckpoint }>;
   /**
    * Record the checkout's content without changing it. Optional so a host
@@ -409,6 +415,7 @@ export interface CodeOperationGitPort {
   readonly checkpoint?: (input: {
     readonly checkoutId: string;
     readonly checkoutRoot: string;
+    readonly executionPolicy: CodeThread["executionPolicy"];
   }) => Promise<
     | { readonly status: "captured"; readonly snapshot: CodeCheckpoint }
     | { readonly status: "unavailable" }
@@ -429,6 +436,7 @@ export interface CodeOperationGitPort {
     readonly checkoutId: string;
     readonly checkoutRoot: string;
     readonly snapshot: CodeCheckpoint;
+    readonly executionPolicy: CodeThread["executionPolicy"];
   }) => Promise<GitMutationOutcome & { readonly undo?: CodeCheckpoint }>;
 }
 
@@ -1395,6 +1403,7 @@ export class CodeOperationService {
             checkoutRoot: root.checkoutRoot,
             paths: command.paths,
             expectedStateToken: command.expectedStateToken,
+            executionPolicy: thread.executionPolicy,
           }),
         );
       case "unstage-git":
@@ -1407,6 +1416,7 @@ export class CodeOperationService {
             checkoutRoot: root.checkoutRoot,
             paths: command.paths,
             expectedStateToken: command.expectedStateToken,
+            executionPolicy: thread.executionPolicy,
           }),
         );
       case "draft-git-text":
@@ -1421,6 +1431,7 @@ export class CodeOperationService {
             checkoutRoot: root.checkoutRoot,
             paths: command.paths,
             expectedStateToken: command.expectedStateToken,
+            executionPolicy: thread.executionPolicy,
           }),
         );
       case "commit-git":
@@ -1434,6 +1445,7 @@ export class CodeOperationService {
             message: command.message,
             expectedStateToken: command.expectedStateToken,
             stagedSummary: command.stagedSummary,
+            executionPolicy: thread.executionPolicy,
           }),
         );
       case "push-git":
@@ -1451,6 +1463,7 @@ export class CodeOperationService {
             expectedHeadOid: command.expectedHeadOid,
             expectedStateToken: command.expectedStateToken,
             authority: command.authorization.kind === "approved" ? "approved" : "full-access",
+            executionPolicy: thread.executionPolicy,
           }),
         );
       case "restore-git-checkpoint": {
@@ -1469,6 +1482,7 @@ export class CodeOperationService {
             checkoutId: checkout.id,
             checkoutRoot: root.checkoutRoot,
             snapshot: command.checkpoint,
+            executionPolicy: thread.executionPolicy,
           }),
         );
       }
@@ -1856,6 +1870,7 @@ export class CodeOperationService {
         checkoutRoot: base.checkoutRoot,
         branch: command.confirmation.branch,
         authority: command.authorization.kind === "approved" ? "approved" : "full-access",
+        executionPolicy: thread.executionPolicy,
       }),
     );
   }
@@ -1988,7 +2003,11 @@ export class CodeOperationService {
     const capture = this.#options.git.checkpoint;
     if (capture === undefined || !mayWriteToRepository(thread.executionPolicy)) return undefined;
     try {
-      const result = await capture({ checkoutId, checkoutRoot });
+      const result = await capture({
+        checkoutId,
+        checkoutRoot,
+        executionPolicy: thread.executionPolicy,
+      });
       return result.status === "captured" ? result.snapshot : undefined;
     } catch {
       return undefined;

@@ -74,6 +74,7 @@ export interface GithubIssueContextServiceOptions {
   readonly snapshot: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>;
   readonly ingestion: Pick<ExternalContentIngestionStore, "record">;
   readonly uuid: () => string;
+  readonly isEffective?: () => boolean;
 }
 
 /**
@@ -85,6 +86,7 @@ export class GithubIssueContextService {
   readonly #snapshot: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>;
   readonly #ingestion: Pick<ExternalContentIngestionStore, "record">;
   readonly #uuid: () => string;
+  readonly #isEffective: (() => boolean) | undefined;
   readonly #pendingFramed = new Map<string, FramedExternalContent>();
 
   constructor(options: GithubIssueContextServiceOptions) {
@@ -92,12 +94,16 @@ export class GithubIssueContextService {
     this.#snapshot = options.snapshot;
     this.#ingestion = options.ingestion;
     this.#uuid = options.uuid;
+    this.#isEffective = options.isEffective;
   }
 
   async prepare(
     request: GithubIssueContextRequest,
     signal: AbortSignal,
   ): Promise<GithubIssueContextResult> {
+    if (this.#isEffective?.() === false) {
+      return refused("unavailable");
+    }
     const snapshot = await this.#snapshot(signal);
     const gate = decideGithubCatalogueRead({ capability: "issues-read", snapshot });
     if (gate.decision === "deny") {

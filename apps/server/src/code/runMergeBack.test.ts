@@ -208,6 +208,7 @@ describe("bringing a run home", () => {
       checkoutRoot: baseRoot,
       branch: "octant/attempt-a",
       authority: "approved",
+      executionPolicy: "full-access",
     });
     expect(result).toMatchObject({ kind: "git-mutation-state", mutation: "merge-run" });
   });

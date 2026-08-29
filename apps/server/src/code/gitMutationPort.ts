@@ -95,6 +95,10 @@ const liveDependencies: GitMutationDependencies = {
   removeFile: (path) => rm(path, { force: true }),
 };
 
+type GitMutationPolicy = {
+  readonly executionPolicy?: ProviderExecutionPolicy;
+};
+
 export class GitMutationPort {
   readonly #dependencies: GitMutationDependencies;
   readonly #commandTimeoutMs: number;
@@ -104,27 +108,29 @@ export class GitMutationPort {
     dependencies: GitMutationDependencies = liveDependencies,
     options: {
       readonly commandTimeoutMs?: number;
-      readonly executionPolicy?: ProviderExecutionPolicy;
     } & GitSeatbeltPortOptions = {},
   ) {
     this.#dependencies = dependencies;
     this.#commandTimeoutMs = options.commandTimeoutMs ?? 15_000;
-    const confinement = createGitSeatbeltConfinement(options);
-    this.#confinement =
-      options.executionPolicy === "plan"
-        ? { ...confinement, confinement: planGitMutationConfinement(confinement.confinement) }
-        : confinement;
+    // A shared port serves every thread. Plan confinement is applied per
+    // mutation from that thread's executionPolicy, not at construction.
+    this.#confinement = createGitSeatbeltConfinement(options);
   }
 
   async stage(
-    input: { readonly checkoutRoot: string; readonly paths: readonly string[] },
+    input: { readonly checkoutRoot: string; readonly paths: readonly string[] } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<GitMutationResult> {
     if (!validPaths(input.paths)) return { status: "rejected", reason: "invalid-paths" };
-    const lock = await this.#lockState(input.checkoutRoot, signal);
+    const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
-    return this.#apply(input.checkoutRoot, ["add", "--", ...input.paths], signal);
+    return this.#apply(
+      input.checkoutRoot,
+      ["add", "--", ...input.paths],
+      signal,
+      input.executionPolicy,
+    );
   }
 
   /**
@@ -133,19 +139,26 @@ export class GitMutationPort {
    * user wrote can be lost here.
    */
   async unstage(
-    input: { readonly checkoutRoot: string; readonly paths: readonly string[] },
+    input: { readonly checkoutRoot: string; readonly paths: readonly string[] } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<GitMutationResult> {
     if (!validPaths(input.paths)) return { status: "rejected", reason: "invalid-paths" };
-    const lock = await this.#lockState(input.checkoutRoot, signal);
+    const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
     const head = await this.#run(
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "--quiet", "HEAD"],
       signal,
+      undefined,
+      input.executionPolicy,
     );
     if (head.exitCode === 0) {
-      return this.#apply(input.checkoutRoot, ["restore", "--staged", "--", ...input.paths], signal);
+      return this.#apply(
+        input.checkoutRoot,
+        ["restore", "--staged", "--", ...input.paths],
+        signal,
+        input.executionPolicy,
+      );
     }
     // A nonzero probe is not proof of an unborn branch: an aborted run, the
     // command timeout, and an unusable checkout root all report the same way.
@@ -158,6 +171,8 @@ export class GitMutationPort {
     const symbolic = await this.#run(
       ["-C", input.checkoutRoot, "symbolic-ref", "--quiet", "HEAD"],
       signal,
+      undefined,
+      input.executionPolicy,
     );
     if (symbolic.exitCode !== 0) return { status: "failed" };
     // `--cached` never touches the file on disk, and `--force` only waives
@@ -167,6 +182,7 @@ export class GitMutationPort {
       input.checkoutRoot,
       ["rm", "--cached", "--force", "--", ...input.paths],
       signal,
+      input.executionPolicy,
     );
   }
 
@@ -177,17 +193,18 @@ export class GitMutationPort {
    * implicitly, so the caller rejects those before reaching here.
    */
   async discard(
-    input: { readonly checkoutRoot: string; readonly paths: readonly string[] },
+    input: { readonly checkoutRoot: string; readonly paths: readonly string[] } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<GitMutationResult> {
     if (!validPaths(input.paths)) return { status: "rejected", reason: "invalid-paths" };
-    const lock = await this.#lockState(input.checkoutRoot, signal);
+    const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
     return this.#apply(
       input.checkoutRoot,
       ["restore", "--staged", "--worktree", "--source=HEAD", "--", ...input.paths],
       signal,
+      input.executionPolicy,
     );
   }
 
@@ -196,23 +213,27 @@ export class GitMutationPort {
       readonly checkoutRoot: string;
       readonly message: string;
       readonly stagedSummary: readonly GitStatusEntry[];
-    },
+    } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<GitMutationResult> {
     if (!validMessage(input.message)) return { status: "rejected", reason: "invalid-message" };
     if (input.stagedSummary.length === 0)
       return { status: "rejected", reason: "empty-staged-summary" };
-    const lock = await this.#lockState(input.checkoutRoot, signal);
+    const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
     const result = await this.#run(
       ["-C", input.checkoutRoot, "commit", "--message", input.message],
       signal,
+      undefined,
+      input.executionPolicy,
     );
     if (result.exitCode !== 0) return { status: "failed" };
     const head = await this.#run(
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
       signal,
+      undefined,
+      input.executionPolicy,
     );
     const oid = head.stdout.trim();
     return head.exitCode === 0 && isObjectId(oid)
@@ -230,7 +251,7 @@ export class GitMutationPort {
         readonly remote: string;
         readonly refspec: string;
       };
-    },
+    } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<GitMutationResult> {
     if (!/^[A-Za-z0-9._-]+$/.test(input.remote))
@@ -240,13 +261,14 @@ export class GitMutationPort {
     const refspec = `${input.localRef}:${input.remoteRef}`;
     if (input.confirmation.remote !== input.remote || input.confirmation.refspec !== refspec)
       return { status: "rejected", reason: "unconfirmed-target" };
-    const lock = await this.#lockState(input.checkoutRoot, signal);
+    const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
     return this.#apply(
       input.checkoutRoot,
       ["push", "--porcelain", "--", input.remote, refspec],
       signal,
+      input.executionPolicy,
     );
   }
 
@@ -261,24 +283,33 @@ export class GitMutationPort {
    * the checkout is left as it was found.
    */
   async mergeBranch(
-    input: { readonly checkoutRoot: string; readonly branch: string },
+    input: { readonly checkoutRoot: string; readonly branch: string } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<GitMutationResult> {
     if (!validBranchName(input.branch)) return { status: "rejected", reason: "invalid-refspec" };
-    const lock = await this.#lockState(input.checkoutRoot, signal);
+    const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
     const result = await this.#run(
       ["-C", input.checkoutRoot, "merge", "--no-ff", "--no-edit", "--end-of-options", input.branch],
       signal,
+      undefined,
+      input.executionPolicy,
     );
     if (result.exitCode !== 0) {
-      await this.#run(["-C", input.checkoutRoot, "merge", "--abort"], signal);
+      await this.#run(
+        ["-C", input.checkoutRoot, "merge", "--abort"],
+        signal,
+        undefined,
+        input.executionPolicy,
+      );
       return { status: "failed" };
     }
     const head = await this.#run(
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
       signal,
+      undefined,
+      input.executionPolicy,
     );
     const oid = head.stdout.trim();
     return head.exitCode === 0 && isObjectId(oid)
@@ -287,21 +318,25 @@ export class GitMutationPort {
   }
 
   async revertCommit(
-    input: { readonly checkoutRoot: string; readonly oid: string },
+    input: { readonly checkoutRoot: string; readonly oid: string } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<GitMutationResult> {
     if (!isObjectId(input.oid)) return { status: "rejected", reason: "invalid-commit" };
-    const lock = await this.#lockState(input.checkoutRoot, signal);
+    const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
     const result = await this.#run(
       ["-C", input.checkoutRoot, "revert", "--no-edit", "--", input.oid],
       signal,
+      undefined,
+      input.executionPolicy,
     );
     if (result.exitCode !== 0) return { status: "failed" };
     const head = await this.#run(
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
       signal,
+      undefined,
+      input.executionPolicy,
     );
     const oid = head.stdout.trim();
     return head.exitCode === 0 && isObjectId(oid)
@@ -327,7 +362,7 @@ export class GitMutationPort {
    * release exactly its own, never a neighbour's.
    */
   async snapshotWorkingTree(
-    input: { readonly checkoutRoot: string; readonly checkoutId: string },
+    input: { readonly checkoutRoot: string; readonly checkoutId: string } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<
     | {
@@ -338,25 +373,43 @@ export class GitMutationPort {
     | { readonly status: "failed" }
   > {
     if (checkpointRefNamespace(input.checkoutId) === undefined) return { status: "failed" };
-    const scratch = await this.#gitPath(input.checkoutRoot, checkpointIndexName(), signal);
+    const scratch = await this.#gitPath(
+      input.checkoutRoot,
+      checkpointIndexName(),
+      signal,
+      input.executionPolicy,
+    );
     if (scratch === undefined) return { status: "failed" };
     const environment = { GIT_INDEX_FILE: scratch };
     try {
-      if (!(await this.#copyIndex(input.checkoutRoot, scratch, signal)))
+      if (!(await this.#copyIndex(input.checkoutRoot, scratch, signal, input.executionPolicy)))
         return { status: "failed" };
-      const index = await this.#writeTree(input.checkoutRoot, environment, signal);
+      const index = await this.#writeTree(
+        input.checkoutRoot,
+        environment,
+        signal,
+        input.executionPolicy,
+      );
       if (index === undefined) return { status: "failed" };
       const staged = await this.#run(
         ["-C", input.checkoutRoot, "add", "-A", "--"],
         signal,
         environment,
+        input.executionPolicy,
       );
       if (staged.exitCode !== 0) return { status: "failed" };
-      const worktree = await this.#writeTree(input.checkoutRoot, environment, signal);
+      const worktree = await this.#writeTree(
+        input.checkoutRoot,
+        environment,
+        signal,
+        input.executionPolicy,
+      );
       if (worktree === undefined) return { status: "failed" };
       const head = await this.#run(
         ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
         signal,
+        undefined,
+        input.executionPolicy,
       );
       const headOid = head.stdout.trim();
       const snapshot: GitTreeSnapshot = {
@@ -365,7 +418,16 @@ export class GitMutationPort {
         ...(head.exitCode === 0 && isObjectId(headOid) ? { head: headOid } : {}),
       };
       const anchorId = randomUUID();
-      if (!(await this.#anchor(input.checkoutRoot, input.checkoutId, anchorId, snapshot, signal))) {
+      if (
+        !(await this.#anchor(
+          input.checkoutRoot,
+          input.checkoutId,
+          anchorId,
+          snapshot,
+          signal,
+          input.executionPolicy,
+        ))
+      ) {
         await this.releaseCheckpoint({ ...input, anchorId }, signal);
         return { status: "failed" };
       }
@@ -388,13 +450,18 @@ export class GitMutationPort {
       readonly checkoutRoot: string;
       readonly checkoutId: string;
       readonly anchorId: string;
-    },
+    } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<void> {
     const names = checkpointRefNames(input.checkoutId, input.anchorId);
     if (names === undefined) return;
     for (const name of names) {
-      await this.#run(["-C", input.checkoutRoot, "update-ref", "-d", name], signal);
+      await this.#run(
+        ["-C", input.checkoutRoot, "update-ref", "-d", name],
+        signal,
+        undefined,
+        input.executionPolicy,
+      );
     }
   }
 
@@ -404,7 +471,8 @@ export class GitMutationPort {
     checkoutId: string,
     anchorId: string,
     snapshot: GitTreeSnapshot,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
   ): Promise<boolean> {
     const names = checkpointRefNames(checkoutId, anchorId);
     if (names === undefined) return false;
@@ -412,7 +480,12 @@ export class GitMutationPort {
       [names[0], snapshot.worktree],
       [names[1], snapshot.index],
     ] as const) {
-      const result = await this.#run(["-C", checkoutRoot, "update-ref", name, oid], signal);
+      const result = await this.#run(
+        ["-C", checkoutRoot, "update-ref", name, oid],
+        signal,
+        undefined,
+        executionPolicy,
+      );
       if (result.exitCode !== 0) return false;
     }
     return true;
@@ -436,29 +509,48 @@ export class GitMutationPort {
    * case that would destroy it. See `#wouldOverwriteIgnored`.
    */
   async restoreWorkingTree(
-    input: { readonly checkoutRoot: string; readonly snapshot: GitTreeSnapshot },
+    input: {
+      readonly checkoutRoot: string;
+      readonly snapshot: GitTreeSnapshot;
+    } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<GitMutationResult> {
     if (!isObjectId(input.snapshot.worktree) || !isObjectId(input.snapshot.index))
       return { status: "rejected", reason: "invalid-commit" };
-    const lock = await this.#lockState(input.checkoutRoot, signal);
+    const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
-    const scratch = await this.#gitPath(input.checkoutRoot, checkpointIndexName(), signal);
+    const scratch = await this.#gitPath(
+      input.checkoutRoot,
+      checkpointIndexName(),
+      signal,
+      input.executionPolicy,
+    );
     if (scratch === undefined) return { status: "failed" };
     const environment = { GIT_INDEX_FILE: scratch };
     try {
-      if (!(await this.#copyIndex(input.checkoutRoot, scratch, signal)))
+      if (!(await this.#copyIndex(input.checkoutRoot, scratch, signal, input.executionPolicy)))
         return { status: "failed" };
       const staged = await this.#run(
         ["-C", input.checkoutRoot, "add", "-A", "--"],
         signal,
         environment,
+        input.executionPolicy,
       );
       if (staged.exitCode !== 0) return { status: "failed" };
       if (
-        !(await this.#treeExists(input.checkoutRoot, input.snapshot.worktree, signal)) ||
-        !(await this.#treeExists(input.checkoutRoot, input.snapshot.index, signal))
+        !(await this.#treeExists(
+          input.checkoutRoot,
+          input.snapshot.worktree,
+          signal,
+          input.executionPolicy,
+        )) ||
+        !(await this.#treeExists(
+          input.checkoutRoot,
+          input.snapshot.index,
+          signal,
+          input.executionPolicy,
+        ))
       ) {
         return { status: "rejected", reason: "invalid-commit" };
       }
@@ -467,18 +559,22 @@ export class GitMutationPort {
         input.checkoutRoot,
         input.snapshot.worktree,
         signal,
+        input.executionPolicy,
       );
       if (overwrites === undefined) return { status: "failed" };
       if (overwrites) return { status: "rejected", reason: "ignored-path-collision" };
       const index = await this.#run(
         ["-C", input.checkoutRoot, "read-tree", "--reset", input.snapshot.index],
         signal,
+        undefined,
+        input.executionPolicy,
       );
       if (index.exitCode !== 0) return { status: "failed" };
       const worktree = await this.#run(
         ["-C", input.checkoutRoot, "read-tree", "-u", "--reset", input.snapshot.worktree],
         signal,
         environment,
+        input.executionPolicy,
       );
       return worktree.exitCode === 0 ? { status: "applied" } : { status: "failed" };
     } finally {
@@ -503,14 +599,22 @@ export class GitMutationPort {
   async #wouldOverwriteIgnored(
     checkoutRoot: string,
     tree: string,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
   ): Promise<boolean | undefined> {
     const listed = await this.#run(
       ["-C", checkoutRoot, "ls-tree", "-r", "-z", "--name-only", tree],
       signal,
+      undefined,
+      executionPolicy,
     );
     if (listed.exitCode !== 0) return undefined;
-    const tracked = await this.#run(["-C", checkoutRoot, "ls-files", "-z"], signal);
+    const tracked = await this.#run(
+      ["-C", checkoutRoot, "ls-files", "-z"],
+      signal,
+      undefined,
+      executionPolicy,
+    );
     if (tracked.exitCode !== 0) return undefined;
     const indexed = new Set(splitNulPaths(tracked.stdout));
     // A path the checkout still tracks cannot be the case at issue: Git does not
@@ -527,6 +631,8 @@ export class GitMutationPort {
       const checked = await this.#run(
         ["-C", checkoutRoot, "check-ignore", "-q", "--", path],
         signal,
+        undefined,
+        executionPolicy,
       );
       if (checked.exitCode === 0) return true;
       // Exit 1 is the answer "this one is not ignored"; anything higher is a
@@ -537,10 +643,17 @@ export class GitMutationPort {
   }
 
   /** Prove a snapshot tree is readable before any part of the checkout moves. */
-  async #treeExists(checkoutRoot: string, oid: string, signal?: AbortSignal): Promise<boolean> {
+  async #treeExists(
+    checkoutRoot: string,
+    oid: string,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
+  ): Promise<boolean> {
     const result = await this.#run(
       ["-C", checkoutRoot, "rev-parse", "--verify", "--quiet", `${oid}^{tree}`],
       signal,
+      undefined,
+      executionPolicy,
     );
     return result.exitCode === 0;
   }
@@ -548,9 +661,15 @@ export class GitMutationPort {
   async #writeTree(
     checkoutRoot: string,
     environment: Readonly<Record<string, string>>,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
   ): Promise<string | undefined> {
-    const result = await this.#run(["-C", checkoutRoot, "write-tree"], signal, environment);
+    const result = await this.#run(
+      ["-C", checkoutRoot, "write-tree"],
+      signal,
+      environment,
+      executionPolicy,
+    );
     const oid = result.stdout.trim();
     return result.exitCode === 0 && isObjectId(oid) ? oid : undefined;
   }
@@ -560,8 +679,13 @@ export class GitMutationPort {
    * file yet is not a failure: the copy is simply skipped and Git starts from
    * an empty index.
    */
-  async #copyIndex(checkoutRoot: string, scratch: string, signal?: AbortSignal): Promise<boolean> {
-    const index = await this.#gitPath(checkoutRoot, "index", signal);
+  async #copyIndex(
+    checkoutRoot: string,
+    scratch: string,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
+  ): Promise<boolean> {
+    const index = await this.#gitPath(checkoutRoot, "index", signal, executionPolicy);
     if (index === undefined) return false;
     try {
       if (await this.#dependencies.pathExists(index))
@@ -584,20 +708,29 @@ export class GitMutationPort {
   async #gitPath(
     checkoutRoot: string,
     name: string,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
   ): Promise<string | undefined> {
     const result = await this.#run(
       ["-C", checkoutRoot, "rev-parse", "--path-format=absolute", "--git-path", name],
       signal,
+      undefined,
+      executionPolicy,
     );
     const path = result.stdout.trim();
     return result.exitCode === 0 && isAbsolute(path) ? path : undefined;
   }
 
-  async #indexLocked(checkoutRoot: string, signal?: AbortSignal): Promise<boolean> {
+  async #indexLocked(
+    checkoutRoot: string,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
+  ): Promise<boolean> {
     const path = await this.#run(
       ["-C", checkoutRoot, "rev-parse", "--path-format=absolute", "--git-path", "index.lock"],
       signal,
+      undefined,
+      executionPolicy,
     );
     if (path.exitCode !== 0 || !isAbsolute(path.stdout.trim()))
       throw new Error("Git index lock state is unavailable.");
@@ -606,10 +739,11 @@ export class GitMutationPort {
 
   async #lockState(
     checkoutRoot: string,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
   ): Promise<"clear" | "locked" | "failed"> {
     try {
-      return (await this.#indexLocked(checkoutRoot, signal)) ? "locked" : "clear";
+      return (await this.#indexLocked(checkoutRoot, signal, executionPolicy)) ? "locked" : "clear";
     } catch {
       return "failed";
     }
@@ -618,9 +752,15 @@ export class GitMutationPort {
   async #apply(
     checkoutRoot: string,
     args: readonly string[],
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    executionPolicy: ProviderExecutionPolicy | undefined,
   ): Promise<GitMutationResult> {
-    const result = await this.#run(["-C", checkoutRoot, ...args], signal);
+    const result = await this.#run(
+      ["-C", checkoutRoot, ...args],
+      signal,
+      undefined,
+      executionPolicy,
+    );
     return result.exitCode === 0 ? { status: "applied" } : { status: "failed" };
   }
 
@@ -628,6 +768,7 @@ export class GitMutationPort {
     args: readonly string[],
     parentSignal?: AbortSignal,
     environment?: Readonly<Record<string, string>>,
+    executionPolicy?: ProviderExecutionPolicy,
   ): Promise<CommandResult> {
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -641,7 +782,10 @@ export class GitMutationPort {
         return { exitCode: 1, stdout: "", stderr: "" };
       }
       const launch = prepareGitSeatbeltLaunch({
-        confinement: this.#confinement.confinement,
+        confinement:
+          executionPolicy === "plan"
+            ? planGitMutationConfinement(this.#confinement.confinement)
+            : this.#confinement.confinement,
         gitExecutable: this.#confinement.gitExecutable,
         checkoutRoot,
         args,

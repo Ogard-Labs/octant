@@ -2319,6 +2319,35 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Code environment" })).toBeNull();
   });
 
+  it("does not execute set-environment-presentation when Environment is toggled", async () => {
+    const user = userEvent.setup();
+    const projectApi = projects({
+      ...projectBootstrap(),
+      availability: [{ ...projectBootstrap().availability[0]!, status: "available" as const }],
+    });
+    vi.mocked(projectApi.environmentForThread).mockResolvedValue(readyEnvironment);
+    vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+    const shellApi = client(codeShellBootstrap());
+
+    render(
+      <App
+        codeClient={codes()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={shellApi}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(await screen.findByRole("button", { name: "Toggle environment" }));
+    expect(await screen.findByRole("dialog", { name: "Environment" })).toBeVisible();
+    expect(shellApi.execute.mock.calls.map(([command]) => command.kind)).not.toContain(
+      "set-environment-presentation",
+    );
+  });
+
   it("treats the native minimum width as compact desktop chrome", async () => {
     const originalMatchMedia = window.matchMedia;
     const addEventListener = vi.fn();

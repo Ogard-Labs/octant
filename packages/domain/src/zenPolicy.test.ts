@@ -10,6 +10,7 @@ import {
   dockResearch,
   recoverSpace,
   processZenCommand,
+  applyTimerAction,
   reconcileScheduledTimer,
   checkChecklistIsolation,
   resolveAccessibilityFallbacks,
@@ -599,6 +600,25 @@ describe("timer lifecycle", () => {
           expectedVersion: 2 as AggregateVersion,
         },
         localHostId,
+        { wallTimeMs: Date.now(), monotonicTimeMs: 100, sessionId: "session-a" },
+      ),
+    ).toThrow(ZenPolicyRejected);
+  });
+
+  it("refuses set-duration when the command does not name a duration", () => {
+    const space = makeSpace(0, [makeTimerElement()]);
+    const elementId = space.elements[0]?.elementId;
+    if (elementId === undefined) throw new Error("expected a timer element");
+    expect(() =>
+      applyTimerAction(
+        space,
+        {
+          command: "timer-action",
+          spaceId: space.spaceId,
+          elementId,
+          action: "set-duration",
+          expectedVersion: 0 as AggregateVersion,
+        },
         { wallTimeMs: Date.now(), monotonicTimeMs: 100, sessionId: "session-a" },
       ),
     ).toThrow(ZenPolicyRejected);

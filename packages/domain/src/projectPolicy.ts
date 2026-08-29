@@ -245,15 +245,16 @@ export function relinkProject(project: Project, input: RelinkProjectInput): Boun
 }
 
 export function rankBetween(left?: ProjectRank, right?: ProjectRank): ProjectRank {
-  if (left === undefined && right === undefined) return decodeProjectRank("0/1");
+  if (right === undefined) {
+    if (left === undefined) return decodeProjectRank("0/1");
+    const leftValue = parseRank(left);
+    return normalizeRank(leftValue.numerator + leftValue.denominator, leftValue.denominator);
+  }
   if (left === undefined) {
-    const rightValue = parseRank(right!);
+    const rightValue = parseRank(right);
     return normalizeRank(rightValue.numerator - rightValue.denominator, rightValue.denominator);
   }
   const leftValue = parseRank(left);
-  if (right === undefined) {
-    return normalizeRank(leftValue.numerator + leftValue.denominator, leftValue.denominator);
-  }
   const rightValue = parseRank(right);
   if (compareRank(left, right) >= 0) {
     reject("invalid-rank", "Project rank neighbors must be strictly ascending");

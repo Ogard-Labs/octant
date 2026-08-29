@@ -270,7 +270,6 @@ type WorkspaceIntent =
 
 type SemanticMutation =
   | { readonly kind: "settings"; readonly patch: Partial<ShellSettings> }
-  | { readonly kind: "presentation"; readonly presentation: EnvironmentPresentationState }
   | { readonly intent: WorkspaceIntent; readonly kind: "workspace" };
 
 function nextAnnouncement(current: AnnouncementEvent, message: string): AnnouncementEvent {
@@ -432,9 +431,6 @@ export function useShellController(options: ShellControllerOptions) {
       try {
         if (mutation.kind === "settings") {
           return await commitSettings(latest, mutation.patch);
-        }
-        if (mutation.kind === "presentation") {
-          return await commitPresentation(latest, mutation.presentation);
         }
         const workspaceMutation = createWorkspaceMutation(latest, mutation.intent);
         noteSurfaceActivation(tabActivation, workspaceMutation);
@@ -753,46 +749,6 @@ export function useShellController(options: ShellControllerOptions) {
     return await enqueueMutation({ kind: "settings", patch });
   }
 
-  async function setEnvironmentPresentation(
-    presentation: EnvironmentPresentationState,
-  ): Promise<void> {
-    await enqueueMutation({ kind: "presentation", presentation });
-  }
-
-  async function commitPresentation(
-    previous: AuthoritativeShell,
-    presentation: EnvironmentPresentationState,
-  ): Promise<boolean> {
-    const generation = ++requestGeneration.current;
-    setAuthoritative({ ...previous, environmentPresentation: presentation });
-    try {
-      const result = await client.execute({
-        kind: "set-environment-presentation",
-        windowId: options.windowId,
-        expectedVersion: previous.presentationVersion,
-        presentation,
-      });
-      if (!isCurrentRequest(generation, requestGeneration, mounted)) return false;
-      if (result.kind !== "environment-presentation-replaced") throw invalidResult();
-      const next: AuthoritativeShell = {
-        ...previous,
-        environmentPresentation: result.presentation,
-        presentationVersion: result.version,
-      };
-      committedShell.current = next;
-      setAuthoritative(next);
-      setStatus("ready");
-      setErrorMessage(undefined);
-      setCrossContextOffer(undefined);
-      announce("Environment presentation saved.");
-      return true;
-    } catch (error) {
-      if (!isCurrentRequest(generation, requestGeneration, mounted)) return false;
-      await recoverCommandFailure(error);
-      return false;
-    }
-  }
-
   async function commitSettings(
     previous: AuthoritativeShell,
     patch: Partial<ShellSettings>,
@@ -1069,6 +1025,8 @@ export function useShellController(options: ShellControllerOptions) {
     clearFocus,
     clearPendingSettingsDeepLink,
     closeSettings,
+    // Bootstrap still carries presentation for journal compatibility. Open or
+    // closed is renderer state; this snapshot is never written back.
     environmentPresentation: authoritative?.environmentPresentation,
     presentationVersion: authoritative?.presentationVersion,
     closePane,
@@ -1100,7 +1058,6 @@ export function useShellController(options: ShellControllerOptions) {
     resetActiveLayout,
     resetNativeBounds,
     retry: () => load("retry"),
-    setEnvironmentPresentation,
     setMode,
     setSettingsSearch,
     settings: authoritative?.settings,

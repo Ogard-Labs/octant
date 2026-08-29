@@ -264,6 +264,7 @@ import { GithubReadToolService } from "./github/githubReadToolService";
 import {
   githubReadToolSetIfEffective,
   isGithubIntegrationEffective,
+  isLinearIntegrationEffective,
 } from "./github/githubIntegrationEffective";
 import { ManagedCloneProcessPort, createOwnedGitContext } from "./github/managedCloneProcessPort";
 import { ManagedCloneService } from "./github/managedCloneService";
@@ -802,6 +803,11 @@ export interface StartOctantServerOptions {
   readonly platformCapabilities?: ReadonlyArray<string>;
   readonly desktopBridgeSecret?: string;
   readonly developmentWebBootstrap?: true;
+  /**
+   * HTTP origin the local renderer may present. `null` is packaged
+   * (`file://` only). Omitted keeps loopback-any-port for tests.
+   */
+  readonly allowedRendererHttpOrigin?: string | null;
   /**
    * Host control wiring for the shared web Settings host card. The
    * service policy port persists the automatic-startup policy and
@@ -1835,17 +1841,20 @@ export function startOctantServer(
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
       ingestion: externalContentIngestionStore,
     });
-    const githubIssueContextService = new GithubIssueContextService({
-      catalogue: githubCatalogueService,
-      snapshot: (signal) => githubCapabilityService.snapshot(signal),
-      ingestion: externalContentIngestionStore,
-      uuid: randomUUID,
-    });
     const githubExtensionSnapshot = {
       read: (): Pick<ExtensionSnapshot, "packages"> => ({ packages: [] }),
     };
     const githubIntegrationIsEffective = () =>
       isGithubIntegrationEffective(githubExtensionSnapshot.read());
+    const linearIntegrationIsEffective = () =>
+      isLinearIntegrationEffective(githubExtensionSnapshot.read());
+    const githubIssueContextService = new GithubIssueContextService({
+      catalogue: githubCatalogueService,
+      snapshot: (signal) => githubCapabilityService.snapshot(signal),
+      ingestion: externalContentIngestionStore,
+      uuid: randomUUID,
+      isEffective: githubIntegrationIsEffective,
+    });
     const githubRoutes = createGithubRouteHandler({
       windowAuthorityStore,
       service: githubCapabilityService,
@@ -1875,6 +1884,7 @@ export function startOctantServer(
           ? {}
           : { clientId: options.linearOAuthClientId }),
       },
+      isEffective: linearIntegrationIsEffective,
     });
     const linearIssueContextService = new LinearIssueContextService({
       reader: {
@@ -1888,6 +1898,7 @@ export function startOctantServer(
       },
       ingestion: externalContentIngestionStore,
       uuid: randomUUID,
+      isEffective: linearIntegrationIsEffective,
     });
     const peekCreateFromIssueFramed = (threadId: string) =>
       githubIssueContextService.peekFramedForFirstTurn(threadId) ??
@@ -1899,6 +1910,7 @@ export function startOctantServer(
     const integrationRoutes = createIntegrationRouteHandler({
       windowAuthorityStore,
       service: integrationService,
+      isEffective: (slug) => slug !== "linear" || linearIntegrationIsEffective(),
     });
     const zenEventStore = new ZenEventStore({
       journal: persistence.journal,
@@ -1997,6 +2009,9 @@ export function startOctantServer(
       ...(options.developmentWebBootstrap === undefined
         ? {}
         : { developmentWebBootstrap: options.developmentWebBootstrap }),
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
       launchSessionStore,
       windowAuthorityStore,
     });
@@ -2069,9 +2084,11 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
     });
     revokeShellWindow = (windowId) => shellService.revokeWindow(windowId);
+    const allowedRendererHttpOrigin = options.allowedRendererHttpOrigin;
     const shellRoutes = createShellRouteHandler(shellService, {
       windowAuthorityStore,
       now: Date.now,
+      ...(allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin }),
     });
     const themeService = new ThemeService({
       persistence,
@@ -2622,6 +2639,7 @@ export function startOctantServer(
                 ...tool,
                 ...(signal === undefined ? {} : { signal }),
               }),
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         ...(extensionSupervisor instanceof ExtensionSupervisor
           ? { stdioSupervisor: extensionSupervisor }
           : {}),
@@ -6154,7 +6172,10 @@ export function startOctantServer(
                 if (url.pathname === "/api/hosts") {
                   const origin = request.headers.get("origin");
                   const headers = new Headers({ vary: "Origin" });
-                  if (origin !== null && isAllowedRendererOrigin(origin)) {
+                  if (
+                    origin !== null &&
+                    isAllowedRendererOrigin(origin, options.allowedRendererHttpOrigin)
+                  ) {
                     headers.set("access-control-allow-origin", origin);
                   }
                   return Response.json({ hosts: listHosts(localHostDisplayName()) }, { headers });

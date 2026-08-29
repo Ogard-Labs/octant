@@ -941,7 +941,10 @@ export function applyTimerAction(
       if (element.status === "running") {
         reject("unsupported-kind", "Pause or reset a running timer before changing its duration");
       }
-      const durationMs = command.durationMs!;
+      const durationMs = command.durationMs;
+      if (durationMs === undefined) {
+        reject("unsupported-kind", "Set-duration requires a duration");
+      }
       if (
         element.durationMs === durationMs &&
         element.status === "idle" &&

@@ -475,10 +475,14 @@ describe("GitMutationPort", () => {
     );
   });
 
-  it("does not give Plan git mutations bound-root writes or process execution", async () => {
+  it("refuses Plan git mutations the same sandbox flags as a Plan provider launch", async () => {
     let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
     const fake = createFakeSandboxConfinement();
     directories.push(fake.root);
+    // Production constructs one shared port with no executionPolicy. Plan
+    // confinement has to be a per-call flag, or a later non-Plan thread would
+    // inherit a read-only git child — or a Plan thread would inherit a writable
+    // one.
     const port = new GitMutationPort(undefined, {
       confinement: {
         prepare: (input) => {
@@ -488,13 +492,23 @@ describe("GitMutationPort", () => {
       },
       temporaryDirectory: fake.temporaryDirectory,
       gitExecutable: "/usr/bin/git",
-      executionPolicy: "plan",
     });
 
+    await port.stage({
+      checkoutRoot: temporaryDirectory(),
+      paths: ["README.md"],
+      executionPolicy: "plan",
+    });
+    const planFlags = captured;
+    expect(planFlags !== undefined && planFlags.writeBoundRoot === false).toBe(true);
+    expect(planFlags !== undefined && planFlags.allowProcessExec === false).toBe(true);
+    expect(planFlags !== undefined && planFlags.allowProcessFork === false).toBe(true);
+
     await port.stage({ checkoutRoot: temporaryDirectory(), paths: ["README.md"] });
-    expect(captured?.writeBoundRoot).toBe(false);
-    expect(captured?.allowProcessExec).toBe(false);
-    expect(captured?.allowProcessFork).toBe(false);
+    const defaultFlags = captured;
+    expect(defaultFlags !== undefined && defaultFlags.writeBoundRoot !== false).toBe(true);
+    expect(defaultFlags !== undefined && defaultFlags.allowProcessExec !== false).toBe(true);
+    expect(defaultFlags !== undefined && defaultFlags.allowProcessFork !== false).toBe(true);
   });
 
   it("fails closed when Seatbelt confinement is unavailable", async () => {

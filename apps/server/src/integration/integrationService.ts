@@ -8,7 +8,7 @@ import {
   decodeIntegrationAuthenticationSnapshot,
   decodeIntegrationExecutionResult,
 } from "@octant/contracts/integration";
-import type { IntegrationRuntime } from "@octant/plugin-api/integration";
+import type { IntegrationHostPort, IntegrationRuntime } from "@octant/plugin-api/integration";
 import { createIntegrationHostPort } from "./integrationHostPort";
 import { constructIntegrationRuntime } from "./integrationLoader";
 import { createIntegrationOAuthHost, type IntegrationOAuthHost } from "./integrationOAuth";
@@ -50,7 +50,67 @@ export interface IntegrationService {
   readonly deleteSecret: (pluginSlug: string, scope: "personal-api-key") => Promise<void>;
 }
 
+const LINEAR_SLUG = "linear";
+const UNAVAILABLE_REMEDIATION = "That integration is not available on this host.";
+
+const firstPartyIntegrationFactories = {
+  linear: (config: LinearIntegrationConfig) => (hostPort: IntegrationHostPort) =>
+    createLinearIntegration(hostPort, config),
+} as const;
+
 export function createLinearIntegrationService(options: {
+  readonly vault: IntegrationSecretVault;
+  readonly config: LinearIntegrationConfig;
+  readonly fetch?: (input: Request) => Promise<Response>;
+  readonly now?: () => number;
+  readonly connectionStore?: IntegrationConnectionStore;
+  readonly startCallbackListener?: boolean;
+  readonly isEffective?: () => boolean;
+}): IntegrationService {
+  let bound: IntegrationService | undefined;
+
+  const ensureBound = (pluginSlug: string): IntegrationService | undefined => {
+    if (pluginSlug !== LINEAR_SLUG) return undefined;
+    if (options.isEffective?.() === false) return undefined;
+    bound ??= constructLinearBoundService(options);
+    return bound;
+  };
+
+  return {
+    snapshot: async (pluginSlug, signal) => {
+      const service = ensureBound(pluginSlug);
+      if (service === undefined) return unavailableAuthentication();
+      return service.snapshot(pluginSlug, signal);
+    },
+    execute: async (pluginSlug, command, signal) => {
+      const service = ensureBound(pluginSlug);
+      if (service === undefined) return unavailableAuthentication();
+      return service.execute(pluginSlug, command, signal);
+    },
+    executeOperation: async (pluginSlug, command, signal) => {
+      const service = ensureBound(pluginSlug);
+      if (service === undefined) return unavailableOperation();
+      return service.executeOperation(pluginSlug, command, signal);
+    },
+    completeAuthorization: async (pluginSlug, request) => {
+      const service = ensureBound(pluginSlug);
+      if (service === undefined) return { kind: "refused", reason: UNAVAILABLE_REMEDIATION };
+      return service.completeAuthorization(pluginSlug, request);
+    },
+    putSecret: async (pluginSlug, scope, secret) => {
+      const service = ensureBound(pluginSlug);
+      if (service === undefined) return { kind: "unavailable", reason: UNAVAILABLE_REMEDIATION };
+      return service.putSecret(pluginSlug, scope, secret);
+    },
+    deleteSecret: async (pluginSlug, scope) => {
+      const service = ensureBound(pluginSlug);
+      if (service === undefined) return;
+      await service.deleteSecret(pluginSlug, scope);
+    },
+  };
+}
+
+function constructLinearBoundService(options: {
   readonly vault: IntegrationSecretVault;
   readonly config: LinearIntegrationConfig;
   readonly fetch?: (input: Request) => Promise<Response>;
@@ -79,15 +139,29 @@ export function createLinearIntegrationService(options: {
     revokeCredential: oauth.revokeCredential,
   });
   const loaded = constructIntegrationRuntime(
-    (port: typeof hostPort) => createLinearIntegration(port, options.config),
+    firstPartyIntegrationFactories.linear(options.config),
     hostPort,
-    "linear",
+    LINEAR_SLUG,
   );
   if (loaded.kind !== "loaded") {
     throw new Error("Linear integration failed to load.");
   }
-  const runtime = loaded.runtime;
-  return createBoundService("linear", runtime, oauth);
+  return createBoundService(LINEAR_SLUG, loaded.runtime, oauth);
+}
+
+function unavailableAuthentication(): IntegrationAuthenticationSnapshot {
+  return decodeIntegrationAuthenticationSnapshot({
+    state: "unavailable",
+    capabilities: [],
+    remediation: UNAVAILABLE_REMEDIATION,
+  });
+}
+
+function unavailableOperation(): IntegrationExecutionResult {
+  return decodeIntegrationExecutionResult({
+    kind: "refused",
+    reason: UNAVAILABLE_REMEDIATION,
+  });
 }
 
 function createBoundService(
