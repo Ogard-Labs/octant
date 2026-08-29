@@ -804,6 +804,11 @@ export interface StartOctantServerOptions {
   readonly desktopBridgeSecret?: string;
   readonly developmentWebBootstrap?: true;
   /**
+   * HTTP origin the local renderer may present. `null` is packaged
+   * (`file://` only). Omitted keeps loopback-any-port for tests.
+   */
+  readonly allowedRendererHttpOrigin?: string | null;
+  /**
    * Host control wiring for the shared web Settings host card. The
    * service policy port persists the automatic-startup policy and
    * `requestOwnerStop` requests the same graceful owner drain the control
@@ -2004,6 +2009,9 @@ export function startOctantServer(
       ...(options.developmentWebBootstrap === undefined
         ? {}
         : { developmentWebBootstrap: options.developmentWebBootstrap }),
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
       launchSessionStore,
       windowAuthorityStore,
     });
@@ -2076,9 +2084,11 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
     });
     revokeShellWindow = (windowId) => shellService.revokeWindow(windowId);
+    const allowedRendererHttpOrigin = options.allowedRendererHttpOrigin;
     const shellRoutes = createShellRouteHandler(shellService, {
       windowAuthorityStore,
       now: Date.now,
+      ...(allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin }),
     });
     const themeService = new ThemeService({
       persistence,
@@ -6162,7 +6172,10 @@ export function startOctantServer(
                 if (url.pathname === "/api/hosts") {
                   const origin = request.headers.get("origin");
                   const headers = new Headers({ vary: "Origin" });
-                  if (origin !== null && isAllowedRendererOrigin(origin)) {
+                  if (
+                    origin !== null &&
+                    isAllowedRendererOrigin(origin, options.allowedRendererHttpOrigin)
+                  ) {
                     headers.set("access-control-allow-origin", origin);
                   }
                   return Response.json({ hosts: listHosts(localHostDisplayName()) }, { headers });

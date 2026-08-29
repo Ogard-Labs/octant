@@ -1,5 +1,11 @@
-import { Tooltip } from "@base-ui/react/tooltip";
 import type { ReactElement, ReactNode } from "react";
+import {
+  Tooltip,
+  TooltipPopup,
+  TooltipPortal,
+  TooltipPositioner,
+  TooltipTrigger,
+} from "../shadcn/tooltip";
 
 export interface OctantTooltipProps {
   readonly children: ReactElement;
@@ -11,20 +17,20 @@ export interface OctantTooltipProps {
 /** Opaque, collision-aware tooltip for compact shell controls. */
 export function OctantTooltip(props: OctantTooltipProps) {
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger closeOnClick delay={350} render={props.children} />
-      <Tooltip.Portal>
-        <Tooltip.Positioner
+    <Tooltip>
+      <TooltipTrigger closeOnClick delay={350} render={props.children} />
+      <TooltipPortal>
+        <TooltipPositioner
           align={props.align ?? "center"}
           className="octant-tooltip__positioner"
           side={props.side ?? "bottom"}
           sideOffset={8}
         >
-          <Tooltip.Popup className="octant-tooltip" role="tooltip">
+          <TooltipPopup className="octant-tooltip" role="tooltip">
             {props.label}
-          </Tooltip.Popup>
-        </Tooltip.Positioner>
-      </Tooltip.Portal>
-    </Tooltip.Root>
+          </TooltipPopup>
+        </TooltipPositioner>
+      </TooltipPortal>
+    </Tooltip>
   );
 }

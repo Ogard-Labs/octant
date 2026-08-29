@@ -567,6 +567,7 @@ describe("wiring exemptions", () => {
     expect(KNOWN_ISLANDS.has("apps/server/src/automation/automationModeDispatchPorts.ts")).toBe(
       false,
     );
+    expect(KNOWN_ISLANDS.has("packages/domain/src/trackerReferencePolicy.ts")).toBe(false);
   });
 });
 
