@@ -674,6 +674,7 @@ export function useWorkResearchController(
           return outcome;
         }
         if (outcome.keepDraft === true) {
+          reload();
           return { kind: "rejected", message: outcome.message };
         }
         const removed = await removeReportArtifact({
@@ -708,7 +709,7 @@ export function useWorkResearchController(
       }
       return await settle(await propose(command));
     },
-    [options.enabled, options.mutationClient, options.projectId, propose, resolveBrief],
+    [options.enabled, options.mutationClient, options.projectId, propose, resolveBrief, reload],
   );
 
   return {
