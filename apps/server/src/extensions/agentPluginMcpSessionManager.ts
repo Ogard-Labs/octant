@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, relative } from "node:path";
@@ -21,6 +21,11 @@ import {
   type McpToolDefinition,
 } from "./agentPluginMcpClient";
 import { prepareAgentPluginMcpRuntime } from "./agentPluginMcpRuntime";
+import { frameExternalContentForModel } from "../context/externalContentFraming";
+import type {
+  ExternalContentIngestionResult,
+  RecordExternalContentIngestionInput,
+} from "../context/externalContentIngestionStore";
 import type { ExtensionPackageStore } from "./extensionPackageStore";
 import type { ExtensionToolExecutionPort } from "./extensionChatResolver";
 import type { ExtensionRuntimeStartInput, ExtensionSupervisor } from "./extensionSupervisor";
@@ -62,6 +67,10 @@ export interface AgentPluginMcpSessionManagerOptions {
     readonly inputJson: string;
     readonly signal?: AbortSignal;
   }) => Promise<boolean>;
+  readonly recordExternalContentIngestion?: (
+    input: RecordExternalContentIngestionInput,
+  ) => ExternalContentIngestionResult;
+  readonly uuid?: () => string;
 }
 
 /**
@@ -77,6 +86,8 @@ export class AgentPluginMcpSessionManager {
   readonly #stdioSupervisor: Pick<ExtensionSupervisor, "startInteractive"> | undefined;
   readonly #baseEnv: Readonly<Record<string, string>>;
   readonly #authorizeToolCall: AgentPluginMcpSessionManagerOptions["authorizeToolCall"];
+  readonly #recordExternalContentIngestion: AgentPluginMcpSessionManagerOptions["recordExternalContentIngestion"];
+  readonly #uuid: () => string;
   readonly #sessions = new Map<string, AgentPluginMcpSessionRecord>();
   readonly #desired = new Map<
     string,
@@ -105,6 +116,8 @@ export class AgentPluginMcpSessionManager {
     this.#stdioSupervisor = options.stdioSupervisor;
     this.#baseEnv = options.baseEnv ?? approvedAgentPluginMcpBaseEnvironment();
     this.#authorizeToolCall = options.authorizeToolCall;
+    this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
+    this.#uuid = options.uuid ?? randomUUID;
   }
 
   sessions(): ReadonlyArray<AgentPluginMcpSessionRecord> {
@@ -231,7 +244,7 @@ export class AgentPluginMcpSessionManager {
               isError: true,
             };
           }
-          return { result };
+          return this.#taintToolResult(thread.id, result);
         } catch (error) {
           if (controller.signal.aborted) {
             await this.#close(indexed.sessionKey, record);
@@ -259,6 +272,49 @@ export class AgentPluginMcpSessionManager {
         }
       },
     };
+  }
+
+  #taintToolResult(
+    threadId: ChatThread["id"],
+    result: unknown,
+  ): { readonly result: unknown; readonly isError?: boolean } {
+    const record = this.#recordExternalContentIngestion;
+    if (record === undefined) {
+      return { result: { error: "extension-tool-unavailable" }, isError: true };
+    }
+    let body: string;
+    try {
+      const serialized = JSON.stringify(result);
+      if (typeof serialized !== "string") {
+        return { result: { error: "extension-tool-unavailable" }, isError: true };
+      }
+      body = serialized;
+    } catch {
+      return { result: { error: "extension-tool-unavailable" }, isError: true };
+    }
+    const ingested = record({
+      threadId,
+      provenance: { origin: "tool-result", sourceLabel: "mcp-tool" },
+      contentReference: `mcp-${createHash("sha256").update(body).digest("hex")}`,
+      correlationId: this.#uuid(),
+      authorized: true,
+    });
+    if (ingested.kind === "refused") {
+      return { result: { error: "extension-tool-unavailable" }, isError: true };
+    }
+    const framed = frameExternalContentForModel({
+      origin: "tool-result",
+      sourceLabel: "mcp-tool",
+      body,
+      section: "tool-results",
+    });
+    if (!isProviderSafeToolResult(framed.text)) {
+      return {
+        result: { error: "MCP tool result exceeded provider limits." },
+        isError: true,
+      };
+    }
+    return { result: framed.text };
   }
 
   async reconcile(effective: ExtensionEffectiveSnapshot): Promise<void> {

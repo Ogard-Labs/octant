@@ -936,6 +936,7 @@ describe("CodeOperationService", () => {
       checkoutRoot: "/tmp/repo",
       paths: ["src/file.ts"],
       expectedStateToken: "f".repeat(64),
+      executionPolicy: "auto-accept-edits",
     });
   });
 
@@ -1225,6 +1226,31 @@ describe("CodeOperationService", () => {
       kind: "provider-turn-state",
     });
     expect(checkpoint).toHaveBeenCalledOnce();
+  });
+
+  it("forwards the thread execution policy into git mutations", async () => {
+    const stage = vi.fn(async () => ({ status: "applied" as const }));
+    const fixture = providerTurnFixture({
+      git: { stage } as never,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "stage-git",
+        operationId: decodeCodeOperationId("52525252-5252-4525-8525-525252525252"),
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        gitOperationId: decodeCodeOperationId("53535353-5353-4535-8535-535353535353"),
+        paths: ["src/file.ts"],
+        expectedStateToken: "f".repeat(64),
+      }),
+    ).resolves.toMatchObject({ kind: "git-mutation-state", state: "completed" });
+    expect(stage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionPolicy: "full-access",
+        paths: ["src/file.ts"],
+      }),
+    );
   });
 
   it("sends snapshotted profile instructions with the Code turn", async () => {
