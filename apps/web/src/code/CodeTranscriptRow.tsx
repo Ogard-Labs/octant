@@ -1,11 +1,22 @@
 import { ChevronRight, CircleAlert } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import type { CodeActivityRow, CodeTurnActivity } from "./transcriptActivity";
+import {
+  alwaysVisibleActivityRows,
+  settledTurnActivitySummary,
+  type CodeActivityRow,
+  type CodeTurnActivity,
+} from "./transcriptActivity";
 
 export interface CodeTranscriptRowProps {
   readonly activity: CodeTurnActivity;
   readonly running: boolean;
+  /**
+   * When true, the turn has finished and its machinery folds behind one summary
+   * line. While a turn is live or waiting on approval, the fold stays open so
+   * pending work and diffs remain visible.
+   */
+  readonly settled?: boolean;
 }
 
 /** Expanded summaries are clipped to this many characters until the user asks for all of it. */
@@ -77,16 +88,31 @@ function setHas(values: ReadonlySet<string>, id: string, present: boolean): Read
  * expands the hit. Expanding is remembered per row for as long as this turn
  * stays mounted, so a streaming state change does not collapse a row the user
  * opened.
+ *
+ * When the turn has settled, the whole toolchain folds behind one summary line
+ * that the user can expand. Waiting or in-flight rows never hide inside that
+ * outer fold — an approval-pending edit stays visible so it can be judged.
  */
 export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
   const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set());
   const [revealedSummaryIds, setRevealedSummaryIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  // Outer fold is remembered on this turn alone: expanding one settled turn
+  // must not re-fold another that the user already opened.
+  const [toolchainOpen, setToolchainOpen] = useState(false);
   const { activity, running } = props;
+  const settled = props.settled === true;
   const hasRows = activity.rows.length > 0;
   const hasReasoning = activity.reasoning.trim().length > 0;
   if (!hasRows && !hasReasoning) return null;
+
+  const pinnedRows = alwaysVisibleActivityRows(activity);
+  const pinnedIds = new Set(pinnedRows.map(rowKey));
+  const foldableRows = activity.rows.filter((row) => !pinnedIds.has(rowKey(row)));
+  const summary = settledTurnActivitySummary(activity);
+  const foldSettledToolchain =
+    settled && !running && summary.length > 0 && (foldableRows.length > 0 || hasReasoning);
 
   const onToggle = (id: string) => (event: ToggleEvent<HTMLDetailsElement>) => {
     const nextOpen = event.newState === "open";
@@ -99,18 +125,72 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
     setOpenIds((current) => setHas(current, id, !current.has(id)));
   };
 
+  const renderDisclosure = (row: CodeActivityRow) => {
+    const id = rowKey(row);
+    return (
+      <ActivityDisclosure
+        key={id}
+        onKeyDown={onSummaryKeyDown(id)}
+        onToggle={onToggle(id)}
+        open={openIds.has(id)}
+        revealed={revealedSummaryIds.has(id)}
+        row={row}
+        onReveal={() => setRevealedSummaryIds((current) => setHas(current, id, true))}
+      />
+    );
+  };
+
+  const thinkingDisclosure = hasReasoning ? (
+    <details
+      className="code-transcript-row__disclosure code-transcript-row__disclosure--thinking"
+      onToggle={onToggle("thinking")}
+      open={openIds.has("thinking")}
+    >
+      <summary
+        aria-expanded={openIds.has("thinking")}
+        aria-label="Thinking"
+        onKeyDown={onSummaryKeyDown("thinking")}
+        role="button"
+      >
+        <ChevronRight
+          aria-hidden="true"
+          className="code-transcript-row__chevron"
+          size={14}
+          strokeWidth={2}
+        />
+        <span className="code-transcript-row__name">Thinking</span>
+      </summary>
+      <p className="code-transcript-row__thinking-body">{activity.reasoning}</p>
+    </details>
+  ) : null;
+
+  const foldableBody = (
+    <>
+      {thinkingDisclosure}
+      {foldableRows.map(renderDisclosure)}
+    </>
+  );
+
   return (
     <div className="code-transcript-row" {...(running ? { "data-live": "true" } : {})}>
-      {hasReasoning ? (
+      {activity.truncated === true ? (
+        <p className="code-transcript-row__truncated">Earliest steps kept</p>
+      ) : null}
+      {pinnedRows.map(renderDisclosure)}
+      {foldSettledToolchain ? (
         <details
-          className="code-transcript-row__disclosure code-transcript-row__disclosure--thinking"
-          onToggle={onToggle("thinking")}
-          open={openIds.has("thinking")}
+          className="code-transcript-row__disclosure code-transcript-row__disclosure--toolchain"
+          onToggle={(event) => setToolchainOpen(event.newState === "open")}
+          open={toolchainOpen}
         >
           <summary
-            aria-expanded={openIds.has("thinking")}
-            aria-label="Thinking"
-            onKeyDown={onSummaryKeyDown("thinking")}
+            aria-expanded={toolchainOpen}
+            aria-label={summary}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              setToolchainOpen((current) => !current);
+            }}
             role="button"
           >
             <ChevronRight
@@ -119,30 +199,13 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
               size={14}
               strokeWidth={2}
             />
-            <span className="code-transcript-row__name">Thinking</span>
+            <span className="code-transcript-row__name">{summary}</span>
           </summary>
-          <p className="code-transcript-row__thinking-body">{activity.reasoning}</p>
+          <div className="code-transcript-row__toolchain">{foldableBody}</div>
         </details>
-      ) : null}
-      {activity.truncated === true ? (
-        <p className="code-transcript-row__truncated">Earliest steps kept</p>
-      ) : null}
-      {hasRows
-        ? activity.rows.map((row) => {
-            const id = rowKey(row);
-            return (
-              <ActivityDisclosure
-                key={id}
-                onKeyDown={onSummaryKeyDown(id)}
-                onToggle={onToggle(id)}
-                open={openIds.has(id)}
-                revealed={revealedSummaryIds.has(id)}
-                row={row}
-                onReveal={() => setRevealedSummaryIds((current) => setHas(current, id, true))}
-              />
-            );
-          })
-        : null}
+      ) : (
+        foldableBody
+      )}
     </div>
   );
 }

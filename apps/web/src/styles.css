@@ -5675,6 +5675,20 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transform: rotate(90deg);
 }
 
+
+.code-transcript-row__disclosure--toolchain > summary .code-transcript-row__name {
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-weight: 400;
+}
+
+.code-transcript-row__toolchain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 2px;
+}
+
 .code-transcript-row__name {
   flex: 1 1 0;
   min-width: 0;

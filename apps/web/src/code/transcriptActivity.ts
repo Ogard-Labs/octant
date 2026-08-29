@@ -123,3 +123,65 @@ export function activeRowCount(activity: CodeTurnActivity): number {
       : row.state === "pending" || row.state === "running" || row.state === "waiting",
   ).length;
 }
+
+/**
+ * Rows that must stay visible even when a settled turn's toolchain is folded:
+ * a task waiting on approval, or any still-open step. Judging a change you
+ * cannot see is the fold's failure mode.
+ */
+export function alwaysVisibleActivityRows(
+  activity: CodeTurnActivity,
+): ReadonlyArray<CodeActivityRow> {
+  return activity.rows.filter((row) =>
+    row.kind === "tool"
+      ? row.state === "started" || row.state === "running"
+      : row.state === "pending" || row.state === "running" || row.state === "waiting",
+  );
+}
+
+/** Tool names that usually mutate files — used only for the quiet summary line. */
+export function isFileEditToolName(toolName: string): boolean {
+  const name = toolName.trim().toLowerCase();
+  return (
+    name === "write" ||
+    name === "edit" ||
+    name === "multiedit" ||
+    name === "strreplace" ||
+    name === "str_replace" ||
+    name === "applypatch" ||
+    name === "apply_patch" ||
+    name === "notebookedit" ||
+    name === "create_file" ||
+    name === "delete_file" ||
+    name.includes("edit") ||
+    name.includes("write") ||
+    name.includes("patch")
+  );
+}
+
+/**
+ * One quiet line for a settled turn's machinery, e.g. "12 tool calls · 4 files
+ * edited". Empty when there is nothing to fold.
+ */
+export function settledTurnActivitySummary(activity: CodeTurnActivity): string {
+  const toolCalls = activity.rows.filter((row) => row.kind === "tool").length;
+  const filesEdited = activity.rows.filter(
+    (row) => row.kind === "tool" && isFileEditToolName(row.toolName),
+  ).length;
+  const tasks = activity.rows.filter((row) => row.kind === "task").length;
+  const thinking = activity.reasoning.trim().length > 0;
+  const parts: string[] = [];
+  if (toolCalls > 0) {
+    parts.push(`${toolCalls} ${toolCalls === 1 ? "tool call" : "tool calls"}`);
+  }
+  if (filesEdited > 0) {
+    parts.push(`${filesEdited} ${filesEdited === 1 ? "file edited" : "files edited"}`);
+  }
+  if (tasks > 0 && toolCalls === 0) {
+    parts.push(`${tasks} ${tasks === 1 ? "task" : "tasks"}`);
+  }
+  if (thinking && (parts.length === 0 || (toolCalls === 0 && filesEdited === 0))) {
+    parts.push("Thinking");
+  }
+  return parts.join(" · ");
+}

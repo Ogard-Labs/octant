@@ -266,4 +266,98 @@ describe("CodeTranscriptRow", () => {
     expect(screen.getByText(/TAIL/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
   });
+
+  it("folds a settled turn's toolchain behind one summary line by default", () => {
+    const settled: CodeTurnActivity = {
+      reasoning: "Check the failing suite first.",
+      rows: [
+        {
+          kind: "tool",
+          id: "call-1",
+          toolName: "Bash",
+          state: "completed",
+          summary: "exit 0",
+        },
+        {
+          kind: "tool",
+          id: "call-2",
+          toolName: "Write",
+          state: "completed",
+          summary: "Updated pane",
+        },
+      ],
+    };
+    render(<CodeTranscriptRow activity={settled} running={false} settled />);
+
+    const fold = disclosure("2 tool calls · 1 file edited");
+    expect(fold.open).toBe(false);
+    expect(screen.getByRole("button", { name: "2 tool calls · 1 file edited" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.getByText("exit 0")).not.toBeVisible();
+    expect(screen.getByText("Check the failing suite first.")).not.toBeVisible();
+  });
+
+  it("keeps a waiting approval row visible outside the settled fold", () => {
+    render(
+      <CodeTranscriptRow
+        activity={{
+          reasoning: "",
+          rows: [
+            {
+              kind: "tool",
+              id: "call-1",
+              toolName: "Read",
+              state: "completed",
+              summary: "ok",
+            },
+            {
+              kind: "task",
+              id: "task-1",
+              state: "waiting",
+              summary: "Apply the edit",
+            },
+          ],
+        }}
+        running={false}
+        settled
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Apply the edit, waiting" })).toBeVisible();
+    const fold = disclosure("1 tool call");
+    expect(fold.open).toBe(false);
+    expect(screen.getByText("ok")).not.toBeVisible();
+  });
+
+  it("leaves a live turn unfolded even when marked settled", () => {
+    render(<CodeTranscriptRow activity={mixed} running settled />);
+
+    expect(screen.queryByRole("button", { name: /tool call/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bash, done" })).toBeVisible();
+  });
+
+  it("expands one settled toolchain without re-folding another", async () => {
+    const user = userEvent.setup();
+    const first: CodeTurnActivity = {
+      reasoning: "",
+      rows: [{ kind: "tool", id: "a", toolName: "Read", state: "completed", summary: "a" }],
+    };
+    const second: CodeTurnActivity = {
+      reasoning: "",
+      rows: [{ kind: "tool", id: "b", toolName: "Bash", state: "completed", summary: "b" }],
+    };
+    render(
+      <>
+        <CodeTranscriptRow activity={first} running={false} settled />
+        <CodeTranscriptRow activity={second} running={false} settled />
+      </>,
+    );
+
+    const folds = screen.getAllByRole("button", { name: "1 tool call" });
+    await user.click(folds[0]!);
+    expect(folds[0]!.closest("details")).toHaveProperty("open", true);
+    expect(folds[1]!.closest("details")).toHaveProperty("open", false);
+  });
 });
