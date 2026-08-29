@@ -167,8 +167,9 @@ export const AppleSimulatorRequest = Schema.Struct({
   target: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
   /** Coordinate tap in live-frame image pixels when no semantic target is named. */
   point: Schema.optional(AppleSimulatorPoint),
-  /** Typed text for `type-text`. Never copied into durable evidence verbatim. */
-  text: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096))),
+  /** Typed text for `type-text`. Never copied into durable evidence verbatim.
+   *  Leading/trailing whitespace is preserved (passwords and spaced values). */
+  text: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096))),
   /** Hardware or named key for `key-press` (for example `return`, `escape`, `home`). */
   key: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
@@ -190,7 +191,11 @@ export const AppleSimulatorRequest = Schema.Struct({
         );
       }
       if (request.kind === "type-text") {
-        return request.requestedBy !== undefined && request.text !== undefined;
+        return (
+          request.requestedBy !== undefined &&
+          request.text !== undefined &&
+          request.text.trim().length > 0
+        );
       }
       if (request.kind === "key-press") {
         return request.requestedBy !== undefined && request.key !== undefined;
@@ -275,7 +280,20 @@ export const AppleBuildEvidence = Schema.Struct({
   cleanup: AppleCleanupState,
   durationMs: Schema.Int.pipe(Schema.nonNegative()),
   completedAt: UtcTimestamp,
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((evidence) => {
+      if (
+        evidence.kind === "tap" ||
+        evidence.kind === "type-text" ||
+        evidence.kind === "key-press"
+      ) {
+        return evidence.requestedBy !== undefined;
+      }
+      return true;
+    }),
+  );
 export type AppleBuildEvidence = typeof AppleBuildEvidence.Type;
 
 export const AppleActionProgress = Schema.Struct({

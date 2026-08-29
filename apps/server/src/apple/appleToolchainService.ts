@@ -83,6 +83,7 @@ export interface AppleToolchainServiceOptions {
   readonly injectSimulatorInput?: (
     request: AppleSimulatorRequest,
     context: AppleExecutionContext,
+    timeoutMs: number,
     signal?: AbortSignal,
   ) => Promise<AppleProcessResult>;
   readonly realpath: (path: string) => Promise<string>;
@@ -532,14 +533,15 @@ export class AppleToolchainService {
         terminal = await this.#injectInput(request, context, signal);
         // Typed text must never land in stdout/stderr artifacts or diagnostics.
         // Success is verified by a later screenshot, log, or assertion.
-        const redacted = redactedAppleInputDiagnostic(request);
-        const note =
-          request.kind === "type-text" && !succeeded(terminal)
-            ? {
-                severity: "note" as const,
-                message: `type-text ${outcomeFor(terminal)} (text redacted)`,
-              }
-            : redacted;
+        const note = succeeded(terminal)
+          ? redactedAppleInputDiagnostic(request)
+          : {
+              severity: "note" as const,
+              message:
+                request.kind === "type-text"
+                  ? `type-text ${outcomeFor(terminal)} (text redacted)`
+                  : `${request.kind} ${outcomeFor(terminal)}: ${text(terminal.stderr).slice(0, MAX_DIAGNOSTIC_LENGTH)}`,
+            };
         cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
         const logReference = `apple-log-${request.actionId}`;
         await this.#writeArtifact(logReference, [new TextEncoder().encode(`${note.message}\n`)]);
@@ -720,6 +722,9 @@ export class AppleToolchainService {
       if (entry.evidence.kind !== request.kind) continue;
       // A finished actionId returns stored evidence and never re-injects.
       // Interrupted evidence also refuses re-exec so callers mint a new actionId.
+      if (entry.evidence.outcome === "interrupted") {
+        return withInputMustReissueNote(entry.evidence);
+      }
       return entry.evidence;
     }
     return undefined;
@@ -730,8 +735,13 @@ export class AppleToolchainService {
     context: AppleExecutionContext,
     signal: AbortSignal,
   ): Promise<AppleProcessResult> {
-    if (this.#options.injectSimulatorInput !== undefined) {
-      return this.#options.injectSimulatorInput(request, context, signal);
+    const inject = this.#options.injectSimulatorInput;
+    if (inject !== undefined) {
+      return this.#runInjectedInput(
+        (bounded) => inject(request, context, request.timeoutMs, bounded),
+        request.timeoutMs,
+        signal,
+      );
     }
     const platform = this.#options.platform ?? process.platform;
     if (platform !== "darwin") {
@@ -744,6 +754,59 @@ export class AppleToolchainService {
       return unavailableInputResult("Simulator input request is incomplete for host injection.");
     }
     return this.#command(argv, context, request.timeoutMs, signal);
+  }
+
+  /**
+   * Bound a host adapter the same way `#command` bounds osascript: a
+   * non-settling injector must not leave the action stuck in `#active`.
+   */
+  async #runInjectedInput(
+    run: (signal: AbortSignal) => Promise<AppleProcessResult>,
+    timeoutMs: number,
+    parent: AbortSignal,
+  ): Promise<AppleProcessResult> {
+    if (parent.aborted) {
+      return {
+        termination: "cancelled",
+        exitCode: null,
+        stdout: new Uint8Array(),
+        stderr: new Uint8Array(),
+        parserFailed: false,
+        cleanupUncertain: false,
+      };
+    }
+    const controller = new AbortController();
+    const onParentAbort = () => controller.abort(parent.reason);
+    parent.addEventListener("abort", onParentAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(new Error("deadline-exceeded")), timeoutMs);
+    try {
+      return await run(controller.signal);
+    } catch (error) {
+      if (parent.aborted) {
+        return {
+          termination: "cancelled",
+          exitCode: null,
+          stdout: new Uint8Array(),
+          stderr: new Uint8Array(),
+          parserFailed: false,
+          cleanupUncertain: false,
+        };
+      }
+      if (controller.signal.aborted) {
+        return {
+          termination: "timed-out",
+          exitCode: null,
+          stdout: new Uint8Array(),
+          stderr: new TextEncoder().encode("Simulator input injection timed out."),
+          parserFailed: false,
+          cleanupUncertain: true,
+        };
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      parent.removeEventListener("abort", onParentAbort);
+    }
   }
 
   #progress(
@@ -1165,6 +1228,20 @@ function evidence(
   });
 }
 
+function withInputMustReissueNote(evidence: AppleBuildEvidence): AppleBuildEvidence {
+  const alreadyNoted = evidence.diagnostics.some(
+    (diagnostic) => diagnostic.message === APPLE_INPUT_MUST_REISSUE_NOTE,
+  );
+  if (alreadyNoted) return evidence;
+  return {
+    ...evidence,
+    diagnostics: [
+      ...evidence.diagnostics,
+      { severity: "note", message: APPLE_INPUT_MUST_REISSUE_NOTE },
+    ].slice(0, MAX_DIAGNOSTICS),
+  };
+}
+
 function diagnosticsFor(
   outputs: ReadonlyArray<Uint8Array>,
   context: AppleExecutionContext,
@@ -1259,6 +1336,11 @@ function unavailableInputResult(message: string): AppleProcessResult {
  * passed only as an osascript argument for execution — never mirrored into
  * durable logs by the caller. Prefer a reviewed injectSimulatorInput adapter
  * when one is configured on the host.
+ *
+ * Point taps offset live-frame image pixels from Simulator window 1's
+ * top-left. That misses title-bar/bezel chrome and does not scale when the
+ * frame and window sizes differ; prefer semantic `target`, or supply
+ * `injectSimulatorInput` for accurate mapping.
  */
 function darwinSimulatorInputArgv(
   request: AppleSimulatorRequest,
@@ -1282,7 +1364,14 @@ function darwinSimulatorInputArgv(
         "-e",
         'tell application "Simulator" to activate',
         "-e",
-        `tell application "System Events" to click at {${x}, ${y}}`,
+        [
+          'tell application "System Events"',
+          'tell process "Simulator"',
+          "set {wx, wy} to position of window 1",
+          "end tell",
+          `click at {wx + ${x}, wy + ${y}}`,
+          "end tell",
+        ].join("\n"),
       ];
     }
     return undefined;

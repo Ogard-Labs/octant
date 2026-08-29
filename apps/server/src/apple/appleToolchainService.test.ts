@@ -798,6 +798,7 @@ describe("AppleToolchainService Simulator input", () => {
     expect(first.outcome).toBe("interrupted");
     const second = await service.execute(request, context);
     expect(second.outcome).toBe("interrupted");
+    expect(second.diagnostics.some((d) => d.message.includes("Issue a new actionId"))).toBe(true);
     expect(injectSimulatorInput).toHaveBeenCalledTimes(1);
   });
 
@@ -856,5 +857,7 @@ describe("AppleToolchainService Simulator input", () => {
       context,
     );
     expect(evidence.outcome).toBe("unavailable");
+    expect(evidence.diagnostics[0]?.message).toContain("unavailable");
+    expect(evidence.diagnostics[0]?.message).toContain("Open the thread on the Mac");
   });
 });

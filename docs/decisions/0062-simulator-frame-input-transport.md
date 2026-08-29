@@ -45,8 +45,11 @@ confused with an agent petition (0053 destination rules; contracts in
   other reads stay approval-free. Prefer semantic targets (accessibility
   identifier or role) when the request carries one; coordinate taps are
   allowed when the live frame supplies them and no stable target is named.
-  Success is never assumed from a void return; the next screenshot, log, or
-  assertion verifies, as 0014 already requires.
+  Darwin's default Accessibility fallback offsets those pixels from the
+  Simulator window origin; it does not account for chrome or mismatched
+  frame/window scale. Hosts that need accurate mapping supply
+  `injectSimulatorInput`. Success is never assumed from a void return; the
+  next screenshot, log, or assertion verifies, as 0014 already requires.
 - **Renderer chrome is semantic accessibility for Octant controls**, not
   the Simulator's accessibility tree. Frame status, captions, and input
   affordances are labelled and keyboard-reachable in the web surface. The

@@ -117,9 +117,8 @@ function FrameInputControls(props: {
           onKeyDown={(event) => {
             if (event.key !== "Enter" || props.busy) return;
             event.preventDefault();
-            const next = text.trim();
-            if (next.length === 0) return;
-            props.onInput({ kind: "type-text", text: next });
+            if (text.trim().length === 0) return;
+            props.onInput({ kind: "type-text", text });
             setText("");
           }}
           placeholder="Text to type"
@@ -131,9 +130,8 @@ function FrameInputControls(props: {
         <OctantButton
           disabled={props.busy || text.trim().length === 0}
           onClick={() => {
-            const next = text.trim();
-            if (next.length === 0) return;
-            props.onInput({ kind: "type-text", text: next });
+            if (text.trim().length === 0) return;
+            props.onInput({ kind: "type-text", text });
             setText("");
           }}
           type="button"
