@@ -327,9 +327,12 @@ export function createHostFederationLifecycle(
       options.cache.markStale(input.hostId);
       return;
     }
-    options.cache.ensureHost(input.hostId, {
+    // Ready-empty → unavailable must refresh freshness, not keep "ready".
+    options.cache.put({
+      hostId: input.hostId,
       hostDisplayName: input.displayName,
       freshness: freshnessForLifecycle(input.state),
+      items: existing?.items ?? [],
     });
   };
 

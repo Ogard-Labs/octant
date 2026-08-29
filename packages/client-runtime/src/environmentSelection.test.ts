@@ -6,6 +6,7 @@ import {
   environmentReach,
   environmentRows,
   environmentSelectionSummary,
+  pruneEnvironmentSelection,
   selectEnvironmentItems,
   toggleAllEnvironments,
   toggleEnvironment,
@@ -134,6 +135,25 @@ describe("choosing environments", () => {
 
     expect(none).toEqual({ kind: "some", hostIds: new Set() });
     expect(toggleAllEnvironments(none)).toEqual(ALL_ENVIRONMENTS);
+  });
+
+  it("restores All when every selected host has been removed", () => {
+    const onlyRemoved: EnvironmentSelection = {
+      kind: "some",
+      hostIds: new Set([laptop]),
+    };
+    expect(pruneEnvironmentSelection(onlyRemoved, [local, devbox])).toEqual(ALL_ENVIRONMENTS);
+  });
+
+  it("drops removed hosts from a partial selection without collapsing when others remain", () => {
+    const partial: EnvironmentSelection = {
+      kind: "some",
+      hostIds: new Set([devbox, laptop]),
+    };
+    expect(pruneEnvironmentSelection(partial, [local, devbox])).toEqual({
+      kind: "some",
+      hostIds: new Set([devbox]),
+    });
   });
 });
 

@@ -291,6 +291,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           projectViewState.activeViewId,
           allProjectsPreferences,
         );
+  // Search and environment filters both hide threads without deleting them.
+  const filteringThreads =
+    searching || (currentFilters !== undefined && currentFilters.environmentIds.length > 0);
   const timeFilteredThreads =
     currentFilters === undefined || listedThreads === undefined
       ? listedThreads
@@ -552,17 +555,17 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           status={props.threadStatus}
         />
       ) : null}
-      {searching && !hasVisibleThreads ? (
+      {filteringThreads && !hasVisibleThreads ? (
         <p className="project-nav__empty" role="status">
           {FILTERED_THREADS_EMPTY_MESSAGE}
         </p>
       ) : visibleProjects.length === 0 && unfiled.length === 0 ? (
         <p className="project-nav__empty">No Projects in this mode.</p>
       ) : null}
-      {searching && !hasVisibleThreads ? null : nestThreads && activityView ? (
+      {filteringThreads && !hasVisibleThreads ? null : nestThreads && activityView ? (
         <ActivityThreadList
           {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
-          {...(searching ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE } : {})}
+          {...(filteringThreads ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE } : {})}
           groups={activity.groups}
           onSelectThread={props.onSelectThread!}
         />

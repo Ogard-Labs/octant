@@ -69,6 +69,7 @@ import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
 import { LOCAL_HOST_ID, decodeHostId, type HostId } from "@octant/contracts/host";
 import {
   ALL_ENVIRONMENTS,
+  pruneEnvironmentSelection,
   type EnvironmentSelection,
 } from "@octant/client-runtime/environment-selection";
 import {
@@ -1330,6 +1331,12 @@ function LaunchedShell(
     () => readLastSelectedHealthyHostId(),
   );
   const [createHostId, setCreateHostId] = useState<HostId>(() => defaultCreateHostId());
+  // Drop removed hosts from the environments filter before create preselect runs,
+  // otherwise a lone removed remote leaves createHostId pointing at nothing.
+  useEffect(() => {
+    const knownHostIds = hosts.map((host) => String(host.hostId));
+    setEnvironmentSelection((current) => pruneEnvironmentSelection(current, knownHostIds));
+  }, [hosts]);
   // A single selected environment fixes create's destination to that host;
   // otherwise create keeps the All Hosts preselect (last healthy → first
   // healthy). The selector still accepts multi-host input either way.
