@@ -599,7 +599,10 @@ mechanisms are:
   all-hosts honesty, pairing at scale, and conflict presentation is client
   registry work under
   [decisions/0059-multi-host-federation.md](decisions/0059-multi-host-federation.md),
-  not a new trust boundary.
+  not a new trust boundary. Conflicting facts stay under their owning host;
+  create and mutation routing name one destination and refuse when that host is
+  not routable — they never queue offline work or convert one host's read model
+  into authority on another.
 
 ## Package map
 

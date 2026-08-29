@@ -90,13 +90,22 @@ describe("preselectCreateHost", () => {
     expect(result).toEqual({ kind: "selected", host: healthyLocal });
   });
 
-  it("preselects the filtered host in a host-filtered view", () => {
+  it("preselects the filtered host in a host-filtered view when that host is routable", () => {
     const result = preselectCreateHost({
       hosts: [healthyLocal, healthyStudio],
       viewScope: { kind: "host-filter", hostId: STUDIO },
       lastSelectedHealthyHostId: LOCAL,
     });
     expect(result).toEqual({ kind: "selected", host: healthyStudio });
+  });
+
+  it("rejects a host-filtered view when the filtered host is not routable", () => {
+    const result = preselectCreateHost({
+      hosts: [healthyLocal, staleLaptop],
+      viewScope: { kind: "host-filter", hostId: LAPTOP },
+      lastSelectedHealthyHostId: LOCAL,
+    });
+    expect(result).toEqual({ kind: "rejected", reason: "host-unavailable" });
   });
 
   it("fixes selection to the Project host and ignores view scope or last selection", () => {

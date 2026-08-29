@@ -128,6 +128,7 @@ import {
   resolveDraftProviderSelection,
 } from "@octant/domain";
 import type { CreateHostViewScope, ModelPickerSelection } from "@octant/domain";
+import { assertCreateDestinationFromHosts } from "./shell/assertCreateDestination";
 import { resolveSidebarBackground } from "@octant/theme/backgrounds";
 import {
   lazy,
@@ -1358,6 +1359,12 @@ function LaunchedShell(
     });
     if (result.kind === "selected") {
       setCreateHostId(result.host.hostId);
+      return;
+    }
+    // Host-filter views still name the filtered host so the selector can show
+    // it disabled; create submit refuses until that host is routable.
+    if (createHostViewScope.kind === "host-filter") {
+      setCreateHostId(createHostViewScope.hostId);
     }
   }, [createHostViewScope, hosts, lastSelectedHealthyHostId]);
   function handleSelectCreateHost(hostId: HostId) {
@@ -1366,6 +1373,33 @@ function LaunchedShell(
     if (host === undefined) return;
     const remembered = rememberHealthyCreateHost(host);
     if (remembered !== undefined) setLastSelectedHealthyHostId(remembered);
+  }
+  function refuseUnlessCreatableDestination(input: {
+    readonly action: string;
+    readonly requiredCapability?: string;
+    readonly projectHostId?: HostId;
+    readonly onRefuse: (reason: string) => void;
+  }): HostId | undefined {
+    const decision = assertCreateDestinationFromHosts({
+      hosts,
+      createHostId,
+      action: input.action,
+      ...(input.projectHostId === undefined ? {} : { projectHostId: input.projectHostId }),
+      ...(input.requiredCapability === undefined
+        ? {}
+        : { requiredCapability: input.requiredCapability }),
+      ...(hostFederationLifecycle === undefined
+        ? {}
+        : {
+            mutationDecision: (hostId, action) =>
+              hostFederationLifecycle.mutationDecision(hostId, action),
+          }),
+    });
+    if (decision.kind === "refused") {
+      input.onRefuse(decision.reason);
+      return undefined;
+    }
+    return decision.hostId;
   }
   // Read cursors are the window's, not a thread's: the sidebar's unread marks
   // have to agree no matter which thread's controller cleared them.
@@ -3138,6 +3172,12 @@ function LaunchedShell(
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
   ): Promise<boolean> {
+    const destinationHostId = refuseUnlessCreatableDestination({
+      action: "create-work-thread",
+      requiredCapability: "work",
+      onRefuse: () => undefined,
+    });
+    if (destinationHostId === undefined) return false;
     const project = projectController.allProjects.find(
       (
         candidate,
@@ -3164,7 +3204,7 @@ function LaunchedShell(
         title: prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt,
         providerInstanceId,
         modelId,
-        hostId: createHostId,
+        hostId: destinationHostId,
         bindingRevisionId,
         workingDirectory: "." as never,
       });
@@ -3186,7 +3226,7 @@ function LaunchedShell(
         turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
         prompt,
         authority: {
-          hostId: createHostId,
+          hostId: destinationHostId,
           projectId: project.id,
           bindingRevisionId,
           workingDirectory: created.thread.workingDirectory ?? ("." as never),
@@ -3294,6 +3334,12 @@ function LaunchedShell(
     setDraftPendingMessage(undefined);
     setRailPlaceholder(undefined);
     try {
+      const destinationHostId = refuseUnlessCreatableDestination({
+        action: "create-code-thread",
+        requiredCapability: "code",
+        onRefuse: (reason) => setDraftError(reason),
+      });
+      if (destinationHostId === undefined) return false;
       const resolution = resolveDraftProject({
         draftProjectId,
         candidates: projectController.projects,
@@ -3339,7 +3385,7 @@ function LaunchedShell(
       // start nothing instead.
       if (
         executionProfileController.selectedProfile !== undefined &&
-        String(createHostId) !== String(LOCAL_HOST_ID)
+        String(destinationHostId) !== String(LOCAL_HOST_ID)
       ) {
         setDraftError(
           "Profiles belong to this host. Clear the selected profile to start this thread on another host.",
@@ -3517,6 +3563,13 @@ function LaunchedShell(
           setDraftError("The first message could not be sent. Retry from the open thread.");
         }
       } else if (mode === "code") {
+        const destinationHostId = refuseUnlessCreatableDestination({
+          action: "create-code-thread",
+          requiredCapability: "code",
+          onRefuse: (reason) => setDraftError(reason),
+        });
+        if (destinationHostId === undefined) return false;
+        void destinationHostId;
         const resolution = resolveDraftProject({
           draftProjectId,
           candidates: projectController.projects,
@@ -3615,6 +3668,12 @@ function LaunchedShell(
           created.thread.projectId,
         );
       } else if (mode === "work") {
+        const destinationHostId = refuseUnlessCreatableDestination({
+          action: "create-work-thread",
+          requiredCapability: "work",
+          onRefuse: (reason) => setDraftError(reason),
+        });
+        if (destinationHostId === undefined) return false;
         const resolution = resolveDraftProject({
           draftProjectId,
           candidates: projectController.projects.filter(
@@ -3652,7 +3711,7 @@ function LaunchedShell(
           title: prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt,
           providerInstanceId,
           modelId,
-          hostId: createHostId,
+          hostId: destinationHostId,
           bindingRevisionId,
           workingDirectory: "." as never,
           ...(issueContext === undefined ? {} : { issueContext }),
@@ -3677,7 +3736,7 @@ function LaunchedShell(
           turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
           prompt,
           authority: {
-            hostId: createHostId,
+            hostId: destinationHostId,
             projectId: project.id,
             bindingRevisionId,
             workingDirectory: created.thread.workingDirectory ?? ("." as never),
@@ -4781,9 +4840,17 @@ function LaunchedShell(
                     onDraftCreateCodeThread={handleDraftCreateCodeThread}
                     onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}
                     draftCodeExecute={codeController.execute}
-                    onCreateProject={(mode, name, receiptId) =>
-                      projectController.create(mode, name, receiptId, createHostId)
-                    }
+                    onCreateProject={(mode, name, receiptId) => {
+                      const destinationHostId = refuseUnlessCreatableDestination({
+                        action: "create-project",
+                        requiredCapability: mode,
+                        onRefuse: (reason) => setDraftError(reason),
+                      });
+                      if (destinationHostId === undefined) {
+                        return Promise.resolve(undefined);
+                      }
+                      return projectController.create(mode, name, receiptId, destinationHostId);
+                    }}
                     {...(draftCreating ? { onDraftCreating: true } : {})}
                     {...(draftError === undefined ? {} : { onDraftError: draftError })}
                     {...(draftPendingMessage === undefined
@@ -4934,9 +5001,17 @@ function LaunchedShell(
             setCreateOpen(false);
             setProjectCreateMode(undefined);
           }}
-          onCreateProject={(mode, name, receiptId) =>
-            projectController.create(mode, name, receiptId, createHostId)
-          }
+          onCreateProject={(mode, name, receiptId) => {
+            const destinationHostId = refuseUnlessCreatableDestination({
+              action: "create-project",
+              requiredCapability: mode,
+              onRefuse: (reason) => setDraftError(reason),
+            });
+            if (destinationHostId === undefined) {
+              return Promise.resolve(undefined);
+            }
+            return projectController.create(mode, name, receiptId, destinationHostId);
+          }}
           onCreatedProject={(projectId, mode, name) => {
             // First run is still asking; creating a Project is a prerequisite
             // round-trip, not the thread handoff.

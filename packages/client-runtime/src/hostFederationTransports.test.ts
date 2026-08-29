@@ -35,7 +35,12 @@ function remoteHost(
   };
 }
 
-function createFakeBridge(hostId: string, displayName: string): RemoteSessionBridge {
+function createFakeBridge(
+  hostId: string,
+  displayName: string,
+): RemoteSessionBridge & {
+  readonly setState: (next: RemoteSessionBridgeState) => void;
+} {
   let state: RemoteSessionBridgeState = { kind: "idle" };
   const listeners = new Set<(next: RemoteSessionBridgeState) => void>();
   const connection = {
@@ -46,6 +51,10 @@ function createFakeBridge(hostId: string, displayName: string): RemoteSessionBri
   };
   return {
     getState: () => state,
+    setState: (next) => {
+      state = next;
+      for (const listener of listeners) listener(state);
+    },
     subscribe: (listener) => {
       listeners.add(listener);
       return () => {
@@ -71,7 +80,9 @@ function createFakeBridge(hostId: string, displayName: string): RemoteSessionBri
   };
 }
 
-function createFactory(bridges: Map<string, RemoteSessionBridge>): HostFederationTransportFactory {
+function createFactory(
+  bridges: Map<string, ReturnType<typeof createFakeBridge>>,
+): HostFederationTransportFactory {
   return {
     createRemoteBridge: (registration) => {
       const existing = bridges.get(registration.hostId);
@@ -113,7 +124,7 @@ describe("HostFederationTransports (Post-preview B2)", () => {
       }),
     );
 
-    const bridges = new Map<string, RemoteSessionBridge>();
+    const bridges = new Map();
     const transports = createHostFederationTransports({
       registry,
       deviceKeyStore: {} as RemoteDeviceKeyStore,
@@ -161,7 +172,7 @@ describe("HostFederationTransports (Post-preview B2)", () => {
       }),
     );
 
-    const bridges = new Map<string, RemoteSessionBridge>();
+    const bridges = new Map();
     const transports = createHostFederationTransports({
       registry,
       deviceKeyStore: {} as RemoteDeviceKeyStore,
@@ -211,7 +222,7 @@ describe("HostFederationTransports (Post-preview B2)", () => {
       }),
     );
 
-    const bridges = new Map<string, RemoteSessionBridge>();
+    const bridges = new Map();
     const transports = createHostFederationTransports({
       registry,
       deviceKeyStore: {} as RemoteDeviceKeyStore,
@@ -258,7 +269,7 @@ describe("HostFederationTransports (Post-preview B2)", () => {
       }),
     );
 
-    const bridges = new Map<string, RemoteSessionBridge>();
+    const bridges = new Map();
     const transports = createHostFederationTransports({
       registry,
       deviceKeyStore: {} as RemoteDeviceKeyStore,
@@ -298,6 +309,43 @@ describe("HostFederationTransports (Post-preview B2)", () => {
     ).rejects.toThrow(/no transport/i);
   });
 
+  it("rejects routing when the owning host transport is not ready", async () => {
+    const registry = createClientHostRegistry(createInMemoryClientHostRegistryStorage());
+    await registry.upsertRemote(
+      remoteHost({
+        hostId: decodeHostId(HOST_A),
+        displayName: "Studio",
+        origin: "https://studio.tailnet:8443",
+        credential: {
+          keyId: "key-a",
+          credentialGeneration: 1,
+          hostKeyFingerprint: "a".repeat(64),
+        },
+      }),
+    );
+    const bridges = new Map();
+    const transports = createHostFederationTransports({
+      registry,
+      deviceKeyStore: {} as RemoteDeviceKeyStore,
+      factory: createFactory(bridges),
+    });
+    await transports.syncEnabledHosts();
+    bridges.get(HOST_A)!.setState({
+      kind: "stale",
+      hostId: HOST_A,
+      displayName: "Studio",
+    });
+
+    await expect(
+      routeToOwningHost({
+        transports,
+        ref: globalEntityReference(HOST_A, "thread-1"),
+        action: "mutate-thread",
+        execute: async () => "nope",
+      }),
+    ).rejects.toThrow(/stale \(read-only\)|not queued/i);
+  });
+
   it("fan-out uses allSettled isolation so one host failure does not reject others", async () => {
     const registry = createClientHostRegistry(createInMemoryClientHostRegistryStorage());
     await registry.upsertRemote(
@@ -325,7 +373,7 @@ describe("HostFederationTransports (Post-preview B2)", () => {
       }),
     );
 
-    const bridges = new Map<string, RemoteSessionBridge>();
+    const bridges = new Map();
     const transports = createHostFederationTransports({
       registry,
       deviceKeyStore: {} as RemoteDeviceKeyStore,
@@ -371,7 +419,7 @@ describe("HostFederationTransports (Post-preview B2)", () => {
       }),
     );
 
-    const bridges = new Map<string, RemoteSessionBridge>();
+    const bridges = new Map();
     const transports = createHostFederationTransports({
       registry,
       deviceKeyStore: {} as RemoteDeviceKeyStore,
@@ -401,7 +449,7 @@ describe("HostFederationTransports (Post-preview B2)", () => {
       }),
     );
 
-    const bridges = new Map<string, RemoteSessionBridge>();
+    const bridges = new Map();
     const transports = createHostFederationTransports({
       registry,
       deviceKeyStore: {} as RemoteDeviceKeyStore,
