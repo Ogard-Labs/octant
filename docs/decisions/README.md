@@ -66,7 +66,7 @@ distilled successor of the earlier long-form design specifications.
 | [0056](0056-image-generation-jobs-and-adapters.md)            | Image generation jobs, adapters, and artifact scope                                         | Accepted           |
 | [0057](0057-linux-confinement-bubblewrap.md)                  | Linux confinement uses Bubblewrap as a scoped exception to the Seatbelt-only implementation | Accepted           |
 | [0058](0058-cross-platform-desktop.md)                        | One desktop app across macOS, Linux, and Windows                                            | Proposed           |
-| [0059](0059-multi-host-federation.md)                         | Multi-host federation completes without new host authority                                  | Proposed           |
+| [0059](0059-multi-host-federation.md)                         | Multi-host federation completes without new host authority                                  | Accepted           |
 | [0060](0060-usage-spend-ceilings.md)                          | Usage spend ceilings                                                                        | Proposed           |
 | [0061](0061-in-app-changelog.md)                              | In-app changelog rides the update path                                                      | Proposed           |
 | [0062](0062-simulator-frame-input-transport.md)               | Simulator frame input rides the Apple workbench channel                                     | Accepted           |
