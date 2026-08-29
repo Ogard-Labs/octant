@@ -315,6 +315,7 @@ import { createLinkedThreadRouteHandler } from "./linkedThread/linkedThreadRoute
 import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
+import { windowCanAccessCodeProject } from "./windowCodeProjectAccess";
 import { ProjectRootPort } from "./projectRootPort";
 import { createArtifactLibraryRouteHandler } from "./artifactLibraryRoutes";
 import { createArtifactMirrorRouteHandler } from "./artifactMirrorRoutes";
@@ -2350,13 +2351,18 @@ export function startOctantServer(
     ) => Promise<ProviderProbeResult> = async () => {
       throw new Error("Provider probing is unavailable during server startup.");
     };
+    const canAccessCodeProject = (windowId: WindowId, projectId: ProjectId) =>
+      windowCanAccessCodeProject({
+        workspace: persistence.readWindowWorkspace(windowId)?.workspace,
+        projectId,
+        hasActiveCodeProject: (id) => projectService.hasActiveProject(id, "code"),
+      });
     const codeService =
       options.codeService ??
       new CodeService({
         persistence,
         access: {
-          canAccessProject: async (_windowId, projectId) =>
-            projectService.hasActiveProject(projectId, "code"),
+          canAccessProject: canAccessCodeProject,
         },
         checkouts,
         roots,
@@ -3060,8 +3066,7 @@ export function startOctantServer(
           readReviewFindings: persistence.readCodeReviewFindings,
         },
         windowAccess: {
-          canAccessProject: async (_windowId, projectId) =>
-            projectService.hasActiveProject(projectId, "code"),
+          canAccessProject: canAccessCodeProject,
         },
         resolveCheckoutRoot: async (windowId, thread, checkout) => {
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
