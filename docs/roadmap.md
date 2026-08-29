@@ -134,7 +134,8 @@ starts.
   TestFlight, and App Store submission on top of the Simulator loop. Design:
   [apple-devices-distribution.md](apple-devices-distribution.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
-  Bedrock Converse/IAM adapters beyond the API-key paths.
+  Bedrock Converse/IAM adapters beyond the API-key paths. Design:
+  [enterprise-provider-identity.md](enterprise-provider-identity.md).
 - **Remote SSH development environments**, **live guest sharing**, **thread
   retention and purge**, **agent-to-agent messaging** (authority model in
   [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md);
