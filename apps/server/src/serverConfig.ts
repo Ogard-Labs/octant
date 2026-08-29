@@ -85,6 +85,7 @@ export interface ServerLaunchConfig {
   readonly instanceId?: string;
   readonly desktopBridgeSecret?: string;
   readonly developmentWebBootstrap?: true;
+  readonly allowedRendererHttpOrigin?: string | null;
   readonly packagedProviderSmokeControl?: true;
   readonly hostServiceMode: Exclude<HostRuntimeServiceMode, "maintenance">;
   readonly linearOAuthClientId?: string;
@@ -138,6 +139,10 @@ export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): S
   const linearOAuthRedirectUri = parseLinearOAuthRedirectUri(
     environment.OCTANT_LINEAR_OAUTH_REDIRECT_URI,
   );
+  const allowedRendererHttpOrigin = parseAllowedRendererHttpOrigin(
+    environment.OCTANT_WEB_URL,
+    isPackagedRuntime,
+  );
   return {
     port: parseServerPort(environment.OCTANT_SERVER_PORT),
     hostServiceMode: parseHostServiceMode(environment.OCTANT_HOST_SERVICE_MODE),
@@ -146,6 +151,7 @@ export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): S
     ...(instanceId === undefined ? {} : { instanceId }),
     ...(desktopBridgeSecret === undefined ? {} : { desktopBridgeSecret }),
     ...(developmentWebBootstrap === undefined ? {} : { developmentWebBootstrap }),
+    ...(allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin }),
     ...(packagedProviderSmokeControl === "1"
       ? { packagedProviderSmokeControl: true as const }
       : {}),
@@ -158,6 +164,21 @@ export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): S
     ...(linearOAuthClientId === undefined ? {} : { linearOAuthClientId }),
     ...(linearOAuthRedirectUri === undefined ? {} : { linearOAuthRedirectUri }),
   };
+}
+
+function parseAllowedRendererHttpOrigin(
+  developmentWebUrl: string | undefined,
+  isPackagedRuntime: boolean,
+): string | null | undefined {
+  if (isPackagedRuntime) return null;
+  if (developmentWebUrl === undefined || developmentWebUrl === "") return undefined;
+  try {
+    const url = new URL(developmentWebUrl);
+    if (url.username !== "" || url.password !== "") return undefined;
+    return url.origin;
+  } catch {
+    return undefined;
+  }
 }
 
 export function parseLinearOAuthClientId(value: string | undefined): string | undefined {

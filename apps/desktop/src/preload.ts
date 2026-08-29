@@ -349,6 +349,7 @@ export interface OctantHostBridge {
     request: CodeOperationApprovalRequest,
   ) => Promise<CodeApprovalId | undefined>;
   readonly projectWindowCapability: string;
+  readonly windowId?: string;
   readonly providerCredentialStatus: (
     providerInstanceId: string,
   ) => Promise<ProviderCredentialStatus>;
@@ -399,6 +400,7 @@ export function createHostBridge(
   projectWindowCapability: string,
   initialProjectTarget?: ProjectWindowTarget,
   platform: NodeJS.Platform = process.platform,
+  windowId?: string,
 ): OctantHostBridge {
   const invoke = async (channel: string, ...args: readonly unknown[]): Promise<void> =>
     void (await ipc.invoke(channel, ...args));
@@ -582,6 +584,7 @@ export function createHostBridge(
       return value as CodeApprovalId;
     },
     projectWindowCapability,
+    ...(windowId === undefined ? {} : { windowId }),
     providerCredentialStatus: async (providerInstanceId: string) => {
       validateProviderInstanceId(providerInstanceId);
       let value: unknown;
@@ -1503,6 +1506,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function decodeWindowIdArgument(argv: readonly string[]): string {
+  const prefix = "--octant-window-id=";
+  const values = argv.filter((argument) => argument.startsWith(prefix));
+  if (values.length !== 1) throw new TypeError("Invalid window identity.");
+  const windowId = values[0]?.slice(prefix.length);
+  if (windowId === undefined || !PROVIDER_INSTANCE_ID_PATTERN.test(windowId)) {
+    throw new TypeError("Invalid window identity.");
+  }
+  return windowId;
+}
+
 export function decodeProjectWindowCapability(argv: readonly string[]): string {
   const prefix = "--octant-project-capability=";
   const values = argv.filter((argument) => argument.startsWith(prefix));
@@ -1558,13 +1572,21 @@ export function installHostBridge(
   projectWindowCapability = decodeProjectWindowCapability(process.argv),
   initialProjectTarget = decodeInitialProjectTarget(process.argv),
   platform: NodeJS.Platform = process.platform,
+  windowId?: string,
 ): void {
   context.exposeInMainWorld(
     HOST_BRIDGE_KEY,
-    createHostBridge(ipc, projectWindowCapability, initialProjectTarget, platform),
+    createHostBridge(ipc, projectWindowCapability, initialProjectTarget, platform, windowId),
   );
 }
 
 if (process.versions.electron !== undefined) {
-  installHostBridge(contextBridge, ipcRenderer);
+  installHostBridge(
+    contextBridge,
+    ipcRenderer,
+    decodeProjectWindowCapability(process.argv),
+    decodeInitialProjectTarget(process.argv),
+    process.platform,
+    decodeWindowIdArgument(process.argv),
+  );
 }

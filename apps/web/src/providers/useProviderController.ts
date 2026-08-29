@@ -20,6 +20,7 @@ import {
   type ProviderModelId,
   type ProviderAuthenticationAttempt,
   type ProviderObservedState,
+  type ProviderInstance,
   type ProviderRegistryCommand,
   type ProviderRegistryCommandResult,
   type ProviderRegistrySnapshot,
@@ -56,6 +57,16 @@ function findProvider(current: ProviderRegistrySnapshot, instanceId: ProviderIns
   return current.instances.find((instance) => instance.id === instanceId);
 }
 
+function configurationAuthentication(instance: ProviderInstance): string | undefined {
+  return "authentication" in instance.configuration
+    ? instance.configuration.authentication
+    : undefined;
+}
+
+function usesSubscriptionAuthentication(instance: ProviderInstance): boolean {
+  return configurationAuthentication(instance) === "subscription";
+}
+
 export function useProviderController(options: ProviderControllerOptions) {
   const hostBridge =
     options.hostBridge ??
@@ -86,12 +97,7 @@ export function useProviderController(options: ProviderControllerOptions) {
   const install = useCallback((value: ProviderRegistrySnapshot) => {
     for (const instanceId of credentialStatusUnconfirmed.current) {
       const instance = findProvider(value, instanceId);
-      if (
-        (instance?.driverKind !== "claude" &&
-          instance?.driverKind !== "mistral-vibe" &&
-          instance?.driverKind !== "grok") ||
-        instance.configuration.authentication !== "subscription"
-      ) {
+      if (instance === undefined || !usesSubscriptionAuthentication(instance)) {
         credentialStatusUnconfirmed.current.delete(instanceId);
       }
     }
@@ -131,13 +137,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     try {
       const loaded = await client.bootstrap();
       if (hostBridge !== undefined) {
-        const subscriptionProviders = loaded.instances.filter(
-          (instance) =>
-            (instance.driverKind === "claude" ||
-              instance.driverKind === "mistral-vibe" ||
-              instance.driverKind === "grok") &&
-            instance.configuration.authentication === "subscription",
-        );
+        const subscriptionProviders = loaded.instances.filter(usesSubscriptionAuthentication);
         const credentialStatuses = await Promise.all(
           subscriptionProviders.map(async (instance) => {
             try {
@@ -1606,11 +1606,9 @@ export function useProviderController(options: ProviderControllerOptions) {
             (instance.configuration.authentication === "api-key" ||
               instance.configuration.authentication === "bearer" ||
               credentialCleanupRequired.current.has(instanceId))) ||
-          ((instance.driverKind === "claude" ||
-            instance.driverKind === "mistral-vibe" ||
-            instance.driverKind === "grok") &&
-            (instance.configuration.authentication === "api-key" ||
-              credentialCleanupRequired.current.has(instanceId)));
+          configurationAuthentication(instance) === "api-key" ||
+          (usesSubscriptionAuthentication(instance) &&
+            credentialCleanupRequired.current.has(instanceId));
         // Only credential-bearing instances need the desktop bridge, so the
         // requirement stays inside the branches that actually touch the
         // Keychain.

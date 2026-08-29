@@ -13,6 +13,7 @@ const now = () => 1_000;
 function makeHandler(options?: {
   bridgeSecret?: string | undefined;
   developmentWebBootstrap?: true | undefined;
+  allowedRendererHttpOrigin?: string | null;
 }) {
   const store = new LaunchSessionStore({ now });
   const authorityStore = new WindowAuthorityStore();
@@ -31,6 +32,10 @@ function makeHandler(options?: {
       ...(options?.developmentWebBootstrap === undefined
         ? {}
         : { developmentWebBootstrap: options.developmentWebBootstrap }),
+      ...(options !== undefined &&
+      Object.prototype.hasOwnProperty.call(options, "allowedRendererHttpOrigin")
+        ? { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }
+        : {}),
       generateDevelopmentAuthority: () => ({ windowId, capability }),
     }),
   };
@@ -264,6 +269,31 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
       ),
     );
     expect(response?.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+  });
+
+  it("exchanges a launch token from a packaged opaque origin", async () => {
+    const { handler, store, authorityStore } = makeHandler({ allowedRendererHttpOrigin: null });
+    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const response = await handler(
+      post("/api/shell/launch-session", { launchToken: receipt.launchToken }, { origin: "null" }),
+    );
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("access-control-allow-origin")).toBe("null");
+    expect(authorityStore.authenticate(capability, now())).toBe(windowId);
+  });
+
+  it("rejects a development origin when the renderer is packaged", async () => {
+    const { handler, store } = makeHandler({ allowedRendererHttpOrigin: null });
+    const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
+    const response = await handler(
+      post(
+        "/api/shell/launch-session",
+        { launchToken: receipt.launchToken },
+        { origin: "http://localhost:5173" },
+      ),
+    );
+    expect(response?.status).toBe(400);
+    expect(response?.headers.get("access-control-allow-origin")).toBeNull();
   });
 
   it("handles an OPTIONS preflight for the renderer exchange route", async () => {

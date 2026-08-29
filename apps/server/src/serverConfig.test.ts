@@ -176,6 +176,16 @@ describe("parseServerLaunchConfig", () => {
       hostServiceMode: "foreground",
     });
   });
+
+  it("pins the packaged renderer to a file origin and development to the Vite origin", () => {
+    expect(parseServerLaunchConfig({ OCTANT_PACKAGED_RUNTIME: "1" })).toMatchObject({
+      allowedRendererHttpOrigin: null,
+    });
+    expect(parseServerLaunchConfig({ OCTANT_WEB_URL: "http://localhost:5173/" })).toMatchObject({
+      allowedRendererHttpOrigin: "http://localhost:5173",
+    });
+    expect(parseServerLaunchConfig({})).not.toHaveProperty("allowedRendererHttpOrigin");
+  });
 });
 
 describe("parseServerInstanceId", () => {

@@ -1032,6 +1032,7 @@ export function resolveCodeFileHelperPath(options: DesktopNativeHelperPathOption
 export function createMainBrowserWindowOptions(options: {
   readonly bounds: WindowBounds;
   readonly capability: string;
+  readonly windowId: string;
   readonly initialProjectId?: string;
   readonly initialThreadMode?: "code" | "work";
   readonly initialThreadId?: string;
@@ -1056,6 +1057,7 @@ export function createMainBrowserWindowOptions(options: {
       contextIsolation: true,
       additionalArguments: [
         `--octant-project-capability=${options.capability}`,
+        `--octant-window-id=${options.windowId}`,
         ...(options.initialProjectId === undefined
           ? []
           : [`--octant-initial-project-id=${options.initialProjectId}`]),
@@ -1069,6 +1071,7 @@ export function createMainBrowserWindowOptions(options: {
       nodeIntegration: false,
       preload: options.preloadPath,
       sandbox: true,
+      webSecurity: true,
     },
   };
 }
@@ -1083,6 +1086,11 @@ export function prepareDevelopmentRendererUrl(
   launchUrl.searchParams.set("serverUrl", serverUrl);
   launchUrl.searchParams.set("developmentWebBootstrap", "1");
   return launchUrl.toString();
+}
+
+/** Packaged `loadFile` query: server URL only. Window identity stays in argv. */
+export function preparePackagedRendererQuery(serverUrl: string): { readonly serverUrl: string } {
+  return { serverUrl };
 }
 
 function getCredentialBackend(): Promise<DesktopCredentialBackend> {
@@ -1405,6 +1413,7 @@ async function createWindow(): Promise<void> {
         createMainBrowserWindowOptions({
           bounds: state.bounds,
           capability,
+          windowId: state.windowId,
           preloadPath: resolve(dirname(fileURLToPath(import.meta.url)), DESKTOP_PRELOAD_FILENAME),
           browserWindow: presentation.browserWindow,
         }),
@@ -1553,7 +1562,7 @@ async function createWindow(): Promise<void> {
         );
       } else {
         await window.loadFile(resolve(root, "apps/web/dist/index.html"), {
-          query: { windowId: state.windowId, serverUrl },
+          query: preparePackagedRendererQuery(serverUrl),
         });
       }
     },
@@ -1610,6 +1619,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           createMainBrowserWindowOptions({
             bounds: state.bounds,
             capability,
+            windowId,
             initialProjectId: target.projectId,
             ...(target.kind === "project-thread"
               ? { initialThreadMode: target.mode, initialThreadId: target.threadId }
@@ -1737,7 +1747,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           await window.loadURL(prepareDevelopmentRendererUrl(developmentUrl, windowId, serverUrl));
         } else {
           await window.loadFile(resolve(repositoryRoot(), "apps/web/dist/index.html"), {
-            query: { windowId, serverUrl },
+            query: preparePackagedRendererQuery(serverUrl),
           });
         }
       },
