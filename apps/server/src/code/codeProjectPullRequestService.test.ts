@@ -1,5 +1,6 @@
 import { decodeProjectId, decodeWindowId, type CodeProjectPullRequestRow } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
+import type { CodeProjectLinkedThreadFact } from "@octant/domain/code-project-pull-request-policy";
 import { describe, expect, it, vi } from "vitest";
 import { CacheStatsProjection, type CacheStatsRecorder } from "../cacheStatsProjection";
 import {
@@ -80,6 +81,7 @@ function serviceFixture(options: {
     signal: AbortSignal,
   ) => Promise<GhPullRequestReviewResult>;
   readonly journal?: { readonly append: ReturnType<typeof vi.fn> };
+  readonly threads?: ReadonlyArray<CodeProjectLinkedThreadFact>;
   readonly knownPullRequests?: ReadonlyArray<{
     readonly number: number;
     readonly observedAt: string;
@@ -129,16 +131,17 @@ function serviceFixture(options: {
     list: { listActive },
     detail: { observeReviewByIdentity },
     threads: {
-      list: async () => [
-        {
-          threadId: String(threadId),
-          projectId: String(projectA),
-          title: "Manual refresh",
-          repository: { owner: "octant", name: "octant" },
-          deliveryBranch: "feature/manual-refresh",
-          pullRequestNumbers: options.knownPullRequests ?? [],
-        },
-      ],
+      list: async () =>
+        options.threads ?? [
+          {
+            threadId: String(threadId),
+            projectId: String(projectA),
+            title: "Manual refresh",
+            repository: { owner: "octant", name: "octant" },
+            deliveryBranch: "feature/manual-refresh",
+            pullRequestNumbers: options.knownPullRequests ?? [],
+          },
+        ],
     },
     clock: options.clock ?? (() => now),
     ...(options.cacheStats === undefined ? {} : { cacheStats: options.cacheStats }),
@@ -407,6 +410,86 @@ describe("CodeProjectPullRequestService", () => {
       [12, "open"],
       [11, "merged"],
     ]);
+  });
+
+  it("keeps another window's linked pull-request pairs when a window with disjoint thread visibility refreshes", async () => {
+    // Window A's renderer can only see the Octant Project's threads; window B
+    // only works in Docs. The snapshot they share must carry both Projects'
+    // (thread, pull request) pairs no matter which window rebuilt it, so the
+    // thread source is host-wide and both pairs survive A's refresh.
+    const windowB = decodeWindowId("00000000-0000-4000-8000-000000000902");
+    const docsThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000002");
+    const fixture = serviceFixture({
+      projects: [
+        codeProject({ id: projectA, name: "Octant", root: "/repos/octant" }),
+        codeProject({ id: projectC, name: "Docs", root: "/repos/docs" }),
+      ],
+      remotes: {
+        "/repos/octant": [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/octant.git",
+            pushUrl: "https://github.com/octant/octant.git",
+          },
+        ],
+        "/repos/docs": [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/docs.git",
+            pushUrl: "https://github.com/octant/docs.git",
+          },
+        ],
+      },
+      threads: [
+        {
+          threadId: String(threadId),
+          projectId: String(projectA),
+          title: "Manual refresh",
+          repository: { owner: "octant", name: "octant" },
+          deliveryBranch: "feature/manual-refresh",
+        },
+        {
+          threadId: String(docsThreadId),
+          projectId: String(projectC),
+          title: "Docs delivery",
+          repository: { owner: "octant", name: "docs" },
+          deliveryBranch: "feature/docs",
+          pullRequestNumbers: [{ number: 7, observedAt: "2026-08-21T08:00:00Z" }],
+        },
+      ],
+      list: async (request) =>
+        request.name === "docs" ? { status: "ok", rows: [] } : { status: "ok", rows: [ghRow()] },
+      detail: async (request) =>
+        request.name === "docs" && request.number === 7
+          ? {
+              ...observedDetail,
+              pullRequest: {
+                ...observedDetail.pullRequest,
+                number: 7,
+                url: "https://github.com/octant/docs/pull/7",
+                title: "Docs pull request",
+                state: "merged",
+                mergeability: "unknown",
+                baseRepository: "octant/docs",
+                headBranch: "feature/docs",
+                updatedAt: "2026-08-22T06:30:00Z",
+              },
+            }
+          : { status: "unavailable" },
+    });
+
+    await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+
+    const board = await fixture.service.boardSnapshot(windowB);
+    expect(board.rows.map((row) => [row.repositoryName, row.number, row.state])).toEqual([
+      ["octant", 12, "open"],
+      ["docs", 7, "merged"],
+    ]);
+    expect(board.rows[0]?.linkedThreads).toEqual([{ threadId, title: "Manual refresh" }]);
+    expect(board.rows[1]?.linkedThreads).toEqual([
+      { threadId: docsThreadId, title: "Docs delivery" },
+    ]);
+    expect(board.freshness).toEqual({ status: "fresh", lastSuccessfulRefreshAt: now });
   });
 
   it("reconstructs merged and closed board history on the first manual refresh after restart", async () => {

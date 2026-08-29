@@ -91,8 +91,17 @@ export interface CodeProjectPullRequestDetailPort {
   ): Promise<GhPullRequestReviewResult>;
 }
 
+/**
+ * Host-wide linked-thread facts, deliberately not window-scoped. The snapshot
+ * cache is shared by every window and by background refreshes, so building it
+ * from one window's visible threads let a refresh from a window with disjoint
+ * Code-project visibility erase the other windows' linked (thread, pull
+ * request) pairs until a window that could see them refreshed again.
+ * Per-window authority stays where threads are read: boards and thread views
+ * filter by their own window-visible thread lists before joining these rows.
+ */
 export interface CodeProjectLinkedThreadSource {
-  list(windowId: WindowId): Promise<ReadonlyArray<CodeProjectLinkedThreadFact>>;
+  list(): Promise<ReadonlyArray<CodeProjectLinkedThreadFact>>;
 }
 
 interface CachedSnapshot {
@@ -223,7 +232,7 @@ export class CodeProjectPullRequestService {
   }> {
     const [projects, threads] = await Promise.all([
       this.#resolveProjects(windowId),
-      this.#threads.list(windowId),
+      this.#threads.list(),
     ]);
     this.#observeListRead();
     const cachedRows = this.#authorizedRows(projects);
@@ -280,7 +289,7 @@ export class CodeProjectPullRequestService {
       });
     }
     this.#cacheStats?.recordHit("pull-request-detail");
-    const threads = await this.#threads.list(windowId);
+    const threads = await this.#threads.list();
     return this.#detailView({
       query,
       detail: cached.detail,
@@ -316,7 +325,6 @@ export class CodeProjectPullRequestService {
         query: command,
         authorized,
         reason: "refresh-failed",
-        windowId,
       });
     }
 
@@ -325,7 +333,7 @@ export class CodeProjectPullRequestService {
     const now = decodeUtcTimestamp(this.#clock());
     this.#detailCache.set(key, { detail, lastSuccessfulRefreshAt: now });
     this.#detailFreshness.set(key, { status: "fresh", lastSuccessfulRefreshAt: now });
-    const threads = await this.#threads.list(windowId);
+    const threads = await this.#threads.list();
     return this.#detailView({
       query: command,
       detail,
@@ -439,7 +447,7 @@ export class CodeProjectPullRequestService {
     const listBudget = CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS + 1;
     let listedRowCount = 0;
     const [threads, listedResults] = await Promise.all([
-      this.#threads.list(windowId),
+      this.#threads.list(),
       mapConcurrentOrdered(bounded.repositories, GITHUB_READ_CONCURRENCY, async (repository) => {
         const listed = await this.#list.listActive(
           {
@@ -992,7 +1000,6 @@ export class CodeProjectPullRequestService {
     readonly query: CodeProjectPullRequestDetailQuery;
     readonly authorized: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>;
     readonly reason: CodeProjectPullRequestStaleReason;
-    readonly windowId: WindowId;
   }): Promise<CodeProjectPullRequestDetailView> {
     const key = detailKey(input.query);
     const cached = this.#detailCache.get(key);
@@ -1014,7 +1021,7 @@ export class CodeProjectPullRequestService {
         }),
       );
     }
-    return this.#threads.list(input.windowId).then((threads) =>
+    return this.#threads.list().then((threads) =>
       this.#detailView({
         query: input.query,
         detail: cached.detail,

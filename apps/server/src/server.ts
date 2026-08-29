@@ -2466,8 +2466,11 @@ export function startOctantServer(
     let observeRefreshedPullRequestRows:
       | ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void)
       | undefined;
-    const listProjectPullRequestThreadFacts = async (windowId: WindowId) => {
-      const bootstrap = await codeService.bootstrap(windowId);
+    // Host-wide on purpose: the snapshot cache is shared across windows, so
+    // linked-thread facts must come from every persisted Code thread, not from
+    // any window's visible subset. Session-authority overlays only change
+    // executionPolicy, which no fact here reads.
+    const listProjectPullRequestThreadFacts = async () => {
       const facts: Array<{
         readonly threadId: string;
         readonly projectId: string;
@@ -2479,7 +2482,7 @@ export function startOctantServer(
           readonly observedAt: string;
         }>;
       }> = [];
-      for (const thread of bootstrap.threads) {
+      for (const thread of persistence.readCodeThreads()) {
         const repository = thread.deliveryTarget.proposedBaseRepository;
         const slash = repository.indexOf("/");
         if (slash <= 0 || repository.includes("/", slash + 1)) continue;
@@ -2512,14 +2515,15 @@ export function startOctantServer(
       cacheStats,
       onSnapshotRefreshed: (rows) => observeRefreshedPullRequestRows?.(rows),
       threads: {
-        list: (windowId) => listProjectPullRequestThreadFacts(windowId),
+        list: () => listProjectPullRequestThreadFacts(),
       },
     });
     revokeProjectPullRequests = () => projectPullRequestService.revokeGithub();
     // The cadence acts as the host, not as any renderer window. The window
-    // identity below exists only to satisfy window-shaped read signatures;
+    // identity below exists only to satisfy window-shaped observe signatures;
     // on this host `projectService.bootstrap` and Code Project access checks
     // do not branch on it, so no renderer authority is borrowed or widened.
+    // Thread facts for hasBoardRelevantIdentities are host-wide (above).
     const pullRequestCadenceWindowId = decodeWindowId(randomUUID());
     // Refreshed once per cadence pass by the projects callback below, so the
     // per-Project identity check is a set lookup instead of a journal replay
@@ -2539,9 +2543,7 @@ export function startOctantServer(
         // feature that is off.
         pullRequestCadenceProjectsWithIdentities = projects.some((project) => project.enabled)
           ? new Set(
-              (await listProjectPullRequestThreadFacts(pullRequestCadenceWindowId)).map(
-                (fact) => fact.projectId,
-              ),
+              (await listProjectPullRequestThreadFacts()).map((fact) => fact.projectId),
             )
           : new Set();
         return projects;
