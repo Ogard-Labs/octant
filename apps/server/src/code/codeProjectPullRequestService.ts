@@ -138,6 +138,9 @@ export class CodeProjectPullRequestService {
   readonly #threads: CodeProjectLinkedThreadSource;
   readonly #clock: () => string;
   readonly #cacheStats: CacheStatsRecorder | undefined;
+  readonly #onSnapshotRefreshed:
+    | ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void)
+    | undefined;
   #cache: CachedSnapshot | undefined;
   readonly #projectFreshness = new Map<string, CodeProjectPullRequestFreshness>();
   readonly #detailCache = new Map<string, CachedDetail>();
@@ -156,6 +159,13 @@ export class CodeProjectPullRequestService {
     readonly threads: CodeProjectLinkedThreadSource;
     readonly clock?: () => string;
     readonly cacheStats?: CacheStatsRecorder;
+    /**
+     * Observes every replacement of the row snapshot, however a refresh was
+     * initiated. This is the seam that turns snapshot facts (for example a
+     * linked pull request's checks turning red) into thread obligations
+     * without the observer ever reaching GitHub itself.
+     */
+    readonly onSnapshotRefreshed?: (rows: ReadonlyArray<CodeProjectPullRequestRow>) => void;
   }) {
     this.#projects = options.projects;
     this.#remotes = options.remotes;
@@ -164,6 +174,7 @@ export class CodeProjectPullRequestService {
     this.#threads = options.threads;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#cacheStats = options.cacheStats;
+    this.#onSnapshotRefreshed = options.onSnapshotRefreshed;
   }
 
   revokeGithub(): void {
@@ -605,6 +616,10 @@ export class CodeProjectPullRequestService {
       knownIdentityRefreshFailed.size > 0
         ? { status: "stale", staleReason: "refresh-failed", lastSuccessfulRefreshAt: now }
         : { status: "fresh", lastSuccessfulRefreshAt: now };
+    // Fires for every path that replaces the snapshot — explicit refresh and
+    // cadence observation alike — so downstream observers (for example the
+    // failing-checks follow-ups) see cadence-driven facts too.
+    this.#onSnapshotRefreshed?.(rows);
     const view = this.#view({
       query: { version: 1 },
       projects,

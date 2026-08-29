@@ -194,6 +194,7 @@ import {
 } from "./code/codeThreadBoardService";
 import { createCodeBoardPlanProgressSource } from "./code/codeBoardPlanProgress";
 import { CodeFollowUpService } from "./code/codeFollowUpService";
+import { FailingChecksFollowUps } from "./code/failingChecksFollowUps";
 import {
   CodeProjectPullRequestService,
   type CodeProjectPullRequestDetailPort,
@@ -549,6 +550,7 @@ import {
   decodeImageGenerationScopeId,
   decodeMultiModelRoutingVendorId,
   type ChatThreadView,
+  type CodeProjectPullRequestRow,
   type CodeWorktreeRemoteFacts,
   type ImageGenerationSaveResult,
   type MentionableThreadId,
@@ -2456,6 +2458,12 @@ export function startOctantServer(
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     const projectPullRequestPorts = createProjectPullRequestPorts(options.ghExecutable);
+    // Late-bound because the follow-up service that consumes refreshed
+    // snapshots is constructed further down, alongside the other Code thread
+    // services (same pattern as recordExtensionRuntimeEvidence).
+    let observeRefreshedPullRequestRows:
+      | ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void)
+      | undefined;
     const listProjectPullRequestThreadFacts = async (windowId: WindowId) => {
       const bootstrap = await codeService.bootstrap(windowId);
       const facts: Array<{
@@ -2500,6 +2508,7 @@ export function startOctantServer(
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
       cacheStats,
+      onSnapshotRefreshed: (rows) => observeRefreshedPullRequestRows?.(rows),
       threads: {
         list: (windowId) => listProjectPullRequestThreadFacts(windowId),
       },
@@ -3361,6 +3370,18 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    // A linked pull request's checks turning red is a user obligation, not an
+    // agent event: every snapshot refresh feeds the durable follow-up marker on
+    // the owning thread. Read-only toward GitHub; only an explicit completion
+    // clears the marker.
+    const failingChecksFollowUps = new FailingChecksFollowUps({
+      followUps: codeFollowUpService,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    observeRefreshedPullRequestRows = (rows) => {
+      void failingChecksFollowUps.observe(rows);
+    };
     const boardRouteCodeService: CodeRouteService = withCodeBoard(
       baseRouteCodeService,
       async (windowId, query) => {
