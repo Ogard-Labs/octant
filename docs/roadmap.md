@@ -120,7 +120,8 @@ starts.
   stays outside the first release until the Out of scope preconditions in 0058
   hold; Work/Code stay `incompatible` until a Windows sandbox ADR exists.
 - **Mobile maturity** — device builds, live push notifications, native capture,
-  voice input, and public store distribution for the Expo client.
+  voice input, and public store distribution for the Expo client. Design:
+  [mobile-maturity-phases.md](mobile-maturity-phases.md).
 - **Hosted relay** — only if LAN, Tailscale, or SSH cannot satisfy a concrete
   reachability need; local-first remote access comes first. Research:
   [remote-path-sufficiency.md](remote-path-sufficiency.md).
