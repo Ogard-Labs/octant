@@ -79,7 +79,7 @@ import {
   snapshotProfileThreadContext,
   type ProfileThreadContextSnapshot,
 } from "@octant/domain/agent-profile-policy";
-import { authorizeCodeOperation } from "@octant/domain/code-policy";
+import { ACCESS_POSTURE_RANK, authorizeCodeOperation } from "@octant/domain/code-policy";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -267,8 +267,7 @@ function highestPolicy(
   left: ProviderExecutionPolicy,
   right: ProviderExecutionPolicy,
 ): ProviderExecutionPolicy {
-  const rank = { plan: 0, "approval-gated": 1, "auto-accept-edits": 2, "full-access": 3 } as const;
-  return rank[left] >= rank[right] ? left : right;
+  return ACCESS_POSTURE_RANK[left] >= ACCESS_POSTURE_RANK[right] ? left : right;
 }
 
 type ProfiledThreadAuthority = {
