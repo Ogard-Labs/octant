@@ -860,4 +860,85 @@ describe("AppleToolchainService Simulator input", () => {
     expect(evidence.diagnostics[0]?.message).toContain("unavailable");
     expect(evidence.diagnostics[0]?.message).toContain("Open the thread on the Mac");
   });
+
+  it("refuses Darwin coordinate taps without a reviewed injector or semantic target", async () => {
+    const execute = discoveryExecutor();
+    const service = new AppleToolchainService({
+      execute,
+      platform: "darwin",
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "tap",
+        bundleIdentifier: undefined,
+        requestedBy: actor,
+        point: { x: 10, y: 20 },
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      context,
+    );
+    expect(evidence.outcome).toBe("unavailable");
+    expect(JSON.stringify(evidence.diagnostics)).toContain("Coordinate taps require");
+    expect(execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ argv: expect.arrayContaining(["osascript"]) }),
+      expect.anything(),
+    );
+  });
+
+  it("reconciles an interrupted type-text receipt with requestedBy after restart", async () => {
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    const evidence = await service.reconcileAfterRestart(
+      [
+        {
+          actionId: ids.action,
+          correlationId: ids.correlation,
+          authority,
+          threadId: ids.thread,
+          checkoutId: ids.checkout,
+          kind: "type-text",
+          simulatorId: ids.simulator,
+          requestedBy: actor,
+          startedAt: "2026-07-27T19:59:00.000Z",
+        },
+      ],
+      context,
+    );
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]?.kind).toBe("type-text");
+    expect(evidence[0]?.outcome).toBe("interrupted");
+    expect(evidence[0]?.requestedBy).toEqual(actor);
+  });
+
+  it("keeps the must-reissue note when interrupted evidence already has a full diagnostic list", async () => {
+    const { withInputMustReissueNote: appendNote } = await import("./appleToolchainService");
+    const filled = {
+      actionId: ids.action,
+      correlationId: ids.correlation,
+      authority,
+      kind: "key-press" as const,
+      outcome: "interrupted" as const,
+      requestedBy: actor,
+      diagnostics: Array.from({ length: 64 }, (_, index) => ({
+        severity: "note" as const,
+        message: `filled-${String(index)}`,
+      })),
+      artifacts: [],
+      cleanup: "uncertain" as const,
+      durationMs: 1,
+      completedAt: "2026-07-27T20:00:00.000Z" as const,
+    };
+    const next = appendNote(filled as never);
+    expect(next.diagnostics).toHaveLength(64);
+    expect(next.diagnostics.at(-1)?.message).toContain("Issue a new actionId");
+  });
 });

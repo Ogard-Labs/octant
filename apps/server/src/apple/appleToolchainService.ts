@@ -62,6 +62,8 @@ export interface AppleRuntimeReceipt {
   readonly kind: AppleActionRequest["kind"];
   readonly simulatorId?: string;
   bundleIdentifier?: string;
+  /** Required for tap / type-text / key-press so restart replay can decode evidence. */
+  readonly requestedBy?: AppleSimulatorRequest["requestedBy"];
   readonly startedAt: string;
 }
 
@@ -378,6 +380,7 @@ export class AppleToolchainService {
         kind: receipt.kind,
         outcome: "interrupted",
         ...(receipt.simulatorId === undefined ? {} : { simulatorId: receipt.simulatorId }),
+        ...(receipt.requestedBy === undefined ? {} : { requestedBy: receipt.requestedBy }),
         diagnostics: [
           {
             severity: "note",
@@ -431,6 +434,9 @@ export class AppleToolchainService {
       ...(!("bundleIdentifier" in request) || request.bundleIdentifier === undefined
         ? {}
         : { bundleIdentifier: request.bundleIdentifier }),
+      ...(!("requestedBy" in request) || request.requestedBy === undefined
+        ? {}
+        : { requestedBy: request.requestedBy }),
       startedAt,
     };
     let markDone = () => {};
@@ -751,6 +757,11 @@ export class AppleToolchainService {
     }
     const argv = darwinSimulatorInputArgv(request);
     if (argv === undefined) {
+      if (request.kind === "tap" && request.point !== undefined && request.target === undefined) {
+        return unavailableInputResult(
+          "Coordinate taps require a reviewed injectSimulatorInput adapter or a semantic target. Darwin Accessibility fallback refuses guessed screen coordinates.",
+        );
+      }
       return unavailableInputResult("Simulator input request is incomplete for host injection.");
     }
     return this.#command(argv, context, request.timeoutMs, signal);
@@ -765,46 +776,53 @@ export class AppleToolchainService {
     timeoutMs: number,
     parent: AbortSignal,
   ): Promise<AppleProcessResult> {
-    if (parent.aborted) {
-      return {
-        termination: "cancelled",
-        exitCode: null,
-        stdout: new Uint8Array(),
-        stderr: new Uint8Array(),
-        parserFailed: false,
-        cleanupUncertain: false,
-      };
-    }
+    const cancelled: AppleProcessResult = {
+      termination: "cancelled",
+      exitCode: null,
+      stdout: new Uint8Array(),
+      stderr: new Uint8Array(),
+      parserFailed: false,
+      cleanupUncertain: false,
+    };
+    const timedOut: AppleProcessResult = {
+      termination: "timed-out",
+      exitCode: null,
+      stdout: new Uint8Array(),
+      stderr: new TextEncoder().encode("Simulator input injection timed out."),
+      parserFailed: false,
+      cleanupUncertain: true,
+    };
+    if (parent.aborted) return cancelled;
+
     const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const onParentAbort = () => controller.abort(parent.reason);
     parent.addEventListener("abort", onParentAbort, { once: true });
-    const timer = setTimeout(() => controller.abort(new Error("deadline-exceeded")), timeoutMs);
+
+    const deadline = new Promise<AppleProcessResult>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort(new Error("deadline-exceeded"));
+        resolve(timedOut);
+      }, timeoutMs);
+      parent.addEventListener(
+        "abort",
+        () => {
+          resolve(cancelled);
+        },
+        { once: true },
+      );
+    });
+
     try {
-      return await run(controller.signal);
+      // Race so an injector that ignores abort cannot hold `#active` open, and
+      // a late success after the deadline cannot become succeeded evidence.
+      return await Promise.race([run(controller.signal), deadline]);
     } catch (error) {
-      if (parent.aborted) {
-        return {
-          termination: "cancelled",
-          exitCode: null,
-          stdout: new Uint8Array(),
-          stderr: new Uint8Array(),
-          parserFailed: false,
-          cleanupUncertain: false,
-        };
-      }
-      if (controller.signal.aborted) {
-        return {
-          termination: "timed-out",
-          exitCode: null,
-          stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode("Simulator input injection timed out."),
-          parserFailed: false,
-          cleanupUncertain: true,
-        };
-      }
+      if (parent.aborted) return cancelled;
+      if (controller.signal.aborted) return timedOut;
       throw error;
     } finally {
-      clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
       parent.removeEventListener("abort", onParentAbort);
     }
   }
@@ -1228,7 +1246,7 @@ function evidence(
   });
 }
 
-function withInputMustReissueNote(value: AppleBuildEvidence): AppleBuildEvidence {
+export function withInputMustReissueNote(value: AppleBuildEvidence): AppleBuildEvidence {
   const alreadyNoted = value.diagnostics.some(
     (diagnostic) => diagnostic.message === APPLE_INPUT_MUST_REISSUE_NOTE,
   );
@@ -1239,7 +1257,10 @@ function withInputMustReissueNote(value: AppleBuildEvidence): AppleBuildEvidence
   };
   return {
     ...value,
-    diagnostics: [...value.diagnostics, note].slice(0, MAX_DIAGNOSTICS),
+    diagnostics:
+      value.diagnostics.length >= MAX_DIAGNOSTICS
+        ? [...value.diagnostics.slice(0, MAX_DIAGNOSTICS - 1), note]
+        : [...value.diagnostics, note],
   };
 }
 
@@ -1338,10 +1359,10 @@ function unavailableInputResult(message: string): AppleProcessResult {
  * durable logs by the caller. Prefer a reviewed injectSimulatorInput adapter
  * when one is configured on the host.
  *
- * Point taps offset live-frame image pixels from Simulator window 1's
- * top-left. That misses title-bar/bezel chrome and does not scale when the
- * frame and window sizes differ; prefer semantic `target`, or supply
- * `injectSimulatorInput` for accurate mapping.
+ * Point taps are not emitted on this fallback: live-frame pixels are not
+ * Simulator content coordinates, and a wrong `click at` can leave the
+ * Simulator window. Prefer semantic `target`, or supply `injectSimulatorInput`
+ * for accurate mapping.
  */
 function darwinSimulatorInputArgv(
   request: AppleSimulatorRequest,
@@ -1358,22 +1379,10 @@ function darwinSimulatorInputArgv(
       ];
     }
     if (request.point !== undefined) {
-      const x = Math.round(request.point.x);
-      const y = Math.round(request.point.y);
-      return [
-        "osascript",
-        "-e",
-        'tell application "Simulator" to activate',
-        "-e",
-        [
-          'tell application "System Events"',
-          'tell process "Simulator"',
-          "set {wx, wy} to position of window 1",
-          "end tell",
-          `click at {wx + ${x}, wy + ${y}}`,
-          "end tell",
-        ].join("\n"),
-      ];
+      // Live-frame pixels are not Simulator content or screen coordinates.
+      // Without a reviewed adapter (or a semantic target), refuse rather than
+      // guessing chrome offsets and risking clicks outside Simulator.app.
+      return undefined;
     }
     return undefined;
   }
