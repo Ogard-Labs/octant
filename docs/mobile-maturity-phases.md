@@ -59,7 +59,9 @@ A–D, privacy/review packaging, and an explicit boundary change. This phase is
 ## Explicit hold
 
 Store distribution is Phase E and post-preview. Phases B–D must not sneak in
-public listing, required cloud accounts, or phone-side authority.
+public listing, end-user cloud accounts (push/relay/hosted identity beyond the
+host), or phone-side authority. Maintainer-owned Apple and Google developer
+accounts for TestFlight / Play internal tracks in Phase B stay allowed.
 
 ## Start gate (parent Later item)
 
