@@ -1,70 +1,29 @@
-import { createContextClient, type ContextClient } from "@octant/client-runtime/context-client";
-import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
-import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
+import type { ContextClient } from "@octant/client-runtime/context-client";
+import type { ChatClient } from "@octant/client-runtime/chat-client";
+import type { CodeClient } from "@octant/client-runtime/code-client";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
-import {
-  createComputerUseClient,
-  type ComputerUseClient,
-} from "@octant/client-runtime/computer-use-client";
-import {
-  createWorkThreadClient,
-  type WorkThreadClient,
-} from "@octant/client-runtime/work-thread-client";
-import { createWorkTurnClient, type WorkTurnClient } from "@octant/client-runtime/work-turn-client";
-import { createPreviewClient } from "@octant/client-runtime/preview-client";
-import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
-import {
-  createImageGenerationClient,
-  type ImageGenerationClient,
-} from "@octant/client-runtime/image-generation-client";
-import { createWorkOverviewClient } from "@octant/client-runtime/work-overview-client";
-import { createWorkResearchClient } from "@octant/client-runtime/work-research-client";
-import { createGoalClient } from "@octant/client-runtime/goal-client";
-import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
-import { createShipClient, type ShipClient } from "@octant/client-runtime/ship-client";
-import { createPlanClient, type PlanClient } from "@octant/client-runtime/plan-client";
-import { createUsageDashboardClient, localHostDisplayName } from "@octant/client-runtime";
+import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
+import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
+import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
+import type { CanvasClient } from "@octant/client-runtime/canvas-client";
+import type { ShipClient } from "@octant/client-runtime/ship-client";
+import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
-import { createWorkMutationClient } from "@octant/client-runtime/work-mutation-client";
-import { createWorkRequestClient } from "@octant/client-runtime/work-request-client";
-import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
-import { createUsageClient } from "@octant/client-runtime/usage-client";
-import { createProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
-import { createDiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
-import { createHostControlClient } from "@octant/client-runtime/host-control-client";
-import { createGithubClient } from "@octant/client-runtime/github-client";
-import { createIntegrationClient } from "@octant/client-runtime/integration-client";
-import { createGithubCloneClient } from "@octant/client-runtime/github-clone-client";
-import { createAgentProfileClient, type AgentProfileClient } from "@octant/client-runtime";
-import { createAgentRunClient, type AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
+import type { HostClient } from "@octant/client-runtime/host-client";
+import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-assistant-client";
 import {
-  createAgentRunSettingsClient,
-  type AgentRunSettingsClient,
-} from "@octant/client-runtime/agent-run-settings-client";
-import { createAutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
-import {
-  createExtensionClient,
-  type ExtensionClient,
-} from "@octant/client-runtime/extension-client";
-import {
-  createBrowserAutomationClient,
-  type BrowserAutomationClient,
-} from "@octant/client-runtime/browser-automation-client";
-import { createHostClient, type HostClient } from "@octant/client-runtime/host-client";
-import {
-  createNavigatorAssistantClient,
-  type NavigatorAssistantClient,
-} from "@octant/client-runtime/navigator-assistant-client";
-import {
-  createAutomationClient,
   isRemotePairingOrigin,
+  localHostDisplayName,
   readPairingFragment,
+  type AgentProfileClient,
   type AutomationClient,
 } from "@octant/client-runtime";
-import {
-  createAppleToolchainClient,
-  type AppleToolchainClient,
-} from "@octant/client-runtime/apple-toolchain-client";
+import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
+import { createLaunchedShellClients } from "./app/createLaunchedShellClients";
 import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
 import { LOCAL_HOST_ID, decodeHostId, type HostId } from "@octant/contracts/host";
 import {
@@ -209,7 +168,6 @@ import {
   openLocalCodeThreadIds,
 } from "./shell/workspaceTabLifecycle";
 import {
-  readBottomPanelPresentation,
   readSidebarCollapsed,
   resolveWorkspaceMaterial,
   useAutomaticUpdateCheckSync,
@@ -220,9 +178,9 @@ import {
   useSidebarBackgroundFetcher,
   useSidebarVibrancyModeSync,
   useSidebarVibrancySupported,
-  writeBottomPanelPresentation,
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
+import { useThreadUtilityPresentation } from "./shell/useThreadUtilityPresentation";
 import {
   codeThreadActivity,
   projectThreadsAccessForMode,
@@ -275,19 +233,13 @@ import {
   closeUtilityTabState,
   openThreadUtilityTab,
   openUtilityTabState,
-  readBottomPanelToolPresentation,
-  readUtilityDockPresentation,
   removeUtilityTabs,
   retainAvailableUtilityTabs,
   selectThreadUtilityTab,
   selectUtilityTabState,
   threadUtilityDockState,
   threadUtilityDockKey,
-  writeBottomPanelToolPresentation,
-  writeUtilityDockPresentation,
-  type ThreadUtilityDockState,
   type ThreadUtilityDockKey,
-  type ThreadUtilityDockStates,
 } from "./shell/rightUtilityDockSelection";
 import { isDockToolLaunchable, isDockToolStillOpenable } from "./shell/dockToolAvailability";
 import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
@@ -686,46 +638,23 @@ function LaunchedShell(
   const [chatProjectThreadListRequest, setChatProjectThreadListRequest] = useState<
     { readonly projectId: ProjectId; readonly sequence: number } | undefined
   >(undefined);
-  const [dockVisible, setDockVisible] = useState(
-    () => readUtilityDockPresentation(globalThis, String(props.launch.windowId)).open,
-  );
-  const [bottomPanelPresentation, setBottomPanelPresentation] = useState(() =>
-    readBottomPanelPresentation(globalThis, String(props.launch.windowId)),
-  );
-  const [fallbackBottomPanelState, setFallbackBottomPanelState] = useState<ThreadUtilityDockState>({
-    tabs: [],
-  });
-  const [bottomPanelStatesByThread, setBottomPanelStatesByThread] =
-    useState<ThreadUtilityDockStates>(() =>
-      readBottomPanelToolPresentation(globalThis, String(props.launch.windowId)),
-    );
+  const {
+    dockVisible,
+    setDockVisible,
+    dockStatesByThread,
+    setDockStatesByThread,
+    fallbackDockState,
+    setFallbackDockState,
+    bottomPanelPresentation,
+    persistBottomPanelPresentation,
+    bottomPanelStatesByThread,
+    setBottomPanelStatesByThread,
+    fallbackBottomPanelState,
+    setFallbackBottomPanelState,
+  } = useThreadUtilityPresentation(String(props.launch.windowId));
   const [previewBottomPanelHeight, setPreviewBottomPanelHeight] = useState<number>();
-  const persistBottomPanelPresentation = useCallback(
-    (next: typeof bottomPanelPresentation) => {
-      setBottomPanelPresentation(next);
-      writeBottomPanelPresentation(globalThis, String(props.launch.windowId), next);
-    },
-    [props.launch.windowId],
-  );
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
-  const [fallbackDockState, setFallbackDockState] = useState<ThreadUtilityDockState>({ tabs: [] });
-  const [dockStatesByThread, setDockStatesByThread] = useState<ThreadUtilityDockStates>(
-    () => readUtilityDockPresentation(globalThis, String(props.launch.windowId)).threads,
-  );
-  useEffect(() => {
-    writeUtilityDockPresentation(globalThis, String(props.launch.windowId), {
-      open: dockVisible,
-      threads: dockStatesByThread,
-    });
-  }, [dockStatesByThread, dockVisible, props.launch.windowId]);
-  useEffect(() => {
-    writeBottomPanelToolPresentation(
-      globalThis,
-      String(props.launch.windowId),
-      bottomPanelStatesByThread,
-    );
-  }, [bottomPanelStatesByThread, props.launch.windowId]);
   const [addAgentInvokedByThread, setAddAgentInvokedByThread] = useState(() => new Set<string>());
   const [dockSidecarsByThread, setDockSidecarsByThread] = useState<
     ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>
@@ -885,46 +814,96 @@ function LaunchedShell(
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
   }, [activeDraftKey]);
-  const chatClient = useMemo(
+  const launchedClients = useMemo(
     () =>
-      props.chatClient ??
-      createChatClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
+      createLaunchedShellClients({
+        serverUrl: props.launch.serverUrl,
         windowCapability: props.projectWindowCapability,
+        agentProfileClient: props.agentProfileClient,
+        agentRunClient: props.agentRunClient,
+        agentRunSettingsClient: props.agentRunSettingsClient,
+        appleToolchainClient: props.appleToolchainClient,
+        automationClient: props.automationClient,
+        browserAutomationClient: props.browserAutomationClient,
+        canvasClient: props.canvasClient,
+        chatClient: props.chatClient,
+        codeClient: props.codeClient,
+        computerUseClient: props.computerUseClient,
+        contextClient: props.contextClient,
+        extensionClient: props.extensionClient,
+        hostClient: props.hostClient,
+        navigatorAssistantClient: props.navigatorAssistantClient,
+        planClient: props.planClient,
+        shipClient: props.shipClient,
+        workThreadClient: props.workThreadClient,
+        workTurnClient: props.workTurnClient,
       }),
-    [props.chatClient, props.launch.serverUrl, props.projectWindowCapability],
+    [
+      props.agentProfileClient,
+      props.agentRunClient,
+      props.agentRunSettingsClient,
+      props.appleToolchainClient,
+      props.automationClient,
+      props.browserAutomationClient,
+      props.canvasClient,
+      props.chatClient,
+      props.codeClient,
+      props.computerUseClient,
+      props.contextClient,
+      props.extensionClient,
+      props.hostClient,
+      props.launch.serverUrl,
+      props.navigatorAssistantClient,
+      props.planClient,
+      props.projectWindowCapability,
+      props.shipClient,
+      props.workThreadClient,
+      props.workTurnClient,
+    ],
   );
-  // Navigator is host-owned and loopback-only. A base URL the client refuses
-  // leaves the surface without one, which the panel reports as "not available
-  // on this host" rather than pretending to a conversation it cannot reach.
-  const navigatorAssistantClient = useMemo(() => {
-    if (props.navigatorAssistantClient !== undefined) return props.navigatorAssistantClient;
-    try {
-      return createNavigatorAssistantClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      });
-    } catch {
-      return undefined;
-    }
-  }, [props.navigatorAssistantClient, props.launch.serverUrl, props.projectWindowCapability]);
+  const {
+    agentProfileClient,
+    agentRunClient,
+    agentRunSettingsClient,
+    appleToolchainClient,
+    automationClient,
+    automationNotificationClient,
+    browserAutomationClient,
+    canvasClient,
+    chatClient,
+    codeClient,
+    computerUseClient,
+    contextClient,
+    diagnosticsExportClient,
+    extensionClient,
+    folderBrowseClient,
+    githubCloneClient,
+    githubTransport,
+    goalClient,
+    goalLoopClient,
+    hostClient,
+    hostControlClient,
+    imageGenerationClient,
+    linearTransport,
+    navigatorAssistantClient,
+    planClient,
+    previewClient,
+    providerUsageLimitsClient,
+    shipClient,
+    usageClient,
+    usageDashboardClient,
+    workMutationClient,
+    workOverviewClient,
+    workRequestClient,
+    workResearchClient,
+    workThreadClient,
+    workTurnClient,
+  } = launchedClients;
   // One Navigator reader for the whole window: the dock panel and Zen's
   // assistant are two fronts on it, so a turn sent from either is immediately
   // on screen in both.
   const navigatorAssistant = useNavigatorAssistant(navigatorAssistantClient);
   const chatReadCursorStore = useMemo(() => createChatReadCursorStore(), []);
-  const extensionClient = useMemo(
-    () =>
-      props.extensionClient ??
-      createExtensionClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.extensionClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
   // Skills this host reports as installed and effective. They become the
   // Skills group of the `/` composer affordance; an unreachable extension
   // service simply contributes nothing.
@@ -944,114 +923,9 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
-  const codeClient = useMemo(
-    () =>
-      props.codeClient ??
-      createCodeClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.codeClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
   const createCodeOperationId = useCallback(
     () => globalThis.crypto.randomUUID() as CodeOperationId,
     [],
-  );
-  const automationClient = useMemo(
-    () =>
-      props.automationClient ??
-      createAutomationClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.automationClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const appleToolchainClient = useMemo(
-    () =>
-      props.appleToolchainClient ??
-      createAppleToolchainClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.appleToolchainClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const computerUseClient = useMemo(
-    () =>
-      props.computerUseClient ??
-      createComputerUseClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.computerUseClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const workOverviewClient = useMemo(
-    () =>
-      createWorkOverviewClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const workResearchClient = useMemo(
-    () =>
-      createWorkResearchClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const usageDashboardClient = useMemo(
-    () =>
-      createUsageDashboardClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const goalClient = useMemo(
-    () =>
-      createGoalClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const goalLoopClient = useMemo(
-    () =>
-      createGoalLoopClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const shipClient = useMemo(
-    () =>
-      props.shipClient ??
-      createShipClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability, props.shipClient],
-  );
-  const planClient = useMemo(
-    () =>
-      props.planClient ??
-      createPlanClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability, props.planClient],
   );
   // Export is offered only where a client resolves — the same test the chat
   // thread-actions menu applies — so a window without a server capability
@@ -1073,116 +947,10 @@ function LaunchedShell(
     const timer = setTimeout(() => setThreadExportNotice(undefined), 8000);
     return () => clearTimeout(timer);
   }, [threadExportNotice]);
-  const workMutationClient = useMemo(
-    () =>
-      createWorkMutationClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const workRequestClient = useMemo(
-    () =>
-      createWorkRequestClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const folderBrowseClient = useMemo(
-    () =>
-      createFolderBrowseClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const workThreadClient = useMemo(
-    () =>
-      props.workThreadClient ??
-      createWorkThreadClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.workThreadClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const workTurnClient = useMemo(
-    () =>
-      props.workTurnClient ??
-      createWorkTurnClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.workTurnClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
   const workNavigation = useWorkThreadNavigation(workThreadClient);
-  const usageClient = useMemo(
-    () =>
-      createUsageClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const providerUsageLimitsClient = useMemo(() => {
-    try {
-      return createProviderUsageLimitsClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      });
-    } catch {
-      // Provider limit facts are a local-host capability. Remote clients keep
-      // the rest of Settings usable and omit this optional panel.
-      return undefined;
-    }
-  }, [props.launch.serverUrl, props.projectWindowCapability]);
-  const diagnosticsExportClient = useMemo(
-    () =>
-      createDiagnosticsExportClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const hostControlClient = useMemo(
-    () =>
-      createHostControlClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const githubTransport = useMemo(
-    () =>
-      createGithubClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
   const githubClient = useMemo(
     () => withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable),
     [githubTransport],
-  );
-  const linearTransport = useMemo(
-    () =>
-      createIntegrationClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-        slug: "linear",
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
   );
   const linearClient = useMemo(
     () =>
@@ -1263,70 +1031,6 @@ function LaunchedShell(
       linearIssuesRead,
       linearClient,
     ],
-  );
-  const githubCloneClient = useMemo(
-    () =>
-      createGithubCloneClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const agentProfileClient = useMemo(
-    () =>
-      props.agentProfileClient ??
-      createAgentProfileClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.agentProfileClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const agentRunClient = useMemo(
-    () =>
-      props.agentRunClient ??
-      createAgentRunClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.agentRunClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const agentRunSettingsClient = useMemo(
-    () =>
-      props.agentRunSettingsClient ??
-      createAgentRunSettingsClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.agentRunSettingsClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const automationNotificationClient = useMemo(
-    () =>
-      createAutomationNotificationClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const browserAutomationClient = useMemo(
-    () =>
-      props.browserAutomationClient ??
-      createBrowserAutomationClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.browserAutomationClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const hostClient = useMemo(
-    () =>
-      props.hostClient ??
-      createHostClient({ baseUrl: props.launch.serverUrl, fetch: globalThis.fetch }),
-    [props.hostClient, props.launch.serverUrl],
   );
   const observedHosts = useHostObservation(hostClient);
   const hostFederationLifecycle = useHostFederationLifecycle();
@@ -1519,44 +1223,6 @@ function LaunchedShell(
     // active: the mode context remains bound even without an active Project tab.
     controller.workspace?.contextByMode[activeMode].projectId ??
     undefined;
-  const contextClient = useMemo(
-    () =>
-      props.contextClient ??
-      createContextClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.contextClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const previewClient = useMemo(
-    () =>
-      createPreviewClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const canvasClient = useMemo(
-    () =>
-      props.canvasClient ??
-      createCanvasClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.canvasClient, props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const imageGenerationClient = useMemo(
-    (): ImageGenerationClient =>
-      createImageGenerationClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
   const contextSubject = useMemo(() => {
     if (activeMode === "chat" && activeChatThreadId !== undefined) {
       return decodeContextSubjectRef({
