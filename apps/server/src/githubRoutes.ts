@@ -36,11 +36,13 @@ export function createGithubRouteHandler(dependencies: {
   readonly catalogue: GithubCatalogueRoutePort;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
+  readonly isEffective?: () => boolean;
 }) {
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     if (!ROUTES.has(url.pathname)) return undefined;
+    if (dependencies.isEffective?.() === false) return undefined;
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname) || (origin !== null && !isAllowedRendererOrigin(origin)))
       return failure("invalid", 400, origin);

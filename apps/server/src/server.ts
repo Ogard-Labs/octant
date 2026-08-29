@@ -43,6 +43,7 @@ import {
   type WorkThreadId,
 } from "@octant/contracts";
 import type { ExtensionProviderFamily, StandaloneSkillScope } from "@octant/contracts/extensions";
+import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AgentRunControlParentFacts } from "./agentRun/agentRunControlService";
 import { Data, Effect, Schema, Scope } from "effect";
@@ -258,6 +259,10 @@ import { GithubIssueContextService } from "./github/githubIssueContextService";
 import { LinearIssueContextService } from "./plugins/linear/linearIssueContextService";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "./github/githubReadToolService";
+import {
+  githubReadToolSetIfEffective,
+  isGithubIntegrationEffective,
+} from "./github/githubIntegrationEffective";
 import { ManagedCloneProcessPort, createOwnedGitContext } from "./github/managedCloneProcessPort";
 import { ManagedCloneService } from "./github/managedCloneService";
 import { ManagedRepositoryInventory } from "./github/managedRepositoryInventory";
@@ -1835,10 +1840,16 @@ export function startOctantServer(
       ingestion: externalContentIngestionStore,
       uuid: randomUUID,
     });
+    const githubExtensionSnapshot = {
+      read: (): Pick<ExtensionSnapshot, "packages"> => ({ packages: [] }),
+    };
+    const githubIntegrationIsEffective = () =>
+      isGithubIntegrationEffective(githubExtensionSnapshot.read());
     const githubRoutes = createGithubRouteHandler({
       windowAuthorityStore,
       service: githubCapabilityService,
       catalogue: githubCatalogueService,
+      isEffective: githubIntegrationIsEffective,
     });
     const integrationVault =
       options.integrationSecretVault ??
@@ -2023,6 +2034,7 @@ export function startOctantServer(
     const githubCloneRoutes = createGithubCloneRouteHandler({
       windowAuthorityStore,
       service: managedCloneService,
+      isEffective: githubIntegrationIsEffective,
     });
     const contextHarness = new ContextHarnessService({
       persistence,
@@ -2664,6 +2676,7 @@ export function startOctantServer(
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
       },
     });
+    githubExtensionSnapshot.read = () => extensionApiService.snapshot();
     const extensionRoutes = createExtensionRouteHandler({
       service: extensionApiService,
       windowAuthorityStore,
@@ -3207,7 +3220,9 @@ export function startOctantServer(
           }),
         }),
         githubReadTools: ({ windowId, thread, readThread }) =>
-          githubReadToolService.createToolSet({ windowId, thread, readThread }),
+          githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
+            githubReadToolService.createToolSet({ windowId, thread, readThread }),
+          ),
         resolvePullRequestTarget: async (threadId) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return undefined;
