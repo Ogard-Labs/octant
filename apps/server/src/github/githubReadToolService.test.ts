@@ -95,6 +95,14 @@ const projectPage = {
   },
 };
 
+const defaultIngestion = {
+  record: () =>
+    ({
+      kind: "already-recorded",
+      taint: { externalContentIngested: true, ingestedSources: ["github-issues"] },
+    }) as const,
+};
+
 function setup(
   options: {
     snapshot?: GithubAuthenticationSnapshot;
@@ -108,7 +116,7 @@ function setup(
   const service = new GithubReadToolService({
     catalogue: { read } as never,
     snapshot: async () => options.snapshot ?? readySnapshot,
-    ...(options.ingestion === undefined ? {} : { ingestion: options.ingestion }),
+    ingestion: options.ingestion ?? defaultIngestion,
     ...(options.uuid === undefined ? {} : { uuid: options.uuid }),
   });
   const toolSet = service.createToolSet({
@@ -154,6 +162,7 @@ describe("GithubReadToolService", () => {
     const service = new GithubReadToolService({
       catalogue: { read } as never,
       snapshot,
+      ingestion: defaultIngestion,
     });
     const toolSet = service.createToolSet({
       windowId: "window-1" as never,
@@ -184,6 +193,7 @@ describe("GithubReadToolService", () => {
     const service = new GithubReadToolService({
       catalogue: { read } as never,
       snapshot,
+      ingestion: defaultIngestion,
     });
     const toolSet = service.createToolSet({
       windowId: "window-1" as never,
@@ -211,6 +221,7 @@ describe("GithubReadToolService", () => {
     const service = new GithubReadToolService({
       catalogue: { read } as never,
       snapshot,
+      ingestion: defaultIngestion,
     });
     const toolSet = service.createToolSet({
       windowId: "window-1" as never,
@@ -285,6 +296,7 @@ describe("GithubReadToolService", () => {
     const service = new GithubReadToolService({
       catalogue: { read: vi.fn() } as never,
       snapshot: async () => readySnapshot,
+      ingestion: defaultIngestion,
     });
     const malformed = {
       ...thread,

@@ -46,7 +46,7 @@ export interface UseWorkResearchControllerOptions {
  */
 export type WorkResearchMutationOutcome =
   | { readonly kind: "accepted" }
-  | { readonly kind: "rejected"; readonly message: string };
+  | { readonly kind: "rejected"; readonly message: string; readonly keepDraft?: true };
 
 export interface WorkResearchController {
   readonly briefs: ReadonlyArray<WorkResearchBriefView>;
@@ -369,7 +369,9 @@ export function useWorkResearchController(
         result = await client.execute(command);
       } catch (error: unknown) {
         if (error instanceof WorkResearchClientFailure) {
-          return { kind: "rejected", message: error.message };
+          return error.status === 0
+            ? { kind: "rejected", message: error.message, keepDraft: true }
+            : { kind: "rejected", message: error.message };
         }
         return { kind: "rejected", message: "The research command could not be sent." };
       }
@@ -670,6 +672,9 @@ export function useWorkResearchController(
         if (outcome.kind === "accepted") {
           drafts.current.delete(input.briefId);
           return outcome;
+        }
+        if (outcome.keepDraft === true) {
+          return { kind: "rejected", message: outcome.message };
         }
         const removed = await removeReportArtifact({
           mutationClient,

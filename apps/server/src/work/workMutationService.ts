@@ -359,6 +359,9 @@ export class WorkMutationService {
     const outputRejection = validateWorkOutputBudget(bytes.byteLength);
     if (outputRejection !== undefined) return failedReply(request, "oversize");
     const previousBytes = await this.#readResolved(resolved.absolutePath, resolved.sourceIdentity);
+    if (previousBytes === undefined) {
+      return failedReply(request, "read-failed", request.artifactId);
+    }
 
     const sequence = entry.sequence + 1;
     const occurredAt = decodeTimestamp(this.#clock());
@@ -407,7 +410,6 @@ export class WorkMutationService {
             bytes,
           }),
         compensate: async () => {
-          if (previousBytes === undefined) return;
           await writeConfinedWorkFile({
             filesystem: this.#filesystem,
             canonicalPath: resolved.absolutePath,

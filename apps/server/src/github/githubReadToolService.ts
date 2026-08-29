@@ -12,7 +12,6 @@ import {
   isToolAllowedByAllowlist,
   type GithubAgentReadOperation,
 } from "@octant/domain";
-import { originTaintsThread } from "@octant/domain/untrusted-content-policy";
 import type {
   ExternalContentIngestionResult,
   ExternalContentIngestionStore,
@@ -64,14 +63,13 @@ export interface GithubReadToolContext {
 export class GithubReadToolService {
   readonly #catalogue: CatalogueReadPort;
   readonly #snapshot: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>;
-  readonly #ingestion: Pick<ExternalContentIngestionStore, "record"> | undefined;
+  readonly #ingestion: Pick<ExternalContentIngestionStore, "record">;
   readonly #uuid: () => string;
 
   constructor(options: {
     readonly catalogue: CatalogueReadPort;
     readonly snapshot: (signal: AbortSignal) => Promise<GithubAuthenticationSnapshot>;
-    /** Optional until the host injects the ingestion store; absent means this read cannot journal taint. */
-    readonly ingestion?: Pick<ExternalContentIngestionStore, "record">;
+    readonly ingestion: Pick<ExternalContentIngestionStore, "record">;
     readonly uuid?: () => string;
   }) {
     this.#catalogue = options.catalogue;
@@ -160,7 +158,7 @@ export class GithubReadToolService {
           owner: decision.repository.owner,
           name: decision.repository.name,
         });
-        if (ingested?.kind === "refused") {
+        if (ingested.kind === "refused") {
           return failure("tool-unavailable");
         }
         return {
@@ -287,19 +285,17 @@ const GITHUB_READ_SOURCE_LABEL = {
 } as const;
 
 function recordGithubReadIngestion(input: {
-  readonly ingestion: Pick<ExternalContentIngestionStore, "record"> | undefined;
+  readonly ingestion: Pick<ExternalContentIngestionStore, "record">;
   readonly uuid: () => string;
   readonly threadId: CodeThread["id"];
   readonly operation: GithubReadToolInput["operation"];
   readonly owner: string;
   readonly name: string;
-}): ExternalContentIngestionResult | undefined {
-  if (input.ingestion === undefined) return undefined;
+}): ExternalContentIngestionResult {
   const provenance = {
     origin: "tool-result" as const,
     sourceLabel: GITHUB_READ_SOURCE_LABEL[input.operation],
   };
-  if (!originTaintsThread(provenance.origin)) return undefined;
   return input.ingestion.record({
     threadId: input.threadId,
     provenance,
