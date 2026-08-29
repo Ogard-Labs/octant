@@ -34,6 +34,7 @@ import {
   changeProjectLifecycle,
   changeCodeProjectAccess,
   changeCodeProjectNewThreadWorkspace,
+  changeCodeProjectPullRequestBackgroundRefresh,
   createMemoryEntry,
   createProject,
   defaultShellSettings,
@@ -498,6 +499,17 @@ export class ProjectService implements ProjectServiceApi {
           );
           kind = "code-project-new-thread-workspace-changed";
           eventName = "project.code-new-thread-workspace-changed@1";
+        } else if (command.kind === "change-code-project-pull-request-background-refresh") {
+          // One journaled event per user toggle. The background cadence the
+          // setting enables never journals anything itself: its observations
+          // stay in the in-memory pull-request snapshot.
+          project = changeCodeProjectPullRequestBackgroundRefresh(
+            current,
+            command.pullRequestBackgroundRefresh,
+            timestamp,
+          );
+          kind = "code-project-pull-request-background-refresh-changed";
+          eventName = "project.code-pull-request-background-refresh-changed@1";
         } else {
           if (current.type === "chat")
             throw new ProjectServiceError({

@@ -1,4 +1,5 @@
 import type {
+  CodeProjectPullRequestBackgroundRefreshState,
   CodeProjectPullRequestConnection,
   CodeProjectPullRequestDetail,
   CodeProjectPullRequestDetailObserved,
@@ -107,9 +108,27 @@ interface CachedDetail {
 }
 
 /**
- * In-memory Project-scoped pull-request snapshot. Manual refresh reconstructs
- * the bounded open, draft, merged, and closed history after a process restart.
- * The journal never sees list or detail rows.
+ * What one background observation of a Project reported, as a value the
+ * cadence can pace on. `unconnected` means there was nothing to observe;
+ * `unauthorized` is the full stop that only an explicit signal clears.
+ */
+export type CodeProjectPullRequestCadenceObservation =
+  | { readonly status: "fresh" }
+  | { readonly status: "empty" }
+  | { readonly status: "unconnected" }
+  | {
+      readonly status: "failed";
+      readonly reason: CodeProjectPullRequestStaleReason;
+      readonly retryAfter?: UtcTimestamp;
+    }
+  | { readonly status: "unauthorized" };
+
+/**
+ * In-memory Project-scoped pull-request snapshot. Manual refresh — or, for
+ * Projects that opted in, the bounded background cadence driving
+ * `observeForCadence` — reconstructs the bounded open, draft, merged, and
+ * closed history after a process restart. The journal never sees list or
+ * detail rows, however often either refresh path runs.
  */
 export class CodeProjectPullRequestService {
   readonly #projects: CodeProjectPullRequestProjectSource;
@@ -127,6 +146,9 @@ export class CodeProjectPullRequestService {
   readonly #detailCache = new Map<string, CachedDetail>();
   #freshness: CodeProjectPullRequestFreshness = { status: "empty" };
   readonly #detailFreshness = new Map<string, CodeProjectPullRequestFreshness>();
+  readonly #backgroundRefresh = new Map<string, CodeProjectPullRequestBackgroundRefreshState>();
+  /** Tail of the serialized refresh chain; see `#refreshCore`. */
+  #refreshQueue: Promise<unknown> = Promise.resolve();
   #githubRevoked = false;
 
   constructor(options: {
@@ -161,6 +183,15 @@ export class CodeProjectPullRequestService {
     this.#detailCache.clear();
     this.#detailFreshness.clear();
     this.#freshness = { status: "stale", staleReason: "disconnected" };
+  }
+
+  /**
+   * The cadence reports its per-Project state here so the list view can show
+   * why cards are or are not moving. State flows one way — cadence into
+   * service — and is never journaled.
+   */
+  recordBackgroundRefreshState(state: CodeProjectPullRequestBackgroundRefreshState): void {
+    this.#backgroundRefresh.set(String(state.projectId), state);
   }
 
   async query(
@@ -308,20 +339,83 @@ export class CodeProjectPullRequestService {
     command: CodeProjectPullRequestRefreshCommand,
     signal: AbortSignal,
   ): Promise<CodeProjectPullRequestView> {
+    const { view } = await this.#refreshCore(windowId, command, signal, {
+      skipSettledKnownIdentities: false,
+    });
+    return view;
+  }
+
+  /**
+   * Background variant of an explicit per-Project refresh. It reuses the same
+   * core so there is no second refresh semantics to keep honest, but it may
+   * reuse cached merged/closed rows instead of re-observing them, and it
+   * reports the outcome as a value the cadence can pace on.
+   */
+  async observeForCadence(
+    windowId: WindowId,
+    projectId: ProjectId,
+    signal: AbortSignal,
+  ): Promise<CodeProjectPullRequestCadenceObservation> {
+    const { outcome } = await this.#refreshCore(
+      windowId,
+      { kind: "refresh-project", projectId },
+      signal,
+      { skipSettledKnownIdentities: true },
+    );
+    return outcome;
+  }
+
+  /**
+   * Explicit and cadence refreshes commit to one shared cache. Running them
+   * one at a time keeps commit order equal to start order, so a background
+   * observation whose reads were still in flight can never overwrite the
+   * result of an explicit refresh that started after it.
+   */
+  #refreshCore(
+    windowId: WindowId,
+    command: CodeProjectPullRequestRefreshCommand,
+    signal: AbortSignal,
+    options: { readonly skipSettledKnownIdentities: boolean },
+  ): Promise<{
+    readonly view: CodeProjectPullRequestView;
+    readonly outcome: CodeProjectPullRequestCadenceObservation;
+  }> {
+    const run = this.#refreshQueue.then(() =>
+      this.#refreshExclusive(windowId, command, signal, options),
+    );
+    this.#refreshQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  async #refreshExclusive(
+    windowId: WindowId,
+    command: CodeProjectPullRequestRefreshCommand,
+    signal: AbortSignal,
+    options: { readonly skipSettledKnownIdentities: boolean },
+  ): Promise<{
+    readonly view: CodeProjectPullRequestView;
+    readonly outcome: CodeProjectPullRequestCadenceObservation;
+  }> {
     const projects = await this.#resolveProjects(windowId);
     const selected =
       command.kind === "refresh-all"
         ? projects
         : projects.filter((project) => String(project.projectId) === String(command.projectId));
     if (command.kind === "refresh-project" && selected.length === 0) {
-      return this.#view({
-        query: { version: 1 },
-        projects,
-        rows: this.#authorizedActiveRows(projects),
-        repositoriesTruncated: this.#cache?.repositoriesTruncated ?? false,
-        pullRequestsTruncated: this.#cache?.pullRequestsTruncated ?? false,
-        freshness: this.#queryFreshness(),
-      });
+      return {
+        view: this.#view({
+          query: { version: 1 },
+          projects,
+          rows: this.#authorizedActiveRows(projects),
+          repositoriesTruncated: this.#cache?.repositoriesTruncated ?? false,
+          pullRequestsTruncated: this.#cache?.pullRequestsTruncated ?? false,
+          freshness: this.#queryFreshness(),
+        }),
+        outcome: { status: "unconnected" },
+      };
     }
 
     const connected = selected.filter(
@@ -375,11 +469,22 @@ export class CodeProjectPullRequestService {
           listed.status === "unauthorized" ? "disconnected" : listed.status,
           retryAfter,
         );
-        return this.#staleView({
-          projects,
-          reason: listed.status === "unauthorized" ? "disconnected" : listed.status,
-          ...(retryAfter === undefined ? {} : { retryAfter }),
-        });
+        const reason = listed.status === "unauthorized" ? "disconnected" : listed.status;
+        return {
+          view: this.#staleView({
+            projects,
+            reason,
+            ...(retryAfter === undefined ? {} : { retryAfter }),
+          }),
+          outcome:
+            listed.status === "unauthorized"
+              ? { status: "unauthorized" }
+              : {
+                  status: "failed",
+                  reason,
+                  ...(retryAfter === undefined ? {} : { retryAfter }),
+                },
+        };
       }
     }
 
@@ -423,7 +528,30 @@ export class CodeProjectPullRequestService {
     const recoveredKnown = await mapConcurrentOrdered(
       knownCandidates,
       GITHUB_READ_CONCURRENCY,
-      async ({ repository, knownRow }) => {
+      async ({
+        repository,
+        knownRow,
+      }): Promise<
+        | {
+            readonly kind: "settled";
+            readonly repository: (typeof knownCandidates)[number]["repository"];
+            readonly row: CodeProjectPullRequestRow;
+          }
+        | {
+            readonly kind: "observed";
+            readonly repository: (typeof knownCandidates)[number]["repository"];
+            readonly knownRow: CodeProjectPullRequestRow;
+            readonly observed: GhPullRequestReviewResult;
+          }
+      > => {
+        if (options.skipSettledKnownIdentities) {
+          // Merged is terminal, and a closed pull request that reopens shows
+          // up again in the active list above — so a cached merged/closed row
+          // cannot silently change and the identity read can be skipped on
+          // the background cadence. Explicit refresh still re-observes it.
+          const settled = this.#cachedSettledRow(repository, knownRow.number);
+          if (settled !== undefined) return { kind: "settled", repository, row: settled };
+        }
         const observed = await this.#detail.observeReviewByIdentity(
           {
             owner: repository.repositoryOwner,
@@ -433,10 +561,15 @@ export class CodeProjectPullRequestService {
           },
           signal,
         );
-        return { repository, knownRow, observed };
+        return { kind: "observed", repository, knownRow, observed };
       },
     );
-    for (const { repository, knownRow, observed } of recoveredKnown) {
+    for (const entry of recoveredKnown) {
+      if (entry.kind === "settled") {
+        collected.push(entry.row);
+        continue;
+      }
+      const { repository, knownRow, observed } = entry;
       if (observed.status === "observed" && observed.freshness === "fresh" && !observed.ambiguous) {
         collected.push(this.#rowFromObserved(repository, observed, threads, knownRow.updatedAt));
       } else {
@@ -483,8 +616,11 @@ export class CodeProjectPullRequestService {
       knownIdentityRefreshFailed.size > 0
         ? { status: "stale", staleReason: "refresh-failed", lastSuccessfulRefreshAt: now }
         : { status: "fresh", lastSuccessfulRefreshAt: now };
+    // Fires for every path that replaces the snapshot — explicit refresh and
+    // cadence observation alike — so downstream observers (for example the
+    // failing-checks follow-ups) see cadence-driven facts too.
     this.#onSnapshotRefreshed?.(rows);
-    return this.#view({
+    const view = this.#view({
       query: { version: 1 },
       projects,
       rows: rows.filter((row) => row.state === "open"),
@@ -492,6 +628,40 @@ export class CodeProjectPullRequestService {
       pullRequestsTruncated,
       freshness: this.#freshness,
     });
+    if (command.kind === "refresh-project" && connected.length === 0) {
+      return { view, outcome: { status: "unconnected" } };
+    }
+    const observedRows =
+      command.kind === "refresh-project"
+        ? rows.filter((row) => String(row.projectId) === String(command.projectId))
+        : rows;
+    const outcome: CodeProjectPullRequestCadenceObservation =
+      knownIdentityRefreshFailed.size > 0
+        ? { status: "failed", reason: "refresh-failed" }
+        : observedRows.length === 0
+          ? { status: "empty" }
+          : { status: "fresh" };
+    return { view, outcome };
+  }
+
+  /**
+   * A cached row for this identity whose state can no longer drift while it
+   * stays out of the active list: merged is terminal and a reopen re-enters
+   * the list. Anything else must be re-observed.
+   */
+  #cachedSettledRow(
+    repository: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
+    number: number,
+  ): CodeProjectPullRequestRow | undefined {
+    if (this.#githubRevoked || this.#cache === undefined) return undefined;
+    return this.#cache.rows.find(
+      (row) =>
+        (row.state === "merged" || row.state === "closed") &&
+        row.number === number &&
+        String(row.projectId) === String(repository.projectId) &&
+        row.repositoryOwner === repository.repositoryOwner &&
+        row.repositoryName === repository.repositoryName,
+    );
   }
 
   async #resolveProjects(
@@ -739,6 +909,14 @@ export class CodeProjectPullRequestService {
         projectId: project.projectId,
         freshness: this.#projectFreshnessFor(project),
       })),
+      ...(this.#backgroundRefresh.size === 0
+        ? {}
+        : {
+            backgroundRefresh: input.projects.flatMap((project) => {
+              const state = this.#backgroundRefresh.get(String(project.projectId));
+              return state === undefined ? [] : [state];
+            }),
+          }),
       generatedAt: decodeUtcTimestamp(this.#clock()),
     });
   }

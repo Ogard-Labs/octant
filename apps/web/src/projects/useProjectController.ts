@@ -12,6 +12,7 @@ import {
   type ProjectType,
   type CodeAccessPersistence,
   type CodeNewThreadWorkspace,
+  type CodeProjectPullRequestBackgroundRefresh,
 } from "@octant/contracts/projects";
 import type { AggregateVersion } from "@octant/contracts/events";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
@@ -216,6 +217,32 @@ export function useProjectController(options: ProjectControllerOptions) {
         newThreadWorkspace,
       },
       "Code Project new-thread workspace updated.",
+    );
+  }
+
+  /**
+   * Opt a Code Project into (or out of) background refresh of its pull-request
+   * snapshot. The server is the authority: this only issues the command.
+   */
+  async function setCodePullRequestBackgroundRefresh(
+    projectId: ProjectId,
+    pullRequestBackgroundRefresh: CodeProjectPullRequestBackgroundRefresh,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    if ((project.pullRequestBackgroundRefresh ?? "disabled") === pullRequestBackgroundRefresh) {
+      return true;
+    }
+    return execute(
+      {
+        kind: "change-code-project-pull-request-background-refresh",
+        projectId,
+        expectedVersion: project.version,
+        pullRequestBackgroundRefresh,
+      },
+      pullRequestBackgroundRefresh === "enabled"
+        ? "Background pull-request refresh enabled."
+        : "Background pull-request refresh disabled.",
     );
   }
 
@@ -501,6 +528,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     searchStatus,
     setCodeAccessPersistence,
     setCodeNewThreadWorkspace,
+    setCodePullRequestBackgroundRefresh,
     setArchived,
     status,
     supersedeMemory,

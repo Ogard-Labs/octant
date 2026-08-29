@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ProjectPolicyRejected,
   changeCodeProjectAccess,
+  changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectLifecycle,
   compareProjectOrder,
   createProject,
@@ -166,6 +167,28 @@ describe("Project creation and lifecycle", () => {
     });
     expect(() =>
       changeCodeProjectAccess(makeProject(ids.chat, "0/1"), "project-default", updatedAt),
+    ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("enables background pull-request refresh on a Code Project and bumps its version", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const enabled = changeCodeProjectPullRequestBackgroundRefresh(project, "enabled", updatedAt);
+    expect(enabled).toMatchObject({
+      type: "code",
+      pullRequestBackgroundRefresh: "enabled",
+      version: 2,
+    });
+    // Absence reads as disabled, so a "disable" of an untouched Project is a
+    // no-op the journal must never record.
+    expect(() =>
+      changeCodeProjectPullRequestBackgroundRefresh(project, "disabled", updatedAt),
+    ).toThrow(ProjectPolicyRejected);
+    expect(() =>
+      changeCodeProjectPullRequestBackgroundRefresh(
+        makeProject(ids.chat, "0/1"),
+        "enabled",
+        updatedAt,
+      ),
     ).toThrow(ProjectPolicyRejected);
   });
 

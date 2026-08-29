@@ -32,7 +32,12 @@ export const ThreadBoardPullRequestState = Schema.Literal(
 );
 export type ThreadBoardPullRequestState = typeof ThreadBoardPullRequestState.Type;
 
-export const ThreadBoardPullRequestFreshness = Schema.Literal("fresh", "stale");
+/**
+ * `unavailable` means the snapshot cannot reach GitHub at all — `gh` missing,
+ * unauthenticated, or offline — which is a different promise than `stale`
+ * (reachable, but the facts are older than the last successful refresh).
+ */
+export const ThreadBoardPullRequestFreshness = Schema.Literal("fresh", "stale", "unavailable");
 export type ThreadBoardPullRequestFreshness = typeof ThreadBoardPullRequestFreshness.Type;
 
 export const ThreadBoardPullRequestMergeability = Schema.Literal(

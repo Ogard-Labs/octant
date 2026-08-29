@@ -108,7 +108,13 @@ The list is a cached read of a temporary in-memory snapshot. Opening the
 workspace, switching Projects, and ordinary board queries do not call GitHub.
 Refresh all and per-Project refresh are explicit; repositories are read
 concurrently through the installed authenticated `gh` CLI, then reconciled in
-stable Project order. The preview bounds
+stable Project order. A Project can also opt into **background refresh** with
+the toggle in its group header: while enabled and the Project has
+board-relevant pull requests, the host re-observes the snapshot on a bounded
+cadence (never faster than every 30 seconds, every 2 minutes by default),
+backs off after failures, and stops entirely when `gh` is missing or not
+authenticated. The default is off, which keeps the explicit-refresh-only
+behavior. The preview bounds
 the refresh to 25 repositories and 100 pull requests. The workspace continues
 to show only active open and draft rows, while Code board cards may use the same
 explicit refresh to show exact linked PRs as Open, Draft, Merged, or Closed.
