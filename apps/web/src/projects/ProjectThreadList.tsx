@@ -513,7 +513,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
             className="sidebar-navigation__thread-checkout"
             title={props.thread.checkoutChip.label}
           >
-            <GitBranch aria-hidden="true" size={11} strokeWidth={2} />
+            <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
             <span className="sidebar-navigation__thread-checkout-label">
               {props.thread.checkoutChip.label}
             </span>
