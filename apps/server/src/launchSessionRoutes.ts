@@ -21,6 +21,7 @@ export interface LaunchSessionRouteDependencies {
   readonly now?: () => number;
   readonly maxRequestBodySize?: number;
   readonly developmentWebBootstrap?: true;
+  readonly allowedRendererHttpOrigin?: string | null;
   readonly generateDevelopmentAuthority?: () => {
     readonly windowId: WindowId;
     readonly capability: string;
@@ -68,10 +69,13 @@ async function handleDevelopmentBootstrap(
       400,
     );
   }
-  if (origin === null || !isAllowedDevelopmentRendererOrigin(origin)) {
+  if (
+    origin === null ||
+    !isAllowedDevelopmentRendererOrigin(origin, dependencies.allowedRendererHttpOrigin)
+  ) {
     return failureResponse(
       { category: "invalid", message: "Renderer origin is not allowed." },
-      origin,
+      null,
       400,
     );
   }
@@ -103,8 +107,11 @@ async function handleDevelopmentBootstrap(
   }
 }
 
-function isAllowedDevelopmentRendererOrigin(origin: string): boolean {
-  if (!isAllowedRendererOrigin(origin)) return false;
+function isAllowedDevelopmentRendererOrigin(
+  origin: string,
+  allowedHttpOrigin?: string | null,
+): boolean {
+  if (!isAllowedRendererOrigin(origin, allowedHttpOrigin)) return false;
   try {
     return new URL(origin).protocol === "http:";
   } catch {
@@ -219,10 +226,10 @@ async function handleRendererExchange(
       400,
     );
   }
-  if (origin !== null && !isAllowedRendererOrigin(origin)) {
+  if (origin !== null && !isAllowedRendererOrigin(origin, dependencies.allowedRendererHttpOrigin)) {
     return failureResponse(
       { category: "invalid", message: "Renderer origin is not allowed." },
-      origin,
+      null,
       400,
     );
   }

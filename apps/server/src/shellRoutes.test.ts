@@ -9,6 +9,8 @@ import { describe, expect, it, vi } from "vitest";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import {
   createShellRouteHandler,
+  isAllowedRendererOrigin,
+  resolveAllowedRendererHttpOrigin,
   SHELL_RENDERER_IDENTITY_HEADER as RENDERER_IDENTITY_HEADER,
 } from "./shellRoutes";
 import { ShellServiceError, type ShellServiceApi } from "./shellService";
@@ -356,6 +358,106 @@ describe("shell routes", () => {
     expect(reuse?.status).toBe(401);
     expect(service.readBootstrap).not.toHaveBeenCalled();
     expect(service.revokeWindow).toHaveBeenCalledWith(windowId);
+  });
+
+  it("rejects a packaged file origin when development origin is pinned", async () => {
+    const authority = new WindowAuthorityStore();
+    authority.register({ windowId, capability, rendererIdentity, now: 0 });
+    const handle = createShellRouteHandler(serviceStub(), {
+      windowAuthorityStore: authority,
+      now: () => 0,
+      allowedRendererHttpOrigin: "http://localhost:5173",
+    });
+    const rejected = await handle(
+      new Request("http://127.0.0.1:13773/api/shell/bootstrap", {
+        method: "POST",
+        headers: {
+          origin: "file://",
+          "x-octant-window-capability": capability,
+          [RENDERER_IDENTITY_HEADER]: rendererIdentity,
+        },
+      }),
+    );
+    expect(rejected?.status).toBe(400);
+    expect(await rejected?.json()).toMatchObject({ category: "unsupported" });
+  });
+
+  it("rejects a non-Vite loopback origin when development origin is pinned", async () => {
+    const authority = new WindowAuthorityStore();
+    authority.register({ windowId, capability, rendererIdentity, now: 0 });
+    const handle = createShellRouteHandler(serviceStub(), {
+      windowAuthorityStore: authority,
+      now: () => 0,
+      allowedRendererHttpOrigin: "http://localhost:5173",
+    });
+    const rejected = await handle(
+      new Request("http://127.0.0.1:13773/api/shell/bootstrap", {
+        method: "POST",
+        headers: { origin: "http://127.0.0.1:5173", "x-octant-window-capability": capability },
+      }),
+    );
+    expect(rejected?.status).toBe(400);
+    expect(await rejected?.json()).toMatchObject({ category: "unsupported" });
+    expect(rejected?.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("rejects HTTP origins when the renderer is packaged", async () => {
+    const service = serviceStub();
+    const authority = new WindowAuthorityStore();
+    authority.register({ windowId, capability, rendererIdentity, now: 0 });
+    const handle = createShellRouteHandler(service, {
+      windowAuthorityStore: authority,
+      now: () => 0,
+      allowedRendererHttpOrigin: null,
+    });
+    const rejected = await handle(
+      new Request("http://127.0.0.1:13773/api/shell/bootstrap", {
+        method: "POST",
+        headers: { origin: "http://localhost:5173", "x-octant-window-capability": capability },
+      }),
+    );
+    expect(rejected?.status).toBe(400);
+    expect(service.bootstrap).not.toHaveBeenCalled();
+
+    const allowed = await handle(
+      new Request("http://127.0.0.1:13773/api/shell/bootstrap", {
+        method: "POST",
+        headers: {
+          origin: "file://",
+          "x-octant-window-capability": capability,
+          [RENDERER_IDENTITY_HEADER]: rendererIdentity,
+        },
+      }),
+    );
+    expect(allowed?.status).toBe(200);
+  });
+});
+
+describe("isAllowedRendererOrigin", () => {
+  it("keeps loopback HTTP on any port when no development origin is configured", () => {
+    expect(isAllowedRendererOrigin("file://")).toBe(true);
+    expect(isAllowedRendererOrigin("http://127.0.0.1:9999")).toBe(true);
+    expect(isAllowedRendererOrigin("http://localhost:5173")).toBe(true);
+  });
+
+  it("requires the configured development origin when set", () => {
+    expect(isAllowedRendererOrigin("http://localhost:5173", "http://localhost:5173")).toBe(true);
+    expect(isAllowedRendererOrigin("http://127.0.0.1:5173", "http://localhost:5173")).toBe(false);
+    expect(isAllowedRendererOrigin("file://", "http://localhost:5173")).toBe(false);
+  });
+
+  it("allows only the packaged file origin", () => {
+    expect(isAllowedRendererOrigin("file://", null)).toBe(true);
+    expect(isAllowedRendererOrigin("http://127.0.0.1:5173", null)).toBe(false);
+    expect(isAllowedRendererOrigin("http://localhost:5173", null)).toBe(false);
+  });
+
+  it("resolves packaged, Vite, and unset development origins", () => {
+    expect(resolveAllowedRendererHttpOrigin({ packaged: true })).toBeNull();
+    expect(resolveAllowedRendererHttpOrigin({ developmentWebUrl: "http://localhost:5173/" })).toBe(
+      "http://localhost:5173",
+    );
+    expect(resolveAllowedRendererHttpOrigin({})).toBeUndefined();
   });
 });
 
