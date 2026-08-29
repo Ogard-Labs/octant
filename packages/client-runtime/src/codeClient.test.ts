@@ -439,6 +439,63 @@ describe("code client", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("reads the Project planner view from the planner route", async () => {
+    const view = {
+      designation: { kind: "none", projectId: ids.project, updatedAt: now },
+      designationVersion: 0,
+      proposals: [],
+    } as const;
+    const fetch = vi.fn().mockResolvedValue(Response.json(view));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    const readPlanner = client.readPlanner;
+    if (readPlanner === undefined) throw new Error("expected the planner client");
+    await expect(readPlanner(ids.project as never)).resolves.toEqual(view);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/planner/${ids.project}`,
+      expect.objectContaining({
+        method: "GET",
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+  });
+
+  it("executes a planner designation command and hands back its refusal as a value", async () => {
+    const command = {
+      kind: "designate-code-planner-thread",
+      projectId: ids.project,
+      threadId: ids.thread,
+      expectedVersion: 0,
+    } as const;
+    const outcome = {
+      status: "refused",
+      reason: "planner-already-designated",
+      message: "This Project already has a planner thread. Undesignate it first.",
+    } as const;
+    const fetch = vi.fn().mockResolvedValue(Response.json(outcome));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    const executePlanner = client.executePlanner;
+    if (executePlanner === undefined) throw new Error("expected the planner client");
+    await expect(executePlanner(command as never)).resolves.toEqual(outcome);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/planner/commands`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify(command) }),
+    );
+  });
+
+  it("rejects a malformed planner proposal command before sending it", async () => {
+    const fetch = vi.fn();
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    const executePlannerProposal = client.executePlannerProposal;
+    if (executePlannerProposal === undefined) throw new Error("expected the planner client");
+    await expect(
+      executePlannerProposal({ kind: "confirm-planner-work-proposal" } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("rejects non-loopback base URLs before exposing the window capability", () => {
     const fetch = vi.fn();
 

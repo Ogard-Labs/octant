@@ -16,8 +16,14 @@ import {
   decodeCodeEventFrame,
   decodeCodeFailure,
   decodeCodeFollowUpCommand,
+  decodeCodePlannerCommand,
+  decodeCodePlannerCommandOutcome,
+  decodeCodePlannerProposalCommand,
+  decodeCodePlannerProposalOutcome,
+  decodeCodePlannerView,
   decodeCodeThreadFollowUpUpdated,
   decodeCodeThreadFollowUpView,
+  decodeProjectId,
   decodeCodeOperationCommand,
   decodeCodeConversationPage,
   decodeCodeOperationEventFrame,
@@ -58,8 +64,14 @@ import {
   type CodeEventFrame,
   type CodeFailure,
   type CodeFollowUpCommand,
+  type CodePlannerCommand,
+  type CodePlannerCommandOutcome,
+  type CodePlannerProposalCommand,
+  type CodePlannerProposalOutcome,
+  type CodePlannerView,
   type CodeThreadFollowUpUpdated,
   type CodeThreadFollowUpView,
+  type ProjectId,
   type CodeOperationCommand,
   type CodeConversationPage,
   type CodeOperationEventFrame,
@@ -141,6 +153,18 @@ export interface CodeClient {
   ): Promise<CodeProjectPullRequestDetailView>;
   readFollowUp(threadId: CodeThreadId): Promise<CodeThreadFollowUpView>;
   executeFollowUp(command: CodeFollowUpCommand): Promise<CodeThreadFollowUpUpdated>;
+  /**
+   * A Code Project's planner designation and its pending work proposals.
+   *
+   * Optional like `listTests`: the planner is a capability of the surface
+   * rather than of every `CodeClient` composite the app builds. A caller
+   * without it renders no planner state rather than inventing any.
+   */
+  readPlanner?(projectId: ProjectId): Promise<CodePlannerView>;
+  /** Designate or undesignate the Project's planner thread; refusals are values. */
+  executePlanner?(command: CodePlannerCommand): Promise<CodePlannerCommandOutcome>;
+  /** Confirm (creating through the ordinary path) or decline one proposal. */
+  executePlannerProposal?(command: CodePlannerProposalCommand): Promise<CodePlannerProposalOutcome>;
   putEvidence(threadId: CodeThreadId, text: string): Promise<CodeEvidenceReference>;
   /**
    * Hand the host one image for a thread's next turn. The host answers with
@@ -441,6 +465,59 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           body: JSON.stringify(validated),
         },
         decodeCodeThreadFollowUpUpdated,
+      );
+    },
+    readPlanner(projectId) {
+      let validated: ProjectId;
+      try {
+        validated = decodeProjectId(projectId);
+      } catch {
+        throw invalidCommand();
+      }
+      return request(
+        fetch,
+        new URL(
+          `/api/code/planner/${encodeURIComponent(String(validated))}`,
+          options.baseUrl,
+        ).toString(),
+        { method: "GET", headers },
+        decodeCodePlannerView,
+      );
+    },
+    async executePlanner(command) {
+      let validated: CodePlannerCommand;
+      try {
+        validated = decodeCodePlannerCommand(command);
+      } catch {
+        throw invalidCommand();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/planner/commands", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeCodePlannerCommandOutcome,
+      );
+    },
+    async executePlannerProposal(command) {
+      let validated: CodePlannerProposalCommand;
+      try {
+        validated = decodeCodePlannerProposalCommand(command);
+      } catch {
+        throw invalidCommand();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/planner/proposals/commands", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeCodePlannerProposalOutcome,
       );
     },
     conversation(threadId, afterCursor, limit) {

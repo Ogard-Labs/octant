@@ -1,5 +1,6 @@
 export * from "./chat";
 export * from "./code";
+export * from "./codePlanner";
 export * from "./codeFileListing";
 export * from "./codeSearch";
 export * from "./codeOperations";

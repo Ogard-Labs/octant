@@ -804,6 +804,30 @@ CREATE TABLE code_thread_activity_projection (
 DELETE FROM projection_checkpoints WHERE projection_name = 'code';
 `;
 
+const CODE_PLANNER_PROJECTIONS_SQL = `
+CREATE TABLE code_planner_projection (
+  project_id TEXT PRIMARY KEY CHECK(length(trim(project_id)) > 0),
+  planner_thread_id TEXT CHECK(planner_thread_id IS NULL OR length(trim(planner_thread_id)) > 0),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  designation_json TEXT NOT NULL CHECK(json_valid(designation_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+
+CREATE TABLE code_planner_proposal_projection (
+  proposal_id TEXT PRIMARY KEY CHECK(length(trim(proposal_id)) > 0),
+  project_id TEXT NOT NULL CHECK(length(trim(project_id)) > 0),
+  status TEXT NOT NULL CHECK(status IN ('pending', 'confirmed', 'declined')),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  proposal_json TEXT NOT NULL CHECK(json_valid(proposal_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+
+CREATE INDEX code_planner_proposal_project_status_idx
+  ON code_planner_proposal_projection(project_id, status);
+`;
+
 const ADD_EVENT_JOURNAL_HOST_ID_SQL = `
 ALTER TABLE event_journal
   ADD COLUMN host_id TEXT NOT NULL DEFAULT 'local'
@@ -1563,6 +1587,11 @@ ALTER TABLE code_runtime_projection
     version: 53,
     name: "create_thread_external_content_taint_projection",
     sql: THREAD_EXTERNAL_CONTENT_TAINT_PROJECTION_SQL,
+  },
+  {
+    version: 54,
+    name: "create_code_planner_projections",
+    sql: CODE_PLANNER_PROJECTIONS_SQL,
   },
 ];
 

@@ -19,7 +19,14 @@ import {
   decodeCodeThreadFollowUp,
   decodePersistedCodeThreadFollowUpUpdated,
   decodeCodeOperationEventFrame,
+  decodeCodePlannerDesignation,
+  decodeCodePlannerDesignationUpdated,
+  decodeCodePlannerProposalUpdated,
+  decodeCodePlannerWorkProposal,
   decodeCodeThreadActivity,
+  type CodePlannerDesignation,
+  type CodePlannerProposalId,
+  type CodePlannerWorkProposal,
   type CodeThreadActivity,
   type CodeThreadFollowUp,
   type CodeCheckoutId,
@@ -34,6 +41,7 @@ import {
   type CodeThreadId,
   type CodeThreadView,
   type EventEnvelope,
+  type ProjectId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Projection } from "./projection";
@@ -61,10 +69,14 @@ const codeEventNames = new Set<string>([
   "code.review-finding-updated@1",
   "code.follow-up-updated@1",
   "code.operation-event-recorded@1",
+  "code.planner-designation-updated@1",
+  "code.planner-proposal-updated@1",
 ]);
 
 export const CODE_FOLLOW_UP_AGGREGATE_TYPE = "code-thread-follow-up";
 export const CODE_OPERATION_AGGREGATE_TYPE = "code-operation";
+export const CODE_PLANNER_AGGREGATE_TYPE = "code-planner";
+export const CODE_PLANNER_PROPOSAL_AGGREGATE_TYPE = "code-planner-proposal";
 
 export class CodeProjection implements Projection {
   readonly name = "code";
@@ -72,6 +84,8 @@ export class CodeProjection implements Projection {
 
   reset(connection: SqliteConnection): void {
     connection.exec(`
+      DELETE FROM code_planner_proposal_projection;
+      DELETE FROM code_planner_projection;
       DELETE FROM code_thread_activity_projection;
       DELETE FROM code_thread_follow_up_projection;
       DELETE FROM code_review_projection;
@@ -193,9 +207,184 @@ export class CodeProjection implements Projection {
         );
         assertEnvelope(String(followUp.threadId) === String(event.aggregateId));
         upsertFollowUp(connection, followUp, event);
+        return;
+      }
+      case "code.planner-designation-updated@1": {
+        assertEnvelope(event.aggregateType === CODE_PLANNER_AGGREGATE_TYPE);
+        const designation = decodeProjection(
+          () => decodeCodePlannerDesignationUpdated(event.payload).designation,
+        );
+        assertEnvelope(String(designation.projectId) === String(event.aggregateId));
+        upsertPlannerDesignation(connection, designation, event);
+        return;
+      }
+      case "code.planner-proposal-updated@1": {
+        assertEnvelope(event.aggregateType === CODE_PLANNER_PROPOSAL_AGGREGATE_TYPE);
+        const proposal = decodeProjection(
+          () => decodeCodePlannerProposalUpdated(event.payload).proposal,
+        );
+        assertEnvelope(String(proposal.id) === String(event.aggregateId));
+        upsertPlannerProposal(connection, proposal, event);
       }
     }
   }
+}
+
+function upsertPlannerDesignation(
+  connection: SqliteConnection,
+  designation: CodePlannerDesignation,
+  event: EventEnvelope,
+): void {
+  connection
+    .prepare(`
+      INSERT INTO code_planner_projection (
+        project_id, planner_thread_id, schema_version, designation_json,
+        aggregate_version, last_sequence
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (project_id) DO UPDATE SET
+        planner_thread_id = excluded.planner_thread_id,
+        schema_version = excluded.schema_version,
+        designation_json = excluded.designation_json,
+        aggregate_version = excluded.aggregate_version,
+        last_sequence = excluded.last_sequence
+      WHERE excluded.aggregate_version >= code_planner_projection.aggregate_version
+    `)
+    .run(
+      designation.projectId,
+      designation.kind === "designated" ? designation.plannerThreadId : null,
+      CODE_PROJECTION_SCHEMA_VERSION,
+      JSON.stringify(designation),
+      event.aggregateVersion,
+      event.globalSequence,
+    );
+}
+
+function upsertPlannerProposal(
+  connection: SqliteConnection,
+  proposal: CodePlannerWorkProposal,
+  event: EventEnvelope,
+): void {
+  connection
+    .prepare(`
+      INSERT INTO code_planner_proposal_projection (
+        proposal_id, project_id, status, schema_version, proposal_json,
+        aggregate_version, last_sequence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (proposal_id) DO UPDATE SET
+        project_id = excluded.project_id,
+        status = excluded.status,
+        schema_version = excluded.schema_version,
+        proposal_json = excluded.proposal_json,
+        aggregate_version = excluded.aggregate_version,
+        last_sequence = excluded.last_sequence
+      WHERE excluded.aggregate_version >= code_planner_proposal_projection.aggregate_version
+    `)
+    .run(
+      proposal.id,
+      proposal.projectId,
+      proposal.status,
+      CODE_PROJECTION_SCHEMA_VERSION,
+      JSON.stringify(proposal),
+      event.aggregateVersion,
+      event.globalSequence,
+    );
+}
+
+export function readCodePlannerDesignation(
+  connection: SqliteConnection,
+  projectId: ProjectId,
+): CodePlannerDesignation | undefined {
+  const row = connection
+    .prepare(
+      "SELECT schema_version, designation_json FROM code_planner_projection WHERE project_id = ?",
+    )
+    .get(projectId) as
+    | { readonly schema_version: number; readonly designation_json: string }
+    | undefined;
+  if (row === undefined) return undefined;
+  assertCodeProjectionSchema(row.schema_version);
+  return decodeCodePlannerDesignation(JSON.parse(row.designation_json));
+}
+
+export function readCodePlannerAggregateVersion(
+  connection: SqliteConnection,
+  projectId: ProjectId,
+): number {
+  const row = connection
+    .prepare(
+      "SELECT aggregate_version FROM aggregate_heads WHERE aggregate_type = ? AND aggregate_id = ?",
+    )
+    .get(CODE_PLANNER_AGGREGATE_TYPE, projectId) as
+    | { readonly aggregate_version: number }
+    | undefined;
+  return row?.aggregate_version ?? 0;
+}
+
+export interface ProjectedCodePlannerProposal {
+  readonly proposal: CodePlannerWorkProposal;
+  readonly proposalVersion: number;
+}
+
+export function readCodePlannerProposal(
+  connection: SqliteConnection,
+  proposalId: CodePlannerProposalId,
+): ProjectedCodePlannerProposal | undefined {
+  const row = connection
+    .prepare(
+      "SELECT schema_version, proposal_json, aggregate_version FROM code_planner_proposal_projection WHERE proposal_id = ?",
+    )
+    .get(proposalId) as
+    | {
+        readonly schema_version: number;
+        readonly proposal_json: string;
+        readonly aggregate_version: number;
+      }
+    | undefined;
+  if (row === undefined) return undefined;
+  assertCodeProjectionSchema(row.schema_version);
+  return {
+    proposal: decodeCodePlannerWorkProposal(JSON.parse(row.proposal_json)),
+    proposalVersion: row.aggregate_version,
+  };
+}
+
+/** Every proposal for a Project, newest journal activity first. */
+export function readCodePlannerProposals(
+  connection: SqliteConnection,
+  projectId: ProjectId,
+): ReadonlyArray<ProjectedCodePlannerProposal> {
+  return (
+    connection
+      .prepare(
+        `SELECT schema_version, proposal_json, aggregate_version
+         FROM code_planner_proposal_projection
+         WHERE project_id = ?
+         ORDER BY last_sequence DESC, proposal_id ASC`,
+      )
+      .all(projectId) as ReadonlyArray<{
+      readonly schema_version: number;
+      readonly proposal_json: string;
+      readonly aggregate_version: number;
+    }>
+  ).map((row) => {
+    assertCodeProjectionSchema(row.schema_version);
+    return {
+      proposal: decodeCodePlannerWorkProposal(JSON.parse(row.proposal_json)),
+      proposalVersion: row.aggregate_version,
+    };
+  });
+}
+
+export function countPendingCodePlannerProposals(
+  connection: SqliteConnection,
+  projectId: ProjectId,
+): number {
+  const row = connection
+    .prepare(
+      "SELECT COUNT(*) AS pending FROM code_planner_proposal_projection WHERE project_id = ? AND status = 'pending'",
+    )
+    .get(projectId) as { readonly pending: number } | undefined;
+  return row?.pending ?? 0;
 }
 
 function upsertThreadActivity(

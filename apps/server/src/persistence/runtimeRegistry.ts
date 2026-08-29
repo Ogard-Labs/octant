@@ -23,6 +23,8 @@ import {
   CodeFileReferenceUpdated,
   CodeRuntimeWorkUpdated,
   CodeReviewFindingUpdated,
+  CodePlannerDesignationUpdated,
+  CodePlannerProposalUpdated,
   CodeThreadFollowUpUpdated,
   PersistedCodeThreadFollowUpUpdated,
   CodeOperationEventFrame,
@@ -287,6 +289,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       persistedSchema: PersistedCodeThreadFollowUpUpdated,
     })
     .register("code.operation-event-recorded@1", 1, CodeOperationEventFrame)
+    .register("code.planner-designation-updated@1", 1, CodePlannerDesignationUpdated)
+    .register("code.planner-proposal-updated@1", 1, CodePlannerProposalUpdated)
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
