@@ -801,13 +801,16 @@ export class AppleToolchainService {
 
     const deadline = new Promise<AppleProcessResult>((resolve) => {
       timer = setTimeout(() => {
-        controller.abort(new Error("deadline-exceeded"));
+        // Resolve first so Promise.race prefers timedOut over an abort-responsive
+        // adapter that would otherwise return exited-success in the same turn.
         resolve(timedOut);
+        controller.abort(new Error("deadline-exceeded"));
       }, timeoutMs);
       parent.addEventListener(
         "abort",
         () => {
           resolve(cancelled);
+          controller.abort(parent.reason);
         },
         { once: true },
       );
