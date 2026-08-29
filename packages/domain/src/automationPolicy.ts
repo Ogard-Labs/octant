@@ -472,49 +472,69 @@ export function buildAutomationWeeklyResolution(
   };
 }
 
+export function automationScheduledAtMatchesTrigger(
+  trigger: AutomationTrigger,
+  scheduledAt: UtcTimestamp,
+): boolean {
+  try {
+    const dueMs = parseUtc(scheduledAt);
+    return (
+      resolveNextAutomationOccurrence({
+        trigger,
+        after: toUtcTimestamp(dueMs - 1),
+        inclusive: true,
+      }) === scheduledAt
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function automationWeeklyResolutionMatchesTrigger(
+  trigger: Extract<AutomationTrigger, { readonly kind: "weekly-local" }>,
+  scheduledAt: UtcTimestamp,
+  evidence: AutomationWeeklyResolution | undefined,
+): boolean {
+  if (
+    evidence === undefined ||
+    evidence.timeZone !== trigger.timeZone ||
+    evidence.resolvedAt !== scheduledAt
+  ) {
+    return false;
+  }
+  try {
+    const resolvedLocal = new Date(parseUtc(scheduledAt) + evidence.utcOffsetMinutes * MINUTE_MS);
+    if (
+      resolvedLocal.toISOString().slice(0, 10) !== evidence.resolvedLocalDate ||
+      resolvedLocal.toISOString().slice(11, 16) !== evidence.resolvedLocalTime
+    ) {
+      return false;
+    }
+    const weekday = resolvedLocal.getUTCDay() || 7;
+    if (!trigger.weekdays.some((value) => value === weekday)) return false;
+    const [hourText, minuteText] = trigger.localTime.split(":");
+    if (hourText === undefined || minuteText === undefined) return false;
+    const triggerMinutes = Number(hourText) * 60 + Number(minuteText);
+    const resolvedMinutes =
+      Number(evidence.resolvedLocalTime.slice(0, 2)) * 60 +
+      Number(evidence.resolvedLocalTime.slice(3, 5));
+    return evidence.resolution === "gap-forward"
+      ? resolvedMinutes >= triggerMinutes
+      : evidence.resolvedLocalTime === trigger.localTime;
+  } catch {
+    return false;
+  }
+}
+
 function recurringDueMatchesTrigger(
   trigger: Extract<AutomationTrigger, { readonly kind: "interval" | "weekly-local" }>,
   nextDueAt: UtcTimestamp,
   resolution: AutomationWeeklyResolution | undefined,
 ): boolean {
   if (trigger.kind === "weekly-local" && resolution !== undefined) {
-    try {
-      if (resolution.timeZone !== trigger.timeZone || resolution.resolvedAt !== nextDueAt) {
-        return false;
-      }
-      const resolvedLocal = new Date(parseUtc(nextDueAt) + resolution.utcOffsetMinutes * MINUTE_MS);
-      if (
-        resolvedLocal.toISOString().slice(0, 10) !== resolution.resolvedLocalDate ||
-        resolvedLocal.toISOString().slice(11, 16) !== resolution.resolvedLocalTime
-      ) {
-        return false;
-      }
-      const weekday = resolvedLocal.getUTCDay() || 7;
-      if (!trigger.weekdays.includes(weekday as (typeof trigger.weekdays)[number])) {
-        return false;
-      }
-      const [hourText, minuteText] = trigger.localTime.split(":") as [string, string];
-      const triggerMinutes = Number(hourText) * 60 + Number(minuteText);
-      const resolvedMinutes =
-        Number(resolution.resolvedLocalTime.slice(0, 2)) * 60 +
-        Number(resolution.resolvedLocalTime.slice(3, 5));
-      return resolution.resolution === "gap-forward"
-        ? resolvedMinutes >= triggerMinutes
-        : resolution.resolvedLocalTime === trigger.localTime;
-    } catch {
-      return false;
-    }
+    return automationWeeklyResolutionMatchesTrigger(trigger, nextDueAt, resolution);
   }
-  try {
-    const dueMs = parseUtc(nextDueAt);
-    const predecessor = toUtcTimestamp(dueMs - 1);
-    return (
-      resolveNextAutomationOccurrence({ trigger, after: predecessor, inclusive: true }) ===
-      nextDueAt
-    );
-  } catch {
-    return false;
-  }
+  return automationScheduledAtMatchesTrigger(trigger, nextDueAt);
 }
 
 export const resolveNextOccurrence = resolveNextAutomationOccurrence;

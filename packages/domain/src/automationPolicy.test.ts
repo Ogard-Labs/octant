@@ -8,6 +8,8 @@ import type {
 import { decodeAutomationTrigger } from "@octant/contracts/automation";
 import {
   AutomationPolicyRejected,
+  automationScheduledAtMatchesTrigger,
+  automationWeeklyResolutionMatchesTrigger,
   buildAutomationWeeklyResolution,
   buildManualAutomationOccurrenceKey,
   buildScheduledAutomationOccurrenceKey,
@@ -513,6 +515,28 @@ describe("automation weekly resolution evidence", () => {
       utcOffsetMinutes: -240,
       resolution: "fold-earlier",
     });
+  });
+
+  it("accepts stored evidence only when the offset reconstructs the local wall time", () => {
+    const scheduledAt = utc("2026-08-09T06:30:00.000Z");
+    const evidence = buildAutomationWeeklyResolution({ trigger: weekly, scheduledAt });
+    expect(automationWeeklyResolutionMatchesTrigger(weekly, scheduledAt, evidence)).toBe(true);
+    expect(
+      automationWeeklyResolutionMatchesTrigger(weekly, scheduledAt, {
+        ...evidence,
+        utcOffsetMinutes: 0,
+      }),
+    ).toBe(false);
+    expect(automationWeeklyResolutionMatchesTrigger(weekly, scheduledAt, undefined)).toBe(false);
+  });
+
+  it("accepts interval dues that land on the trigger lattice", () => {
+    expect(automationScheduledAtMatchesTrigger(interval, utc("2026-08-10T01:00:00.000Z"))).toBe(
+      true,
+    );
+    expect(automationScheduledAtMatchesTrigger(interval, utc("2026-08-10T01:01:00.000Z"))).toBe(
+      false,
+    );
   });
 
   it("rejects instants that are not the canonical resolution of the trigger", () => {

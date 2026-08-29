@@ -1,5 +1,11 @@
 import type { GoalLoopClient, GoalLoopProjection } from "@octant/client-runtime/goal-loop-client";
-import type { AgentRunAuthority, GoalLoop, ThreadGoal } from "@octant/contracts";
+import {
+  decodeAggregateVersion,
+  decodeGoalLoopId,
+  type AgentRunAuthority,
+  type GoalLoop,
+  type ThreadGoal,
+} from "@octant/contracts";
 import { goalLoopBurnDown, goalLoopPauseText } from "@octant/domain";
 import { useCallback, useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -84,8 +90,8 @@ export function GoalLoopPanel(props: GoalLoopPanelProps) {
             void run({
               kind: "start-goal-loop",
               threadId,
-              expectedVersion: 0 as never,
-              loopId: crypto.randomUUID() as never,
+              expectedVersion: decodeAggregateVersion(0),
+              loopId: decodeGoalLoopId(crypto.randomUUID()),
               goalId: goal.id,
               ceiling: LOOP_CEILING,
               trigger: { kind: "continuous" },

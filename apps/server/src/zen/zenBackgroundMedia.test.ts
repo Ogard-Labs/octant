@@ -65,5 +65,7 @@ describe("zen background media", () => {
 });
 
 function hex(value: string): Uint8Array {
-  return Uint8Array.from(value.match(/../g)!.map((pair) => Number.parseInt(pair, 16)));
+  const pairs = value.match(/../g);
+  if (pairs === null) return new Uint8Array();
+  return Uint8Array.from(pairs.map((pair) => Number.parseInt(pair, 16)));
 }

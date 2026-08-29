@@ -42,6 +42,7 @@ export const UtcTimestamp = Schema.String.pipe(
 export type UtcTimestamp = typeof UtcTimestamp.Type;
 
 export const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+export const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 
 /**
  * Brand-compatible with `DeviceId` / `ProviderInstanceId` from sibling contract
