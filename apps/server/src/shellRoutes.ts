@@ -176,15 +176,17 @@ export function isLoopbackHostname(hostname: string): boolean {
 }
 
 /**
- * Packaged renderers present `file://`. Development may pin the Vite origin.
- * Tests omit `allowedHttpOrigin` and keep loopback HTTP on any port.
+ * Packaged Electron file pages send Origin: null (opaque) or file://.
+ * Development may pin the Vite origin. Tests omit `allowedHttpOrigin` and
+ * keep loopback HTTP on any port.
  */
 export function isAllowedRendererOrigin(
   origin: string,
   allowedHttpOrigin?: string | null,
 ): boolean {
-  if (allowedHttpOrigin === null) return origin === "file://";
-  if (origin === "file://") return allowedHttpOrigin === undefined;
+  if (isPackagedRendererOrigin(origin)) {
+    return allowedHttpOrigin === null || allowedHttpOrigin === undefined;
+  }
   try {
     const url = new URL(origin);
     const loopbackHttp =
@@ -218,6 +220,10 @@ export function resolveAllowedRendererHttpOrigin(input: {
   } catch {
     return undefined;
   }
+}
+
+function isPackagedRendererOrigin(origin: string): boolean {
+  return origin === "file://" || origin === "null";
 }
 
 function unsupportedMethod(origin: string | null): Response {

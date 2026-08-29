@@ -436,6 +436,7 @@ describe("shell routes", () => {
 describe("isAllowedRendererOrigin", () => {
   it("keeps loopback HTTP on any port when no development origin is configured", () => {
     expect(isAllowedRendererOrigin("file://")).toBe(true);
+    expect(isAllowedRendererOrigin("null")).toBe(true);
     expect(isAllowedRendererOrigin("http://127.0.0.1:9999")).toBe(true);
     expect(isAllowedRendererOrigin("http://localhost:5173")).toBe(true);
   });
@@ -444,10 +445,12 @@ describe("isAllowedRendererOrigin", () => {
     expect(isAllowedRendererOrigin("http://localhost:5173", "http://localhost:5173")).toBe(true);
     expect(isAllowedRendererOrigin("http://127.0.0.1:5173", "http://localhost:5173")).toBe(false);
     expect(isAllowedRendererOrigin("file://", "http://localhost:5173")).toBe(false);
+    expect(isAllowedRendererOrigin("null", "http://localhost:5173")).toBe(false);
   });
 
   it("allows only the packaged file origin", () => {
     expect(isAllowedRendererOrigin("file://", null)).toBe(true);
+    expect(isAllowedRendererOrigin("null", null)).toBe(true);
     expect(isAllowedRendererOrigin("http://127.0.0.1:5173", null)).toBe(false);
     expect(isAllowedRendererOrigin("http://localhost:5173", null)).toBe(false);
   });
