@@ -776,13 +776,19 @@ export class AppleToolchainService {
     timeoutMs: number,
     parent: AbortSignal,
   ): Promise<AppleProcessResult> {
-    const cancelled: AppleProcessResult = {
+    const cancelledClean: AppleProcessResult = {
       termination: "cancelled",
       exitCode: null,
       stdout: new Uint8Array(),
       stderr: new Uint8Array(),
       parserFailed: false,
       cleanupUncertain: false,
+    };
+    // Race cancel/timeout can win before the adapter settles, so input may still
+    // apply afterward — mark cleanup uncertain rather than claiming a clean stop.
+    const cancelledUncertain: AppleProcessResult = {
+      ...cancelledClean,
+      cleanupUncertain: true,
     };
     const timedOut: AppleProcessResult = {
       termination: "timed-out",
@@ -792,7 +798,7 @@ export class AppleToolchainService {
       parserFailed: false,
       cleanupUncertain: true,
     };
-    if (parent.aborted) return cancelled;
+    if (parent.aborted) return cancelledClean;
 
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -807,7 +813,7 @@ export class AppleToolchainService {
       parent.addEventListener(
         "abort",
         () => {
-          resolve(cancelled);
+          resolve(cancelledUncertain);
           controller.abort(parent.reason);
         },
         { once: true },
@@ -819,7 +825,7 @@ export class AppleToolchainService {
       // a late success after the deadline cannot become succeeded evidence.
       return await Promise.race([run(controller.signal), deadline]);
     } catch (error) {
-      if (parent.aborted) return cancelled;
+      if (parent.aborted) return cancelledUncertain;
       if (controller.signal.aborted) return timedOut;
       throw error;
     } finally {
