@@ -1,4 +1,5 @@
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
+import { parseListenerRequestHost, requestUrlStaysOnHost } from "./listenerRequestHost";
 import { deriveTransportFactsFromPeer } from "./remoteRequestFacts";
 import type { RequestTransportFacts, Serve } from "./server";
 
@@ -22,6 +23,19 @@ export const bunServe: Serve = (options) => {
     maxRequestBodySize: options.maxRequestBodySize ?? MAX_CHAT_ATTACHMENT_BYTES,
     ...(options.tls === undefined ? {} : { tls: options.tls }),
     fetch: (request, runtime: BunServer) => {
+      const hostUrl = parseListenerRequestHost(
+        request.headers.get("host"),
+        runtime.url,
+        options.hostname,
+      );
+      if (hostUrl === undefined) return invalidHostResponse();
+      let requestUrl: URL;
+      try {
+        requestUrl = new URL(request.url);
+      } catch {
+        return invalidHostResponse();
+      }
+      if (!requestUrlStaysOnHost(requestUrl, hostUrl)) return invalidHostResponse();
       if (safeMethodDeclaresBody(request)) {
         return new Response("Request body too large", {
           status: 413,
@@ -39,6 +53,16 @@ export const bunServe: Serve = (options) => {
   });
   return server as unknown as ReturnType<Serve>;
 };
+
+function invalidHostResponse(): Response {
+  return new Response("Invalid Host header", {
+    status: 400,
+    headers: {
+      connection: "close",
+      "content-type": "text/plain; charset=utf-8",
+    },
+  });
+}
 
 function safeMethodDeclaresBody(request: Request): boolean {
   if (request.method !== "GET" && request.method !== "HEAD") return false;

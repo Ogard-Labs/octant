@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
+import { parseListenerRequestHost, requestUrlStaysOnHost } from "./listenerRequestHost";
 import { deriveTransportFactsFromPeer } from "./remoteRequestFacts";
 import { MAX_CHAT_ATTACHMENT_BYTES, type OctantServer, type RequestTransportFacts } from "./server";
 import type { PrivateListenerTls } from "./privateListener";
@@ -201,75 +202,20 @@ function resolveRequestUrl(
   configuredHostname: string,
 ): string {
   const hostHeader = incoming.headers.host;
-  if (
-    typeof hostHeader !== "string" ||
-    hostHeader.length === 0 ||
-    hostHeader.trim() !== hostHeader
-  ) {
-    throw new InvalidRequestHost();
-  }
-
-  let hostUrl: URL;
-  try {
-    hostUrl = new URL(`${listenerUrl.protocol}//${hostHeader}/`);
-  } catch {
-    throw new InvalidRequestHost();
-  }
-  if (
-    hostUrl.username !== "" ||
-    hostUrl.password !== "" ||
-    hostUrl.pathname !== "/" ||
-    hostUrl.search !== "" ||
-    hostUrl.hash !== "" ||
-    !hostMatchesListener(hostUrl.hostname, hostUrl.port, listenerUrl, configuredHostname)
-  ) {
-    throw new InvalidRequestHost();
-  }
+  const hostUrl = parseListenerRequestHost(hostHeader, listenerUrl, configuredHostname);
+  if (hostUrl === undefined) throw new InvalidRequestHost();
 
   const target = incoming.url ?? "/";
   if (!target.startsWith("/") || target.startsWith("//")) throw new InvalidRequestHost();
-  const resolved = new URL(target, `${listenerUrl.protocol}//${hostHeader}/`);
+  const resolved = new URL(target, hostUrl);
   // The host header is validated above, but resolution can still carry the
   // request off it: URL treats a backslash like a slash for these schemes, so
   // `/\attacker.example/path` resolves exactly as `//attacker.example/path`
   // does and reaches the handler wearing somebody else's origin. Rather than
   // enumerate every separator a parser might accept, the resolved URL has to
   // land on the host that was checked.
-  if (resolved.origin !== hostUrl.origin) throw new InvalidRequestHost();
+  if (!requestUrlStaysOnHost(resolved, hostUrl)) throw new InvalidRequestHost();
   return resolved.toString();
-}
-
-function hostMatchesListener(
-  hostname: string,
-  port: string,
-  listenerUrl: URL,
-  configuredHostname: string,
-): boolean {
-  const listenerHostname = normalizeHostname(listenerUrl.hostname);
-  const configured = normalizeHostname(configuredHostname);
-  const requestHostname = normalizeHostname(hostname);
-  const hostMatches =
-    requestHostname === listenerHostname ||
-    requestHostname === configured ||
-    (isLoopbackHostname(requestHostname) &&
-      (isLoopbackHostname(listenerHostname) || isLoopbackHostname(configured)));
-  if (!hostMatches) return false;
-  const listenerPort =
-    listenerUrl.port === "" ? defaultPort(listenerUrl.protocol) : listenerUrl.port;
-  const requestPort = port === "" ? defaultPort(listenerUrl.protocol) : port;
-  return requestPort === listenerPort;
-}
-
-function normalizeHostname(hostname: string): string {
-  return hostname.replace(/^\[|\]$/g, "").toLowerCase();
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
-}
-
-function defaultPort(protocol: string): string {
-  return protocol === "https:" ? "443" : "80";
 }
 
 async function readBody(incoming: IncomingMessage, maxBytes: number): Promise<Buffer> {
