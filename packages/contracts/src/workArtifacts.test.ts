@@ -182,6 +182,31 @@ describe("WorkMutationRequest", () => {
     expect(decodeWorkMutationRequest(request)).toEqual(request);
   });
 
+  it("decodes a delete-artifact request with recorded confirmation", () => {
+    const request = {
+      kind: "delete-artifact",
+      requestId: ids.request,
+      projectId: ids.project,
+      artifactId: ids.artifact,
+      expectedArtifactVersion: 1,
+      confirmed: true,
+    };
+    expect(decodeWorkMutationRequest(request)).toEqual(request);
+  });
+
+  it("rejects a delete-artifact request whose confirmation is not true", () => {
+    expect(() =>
+      decodeWorkMutationRequest({
+        kind: "delete-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        artifactId: ids.artifact,
+        expectedArtifactVersion: 1,
+        confirmed: false,
+      }),
+    ).toThrow();
+  });
+
   it("decodes an export-artifact request with an expected version", () => {
     const request = {
       kind: "export-artifact",

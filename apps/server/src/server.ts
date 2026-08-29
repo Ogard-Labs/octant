@@ -26,7 +26,6 @@ import {
   ReplayCursor,
   type AgentRun,
   type AgentRunParentThreadId,
-  type WorkspaceLayoutNode,
   type CodeCheckoutIdentity,
   type PermissionPersistence,
   type ProviderDriverKind,
@@ -43,8 +42,12 @@ import {
   type WorkThreadId,
 } from "@octant/contracts";
 import type { ExtensionProviderFamily, StandaloneSkillScope } from "@octant/contracts/extensions";
+import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import type { AgentRunControlParentFacts } from "./agentRun/agentRunControlService";
+import {
+  authorizeAgentRunCreation,
+  layoutContainsAgentRunThread,
+} from "./agentRun/authorizeAgentRunCreation";
 import { Data, Effect, Schema, Scope } from "effect";
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
 import { assistantTranscript } from "./chat/assistantTranscript";
@@ -259,6 +262,10 @@ import { GithubIssueContextService } from "./github/githubIssueContextService";
 import { LinearIssueContextService } from "./plugins/linear/linearIssueContextService";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "./github/githubReadToolService";
+import {
+  githubReadToolSetIfEffective,
+  isGithubIntegrationEffective,
+} from "./github/githubIntegrationEffective";
 import { ManagedCloneProcessPort, createOwnedGitContext } from "./github/managedCloneProcessPort";
 import { ManagedCloneService } from "./github/managedCloneService";
 import { ManagedRepositoryInventory } from "./github/managedRepositoryInventory";
@@ -316,6 +323,7 @@ import { createLinkedThreadRouteHandler } from "./linkedThread/linkedThreadRoute
 import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
+import { windowCanAccessCodeProject } from "./windowCodeProjectAccess";
 import { ProjectRootPort } from "./projectRootPort";
 import { createArtifactLibraryRouteHandler } from "./artifactLibraryRoutes";
 import { createArtifactMirrorRouteHandler } from "./artifactMirrorRoutes";
@@ -563,14 +571,12 @@ import {
   canonicalizeWorkRelativePath,
   chatAttemptAnswered,
   decidesCodeEffectsByApproval,
-  defaultAgentRunAuthorityCeilingForMode,
   defaultShellSettings,
   formatThreadMentionContext,
   isAgentRunActiveStatus,
   isImageProfileDriverKind,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
-  resolveAgentRunLiveParentGrant,
   type PreviewPosture,
   findWorkspacePresetTarget,
 } from "@octant/domain";
@@ -1819,10 +1825,6 @@ export function startOctantServer(
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
       cacheStats,
     });
-    const githubReadToolService = new GithubReadToolService({
-      catalogue: githubCatalogueService,
-      snapshot: (signal) => githubCapabilityService.snapshot(signal),
-    });
     const externalContentIngestionStore = new ExternalContentIngestionStore({
       journal: persistence.journal,
       connection: persistence.connection,
@@ -1830,16 +1832,27 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    const githubReadToolService = new GithubReadToolService({
+      catalogue: githubCatalogueService,
+      snapshot: (signal) => githubCapabilityService.snapshot(signal),
+      ingestion: externalContentIngestionStore,
+    });
     const githubIssueContextService = new GithubIssueContextService({
       catalogue: githubCatalogueService,
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
       ingestion: externalContentIngestionStore,
       uuid: randomUUID,
     });
+    const githubExtensionSnapshot = {
+      read: (): Pick<ExtensionSnapshot, "packages"> => ({ packages: [] }),
+    };
+    const githubIntegrationIsEffective = () =>
+      isGithubIntegrationEffective(githubExtensionSnapshot.read());
     const githubRoutes = createGithubRouteHandler({
       windowAuthorityStore,
       service: githubCapabilityService,
       catalogue: githubCatalogueService,
+      isEffective: githubIntegrationIsEffective,
     });
     const integrationVault =
       options.integrationSecretVault ??
@@ -2024,6 +2037,7 @@ export function startOctantServer(
     const githubCloneRoutes = createGithubCloneRouteHandler({
       windowAuthorityStore,
       service: managedCloneService,
+      isEffective: githubIntegrationIsEffective,
     });
     const contextHarness = new ContextHarnessService({
       persistence,
@@ -2352,13 +2366,18 @@ export function startOctantServer(
     ) => Promise<ProviderProbeResult> = async () => {
       throw new Error("Provider probing is unavailable during server startup.");
     };
+    const canAccessCodeProject = (windowId: WindowId, projectId: ProjectId) =>
+      windowCanAccessCodeProject({
+        workspace: persistence.readWindowWorkspace(windowId)?.workspace,
+        projectId,
+        hasActiveCodeProject: (id) => projectService.hasActiveProject(id, "code"),
+      });
     const codeService =
       options.codeService ??
       new CodeService({
         persistence,
         access: {
-          canAccessProject: async (_windowId, projectId) =>
-            projectService.hasActiveProject(projectId, "code"),
+          canAccessProject: canAccessCodeProject,
         },
         checkouts,
         roots,
@@ -2667,6 +2686,7 @@ export function startOctantServer(
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
       },
     });
+    githubExtensionSnapshot.read = () => extensionApiService.snapshot();
     const extensionRoutes = createExtensionRouteHandler({
       service: extensionApiService,
       windowAuthorityStore,
@@ -3069,8 +3089,7 @@ export function startOctantServer(
           readReviewFindings: persistence.readCodeReviewFindings,
         },
         windowAccess: {
-          canAccessProject: async (_windowId, projectId) =>
-            projectService.hasActiveProject(projectId, "code"),
+          canAccessProject: canAccessCodeProject,
         },
         resolveCheckoutRoot: async (windowId, thread, checkout) => {
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
@@ -3211,7 +3230,9 @@ export function startOctantServer(
           }),
         }),
         githubReadTools: ({ windowId, thread, readThread }) =>
-          githubReadToolService.createToolSet({ windowId, thread, readThread }),
+          githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
+            githubReadToolService.createToolSet({ windowId, thread, readThread }),
+          ),
         resolvePullRequestTarget: async (threadId) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return undefined;
@@ -6647,196 +6668,6 @@ async function resolveAgentRunPrepareCode(
   } catch {
     return {};
   }
-}
-
-function authorizeAgentRunCreation(input: {
-  readonly persistence: PersistenceService;
-  readonly workThreadProjection: WorkThreadProjection;
-  readonly parentThreadId: AgentRunParentThreadId;
-  readonly windowId: string;
-  readonly codeSessionAuthority: CodeSessionAuthorityStore;
-}): AgentRunControlParentFacts | undefined {
-  const workspace = input.persistence.readWindowWorkspace(input.windowId as WindowId)?.workspace;
-  if (workspace === undefined) return undefined;
-
-  const chatContext = workspace.contextByMode.chat;
-  let chatThread;
-  try {
-    chatThread = input.persistence.readChatThread(decodeChatThreadId(String(input.parentThreadId)));
-  } catch {
-    chatThread = undefined;
-  }
-  if (
-    chatThread !== undefined &&
-    chatThread.lifecycle === "active" &&
-    chatContext.mode === "chat" &&
-    String(chatContext.projectId) === String(chatThread.projectId ?? null) &&
-    layoutContainsAgentRunThread(
-      workspace.layouts.chat,
-      String(chatThread.id),
-      String(chatContext.host),
-    )
-  ) {
-    const parentAuthority = defaultAgentRunAuthorityCeilingForMode("chat");
-    const liveAuthority = resolveAgentRunLiveParentGrant({
-      mode: "chat",
-      filesystem: false,
-      shell: false,
-      git: false,
-      network: false,
-      tools: true,
-      subagents: true,
-      executionPolicy: "plan",
-      permissionPersistence: "current-session",
-    });
-    return {
-      parentMode: "chat",
-      parentAuthority,
-      liveAuthority,
-      workspaceParent: { threadId: String(input.parentThreadId), mode: "chat" },
-      parentRoute: {
-        providerInstanceId: chatThread.providerInstanceId,
-        modelId: chatThread.modelId,
-        ...(chatThread.projectId === undefined ? {} : { projectId: String(chatThread.projectId) }),
-        ...reasoningFromModelOptions(chatThread.modelOptionValues),
-      },
-    };
-  }
-
-  const workContext = workspace.contextByMode.work;
-  let workThread;
-  try {
-    workThread = input.workThreadProjection.read(input.parentThreadId as never);
-  } catch {
-    workThread = undefined;
-  }
-  if (
-    workThread !== undefined &&
-    workThread.lifecycle === "active" &&
-    workContext.mode === "work" &&
-    String(workContext.projectId) === String(workThread.projectId) &&
-    layoutContainsAgentRunThread(
-      workspace.layouts.work,
-      String(workThread.id),
-      String(workContext.host),
-    )
-  ) {
-    const project = input.persistence.readProject(workThread.projectId);
-    if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
-    const revision = project.bindingHistory.at(-1);
-    if (revision === undefined) return undefined;
-    const parentAuthority = defaultAgentRunAuthorityCeilingForMode("work");
-    const liveAuthority = resolveAgentRunLiveParentGrant({
-      mode: "work",
-      filesystem: true,
-      shell: false,
-      git: false,
-      network: false,
-      tools: true,
-      subagents: true,
-      executionPolicy: "approval-gated",
-      permissionPersistence: "current-session",
-    });
-    return {
-      parentMode: "work",
-      parentAuthority,
-      liveAuthority,
-      workspaceParent: {
-        threadId: String(input.parentThreadId),
-        mode: "work",
-        projectId: String(project.id),
-        bindingRevisionId: String(revision.revisionId),
-        canonicalRoot: project.binding.canonicalRoot,
-      },
-      parentRoute: {
-        providerInstanceId: workThread.providerInstanceId,
-        modelId: workThread.modelId,
-        projectId: String(project.id),
-      },
-    };
-  }
-
-  const codeContext = workspace.contextByMode.code;
-  let codeThread;
-  try {
-    codeThread = input.persistence.readCodeThread(decodeCodeThreadId(String(input.parentThreadId)));
-  } catch {
-    codeThread = undefined;
-  }
-  if (
-    codeThread !== undefined &&
-    codeThread.lifecycle === "active" &&
-    codeContext.mode === "code" &&
-    String(codeContext.projectId) === String(codeThread.projectId) &&
-    layoutContainsAgentRunThread(
-      workspace.layouts.code,
-      String(codeThread.id),
-      String(codeContext.host),
-    )
-  ) {
-    const effectiveThread = input.codeSessionAuthority.effectiveThread(
-      input.windowId as WindowId,
-      codeThread,
-    );
-    const parentAuthority = defaultAgentRunAuthorityCeilingForMode("code");
-    const planOnly = effectiveThread.executionPolicy === "plan";
-    const liveAuthority = resolveAgentRunLiveParentGrant({
-      mode: "code",
-      filesystem: true,
-      shell: !planOnly,
-      git: !planOnly,
-      network: !planOnly,
-      tools: true,
-      subagents: true,
-      executionPolicy: effectiveThread.executionPolicy,
-      permissionPersistence: effectiveThread.permissionPersistence,
-    });
-    return {
-      parentMode: "code",
-      parentAuthority,
-      liveAuthority,
-      workspaceParent: {
-        threadId: String(input.parentThreadId),
-        mode: "code",
-        projectId: String(codeThread.projectId),
-        bindingRevisionId: String(codeThread.bindingRevisionId),
-      },
-      parentRoute: {
-        providerInstanceId: codeThread.providerInstanceId,
-        modelId: codeThread.modelId,
-        projectId: String(codeThread.projectId),
-      },
-    };
-  }
-
-  return undefined;
-}
-
-function reasoningFromModelOptions(
-  values: Readonly<Record<string, string>> | undefined,
-): { readonly reasoning: string } | Record<string, never> {
-  if (values === undefined) return {};
-  const value = values.reasoning ?? values.effort;
-  if (value === undefined || value.trim().length === 0) return {};
-  return { reasoning: value.trim().slice(0, 128) };
-}
-
-function layoutContainsAgentRunThread(
-  layout: WorkspaceLayoutNode,
-  threadId: string,
-  hostId: string,
-): boolean {
-  if (layout.kind === "split") {
-    return (
-      layoutContainsAgentRunThread(layout.first, threadId, hostId) ||
-      layoutContainsAgentRunThread(layout.second, threadId, hostId)
-    );
-  }
-  const surface = layout.surface;
-  if (!("threadId" in surface) || String(surface.threadId) !== threadId) return false;
-  return (
-    !("hostId" in surface) || surface.hostId === undefined || String(surface.hostId) === hostId
-  );
 }
 
 function appleRestartContext(

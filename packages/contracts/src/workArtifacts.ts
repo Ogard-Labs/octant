@@ -158,6 +158,12 @@ export type WorkCapabilityReport = typeof WorkCapabilityReport.Type;
 const MutationRequestCommon = {
   requestId: WorkMutationRequestId,
   projectId: ProjectId,
+  /**
+   * Recorded user confirmation for a destructive or lossy mutation. Safe
+   * mutations omit it; `false` is rejected so an unconfirmed request cannot
+   * masquerade as approved.
+   */
+  confirmed: Schema.optional(Schema.Literal(true)),
 } as const;
 
 /**
@@ -166,7 +172,8 @@ const MutationRequestCommon = {
  * confinement authority, and journals a versioned event before replying.
  * `expectedArtifactVersion` enables optimistic concurrency on revise,
  * transform, rename, and delete so a stale client cannot clobber a newer
- * version silently.
+ * version silently. `confirmed` is required for destructive and lossy
+ * mutations; the server never infers approval from the transport.
  */
 export const WorkMutationRequest = Schema.Union(
   Schema.Struct({

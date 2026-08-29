@@ -1,9 +1,10 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_WORK_RESEARCH_SOURCE_BYTES, decodeProjectId } from "@octant/contracts";
-import type {
-  WorkResearchBriefView,
-  WorkResearchClient,
+import {
+  WorkResearchClientFailure,
+  type WorkResearchBriefView,
+  type WorkResearchClient,
 } from "@octant/client-runtime/work-research-client";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import { useWorkResearchController } from "./useWorkResearchController";
@@ -492,12 +493,40 @@ describe("useWorkResearchController", () => {
       projectId,
       artifactId,
       expectedArtifactVersion: 1,
+      confirmed: true,
     });
     expect(outcome).toEqual({
       kind: "rejected",
       message:
         "The brief changed on the host. It was reloaded; try again. The report artifact was removed, so no unreferenced report was left behind.",
     });
+  });
+
+  it("does not delete the report artifact when finalization never answers", async () => {
+    const client = stubClient({
+      execute: vi
+        .fn()
+        .mockRejectedValue(new WorkResearchClientFailure("The host did not answer.", 0)),
+    });
+    const mutationClient = routedMutationClient({
+      "create-artifact": createdOutcome(),
+    });
+    const { result } = renderHook(() =>
+      useWorkResearchController({ client, enabled: true, mutationClient, projectId }),
+    );
+    await waitFor(() => {
+      expect(result.current.status).toBe("ready");
+    });
+
+    const outcome = await result.current.finalizeReport({ briefId });
+
+    expect(outcome).toEqual({
+      kind: "rejected",
+      message: "The host did not answer.",
+    });
+    expect(vi.mocked(mutationClient.mutate).mock.calls.map((call) => call[0]?.kind)).toEqual([
+      "create-artifact",
+    ]);
   });
 
   it("says the report artifact remains when it cannot be removed, and reuses it on retry", async () => {

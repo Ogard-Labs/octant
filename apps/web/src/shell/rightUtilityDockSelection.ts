@@ -1,5 +1,8 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
+import {
+  RIGHT_UTILITY_DOCK_SURFACES,
+  type RightUtilityDockSurfaceId,
+} from "./rightUtilityDockModel";
 
 export type ThreadUtilityDockKey = `${OctantMode}:${string}`;
 
@@ -124,4 +127,151 @@ function replace(
   const next = new Map(states);
   next.set(key, state);
   return next;
+}
+
+export interface UtilityDockPresentation {
+  readonly open: boolean;
+  readonly threads: ThreadUtilityDockStates;
+}
+
+function utilityDockStorageKey(windowId: string): string {
+  return `octant.shell.utility-dock.${windowId}.v1`;
+}
+
+function bottomPanelToolsStorageKey(windowId: string): string {
+  return `octant.shell.bottom-panel-tools.${windowId}.v1`;
+}
+
+/**
+ * Per-window dock open-tool state. Authority and processes stay on the server;
+ * this is only which tools this window last showed for each thread.
+ */
+export function readUtilityDockPresentation(
+  scope: { readonly localStorage?: Storage },
+  windowId: string,
+): UtilityDockPresentation {
+  return readDockPresentationRecord(scope, utilityDockStorageKey(windowId), true);
+}
+
+export function writeUtilityDockPresentation(
+  scope: { readonly localStorage?: Storage },
+  windowId: string,
+  presentation: UtilityDockPresentation,
+): void {
+  writeJson(scope, utilityDockStorageKey(windowId), {
+    open: presentation.open === true,
+    threads: encodeDockStates(presentation.threads),
+  });
+}
+
+export function readBottomPanelToolPresentation(
+  scope: { readonly localStorage?: Storage },
+  windowId: string,
+): ThreadUtilityDockStates {
+  return readDockPresentationRecord(scope, bottomPanelToolsStorageKey(windowId), false).threads;
+}
+
+export function writeBottomPanelToolPresentation(
+  scope: { readonly localStorage?: Storage },
+  windowId: string,
+  threads: ThreadUtilityDockStates,
+): void {
+  writeJson(scope, bottomPanelToolsStorageKey(windowId), {
+    threads: encodeDockStates(threads),
+  });
+}
+
+function readDockPresentationRecord(
+  scope: { readonly localStorage?: Storage },
+  storageKey: string,
+  readOpen: boolean,
+): UtilityDockPresentation {
+  try {
+    const raw = scope.localStorage?.getItem(storageKey);
+    if (raw === undefined || raw === null) {
+      return { open: false, threads: new Map() };
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") {
+      return { open: false, threads: new Map() };
+    }
+    const candidate = parsed as { readonly open?: unknown; readonly threads?: unknown };
+    return {
+      open: readOpen && candidate.open === true,
+      threads: decodeDockStates(candidate.threads),
+    };
+  } catch {
+    return { open: false, threads: new Map() };
+  }
+}
+
+function writeJson(
+  scope: { readonly localStorage?: Storage },
+  storageKey: string,
+  value: unknown,
+): void {
+  try {
+    scope.localStorage?.setItem(storageKey, JSON.stringify(value));
+  } catch {
+    // Presentation persistence is best-effort.
+  }
+}
+
+function encodeDockStates(
+  states: ThreadUtilityDockStates,
+): Record<string, { readonly tabs: ReadonlyArray<string>; readonly active?: string }> {
+  const encoded: Record<
+    string,
+    { readonly tabs: ReadonlyArray<string>; readonly active?: string }
+  > = {};
+  for (const [key, state] of states) {
+    if (state.tabs.length === 0) continue;
+    encoded[key] = {
+      tabs: [...state.tabs],
+      ...(state.active === undefined ? {} : { active: state.active }),
+    };
+  }
+  return encoded;
+}
+
+function decodeDockStates(value: unknown): ThreadUtilityDockStates {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return new Map();
+  const next = new Map<ThreadUtilityDockKey, ThreadUtilityDockState>();
+  for (const [key, state] of Object.entries(value)) {
+    if (!isThreadUtilityDockKey(key)) continue;
+    const decoded = decodeDockState(state);
+    if (decoded === undefined) continue;
+    next.set(key, decoded);
+  }
+  return next;
+}
+
+function decodeDockState(value: unknown): ThreadUtilityDockState | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const candidate = value as { readonly tabs?: unknown; readonly active?: unknown };
+  if (!Array.isArray(candidate.tabs)) return undefined;
+  const tabs: RightUtilityDockSurfaceId[] = [];
+  for (const item of candidate.tabs) {
+    const surface = decodeDockSurfaceId(item);
+    if (surface !== undefined && !tabs.includes(surface)) tabs.push(surface);
+  }
+  const fallback = tabs[tabs.length - 1];
+  if (fallback === undefined) return undefined;
+  const activeCandidate = decodeDockSurfaceId(candidate.active);
+  const active =
+    activeCandidate !== undefined && tabs.includes(activeCandidate) ? activeCandidate : fallback;
+  return { tabs, active };
+}
+
+function decodeDockSurfaceId(value: unknown): RightUtilityDockSurfaceId | undefined {
+  const canonical = value === "changes" ? "review" : value;
+  if (typeof canonical !== "string") return undefined;
+  return RIGHT_UTILITY_DOCK_SURFACES.find((surface) => surface.id === canonical)?.id;
+}
+
+function isThreadUtilityDockKey(value: string): value is ThreadUtilityDockKey {
+  const separator = value.indexOf(":");
+  if (separator <= 0) return false;
+  const mode = value.slice(0, separator);
+  return (mode === "chat" || mode === "work" || mode === "code") && value.length > separator + 1;
 }

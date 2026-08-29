@@ -3,12 +3,10 @@ import type {
   PaneId,
   WorkspaceLayoutNode,
   WorkspacePane,
-  WorkspaceSurfaceKind,
   WorkspaceTab,
 } from "@octant/contracts/shell";
-import { GripVertical, Plus } from "lucide-react";
+import { GripVertical } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import {
   OctantContextMenuContent,
@@ -44,7 +42,6 @@ export interface SplitWorkspaceProps {
   readonly mode: "chat" | "work" | "code";
   /** A pointer landing anywhere in a pane makes it the window's active pane. */
   readonly onActivatePane: (paneId: PaneId) => void;
-  readonly onAddSurface?: (paneId: PaneId, surface: WorkspaceSurfaceKind) => void;
   readonly onClearFocus: () => void;
   readonly onClosePane: (paneId: PaneId) => void;
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
@@ -329,13 +326,6 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
             )}
             <span className="workspace-pane__title">{surface.title}</span>
           </span>
-          {props.onAddSurface === undefined ? null : (
-            <PaneAddTab
-              mode={props.mode}
-              onAdd={(kind) => props.onAddSurface?.(pane.paneId, kind)}
-              surface={surface}
-            />
-          )}
           <span
             aria-hidden="true"
             className="workspace-pane__window-drag-space window-drag-region"
@@ -360,98 +350,6 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       )}
     </section>
   );
-}
-
-function PaneAddTab(props: {
-  readonly mode: "chat" | "work" | "code";
-  readonly onAdd: (surface: WorkspaceSurfaceKind) => void;
-  readonly surface: WorkspaceTab;
-}) {
-  const options = paneAddTabOptions(props.mode, props.surface);
-  if (options.length === 0) return null;
-  return (
-    <OctantMenu
-      items={options.map((option) => ({
-        label: option.label,
-        value: option.kind,
-      }))}
-      onValueChange={(value) => {
-        const selected = options.find((option) => option.kind === value);
-        if (selected !== undefined) props.onAdd(selected.kind);
-      }}
-      selectionMode="action"
-      trigger={<Plus aria-hidden="true" size={14} strokeWidth={1.8} />}
-      triggerClassName="workspace-pane__add-tab window-no-drag"
-      triggerLabel="Add tab"
-      value=""
-    />
-  );
-}
-
-function paneAddTabOptions(
-  mode: "chat" | "work" | "code",
-  surface: WorkspaceTab,
-): ReadonlyArray<{ readonly kind: WorkspaceSurfaceKind; readonly label: string }> {
-  const hasThread = "threadId" in surface;
-  if (mode === "code" && hasThread) {
-    return withoutCurrentSurface(
-      [
-        { kind: "browser", label: "Browser" },
-        { kind: "terminal", label: "Terminal" },
-        { kind: "files", label: "Files" },
-        { kind: "diff", label: "Review" },
-        { kind: "git-review", label: "Git" },
-        { kind: "side-chat", label: "Side Chat" },
-      ],
-      surface,
-    );
-  }
-  if (mode === "work" && hasThread) {
-    return withoutCurrentSurface(
-      [
-        { kind: "browser", label: "Browser" },
-        { kind: "files", label: "Files" },
-        { kind: "side-chat", label: "Side Chat" },
-      ],
-      surface,
-    );
-  }
-  if (mode === "chat" && surface.kind === "chat-thread") {
-    return [{ kind: "side-chat", label: "Side Chat" }];
-  }
-  if (mode === "chat") {
-    return withoutCurrentSurface([{ kind: "thread", label: "Conversation" }], surface);
-  }
-  return withoutCurrentSurface(
-    [
-      { kind: "thread", label: "Conversation" },
-      { kind: "files", label: "Files" },
-    ],
-    surface,
-  );
-}
-
-function withoutCurrentSurface(
-  options: ReadonlyArray<{ readonly kind: WorkspaceSurfaceKind; readonly label: string }>,
-  surface: WorkspaceTab,
-): ReadonlyArray<{ readonly kind: WorkspaceSurfaceKind; readonly label: string }> {
-  const currentKind: WorkspaceSurfaceKind | undefined =
-    surface.kind === "welcome" || surface.kind === "draft-thread"
-      ? "thread"
-      : surface.kind === "browser"
-        ? "browser"
-        : surface.kind === "files"
-          ? "files"
-          : surface.kind === "side-chat"
-            ? "side-chat"
-            : surface.kind === "code-local-review"
-              ? "diff"
-              : surface.kind === "code-git"
-                ? "git-review"
-                : undefined;
-  return currentKind === undefined
-    ? options
-    : options.filter((option) => option.kind !== currentKind);
 }
 
 /**

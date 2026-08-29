@@ -1,5 +1,4 @@
 import type { WorkspaceTab } from "@octant/contracts/shell";
-import { defaultEnvironmentPresentationState } from "@octant/domain/shell-policy";
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -100,8 +99,6 @@ function props(): WorkspaceViewProps {
       },
       version: 1,
     } as never,
-    environmentPresentation: defaultEnvironmentPresentationState(),
-    onSetEnvironmentPresentation: vi.fn(),
     projectServerUrl: "http://localhost:0",
     projectWindowCapability: "test-capability",
   };

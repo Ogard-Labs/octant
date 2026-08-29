@@ -46,7 +46,7 @@ export interface UseWorkResearchControllerOptions {
  */
 export type WorkResearchMutationOutcome =
   | { readonly kind: "accepted" }
-  | { readonly kind: "rejected"; readonly message: string };
+  | { readonly kind: "rejected"; readonly message: string; readonly keepDraft?: true };
 
 export interface WorkResearchController {
   readonly briefs: ReadonlyArray<WorkResearchBriefView>;
@@ -288,6 +288,9 @@ async function removeReportArtifact(input: {
       projectId: input.projectId,
       artifactId: input.artifact.artifactId,
       expectedArtifactVersion: input.artifact.sequence,
+      // The host refused to finalize; removing the orphan is recovery for
+      // that same user-initiated write, not a new destructive intent.
+      confirmed: true,
     });
     return reply.outcome.kind === "deleted";
   } catch {
@@ -366,7 +369,9 @@ export function useWorkResearchController(
         result = await client.execute(command);
       } catch (error: unknown) {
         if (error instanceof WorkResearchClientFailure) {
-          return { kind: "rejected", message: error.message };
+          return error.status === 0
+            ? { kind: "rejected", message: error.message, keepDraft: true }
+            : { kind: "rejected", message: error.message };
         }
         return { kind: "rejected", message: "The research command could not be sent." };
       }
@@ -668,6 +673,10 @@ export function useWorkResearchController(
           drafts.current.delete(input.briefId);
           return outcome;
         }
+        if (outcome.keepDraft === true) {
+          reload();
+          return { kind: "rejected", message: outcome.message };
+        }
         const removed = await removeReportArtifact({
           mutationClient,
           projectId,
@@ -700,7 +709,7 @@ export function useWorkResearchController(
       }
       return await settle(await propose(command));
     },
-    [options.enabled, options.mutationClient, options.projectId, propose, resolveBrief],
+    [options.enabled, options.mutationClient, options.projectId, propose, resolveBrief, reload],
   );
 
   return {

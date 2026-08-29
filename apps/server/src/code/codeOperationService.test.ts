@@ -185,6 +185,7 @@ describe("CodeOperationService", () => {
       columns: 120,
       rows: 40,
       credentialReferences: [{ environmentName: "TOKEN", reference: "keychain:token" }],
+      executionPolicy: "approval-gated",
     });
     approved = false;
     await expect(

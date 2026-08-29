@@ -251,20 +251,6 @@ export class WorkMutationService {
     if (outputRejection !== undefined) return failedReply(request, "oversize");
     const sourceVersion = computeSourceVersion(bytes, occurredAt);
 
-    const created = await writeConfinedWorkFile({
-      filesystem: this.#filesystem,
-      canonicalPath: resolution.absolutePath,
-      allowCreate: true,
-      parent: {
-        absolutePath: resolution.parentAbsolute,
-        identity: resolution.parentIdentity,
-        remaining: resolution.remaining,
-      },
-      bytes,
-    });
-    if (!created) return failedReply(request, "write-failed");
-    if (context.signal?.aborted) return interruptedReply(request);
-
     const artifact: WorkArtifactIdentity = {
       artifactId,
       projectId: request.projectId,
@@ -290,14 +276,22 @@ export class WorkMutationService {
       version,
       previewTarget,
     };
-    const frame = this.#buildFrame(request, request.projectId, 1, occurredAt, outcome);
-    try {
-      this.#eventStore.append({ artifactId, expectedSequence: 0, frame });
-    } catch {
-      return failedReply(request, "write-failed");
-    }
-    this.#projection.apply(frame);
-    return successReply(request, outcome, capability);
+    return this.#commitSuccess(request, artifactId, 0, 1, occurredAt, outcome, capability, {
+      persist: () =>
+        writeConfinedWorkFile({
+          filesystem: this.#filesystem,
+          canonicalPath: resolution.absolutePath,
+          allowCreate: true,
+          parent: {
+            absolutePath: resolution.parentAbsolute,
+            identity: resolution.parentIdentity,
+            remaining: resolution.remaining,
+          },
+          bytes,
+        }),
+      compensate: () => this.#filesystem.unlink(resolution.absolutePath),
+      signal: context.signal,
+    });
   }
 
   async #reviseArtifact(
@@ -364,15 +358,10 @@ export class WorkMutationService {
     }
     const outputRejection = validateWorkOutputBudget(bytes.byteLength);
     if (outputRejection !== undefined) return failedReply(request, "oversize");
-    const revised = await writeConfinedWorkFile({
-      filesystem: this.#filesystem,
-      canonicalPath: resolved.absolutePath,
-      expected: resolved.sourceIdentity,
-      allowCreate: false,
-      bytes,
-    });
-    if (!revised) return failedReply(request, "write-failed");
-    if (context.signal?.aborted) return interruptedReply(request);
+    const previousBytes = await this.#readResolved(resolved.absolutePath, resolved.sourceIdentity);
+    if (previousBytes === undefined) {
+      return failedReply(request, "read-failed", request.artifactId);
+    }
 
     const sequence = entry.sequence + 1;
     const occurredAt = decodeTimestamp(this.#clock());
@@ -411,6 +400,26 @@ export class WorkMutationService {
       occurredAt,
       outcome,
       capability,
+      {
+        persist: () =>
+          writeConfinedWorkFile({
+            filesystem: this.#filesystem,
+            canonicalPath: resolved.absolutePath,
+            expected: resolved.sourceIdentity,
+            allowCreate: false,
+            bytes,
+          }),
+        compensate: async () => {
+          await writeConfinedWorkFile({
+            filesystem: this.#filesystem,
+            canonicalPath: resolved.absolutePath,
+            expected: resolved.sourceIdentity,
+            allowCreate: false,
+            bytes: previousBytes,
+          });
+        },
+        signal: context.signal,
+      },
     );
   }
 
@@ -598,16 +607,10 @@ export class WorkMutationService {
     }
     if (context.signal?.aborted) return interruptedReply(request);
 
-    // Write the converted bytes before journaling so a write failure leaves
-    // the journal/projection unchanged and the client can retry without a
-    // version conflict. If the journal fails after the write, the file has
-    // new content but the projection is stale; the next mutation detects the
-    // content-hash mismatch and surfaces it as stale, providing a recovery
-    // path. This is the safer failure mode than journaling first (which would
-    // advance the sequence on a write failure and block retries).
-    if (!targetBytesAlreadyWritten) {
-      const samePath = targetAbsolutePath === resolved.absolutePath;
-      const written = await writeConfinedWorkFile({
+    const samePath = targetAbsolutePath === resolved.absolutePath;
+    const persistTransform = async (): Promise<boolean> => {
+      if (targetBytesAlreadyWritten) return true;
+      return await writeConfinedWorkFile({
         filesystem: this.#filesystem,
         canonicalPath: targetAbsolutePath,
         allowCreate: !samePath,
@@ -624,15 +627,7 @@ export class WorkMutationService {
                 },
               }),
       });
-      if (!written) return failedReply(request, "write-failed", request.artifactId);
-    }
-    // After the write succeeds, check for abort before journaling. If the
-    // signal was aborted during the write, the file has new content but the
-    // journal has not advanced — the next mutation will detect the content
-    // mismatch and surface it as stale. Return interrupted so the client
-    // knows the operation did not complete; the client can retry and the
-    // retry will recognize the already-written bytes (orphan cleanup).
-    if (context.signal?.aborted) return interruptedReply(request);
+    };
 
     const sequence = entry.sequence + 1;
     const occurredAt = decodeTimestamp(this.#clock());
@@ -663,7 +658,7 @@ export class WorkMutationService {
       version,
       previewTarget,
     };
-    const reply = this.#commitSuccess(
+    const reply = await this.#commitSuccess(
       request,
       entry.artifactId,
       entry.sequence,
@@ -671,6 +666,23 @@ export class WorkMutationService {
       occurredAt,
       outcome,
       baseWorkCapabilityReport(targetFormat),
+      {
+        persist: persistTransform,
+        compensate: async () => {
+          if (isCrossFormat && newResolutionForTransform !== undefined) {
+            await this.#filesystem.unlink(targetAbsolutePath);
+            return;
+          }
+          await writeConfinedWorkFile({
+            filesystem: this.#filesystem,
+            canonicalPath: resolved.absolutePath,
+            expected: resolved.sourceIdentity,
+            allowCreate: false,
+            bytes: sourceBytes,
+          });
+        },
+        signal: context.signal,
+      },
     );
     if (reply.outcome.kind !== "revised") return reply;
 
@@ -685,7 +697,6 @@ export class WorkMutationService {
         // Best-effort cleanup; the new file and journal are committed.
       }
     }
-    void newResolutionForTransform;
     return reply;
   }
 
@@ -751,20 +762,30 @@ export class WorkMutationService {
       return unauthorizedReply(request, "approval-required", request.artifactId);
     }
 
-    try {
-      await this.#filesystem.rename(resolved.absolutePath, newResolution.absolutePath);
-    } catch {
-      return failedReply(request, "write-failed", request.artifactId);
-    }
-    if (context.signal?.aborted) return interruptedReply(request);
-
     const sequence = entry.sequence + 1;
     const occurredAt = decodeTimestamp(this.#clock());
     // A rename carries the object, so the identity this mutation resolved still
     // describes it under its new name — and refuses anything else that arrived
     // there while the rename was authorized and performed.
+    const persistRename = async (): Promise<boolean> => {
+      try {
+        await this.#filesystem.rename(resolved.absolutePath, newResolution.absolutePath);
+      } catch {
+        return false;
+      }
+      return true;
+    };
+    const renamed = await persistRename();
+    if (!renamed) return failedReply(request, "write-failed", request.artifactId);
     const bytes = await this.#readResolved(newResolution.absolutePath, resolved.sourceIdentity);
-    if (bytes === undefined) return failedReply(request, "read-failed", request.artifactId);
+    if (bytes === undefined) {
+      try {
+        await this.#filesystem.rename(newResolution.absolutePath, resolved.absolutePath);
+      } catch {
+        // Best-effort restore of the original name after a failed identity read.
+      }
+      return failedReply(request, "read-failed", request.artifactId);
+    }
     const sourceVersion = computeSourceVersion(bytes, occurredAt);
     const versionId = decodeWorkArtifactVersionId(this.#uuid());
     const artifact: WorkArtifactIdentity = {
@@ -800,6 +821,12 @@ export class WorkMutationService {
       occurredAt,
       outcome,
       capability,
+      {
+        persist: async () => true,
+        compensate: () =>
+          this.#filesystem.rename(newResolution.absolutePath, resolved.absolutePath),
+        signal: context.signal,
+      },
     );
   }
 
@@ -849,13 +876,6 @@ export class WorkMutationService {
       return unauthorizedReply(request, "approval-required", request.artifactId);
     }
 
-    try {
-      await this.#filesystem.unlink(resolved.absolutePath);
-    } catch {
-      return failedReply(request, "write-failed", request.artifactId);
-    }
-    if (context.signal?.aborted) return interruptedReply(request);
-
     const sequence = entry.sequence + 1;
     const occurredAt = decodeTimestamp(this.#clock());
     const lastVersion: WorkArtifactVersion = {
@@ -874,7 +894,7 @@ export class WorkMutationService {
       projectId: entry.projectId,
       lastVersion,
     };
-    return this.#commitSuccess(
+    const reply = await this.#commitSuccess(
       request,
       entry.artifactId,
       entry.sequence,
@@ -883,6 +903,13 @@ export class WorkMutationService {
       outcome,
       capability,
     );
+    if (reply.outcome.kind !== "deleted") return reply;
+    try {
+      await this.#filesystem.unlink(resolved.absolutePath);
+    } catch {
+      // The journal already records deletion; a leftover file is an orphan.
+    }
+    return reply;
   }
 
   async #versionArtifact(
@@ -1081,8 +1108,9 @@ export class WorkMutationService {
         exportBytesAlreadyWritten = true;
       }
     }
-    if (!exportBytesAlreadyWritten) {
-      const written = await writeConfinedWorkFile({
+    const persistExport = async (): Promise<boolean> => {
+      if (exportBytesAlreadyWritten) return true;
+      return await writeConfinedWorkFile({
         filesystem: this.#filesystem,
         canonicalPath: exportResolution.absolutePath,
         allowCreate: true,
@@ -1093,13 +1121,8 @@ export class WorkMutationService {
         },
         bytes: exportBytes,
       });
-      if (!written) return failedReply(request, "write-failed", request.artifactId);
-    }
-    if (context.signal?.aborted) return interruptedReply(request);
+    };
 
-    // The derived bytes are materialized before the journal frame. The
-    // produced version and preview target therefore describe real confined
-    // bytes rather than relabeling the source file with another format.
     const sequence = entry.sequence + 1;
     const sourceVersion = computeSourceVersion(exportBytes, occurredAt);
     const versionId = decodeWorkArtifactVersionId(this.#uuid());
@@ -1159,10 +1182,32 @@ export class WorkMutationService {
       occurredAt,
       outcome,
       baseWorkCapabilityReport(exportFormat),
+      {
+        persist: persistExport,
+        compensate: async () => {
+          if (samePath) {
+            await writeConfinedWorkFile({
+              filesystem: this.#filesystem,
+              canonicalPath: resolved.absolutePath,
+              expected: resolved.sourceIdentity,
+              allowCreate: false,
+              bytes: sourceBytes,
+            });
+            return;
+          }
+          await this.#filesystem.unlink(exportResolution.absolutePath);
+        },
+        signal: context.signal,
+      },
     );
   }
 
-  #commitSuccess(
+  /**
+   * Persist confined bytes (if any), then append the journal frame. A failed
+   * append compensates the disk write so an unjournaled file is never source
+   * of truth. The live projection is applied only after a successful append.
+   */
+  async #commitSuccess(
     request: WorkMutationRequest,
     artifactId: WorkArtifactId,
     expectedSequence: number,
@@ -1170,15 +1215,37 @@ export class WorkMutationService {
     occurredAt: typeof UtcTimestamp.Type,
     outcome: WorkMutationSuccessOutcome,
     capability: WorkCapabilityReport,
-  ): WorkMutationReply {
+    disk?: {
+      readonly persist: () => Promise<boolean>;
+      readonly compensate: () => Promise<void>;
+      readonly signal: AbortSignal | undefined;
+    },
+  ): Promise<WorkMutationReply> {
+    if (disk !== undefined) {
+      const persisted = await disk.persist();
+      if (!persisted) return failedReply(request, "write-failed", artifactId);
+      if (disk.signal?.aborted) {
+        await this.#compensateDisk(disk.compensate);
+        return interruptedReply(request);
+      }
+    }
     const frame = this.#buildFrame(request, request.projectId, sequence, occurredAt, outcome);
     try {
       this.#eventStore.append({ artifactId, expectedSequence, frame });
     } catch {
+      if (disk !== undefined) await this.#compensateDisk(disk.compensate);
       return failedReply(request, "write-failed", artifactId);
     }
     this.#projection.apply(frame);
     return successReply(request, outcome, capability);
+  }
+
+  async #compensateDisk(compensate: () => Promise<void>): Promise<void> {
+    try {
+      await compensate();
+    } catch {
+      // Compensation is best-effort; it must not mask the journal failure.
+    }
   }
 
   #buildFrame(

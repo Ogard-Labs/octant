@@ -321,13 +321,15 @@ and may include a truthful child-run summary
 The dock already hosts live thread-owned tool instances — Files, Browser,
 Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery,
 thread-level Agents, and Review — rather than a generic Thread accordion.
-Local checkout changes open in Review beside the thread; the full-window Code
-diff is gone. Context usage already lives on the composer meter. Project memory
-already lives in Project Overview. Navigator is already one host-wide chat
-popover from the bottom-left profile and Settings control. Simulator placement
-is already [0043](decisions/0043-simulator-follows-the-active-thread.md). 0015
-remains the Accepted implemented shell until that remaining migration is
-accepted.
+Open tools restore as per-window presentation keyed by thread; hiding a
+Browser or Terminal does not stop its server-owned lifecycle. Pane Add tab
+no longer mints those tools as split-tree surfaces. Local checkout changes
+open in Review beside the thread; the full-window Code diff is gone. Context
+usage already lives on the composer meter. Project memory already lives in
+Project Overview. Navigator is already one host-wide chat popover from the
+bottom-left profile and Settings control. Simulator placement is already
+[0043](decisions/0043-simulator-follows-the-active-thread.md). 0015 remains
+the Accepted implemented shell until 0041 and 0044 are accepted.
 
 ## Persistence
 
