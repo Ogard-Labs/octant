@@ -1,4 +1,4 @@
-# 0064. Native harness model role slots
+# 0066. Native harness model role slots
 
 **Status:** Proposed
 
@@ -71,4 +71,4 @@ journaling, capacity scheduling — are unchanged.
 - 0007 Direct API providers and the native agent harness
 - 0008 Context budget and capacity scheduling
 - 0012 Mixed-provider subagents (one rule superseded, see above)
-- 0065 Native harness turn loop, advisor, and follow-up suggestions
+- 0067 Native harness turn loop, advisor, and follow-up suggestions

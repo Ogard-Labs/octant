@@ -1,4 +1,4 @@
-# 0065. Native harness turn loop, advisor, and follow-up suggestions
+# 0067. Native harness turn loop, advisor, and follow-up suggestions
 
 **Status:** Proposed
 
@@ -28,7 +28,7 @@ must be decided before implementation, not tuned after.
   model-written summary, per the 0008 ladder. After summarization the goal,
   its acceptance criteria, and recently-edited files are restored to context.
 - Meta work — titles, summaries, compaction — never runs on the lead's slot;
-  it runs on `smol` (0064).
+  it runs on `smol` (0066).
 - The advisor is a supervising role on the `advisor` slot. It may cancel the
   lead's in-flight turn, inject a redirect the lead must read before its next
   turn, and pause the run for the user. It never executes tools, edits files,
@@ -67,4 +67,4 @@ must be decided before implementation, not tuned after.
 - 0007 Direct API providers and the native agent harness
 - 0008 Context budget and capacity scheduling
 - 0025 Long-running goal loops
-- 0064 Native harness model role slots
+- 0066 Native harness model role slots

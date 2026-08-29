@@ -71,8 +71,8 @@ distilled successor of the earlier long-form design specifications.
 | [0061](0061-in-app-changelog.md)                              | In-app changelog rides the update path                                                      | Proposed           |
 | [0062](0062-simulator-frame-input-transport.md)               | Simulator frame input rides the Apple workbench channel                                     | Accepted           |
 | [0063](0063-agent-to-agent-messaging.md)                      | Agent-to-agent messaging authority                                                          | Proposed           |
-| [0064](0064-native-harness-model-role-slots.md)               | Native harness model role slots                                                             | Proposed           |
-| [0065](0065-native-harness-turn-loop-and-supervision.md)      | Native harness turn loop, advisor, and follow-up suggestions                                | Proposed           |
+| [0066](0066-native-harness-model-role-slots.md)               | Native harness model role slots                                                             | Proposed           |
+| [0067](0067-native-harness-turn-loop-and-supervision.md)      | Native harness turn loop, advisor, and follow-up suggestions                                | Proposed           |
 
 ## Adding an ADR
 
