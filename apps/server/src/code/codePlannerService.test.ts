@@ -55,6 +55,7 @@ interface FixtureOptions {
     windowId: WindowId,
     creation: CodePlannerThreadCreation,
   ) => Promise<CodeCommandResult>;
+  readonly canAccessProject?: (windowId: WindowId, projectId: ProjectId) => boolean;
 }
 
 function fixture(options?: FixtureOptions): {
@@ -94,6 +95,7 @@ function fixture(options?: FixtureOptions): {
     persistence,
     uuid: () => crypto.randomUUID(),
     clock: () => now,
+    canAccessProject: options?.canAccessProject ?? (() => true),
     createThread:
       options?.createThread ??
       (async (_windowId, creation) => {
@@ -109,7 +111,7 @@ const threadId = decodeCodeThreadId(ids.thread);
 const windowId = ids.window as WindowId;
 
 function designate(service: CodePlannerService) {
-  return service.execute({
+  return service.execute(windowId, {
     kind: "designate-code-planner-thread",
     projectId: ids.project,
     threadId: ids.thread,
@@ -152,14 +154,14 @@ describe("planner designation", () => {
     const { service } = fixture();
     const outcome = await designate(service);
     expect(outcome.status).toBe("designated");
-    const view = service.readView(ids.project);
+    const view = service.readView(windowId, ids.project);
     expect(view.designation).toMatchObject({ kind: "designated", plannerThreadId: ids.thread });
     expect(view.designationVersion).toBe(1);
   });
 
   it("refuses to designate a thread that does not exist", async () => {
     const { service } = fixture();
-    const outcome = await service.execute({
+    const outcome = await service.execute(windowId, {
       kind: "designate-code-planner-thread",
       projectId: ids.project,
       threadId: ids.otherThread,
@@ -177,7 +179,7 @@ describe("planner designation", () => {
   it("refuses a second planner while one is designated", async () => {
     const { service } = fixture();
     await designate(service);
-    const outcome = await service.execute({
+    const outcome = await service.execute(windowId, {
       kind: "designate-code-planner-thread",
       projectId: ids.project,
       threadId: ids.thread,
@@ -189,7 +191,7 @@ describe("planner designation", () => {
   it("refuses a stale designation command instead of overwriting a newer one", async () => {
     const { service } = fixture();
     await designate(service);
-    const outcome = await service.execute({
+    const outcome = await service.execute(windowId, {
       kind: "undesignate-code-planner-thread",
       projectId: ids.project,
       expectedVersion: 0,
@@ -197,10 +199,20 @@ describe("planner designation", () => {
     expect(outcome).toMatchObject({ status: "refused", reason: "designation-changed" });
   });
 
+  it("refuses a planner command from a window that cannot act on the Project", async () => {
+    const { service } = fixture({ canAccessProject: () => false });
+    await expect(designate(service)).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    expect(() => service.readView(windowId, ids.project)).toThrowError(
+      expect.objectContaining({ failure: expect.objectContaining({ category: "unauthorized" }) }),
+    );
+  });
+
   it("undesignates the planner and the board access ends with it", async () => {
     const { service } = fixture();
     await designate(service);
-    const outcome = await service.execute({
+    const outcome = await service.execute(windowId, {
       kind: "undesignate-code-planner-thread",
       projectId: ids.project,
       expectedVersion: 1,
@@ -235,7 +247,7 @@ describe("planner work proposals", () => {
     await designate(service);
     const outcome = service.propose(threadId, draft);
     expect(outcome.status).toBe("proposed");
-    const view = service.readView(ids.project);
+    const view = service.readView(windowId, ids.project);
     expect(view.proposals).toHaveLength(1);
     expect(view.proposals[0]?.proposal).toMatchObject({ status: "pending", title: draft.title });
   });
@@ -260,7 +272,7 @@ describe("planner work proposals", () => {
     expect(outcome.status).toBe("confirmed");
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({ kind: "create-managed-code-thread" });
-    const view = service.readView(ids.project);
+    const view = service.readView(windowId, ids.project);
     expect(view.proposals[0]?.proposal).toMatchObject({
       status: "confirmed",
       createdThreadId: ids.otherThread,
@@ -331,7 +343,7 @@ describe("planner work proposals", () => {
         creation: managedCreation(),
       }),
     ).rejects.toThrow();
-    const view = service.readView(ids.project);
+    const view = service.readView(windowId, ids.project);
     expect(view.proposals[0]?.proposal.status).toBe("pending");
   });
 });

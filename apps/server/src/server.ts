@@ -3407,6 +3407,7 @@ export function startOctantServer(
       persistence,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+      canAccessProject: canAccessCodeProject,
       createThread: async (windowId, creation, signal) =>
         baseRouteCodeService.execute(windowId, creation, signal),
     });
@@ -3470,8 +3471,8 @@ export function startOctantServer(
       ...boardRouteCodeService,
       readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
       executeFollowUp: (_windowId, command) => codeFollowUpService.execute(command),
-      readPlanner: (_windowId, projectId) => codePlannerService.readView(projectId),
-      executePlanner: (_windowId, command) => codePlannerService.execute(command),
+      readPlanner: (windowId, projectId) => codePlannerService.readView(windowId, projectId),
+      executePlanner: (windowId, command) => codePlannerService.execute(windowId, command),
       executePlannerProposal: (windowId, command, signal) =>
         codePlannerService.resolveProposal(windowId, command, signal),
       queryProjectPullRequests: (windowId, query) =>

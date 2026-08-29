@@ -918,6 +918,54 @@ describe("Code planner routes", () => {
     );
   });
 
+  it("refuses planner designation and proposal resolution from an agent-gated principal", async () => {
+    const executePlanner = vi.fn();
+    const executePlannerProposal = vi.fn();
+    const route = routeFixture({ executePlanner, executePlannerProposal });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000915";
+    const asRemote = (path: string, body: Record<string, unknown>) => {
+      const remoteRequest = request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      bindPrincipalRouteContext(remoteRequest, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000916" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remoteRequest;
+    };
+
+    const designation = await route(
+      asRemote("/api/code/planner/commands", {
+        kind: "designate-code-planner-thread",
+        projectId,
+        threadId,
+        expectedVersion: 0,
+      }),
+    );
+    const resolution = await route(
+      asRemote("/api/code/planner/proposals/commands", {
+        kind: "decline-planner-work-proposal",
+        proposalId: "00000000-0000-4000-8000-000000000910",
+        expectedVersion: 1,
+      }),
+    );
+
+    expect(designation?.status).toBe(401);
+    expect(resolution?.status).toBe(401);
+    expect(executePlanner).not.toHaveBeenCalled();
+    expect(executePlannerProposal).not.toHaveBeenCalled();
+  });
+
   it("reports the planner unavailable on a host without the planner capability", async () => {
     const store = new WindowAuthorityStore();
     store.register({ windowId, capability, now: 0 });

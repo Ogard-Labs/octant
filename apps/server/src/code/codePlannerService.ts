@@ -75,6 +75,12 @@ export interface CodePlannerServiceOptions {
   readonly uuid: () => string;
   readonly clock: () => string;
   /**
+   * Whether an authenticated window may act on a Code Project — the same
+   * workspace-scoped check the Code command service applies, so the planner
+   * cannot be read or redirected from a window the Project is not open in.
+   */
+  readonly canAccessProject: (windowId: WindowId, projectId: ProjectId) => boolean;
+  /**
    * The ordinary thread-creation command path, injected so a confirmed
    * proposal creates its thread exactly the way the create dialog does. The
    * planner has no creation path of its own.
@@ -108,21 +114,24 @@ export class CodePlannerService {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #createThread: CodePlannerServiceOptions["createThread"];
+  readonly #canAccessProject: CodePlannerServiceOptions["canAccessProject"];
 
   constructor(options: CodePlannerServiceOptions) {
     this.#persistence = options.persistence;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#createThread = options.createThread;
+    this.#canAccessProject = options.canAccessProject;
   }
 
-  readView(projectIdInput: unknown): CodePlannerView {
+  readView(authenticatedWindowId: WindowId, projectIdInput: unknown): CodePlannerView {
     const projectId = this.#decodeProjectId(projectIdInput);
     if (this.#persistence.readProject(projectId) === undefined) {
       throw new CodePlannerServiceError(
         decodeCodeFailure({ category: "invalid", message: "Project was not found." }),
       );
     }
+    this.#assertWindowAccess(authenticatedWindowId, projectId);
     return decodeCodePlannerView({
       designation: this.#designation(projectId),
       designationVersion: readCodePlannerAggregateVersion(this.#persistence.connection, projectId),
@@ -130,7 +139,10 @@ export class CodePlannerService {
     });
   }
 
-  async execute(input: unknown): Promise<CodePlannerCommandOutcome> {
+  async execute(
+    authenticatedWindowId: WindowId,
+    input: unknown,
+  ): Promise<CodePlannerCommandOutcome> {
     let command: ReturnType<typeof decodeCodePlannerCommand>;
     try {
       command = decodeCodePlannerCommand(input);
@@ -140,6 +152,11 @@ export class CodePlannerService {
       );
     }
     const project = this.#projectFacts(command.projectId);
+    // A missing Project stays the policy's project-unavailable refusal; a
+    // Project this window's workspace cannot act on is unauthorized.
+    if (project !== undefined) {
+      this.#assertWindowAccess(authenticatedWindowId, command.projectId);
+    }
     const currentDesignation = readCodePlannerDesignation(
       this.#persistence.connection,
       command.projectId,
@@ -288,6 +305,9 @@ export class CodePlannerService {
       );
     }
     const projected = readCodePlannerProposal(this.#persistence.connection, command.proposalId);
+    if (projected !== undefined) {
+      this.#assertWindowAccess(authenticatedWindowId, projected.proposal.projectId);
+    }
     const decision = decideCodePlannerProposalResolution({
       proposal: projected?.proposal,
       action: command.kind === "confirm-planner-work-proposal" ? "confirm" : "decline",
@@ -310,7 +330,20 @@ export class CodePlannerService {
         status: "declined",
         resolvedAt: decodeTimestamp(this.#clock()),
       };
-      this.#appendProposal(declined, command.expectedVersion);
+      try {
+        this.#appendProposal(declined, command.expectedVersion);
+      } catch (error) {
+        // A concurrent resolution between the version check and this append is
+        // the same expected race the confirm path answers with a value.
+        if (error instanceof ConcurrencyConflict) {
+          return {
+            status: "refused",
+            reason: "proposal-changed",
+            message: "The proposal changed; reload and retry.",
+          };
+        }
+        throw this.#unavailable();
+      }
       return { status: "declined", proposal: this.#requireProposal(declined.id) };
     }
 
@@ -438,6 +471,17 @@ export class CodePlannerService {
       occurredAt: decodeTimestamp(this.#clock()),
       payload,
     };
+  }
+
+  #assertWindowAccess(authenticatedWindowId: WindowId, projectId: ProjectId): void {
+    if (!this.#canAccessProject(authenticatedWindowId, projectId)) {
+      throw new CodePlannerServiceError(
+        decodeCodeFailure({
+          category: "unauthorized",
+          message: "This window cannot act on that Project's planner.",
+        }),
+      );
+    }
   }
 
   #decodeProjectId(input: unknown): ProjectId {

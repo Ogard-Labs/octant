@@ -696,6 +696,18 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         case "planner-commands": {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
+          // Designating a planner is the person's act. The same route chain
+          // serves the authenticated remote gateway, where a paired device is
+          // gated as an agent — it may watch the planner, never appoint one.
+          if (operationInitiator !== "user") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Planner designation requires the local user.",
+              },
+              origin,
+            );
+          }
           if (dependencies.service.executePlanner === undefined) {
             return failureResponse(
               { category: "unavailable", message: "Code planner is unavailable." },
@@ -723,6 +735,18 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         case "planner-proposal-commands": {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
+          // Confirming a proposal creates a thread; declining discards one.
+          // Both are the explicit user decision the proposal exists to wait
+          // for, so an agent-gated principal is refused before any effect.
+          if (operationInitiator !== "user") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Resolving a planner proposal requires the local user.",
+              },
+              origin,
+            );
+          }
           if (dependencies.service.executePlannerProposal === undefined) {
             return failureResponse(
               { category: "unavailable", message: "Code planner is unavailable." },
