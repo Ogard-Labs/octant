@@ -49,6 +49,18 @@ function bindLocalWindow(value: Request) {
 describe("GitHub clone routes", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it("falls through when the GitHub integration is not effective", async () => {
+    const handler = createGithubCloneRouteHandler({
+      service,
+      windowAuthorityStore: store,
+      isEffective: () => false,
+    });
+    const value = commandRequest(requestCommand);
+    bindLocalWindow(value);
+    expect(await handler(value)).toBeUndefined();
+    expect(service.execute).not.toHaveBeenCalled();
+  });
+
   it("dispatches a validated clone command with the authenticated window scope", async () => {
     const handler = createHandler();
     const value = commandRequest(requestCommand);

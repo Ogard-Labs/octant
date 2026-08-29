@@ -1492,6 +1492,31 @@ describe("useShellController", () => {
     restarted.unmount();
   });
 
+  it("does not execute set-environment-presentation after loading bootstrap or changing settings", async () => {
+    const presentation = {
+      ...defaultEnvironmentPresentationState(),
+      byMode: { chat: "floating" as const, work: "hidden" as const, code: "floating" as const },
+    };
+    const server = statefulClient({
+      ...initialBootstrap(),
+      environmentPresentation: presentation,
+    });
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    expect(result.current.environmentPresentation).toEqual(presentation);
+    expect(result.current).not.toHaveProperty("setEnvironmentPresentation");
+
+    await act(async () => result.current.setMode("chat"));
+    await act(async () => result.current.updateSettings({ sidebarWidth: 280 }));
+
+    expect(server.execute.mock.calls.map(([command]) => command.kind)).not.toContain(
+      "set-environment-presentation",
+    );
+  });
+
   it("persists the saved sidebar material across restart", async () => {
     const server = statefulClient();
     const first = renderHook(() =>

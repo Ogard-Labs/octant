@@ -32,6 +32,7 @@ export interface TerminalLaunchRequest {
   readonly columns: number;
   readonly rows: number;
   readonly credentialReferences: readonly TerminalCredentialReference[];
+  readonly executionPolicy?: TerminalLaunchInput["executionPolicy"];
 }
 
 export interface RestoredTerminalRecord {
@@ -154,6 +155,9 @@ export class TerminalService {
       environment,
       columns: request.columns,
       rows: request.rows,
+      ...(request.executionPolicy === undefined
+        ? {}
+        : { executionPolicy: request.executionPolicy }),
     });
     const record: TerminalRecord = {
       terminalId: request.terminalId,

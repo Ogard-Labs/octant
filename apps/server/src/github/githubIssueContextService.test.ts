@@ -102,6 +102,7 @@ function service(options: {
   readonly snapshot?: GithubAuthenticationSnapshot;
   readonly response?: GithubCatalogueReadResponse;
   readonly ingestion?: Pick<ExternalContentIngestionStore, "record">;
+  readonly isEffective?: () => boolean;
 }) {
   const catalogue = {
     read: vi.fn(
@@ -113,6 +114,7 @@ function service(options: {
         },
     ),
   };
+  const snapshot = vi.fn(async () => options.snapshot ?? readySnapshot);
   const ingestion = options.ingestion ?? {
     record: vi.fn(() => ({
       kind: "recorded" as const,
@@ -121,12 +123,14 @@ function service(options: {
   };
   return {
     catalogue,
+    snapshot,
     ingestion,
     service: new GithubIssueContextService({
       catalogue,
-      snapshot: async () => options.snapshot ?? readySnapshot,
+      snapshot,
       ingestion,
       uuid: () => "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      ...(options.isEffective === undefined ? {} : { isEffective: options.isEffective }),
     }),
   };
 }
@@ -208,6 +212,25 @@ describe("GitHub issue context", () => {
     });
     expect(utf8Bytes(composed)).toBeLessThanOrEqual(MAX_NEW_THREAD_DRAFT_INTENT_BYTES);
     expect(composed).toMatch(/truncated/i);
+  });
+
+  it("refuses create-from-issue without framed content when the GitHub integration is not effective", async () => {
+    const {
+      service: context,
+      catalogue,
+      snapshot,
+    } = service({
+      isEffective: () => false,
+    });
+    const result = await context.prepare({ owner: "octant", name: "octant", number: 7 }, signal());
+    expect(result).toEqual({
+      status: "refused",
+      reason: "unavailable",
+      message: GITHUB_ISSUE_CONTEXT_REFUSED_MESSAGE,
+    });
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(catalogue.read).not.toHaveBeenCalled();
+    expect(context.peekFramedForFirstTurn(ids.thread)).toBeUndefined();
   });
 
   it("refuses when issues-read is unavailable", async () => {

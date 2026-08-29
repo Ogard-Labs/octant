@@ -74,6 +74,7 @@ export interface LinearIssueContextServiceOptions {
   readonly reader: LinearIssueContextReader;
   readonly ingestion: Pick<ExternalContentIngestionStore, "record">;
   readonly uuid: () => string;
+  readonly isEffective?: () => boolean;
 }
 
 /**
@@ -85,18 +86,23 @@ export class LinearIssueContextService {
   readonly #reader: LinearIssueContextReader;
   readonly #ingestion: Pick<ExternalContentIngestionStore, "record">;
   readonly #uuid: () => string;
+  readonly #isEffective: (() => boolean) | undefined;
   readonly #pendingFramed = new Map<string, FramedExternalContent>();
 
   constructor(options: LinearIssueContextServiceOptions) {
     this.#reader = options.reader;
     this.#ingestion = options.ingestion;
     this.#uuid = options.uuid;
+    this.#isEffective = options.isEffective;
   }
 
   async prepare(
     request: LinearIssueContextRequest,
     signal: AbortSignal,
   ): Promise<LinearIssueContextResult> {
+    if (this.#isEffective?.() === false) {
+      return refused("unavailable");
+    }
     const snapshot = await this.#reader.snapshot(signal);
     if (!linearIssueBrowseAvailable(snapshot.capabilities)) {
       return refused(mapSnapshotRefusal(snapshot));

@@ -494,7 +494,22 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
       }),
     );
     expect(plan.args[1]).not.toContain(`(allow file-write* (subpath "${target.canonicalRoot}"))`);
+    expect(plan.args[1]).not.toContain("(allow process-exec)");
+    expect(plan.args[1]).not.toContain("(allow process-fork)");
     expect(plan.args[1]).toContain(`(allow file-read* (subpath "${target.canonicalRoot}"))`);
+
+    const chat = await Effect.runPromise(
+      confinement(target).prepare({
+        profile,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-chat"),
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        environment: {},
+      }),
+    );
+    expect(chat.args[1]).not.toContain(`(allow file-write* (subpath "${target.canonicalRoot}"))`);
 
     const hostAuth = join(target.canonicalRoot, "host-auth");
     if (profile.process.hostAuthentication?.kind === "directory") {

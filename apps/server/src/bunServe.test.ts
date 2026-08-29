@@ -64,6 +64,32 @@ function rawRequest(
   });
 }
 
+function rawHostRequest(
+  url: URL,
+  options: { readonly headers?: Readonly<Record<string, string>> },
+): Promise<{
+  readonly body: string;
+  readonly handlerCalled: string | undefined;
+  readonly status: number | undefined;
+}> {
+  return new Promise((resolve, reject) => {
+    const outgoing = request(url, { method: "GET", headers: options.headers }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      response.on("end", () => {
+        const handlerHeader = response.headers["x-octant-handler"];
+        resolve({
+          body: Buffer.concat(chunks).toString("utf8"),
+          handlerCalled: Array.isArray(handlerHeader) ? handlerHeader[0] : handlerHeader,
+          status: response.statusCode,
+        });
+      });
+    });
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+}
+
 describe("bunServe", () => {
   it.each(["GET", "HEAD"] as const)(
     "rejects a declared %s body before invoking the Fetch handler",
@@ -135,6 +161,36 @@ describe("bunServe", () => {
       sourceClass: "loopback",
       sourceKeyLength: "64",
       status: 204,
+    });
+  });
+
+  it("rejects a mismatched or malformed Host before invoking the Fetch handler", async () => {
+    const port = new URL(serverUrl).port;
+    const accepted = await rawRequest(new URL("/actual-host", serverUrl), {
+      method: "GET",
+      headers: { host: `localhost:${port}` },
+    });
+    expect(accepted).toMatchObject({
+      handlerCalled: "called",
+      status: 204,
+    });
+
+    const mismatch = await rawHostRequest(new URL("/mismatch", serverUrl), {
+      headers: { host: `attacker.example:${port}` },
+    });
+    expect(mismatch).toEqual({
+      body: "Invalid Host header",
+      handlerCalled: undefined,
+      status: 400,
+    });
+
+    const malformed = await rawHostRequest(new URL("/malformed", serverUrl), {
+      headers: { host: "localhost:not-a-port" },
+    });
+    expect(malformed).toEqual({
+      body: "Invalid Host header",
+      handlerCalled: undefined,
+      status: 400,
     });
   });
 });
