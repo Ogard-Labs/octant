@@ -343,6 +343,39 @@ describe("GitService", () => {
       undefined,
     );
   });
+
+  it("forwards Plan execution policy into the mutation port per call", async () => {
+    const observation = readyObservation();
+    const mutation = mutationPort();
+    const service = new GitService({ observe: vi.fn(async () => observation) }, mutation);
+
+    await expect(
+      service.stage({
+        checkoutId: "checkout-1",
+        checkoutRoot: "/repo",
+        paths: ["file.txt"],
+        expectedStateToken: observation.stateToken,
+        executionPolicy: "plan",
+      }),
+    ).resolves.toEqual({ status: "applied" });
+    expect(mutation.stage).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", paths: ["file.txt"], executionPolicy: "plan" },
+      undefined,
+    );
+
+    await expect(
+      service.stage({
+        checkoutId: "checkout-1",
+        checkoutRoot: "/repo",
+        paths: ["file.txt"],
+        expectedStateToken: observation.stateToken,
+      }),
+    ).resolves.toEqual({ status: "applied" });
+    expect(mutation.stage).toHaveBeenLastCalledWith(
+      { checkoutRoot: "/repo", paths: ["file.txt"] },
+      undefined,
+    );
+  });
 });
 
 const headOid = "a".repeat(40);

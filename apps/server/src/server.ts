@@ -2638,6 +2638,7 @@ export function startOctantServer(
                 ...tool,
                 ...(signal === undefined ? {} : { signal }),
               }),
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         ...(extensionSupervisor instanceof ExtensionSupervisor
           ? { stdioSupervisor: extensionSupervisor }
           : {}),
