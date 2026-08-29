@@ -10,7 +10,7 @@ import { decodeProjectId } from "@octant/contracts/projects";
 import { decodePreviewHostId } from "@octant/contracts/previews";
 import { WorkResolutionService, type WorkRootBinding } from "./workResolutionService";
 import { WorkArtifactProjection } from "./workArtifactProjection";
-import { WorkMutationService } from "./workMutationService";
+import { WorkMutationService, type WorkMutationEventStorePort } from "./workMutationService";
 import type { WorkFilesystemPort } from "./workFilesystemPort";
 import { workFilesystemFixture, type WorkFilesystemFixture } from "./workFilesystemFixture";
 import { MAX_WORK_INPUT_BYTES } from "./workBudget";
@@ -32,7 +32,12 @@ const availableBinding: WorkRootBinding = {
   bindingSuperseded: false,
 };
 
-function createService(filesystem: WorkFilesystemPort = workFilesystemFixture()) {
+function createService(
+  filesystem: WorkFilesystemPort = workFilesystemFixture(),
+  options: {
+    readonly append?: WorkMutationEventStorePort["append"];
+  } = {},
+) {
   const resolution = new WorkResolutionService(filesystem);
   const projection = new WorkArtifactProjection();
   let counter = 0;
@@ -42,9 +47,8 @@ function createService(filesystem: WorkFilesystemPort = workFilesystemFixture())
     return `aaaaaaaa-aaaa-4aaa-8aaa-${suffix}`;
   };
   const clock = () => "2026-07-22T08:00:00.000Z";
-  const eventStore = {
-    append: (input: { readonly frame: import("@octant/contracts").WorkArtifactMutationFrame }) =>
-      input.frame,
+  const eventStore: WorkMutationEventStorePort = {
+    append: options.append ?? ((input) => input.frame),
     replay: () => ({ status: "ok" as const, frames: [], nextCursor: 0 }),
   };
   const service = new WorkMutationService({
@@ -228,6 +232,70 @@ describe("WorkMutationService", () => {
     expect(reply.outcome.kind).toBe("failed");
     if (reply.outcome.kind !== "failed") return;
     expect(reply.outcome.reason).toBe("oversize");
+  });
+
+  it("does not leave an unjournaled file when the artifact event cannot append", async () => {
+    const filesystem = workFilesystemFixture();
+    const { service, projection } = createService(filesystem, {
+      append: () => {
+        throw new Error("Work mutation journal is unavailable.");
+      },
+    });
+    const reply = await service.mutate(
+      {
+        kind: "create-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        format: "markdown",
+        displayName: "notes.md",
+        content: "# Hello",
+      } satisfies WorkMutationRequest,
+      fullContext,
+    );
+    expect(reply.outcome.kind).toBe("failed");
+    if (reply.outcome.kind !== "failed") return;
+    expect(reply.outcome.reason).toBe("write-failed");
+    expect(filesystem.readBytes("/work/notes.md")).toBeUndefined();
+    expect(projection.snapshot().size).toBe(0);
+  });
+
+  it("does not leave unjournaled revision bytes when the artifact event cannot append", async () => {
+    const filesystem = workFilesystemFixture();
+    let failAppend = false;
+    const { service } = createService(filesystem, {
+      append: (input) => {
+        if (failAppend) throw new Error("Work mutation journal is unavailable.");
+        return input.frame;
+      },
+    });
+    const created = await service.mutate(
+      {
+        kind: "create-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        format: "markdown",
+        displayName: "notes.md",
+        content: "# Hello",
+      } satisfies WorkMutationRequest,
+      fullContext,
+    );
+    if (created.outcome.kind !== "created") throw new Error("create failed");
+    failAppend = true;
+    const reply = await service.mutate(
+      {
+        kind: "revise-artifact",
+        requestId: ids.request,
+        projectId: ids.project,
+        artifactId: created.outcome.artifact.artifactId,
+        content: "# Revised",
+        expectedArtifactVersion: 1,
+      } satisfies WorkMutationRequest,
+      fullContext,
+    );
+    expect(reply.outcome.kind).toBe("failed");
+    if (reply.outcome.kind !== "failed") return;
+    expect(reply.outcome.reason).toBe("write-failed");
+    expect(new TextDecoder().decode(filesystem.readBytes("/work/notes.md"))).toBe("# Hello");
   });
 
   it("requires approval for a destructive delete and fails closed when not approved", async () => {

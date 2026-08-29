@@ -6,6 +6,7 @@ import {
   type ProjectId,
   type WindowId,
 } from "@octant/contracts";
+import { classifyDestructiveChange, type WorkMutationKind } from "@octant/domain";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
 import type { PersistenceService } from "./persistence/persistenceService";
 import type { ProjectService } from "./projectService";
@@ -28,7 +29,7 @@ export interface WorkMutationRouteDependencies {
           readonly bindingSuperseded: false;
         };
         readonly posture: "full";
-        readonly approved: true;
+        readonly approved: boolean;
         readonly signal?: AbortSignal;
       },
     ): Promise<WorkMutationReply>;
@@ -108,7 +109,7 @@ export function createWorkMutationRouteHandler(dependencies: WorkMutationRouteDe
           bindingSuperseded: false,
         },
         posture: "full",
-        approved: true,
+        approved: userInitiatedMutationApproved(mutation),
         signal: request.signal,
       });
       return jsonResponse(decodeWorkMutationReply(reply), 200, origin);
@@ -213,6 +214,35 @@ function corsHeaders(origin: string | null): Headers {
     headers.set("access-control-allow-origin", origin);
   }
   return headers;
+}
+
+function userInitiatedMutationApproved(request: WorkMutationRequest): boolean {
+  const change = classifyDestructiveChange({
+    kind: mutationKindForRequest(request),
+    ...(request.kind === "create-artifact" ? { format: request.format } : {}),
+    ...(request.kind === "transform-artifact" ? { targetFormat: request.targetFormat } : {}),
+  });
+  if (!change.requiresApproval) return true;
+  return request.confirmed === true;
+}
+
+function mutationKindForRequest(request: WorkMutationRequest): WorkMutationKind {
+  switch (request.kind) {
+    case "create-artifact":
+      return "create";
+    case "revise-artifact":
+      return "revise";
+    case "transform-artifact":
+      return "transform";
+    case "rename-artifact":
+      return "rename";
+    case "delete-artifact":
+      return "delete";
+    case "version-artifact":
+      return "version";
+    case "export-artifact":
+      return "export";
+  }
 }
 
 class WorkMutationRouteRejected extends Error {
