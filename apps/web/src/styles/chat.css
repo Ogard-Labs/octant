@@ -731,27 +731,17 @@
 /* The composer's frame, focus ring, input, chips row, bottom row, and send
    control are the system's; this block only places the composer in the
    workspace column and pads the pieces the system does not know about. */
-/* The frame owns the composer's ring and lift. Adding a shadow here drew a
-   second, solid outline a step brighter than the hairline, so the box read as
-   two stacked borders. */
 .chat-composer {
   position: relative;
   z-index: 2;
   flex: 0 0 auto;
   margin-block: 0 18px;
+  /* The frame owns the composer's ring and lift. Adding a shadow here drew a
+     second, solid outline a step brighter than the hairline, so the box read
+     as two stacked borders. */
   transition:
     background-color var(--oct-dur-base) var(--oct-ease-color),
     box-shadow var(--oct-dur-base) var(--oct-ease-color);
-}
-
-.chat-composer--queued {
-  border-color: color-mix(in oklab, var(--oct-warn-fg) 42%, var(--oct-border));
-  background: color-mix(in oklab, var(--oct-warn-soft) 32%, var(--oct-surface));
-  box-shadow: var(--octant-shadow-md);
-}
-
-.chat-composer--held {
-  border-color: color-mix(in oklab, var(--oct-danger-fg) 38%, var(--oct-border));
 }
 
 .chat-composer__status {
@@ -765,11 +755,6 @@
   line-height: 1.35;
 }
 
-.chat-composer--queued .chat-composer__status {
-  color: var(--oct-warn-fg);
-  font-weight: 500;
-}
-
 /* A running thread is being read, not written to, so the follow-up box gives
    its height back to the transcript until the user starts typing. It still
    grows from its own content, so a long follow-up is never cramped. */
@@ -778,8 +763,9 @@
 }
 
 /* While a response is arriving the status is the only thing telling the user
-   the thread is alive, so it reads as a live strip with a marker rather than a
-   grey footnote under the box. The marker only pulses where motion is welcome. */
+   the thread is alive, so it reads as a live strip with a marker rather than
+   a grey footnote under the box. The marker only pulses where motion is
+   welcome. */
 .chat-composer__status--live {
   gap: var(--oct-space-2);
   color: var(--oct-fg-2);
@@ -808,11 +794,6 @@
   50% {
     opacity: 0.35;
   }
-}
-
-.chat-composer--held .chat-composer__status {
-  color: var(--oct-danger-fg);
-  font-weight: 500;
 }
 
 .chat-composer__status--quiet {

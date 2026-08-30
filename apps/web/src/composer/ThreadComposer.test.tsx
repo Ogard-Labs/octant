@@ -72,28 +72,6 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
-  it("offers to discard a queued follow-up on a plain send bar, hiding send while it is queued", async () => {
-    const user = userEvent.setup();
-    const onDiscard = vi.fn();
-    render(
-      <ThreadComposer
-        input={<textarea className="composer-input" />}
-        row={{
-          actions: {
-            kind: "send",
-            send: { ariaLabel: "Send follow-up", onSend: vi.fn() },
-            discard: { ariaLabel: "Discard queued message", onDiscard },
-            sendHidden: true,
-          },
-        }}
-      />,
-    );
-
-    expect(screen.queryByRole("button", { name: "Send follow-up" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
-    expect(onDiscard).toHaveBeenCalledOnce();
-  });
-
   it("shows stop alongside send while a response streams, honors the stop disabled reason, and hides stop once idle", () => {
     const stop = { ariaLabel: "Stop response", onStop: vi.fn() };
     const send = { ariaLabel: "Send message", onSend: vi.fn() };
@@ -112,9 +90,8 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    // Sending never hides send on its own — a caller lets a follow-up be
-    // queued by keeping send available (relabeled) alongside stop; only the
-    // explicit `sendHidden` flag below takes send away.
+    // Send stays available while a response streams: a message written then is
+    // sent, so the control that sends it must never go away.
     expect(screen.getByRole("button", { name: "Stop response" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
 
@@ -150,32 +127,6 @@ describe("ThreadComposer", () => {
     );
     expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
-  });
-
-  it("hides send once a follow-up is already queued, and offers to discard it", async () => {
-    const user = userEvent.setup();
-    const onDiscard = vi.fn();
-    render(
-      <ThreadComposer
-        input={<textarea className="composer-input" />}
-        row={{
-          actions: {
-            kind: "send-or-stop",
-            cellClassName: "surface__actions",
-            sending: true,
-            send: { ariaLabel: "Queue message", onSend: vi.fn() },
-            stop: { ariaLabel: "Stop response", onStop: vi.fn() },
-            discard: { ariaLabel: "Discard queued message", onDiscard },
-            sendHidden: true,
-          },
-        }}
-      />,
-    );
-
-    expect(screen.getByRole("button", { name: "Stop response" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
-    expect(onDiscard).toHaveBeenCalledOnce();
   });
 
   it("submits the surrounding form when the surface owns submission", async () => {

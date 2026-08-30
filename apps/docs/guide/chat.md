@@ -37,6 +37,20 @@ A Chat thread not assigned to a Project uses an explicit unfiled Chat context. I
 
 When you drag or drop a Chat thread into another workspace, the server resolves the action against the context key (host, mode, Project, bound root). A cross-Project drop does not silently change authority; it offers to open the thread in a new window instead.
 
+## Sending while a response is running
+
+The composer stays open while a response is streaming. Press Enter and the
+message is sent: it leaves the composer, joins the transcript at the end, and
+runs as soon as the response in progress stops — nothing to release, discard,
+or re-send by hand. A response that is cancelled or fails has also stopped, so
+the message runs then too.
+
+Only one message waits at a time. Anything typed after it stays in the
+composer as an ordinary draft. If the host refuses the message, its words come
+back to the composer — unless you have already typed something newer, which is
+kept instead. The waiting message lives on this client only; a restart drops it
+rather than sending it behind your back.
+
 ## Unsent drafts
 
 Each Chat thread keeps one unsent composer draft on this client. Leaving the

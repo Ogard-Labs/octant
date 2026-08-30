@@ -39,6 +39,8 @@ export interface CodePathMentionsController {
   /** Returns `true` when the typeahead consumed the key. */
   readonly handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   readonly choose: (candidate: PathMentionCandidate) => void;
+  /** Restore paths carried by a refused message. */
+  readonly restore: (paths: ReadonlyArray<string>) => void;
   readonly clear: () => void;
 }
 
@@ -161,6 +163,11 @@ export function useCodePathMentions(options: CodePathMentionsOptions): CodePathM
     sync,
     handleKeyDown,
     choose,
+    restore: (paths) =>
+      setSelectedPaths((current) => [
+        ...paths.filter((path) => !current.includes(path)),
+        ...current,
+      ]),
     clear: () => setSelectedPaths([]),
   };
 }
