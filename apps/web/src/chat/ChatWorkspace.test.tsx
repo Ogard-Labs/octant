@@ -1678,9 +1678,18 @@ describe("ChatWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(sendTurn).toHaveBeenCalledTimes(2));
-    const secondMessage = String(sendTurn.mock.calls[1]![0]);
-    expect(secondMessage).toContain("Second quote excerpt.");
-    expect(secondMessage).not.toContain("First quote excerpt.");
+    expect(sendTurn).toHaveBeenLastCalledWith(
+      expect.stringContaining("Second quote excerpt."),
+      [],
+      [],
+      [],
+      [],
+      [],
+    );
+    const lastMessage = String(
+      (sendTurn.mock.calls.at(-1) as ReadonlyArray<unknown> | undefined)?.[0] ?? "",
+    );
+    expect(lastMessage).not.toContain("First quote excerpt.");
   });
 
   it("keeps an attachment visible when authoritative discard fails", async () => {
