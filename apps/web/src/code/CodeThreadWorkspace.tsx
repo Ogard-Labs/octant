@@ -95,6 +95,8 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
  */
 interface CodeSteeredMessage {
   readonly id: string;
+  readonly threadKey: string;
+  readonly restore: (message: CodeSteeredMessage) => void;
   readonly prompt: string;
   readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
   readonly threadMentionChips: ReadonlyArray<ThreadMentionChip>;
@@ -200,6 +202,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // a steered message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
   const draftRevisionRef = useRef(0);
+  const activeThreadKeyRef = useRef(String(props.threadId));
+  activeThreadKeyRef.current = String(props.threadId);
   const [providerChanging, setProviderChanging] = useState(false);
   const [accessChanging, setAccessChanging] = useState(false);
   const [accessMessage, setAccessMessage] = useState<string>();
@@ -256,7 +260,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     settlement: codeTurnSettlement(props.controller.turnStatus),
     ready: !attachments.busy,
     send: (message) => sendSteeredRef.current(message),
-    restore: (message) => restoreSteeredRef.current(message),
+    restore: (message) => message.restore(message),
   });
 
   const composerReady = view !== undefined && props.controller.status !== "disconnected";
@@ -457,6 +461,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       // a refusal restores it, while later edits stay with the composer.
       const steeredMessage: CodeSteeredMessage = {
         id: globalThis.crypto.randomUUID(),
+        threadKey: String(props.threadId),
+        restore: restoreSteeredRef.current,
         prompt,
         threadMentionIds,
         threadMentionChips,
@@ -524,6 +530,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   restoreSteeredRef.current = (message) => {
+    if (activeThreadKeyRef.current !== message.threadKey) return;
     setTurnAccessOverride((current) => current ?? message.accessOverride);
     if (draftRevisionRef.current !== message.draftRevision) {
       attachments.discardDetached(message.detachedAttachments);

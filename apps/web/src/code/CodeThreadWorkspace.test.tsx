@@ -1519,6 +1519,101 @@ describe("CodeThreadWorkspace", () => {
     expect(composer).toHaveValue("newer draft");
   });
 
+  it("never restores a pending Code context into the next thread", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000025" as CodeAttachmentId,
+      displayName: "origin.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "e".repeat(64),
+    };
+    const discardAttachment = vi.fn(async () => undefined);
+    const attachmentClient: CodeAttachmentClient = {
+      putAttachment: vi.fn(async () => reference),
+      discardAttachment,
+      attachment: vi.fn(),
+    };
+    const search = vi.fn(async () => [
+      {
+        threadId: mentionedThreadId,
+        mode: "chat" as const,
+        title: "Release notes",
+        placement: { kind: "unfiled" as const },
+        updatedAt: "2026-08-15T09:00:00.000Z" as never,
+      },
+    ]);
+    const resolveMention = vi.fn(async () => ({ mentions: [], unavailable: [] }));
+    const list = vi.fn(async () => ({
+      status: "listed" as const,
+      listing: {
+        kind: "code-file-listing" as const,
+        threadId,
+        checkoutId: "20000000-0000-4000-8000-000000000002" as never,
+        entries: [
+          {
+            kind: "file" as const,
+            fileId: "file_" + "b".repeat(59),
+            path: "src/index.ts" as never,
+            byteLength: 12,
+            availability: { status: "available" as const },
+          },
+        ],
+        truncated: false,
+        observedAt: "2026-08-16T09:00:00.000Z" as never,
+      },
+    }));
+    const threadMentionClient = {
+      search,
+      resolve: resolveMention,
+      openSideChat: vi.fn(),
+      execute: vi.fn(),
+    } as never;
+    const controllerA = controller({ sendFollowUp, turnStatus: "running" });
+    const controllerB = controller({ turnStatus: "idle" }, anotherThreadId);
+    const { rerender, unmount } = render(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controllerA}
+        fileListingClient={{ list } as never}
+        threadId={threadId}
+        threadMentionClient={threadMentionClient}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "#Rel");
+    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
+    await user.type(composer, "explain @ind");
+    await user.click(await screen.findByRole("option", { name: /src\/index\.ts/ }));
+    await user.type(composer, " now");
+    pasteImage(composer, "origin.png");
+    await screen.findByAltText("origin.png");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    rerender(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controllerB}
+        fileListingClient={{ list } as never}
+        threadId={anotherThreadId}
+        threadMentionClient={threadMentionClient}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("Follow-up message")).toHaveValue(""));
+    expect(screen.queryByAltText("origin.png")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Mentioned threads")).not.toBeInTheDocument();
+    expect(controllerB.setPendingDraft).not.toHaveBeenCalledWith(
+      expect.stringContaining("Release"),
+    );
+
+    unmount();
+    expect(discardAttachment).toHaveBeenCalledOnce();
+    expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId);
+  });
+
   it("restores the refused prompt, image, thread chip, and path for retry", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
