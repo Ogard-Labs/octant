@@ -170,6 +170,7 @@ function harness(options: { readonly fetch?: "fetched" | "failed" | "interrupted
     readCodeThread: () => undefined,
     readCodeThreads: () => [],
     readCodeThreadActivity: () => [],
+    readCodeRuntimeWorks: () => [],
     readCodeCheckout: () => undefined,
     readCodeCheckoutAggregateVersion: () => 0,
     readCodeCheckouts: () => [],

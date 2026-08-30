@@ -48,6 +48,7 @@ export interface SidebarNavigationInput {
 }
 
 export interface ChatThreadNavigationSource {
+  readonly executing?: boolean;
   readonly followUpOpen?: boolean;
   readonly lastSequence?: number;
   /**
@@ -81,15 +82,26 @@ export interface ThreadProviderIdentity {
  * What a thread row's status dot says, in the vocabulary the thread board
  * already uses.
  *
- * `working` is only claimed for a thread whose turn this window is actually
- * running: a dot that pulses on a thread nothing is doing would be a lie, and
- * the host reports no per-thread run state to the sidebar yet.
+ * `working` is claimed only while the host projects the thread as executing —
+ * the same run-state signal board reasons derive from. When that settles, the
+ * row falls back to follow-up, unread, or idle.
  */
 export type ThreadRowActivity = "working" | "attention" | "unread" | "idle";
+
+/**
+ * Compact checkout identity for a Code row bound to its own worktree. Absent
+ * for the Project's default checkout so those rows stay quiet.
+ */
+export interface ThreadCheckoutChip {
+  readonly checkoutKind: "managed-worktree";
+  readonly label: string;
+}
 
 export interface ChatThreadNavigationItem {
   /** Absent leaves the row's dot idle rather than inventing a state. */
   readonly activity?: ThreadRowActivity;
+  /** Present when the host projected a non-default Code checkout for this row. */
+  readonly checkoutChip?: ThreadCheckoutChip;
   readonly followUp?: boolean;
   /**
    * The visible thread this one was forked or branched from. Absent when the
@@ -115,6 +127,7 @@ export function buildChatThreadNavigation(
   threads: ReadonlyArray<ChatThreadNavigationSource>,
 ): ReadonlyArray<ChatThreadNavigationItem> {
   return threads.map((thread) => ({
+    ...(thread.executing === true ? { activity: "working" as const } : {}),
     ...(thread.followUpOpen === undefined ? {} : { followUp: thread.followUpOpen }),
     ...(thread.lineageParentThreadId === undefined
       ? {}
