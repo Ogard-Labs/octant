@@ -1575,7 +1575,12 @@ describe("CodeThreadWorkspace", () => {
       openSideChat: vi.fn(),
       execute: vi.fn(),
     } as never;
-    const controllerA = controller({ sendFollowUp, turnStatus: "running" });
+    const writePendingDraftFor = vi.fn();
+    const controllerA = controller({
+      sendFollowUp,
+      turnStatus: "running",
+      writePendingDraftFor,
+    } as never);
     const controllerB = controller({ turnStatus: "idle" }, anotherThreadId);
     const { rerender, unmount } = render(
       <CodeThreadWorkspace
@@ -1610,6 +1615,10 @@ describe("CodeThreadWorkspace", () => {
     await waitFor(() => expect(screen.getByLabelText("Follow-up message")).toHaveValue(""));
     expect(screen.queryByAltText("origin.png")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Mentioned threads")).not.toBeInTheDocument();
+    expect(writePendingDraftFor).toHaveBeenCalledWith(
+      String(threadId),
+      expect.stringContaining("Release notes"),
+    );
     expect(controllerB.setPendingDraft).not.toHaveBeenCalledWith(
       expect.stringContaining("Release"),
     );
@@ -1618,6 +1627,52 @@ describe("CodeThreadWorkspace", () => {
     expect(discardAttachment).toHaveBeenCalledOnce();
     expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId);
     expect(attachmentClientB.discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it("restores detached Code context after Strict Mode effect replay", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => false);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000026" as CodeAttachmentId,
+      displayName: "strict.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "f".repeat(64),
+    };
+    const attachmentClient: CodeAttachmentClient = {
+      putAttachment: vi.fn(async () => reference),
+      discardAttachment: vi.fn(async () => undefined),
+      attachment: vi.fn(),
+    };
+    const { rerender } = render(
+      <StrictMode>
+        <CodeThreadWorkspace
+          attachmentClient={attachmentClient}
+          controller={controller({ sendFollowUp, turnStatus: "running" })}
+          threadId={threadId}
+        />
+      </StrictMode>,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "retry after strict mode");
+    pasteImage(composer, "strict.png");
+    await screen.findByAltText("strict.png");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    rerender(
+      <StrictMode>
+        <CodeThreadWorkspace
+          attachmentClient={attachmentClient}
+          controller={controller({ sendFollowUp, turnStatus: "idle" })}
+          threadId={threadId}
+        />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
+    await waitFor(() => expect(composer).toHaveValue("retry after strict mode"));
+    expect(screen.getByAltText("strict.png")).toBeInTheDocument();
+    expect(attachmentClient.discardAttachment).not.toHaveBeenCalled();
   });
 
   it("restores the refused prompt, image, thread chip, and path for retry", async () => {
@@ -1806,6 +1861,86 @@ describe("CodeThreadWorkspace", () => {
     );
     expect(composer).toHaveValue("newer draft");
     expect(setPendingDraft).toHaveBeenLastCalledWith("newer draft");
+  });
+
+  it("persists an abandoned prompt to its origin when navigation wins mention resolution", async () => {
+    const user = userEvent.setup();
+    let resolveMention!: (value: { mentions: never[]; unavailable: never[] }) => void;
+    const mentionResolution = new Promise<{ mentions: never[]; unavailable: never[] }>(
+      (resolve) => {
+        resolveMention = resolve;
+      },
+    );
+    const writePendingDraftFor = vi.fn();
+    const sendFollowUp = vi.fn(async () => true);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000027" as CodeAttachmentId,
+      displayName: "abandoned.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "a".repeat(64),
+    };
+    const discardAttachment = vi.fn(async () => undefined);
+    const attachmentClient: CodeAttachmentClient = {
+      putAttachment: vi.fn(async () => reference),
+      discardAttachment,
+      attachment: vi.fn(),
+    };
+    const search = vi.fn(async () => [
+      {
+        threadId: mentionedThreadId,
+        mode: "chat" as const,
+        title: "Release notes",
+        placement: { kind: "unfiled" as const },
+        updatedAt: "2026-08-15T09:00:00.000Z" as never,
+      },
+    ]);
+    const resolveClient = vi.fn(() => mentionResolution);
+    const threadMentionClient = {
+      search,
+      resolve: resolveClient,
+      openSideChat: vi.fn(),
+      execute: vi.fn(),
+    } as never;
+    const controllerA = controller({
+      sendFollowUp,
+      turnStatus: "running",
+      writePendingDraftFor,
+    } as never);
+    const controllerB = controller({ turnStatus: "idle" }, anotherThreadId);
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controllerA}
+        threadId={threadId}
+        threadMentionClient={threadMentionClient}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "#Rel");
+    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
+    await user.type(composer, "first");
+    pasteImage(composer, "abandoned.png");
+    await screen.findByAltText("abandoned.png");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    rerender(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controllerB}
+        threadId={anotherThreadId}
+        threadMentionClient={threadMentionClient}
+      />,
+    );
+    resolveMention({ mentions: [], unavailable: [] });
+
+    await waitFor(() =>
+      expect(writePendingDraftFor).toHaveBeenCalledWith(String(threadId), "#[Release notes] first"),
+    );
+    expect(sendFollowUp).not.toHaveBeenCalled();
+    expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId);
+    expect(screen.getByLabelText("Follow-up message")).toHaveValue("");
   });
 
   it("removes a sent image when clearing the draft also cleared its thread mention", async () => {

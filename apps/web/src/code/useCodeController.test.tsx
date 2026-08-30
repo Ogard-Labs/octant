@@ -1149,6 +1149,11 @@ describe("useCodeController", () => {
 
   it("keeps an identical draft typed after a follow-up dispatches", async () => {
     const operationId = "70000000-0000-4000-8000-000000000042";
+    const started = deferred<{
+      readonly kind: "provider-turn-state";
+      readonly operationId: string;
+      readonly state: "running";
+    }>();
     const finished = deferred<void>();
     async function* frames() {
       await finished.promise;
@@ -1160,11 +1165,7 @@ describe("useCodeController", () => {
         event: { kind: "operation-state", state: "completed" },
       };
     }
-    const executeOperation = vi.fn(async () => ({
-      kind: "provider-turn-state" as const,
-      operationId,
-      state: "running" as const,
-    }));
+    const executeOperation = vi.fn(() => started.promise);
     const client = fakeClient({
       executeOperation: executeOperation as never,
       subscribeOperation: vi.fn(() => frames()) as never,
@@ -1195,6 +1196,8 @@ describe("useCodeController", () => {
       result.current.setPendingDraft("same prompt");
     });
     await waitFor(() => expect(result.current.pendingDraft).toBe("same prompt"));
+    started.resolve({ kind: "provider-turn-state", operationId, state: "running" });
+    await waitFor(() => expect(result.current.turnStatus).toBe("running"));
     await act(async () => finished.resolve());
     await expect(sent).resolves.toBe(true);
     expect(client.subscribeOperation).toHaveBeenCalledOnce();

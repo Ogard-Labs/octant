@@ -221,12 +221,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
   const mountedRef = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
   const scaffolds = useScaffoldCatalog({
     threadId: String(props.threadId),
     checkoutId: String(view?.checkout.id ?? ""),
@@ -443,6 +443,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   async function submitFollowUp() {
     if (!canSend || steered.pending !== undefined) return;
     const draftRevision = draftRevisionRef.current;
+    const originThreadKey = String(props.threadId);
     // The one-shot override is consumed when the message is sent, not when the
     // turn later finishes: a long running turn must not leave Plan selected for
     // whatever the user writes next. A refused send puts it back.
@@ -463,6 +464,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       // Resolve the captured chips rather than whatever a later draft names;
       // the host still rechecks authority when the message runs.
       const threadMentionIds = await threadMentions.resolveForSend();
+      if (activeThreadKeyRef.current !== originThreadKey) {
+        // The user left while the host checked the mention ids. Keep the
+        // abandoned prompt with its originating thread and dispose of its
+        // detached host attachments; never steer them into the new thread.
+        props.controller.writePendingDraftFor?.(originThreadKey, prompt);
+        attachments.discardDetached(detachedAttachments);
+        return;
+      }
       // Sending while a turn runs is still sending. The message leaves the
       // composer now and joins the transcript, and the host is asked to run it
       // as soon as this thread stops running one — the user never administers
@@ -483,14 +492,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         draftRevision,
       };
       if (!steered.steer(steeredMessage)) {
-        attachments.restoreDetached(detachedAttachments);
         if (draftRevisionRef.current === draftRevision) {
+          attachments.restoreDetached(detachedAttachments);
           setDraft(prompt);
           props.controller.setPendingDraft?.(prompt);
           threadMentions.restore(threadMentionChips);
           pathMentions.restore(fileMentionPaths);
+          setTurnAccessOverride((current) => current ?? override);
+        } else {
+          // A newer draft won the race to steer this message. Its detached
+          // host attachments and access override must not bleed into that draft.
+          attachments.discardDetached(detachedAttachments);
         }
-        setTurnAccessOverride((current) => current ?? override);
         return;
       }
       return;
@@ -546,11 +559,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   restoreSteeredRef.current = (message) => {
-    if (!mountedRef.current) {
+    if (!mountedRef.current || activeThreadKeyRef.current !== message.threadKey) {
+      props.controller.writePendingDraftFor?.(message.threadKey, message.prompt);
       attachments.discardDetached(message.detachedAttachments);
       return;
     }
-    if (activeThreadKeyRef.current !== message.threadKey) return;
     setTurnAccessOverride((current) => current ?? message.accessOverride);
     if (draftRevisionRef.current !== message.draftRevision) {
       attachments.discardDetached(message.detachedAttachments);

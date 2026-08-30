@@ -475,6 +475,9 @@ export function useCodeController(options: CodeControllerOptions) {
   const setPendingDraftCaret = useCallback((caretIndex: number) => {
     composerDraftRef.current.setCaret(caretIndex);
   }, []);
+  const writePendingDraftFor = useCallback((threadId: string, value: string) => {
+    composerDraftRef.current.writeFor(threadId, value);
+  }, []);
 
   const clearFailure = useCallback(() => {
     setErrorCategory(undefined);
@@ -1788,13 +1791,12 @@ export function useCodeController(options: CodeControllerOptions) {
       const sendingThreadId = String(view.thread.id);
       const draftRevisionAtDispatch = composerDraftRef.current.revisionFor(sendingThreadId);
       const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
-      const draftRevisionAfterInternalClear =
-        draftRevisionAtDispatch + (previousDraft === undefined ? 0 : 1);
+      let internalClearRan = false;
       const restoreFailedPrompt = () => {
         const currentRevision = composerDraftRef.current.revisionFor(sendingThreadId);
         if (
           currentRevision !== draftRevisionAtDispatch &&
-          currentRevision !== draftRevisionAfterInternalClear
+          (!internalClearRan || currentRevision !== draftRevisionAtDispatch + 1)
         ) {
           return;
         }
@@ -1849,6 +1851,7 @@ export function useCodeController(options: CodeControllerOptions) {
         // after this dispatch.
         if (composerDraftRef.current.revisionFor(sendingThreadId) === draftRevisionAtDispatch) {
           composerDraftRef.current.clearFor(sendingThreadId);
+          internalClearRan = true;
         }
         setConversation((current) => [
           ...current,
@@ -2114,6 +2117,7 @@ export function useCodeController(options: CodeControllerOptions) {
     sendFollowUp,
     setPendingDraft,
     setPendingDraftCaret,
+    writePendingDraftFor,
     startThreadTurn,
     status,
     threadUsage,
@@ -2141,7 +2145,11 @@ function conversationFallback(
   }
 }
 
-export type CodeController = ReturnType<typeof useCodeController>;
+type CodeControllerResult = ReturnType<typeof useCodeController>;
+export type CodeController = Omit<CodeControllerResult, "writePendingDraftFor"> & {
+  /** Optional for injected fixtures and hosts that do not persist drafts by thread. */
+  readonly writePendingDraftFor?: (threadId: string, value: string) => void;
+};
 
 function required(value: string | undefined): string {
   if (value === undefined) throw new Error("Code controller requires launch authority.");
