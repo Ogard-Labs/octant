@@ -7,7 +7,7 @@ import {
   type ChatThreadView,
   type ChatTurnId,
 } from "@octant/contracts/chat";
-import type { SideChatSidecar } from "@octant/contracts";
+import type { MentionableThreadId, SideChatSidecar } from "@octant/contracts";
 import type { ThreadMentionClient } from "@octant/client-runtime";
 import {
   buildAttachmentCapability,
@@ -31,6 +31,7 @@ import {
   ChatComposer,
   type ChatComposerAttachmentCapability,
   type ChatComposerExtensionSelection,
+  type ChatComposerThreadMentionChip,
   type ChatComposerModelOption,
   type ChatComposerOption,
   type ChatComposerProps,
@@ -123,7 +124,24 @@ interface PendingAttachment {
 interface ChatSteeredMessage {
   readonly id: string;
   readonly prompt: string;
+  readonly attachmentIds: ReadonlyArray<ChatAttachmentId>;
+  readonly previewSelections: ReadonlyArray<PreviewContextSelection>;
+  readonly canvasSelections: ReadonlyArray<CanvasContextSelection>;
+  readonly quotes: ReadonlyArray<TranscriptQuoteChip>;
+  readonly extensionReceipts: ReadonlyArray<ChatComposerExtensionSelection>;
+  readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+  readonly threadMentionChips: ReadonlyArray<ChatComposerThreadMentionChip>;
 }
+
+type ChatSendContext = Pick<
+  ChatSteeredMessage,
+  | "attachmentIds"
+  | "previewSelections"
+  | "canvasSelections"
+  | "quotes"
+  | "extensionReceipts"
+  | "threadMentionIds"
+>;
 
 /**
  * The authoritative thread state a queued model option change builds on.
@@ -170,7 +188,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   >([]);
   const activeThread = view?.thread;
   const activeThreadId = activeThread?.id;
-  const submitTurnRef = useRef<(draft: string) => Promise<boolean>>(async () => false);
+  const submitTurnRef = useRef<(message: ChatSteeredMessage) => Promise<boolean>>(
+    async () => false,
+  );
   // Read after an await, so a message sent mid-response sees the draft the user
   // has typed since rather than the one the render that started it captured.
   const pendingDraftRef = useRef(props.controller.pendingDraft);
@@ -185,7 +205,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     send: async (message) => {
       const laterDraft = pendingDraftRef.current;
       const draftEditRevision = draftEditRevisionRef.current;
-      const sent = await submitTurnRef.current(message.prompt);
+      const sent = await submitTurnRef.current(message);
       // The send path owns the composer for the message it is sending: it
       // clears the draft, and puts the message back if the host refused it.
       // A draft the user typed while this message was waiting belongs to
@@ -199,8 +219,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     // back leaves the whole message retryable. A newer draft the user typed
     // while this one waited is the one worth keeping.
     restore: (message) => {
-      if (pendingDraftRef.current.length > 0) return;
-      setPendingDraftRef.current(message.prompt);
+      if (pendingDraftRef.current.length === 0) setPendingDraftRef.current(message.prompt);
+      threadMentionsRestoreRef.current(message.threadMentionChips);
     },
   });
   const checkpoints = useThreadCheckpoints({
@@ -214,6 +234,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const pendingExtensionRef = useRef<ReadonlyArray<ChatComposerExtensionSelection>>([]);
   const pendingCanvasRef = useRef<ReadonlyArray<CanvasContextSelection>>([]);
   const pendingPreviewRef = useRef<ReadonlyArray<PreviewContextSelection>>([]);
+  const pendingQuotesRef = useRef<ReadonlyArray<TranscriptQuoteChip>>([]);
+  const threadMentionsRestoreRef = useRef<
+    (chips: ReadonlyArray<ChatComposerThreadMentionChip>) => void
+  >(() => {});
   // Every composer command that carries the thread's expected version shares
   // one queue. Two of them dispatched before the first round trip returns
   // would otherwise both send the rendered version, so the second is rejected
@@ -313,6 +337,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     dialogueEnabled: true,
     ...(props.onOpenSideChat === undefined ? {} : { onSideChatOpened: props.onOpenSideChat }),
   });
+  threadMentionsRestoreRef.current = threadMentions.restore;
   const parallelReview = useLinkedThreadParallelReview({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -322,6 +347,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   pendingCanvasRef.current = pendingCanvasSelections;
   pendingPreviewRef.current = pendingPreviewSelections;
   pendingExtensionRef.current = props.pendingExtensionSelections ?? extensionDraft.receipts;
+  pendingQuotesRef.current = pendingQuotes;
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
@@ -535,10 +561,59 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     }).catch(() => undefined);
   }
 
-  const submitTurn = async (draft: string): Promise<boolean> => {
-    const claimedAttachments = pendingAttachmentsRef.current;
-    pendingAttachmentsRef.current = [];
-    const quotesForSend = pendingQuotes;
+  function consumeContext(context: ChatSendContext): void {
+    const attachmentIds = new Set(context.attachmentIds.map((id) => String(id)));
+    setPendingAttachments((current) => {
+      const next = current.filter((attachment) => !attachmentIds.has(String(attachment.id)));
+      pendingAttachmentsRef.current = next;
+      return next;
+    });
+    const previewIds = new Set(context.previewSelections.map((selection) => String(selection.id)));
+    setPendingPreviewSelections((current) =>
+      current.filter((selection) => !previewIds.has(String(selection.id))),
+    );
+    const quoteIds = new Set(context.quotes.map((quote) => quote.id));
+    setPendingQuotes((current) => current.filter((quote) => !quoteIds.has(quote.id)));
+    const canvasIds = new Set(context.canvasSelections.map((selection) => String(selection.id)));
+    if (props.pendingCanvasSelections === undefined) {
+      setLocalCanvasSelections((current) =>
+        current.filter((selection) => !canvasIds.has(String(selection.id))),
+      );
+    } else if (props.onRemoveCanvasSelection !== undefined) {
+      for (const selection of context.canvasSelections) {
+        props.onRemoveCanvasSelection(selection.id);
+      }
+    }
+    if (props.pendingExtensionSelections === undefined) {
+      for (const receipt of context.extensionReceipts) extensionDraft.remove(receipt.reference);
+    } else if (props.onRemoveExtensionSelection !== undefined) {
+      for (const receipt of context.extensionReceipts) {
+        props.onRemoveExtensionSelection(receipt.reference);
+      }
+    }
+    const mentionComposer = threadMentions.composer;
+    if (mentionComposer !== undefined) {
+      for (const threadId of context.threadMentionIds) mentionComposer.onRemoveChip(threadId);
+    }
+  }
+
+  const submitTurn = async (
+    draft: string,
+    steeredMessage?: ChatSteeredMessage,
+  ): Promise<boolean> => {
+    const deferred = steeredMessage !== undefined;
+    const claimedAttachments = deferred ? [] : pendingAttachmentsRef.current;
+    if (!deferred) pendingAttachmentsRef.current = [];
+    const quotesForSend = deferred ? steeredMessage.quotes : pendingQuotesRef.current;
+    const previewSelectionsForSend = deferred
+      ? steeredMessage.previewSelections
+      : pendingPreviewSelections;
+    const canvasSelectionsForSend = deferred
+      ? steeredMessage.canvasSelections
+      : pendingCanvasSelections;
+    const extensionReceiptsForSend = deferred
+      ? steeredMessage.extensionReceipts
+      : pendingExtensionRef.current;
     // A `#thread` chip names a thread; it never carries one. The turn
     // sends chip ids and the host resolves each one as the turn runs,
     // re-checking that the sender may still open it, so the message
@@ -547,10 +622,23 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     // report: a chip the host refuses is shown as unavailable rather
     // than silently dropped.
     const sendingThreadId = String(view.thread.id);
-    const threadMentionIds = await threadMentions.resolveForSend();
+    const threadMentionIds = deferred
+      ? steeredMessage.threadMentionIds
+      : await threadMentions.resolveForSend();
     if (activeThreadIdRef.current !== sendingThreadId) return false;
     const outgoing = formatOutgoingMessageWithQuotes({ draft, quotes: quotesForSend });
-    if (outgoing.trim().length === 0 && claimedAttachments.length === 0) return false;
+    const attachmentIds = deferred
+      ? steeredMessage.attachmentIds
+      : claimedAttachments.map((attachment) => attachment.id);
+    if (outgoing.trim().length === 0 && attachmentIds.length === 0) return false;
+    const context: ChatSendContext = {
+      attachmentIds,
+      canvasSelections: canvasSelectionsForSend,
+      extensionReceipts: extensionReceiptsForSend,
+      previewSelections: previewSelectionsForSend,
+      quotes: quotesForSend,
+      threadMentionIds,
+    };
     let sent = false;
     try {
       // Behind the same queue as a model or option change: a turn sent
@@ -562,10 +650,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       sent = await enqueueThreadCommand(async (previous) => ({
         value: await props.controller.sendTurn(
           outgoing,
-          claimedAttachments.map((attachment) => attachment.id),
-          pendingPreviewSelections,
-          pendingCanvasSelections,
-          pendingExtensionSelections.flatMap((item) =>
+          attachmentIds,
+          previewSelectionsForSend,
+          canvasSelectionsForSend,
+          extensionReceiptsForSend.flatMap((item) =>
             item.selection === undefined ? [] : [item.selection],
           ),
           threadMentionIds,
@@ -578,40 +666,20 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         ),
       }));
     } catch (error) {
-      recoverClaimedAttachments(
-        claimedAttachments,
-        mountedRef.current,
-        view.thread.id,
-        pendingAttachmentsRef,
-        discardAttachmentRef,
-      );
+      if (!deferred) {
+        recoverClaimedAttachments(
+          claimedAttachments,
+          mountedRef.current,
+          view.thread.id,
+          pendingAttachmentsRef,
+          discardAttachmentRef,
+        );
+      }
       throw error;
     }
     if (sent) {
-      // Remove exactly what this send claimed, and keep the claim ledger
-      // (the ref) in step with the visible chips: an upload that settled
-      // during the send's await window has already re-entered both, and
-      // clearing state alone would leave the ref holding a sent
-      // attachment plus an invisible new one for the next send to claim.
-      setPendingAttachments((current) => {
-        const claimed = new Set(claimedAttachments.map((attachment) => String(attachment.id)));
-        const next = current.filter((attachment) => !claimed.has(String(attachment.id)));
-        pendingAttachmentsRef.current = next;
-        return next;
-      });
-      setPendingPreviewSelections([]);
-      setPendingQuotes((current) => {
-        const sent = new Set(quotesForSend.map((quote) => quote.id));
-        return current.filter((quote) => !sent.has(quote.id));
-      });
-      if (props.pendingCanvasSelections === undefined) {
-        setLocalCanvasSelections([]);
-      } else {
-        props.onClearCanvasSelections?.();
-      }
-      if (props.pendingExtensionSelections === undefined) extensionDraft.clear();
-      threadMentions.clear();
-    } else {
+      consumeContext(context);
+    } else if (!deferred) {
       recoverClaimedAttachments(
         claimedAttachments,
         mountedRef.current,
@@ -622,7 +690,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     }
     return sent;
   };
-  submitTurnRef.current = submitTurn;
+  submitTurnRef.current = (message) => submitTurn(message.prompt, message);
 
   return (
     <section aria-label="Chat workspace" className="chat-workspace">
@@ -1032,12 +1100,31 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           // leaves the composer now and joins the transcript, and the host runs
           // it as soon as this thread stops running one.
           if (isSending) {
-            const steeredMessage: ChatSteeredMessage = {
+            const draftRevision = draftEditRevisionRef.current;
+            const snapshot = {
               id: globalThis.crypto.randomUUID(),
               prompt: draft,
+              attachmentIds: pendingAttachmentsRef.current.map((attachment) => attachment.id),
+              previewSelections: [...pendingPreviewRef.current],
+              canvasSelections: [...pendingCanvasRef.current],
+              quotes: [...pendingQuotesRef.current],
+              extensionReceipts: [...pendingExtensionRef.current],
+              threadMentionChips: [...threadMentions.chips],
+            };
+            // Resolve before steering so this message carries the host's
+            // availability receipt. The returned ids stay with this snapshot;
+            // a later edit must not replace them.
+            const threadMentionIds = await threadMentions.resolveForSend();
+            const steeredMessage: ChatSteeredMessage = {
+              ...snapshot,
+              threadMentionIds,
             };
             if (!steered.steer(steeredMessage)) return false;
-            props.controller.setPendingDraft("");
+            // The textarea remains editable while mention resolution is in
+            // flight. Never clear text typed after this send began.
+            if (draftEditRevisionRef.current === draftRevision) {
+              props.controller.setPendingDraft("");
+            }
             return true;
           }
           return await submitTurn(draft);

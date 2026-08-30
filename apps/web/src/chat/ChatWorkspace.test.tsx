@@ -11,6 +11,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Profiler, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ChatController } from "./useChatController";
 import { ChatWorkspace } from "./ChatWorkspace";
 
@@ -256,6 +258,19 @@ function viewWithQuotableReplies() {
       },
     ],
   });
+}
+
+function viewWithStreamingQuotableReplies() {
+  const view = viewWithQuotableReplies();
+  const turns = view.turns.map((turn, index) =>
+    index === view.turns.length - 1
+      ? {
+          ...turn,
+          attempts: turn.attempts.map((attempt) => ({ ...attempt, outcome: "streaming" as const })),
+        }
+      : turn,
+  );
+  return decodeChatThreadView({ ...view, turns });
 }
 
 /** Paste clipboard images into the composer the way the OS delivers them. */
@@ -667,6 +682,342 @@ describe("ChatWorkspace", () => {
 
     await waitFor(() => expect(screen.queryByText("Next step")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue("newest draft"));
+  });
+
+  it("uses only the context captured when steering and preserves later context", async () => {
+    const user = userEvent.setup();
+    let finish: ((value: boolean) => void) | undefined;
+    const sendTurn = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const upload = vi.fn(async (input: Parameters<ChatController["upload"]>[0]) => ({
+      id: input.attachmentId,
+      threadId: input.threadId,
+      displayName: input.displayName,
+      mediaType: input.mediaType as never,
+      byteLength: input.bytes.byteLength,
+      digest: "a".repeat(64) as never,
+      status: "finalized" as const,
+      createdAt: now as never,
+    }));
+    const firstMentionId = "00000000-0000-4000-8000-000000000951";
+    const secondMentionId = "00000000-0000-4000-8000-000000000952";
+    const firstCanvas = {
+      id: "00000000-0000-4000-8000-000000000955",
+      canvasId: "00000000-0000-4000-8000-000000000956",
+      versionId: "00000000-0000-4000-8000-000000000957",
+      sequence: 1,
+      displayName: "First canvas",
+      scope: "whole-canvas" as const,
+    } as CanvasContextSelection;
+    const secondCanvas = {
+      ...firstCanvas,
+      id: "00000000-0000-4000-8000-000000000958",
+      displayName: "Second canvas",
+    } as CanvasContextSelection;
+    const firstExtension = {
+      kind: "plugin" as const,
+      extensionId: "00000000-0000-4000-8000-000000000959",
+      packageId: "00000000-0000-4000-8000-000000000960",
+      componentId: "instructions",
+      packageVersion: "1.0.0",
+      packageDigest: `sha256:${"a".repeat(64)}`,
+      catalogEpoch: `sha256:${"b".repeat(64)}`,
+      origin: { kind: "draft" as const, reference: "@first" },
+    } as unknown as ExtensionSelection;
+    const secondExtension = {
+      ...firstExtension,
+      origin: { kind: "draft" as const, reference: "@second" },
+    } as unknown as ExtensionSelection;
+    const firstExtensionReceipt = {
+      reference: "@first",
+      label: "First extension",
+      selection: firstExtension,
+      status: { kind: "selected" as const },
+    };
+    const secondExtensionReceipt = {
+      reference: "@second",
+      label: "Second extension",
+      selection: secondExtension,
+      status: { kind: "selected" as const },
+    };
+    const threadMentionClient = {
+      search: vi.fn(async (_requestId: string, query: string) => [
+        {
+          threadId: query.toLowerCase().includes("second") ? secondMentionId : firstMentionId,
+          mode: "chat" as const,
+          title: query.toLowerCase().includes("second") ? "Second context" : "First context",
+          placement: { kind: "unfiled" as const },
+          updatedAt: now,
+        },
+      ]),
+      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
+      openSideChat: vi.fn(),
+      execute: vi.fn(),
+    } as unknown as ThreadMentionClient;
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      const [view, setView] = useState(viewWithQuotableReplies());
+      const [canvasSelections, setCanvasSelections] = useState([firstCanvas]);
+      const [extensionSelections, setExtensionSelections] = useState([firstExtensionReceipt]);
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+              upload,
+            })}
+            providerSnapshot={providerSnapshot()}
+            threadMentionClient={threadMentionClient}
+            pendingCanvasSelections={canvasSelections}
+            onRemoveCanvasSelection={(selectionId) =>
+              setCanvasSelections((current) =>
+                current.filter((selection) => selection.id !== selectionId),
+              )
+            }
+            pendingExtensionSelections={extensionSelections}
+            onRemoveExtensionSelection={(reference) =>
+              setExtensionSelections((current) =>
+                current.filter((selection) => selection.reference !== reference),
+              )
+            }
+          />
+          <button onClick={() => setView(viewWithStreamingQuotableReplies())} type="button">
+            Start turn
+          </button>
+          <button
+            onClick={() => {
+              setCanvasSelections([firstCanvas, secondCanvas]);
+              setExtensionSelections([firstExtensionReceipt, secondExtensionReceipt]);
+            }}
+            type="button"
+          >
+            Add later context
+          </button>
+          <button onClick={() => setView(viewWithQuotableReplies())} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+
+    const composer = screen.getByRole("textbox", { name: "Message" });
+    await user.type(composer, "#First");
+    await user.click(await screen.findByRole("option", { name: /First context/ }));
+    await user.type(composer, " first");
+    await addQuoteFromTranscript(user, "First quote excerpt.");
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["first"], "first.png", { type: "image/png" }),
+    );
+    await screen.findByText("first.png");
+
+    await user.click(screen.getByRole("button", { name: "Start turn" }));
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(threadMentionClient.resolve).toHaveBeenCalledOnce());
+    expect(sendTurn).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Add later context" }));
+    await user.clear(composer);
+    await user.type(composer, "#Second");
+    await user.click(await screen.findByRole("option", { name: /Second context/ }));
+    await user.type(composer, "second");
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["second"], "second.png", { type: "image/png" }),
+    );
+    await screen.findByText("second.png");
+
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    const firstAttachmentId = upload.mock.calls[0]![0].attachmentId;
+    const secondAttachmentId = upload.mock.calls[1]![0].attachmentId;
+    expect(sendTurn).toHaveBeenCalledWith(
+      expect.stringContaining("First quote excerpt."),
+      [firstAttachmentId],
+      [],
+      [firstCanvas],
+      [firstExtension],
+      [firstMentionId],
+    );
+
+    finish?.(true);
+    await waitFor(() => expect(screen.queryByText("first.png")).not.toBeInTheDocument());
+    expect(screen.getByText("second.png")).toBeInTheDocument();
+    expect(composer).toHaveValue("#[Second context] second");
+    expect(screen.getByText("Second canvas")).toBeInTheDocument();
+    expect(screen.getByText("Second extension")).toBeInTheDocument();
+    expect(secondAttachmentId).not.toBe(firstAttachmentId);
+  });
+
+  it("restores the original context when a deferred Chat send is refused", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi
+      .fn<ChatController["sendTurn"]>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const upload = vi.fn(async (input: Parameters<ChatController["upload"]>[0]) => ({
+      id: input.attachmentId,
+      threadId: input.threadId,
+      displayName: input.displayName,
+      mediaType: input.mediaType as never,
+      byteLength: input.bytes.byteLength,
+      digest: "a".repeat(64) as never,
+      status: "finalized" as const,
+      createdAt: now as never,
+    }));
+    const threadMentionId = "00000000-0000-4000-8000-000000000953";
+    const threadMentionClient = {
+      search: vi.fn(async () => [
+        {
+          threadId: threadMentionId,
+          mode: "chat" as const,
+          title: "Retry context",
+          placement: { kind: "unfiled" as const },
+          updatedAt: now,
+        },
+      ]),
+      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
+      openSideChat: vi.fn(),
+      execute: vi.fn(),
+    } as unknown as ThreadMentionClient;
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      const [view, setView] = useState(viewWithQuotableReplies());
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+              upload,
+            })}
+            providerSnapshot={providerSnapshot()}
+            threadMentionClient={threadMentionClient}
+          />
+          <button onClick={() => setView(viewWithStreamingQuotableReplies())} type="button">
+            Start turn
+          </button>
+          <button onClick={() => setView(viewWithQuotableReplies())} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+
+    const composer = screen.getByRole("textbox", { name: "Message" });
+    await user.type(composer, "#Retry");
+    await user.click(await screen.findByRole("option", { name: /Retry context/ }));
+    await user.type(composer, "retry this");
+    await addQuoteFromTranscript(user, "First quote excerpt.");
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["retry"], "retry.png", { type: "image/png" }),
+    );
+    await screen.findByText("retry.png");
+
+    await user.click(screen.getByRole("button", { name: "Start turn" }));
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    await waitFor(() => expect(composer).toHaveValue("#[Retry context] retry this"));
+    expect(screen.getByText("retry.png")).toBeInTheDocument();
+    expect(screen.getByText("Retry context")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledTimes(2));
+    const attachmentId = upload.mock.calls[0]![0].attachmentId;
+    expect(sendTurn).toHaveBeenLastCalledWith(
+      expect.stringContaining("First quote excerpt."),
+      [attachmentId],
+      [],
+      [],
+      [],
+      [threadMentionId],
+    );
+  });
+
+  it("does not clear a newer draft typed while mention resolution is pending", async () => {
+    const user = userEvent.setup();
+    let resolveMentions!: () => void;
+    const mentionResolution = new Promise<{ mentions: never[]; unavailable: never[] }>(
+      (resolve) => {
+        resolveMentions = () => resolve({ mentions: [], unavailable: [] });
+      },
+    );
+    const sendTurn = vi.fn(async () => true);
+    const threadMentionId = "00000000-0000-4000-8000-000000000954";
+    const threadMentionClient = {
+      search: vi.fn(async () => [
+        {
+          threadId: threadMentionId,
+          mode: "chat" as const,
+          title: "First context",
+          placement: { kind: "unfiled" as const },
+          updatedAt: now,
+        },
+      ]),
+      resolve: vi.fn(() => mentionResolution),
+      openSideChat: vi.fn(),
+      execute: vi.fn(),
+    } as unknown as ThreadMentionClient;
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      const [view, setView] = useState(viewWithStreamingQuotableReplies());
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+            })}
+            providerSnapshot={providerSnapshot()}
+            threadMentionClient={threadMentionClient}
+          />
+          <button onClick={() => setView(viewWithQuotableReplies())} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+
+    const composer = screen.getByRole("textbox", { name: "Message" });
+    await user.type(composer, "#First");
+    await user.click(await screen.findByRole("option", { name: /First context/ }));
+    await user.type(composer, "first");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(threadMentionClient.resolve).toHaveBeenCalledOnce());
+
+    await user.clear(composer);
+    await user.type(composer, "newer draft");
+    resolveMentions();
+    await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue("newer draft"));
+    expect(screen.getByText("#[First context] first")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    expect(sendTurn).toHaveBeenCalledWith(
+      "#[First context] first",
+      [],
+      [],
+      [],
+      [],
+      [threadMentionId],
+    );
+    expect(composer).toHaveValue("newer draft");
   });
 
   it("does not send a message into a thread whose composer has unmounted", async () => {
