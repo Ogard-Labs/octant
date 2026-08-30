@@ -44,6 +44,8 @@ export interface WorkComposerImages {
   readonly staged: ReadonlyArray<StagedWorkImage>;
   readonly message: string | undefined;
   readonly attach: (files: ReadonlyArray<File>) => void;
+  /** Restore image files detached for a send the host refused. */
+  readonly restore: (files: ReadonlyArray<File>) => void;
   readonly refuse: (message: string) => void;
   readonly remove: (id: string) => void;
   readonly takeForSend: () => ReadonlyArray<File>;
@@ -124,6 +126,13 @@ export function useWorkComposerImages(): WorkComposerImages {
     [apply],
   );
 
+  const restore = useCallback(
+    (files: ReadonlyArray<File>) => {
+      attach(files);
+    },
+    [attach],
+  );
+
   const remove = useCallback(
     (id: string) => {
       apply((list) => {
@@ -174,6 +183,7 @@ export function useWorkComposerImages(): WorkComposerImages {
     staged,
     message,
     attach,
+    restore,
     refuse: setMessage,
     remove,
     takeForSend,

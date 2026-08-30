@@ -43,6 +43,20 @@ The sidebar **Thread board** is a server-derived view of Work threads as Ready, 
 
 Work does not expose Code Git/terminal authority. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
+## Sending while a response is running
+
+The composer stays open while a response is streaming. Press Enter and the
+message is sent: it leaves the composer, joins the transcript at the end, and
+runs as soon as the response in progress stops — nothing to release, discard,
+or re-send by hand. A response that is cancelled or fails has also stopped, so
+the message runs then too.
+
+Only one message waits at a time. Anything typed after it stays in the
+composer as an ordinary draft. If the host refuses the message, its words come
+back to the composer — unless you have already typed something newer, which is
+kept instead. The waiting message lives on this client only; a restart drops it
+rather than sending it behind your back.
+
 ## Unsent drafts
 
 Each Work thread keeps one unsent composer draft on this client. Leaving the

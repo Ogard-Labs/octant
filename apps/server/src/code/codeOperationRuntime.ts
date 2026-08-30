@@ -1111,6 +1111,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     if (replay.status !== "ok") {
       active.state = "waiting";
+      // Nothing downstream reports an outcome for a turn that never reached the
+      // provider, so the record it opened has to be closed here or the board
+      // would read the thread as executing until the next restart.
+      this.#persistRuntimeWork(active, "waiting");
       return;
     }
     active.cursor = replay.nextCursor;
@@ -1287,13 +1291,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
-   * Move this turn's runtime work record to the turn's own state, so the board
-   * reports the thread as executing for exactly as long as the turn runs.
+   * Mirror the turn's live state into the thread's runtime work record.
    *
-   * The record is separate from the operation event the turn also writes: an
-   * operation event is the transcript of one turn, while this is the thread's
-   * live work as the board reads it. The transcript stays authoritative, which
-   * is why it is appended first.
+   * The Code board and the sidebar row both read runtime work, never the
+   * operation journal, so a turn that writes no record is reported as idle for
+   * its whole run: the card sits in Ready while the agent is working and the
+   * row falls through to an unread dot instead of Working.
+   *
+   * The record is also what restart reconciliation looks for. A `running`
+   * provider turn left behind by a killed host becomes `waiting` there, where
+   * an operation frame frozen mid-turn would claim the thread was executing
+   * forever.
    */
   #persistRuntimeWork(active: ActiveTurn, state: CodeTurnOutcome): void {
     this.#runtimeWork.settle({

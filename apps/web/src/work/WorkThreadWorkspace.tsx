@@ -4,6 +4,8 @@ import {
   decodeWorkMutationRequestId,
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
+  type MentionableThreadId,
+  type WorkAttachmentId,
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
@@ -11,10 +13,12 @@ import {
 } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { PickerGroup } from "@octant/domain";
+import type { ChatComposerThreadMentionChip } from "../chat/ChatComposer";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
+import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
 import { Check, Globe2, Paperclip } from "lucide-react";
 import {
   useCallback,
@@ -32,8 +36,8 @@ import {
   type ComposerThreadDraftStore,
 } from "../composer/composerThreadDraftStore";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
-import { useQueuedSend } from "../composer/useQueuedSend";
-import type { TurnSettlement } from "../composer/queuedSend";
+import { useSteeredSend } from "../composer/useSteeredSend";
+import type { TurnSettlement } from "../composer/steeredSend";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -62,6 +66,25 @@ import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceCompos
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 
+/**
+ * A message the user sent while a turn was still running.
+ *
+ * The prompt and every context selection travel with it. Context is detached
+ * from the composer before a second draft can start, then restored if this
+ * message is refused so the sent message never borrows a later draft.
+ */
+interface WorkSteeredMessage {
+  readonly id: string;
+  readonly originRestore: (message: WorkSteeredMessage) => void;
+  readonly threadKey: string;
+  readonly prompt: string;
+  readonly images: ReadonlyArray<File>;
+  readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+  readonly threadMentionChips: ReadonlyArray<ChatComposerThreadMentionChip>;
+  readonly fileMentionPaths: ReadonlyArray<string>;
+  readonly draftRevision: number;
+}
+
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
   readonly threadId: WorkThreadId;
@@ -71,6 +94,8 @@ export interface WorkThreadWorkspaceProps {
   readonly mutationClient?: WorkMutationClient;
   readonly onOpenBrowser?: () => void;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
+  readonly threadMentionClient?: ThreadMentionClient;
+  readonly fileMentionClient?: FileMentionClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
@@ -119,16 +144,21 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [completionEvidence, setCompletionEvidence] = useState("");
   const transcriptGeneration = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const sendQueuedRef = useRef<() => Promise<boolean>>(async () => false);
+  const currentThreadKeyRef = useRef(String(props.threadId));
+  currentThreadKeyRef.current = String(props.threadId);
+  const sendSteeredRef = useRef<(message: WorkSteeredMessage) => Promise<boolean>>(
+    async () => false,
+  );
   const mentionListId = useId();
   const fileMentionListId = useId();
   const trimmed = prompt.trim();
   const completionLocked = thread?.completionConfirmed === true;
-  const queued = useQueuedSend({
+  const steered = useSteeredSend<WorkSteeredMessage>({
     threadKey: String(props.threadId),
     settlement: workTurnSettlement(turns),
     ready: !providerChanging && !creating && !completionLocked,
-    send: () => sendQueuedRef.current(),
+    send: (message) => sendSteeredRef.current(message),
+    restore: (message) => message.originRestore(message),
   });
   const turnRunning = workTurnSettlement(turns) === "running";
   const images = useWorkComposerImages();
@@ -137,6 +167,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(thread === undefined ? {} : { modelId: thread.modelId }),
   });
   const threadMentions = useThreadMentions({
+    ...(props.threadMentionClient === undefined ? {} : { client: props.threadMentionClient }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
@@ -149,6 +180,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     disabled: creating || completionLocked,
   });
   const fileMentions = useWorkFileMentions({
+    ...(props.fileMentionClient === undefined ? {} : { client: props.fileMentionClient }),
     threadId: props.threadId,
     draft: prompt,
     onDraftChange: composerDraft.setDraft,
@@ -161,12 +193,16 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     trimmed.length > 0 &&
     !creating &&
     !completionLocked &&
+    steered.pending === undefined &&
     projectId !== undefined &&
     (props.turnClient !== undefined || props.mutationClient !== undefined);
 
+  // A confirmed completion means this thread will never run the message, so it
+  // goes back to the composer instead of waiting for a settlement that is not
+  // coming.
   useEffect(() => {
-    if (completionLocked) queued.discard();
-  }, [completionLocked, queued.discard]);
+    if (completionLocked) steered.drop();
+  }, [completionLocked, steered.drop]);
 
   useEffect(() => {
     const requestGeneration = ++transcriptGeneration.current;
@@ -301,117 +337,173 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     [props.threadClient, providerChanging, thread],
   );
 
-  const sendWorkTurn = useCallback(async (): Promise<boolean> => {
-    if (
-      thread !== undefined &&
-      thread.bindingRevisionId === undefined &&
-      props.turnClient !== undefined
-    ) {
-      setErrorMessage(
-        "This Work thread must be rebound before sending a follow-up. The Project folder is no longer authorized for this thread.",
-      );
-      return false;
-    }
-    if (
-      thread === undefined ||
-      thread.completionConfirmed === true ||
-      providerChanging ||
-      props.turnClient === undefined ||
-      thread.bindingRevisionId === undefined ||
-      projectId === undefined
-    ) {
-      return false;
-    }
-    const promptText = composerDraft.text.trim();
-    if (promptText.length === 0) return false;
-    const sendingThreadId = String(thread.id);
-    setCreating(true);
-    setErrorMessage(undefined);
-    setStatus(undefined);
-    try {
-      if (String(props.threadId) !== sendingThreadId) return false;
-      const threadMentionIds = await threadMentions.resolveForSend();
-      const staged = images.filesForSend();
-      const attachmentIds = [];
-      for (const file of staged) {
-        const attachmentId = decodeWorkAttachmentId(globalThis.crypto.randomUUID());
-        await props.turnClient.putAttachment({
-          threadId: props.threadId,
-          attachmentId,
-          displayName: file.name.trim() === "" ? "Pasted image" : file.name,
-          mediaType: decodeWorkAttachmentMediaType(file.type),
-          bytes: new Uint8Array(await file.arrayBuffer()),
-        });
-        attachmentIds.push(attachmentId);
-      }
-      const started = await props.turnClient.startFirstTurn({
-        kind: "start-work-thread-turn",
-        requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
-        threadId: props.threadId,
-        turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
-        prompt: promptText,
-        authority: {
-          hostId: props.hostId ?? LOCAL_HOST_ID,
-          projectId,
-          bindingRevisionId: thread.bindingRevisionId,
-          workingDirectory: thread.workingDirectory ?? ("." as never),
-          confinementPosture: "project-root-confined",
-          providerInstanceId: thread.providerInstanceId,
-          modelId: thread.modelId,
-        },
-        ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
-        ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
-        ...(fileMentions.selectedPaths.length === 0
-          ? {}
-          : { fileMentionPaths: [...fileMentions.selectedPaths] }),
-      });
-      if (started.kind !== "accepted") {
-        setErrorMessage("The Work turn could not be started.");
+  const sendWorkTurn = useCallback(
+    async (message?: WorkSteeredMessage): Promise<boolean> => {
+      if (
+        thread !== undefined &&
+        thread.bindingRevisionId === undefined &&
+        props.turnClient !== undefined
+      ) {
+        setErrorMessage(
+          "This Work thread must be rebound before sending a follow-up. The Project folder is no longer authorized for this thread.",
+        );
         return false;
       }
-      images.clearAfterAccepted();
-      composerDraft.clear();
-      threadMentions.clear();
-      fileMentions.clear();
-      setTurns((current) => [...current, started.turn]);
-      textareaRef.current?.focus();
-      return true;
-    } catch {
-      setErrorMessage("The Work turn could not be started.");
-      return false;
-    } finally {
-      setCreating(false);
-    }
-  }, [
-    composerDraft,
-    fileMentions,
-    images,
-    projectId,
-    props.hostId,
-    props.threadId,
-    props.turnClient,
-    providerChanging,
-    thread,
-    threadMentions,
-  ]);
-  sendQueuedRef.current = sendWorkTurn;
+      if (
+        thread === undefined ||
+        thread.completionConfirmed === true ||
+        providerChanging ||
+        props.turnClient === undefined ||
+        thread.bindingRevisionId === undefined ||
+        projectId === undefined
+      ) {
+        return false;
+      }
+      const promptText = (message?.prompt ?? composerDraft.text).trim();
+      if (promptText.length === 0) return false;
+      const sendingThreadId = String(thread.id);
+      const draftRevision = composerDraft.revisionFor(String(props.threadId));
+      const attachmentIds: WorkAttachmentId[] = [];
+      const discardUploadedAttachments = async (): Promise<void> => {
+        await Promise.allSettled(
+          attachmentIds.map((attachmentId) =>
+            props.turnClient?.discardAttachment(props.threadId, attachmentId),
+          ),
+        );
+      };
+      setCreating(true);
+      setErrorMessage(undefined);
+      setStatus(undefined);
+      try {
+        if (String(props.threadId) !== sendingThreadId) return false;
+        const staged = message?.images ?? images.filesForSend();
+        const fileMentionPaths = message?.fileMentionPaths ?? [...fileMentions.selectedPaths];
+        const threadMentionIds =
+          message?.threadMentionIds ?? (await threadMentions.resolveForSend());
+        for (const file of staged) {
+          const attachmentId = decodeWorkAttachmentId(globalThis.crypto.randomUUID());
+          await props.turnClient.putAttachment({
+            threadId: props.threadId,
+            attachmentId,
+            displayName: file.name.trim() === "" ? "Pasted image" : file.name,
+            mediaType: decodeWorkAttachmentMediaType(file.type),
+            bytes: new Uint8Array(await file.arrayBuffer()),
+          });
+          attachmentIds.push(attachmentId);
+        }
+        const started = await props.turnClient.startFirstTurn({
+          kind: "start-work-thread-turn",
+          requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
+          threadId: props.threadId,
+          turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
+          prompt: promptText,
+          authority: {
+            hostId: props.hostId ?? LOCAL_HOST_ID,
+            projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            workingDirectory: thread.workingDirectory ?? ("." as never),
+            confinementPosture: "project-root-confined",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          },
+          ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+          ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
+          ...(fileMentionPaths.length === 0 ? {} : { fileMentionPaths: [...fileMentionPaths] }),
+        });
+        if (started.kind !== "accepted") {
+          await discardUploadedAttachments();
+          setErrorMessage("The Work turn could not be started.");
+          return false;
+        }
+        if (message === undefined) {
+          images.clearAfterAccepted();
+          threadMentions.clear();
+          fileMentions.clear();
+          // Do not clear text typed while this send was resolving, even when it
+          // happens to be identical to the text this send carried.
+          if (composerDraft.revisionFor(String(props.threadId)) === draftRevision) {
+            composerDraft.clear();
+          }
+        }
+        setTurns((current) => [...current, started.turn]);
+        textareaRef.current?.focus();
+        return true;
+      } catch {
+        await discardUploadedAttachments();
+        setErrorMessage("The Work turn could not be started.");
+        return false;
+      } finally {
+        setCreating(false);
+      }
+    },
+    [
+      composerDraft,
+      fileMentions,
+      images,
+      projectId,
+      props.hostId,
+      props.threadId,
+      props.turnClient,
+      providerChanging,
+      thread,
+      threadMentions,
+    ],
+  );
+  sendSteeredRef.current = (message) => sendWorkTurn(message);
+  const restoreWorkMessage = useCallback(
+    (message: WorkSteeredMessage): void => {
+      const originThreadKey = message.threadKey;
+      // A newer draft the user typed while this one waited is the one worth
+      // keeping. The revision check also catches a user who typed the same words
+      // again, rather than mistaking identical text for an unchanged draft.
+      if (composerDraft.revisionFor(originThreadKey) !== message.draftRevision + 1) {
+        return;
+      }
+      composerDraft.writeFor(originThreadKey, message.prompt);
+      // A navigation can reuse this hook instance for another thread. Restore
+      // text into the originating draft store, but never attach its context to
+      // the newly selected thread's composer.
+      if (currentThreadKeyRef.current !== originThreadKey) return;
+      images.restore(message.images);
+      threadMentions.restore(message.threadMentionChips);
+      fileMentions.restore(message.fileMentionPaths);
+    },
+    [composerDraft, fileMentions, images, threadMentions],
+  );
 
   const submit = useCallback(async () => {
+    if (steered.pending !== undefined) return;
     if (turnRunning) {
-      queued.enqueue();
-      return;
-    }
-    if (queued.state.status === "held") {
-      const sent = await sendWorkTurn();
-      if (sent) queued.discard();
+      // Sending during a running turn is still sending: the message leaves the
+      // composer now and joins the transcript, and the host runs it as soon as
+      // this thread stops running one.
+      if (!canSubmit) return;
+      const threadMentionChips = [...threadMentions.chips];
+      const steeredMessage: WorkSteeredMessage = {
+        id: globalThis.crypto.randomUUID(),
+        originRestore: restoreWorkMessage,
+        threadKey: String(props.threadId),
+        prompt: trimmed,
+        images: images.filesForSend(),
+        threadMentionIds: threadMentionChips.map((chip) => chip.threadId),
+        threadMentionChips,
+        fileMentionPaths: [...fileMentions.selectedPaths],
+        draftRevision: composerDraft.revisionFor(String(props.threadId)),
+      };
+      if (!steered.steer(steeredMessage)) return;
+      // Detach this message's context before the user can start a second draft;
+      // a refused send restores it through the same public hook APIs.
+      images.takeForSend();
+      threadMentions.clear();
+      fileMentions.clear();
+      composerDraft.clear();
       return;
     }
     if (!canSubmit || projectId === undefined) {
       return;
     }
     if (props.turnClient !== undefined) {
-      const sent = await sendWorkTurn();
-      if (sent) queued.discard();
+      await sendWorkTurn();
       return;
     }
     if (props.mutationClient === undefined) return;
@@ -445,8 +537,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     projectId,
     props.mutationClient,
     props.turnClient,
-    queued,
     sendWorkTurn,
+    steered,
     trimmed,
     turnRunning,
   ]);
@@ -619,6 +711,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               )),
             )
           )}
+          {steered.pending === undefined ? null : (
+            <article className="work-thread-workspace__message">
+              <strong>You</strong>
+              <TrackerReferenceText asParagraph text={steered.pending.prompt} />
+            </article>
+          )}
           {pendingRequests.map((request) => (
             <article
               className="work-thread-workspace__message"
@@ -734,7 +832,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 }}
                 placeholder={
                   turnRunning
-                    ? "Queue the next message…"
+                    ? "Send the next message…"
                     : "Describe the deliverable or paste a draft…"
                 }
                 ref={textareaRef}
@@ -828,31 +926,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               actions: {
                 kind: "send",
                 send: {
-                  ariaLabel: turnRunning
-                    ? "Queue message"
-                    : queued.state.status === "held"
-                      ? "Send message"
-                      : props.turnClient === undefined
-                        ? "Create artifact"
-                        : "Send follow-up",
+                  ariaLabel:
+                    props.turnClient === undefined && !turnRunning
+                      ? "Create artifact"
+                      : "Send follow-up",
                   disabled: !canSubmit,
                   onSend: () => void submit(),
                 },
-                ...(queued.state.status === "idle"
-                  ? {}
-                  : {
-                      discard: {
-                        ariaLabel: "Discard queued message",
-                        onDiscard: () => {
-                          queued.discard();
-                          composerDraft.clear();
-                          threadMentions.clear();
-                          fileMentions.clear();
-                          images.clearAfterAccepted();
-                        },
-                      },
-                    }),
-                sendHidden: queued.state.status === "queued",
               },
             }}
           />
@@ -861,16 +941,16 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               {errorMessage}
             </p>
           )}
-          {queued.statusMessage === undefined ? null : (
+          {steered.pending === undefined ? null : (
             <p className="draft-thread__hint" role="status">
-              {queued.statusMessage}
+              Sent. It runs when the turn in progress finishes.
             </p>
           )}
           <p className="draft-thread__hint">
             {completionLocked
               ? "Reactivate this Work thread before creating another artifact or changing its provider."
               : turnRunning
-                ? "Press Enter to queue the next message · Shift+Enter for a new line"
+                ? "Press Enter to send · it runs when this response finishes · Shift+Enter for a new line"
                 : props.turnClient === undefined
                   ? "Press Enter to save a markdown artifact · Shift+Enter for a new line"
                   : "Press Enter to send · Shift+Enter for a new line · Type # to mention a thread, @ to mention a file"}

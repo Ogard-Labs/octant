@@ -27,6 +27,7 @@ import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { buildChatThreadNavigation, type ChatThreadNavigationItem } from "../shell/navigationModel";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
 
 export type ChatControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 
@@ -111,77 +112,23 @@ export interface ChatControllerOptions {
   readonly windowCapability?: string;
 }
 
-export interface ChatReadCursorStore {
-  readonly getSnapshot: () => ReadonlyMap<string, number>;
-  /**
-   * Thread ids the user explicitly asked to read as unread, over and above the
-   * cursor comparison. A thread with no sequence advanced this sitting has
-   * nothing for a dropped cursor to resurface — zero over zero — so the
-   * explicit request is held here until the next mark spends it. Deliberately
-   * shaped like Code's store: unread is the same sitting-scoped idea in both
-   * modes.
-   */
-  readonly getMarkedUnread: () => ReadonlySet<string>;
-  readonly mark: (threadId: ChatThreadId, sequence: number) => void;
-  /**
-   * Drops what this sitting has seen of a thread, so it reads as unread again
-   * — and holds it unread even when no sequence advanced. The cursor only
-   * ever moves forward on its own — a refresh must never spend a mark the user
-   * did not see — but a person asking for the thread back in their unread list
-   * is not the refresh path.
-   */
-  readonly unmark: (threadId: ChatThreadId) => void;
-  readonly subscribe: (listener: () => void) => () => void;
-}
+/** Chat keeps its own record, so Code's cursors never read as Chat's. */
+const CHAT_READ_CURSOR_STORAGE_KEY = "octant.chat.readCursors.v1";
 
-export function createChatReadCursorStore(): ChatReadCursorStore {
-  let snapshot: ReadonlyMap<string, number> = new Map();
-  let markedUnread: ReadonlySet<string> = new Set();
-  const listeners = new Set<() => void>();
-  const announce = () => {
-    for (const listener of listeners) listener();
-  };
-  return {
-    getSnapshot: () => snapshot,
-    getMarkedUnread: () => markedUnread,
-    mark: (threadId, sequence) => {
-      const key = String(threadId);
-      // Reading a thread with no new sequence still spends an explicit unread
-      // mark: the cursor has nowhere to move, but the user has now seen what
-      // they asked to be reminded of.
-      const spendsUnreadMark = markedUnread.has(key);
-      if (spendsUnreadMark) {
-        const nextMarked = new Set(markedUnread);
-        nextMarked.delete(key);
-        markedUnread = nextMarked;
-      }
-      if (sequence > (snapshot.get(key) ?? 0)) {
-        const next = new Map(snapshot);
-        next.set(key, sequence);
-        snapshot = next;
-      } else if (!spendsUnreadMark) {
-        return;
-      }
-      announce();
-    },
-    unmark: (threadId) => {
-      const key = String(threadId);
-      if (!snapshot.has(key) && markedUnread.has(key)) return;
-      if (snapshot.has(key)) {
-        const next = new Map(snapshot);
-        next.delete(key);
-        snapshot = next;
-      }
-      const nextMarked = new Set(markedUnread);
-      nextMarked.add(key);
-      markedUnread = nextMarked;
-      announce();
-    },
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-  };
+/**
+ * Chat's read cursors. The store itself is shared with Code — unread is the
+ * same idea in both modes — and survives a relaunch, so a thread the user read
+ * yesterday does not come back unread today.
+ */
+export type ChatReadCursorStore = ReadCursorStore<ChatThreadId>;
+
+export function createChatReadCursorStore(
+  storage?: Pick<Storage, "getItem" | "setItem"> | undefined,
+): ChatReadCursorStore {
+  return createReadCursorStore<ChatThreadId>({
+    storageKey: CHAT_READ_CURSOR_STORAGE_KEY,
+    ...(storage === undefined ? {} : { storage }),
+  });
 }
 
 export function useChatController(options: ChatControllerOptions) {

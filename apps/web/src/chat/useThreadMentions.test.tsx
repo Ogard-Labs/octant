@@ -74,6 +74,21 @@ function Harness(props: {
       <button onClick={mentions.clear} type="button">
         clear
       </button>
+      <button
+        onClick={() =>
+          mentions.restore([
+            {
+              threadId: "thread-1" as never,
+              title: "Release notes",
+              mode: "work",
+              placementLabel: "Launch",
+            },
+          ])
+        }
+        type="button"
+      >
+        restore
+      </button>
       <output aria-label="chips">
         {mentions.chips
           .map((chip) => `${chip.title}|${chip.placementLabel}|${chip.unavailableReason ?? "ok"}`)
@@ -250,6 +265,16 @@ describe("useThreadMentions", () => {
     });
 
     expect(screen.getByLabelText("chips")).toHaveTextContent("");
+  });
+
+  it("restores captured chip metadata for a refused send", async () => {
+    const user = userEvent.setup();
+    render(<Harness client={stubClient()} initialDraft="#[Release notes]" />);
+    await user.click(screen.getByRole("button", { name: "pick" }));
+    await user.click(screen.getByRole("button", { name: "clear" }));
+    await user.click(screen.getByRole("button", { name: "restore" }));
+
+    expect(screen.getByLabelText("chips")).toHaveTextContent("Release notes|Launch|ok");
   });
 
   it("offers no mention surface when no client is reachable", () => {

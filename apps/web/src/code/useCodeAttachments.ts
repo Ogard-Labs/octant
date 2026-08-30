@@ -18,6 +18,13 @@ export interface StagedCodeAttachment {
   readonly previewUrl: string;
 }
 
+interface DetachedCodeAttachment {
+  readonly attachment: StagedCodeAttachment;
+  readonly client: Pick<CodeClient, "discardAttachment">;
+  readonly inFlight: boolean;
+  readonly threadId: CodeThreadId | undefined;
+}
+
 export interface CodeAttachments {
   readonly staged: ReadonlyArray<StagedCodeAttachment>;
   readonly message: string | undefined;
@@ -27,6 +34,16 @@ export interface CodeAttachments {
   /** Refuse an attachment the composer itself knows this turn cannot carry. */
   readonly refuse: (message: string) => void;
   readonly remove: (attachmentId: CodeAttachmentId) => void;
+  /** Detach the current images for a message that is waiting to start. */
+  readonly detachForSend: () => ReadonlyArray<StagedCodeAttachment>;
+  /** Put detached images back after the host refuses their message. */
+  readonly restoreDetached: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
+  /** Keep detached images out of the composer after the host accepts them. */
+  readonly commitDetached: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
+  /** Mark detached images as owned by an in-flight host request. */
+  readonly markDetachedInFlight: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
+  /** Discard detached host attachments when a refused message is superseded. */
+  readonly discardDetached: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
   /** The references a send would carry right now, without clearing the chips. */
   readonly peekForSend: () => ReadonlyArray<CodeAttachmentReference>;
   /**
@@ -66,6 +83,7 @@ export function useCodeAttachments(input: {
   // Uploads land one after another, so the list has to be readable between
   // awaits — not only at the next render.
   const current = useRef<ReadonlyArray<StagedCodeAttachment>>([]);
+  const detached = useRef<ReadonlyArray<DetachedCodeAttachment>>([]);
   const inFlight = useRef(0);
 
   const apply = useCallback(
@@ -95,6 +113,17 @@ export function useCodeAttachments(input: {
     () => () => {
       for (const previewUrl of previews.current) URL.revokeObjectURL(previewUrl);
       previews.current.clear();
+      const inFlight = detached.current.filter((entry) => entry.inFlight);
+      for (const entry of detached.current) {
+        // An accepted host request may still be using these ids after the
+        // surface unmounts; its completion owns the eventual commit/discard.
+        if (entry.inFlight) continue;
+        if (entry.threadId === undefined) continue;
+        void entry.client
+          .discardAttachment(entry.threadId, entry.attachment.reference.attachmentId)
+          .catch(() => undefined);
+      }
+      detached.current = inFlight;
     },
     [],
   );
@@ -162,6 +191,85 @@ export function useCodeAttachments(input: {
     [apply, client, forget, threadId],
   );
 
+  function releaseDetached(attachments: ReadonlyArray<StagedCodeAttachment>): void {
+    const ids = new Set(attachments.map((entry) => String(entry.reference.attachmentId)));
+    detached.current = detached.current.filter(
+      (entry) => !ids.has(String(entry.attachment.reference.attachmentId)),
+    );
+  }
+
+  const detachForSend = useCallback((): ReadonlyArray<StagedCodeAttachment> => {
+    const entries = current.current;
+    current.current = [];
+    setStaged([]);
+    setMessage(undefined);
+    detached.current = entries.map((attachment) => ({
+      attachment,
+      client,
+      inFlight: false,
+      threadId,
+    }));
+    return entries;
+  }, [client, threadId]);
+
+  const restoreDetached = useCallback(
+    (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
+      if (attachments.length === 0) return;
+      releaseDetached(attachments);
+      apply((list) => {
+        const existing = new Set(list.map((entry) => String(entry.reference.attachmentId)));
+        return [
+          ...attachments.filter((entry) => !existing.has(String(entry.reference.attachmentId))),
+          ...list,
+        ];
+      });
+    },
+    [apply],
+  );
+
+  const commitDetached = useCallback(
+    (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
+      releaseDetached(attachments);
+      for (const attachment of attachments) forget(attachment.previewUrl);
+    },
+    [forget],
+  );
+
+  const markDetachedInFlight = useCallback((attachments: ReadonlyArray<StagedCodeAttachment>) => {
+    const ids = new Set(attachments.map((entry) => String(entry.reference.attachmentId)));
+    detached.current = detached.current.map((entry) =>
+      ids.has(String(entry.attachment.reference.attachmentId))
+        ? { ...entry, inFlight: true }
+        : entry,
+    );
+  }, []);
+
+  const discardDetached = useCallback(
+    (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
+      const ids = new Set(attachments.map((entry) => String(entry.reference.attachmentId)));
+      const owned = detached.current.filter((entry) =>
+        ids.has(String(entry.attachment.reference.attachmentId)),
+      );
+      releaseDetached(attachments);
+      for (const attachment of attachments) {
+        forget(attachment.previewUrl);
+        const owner = owned.find(
+          (entry) =>
+            String(entry.attachment.reference.attachmentId) ===
+            String(attachment.reference.attachmentId),
+        );
+        if (owner?.threadId === undefined) continue;
+        void owner.client
+          .discardAttachment(owner.threadId, attachment.reference.attachmentId)
+          .catch(() => {
+            // A refused message that was superseded must not keep its bytes in the
+            // composer; a later host recovery can clean up a failed discard.
+          });
+      }
+    },
+    [client, forget, threadId],
+  );
+
   const peekForSend = useCallback(
     (): ReadonlyArray<CodeAttachmentReference> => current.current.map((entry) => entry.reference),
     [],
@@ -189,6 +297,11 @@ export function useCodeAttachments(input: {
     attach,
     refuse: setMessage,
     remove,
+    detachForSend,
+    restoreDetached,
+    commitDetached,
+    markDetachedInFlight,
+    discardDetached,
     peekForSend,
     peekAbandoned,
     takeForSend,

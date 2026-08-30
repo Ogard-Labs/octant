@@ -29,6 +29,7 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
+import { CodeProjection, readCodeRuntimeWorks } from "../persistence/codeProjection";
 import { CODE_OPERATION_EVENT_RECORDED } from "./codeOperationEventStore";
 import { createCodeOperationRuntime } from "./codeOperationRuntime";
 import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
@@ -429,6 +430,39 @@ describe("CodeOperationRuntime", () => {
       requestId: "provider-approval-narrowed",
       approved: true,
     });
+    fixture.close();
+  });
+
+  it("reports a thread as executing for exactly as long as its provider turn runs", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    expect(fixture.boardActivity()).toMatchObject({ executing: false });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(30),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(fixture.boardActivity()).toMatchObject({ executing: true, awaitingInput: false });
+
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+    await vi.waitFor(() =>
+      expect(fixture.boardActivity()).toMatchObject({
+        executing: false,
+        awaitingInput: false,
+        interrupted: false,
+      }),
+    );
     fixture.close();
   });
 
@@ -1082,7 +1116,9 @@ function runtimeFixture(options: {
     registry: new EventRegistry()
       .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
       .register(CODE_RUNTIME_WORK_UPDATED, 1, CodeRuntimeWorkUpdated),
-    projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+    projections: new ProjectionRegistry()
+      .register(new AggregateHeadsProjection())
+      .register(new CodeProjection()),
     clock: () => now,
   });
   let activeThread = thread();
@@ -1220,23 +1256,8 @@ function runtimeFixture(options: {
           const { work } = envelope.payload as { readonly work: CodeRuntimeWork };
           return { id: String(work.id), kind: work.kind, state: work.state };
         }),
-    /** The board activity those records add up to, as the board derives it. */
-    boardActivity: () => {
-      const latest = new Map<string, { work: CodeRuntimeWork; firstSequence: number }>();
-      for (const envelope of journal.replayAggregateType({
-        aggregateType: "code-runtime",
-        afterSequence: 0,
-        limit: 1_000,
-      })) {
-        const { work } = envelope.payload as { readonly work: CodeRuntimeWork };
-        const seen = latest.get(String(work.id));
-        latest.set(String(work.id), {
-          work,
-          firstSequence: seen?.firstSequence ?? envelope.globalSequence,
-        });
-      }
-      return boardRuntimeActivityFromWorks([...latest.values()]);
-    },
+    /** The board reads the rebuildable Code projection, not journal history. */
+    boardActivity: () => boardRuntimeActivityFromWorks(readCodeRuntimeWorks(connection, threadId)),
     close: () => connection.close(),
   };
 }

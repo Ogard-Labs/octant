@@ -18,6 +18,20 @@ The server validates that the folder exists and the renderer receives an opaque 
 
 A Code Project can remember how new threads should start: in **this Project's current checkout**, or in **a managed worktree Octant creates**. The default is the current checkout, which creates no worktree the owner did not ask for. Set the habit from the Project overview; the composer still lets one thread override it without rewriting the Project. Desktop and phone both inherit that default, and the new thread shows which root it bound. A missing or unauthorized root fails closed instead of inventing a worktree.
 
+## Sending while a response is running
+
+The composer stays open while a response is streaming. Press Enter and the
+message is sent: it leaves the composer, joins the transcript at the end, and
+runs as soon as the response in progress stops — nothing to release, discard,
+or re-send by hand. A response that is cancelled or fails has also stopped, so
+the message runs then too.
+
+Only one message waits at a time. Anything typed after it stays in the
+composer as an ordinary draft. If the host refuses the message, its words come
+back to the composer — unless you have already typed something newer, which is
+kept instead. The waiting message lives on this client only; a restart drops it
+rather than sending it behind your back.
+
 ## Unsent drafts
 
 Each Code thread keeps one unsent composer draft on this client. Leaving the
