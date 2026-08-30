@@ -71,7 +71,7 @@ export function useSteeredSend<Message>(input: UseSteeredSendInput<Message>): St
     const current = stateRef.current;
     const next = disarmSteeredSend(current, input.threadKey);
     if (next === current) return;
-    if (current.status === "steering") restorePending(current.message);
+    if (current.status === "steering" && !firing.current) restorePending(current.message);
     setState(next);
   }, [input.threadKey, restorePending]);
 
@@ -92,24 +92,25 @@ export function useSteeredSend<Message>(input: UseSteeredSendInput<Message>): St
       const threadKey = input.threadKey;
       if (threadKey === undefined) return;
       const message = state.message;
+      const restore = restoreForPendingRef.current;
       firing.current = true;
       void (async () => {
         let sent = false;
         try {
-          if (threadKeyRef.current !== threadKey) return;
-          sent = await sendRef.current(message);
+          if (threadKeyRef.current === threadKey) sent = await sendRef.current(message);
         } catch {
           sent = false;
         } finally {
           firing.current = false;
           setRelease((current) => current + 1);
         }
-        if (threadKeyRef.current !== threadKey) return;
         if (sent) {
+          if (restoreForPendingRef.current === restore) restoreForPendingRef.current = undefined;
+        } else if (restoreForPendingRef.current === restore && restore !== undefined) {
           restoreForPendingRef.current = undefined;
-        } else {
-          restorePending(message);
+          restore(message);
         }
+        if (threadKeyRef.current !== threadKey) return;
         setState((current) =>
           current.status === "steering" && current.threadKey === threadKey
             ? EMPTY_STEERED_SEND

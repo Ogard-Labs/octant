@@ -8,21 +8,31 @@ interface Message {
 }
 
 const message: Message = { prompt: "and then run the tests" };
+const noopRestore = (): void => {};
+
+interface HarnessProps {
+  readonly settlement: TurnSettlement | "idle";
+  readonly threadKey: string;
+  readonly restore?: (message: Message) => void;
+}
 
 function harness(input: {
   readonly send: (message: Message) => Promise<boolean>;
   readonly restore?: (message: Message) => void;
-  readonly threadKey?: string;
 }) {
+  const initialProps: HarnessProps =
+    input.restore === undefined
+      ? { settlement: "running", threadKey: "thread-a" }
+      : { settlement: "running", threadKey: "thread-a", restore: input.restore };
   return renderHook(
-    (props: { settlement: TurnSettlement | "idle"; threadKey: string }) =>
+    (props: HarnessProps) =>
       useSteeredSend<Message>({
         threadKey: props.threadKey,
         settlement: props.settlement,
         send: input.send,
-        restore: input.restore ?? (() => {}),
+        restore: props.restore ?? input.restore ?? noopRestore,
       }),
-    { initialProps: { settlement: "running" as TurnSettlement | "idle", threadKey: "thread-a" } },
+    { initialProps },
   );
 }
 
@@ -78,6 +88,150 @@ describe("sending a message while a response is running", () => {
     rerender({ settlement: "running", threadKey: "thread-b" });
     await waitFor(() => expect(restore).toHaveBeenCalledWith(message));
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("does not restore a message when an in-flight send succeeds after leaving the thread", async () => {
+    let resolveSend: ((sent: boolean) => void) | undefined;
+    const send = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const restoreA = vi.fn();
+    const restoreB = vi.fn();
+    const { rerender, result } = harness({ send, restore: restoreA });
+
+    act(() => {
+      result.current.steer(message);
+    });
+    rerender({ settlement: "completed", threadKey: "thread-a", restore: restoreA });
+    await waitFor(() => expect(send).toHaveBeenCalledWith(message));
+
+    rerender({ settlement: "running", threadKey: "thread-b", restore: restoreB });
+    expect(restoreA).not.toHaveBeenCalled();
+    expect(restoreB).not.toHaveBeenCalled();
+
+    act(() => {
+      resolveSend?.(true);
+    });
+    await waitFor(() => expect(result.current.pending).toBeUndefined());
+    expect(restoreA).not.toHaveBeenCalled();
+    expect(restoreB).not.toHaveBeenCalled();
+  });
+
+  it("restores through the origin callback when an in-flight send is refused after leaving the thread", async () => {
+    let resolveSend: ((sent: boolean) => void) | undefined;
+    const send = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const restoreA = vi.fn();
+    const restoreB = vi.fn();
+    const { rerender, result } = harness({ send, restore: restoreA });
+
+    act(() => {
+      result.current.steer(message);
+    });
+    rerender({ settlement: "completed", threadKey: "thread-a", restore: restoreA });
+    await waitFor(() => expect(send).toHaveBeenCalledWith(message));
+
+    rerender({ settlement: "running", threadKey: "thread-b", restore: restoreB });
+    expect(restoreA).not.toHaveBeenCalled();
+    expect(restoreB).not.toHaveBeenCalled();
+
+    act(() => {
+      resolveSend?.(false);
+    });
+    await waitFor(() => expect(restoreA).toHaveBeenCalledOnce());
+    expect(restoreA).toHaveBeenCalledWith(message);
+    expect(restoreB).not.toHaveBeenCalled();
+  });
+
+  it("restores through the origin callback when an in-flight send throws after leaving the thread", async () => {
+    let rejectSend: ((reason: Error) => void) | undefined;
+    const send = vi.fn(
+      () =>
+        new Promise<boolean>((_, reject) => {
+          rejectSend = reject;
+        }),
+    );
+    const restoreA = vi.fn();
+    const restoreB = vi.fn();
+    const { rerender, result } = harness({ send, restore: restoreA });
+
+    act(() => {
+      result.current.steer(message);
+    });
+    rerender({ settlement: "completed", threadKey: "thread-a", restore: restoreA });
+    await waitFor(() => expect(send).toHaveBeenCalledWith(message));
+
+    rerender({ settlement: "running", threadKey: "thread-b", restore: restoreB });
+    expect(restoreA).not.toHaveBeenCalled();
+    expect(restoreB).not.toHaveBeenCalled();
+
+    act(() => {
+      rejectSend?.(new Error("send failed"));
+    });
+    await waitFor(() => expect(restoreA).toHaveBeenCalledOnce());
+    expect(restoreA).toHaveBeenCalledWith(message);
+    expect(restoreB).not.toHaveBeenCalled();
+  });
+
+  it("does not restore a message when an in-flight send succeeds after its composer unmounts", async () => {
+    let resolveSend: ((sent: boolean) => void) | undefined;
+    const send = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const restore = vi.fn();
+    const { rerender, result, unmount } = harness({ send, restore });
+
+    act(() => {
+      result.current.steer(message);
+    });
+    // A settled turn starts the ordinary send while the composer is mounted.
+    rerender({ settlement: "completed", threadKey: "thread-a" });
+    await waitFor(() => expect(send).toHaveBeenCalledWith(message));
+    unmount();
+    expect(restore).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSend?.(true);
+      await Promise.resolve();
+    });
+    expect(restore).not.toHaveBeenCalled();
+  });
+
+  it("restores through the origin callback when an in-flight send is refused after its composer unmounts", async () => {
+    let resolveSend: ((sent: boolean) => void) | undefined;
+    const send = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const restore = vi.fn();
+    const { rerender, result, unmount } = harness({ send, restore });
+
+    act(() => {
+      result.current.steer(message);
+    });
+    rerender({ settlement: "completed", threadKey: "thread-a" });
+    await waitFor(() => expect(send).toHaveBeenCalledWith(message));
+    unmount();
+    expect(restore).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSend?.(false);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(restore).toHaveBeenCalledOnce());
+    expect(restore).toHaveBeenCalledWith(message);
   });
 
   it("restores through the thread callback that accepted the message", async () => {
