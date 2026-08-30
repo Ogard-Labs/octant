@@ -1737,7 +1737,13 @@ describe("CodeThreadWorkspace", () => {
         resolveMention = resolve;
       },
     );
-    const sendFollowUp = vi.fn(async () => true);
+    const setPendingDraft = vi.fn();
+    const sendFollowUp = vi.fn(async () => {
+      // Mirror the controller's successful-start cleanup. The workspace must
+      // reassert the newer draft that was typed while mention resolution ran.
+      setPendingDraft("");
+      return true;
+    });
     const search = vi.fn(async () => [
       {
         threadId: mentionedThreadId,
@@ -1750,7 +1756,7 @@ describe("CodeThreadWorkspace", () => {
     const resolveClient = vi.fn(() => mentionResolution);
     const { rerender } = render(
       <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        controller={controller({ sendFollowUp, setPendingDraft, turnStatus: "running" })}
         threadId={threadId}
         threadMentionClient={
           {
@@ -1777,7 +1783,7 @@ describe("CodeThreadWorkspace", () => {
 
     rerender(
       <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "idle" })}
+        controller={controller({ sendFollowUp, setPendingDraft, turnStatus: "idle" })}
         threadId={threadId}
         threadMentionClient={
           {
@@ -1799,6 +1805,7 @@ describe("CodeThreadWorkspace", () => {
       ),
     );
     expect(composer).toHaveValue("newer draft");
+    expect(setPendingDraft).toHaveBeenLastCalledWith("newer draft");
   });
 
   it("removes a sent image when clearing the draft also cleared its thread mention", async () => {
