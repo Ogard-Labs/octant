@@ -54,21 +54,21 @@ describe("windowCanAccessCodeProject", () => {
     ).toBe(true);
   });
 
-  it("still lists active Code Projects for an unbound window so first-run can bootstrap", () => {
+  it("refuses an unbound window access to an active Code Project until that window binds one", () => {
     expect(
       windowCanAccessCodeProject({
         workspace: defaultWindowWorkspace(ids.window),
         projectId: ids.other,
         hasActiveCodeProject: activeCodeProjects(ids.bound, ids.other),
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       windowCanAccessCodeProject({
         workspace: undefined,
         projectId: ids.other,
         hasActiveCodeProject: activeCodeProjects(ids.other),
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("never grants a bound window an inactive Code Project even when the ids match", () => {
