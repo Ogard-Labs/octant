@@ -20,6 +20,7 @@ export interface StagedCodeAttachment {
 
 interface DetachedCodeAttachment {
   readonly attachment: StagedCodeAttachment;
+  readonly client: Pick<CodeClient, "discardAttachment">;
   readonly threadId: CodeThreadId | undefined;
 }
 
@@ -72,8 +73,6 @@ export function useCodeAttachments(input: {
   readonly threadId: CodeThreadId | undefined;
 }): CodeAttachments {
   const { client, threadId } = input;
-  const clientRef = useRef(client);
-  clientRef.current = client;
   const [staged, setStaged] = useState<ReadonlyArray<StagedCodeAttachment>>([]);
   const [message, setMessage] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -113,7 +112,7 @@ export function useCodeAttachments(input: {
       previews.current.clear();
       for (const entry of detached.current) {
         if (entry.threadId === undefined) continue;
-        void clientRef.current
+        void entry.client
           .discardAttachment(entry.threadId, entry.attachment.reference.attachmentId)
           .catch(() => undefined);
       }
@@ -197,7 +196,7 @@ export function useCodeAttachments(input: {
     current.current = [];
     setStaged([]);
     setMessage(undefined);
-    detached.current = entries.map((attachment) => ({ attachment, threadId }));
+    detached.current = entries.map((attachment) => ({ attachment, client, threadId }));
     return entries;
   }, [threadId]);
 
@@ -226,14 +225,25 @@ export function useCodeAttachments(input: {
 
   const discardDetached = useCallback(
     (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
+      const ids = new Set(attachments.map((entry) => String(entry.reference.attachmentId)));
+      const owned = detached.current.filter((entry) =>
+        ids.has(String(entry.attachment.reference.attachmentId)),
+      );
       releaseDetached(attachments);
       for (const attachment of attachments) {
         forget(attachment.previewUrl);
-        if (threadId === undefined) continue;
-        void client.discardAttachment(threadId, attachment.reference.attachmentId).catch(() => {
-          // A refused message that was superseded must not keep its bytes in the
-          // composer; a later host recovery can clean up a failed discard.
-        });
+        const owner = owned.find(
+          (entry) =>
+            String(entry.attachment.reference.attachmentId) ===
+            String(attachment.reference.attachmentId),
+        );
+        if (owner?.threadId === undefined) continue;
+        void owner.client
+          .discardAttachment(owner.threadId, attachment.reference.attachmentId)
+          .catch(() => {
+            // A refused message that was superseded must not keep its bytes in the
+            // composer; a later host recovery can clean up a failed discard.
+          });
       }
     },
     [client, forget, threadId],
