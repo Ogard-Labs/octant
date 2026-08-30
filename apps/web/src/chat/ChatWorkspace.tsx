@@ -588,6 +588,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       for (const selection of context.canvasSelections) {
         props.onRemoveCanvasSelection(selection.id);
       }
+    } else if (
+      props.onClearCanvasSelections !== undefined &&
+      pendingCanvasSelections.length === context.canvasSelections.length &&
+      pendingCanvasSelections.every((selection) => canvasIds.has(String(selection.id)))
+    ) {
+      // Keep the legacy all-clear fallback only when no newer selection exists
+      // and this send owns every controlled selection.
+      props.onClearCanvasSelections();
     }
     if (props.pendingExtensionSelections === undefined) {
       for (const receipt of context.extensionReceipts) extensionDraft.remove(receipt.reference);
