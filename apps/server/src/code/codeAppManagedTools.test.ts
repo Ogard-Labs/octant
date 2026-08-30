@@ -103,6 +103,81 @@ describe("Code app-managed tools", () => {
     });
   });
 
+  it("journals taint for a successful terminal result before the next model turn", async () => {
+    let terminalStarted = false;
+    let completionMarker = "";
+    const record = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["octant_terminal"] },
+    }));
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      recordExternalContentIngestion: record,
+      executeOperation: async (_windowId, command) => {
+        if (command.kind === "start-terminal") {
+          terminalStarted = true;
+          return {
+            kind: "terminal-state",
+            operationId: command.operationId,
+            terminalId: command.terminalId,
+            state: "running",
+          } as never;
+        }
+        if (command.kind === "write-terminal") {
+          completionMarker = command.data.match(/octant=([^;]+);/)?.[1] ?? "";
+          return {
+            kind: "terminal-state",
+            operationId: command.operationId,
+            terminalId: command.terminalId,
+            state: "running",
+          } as never;
+        }
+        return {
+          kind: "operation-failed",
+          operationId: command.operationId,
+          failure: { category: "invalid", message: "Unexpected operation." },
+        } as never;
+      },
+      terminal: {
+        read: async () => {
+          if (!terminalStarted) throw new Error("No terminal.");
+          return {
+            terminalId: threadId,
+            status: "running",
+            canRerun: false,
+            transcript: {
+              chunks: [
+                `$ pwd\n/private/repo\n${completionMarker === "" ? "" : `\u001b]777;octant=${completionMarker};exit=0\u0007`}`,
+              ],
+              byteLength: 20,
+              truncated: false,
+              characters: 0,
+            },
+          };
+        },
+      },
+      wait: async () => undefined,
+    });
+
+    const outcome = await tools.execute({
+      name: CODE_TERMINAL_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
+    });
+
+    expect(outcome.isError).toBe(false);
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId,
+        provenance: { origin: "tool-result", sourceLabel: CODE_TERMINAL_TOOL_NAME },
+        authorized: true,
+      }),
+    );
+  });
+
   it("waits for a terminal completion marker instead of returning a timed partial transcript", async () => {
     let marker = "";
     let readsAfterWrite = 0;

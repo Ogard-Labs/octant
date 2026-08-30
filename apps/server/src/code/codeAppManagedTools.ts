@@ -28,8 +28,13 @@ import {
   decideProfileToolConstraint,
   isToolAllowedByAllowlist,
 } from "@octant/domain";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { AppleDiscoveryResult } from "../apple/appleToolchainService";
+import type {
+  ExternalContentIngestionResult,
+  RecordExternalContentIngestionInput,
+} from "../context/externalContentIngestionStore";
+import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
@@ -265,6 +270,9 @@ export interface CodeAppManagedToolsOptions {
    */
   readonly planner?: CodePlannerToolPort;
   readonly wait?: (milliseconds: number) => Promise<void>;
+  readonly recordExternalContentIngestion?: (
+    input: RecordExternalContentIngestionInput,
+  ) => ExternalContentIngestionResult;
 }
 
 export interface CodePlannerToolPort {
@@ -293,7 +301,7 @@ export interface CodePlannerToolPort {
 
 export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): AppManagedToolSet {
   const allowlist = options.thread.toolConstraints ?? [];
-  return {
+  const tools: AppManagedToolSet = {
     definitions: [
       browserDefinition,
       terminalDefinition,
@@ -336,6 +344,14 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       return failure("tool-unavailable");
     },
   };
+  const record = options.recordExternalContentIngestion;
+  if (record === undefined) return tools;
+  return taintAppManagedToolResults({
+    tools,
+    threadId: options.thread.id,
+    recordExternalContentIngestion: record,
+    uuid: options.uuid,
+  });
 }
 
 async function plannerBoardTool(
