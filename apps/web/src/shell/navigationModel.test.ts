@@ -191,6 +191,43 @@ describe("buildSidebarNavigation", () => {
     ]);
   });
 
+  it("marks a row working while the host projects the thread as executing", () => {
+    expect(
+      buildChatThreadNavigation([
+        {
+          executing: true,
+          followUpOpen: true,
+          lastSequence: 4,
+          readSequence: 4,
+          threadId: "00000000-0000-4000-8000-000000000101",
+          title: "Planning",
+        },
+        {
+          executing: false,
+          followUpOpen: false,
+          lastSequence: 3,
+          readSequence: 1,
+          threadId: "00000000-0000-4000-8000-000000000102",
+          title: "Research",
+        },
+      ]),
+    ).toEqual([
+      {
+        activity: "working",
+        followUp: true,
+        threadId: "00000000-0000-4000-8000-000000000101",
+        title: "Planning",
+        unread: false,
+      },
+      {
+        followUp: false,
+        threadId: "00000000-0000-4000-8000-000000000102",
+        title: "Research",
+        unread: true,
+      },
+    ]);
+  });
+
   it("forwards last activity when the source includes updatedAt", () => {
     expect(
       buildChatThreadNavigation([

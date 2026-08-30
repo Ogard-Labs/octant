@@ -329,6 +329,7 @@ export function chats(options: { readonly threadProjectId?: string } = {}): Chat
       }),
     ),
     search: vi.fn(async () => []),
+    searchTranscript: vi.fn(async () => ({ query: "", hits: [], truncated: false })),
     subscribe: vi.fn(async function* () {}),
     thread: vi.fn(async (threadId) =>
       decodeChatThreadView({

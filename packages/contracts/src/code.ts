@@ -886,6 +886,26 @@ export const CodeThreadActivity = Schema.Struct({
 }).annotations(strict);
 export type CodeThreadActivity = typeof CodeThreadActivity.Type;
 
+/**
+ * Live run state and optional checkout chip for one Code sidebar row.
+ *
+ * Kept off durable {@link CodeThread}: executing is runtime-derived the same
+ * way board reasons are, and the chip is a projection over the persisted
+ * checkout identity (no filesystem probe on a navigation tick). `checkoutChip`
+ * is absent for the Project's default checkout so the row stays quiet there.
+ */
+export const CodeNavigationRuntime = Schema.Struct({
+  threadId: CodeThreadId,
+  executing: Schema.Boolean,
+  checkoutChip: Schema.optional(
+    Schema.Struct({
+      checkoutKind: Schema.Literal("managed-worktree"),
+      label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type CodeNavigationRuntime = typeof CodeNavigationRuntime.Type;
+
 export const CodeBootstrap = Schema.Struct({
   settings: CodeSettings,
   threads: Schema.Array(CodeThread),
@@ -902,18 +922,26 @@ export const CodeBootstrap = Schema.Struct({
    * degrades to the unread behavior that host already had.
    */
   activity: Schema.optionalWith(Schema.Array(CodeThreadActivity), { default: () => [] }),
+  /**
+   * Live executing flag and optional checkout chip per visible thread. Same
+   * optional-compat story as `activity`: an older host omits it and the
+   * sidebar stays quiet rather than refusing bootstrap.
+   */
+  runtime: Schema.optionalWith(Schema.Array(CodeNavigationRuntime), { default: () => [] }),
 }).annotations(strict);
 export type CodeBootstrap = typeof CodeBootstrap.Type;
 
 /**
  * The bounded read used to keep the Code sidebar current. It carries only
- * thread row metadata and journaled activity. Checkout filesystem observation
- * belongs to bootstrap: a navigation tick that probed every checkout would
- * contend with thread switching and title-bar work on the packaged host.
+ * thread row metadata, journaled activity, and a runtime sidecar. Checkout
+ * filesystem observation belongs to bootstrap: a navigation tick that probed
+ * every checkout would contend with thread switching and title-bar work on the
+ * packaged host.
  */
 export const CodeNavigation = Schema.Struct({
   threads: Schema.Array(CodeThread),
   activity: Schema.optionalWith(Schema.Array(CodeThreadActivity), { default: () => [] }),
+  runtime: Schema.optionalWith(Schema.Array(CodeNavigationRuntime), { default: () => [] }),
 }).annotations(strict);
 export type CodeNavigation = typeof CodeNavigation.Type;
 
@@ -963,6 +991,7 @@ export const decodeCodeWorktreeRefsListed = Schema.decodeUnknownSync(CodeWorktre
 export const decodeCodeFailure = Schema.decodeUnknownSync(CodeFailure);
 export const decodeCodeBootstrap = Schema.decodeUnknownSync(CodeBootstrap);
 export const decodeCodeNavigation = Schema.decodeUnknownSync(CodeNavigation);
+export const decodeCodeNavigationRuntime = Schema.decodeUnknownSync(CodeNavigationRuntime);
 export const decodeCodeThreadActivity = Schema.decodeUnknownSync(CodeThreadActivity);
 export const decodeCodeThreadView = Schema.decodeUnknownSync(CodeThreadView);
 export const decodeCodeFileMetadata = Schema.decodeUnknownSync(CodeFileMetadata);

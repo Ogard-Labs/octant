@@ -28,6 +28,7 @@ import {
   type BindingRevisionId,
   type CodeBootstrap,
   type CodeNavigation,
+  type CodeNavigationRuntime,
   type CodeApprovalEffect,
   type CodeCheckoutId,
   type CodeCheckoutIdentity,
@@ -85,6 +86,8 @@ import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
+import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
+import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
   issueContextFailureCategory,
@@ -248,6 +251,19 @@ function repeatsJournaledCheckout(
         current.head.oid === observed.head.oid;
 }
 
+/**
+ * Compact checkout chip for a Code sidebar row. Only a thread's own managed
+ * worktree is named; the Project's default existing-worktree checkout leaves
+ * the row quiet. Label comes from the persisted head, never a live probe.
+ */
+export function codeNavigationCheckoutChip(
+  checkout: CodeCheckoutIdentity | undefined,
+): CodeNavigationRuntime["checkoutChip"] {
+  if (checkout === undefined || checkout.kind !== "managed-worktree") return undefined;
+  const label = checkout.head.kind === "branch" ? checkout.head.name : "Detached HEAD";
+  return { checkoutKind: "managed-worktree", label };
+}
+
 function currentCheckoutDigest(
   checkout: CodeCheckoutIdentity | undefined,
   thread: CodeThread,
@@ -302,6 +318,9 @@ export interface CodePersistencePort {
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
+  readonly readCodeRuntimeWorks: (
+    threadId: CodeThreadId,
+  ) => ReadonlyArray<ProjectedCodeRuntimeWork>;
   readonly readCodeCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
   readonly readCodeCheckoutAggregateVersion: (checkoutId: CodeCheckoutId) => number;
   readonly readCodeCheckouts: () => ReadonlyArray<CodeCheckoutIdentity>;
@@ -665,7 +684,11 @@ export class CodeService {
 
   async navigation(authenticatedWindowId: WindowId): Promise<CodeNavigation> {
     const threads = await this.#visibleThreads(authenticatedWindowId);
-    return { threads, activity: this.#visibleActivity(threads) };
+    return {
+      threads,
+      activity: this.#visibleActivity(threads),
+      runtime: this.#visibleRuntime(threads),
+    };
   }
 
   async bootstrap(authenticatedWindowId: WindowId): Promise<CodeBootstrap> {
@@ -794,6 +817,7 @@ export class CodeService {
         .filter((checkout) => checkoutIds.has(String(checkout.id)))
         .map((checkout) => recoveredCheckouts.get(String(checkout.id)) ?? checkout),
       activity: this.#visibleActivity(threads),
+      runtime: this.#visibleRuntime(threads),
     };
   }
 
@@ -815,6 +839,27 @@ export class CodeService {
     return this.#persistence
       .readCodeThreadActivity()
       .filter((entry) => threadIds.has(String(entry.threadId)));
+  }
+
+  /**
+   * Per-thread executing flag and optional checkout chip for the sidebar.
+   * Uses the same runtime-work fold as the Code board, and only the persisted
+   * checkout identity — never a filesystem probe — so a navigation tick stays
+   * cheap. The chip appears only for a thread's own managed worktree.
+   */
+  #visibleRuntime(threads: ReadonlyArray<CodeThread>): ReadonlyArray<CodeNavigationRuntime> {
+    return threads.map((thread) => {
+      const activity = boardRuntimeActivityFromWorks(
+        this.#persistence.readCodeRuntimeWorks(thread.id),
+      );
+      const checkout = this.#persistence.readCodeCheckout(thread.checkoutId);
+      const checkoutChip = codeNavigationCheckoutChip(checkout);
+      return {
+        threadId: thread.id,
+        executing: activity.executing,
+        ...(checkoutChip === undefined ? {} : { checkoutChip }),
+      };
+    });
   }
 
   async read(authenticatedWindowId: WindowId, threadId: CodeThreadId): Promise<CodeThreadView> {

@@ -1,6 +1,6 @@
 # 0059. Multi-host federation completes without new host authority
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -68,8 +68,10 @@ host authority.
 
 ## Consequences
 
-- New federation work is reviewable against these three children instead of one
-  unbounded program issue.
+- The three reviewable children are implemented on the client registry and
+  routing path: all-hosts completeness, pairing at scale, and conflict honesty
+  without cross-host arbitration. Further federation work is judged against
+  this record rather than an unbounded program issue.
 - Station and disposable-computer tracks stay free to land Machine kinds
   without rewriting the client merge contract.
 - Anything that needs hosts to trust each other, or a window to act as

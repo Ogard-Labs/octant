@@ -17,11 +17,14 @@ import {
   decodeChatThreadView,
   decodeChatTurn,
   decodeChatTurnCreated,
+  decodeChatTurnId,
   decodeChatTurnRouteDecided,
   decodeChatTurnRouteDecision,
   decodeContextSubjectRef,
   decodeThreadFollowUpUpdated,
   decodeThreadWorkUpdated,
+  MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
+  MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
   ThreadFollowUp as ThreadFollowUpSchema,
   ThreadWorkItem as ThreadWorkItemSchema,
   type ChatSettings,
@@ -29,6 +32,8 @@ import {
   type ChatThread,
   type ChatThreadId,
   type ChatThreadView,
+  type ChatTranscriptSearchHit,
+  type ChatTurn,
   type ChatTurnRouteDecision,
   type EventEnvelope,
   type ThreadFollowUp,
@@ -93,6 +98,7 @@ export class ChatProjection implements Projection {
       DELETE FROM chat_purge_projection;
       DELETE FROM thread_follow_up_projection;
       DELETE FROM thread_work_item_projection;
+      DELETE FROM chat_transcript_search_projection;
       DELETE FROM chat_search_projection;
       DELETE FROM chat_citation_projection;
       DELETE FROM chat_attachment_projection;
@@ -216,6 +222,7 @@ export class ChatProjection implements Projection {
         event.globalSequence,
       );
     }
+    indexTranscriptSearchForTurn(connection, turn, event.globalSequence, turn.createdAt);
   }
 
   #applyAttemptUpdated(connection: SqliteConnection, event: EventEnvelope): void {
@@ -253,6 +260,7 @@ export class ChatProjection implements Projection {
       updatedTurn.createdAt,
       event.globalSequence,
     );
+    indexTranscriptSearchForTurn(connection, updatedTurn, event.globalSequence, attempt.updatedAt);
   }
 
   #applyTurnRouteDecided(connection: SqliteConnection, event: EventEnvelope): void {
@@ -438,6 +446,9 @@ export function purgeThreadContent(connection: SqliteConnection, threadId: strin
   purgeAgentRunSubjectContent(connection, subject);
   connection.prepare("DELETE FROM chat_attachment_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM chat_citation_projection WHERE thread_id = ?").run(threadId);
+  connection
+    .prepare("DELETE FROM chat_transcript_search_projection WHERE thread_id = ?")
+    .run(threadId);
   connection.prepare("DELETE FROM chat_search_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM thread_work_item_projection WHERE thread_id = ?").run(threadId);
   connection.prepare("DELETE FROM thread_follow_up_projection WHERE thread_id = ?").run(threadId);
@@ -494,6 +505,10 @@ export function readChatThreads(connection: SqliteConnection): ReadonlyArray<Cha
  * Read the complete sidebar projection in one bounded-metadata query. The
  * thread view intentionally remains the transcript read; using it here would
  * load every turn, attachment, citation, and work item once per row.
+ *
+ * `executing` mirrors the Chat service's in-flight check: a queued or streaming
+ * attempt means a turn is running. Waiting attempts are not executing — they
+ * are awaiting input, which the board treats separately.
  */
 export function readChatNavigation(
   connection: SqliteConnection,
@@ -514,14 +529,21 @@ export function readChatNavigation(
         SELECT thread_id, max(last_sequence) AS last_sequence
         FROM activity
         GROUP BY thread_id
+      ), executing_threads AS (
+        SELECT DISTINCT thread_id
+        FROM chat_attempt_projection
+        WHERE json_extract(attempt_json, '$.outcome') IN ('queued', 'streaming')
       )
       SELECT thread.schema_version, thread.thread_json,
              activity.last_sequence,
-             coalesce(follow_up.state = 'open', 0) AS follow_up_open
+             coalesce(follow_up.state = 'open', 0) AS follow_up_open,
+             CASE WHEN executing.thread_id IS NOT NULL THEN 1 ELSE 0 END AS executing
       FROM chat_thread_projection AS thread
       INNER JOIN activity_by_thread AS activity ON activity.thread_id = thread.thread_id
       LEFT JOIN thread_follow_up_projection AS follow_up
         ON follow_up.thread_id = thread.thread_id
+      LEFT JOIN executing_threads AS executing
+        ON executing.thread_id = thread.thread_id
       WHERE thread.lifecycle = 'active'
       ORDER BY thread.updated_at DESC, thread.thread_id ASC
     `)
@@ -530,6 +552,7 @@ export function readChatNavigation(
     readonly thread_json: string;
     readonly last_sequence: number;
     readonly follow_up_open: number;
+    readonly executing: number;
   }>;
   return rows.map((row) => {
     assertChatProjectionSchema(row.schema_version);
@@ -542,6 +565,7 @@ export function readChatNavigation(
       updatedAt: thread.updatedAt,
       lastSequence: row.last_sequence,
       followUpOpen: row.follow_up_open === 1,
+      executing: row.executing === 1,
     });
   });
 }
@@ -765,6 +789,85 @@ export function searchChatThreads(
   });
 }
 
+export interface ChatTranscriptSearchRows {
+  readonly hits: ReadonlyArray<ChatTranscriptSearchHit>;
+  readonly truncated: boolean;
+}
+
+/**
+ * Message-body search over per-content projection rows. Returns active and
+ * archived threads only. Hidden sidecar thread ids are excluded before the
+ * result cap so truncation reflects visible matches only. Snippets are clipped
+ * around the first hit in the stored body text.
+ */
+export function searchChatTranscript(
+  connection: SqliteConnection,
+  query: string,
+  excludeThreadIds: ReadonlySet<string> = new Set<string>(),
+  limit: number = MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
+): ChatTranscriptSearchRows {
+  const normalized = normalizeSearchText(query);
+  if (normalized.length === 0 || limit <= 0) {
+    return { hits: [], truncated: false };
+  }
+  const excluded = [...excludeThreadIds];
+  const excludeClause =
+    excluded.length === 0
+      ? ""
+      : `AND thread.thread_id NOT IN (${excluded.map(() => "?").join(", ")})`;
+  const fetchLimit = limit + 1;
+  const rows = connection
+    .prepare(`
+      SELECT
+        search.schema_version AS search_schema_version,
+        search.content_id AS content_id,
+        search.turn_id AS turn_id,
+        search.search_text AS search_text,
+        thread.schema_version AS thread_schema_version,
+        thread.thread_json AS thread_json,
+        content.body_text AS body_text
+      FROM chat_transcript_search_projection AS search
+      INNER JOIN chat_thread_projection AS thread
+        ON thread.thread_id = search.thread_id
+      INNER JOIN chat_content_store AS content
+        ON content.content_id = search.content_id
+      WHERE search.search_text LIKE '%' || ? || '%' ESCAPE '\\'
+        AND thread.lifecycle IN ('active', 'archived')
+        ${excludeClause}
+      ORDER BY thread.updated_at DESC, search.turn_id ASC, search.content_id ASC
+      LIMIT ?
+    `)
+    .all(escapeLikePattern(normalized), ...excluded, fetchLimit) as ReadonlyArray<{
+    readonly search_schema_version: number;
+    readonly content_id: string;
+    readonly turn_id: string;
+    readonly search_text: string;
+    readonly thread_schema_version: number;
+    readonly thread_json: string;
+    readonly body_text: string;
+  }>;
+
+  const truncated = rows.length > limit;
+  const hits: ChatTranscriptSearchHit[] = [];
+  for (const row of rows.slice(0, limit)) {
+    assertChatProjectionSchema(row.search_schema_version);
+    assertChatProjectionSchema(row.thread_schema_version);
+    const thread = decodeChatThread(JSON.parse(row.thread_json));
+    if (thread.lifecycle !== "active" && thread.lifecycle !== "archived") continue;
+    const clipped = clipTranscriptSearchSnippet(row.body_text, normalized);
+    hits.push({
+      threadId: thread.id,
+      title: thread.title,
+      lifecycle: thread.lifecycle,
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      turnId: decodeChatTurnId(row.turn_id),
+      snippet: clipped.snippet,
+      ...(clipped.matchRanges.length === 0 ? {} : { matchRanges: clipped.matchRanges }),
+    });
+  }
+  return { hits, truncated };
+}
+
 export interface ProjectedThreadWorkState {
   readonly workList: ThreadWorkList;
   readonly followUpVersion: AggregateVersion;
@@ -936,6 +1039,105 @@ function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase();
 }
 
+/** Escape LIKE metacharacters so a user needle cannot widen into every row. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+function indexTranscriptSearchForTurn(
+  connection: SqliteConnection,
+  turn: ChatTurn,
+  lastSequence: number,
+  updatedAt: string,
+): void {
+  const refs: Array<{ contentId: string }> = [{ contentId: String(turn.userMessageRef.contentId) }];
+  for (const attempt of turn.attempts) {
+    for (const responseRef of attempt.responseRefs) {
+      refs.push({ contentId: String(responseRef.contentId) });
+    }
+    if (attempt.researchRef !== undefined) {
+      refs.push({ contentId: String(attempt.researchRef.contentId) });
+    }
+  }
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    if (seen.has(ref.contentId)) continue;
+    seen.add(ref.contentId);
+    upsertTranscriptSearchContent(connection, {
+      contentId: ref.contentId,
+      turnId: String(turn.id),
+      threadId: String(turn.threadId),
+      lastSequence,
+      updatedAt,
+    });
+  }
+}
+
+function upsertTranscriptSearchContent(
+  connection: SqliteConnection,
+  input: {
+    readonly contentId: string;
+    readonly turnId: string;
+    readonly threadId: string;
+    readonly lastSequence: number;
+    readonly updatedAt: string;
+  },
+): void {
+  const content = readChatContent(connection, input.contentId);
+  if (content === undefined) return;
+  const searchText = normalizeSearchText(content.body);
+  if (searchText.length === 0) return;
+  upsertTranscriptSearch(connection).run(
+    input.contentId,
+    input.turnId,
+    input.threadId,
+    content.role,
+    CHAT_PROJECTION_SCHEMA_VERSION,
+    searchText,
+    input.updatedAt,
+    input.lastSequence,
+  );
+}
+
+/**
+ * Clip a body around the first case-insensitive hit so the overlay can show
+ * context without shipping the whole message.
+ */
+export function clipTranscriptSearchSnippet(
+  body: string,
+  needle: string,
+  maxLength: number = MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
+): {
+  readonly snippet: string;
+  readonly matchRanges: ReadonlyArray<{ readonly start: number; readonly end: number }>;
+} {
+  if (maxLength <= 0) return { snippet: "", matchRanges: [] };
+  const haystack = body.toLocaleLowerCase();
+  const normalizedNeedle = needle.trim().toLocaleLowerCase();
+  if (normalizedNeedle.length === 0) {
+    return { snippet: body.slice(0, maxLength), matchRanges: [] };
+  }
+  const index = haystack.indexOf(normalizedNeedle);
+  if (index < 0) {
+    return { snippet: body.slice(0, maxLength), matchRanges: [] };
+  }
+  const matchLength = Math.min(normalizedNeedle.length, maxLength);
+  const pad = Math.max(0, Math.floor((maxLength - matchLength) / 2));
+  let start = Math.max(0, index - pad);
+  let end = Math.min(body.length, start + maxLength);
+  if (end - start < maxLength) {
+    start = Math.max(0, end - maxLength);
+  }
+  const snippet = body.slice(start, end);
+  const matchStart = index - start;
+  if (matchStart < 0 || matchStart >= snippet.length) {
+    return { snippet, matchRanges: [] };
+  }
+  const matchEnd = Math.min(snippet.length, matchStart + matchLength);
+  if (matchEnd <= matchStart) return { snippet, matchRanges: [] };
+  return { snippet, matchRanges: [{ start: matchStart, end: matchEnd }] };
+}
+
 function decodeProjection<T>(decode: () => T): T {
   try {
     return decode();
@@ -1060,6 +1262,24 @@ function upsertSearch(connection: SqliteConnection): SqliteStatement {
       updated_at = excluded.updated_at,
       last_sequence = excluded.last_sequence
     WHERE excluded.last_sequence >= chat_search_projection.last_sequence
+  `);
+}
+
+function upsertTranscriptSearch(connection: SqliteConnection): SqliteStatement {
+  return connection.prepare(`
+    INSERT INTO chat_transcript_search_projection (
+      content_id, turn_id, thread_id, content_role, schema_version,
+      search_text, updated_at, last_sequence
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (content_id) DO UPDATE SET
+      turn_id = excluded.turn_id,
+      thread_id = excluded.thread_id,
+      content_role = excluded.content_role,
+      schema_version = excluded.schema_version,
+      search_text = excluded.search_text,
+      updated_at = excluded.updated_at,
+      last_sequence = excluded.last_sequence
+    WHERE excluded.last_sequence >= chat_transcript_search_projection.last_sequence
   `);
 }
 

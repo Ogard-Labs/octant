@@ -7,6 +7,7 @@ import {
   decodeChatFailure,
   decodeChatThread,
   decodeChatThreadView,
+  decodeChatTranscriptSearch,
   MAX_CHAT_NDJSON_LINE_BYTES,
   type ChatAttachment,
   type ChatBootstrap,
@@ -17,6 +18,7 @@ import {
   type ChatFailure,
   type ChatThreadId,
   type ChatThreadView,
+  type ChatTranscriptSearch,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 import { ChatNdjsonFailure, iterateChatEventNdjson } from "./chatNdjsonStream";
@@ -46,6 +48,7 @@ export interface ChatClient {
   bootstrap(): Promise<ChatBootstrap>;
   navigation(): Promise<ChatNavigation>;
   search(query: string): Promise<ReadonlyArray<ChatBootstrap["threads"][number]>>;
+  searchTranscript(query: string): Promise<ChatTranscriptSearch>;
   thread(threadId: ChatThreadId): Promise<ChatThreadView>;
   execute(command: ChatCommand): Promise<ChatCommandResult>;
   upload(input: ChatAttachmentUpload): Promise<ChatAttachment>;
@@ -91,6 +94,11 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
       const url = new URL("/api/chat/search", options.baseUrl);
       url.searchParams.set("q", query);
       return request(fetch, url.toString(), { method: "GET", headers }, decodeThreadArray);
+    },
+    searchTranscript(query) {
+      const url = new URL("/api/chat/transcript-search", options.baseUrl);
+      url.searchParams.set("q", query);
+      return request(fetch, url.toString(), { method: "GET", headers }, decodeChatTranscriptSearch);
     },
     thread(threadId) {
       return request(

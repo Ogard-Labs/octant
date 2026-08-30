@@ -3,8 +3,10 @@ import type { CodeOperationEvent } from "@octant/contracts";
 import {
   EMPTY_TURN_ACTIVITY,
   activeRowCount,
+  alwaysVisibleActivityRows,
   appendReasoning,
   applyActivityEvent,
+  settledTurnActivitySummary,
 } from "./transcriptActivity";
 
 function tool(state: "started" | "running" | "completed" | "failed"): CodeOperationEvent {
@@ -118,5 +120,37 @@ describe("transcript activity", () => {
     } as CodeOperationEvent);
     expect(activeRowCount(withDoneTask)).toBe(1);
     expect(activeRowCount(applyActivityEvent(withDoneTask, tool("completed")))).toBe(0);
+  });
+
+  it("summarizes a settled turn's toolchain for the quiet fold line", () => {
+    expect(
+      settledTurnActivitySummary({
+        reasoning: "plan",
+        rows: [
+          { kind: "tool", id: "1", toolName: "Read", state: "completed" },
+          { kind: "tool", id: "2", toolName: "Write", state: "completed" },
+          { kind: "tool", id: "3", toolName: "Edit", state: "completed" },
+          { kind: "tool", id: "4", toolName: "Bash", state: "completed" },
+        ],
+      }),
+    ).toBe("4 tool calls · 2 files edited");
+  });
+
+  it("keeps waiting rows outside the settled fold", () => {
+    const activity = {
+      reasoning: "",
+      rows: [
+        { kind: "tool" as const, id: "1", toolName: "Read", state: "completed" as const },
+        {
+          kind: "task" as const,
+          id: "t1",
+          state: "waiting" as const,
+          summary: "Apply the edit",
+        },
+      ],
+    };
+    expect(alwaysVisibleActivityRows(activity)).toEqual([
+      { kind: "task", id: "t1", state: "waiting", summary: "Apply the edit" },
+    ]);
   });
 });
