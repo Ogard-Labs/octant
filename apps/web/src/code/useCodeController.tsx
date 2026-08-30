@@ -42,6 +42,7 @@ import {
 import { samePollingData } from "../polling/samePollingData";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { markInteraction } from "../polling/interactionTrace";
+import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type CodeTurnStatus = "idle" | "sending" | "running" | "waiting" | "failed";
@@ -133,9 +134,9 @@ export interface CodeThreadNavigationItem {
   /**
    * Whether the thread's journaled activity advanced since the user last had it
    * open — including a provider turn that ran entirely in the background.
-   * Session-scoped like Chat's: an unread mark is about this sitting, and
-   * carrying it across restarts would resurface work the user already dealt
-   * with.
+   * Kept across restarts like Chat's: quitting the app is not the same as
+   * having read a thread, and dropping the cursor on launch made every thread
+   * with journaled activity read as unread again.
    */
   readonly unread?: boolean;
   /** Whether the user pinned this thread to the top of the list. */
@@ -172,87 +173,29 @@ function refreshActiveThreadView(
   };
 }
 
+/** Code keeps its own record, so Chat's cursors never read as Code's. */
+const CODE_READ_CURSOR_STORAGE_KEY = "octant.code.readCursors.v1";
+
 /**
- * Per-thread record of the activity sequence the user has actually seen.
+ * Code's read cursors.
  *
  * The sequence is the host's, from the bootstrap: a thread's own version cannot
  * stand in for it, because a provider turn is journaled on a different
  * aggregate and moves neither the version nor `updatedAt`.
  *
- * Deliberately in memory and deliberately shaped like Chat's: unread is a
- * property of this sitting at the app, so a durable one would tell the user
- * about work they closed the laptop on last week.
+ * The store itself is shared with Chat — unread is the same idea in both modes
+ * — and survives a relaunch, so a thread the user read yesterday does not come
+ * back unread today.
  */
-export interface CodeReadCursorStore {
-  readonly getSnapshot: () => ReadonlyMap<string, number>;
-  /**
-   * Thread ids the user explicitly asked to read as unread, over and above the
-   * cursor comparison. A thread with no journaled activity this sitting has
-   * nothing for a dropped cursor to resurface — zero over zero — which is
-   * exactly how "mark as unread" used to do visibly nothing. The explicit
-   * request is held here until the next mark spends it.
-   */
-  readonly getMarkedUnread: () => ReadonlySet<string>;
-  readonly mark: (threadId: CodeThreadId, sequence: number) => void;
-  /**
-   * Drops what this sitting has seen of a thread, so its journaled activity
-   * reads as unread again — and holds it unread even when nothing was
-   * journaled. The cursor only ever moves forward on its own — a refresh must
-   * never spend a mark the user did not see — but a person asking for the
-   * thread back in their unread list is not the refresh path.
-   */
-  readonly unmark: (threadId: CodeThreadId) => void;
-  readonly subscribe: (listener: () => void) => () => void;
-}
+export type CodeReadCursorStore = ReadCursorStore<CodeThreadId>;
 
-export function createCodeReadCursorStore(): CodeReadCursorStore {
-  let snapshot: ReadonlyMap<string, number> = new Map();
-  let markedUnread: ReadonlySet<string> = new Set();
-  const listeners = new Set<() => void>();
-  const announce = () => {
-    for (const listener of listeners) listener();
-  };
-  return {
-    getSnapshot: () => snapshot,
-    getMarkedUnread: () => markedUnread,
-    mark: (threadId, sequence) => {
-      const key = String(threadId);
-      // Reading a thread with no new journaled activity still spends an
-      // explicit unread mark: the cursor has nowhere to move, but the user
-      // has now seen what they asked to be reminded of.
-      const spendsUnreadMark = markedUnread.has(key);
-      if (spendsUnreadMark) {
-        const nextMarked = new Set(markedUnread);
-        nextMarked.delete(key);
-        markedUnread = nextMarked;
-      }
-      if (sequence > (snapshot.get(key) ?? 0)) {
-        const next = new Map(snapshot);
-        next.set(key, sequence);
-        snapshot = next;
-      } else if (!spendsUnreadMark) {
-        return;
-      }
-      announce();
-    },
-    unmark: (threadId) => {
-      const key = String(threadId);
-      if (!snapshot.has(key) && markedUnread.has(key)) return;
-      if (snapshot.has(key)) {
-        const next = new Map(snapshot);
-        next.delete(key);
-        snapshot = next;
-      }
-      const nextMarked = new Set(markedUnread);
-      nextMarked.add(key);
-      markedUnread = nextMarked;
-      announce();
-    },
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-  };
+export function createCodeReadCursorStore(
+  storage?: Pick<Storage, "getItem" | "setItem"> | undefined,
+): CodeReadCursorStore {
+  return createReadCursorStore<CodeThreadId>({
+    storageKey: CODE_READ_CURSOR_STORAGE_KEY,
+    ...(storage === undefined ? {} : { storage }),
+  });
 }
 
 /**
