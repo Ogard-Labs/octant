@@ -1056,15 +1056,19 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--octant-workspace);
 }
 
+/* Dead-centring the start screen in a tall window left the prompt floating in
+   the middle of an empty pane with several hundred pixels of nothing above and
+   below it. It is anchored in the upper third instead, which is where the eye
+   already is, and the pane stops reading as an empty page. */
 .draft-thread__canvas {
   box-sizing: border-box;
   display: flex;
   width: min(100% - 48px, 720px);
   flex-direction: column;
   align-items: stretch;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 100%;
-  padding: clamp(24px, 7vh, 64px) 0;
+  padding-block: min(16vh, 148px) 48px;
   margin: 0 auto;
   gap: 10px;
 }

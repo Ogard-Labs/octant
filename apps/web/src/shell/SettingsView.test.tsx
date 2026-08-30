@@ -548,11 +548,14 @@ describe("SettingsView", () => {
     expect(styles).toContain("min-height: 28px");
   });
 
-  it("keeps Settings on the shared interface type scale with a centered reading column", () => {
+  it("keeps Settings on the shared interface type scale in a pane-filling column", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(/\.settings-view\s*\{[\s\S]*font-family:\s*var\(--oct-font-display\);/);
-    expect(styles).toContain("width: min(calc(100% - 48px), 840px)");
+    // Settings reads as a pane, not a centred article: the column starts at the
+    // pane's edge and only stops growing where a form row gets hard to scan.
+    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*max-width:\s*1080px;/);
+    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*margin:\s*0;/);
     expect(styles).toContain("font-family: var(--oct-font-display)");
     expect(styles).toContain("font-size: var(--octant-ui-font-size)");
     expect(styles).not.toContain("--octant-ui-font-family");
