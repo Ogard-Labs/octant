@@ -93,6 +93,21 @@ export interface ChatSearchProjectionRow {
   readonly last_sequence: number;
 }
 
+/**
+ * Per-content (message body) search row. Turn identity stays with the row so
+ * a hit can deep-link without stuffing every body into the title search_text.
+ */
+export interface ChatTranscriptSearchProjectionRow {
+  readonly content_id: string;
+  readonly turn_id: string;
+  readonly thread_id: string;
+  readonly content_role: ChatContentRole;
+  readonly schema_version: number;
+  readonly search_text: string;
+  readonly updated_at: string;
+  readonly last_sequence: number;
+}
+
 export interface ThreadWorkItemProjectionRow {
   readonly thread_id: string;
   readonly item_id: string;

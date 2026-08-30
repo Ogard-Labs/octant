@@ -35,6 +35,13 @@ export function threadSearchArchivedListingForStatus(
   return status === "loading" ? "loading" : status === "unavailable" ? "unavailable" : "ready";
 }
 
+/** Message-body search status; `idle` means nothing was asked yet. */
+export function threadSearchContentListingForStatus(
+  status: "idle" | "loading" | "ready" | "unavailable" | string,
+): ThreadSearchListingStatus {
+  return status === "loading" ? "loading" : status === "unavailable" ? "unavailable" : "ready";
+}
+
 export function projectThreadsAccessForMode(input: {
   readonly activeMode: OctantMode;
   readonly chat: {

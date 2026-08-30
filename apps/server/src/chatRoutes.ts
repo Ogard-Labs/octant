@@ -69,6 +69,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
     const isBootstrap = url.pathname === "/api/chat/bootstrap";
     const isNavigation = url.pathname === "/api/chat/navigation";
     const isSearch = url.pathname === "/api/chat/search";
+    const isTranscriptSearch = url.pathname === "/api/chat/transcript-search";
     const isCommands = url.pathname === "/api/chat/commands";
     const isAttachments = url.pathname === "/api/chat/attachments";
     const threadMatch = /^\/api\/chat\/threads\/([^/]+)$/.exec(url.pathname);
@@ -81,6 +82,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
       !isBootstrap &&
       !isNavigation &&
       !isSearch &&
+      !isTranscriptSearch &&
       !isCommands &&
       !isAttachments &&
       !isThread &&
@@ -177,6 +179,28 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
         }
         return jsonResponse(
           dependencies.service.search(url.searchParams.get("q") ?? ""),
+          200,
+          origin,
+        );
+      }
+
+      if (isTranscriptSearch) {
+        if (request.method !== "GET") {
+          return failureResponse(
+            { category: "unsupported", message: "HTTP method is not supported for this route." },
+            400,
+            origin,
+          );
+        }
+        if ([...url.searchParams.keys()].some((key) => key !== "q")) {
+          return failureResponse(
+            { category: "invalid", message: "Chat request is invalid." },
+            400,
+            origin,
+          );
+        }
+        return jsonResponse(
+          dependencies.service.searchTranscript(url.searchParams.get("q") ?? ""),
           200,
           origin,
         );

@@ -5,6 +5,7 @@ import {
   type ChatResearchRouting,
   type ChatThread,
   type ChatThreadView,
+  type ChatTurnId,
 } from "@octant/contracts/chat";
 import type { SideChatSidecar } from "@octant/contracts";
 import type { ThreadMentionClient } from "@octant/client-runtime";
@@ -93,6 +94,8 @@ export interface ChatWorkspaceProps {
    * header so it stays visible with the rest of the thread chrome.
    */
   readonly childRunStatus?: ReactNode;
+  /** Scroll the transcript to this turn when the thread view is ready. */
+  readonly revealTurnId?: ChatTurnId;
 }
 
 /**
@@ -699,6 +702,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         )}
         <ChatTranscript
           busy={isSending || branchPending}
+          {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
           {...(checkpoints.available
             ? {
                 checkpoints: {

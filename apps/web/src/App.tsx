@@ -24,7 +24,12 @@ import {
 } from "@octant/client-runtime";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import { createLaunchedShellClients } from "./app/createLaunchedShellClients";
-import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
+import {
+  decodeChatThreadId,
+  decodeChatTurnId,
+  type ChatThreadId,
+  type ChatTurnId,
+} from "@octant/contracts/chat";
 import { LOCAL_HOST_ID, decodeHostId, type HostId } from "@octant/contracts/host";
 import {
   ALL_ENVIRONMENTS,
@@ -192,6 +197,7 @@ import {
   projectThreadsAccessForMode,
   sidebarThreadGroupsForMode,
   threadSearchArchivedListingForStatus,
+  threadSearchContentListingForStatus,
   threadSearchListingForStatus,
 } from "./shell/shellModeRouting";
 import type { ThreadSearchThread } from "./shell/threadSearchViewModel";
@@ -218,6 +224,7 @@ import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
+import { useChatTranscriptSearch } from "./chat/useChatTranscriptSearch";
 import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
 import {
   autoConfigureChatDefaults,
@@ -637,8 +644,13 @@ function LaunchedShell(
   // The Thread Search query lives here as well as in the overlay, because the
   // archived half of the Chat listing is fetched from the host per query.
   const [searchQuery, setSearchQuery] = useState("");
+  // Deep-link target from a content search hit; cleared when Search opens again.
+  const [revealChatTurn, setRevealChatTurn] = useState<
+    { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId } | undefined
+  >(undefined);
   const openThreadSearch = useCallback(() => {
     setSearchQuery("");
+    setRevealChatTurn(undefined);
     setSearchOpen(true);
   }, []);
   const closeThreadSearch = useCallback(() => {
@@ -929,6 +941,11 @@ function LaunchedShell(
   // so the Thread Search overlay's Archived group is filled from the host's own
   // lifecycle-spanning Chat thread search instead.
   const archivedChatSearch = useArchivedChatThreadSearch({
+    client: chatClient,
+    query: searchQuery,
+    enabled: searchOpen && activeMode === "chat",
+  });
+  const transcriptChatSearch = useChatTranscriptSearch({
     client: chatClient,
     query: searchQuery,
     enabled: searchOpen && activeMode === "chat",
@@ -2392,6 +2409,9 @@ function LaunchedShell(
   // `idle` means nothing was asked for yet, which is not an incomplete answer.
   const threadSearchArchivedListing = threadSearchArchivedListingForStatus(
     archivedChatSearch.status,
+  );
+  const threadSearchContentListing = threadSearchContentListingForStatus(
+    transcriptChatSearch.status,
   );
   const threadSearchProjects = [
     ...projectController.projects,
@@ -4339,6 +4359,7 @@ function LaunchedShell(
                     chatClient={chatClient}
                     chatController={chatController}
                     chatReadCursorStore={chatReadCursorStore}
+                    {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
                     onPinTerminal={(request) => void zen.pinTerminal(request)}
                     onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
                     onDockResearch={(request) =>
@@ -4752,6 +4773,9 @@ function LaunchedShell(
           searchProjects={threadSearchProjects}
           searchListing={threadSearchListing}
           searchArchivedListing={threadSearchArchivedListing}
+          searchContentHits={transcriptChatSearch.hits}
+          searchContentListing={threadSearchContentListing}
+          searchContentTruncated={transcriptChatSearch.truncated}
           onSearchQueryChange={setSearchQuery}
           onCloseSearch={closeThreadSearch}
           onNewSearchThread={() => {
@@ -4775,11 +4799,16 @@ function LaunchedShell(
             const hitProjectId =
               hit.projectId === undefined ? undefined : decodeProjectId(hit.projectId);
             if (hit.mode === "chat") {
-              void controller.openChatThread(
-                decodeChatThreadId(hit.threadId),
-                hit.title,
-                hitProjectId,
-              );
+              const threadId = decodeChatThreadId(hit.threadId);
+              if (hit.turnId === undefined) {
+                setRevealChatTurn(undefined);
+              } else {
+                setRevealChatTurn({
+                  threadId,
+                  turnId: decodeChatTurnId(hit.turnId),
+                });
+              }
+              void controller.openChatThread(threadId, hit.title, hitProjectId);
               return;
             }
             if (hit.mode === "work") {
