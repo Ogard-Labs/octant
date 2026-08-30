@@ -75,7 +75,8 @@ distilled successor of the earlier long-form design specifications.
 | [0065](0065-project-planner-thread.md)                        | A Project-scoped planner thread surveys the board and proposes work                         | Accepted           |
 | [0066](0066-native-harness-model-role-slots.md)               | Native harness model role slots                                                             | Proposed           |
 | [0067](0067-native-harness-turn-loop-and-supervision.md)      | Native harness turn loop, advisor, and follow-up suggestions                                | Proposed           |
-| [0068](0068-native-harness-context-overflow.md)               | Native harness context overflow: hard cutover, evidence notes, and journal lookup           | Proposed           |
+| [0068](0068-linux-plan-process-deny.md)                       | Linux Plan process denial uses seccomp                                                      | Accepted           |
+| [0069](0069-native-harness-context-overflow.md)               | Native harness context overflow: hard cutover, evidence notes, and journal lookup           | Proposed           |
 
 ## Adding an ADR
 

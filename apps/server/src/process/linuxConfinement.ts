@@ -1,5 +1,6 @@
 import {
   accessSync,
+  chmodSync,
   constants,
   existsSync,
   lstatSync,
@@ -9,17 +10,20 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
 import {
   SeatbeltConfinementError,
   type ConfinedProcessLaunch,
   type SeatbeltConfinementPrepareInput,
 } from "./seatbeltProfile";
+import { buildLinuxProcessDenySeccompFilter } from "./linuxProcessDenySeccomp";
 
 export const DEFAULT_BWRAP_PATH = "/usr/bin/bwrap";
+const HOST_SH_PATH = "/bin/sh";
 
 export interface BuildLinuxConfinementLaunchInput {
   readonly bwrapPath?: string;
+  readonly processArch?: NodeJS.Architecture;
 }
 
 export function requireLinuxConfinement(bwrapPath: string): void {
@@ -164,10 +168,12 @@ export function buildLinuxConfinementLaunch(
     tryBindWritable(path);
   }
   // Bubblewrap applies seccomp before execve of the command, so a filter that
-  // blocked execve would prevent the launch itself. Overlaying host executable
-  // search paths, then re-binding this launch's binary, is what keeps Plan and
-  // other read-only sessions from spawning a host shell.
-  if (input.allowProcessExec === false || input.allowProcessFork === false) {
+  // blocked execve would prevent the launch itself. Overlay host executable
+  // search paths, re-bind this launch's binary, then load a process-deny
+  // seccomp program that blocks fork/clone (and execveat) after start. See 0068.
+  const denyProcessFork = input.allowProcessFork === false;
+  const denyProcessExec = input.allowProcessExec === false;
+  if (denyProcessFork || denyProcessExec) {
     for (const path of hostExecutableSearchPaths) {
       if (existsSync(path)) addMount("tmpfs", "", path);
     }
@@ -256,6 +262,20 @@ export function buildLinuxConfinementLaunch(
   args.push("--", input.executable);
   args.push(...input.args);
 
+  if (denyProcessFork || denyProcessExec) {
+    const filter = buildLinuxProcessDenySeccompFilter({
+      arch: linuxSeccompArch(options.processArch ?? process.arch),
+      denyFork: denyProcessFork,
+      denyExec: denyProcessExec,
+    });
+    const seccompPath = writeProcessDenySeccompFilter(
+      input.temporaryDirectory,
+      filter,
+      `${denyProcessFork ? "-fork" : ""}${denyProcessExec ? "-exec" : ""}`,
+    );
+    return wrapLinuxLaunchWithSeccomp(bwrapPath, args, seccompPath);
+  }
+
   return { command: bwrapPath, args };
 }
 
@@ -263,6 +283,90 @@ interface Mount {
   kind: "ro-bind" | "bind" | "tmpfs" | "tmpfs-rw";
   source: string;
   target: string;
+}
+
+function writeProcessDenySeccompFilter(
+  temporaryDirectory: string,
+  filter: Uint8Array,
+  suffix: string,
+): string {
+  assertNoSymlinkComponents(temporaryDirectory);
+  const parentStats = lstatSync(temporaryDirectory);
+  if (!parentStats.isDirectory()) {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Linux confinement temporary directory must be a directory.",
+    );
+  }
+  const directory = mkdtempSync(join(temporaryDirectory, "octant-seccomp-"));
+  chmodSync(directory, 0o700);
+  const seccompPath = join(directory, `process-deny${suffix}.bpf`);
+  writeFileSync(seccompPath, filter, { mode: 0o600 });
+  return seccompPath;
+}
+
+function assertNoSymlinkComponents(path: string): void {
+  const absolute = resolve(path);
+  const root = parse(absolute).root;
+  const segments = absolute.slice(root.length).split(sep).filter(Boolean);
+  let current = root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        throw new SeatbeltConfinementError(
+          "invalid-configuration",
+          "Linux confinement temporary directory must not contain symbolic links.",
+        );
+      }
+    } catch (error) {
+      if (isMissingPath(error)) return;
+      throw error;
+    }
+  }
+}
+
+function isMissingPath(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "ENOENT"
+  );
+}
+
+function linuxSeccompArch(arch: NodeJS.Architecture): "x64" | "arm64" {
+  if (arch === "x64" || arch === "arm64") return arch;
+  throw new SeatbeltConfinementError(
+    "incompatible",
+    "Linux process denial requires an x64 or arm64 kernel.",
+  );
+}
+
+function wrapLinuxLaunchWithSeccomp(
+  bwrapPath: string,
+  bwrapArgs: ReadonlyArray<string>,
+  seccompPath: string,
+): ConfinedProcessLaunch {
+  try {
+    accessSync(HOST_SH_PATH, constants.X_OK);
+  } catch {
+    throw new SeatbeltConfinementError(
+      "incompatible",
+      "Linux process denial requires an executable /bin/sh to install the seccomp filter.",
+    );
+  }
+  return {
+    command: HOST_SH_PATH,
+    args: [
+      "-c",
+      'bwrap="$1"; bpf="$2"; shift 2; exec "$bwrap" --seccomp 3 "$@" 3<"$bpf"',
+      "octant-bwrap",
+      bwrapPath,
+      seccompPath,
+      ...bwrapArgs,
+    ],
+  };
 }
 
 function isSharedHostTemporaryRoot(path: string): boolean {

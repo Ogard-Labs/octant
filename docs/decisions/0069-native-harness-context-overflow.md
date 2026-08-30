@@ -1,4 +1,4 @@
-# 0068. Native harness context overflow: hard cutover, evidence notes, and journal lookup
+# 0069. Native harness context overflow: hard cutover, evidence notes, and journal lookup
 
 **Status:** Proposed
 
