@@ -64,15 +64,6 @@
   font-size: var(--oct-text-sm);
 }
 
-.apple-simulator-frame__type input {
-  min-width: 0;
-  padding: var(--oct-space-2);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-bg);
-  color: var(--oct-fg);
-}
-
 .apple-simulator-frame__keys {
   display: flex;
   flex-wrap: wrap;
