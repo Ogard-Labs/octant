@@ -1,6 +1,6 @@
 import type { AppleSimulatorLiveFrame } from "@octant/domain";
 import { canOfferAppleSimulatorFrameInput } from "@octant/domain";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
@@ -73,9 +73,10 @@ function LiveScreen(props: {
   readonly onInput?: (intent: AppleSimulatorFrameInputIntent) => void;
   readonly busy: boolean;
 }) {
+  const imageRef = useRef<HTMLImageElement | null>(null);
   return (
-    // The screen is a coordinate hit region: taps translate to Simulator
-    // device points, so the Octant button recipe (fixed height, padding)
+    // The screen is a coordinate hit region: taps translate to live-frame
+    // image pixels, so the Octant button recipe (fixed height, padding)
     // cannot host it without distorting the mapped geometry.
     /* ui-boundary-exception: specialized-editor-surface */
     <button
@@ -88,10 +89,18 @@ function LiveScreen(props: {
       disabled={!props.offerInput || props.busy || props.onInput === undefined}
       onClick={(event) => {
         if (!props.offerInput || props.onInput === undefined || props.busy) return;
-        const rect = event.currentTarget.getBoundingClientRect();
+        const image = imageRef.current;
+        if (image === null) return;
+        const rect = image.getBoundingClientRect();
+        // AppleSimulatorPoint is the screenshot's own pixel space, and the
+        // rendered image is CSS-scaled to the pane width, so a tap must be
+        // rescaled from rendered pixels to naturalWidth/naturalHeight. An
+        // undecoded image reports 0×0 natural size; drop the tap rather than
+        // sending a point the host adapter would map onto nothing.
         if (rect.width <= 0 || rect.height <= 0) return;
-        const x = ((event.clientX - rect.left) / rect.width) * rect.width;
-        const y = ((event.clientY - rect.top) / rect.height) * rect.height;
+        if (image.naturalWidth <= 0 || image.naturalHeight <= 0) return;
+        const x = ((event.clientX - rect.left) / rect.width) * image.naturalWidth;
+        const y = ((event.clientY - rect.top) / rect.height) * image.naturalHeight;
         props.onInput({
           kind: "tap",
           point: { x: Math.round(x), y: Math.round(y) },
@@ -99,7 +108,7 @@ function LiveScreen(props: {
       }}
       type="button"
     >
-      <img alt={`${props.name} screen`} draggable={false} src={props.screenUrl} />
+      <img alt={`${props.name} screen`} draggable={false} ref={imageRef} src={props.screenUrl} />
     </button>
   );
 }
