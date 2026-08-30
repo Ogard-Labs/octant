@@ -51,6 +51,37 @@ describe("GitHub catalogue contracts", () => {
     ).toMatchObject({ page: { freshness: { status: "stale", staleReason: "rate-limited" } } });
   });
 
+  it("decodes the assigned-work read and its cross-repository page", () => {
+    expect(decodeGithubCatalogueReadRequest({ kind: "assigned-work" })).toEqual({
+      kind: "assigned-work",
+    });
+    expect(() =>
+      decodeGithubCatalogueReadRequest({ kind: "assigned-work", login: "someone-else" }),
+    ).toThrow();
+    const item = {
+      category: "review-request",
+      owner: "octant",
+      name: "octant",
+      number: 12,
+      title: "Confine Plan git per call",
+      author: "octocat",
+      updatedAt: "2026-08-28T10:00:00Z",
+      url: "https://github.com/octant/octant/pull/12",
+    };
+    expect(
+      decodeGithubCatalogueReadResponse({
+        kind: "assigned-work",
+        page: { items: [item], freshness: { status: "fresh" } },
+      }),
+    ).toMatchObject({ kind: "assigned-work", page: { items: [item] } });
+    expect(() =>
+      decodeGithubCatalogueReadResponse({
+        kind: "assigned-work",
+        page: { items: [{ ...item, category: "gist" }], freshness: { status: "fresh" } },
+      }),
+    ).toThrow();
+  });
+
   it("bounds the requested page size between 1 and 100", () => {
     expect(decodeGithubCatalogueReadRequest({ kind: "repositories", pageSize: 100 })).toMatchObject(
       { pageSize: 100 },

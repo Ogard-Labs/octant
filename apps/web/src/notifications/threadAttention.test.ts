@@ -9,11 +9,13 @@ const finished: ThreadAttentionSignal = {
   threadId: "thread-a",
   reason: "turn-finished",
   title: "Rewrite the diff pane",
+  source: "chat",
 };
 const asked: ThreadAttentionSignal = {
   threadId: "thread-b",
   reason: "question-asked",
   title: "Queue the next message",
+  source: "code",
 };
 
 describe("thread attention", () => {

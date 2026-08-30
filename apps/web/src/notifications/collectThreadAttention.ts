@@ -4,31 +4,48 @@ import type { ThreadAttentionSignal } from "./threadAttention";
 
 export interface ThreadAttentionSources {
   readonly chatThreads: ReadonlyArray<ChatThreadNavigationItem>;
+  readonly workThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly codeThreads: ReadonlyArray<CodeThreadNavigationItem>;
-  /** Questions the active Code turn is blocked on right now. */
-  readonly codeProviderRequests?: ReadonlyArray<CodeProviderRequest>;
-  readonly activeCodeThreadId?: string;
-}
-
-function codeThreadTitle(sources: ThreadAttentionSources, threadId: string): string | undefined {
-  return sources.codeThreads.find((thread) => String(thread.threadId) === threadId)?.title;
+  /** Live provider requests keyed by Code thread id for every open thread. */
+  readonly codeProviderRequestsByThreadId?: Readonly<
+    Record<string, ReadonlyArray<CodeProviderRequest>>
+  >;
 }
 
 /**
- * Collects every thread state the user is expected to act on. Chat surfaces a
- * finished turn as unread and a durable question as a follow-up; Code surfaces
- * a durable question the same way, and a live blocked turn through the provider
- * requests the workspace is already rendering.
+ * Collects every thread state the user is expected to act on. Chat and Work
+ * surface a finished turn as unread and a durable question as a follow-up;
+ * Code surfaces a durable question the same way, and a live blocked turn
+ * through the provider requests the workspace is already rendering.
  */
 export function collectThreadAttentionSignals(
   sources: ThreadAttentionSources,
 ): ReadonlyArray<ThreadAttentionSignal> {
   const signals: ThreadAttentionSignal[] = [];
   for (const thread of sources.chatThreads) {
+    const shared = {
+      threadId: thread.threadId,
+      title: thread.title,
+      source: "chat" as const,
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    };
     if (thread.followUp === true) {
-      signals.push({ threadId: thread.threadId, reason: "question-asked", title: thread.title });
+      signals.push({ ...shared, reason: "question-asked" });
     } else if (thread.unread === true) {
-      signals.push({ threadId: thread.threadId, reason: "turn-finished", title: thread.title });
+      signals.push({ ...shared, reason: "turn-finished" });
+    }
+  }
+  for (const thread of sources.workThreads) {
+    const shared = {
+      threadId: thread.threadId,
+      title: thread.title,
+      source: "work" as const,
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    };
+    if (thread.followUp === true) {
+      signals.push({ ...shared, reason: "question-asked" });
+    } else if (thread.unread === true) {
+      signals.push({ ...shared, reason: "turn-finished" });
     }
   }
   for (const thread of sources.codeThreads) {
@@ -37,26 +54,25 @@ export function collectThreadAttentionSignals(
       threadId: String(thread.threadId),
       reason: "question-asked",
       title: thread.title,
+      source: "code",
+      ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
     });
   }
-  const activeCodeThreadId = sources.activeCodeThreadId;
-  if (activeCodeThreadId !== undefined) {
-    const title = codeThreadTitle(sources, activeCodeThreadId) ?? "Code thread";
-    for (const request of sources.codeProviderRequests ?? []) {
+  for (const [threadId, requests] of Object.entries(sources.codeProviderRequestsByThreadId ?? {})) {
+    if (requests.length === 0) continue;
+    const thread = sources.codeThreads.find((entry) => String(entry.threadId) === threadId);
+    const title = thread?.title ?? "Code thread";
+    const shared = {
+      threadId,
+      title,
+      source: "code" as const,
+      ...(thread?.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
+    };
+    for (const request of requests) {
       signals.push(
         request.kind === "approval"
-          ? {
-              threadId: activeCodeThreadId,
-              reason: "approval-required",
-              title,
-              detail: request.summary,
-            }
-          : {
-              threadId: activeCodeThreadId,
-              reason: "question-asked",
-              title,
-              detail: request.prompt,
-            },
+          ? { ...shared, reason: "approval-required", detail: request.summary }
+          : { ...shared, reason: "question-asked", detail: request.prompt },
       );
     }
   }

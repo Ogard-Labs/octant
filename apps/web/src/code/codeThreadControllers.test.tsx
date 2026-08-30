@@ -2,8 +2,22 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeBootstrap, CodeThreadId, CodeThreadView } from "@octant/contracts/code";
 import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { CodeThreadControllerSlots, createCodeThreadControllers } from "./codeThreadControllers";
+import {
+  CodeThreadControllerSlots,
+  createCodeThreadControllers,
+  useOpenCodeThreadProviderRequests,
+} from "./codeThreadControllers";
 import { createCodeReadCursorStore } from "./useCodeController";
+
+function ProviderRequestReader(props: {
+  readonly controllers: ReturnType<typeof createCodeThreadControllers>;
+  readonly threadIds: ReadonlyArray<CodeThreadId>;
+  readonly onRead: (snapshot: unknown) => void;
+}) {
+  const snapshot = useOpenCodeThreadProviderRequests(props.controllers, props.threadIds);
+  props.onRead(snapshot);
+  return null;
+}
 
 const now = "2026-08-16T09:00:00.000Z";
 const repositoryId = `repo_${"a".repeat(64)}`;
@@ -188,5 +202,21 @@ describe("CodeThreadControllerSlots", () => {
 
     await waitFor(() => expect(registry.get(threadA)?.activeView).toBeDefined());
     expect(announced).toHaveBeenCalled();
+  });
+
+  it("returns the same provider-request snapshot when nothing changed", () => {
+    const registry = createCodeThreadControllers();
+    const snapshots: unknown[] = [];
+
+    render(
+      <ProviderRequestReader
+        controllers={registry}
+        onRead={(snapshot) => snapshots.push(snapshot)}
+        threadIds={[threadA]}
+      />,
+    );
+
+    expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots.at(-1)).toBe(snapshots[0]);
   });
 });

@@ -13,6 +13,7 @@ import { decodeGithubCatalogueReadResponse } from "@octant/contracts";
 import { decideGithubCatalogueRead } from "@octant/domain";
 import { CacheStatsProjection, type CacheStatsRecorder } from "../cacheStatsProjection";
 import type {
+  GhAssignedWorkObservationItem,
   GhCatalogueFailure,
   GhCataloguePageObservation,
   GhCatalogueResult,
@@ -72,6 +73,9 @@ interface CataloguePort {
     },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhProjectObservationRow>>>;
+  listAssignedWork(
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<readonly GhAssignedWorkObservationItem[]>>;
 }
 
 interface CacheEntry {
@@ -316,6 +320,17 @@ export class GithubCatalogueService {
         },
       };
     }
+    if (request.kind === "assigned-work") {
+      const result = await this.#port.listAssignedWork(signal);
+      if (result.kind !== "ok") return result;
+      return {
+        kind: "ok",
+        value: {
+          kind: "assigned-work",
+          page: { items: result.value, freshness: { status: "fresh" } },
+        },
+      };
+    }
     if (request.kind === "pull-requests") {
       const result = await this.#port.listPullRequests(
         {
@@ -431,6 +446,10 @@ function capabilityFor(
       return "repository-catalogue";
     case "issues":
     case "issue":
+    // Assigned work reads through the one search surface issues share; a
+    // token that can search issues can search pull requests, so gating the
+    // whole read on issues-read stays honest without inventing a capability.
+    case "assigned-work":
       return "issues-read";
     case "pull-requests":
       return "pull-requests-read";
@@ -456,5 +475,7 @@ function markStale(
       return { kind: "pull-requests", page: { ...response.page, freshness } };
     case "projects":
       return { kind: "projects", page: { ...response.page, freshness } };
+    case "assigned-work":
+      return { kind: "assigned-work", page: { ...response.page, freshness } };
   }
 }

@@ -11,6 +11,7 @@ import {
 
 const unavailableCapabilities = {
   createThread: "unavailable",
+  inbox: "unavailable",
   projects: "unavailable",
   threadBoard: "unavailable",
   pullRequests: "unavailable",
@@ -88,6 +89,7 @@ describe("buildSidebarNavigation", () => {
         descriptorIds({
           activeMode: "code",
           createThread: availability,
+          inbox: availability,
           projects: availability,
           threadBoard: availability,
           pullRequests: availability,
@@ -323,9 +325,10 @@ describe("buildSidebarNavigation", () => {
       "unauthorized",
     ];
     const allowedByMode: Record<OctantMode, ReadonlySet<SidebarNavigationDescriptorId>> = {
-      chat: new Set(["new-chat", "agents", "artifact-library", "plugins", "projects"]),
+      chat: new Set(["new-chat", "inbox", "agents", "artifact-library", "plugins", "projects"]),
       work: new Set([
         "new-work-thread",
+        "inbox",
         "agents",
         "thread-board",
         "projects",
@@ -335,6 +338,7 @@ describe("buildSidebarNavigation", () => {
       ]),
       code: new Set([
         "new-code-thread",
+        "inbox",
         "agents",
         "thread-board",
         "github-issues",
@@ -358,6 +362,7 @@ describe("buildSidebarNavigation", () => {
                     const ids = descriptorIds({
                       activeMode,
                       createThread: "available",
+                      inbox: threadBoard,
                       projects: "available",
                       threadBoard,
                       pullRequests,
