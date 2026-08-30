@@ -5,6 +5,7 @@ import {
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
   type MentionableThreadId,
+  type WorkAttachmentId,
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
@@ -74,6 +75,8 @@ import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentV
  */
 interface WorkSteeredMessage {
   readonly id: string;
+  readonly originRestore: (message: WorkSteeredMessage) => void;
+  readonly threadKey: string;
   readonly prompt: string;
   readonly images: ReadonlyArray<File>;
   readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
@@ -141,10 +144,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [completionEvidence, setCompletionEvidence] = useState("");
   const transcriptGeneration = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const currentThreadKeyRef = useRef(String(props.threadId));
+  currentThreadKeyRef.current = String(props.threadId);
   const sendSteeredRef = useRef<(message: WorkSteeredMessage) => Promise<boolean>>(
     async () => false,
   );
-  const restoreSteeredRef = useRef<(message: WorkSteeredMessage) => void>(() => {});
   const mentionListId = useId();
   const fileMentionListId = useId();
   const trimmed = prompt.trim();
@@ -154,7 +158,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     settlement: workTurnSettlement(turns),
     ready: !providerChanging && !creating && !completionLocked,
     send: (message) => sendSteeredRef.current(message),
-    restore: (message) => restoreSteeredRef.current(message),
+    restore: (message) => message.originRestore(message),
   });
   const turnRunning = workTurnSettlement(turns) === "running";
   const images = useWorkComposerImages();
@@ -359,6 +363,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       if (promptText.length === 0) return false;
       const sendingThreadId = String(thread.id);
       const draftRevision = composerDraft.revisionFor(String(props.threadId));
+      const attachmentIds: WorkAttachmentId[] = [];
+      const discardUploadedAttachments = async (): Promise<void> => {
+        await Promise.allSettled(
+          attachmentIds.map((attachmentId) =>
+            props.turnClient?.discardAttachment(props.threadId, attachmentId),
+          ),
+        );
+      };
       setCreating(true);
       setErrorMessage(undefined);
       setStatus(undefined);
@@ -368,7 +380,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         const fileMentionPaths = message?.fileMentionPaths ?? [...fileMentions.selectedPaths];
         const threadMentionIds =
           message?.threadMentionIds ?? (await threadMentions.resolveForSend());
-        const attachmentIds = [];
         for (const file of staged) {
           const attachmentId = decodeWorkAttachmentId(globalThis.crypto.randomUUID());
           await props.turnClient.putAttachment({
@@ -400,6 +411,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           ...(fileMentionPaths.length === 0 ? {} : { fileMentionPaths: [...fileMentionPaths] }),
         });
         if (started.kind !== "accepted") {
+          await discardUploadedAttachments();
           setErrorMessage("The Work turn could not be started.");
           return false;
         }
@@ -417,6 +429,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         textareaRef.current?.focus();
         return true;
       } catch {
+        await discardUploadedAttachments();
         setErrorMessage("The Work turn could not be started.");
         return false;
       } finally {
@@ -437,18 +450,26 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ],
   );
   sendSteeredRef.current = (message) => sendWorkTurn(message);
-  restoreSteeredRef.current = (message) => {
-    // A newer draft the user typed while this one waited is the one worth
-    // keeping. The revision check also catches a user who typed the same words
-    // again, rather than mistaking identical text for an unchanged draft.
-    if (composerDraft.revisionFor(String(props.threadId)) !== message.draftRevision + 1) {
-      return;
-    }
-    composerDraft.setDraft(message.prompt);
-    images.restore(message.images);
-    threadMentions.restore(message.threadMentionChips);
-    fileMentions.restore(message.fileMentionPaths);
-  };
+  const restoreWorkMessage = useCallback(
+    (message: WorkSteeredMessage): void => {
+      const originThreadKey = message.threadKey;
+      // A newer draft the user typed while this one waited is the one worth
+      // keeping. The revision check also catches a user who typed the same words
+      // again, rather than mistaking identical text for an unchanged draft.
+      if (composerDraft.revisionFor(originThreadKey) !== message.draftRevision + 1) {
+        return;
+      }
+      composerDraft.writeFor(originThreadKey, message.prompt);
+      // A navigation can reuse this hook instance for another thread. Restore
+      // text into the originating draft store, but never attach its context to
+      // the newly selected thread's composer.
+      if (currentThreadKeyRef.current !== originThreadKey) return;
+      images.restore(message.images);
+      threadMentions.restore(message.threadMentionChips);
+      fileMentions.restore(message.fileMentionPaths);
+    },
+    [composerDraft, fileMentions, images, threadMentions],
+  );
 
   const submit = useCallback(async () => {
     if (steered.pending !== undefined) return;
@@ -460,6 +481,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       const threadMentionChips = [...threadMentions.chips];
       const steeredMessage: WorkSteeredMessage = {
         id: globalThis.crypto.randomUUID(),
+        originRestore: restoreWorkMessage,
+        threadKey: String(props.threadId),
         prompt: trimmed,
         images: images.filesForSend(),
         threadMentionIds: threadMentionChips.map((chip) => chip.threadId),

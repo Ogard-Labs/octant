@@ -675,6 +675,7 @@ describe("WorkThreadWorkspace", () => {
         byteLength: input.bytes.byteLength,
         digest: "e".repeat(64),
       })),
+      discardAttachment: vi.fn(async () => undefined),
     };
     const threadMentionClient: ThreadMentionClient = {
       search: vi.fn(async () => [mentionCandidate(mentionedThreadId)]),
@@ -719,8 +720,69 @@ describe("WorkThreadWorkspace", () => {
     turns = [workTurn({ status: "completed" })];
     await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
     await waitFor(() => expect(composer).toHaveValue("retry this #[Release notes]  @first.md"));
+    const uploadedId = turnClient.putAttachment.mock.calls[0]?.[0].attachmentId;
+    expect(uploadedId).toBeDefined();
+    expect(turnClient.discardAttachment).toHaveBeenCalledWith(threadId, uploadedId);
     expect(await screen.findByAltText("first.png")).toBeInTheDocument();
     expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Release notes");
+  });
+
+  it("discards every Work attachment uploaded before turn start throws", async () => {
+    const user = userEvent.setup();
+    let turns = [workTurn({ status: "running" })];
+    const startFirstTurn = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const putAttachment = vi.fn(async (input) => ({
+      attachmentId: input.attachmentId,
+      displayName: input.displayName,
+      mediaType: input.mediaType,
+      byteLength: input.bytes.byteLength,
+      digest: "f".repeat(64),
+    }));
+    const discardAttachment = vi.fn(async () => undefined);
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns })),
+      startFirstTurn,
+      putAttachment,
+      discardAttachment,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const composer = await screen.findByLabelText("Work prompt");
+    await user.type(composer, "retry with both images");
+    fireEvent.paste(composer, {
+      clipboardData: {
+        files: [
+          new File([new Uint8Array([1])], "first.png", { type: "image/png" }),
+          new File([new Uint8Array([2])], "second.png", { type: "image/png" }),
+        ],
+        items: [],
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    turns = [workTurn({ status: "completed" })];
+    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
+    await waitFor(() => expect(discardAttachment).toHaveBeenCalledTimes(2));
+    const uploadedIds = putAttachment.mock.calls.map((call) => call[0].attachmentId);
+    expect(discardAttachment.mock.calls).toEqual([
+      [threadId, uploadedIds[0]],
+      [threadId, uploadedIds[1]],
+    ]);
   });
 
   it("does not let Enter submit a second Work draft while one message waits", async () => {
@@ -799,6 +861,98 @@ describe("WorkThreadWorkspace", () => {
 
     await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce());
     expect(composer).toHaveValue("same draft");
+  });
+
+  it("restores a refused Work message into its origin thread after navigation", async () => {
+    const user = userEvent.setup();
+    const originThreadId = threadId;
+    const otherThreadId = decodeWorkThreadId("10000000-0000-4000-8000-000000000102");
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    let activeThreadId = originThreadId;
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread({ id: activeThreadId })] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({
+        threadId: activeThreadId,
+        turns: [workTurn({ threadId: activeThreadId, status: "running" })],
+      })),
+      startFirstTurn: vi.fn(),
+      putAttachment: vi.fn(async (input) => ({
+        attachmentId: input.attachmentId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "f".repeat(64),
+      })),
+      discardAttachment: vi.fn(),
+    };
+    const threadMentionClient: ThreadMentionClient = {
+      search: vi.fn(async () => [
+        mentionCandidate("90000000-0000-4000-8000-000000000001" as MentionableThreadId),
+      ]),
+      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
+      openSideChat: vi.fn(),
+      execute: vi.fn(),
+    };
+    const fileMentionClient: FileMentionClient = {
+      complete: vi.fn(async () => [
+        { kind: "file" as const, path: decodeFileMentionPath("first.md") },
+      ]),
+      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
+      execute: vi.fn(),
+    };
+
+    const rendered = render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        fileMentionClient={fileMentionClient}
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={originThreadId}
+        threadMentionClient={threadMentionClient}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const composer = await screen.findByLabelText("Work prompt");
+    await user.type(composer, "restore this #first");
+    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
+    await user.type(composer, " @first");
+    await user.click(await screen.findByRole("option", { name: /first.md/ }));
+    fireEvent.paste(composer, {
+      clipboardData: {
+        files: [new File([new Uint8Array([137, 80, 78])], "first.png", { type: "image/png" })],
+        items: [],
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    activeThreadId = otherThreadId;
+    rendered.rerender(
+      <WorkThreadWorkspace
+        draftStore={store}
+        fileMentionClient={fileMentionClient}
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={otherThreadId}
+        threadMentionClient={threadMentionClient}
+        title="Other brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(store.read("work", String(originThreadId))?.text).toBe(
+        "restore this #[Release notes]  @first.md",
+      ),
+    );
+    expect(screen.getByLabelText("Work prompt")).toHaveValue("");
+    expect(store.read("work", String(otherThreadId))).toBeUndefined();
+    expect(screen.queryByAltText("first.png")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Mentioned threads")).not.toBeInTheDocument();
   });
 
   it("hands a Work follow-up back to the composer when the thread is confirmed Done", async () => {
