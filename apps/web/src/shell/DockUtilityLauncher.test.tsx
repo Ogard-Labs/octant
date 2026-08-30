@@ -17,6 +17,11 @@ describe("right sidebar tool launcher", () => {
     expect(styles).toMatch(/\.workspace-disclosure__action > svg \{[^}]*flex: 0 0 16px;/);
   });
 
+  it("offers nothing rather than a dead control when every tool is already open", () => {
+    render(<DockUtilityLauncher onOpen={vi.fn()} surfaces={[]} />);
+    expect(screen.queryByRole("button", { name: "Add tool" })).not.toBeInTheDocument();
+  });
+
   it("opens available tools and restores focus to the trigger", () => {
     const onOpen = vi.fn();
     render(

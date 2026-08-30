@@ -88,6 +88,8 @@ import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
 import { CanvasWorkspaceTab } from "../canvas/CanvasWorkspaceTab";
 import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
+import type { DraftRecentThread } from "./DraftThreadWorkspace";
+import type { OctantMode } from "@octant/contracts/modes";
 import { AgentModeWelcome } from "./AgentModeWelcome";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
@@ -768,6 +770,36 @@ function renderCodeTab(
   );
 }
 
+/**
+ * The threads this mode already has, newest first, for the start screen's
+ * Continue list. It reads what the sidebar already loaded rather than asking
+ * the host for anything, and stays empty when the mode cannot open a thread
+ * from here.
+ */
+function draftRecentThreads(
+  mode: OctantMode,
+  props: WorkspaceViewProps,
+): ReadonlyArray<DraftRecentThread> {
+  const limit = 5;
+  if (mode === "chat") {
+    const open = props.onOpenChatThread;
+    if (open === undefined) return [];
+    return (props.chatController.bootstrap?.threads ?? []).slice(0, limit).map((thread) => ({
+      id: String(thread.id),
+      title: thread.title,
+      onOpen: () => open(thread.id, thread.title),
+    }));
+  }
+  if (mode === "code") {
+    return (props.codeController.bootstrap?.threads ?? []).slice(0, limit).map((thread) => ({
+      id: String(thread.id),
+      title: thread.title,
+      onOpen: () => props.onOpenCodeThread(thread.id, thread.title, thread.projectId),
+    }));
+  }
+  return [];
+}
+
 function renderNonCodeTab(
   tab: WorkspaceTab,
   props: WorkspaceViewProps,
@@ -781,9 +813,11 @@ function renderNonCodeTab(
   openProviderSettings: (() => void) | undefined,
 ): React.ReactNode {
   if (tab.kind === "draft-thread") {
+    const recentThreads = draftRecentThreads(tab.mode, props);
     return (
       <DraftThreadWorkspace
         key={tab.id}
+        {...(recentThreads.length === 0 ? {} : { recentThreads })}
         mode={tab.mode}
         {...(tab.mode === "code" && props.draftExecutionProfile !== undefined
           ? { executionProfile: props.draftExecutionProfile }

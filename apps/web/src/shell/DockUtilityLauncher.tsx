@@ -30,12 +30,16 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
     trigger.current?.focus();
   }
 
+  // A subject whose remaining tools are all gated away has nothing to offer,
+  // and a permanently greyed-out plus reads as a broken control rather than as
+  // an honest "nothing to add here". Absence is the honest state.
+  if (props.surfaces.length === 0) return null;
+
   return (
     <span className="dock-utility-launcher">
       <IconButton
         aria-controls={disclosureId}
         aria-expanded={open}
-        disabled={props.surfaces.length === 0}
         icon={Plus}
         label="Add tool"
         onClick={() => setOpen((current) => !current)}

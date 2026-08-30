@@ -1118,6 +1118,58 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   line-height: 1.65;
 }
 
+/* Recent work under the composer. These rows are the way back into open work
+   from a start screen, so they stay quiet until pointed at and never compete
+   with the prompt above them. The button recipe fixes its own height, which a
+   two-line row has to opt out of. */
+.draft-thread__recent {
+  order: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 28px;
+}
+
+.draft-thread__recent-title {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.draft-thread__recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-thread__recent-item {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: var(--oct-radius-md);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+}
+
+.draft-thread__recent-name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+
+.draft-thread__recent-detail {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
 .draft-thread__intent-cards {
   order: 3;
   display: flex;
