@@ -862,7 +862,12 @@ function renderNonCodeTab(
           issueContext,
           linearIssueContext,
         ) => {
-          if (props.onDraftCreateThread === undefined) return;
+          // Returning quietly here made a wired-up composer look dead: the user
+          // pressed Create thread and nothing happened anywhere. A missing
+          // handler is a wiring defect, so it fails where it can be seen.
+          if (props.onDraftCreateThread === undefined) {
+            throw new Error("Draft thread creation is not wired to this workspace.");
+          }
           return props.onDraftCreateThread(
             tab.mode,
             prompt,

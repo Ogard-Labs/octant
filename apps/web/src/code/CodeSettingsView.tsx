@@ -86,8 +86,10 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               }}
               value={[executionPolicy]}
             >
-              <OctantToggleGroupItem value="approval-gated">Ask</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="auto-accept-edits">Auto-edit</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="approval-gated">Approval</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="auto-accept-edits">
+                Auto-accept edits
+              </OctantToggleGroupItem>
               <OctantToggleGroupItem value="plan">Plan</OctantToggleGroupItem>
               <OctantToggleGroupItem value="full-access">Full access</OctantToggleGroupItem>
             </OctantToggleGroup>

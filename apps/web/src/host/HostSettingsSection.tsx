@@ -270,7 +270,9 @@ export function HostSettingsSection({
             { label: "Uptime", value: formatUptime(status.readiness.uptimeSeconds) },
             {
               label: "Active work",
-              value: `${status.work.active}${status.work.attentionRequired ? " (attention required)" : ""}`,
+              // Reporting "0 (attention required)" reads as a contradiction, so the
+              // qualifier only appears when there is live work to attend to.
+              value: `${status.work.active}${status.work.attentionRequired && status.work.active > 0 ? " (attention required)" : ""}`,
             },
           ]}
         />

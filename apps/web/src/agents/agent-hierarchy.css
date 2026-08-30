@@ -203,15 +203,73 @@
   overflow-wrap: anywhere;
 }
 
+.agent-run-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.agent-run-settings-panel fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.agent-run-settings-panel [role="radiogroup"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.agent-run-settings-panel legend {
+  margin-bottom: 0.25rem;
+  padding: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+/*
+ * The button recipe fixes its own height, which clips a card-shaped option to
+ * one line. Options must opt out of that height before they can hold a label
+ * and a description.
+ */
 .agent-run-settings-panel__option {
   display: flex;
   gap: 0.6rem;
   align-items: flex-start;
   justify-content: flex-start;
   width: 100%;
-  padding: 0.5rem 0;
+  height: auto;
+  min-height: 0;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 0.5rem);
   font-size: 0.875rem;
+  font-weight: 400;
   text-align: left;
+  white-space: normal;
+}
+
+.agent-run-settings-panel__option[aria-checked="true"] {
+  border-color: var(--ring);
+  background: var(--accent);
+}
+
+.agent-run-settings-panel__option strong {
+  font-weight: 600;
+}
+
+.agent-run-settings-panel__option span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.agent-run-settings-panel__option-description {
+  color: var(--muted-foreground);
 }
 
 .agent-run-settings-panel__message,

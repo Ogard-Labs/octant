@@ -112,24 +112,27 @@ export function AgentRunSettingsPanel(props: { readonly client: AgentRunSettings
             {message}
           </p>
         )}
-        {POSTURES.map((posture) => (
-          <OctantButton
-            aria-checked={settings?.creationPosture === posture.value}
-            className="agent-run-settings-panel__option"
-            disabled={saving}
-            key={posture.value}
-            onClick={() => void choose(posture.value)}
-            role="radio"
-            type="button"
-            variant="ghost"
-          >
-            <span>
-              <strong>{posture.label}</strong>
-              <br />
-              {posture.description}
-            </span>
-          </OctantButton>
-        ))}
+        <div aria-label="Subagent creation posture" role="radiogroup">
+          {POSTURES.map((posture) => (
+            <OctantButton
+              aria-checked={settings?.creationPosture === posture.value}
+              className="agent-run-settings-panel__option"
+              disabled={saving}
+              key={posture.value}
+              onClick={() => void choose(posture.value)}
+              role="radio"
+              type="button"
+              variant="ghost"
+            >
+              <span>
+                <strong>{posture.label}</strong>
+                <span className="agent-run-settings-panel__option-description">
+                  {posture.description}
+                </span>
+              </span>
+            </OctantButton>
+          ))}
+        </div>
       </fieldset>
     </section>
   );
