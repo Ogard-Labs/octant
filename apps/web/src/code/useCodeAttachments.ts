@@ -198,7 +198,7 @@ export function useCodeAttachments(input: {
     setMessage(undefined);
     detached.current = entries.map((attachment) => ({ attachment, client, threadId }));
     return entries;
-  }, [threadId]);
+  }, [client, threadId]);
 
   const restoreDetached = useCallback(
     (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
