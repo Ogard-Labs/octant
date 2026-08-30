@@ -1468,8 +1468,8 @@ form > .work-composer-adapter__attachments {
   flex-direction: column;
   align-items: stretch;
   min-height: 100%;
-  justify-content: center;
-  padding: clamp(24px, 7vh, 64px) 0;
+  justify-content: flex-start;
+  padding-block: min(16vh, 148px) 48px;
   margin: 0 auto;
   gap: 10px;
 }
@@ -1599,9 +1599,9 @@ form > .work-composer-adapter__attachments {
   width: min(100% - 48px, 680px);
   flex-direction: column;
   align-items: stretch;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 100%;
-  padding: clamp(24px, 7vh, 64px) 0;
+  padding-block: min(16vh, 148px) 48px;
   margin: 0 auto;
   gap: 10px;
 }

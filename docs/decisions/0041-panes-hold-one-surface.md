@@ -46,8 +46,13 @@ once. The sidebar's hierarchy is the one and only switcher.
   Review, Terminal, Tests, and iOS Simulator tools plus which tool is selected.
   Returning to
   a visible thread restores that tab set and reconnects to the thread's
-  host-owned utility state. The whole sidebar is window state and opens or
-  closes only from the explicit top-right control. Project- and host-scoped
+  host-owned utility state. The whole sidebar is window state; the explicit
+  top-right control is the only thing that opens or closes it, and a wide
+  window that has never been told otherwise starts with it shown. Starting it
+  hidden left the workspace as one narrow column in an empty window, with the
+  dock's own region reading as page margin rather than as the place the
+  thread's tools live. A narrow window still starts closed, because there the
+  dock is a modal drawer and would cover the workspace on launch. Project- and host-scoped
   readers keep a window fallback for panes that hold no thread. A panel the
   newly active pane gives nothing to describe presents that as an explicit
   unavailable state — never the previous pane's content. Which live tools exist

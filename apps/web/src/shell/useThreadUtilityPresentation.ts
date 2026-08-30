@@ -37,9 +37,11 @@ export interface ThreadUtilityPresentation {
 export function useThreadUtilityPresentation(
   windowId: string,
   scope: { readonly localStorage?: Storage } = globalThis,
+  /** A narrow window shows the dock as a modal drawer, so it never opens itself. */
+  defaultOpen = true,
 ): ThreadUtilityPresentation {
   const [dockVisible, setDockVisible] = useState(
-    () => readUtilityDockPresentation(scope, windowId).open,
+    () => readUtilityDockPresentation(scope, windowId, defaultOpen).open,
   );
   const [dockStatesByThread, setDockStatesByThread] = useState<ThreadUtilityDockStates>(
     () => readUtilityDockPresentation(scope, windowId).threads,

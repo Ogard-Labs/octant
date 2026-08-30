@@ -94,9 +94,26 @@ describe("thread utility presentation persistence", () => {
       threads: openThreadUtilityTab(new Map(), key, "terminal"),
     });
     expect(readUtilityDockPresentation({ localStorage }, "window-b")).toEqual({
+      open: true,
+      threads: new Map(),
+    });
+  });
+
+  it("shows the dock in a window that has never been told otherwise", () => {
+    expect(readUtilityDockPresentation({ localStorage: memoryStorage() }, "fresh")).toEqual({
+      open: true,
+      threads: new Map(),
+    });
+  });
+
+  it("keeps the dock closed once a window has closed it", () => {
+    const localStorage = memoryStorage();
+    writeUtilityDockPresentation({ localStorage }, "window-a", {
       open: false,
       threads: new Map(),
     });
+
+    expect(readUtilityDockPresentation({ localStorage }, "window-a").open).toBe(false);
   });
 
   it("drops unknown dock surfaces and keeps the remaining selected tool", () => {
