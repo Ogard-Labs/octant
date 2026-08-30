@@ -287,7 +287,7 @@ interface Mount {
 
 function writeProcessDenySeccompFilter(
   temporaryDirectory: string,
-  filter: Buffer,
+  filter: Uint8Array,
   suffix: string,
 ): string {
   assertNoSymlinkComponents(temporaryDirectory);
