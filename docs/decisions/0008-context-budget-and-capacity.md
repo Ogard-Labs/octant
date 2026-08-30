@@ -96,3 +96,4 @@ scheduled.
 - 0007 Direct API providers and the native agent harness
 - 0012 Mixed-provider subagents
 - 0044 The dock hosts live thread-owned tools
+- 0069 Native harness context overflow (amends one reduction-order step)

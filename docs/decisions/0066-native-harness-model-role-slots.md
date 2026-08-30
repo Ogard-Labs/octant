@@ -78,3 +78,4 @@ capacity scheduling — are unchanged.
 - 0008 Context budget and capacity scheduling
 - 0012 Mixed-provider subagents (one rule superseded, see above)
 - 0067 Native harness turn loop, advisor, and follow-up suggestions
+- 0069 Native harness context overflow
