@@ -86,4 +86,43 @@ describe("Code composer attachment ownership", () => {
       revokeObjectURL.mockRestore();
     }
   });
+
+  it("discards detached host bytes and revokes previews on unmount", async () => {
+    const reference: CodeAttachmentReference = {
+      attachmentId: "40000000-0000-4000-8000-000000000003" as never,
+      displayName: "unmounted.png",
+      mediaType: "image/png",
+      byteLength: 3,
+      digest: "c".repeat(64) as never,
+    };
+    const putAttachment = vi.fn(async () => reference);
+    const discardAttachment = vi.fn(async () => undefined);
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:unmounted");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    try {
+      const { result, unmount } = renderHook(() =>
+        useCodeAttachments({
+          client: { putAttachment, discardAttachment },
+          threadId,
+        }),
+      );
+      await act(async () => {
+        await result.current.attach([
+          new File([new Uint8Array([1, 2, 3])], "unmounted.png", { type: "image/png" }),
+        ]);
+      });
+      act(() => {
+        result.current.detachForSend();
+      });
+
+      unmount();
+
+      expect(discardAttachment).toHaveBeenCalledOnce();
+      expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId);
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:unmounted");
+    } finally {
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
 });

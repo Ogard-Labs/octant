@@ -18,6 +18,11 @@ export interface StagedCodeAttachment {
   readonly previewUrl: string;
 }
 
+interface DetachedCodeAttachment {
+  readonly attachment: StagedCodeAttachment;
+  readonly threadId: CodeThreadId | undefined;
+}
+
 export interface CodeAttachments {
   readonly staged: ReadonlyArray<StagedCodeAttachment>;
   readonly message: string | undefined;
@@ -67,6 +72,8 @@ export function useCodeAttachments(input: {
   readonly threadId: CodeThreadId | undefined;
 }): CodeAttachments {
   const { client, threadId } = input;
+  const clientRef = useRef(client);
+  clientRef.current = client;
   const [staged, setStaged] = useState<ReadonlyArray<StagedCodeAttachment>>([]);
   const [message, setMessage] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -74,6 +81,7 @@ export function useCodeAttachments(input: {
   // Uploads land one after another, so the list has to be readable between
   // awaits — not only at the next render.
   const current = useRef<ReadonlyArray<StagedCodeAttachment>>([]);
+  const detached = useRef<ReadonlyArray<DetachedCodeAttachment>>([]);
   const inFlight = useRef(0);
 
   const apply = useCallback(
@@ -103,6 +111,13 @@ export function useCodeAttachments(input: {
     () => () => {
       for (const previewUrl of previews.current) URL.revokeObjectURL(previewUrl);
       previews.current.clear();
+      for (const entry of detached.current) {
+        if (entry.threadId === undefined) continue;
+        void clientRef.current
+          .discardAttachment(entry.threadId, entry.attachment.reference.attachmentId)
+          .catch(() => undefined);
+      }
+      detached.current = [];
     },
     [],
   );
@@ -170,17 +185,26 @@ export function useCodeAttachments(input: {
     [apply, client, forget, threadId],
   );
 
+  function releaseDetached(attachments: ReadonlyArray<StagedCodeAttachment>): void {
+    const ids = new Set(attachments.map((entry) => String(entry.reference.attachmentId)));
+    detached.current = detached.current.filter(
+      (entry) => !ids.has(String(entry.attachment.reference.attachmentId)),
+    );
+  }
+
   const detachForSend = useCallback((): ReadonlyArray<StagedCodeAttachment> => {
-    const detached = current.current;
+    const entries = current.current;
     current.current = [];
     setStaged([]);
     setMessage(undefined);
-    return detached;
-  }, []);
+    detached.current = entries.map((attachment) => ({ attachment, threadId }));
+    return entries;
+  }, [threadId]);
 
   const restoreDetached = useCallback(
     (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
       if (attachments.length === 0) return;
+      releaseDetached(attachments);
       apply((list) => {
         const existing = new Set(list.map((entry) => String(entry.reference.attachmentId)));
         return [
@@ -194,6 +218,7 @@ export function useCodeAttachments(input: {
 
   const commitDetached = useCallback(
     (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
+      releaseDetached(attachments);
       for (const attachment of attachments) forget(attachment.previewUrl);
     },
     [forget],
@@ -201,6 +226,7 @@ export function useCodeAttachments(input: {
 
   const discardDetached = useCallback(
     (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
+      releaseDetached(attachments);
       for (const attachment of attachments) {
         forget(attachment.previewUrl);
         if (threadId === undefined) continue;
