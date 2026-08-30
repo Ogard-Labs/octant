@@ -212,6 +212,12 @@ describe("ChatTranscript", () => {
     expect(screen.getByText("Worked for 37s")).toBeVisible();
   });
 
+  it("omits a duration shorter than one second", () => {
+    render(<ChatTranscript view={viewFixture({ attemptUpdatedAt: "2026-07-20T08:00:00.999Z" })} />);
+
+    expect(screen.queryByText(/Worked for/)).not.toBeInTheDocument();
+  });
+
   it("does not claim a duration for a turn that did not complete", () => {
     render(
       <ChatTranscript

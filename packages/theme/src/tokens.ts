@@ -70,8 +70,6 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     id: "floating",
     displayName: "Floating surface",
     category: "surface",
-    contrastTarget: "workspace",
-    contrastLevel: "ui",
     defaultLight: "#f7f7f7",
     defaultDark: "#1e1e1e",
   },

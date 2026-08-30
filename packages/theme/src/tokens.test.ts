@@ -101,6 +101,18 @@ describe("theme semantic token catalog", () => {
     expect(DEFAULT_LIGHT_TOKENS["app-background"]).not.toBe(DEFAULT_LIGHT_TOKENS["workspace"]);
   });
 
+  it("treats floating and workspace as decorative depth surfaces, not UI contrast pairs", () => {
+    const floating = getRoleDefinition("floating");
+
+    // The two surfaces form a subtle depth ladder. Neither one carries text or
+    // a control boundary by itself, so WCAG's 3:1 UI-mark contract does not
+    // apply to their fill-to-fill relationship.
+    expect(floating.contrastTarget).toBeUndefined();
+    expect(floating.contrastLevel).toBeUndefined();
+    expect(DEFAULT_LIGHT_TOKENS.floating).not.toBe(DEFAULT_LIGHT_TOKENS.workspace);
+    expect(DEFAULT_DARK_TOKENS.floating).not.toBe(DEFAULT_DARK_TOKENS.workspace);
+  });
+
   it("keeps focus distinguishable from body text in both modes", () => {
     expect(DEFAULT_DARK_TOKENS["focus-ring"]).not.toBe(DEFAULT_DARK_TOKENS["text-primary"]);
     expect(DEFAULT_LIGHT_TOKENS["focus-ring"]).not.toBe(DEFAULT_LIGHT_TOKENS["text-primary"]);

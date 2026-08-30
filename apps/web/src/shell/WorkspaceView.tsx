@@ -787,7 +787,7 @@ function draftRecentThreads(
     return (props.chatController.bootstrap?.threads ?? []).slice(0, limit).map((thread) => ({
       id: String(thread.id),
       title: thread.title,
-      onOpen: () => open(thread.id, thread.title),
+      onOpen: () => open(thread.id, thread.title, thread.projectId),
     }));
   }
   if (mode === "code") {

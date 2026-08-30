@@ -628,7 +628,7 @@ function attemptWorkedFor(attempt: {
   const started = Date.parse(attempt.createdAt);
   const ended = Date.parse(attempt.updatedAt);
   if (Number.isNaN(started) || Number.isNaN(ended)) return undefined;
-  const seconds = Math.round((ended - started) / 1000);
+  const seconds = Math.floor((ended - started) / 1000);
   if (seconds < 1) return undefined;
   if (seconds < 60) return `Worked for ${seconds}s`;
   const minutes = Math.floor(seconds / 60);
