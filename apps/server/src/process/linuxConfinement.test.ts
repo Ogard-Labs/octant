@@ -5,8 +5,10 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -152,7 +154,56 @@ describe("Linux Bubblewrap confinement", () => {
     expect(launch.args[1]).toContain("--seccomp 3");
     const seccompPath = launch.args[4] ?? "";
     expect(seccompPath.endsWith(".bpf")).toBe(true);
+    expect(seccompPath).toMatch(/[/\\]octant-seccomp-[^/\\]+[/\\]process-deny/);
     expect(existsSync(seccompPath)).toBe(true);
+  });
+
+  it("writes the seccomp filter into a private directory instead of a predictable path", () => {
+    const { boundRoot, temporaryDirectory, bwrapPath, root } = fixture();
+    const predictablePath = join(temporaryDirectory, "octant-linux-process-deny-fork-exec.bpf");
+    const trapFile = join(root, "seccomp-trap");
+    writeFileSync(trapFile, "untouched", { mode: 0o600 });
+    symlinkSync(trapFile, predictablePath);
+    const launch = buildLinuxConfinementLaunch(
+      {
+        executable: "/bin/true",
+        args: [],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+        writeBoundRoot: false,
+        allowProcessExec: false,
+        allowProcessFork: false,
+      },
+      { bwrapPath },
+    );
+
+    const seccompPath = launch.args[4] ?? "";
+    expect(seccompPath).not.toBe(predictablePath);
+    expect(readFileSync(trapFile, "utf8")).toBe("untouched");
+    expect(seccompPath).toMatch(/[/\\]octant-seccomp-[^/\\]+[/\\]process-deny/);
+  });
+
+  it("refuses a temporary directory whose path contains a symlink component", () => {
+    const { boundRoot, bwrapPath, root } = fixture();
+    const realTemporaryDirectory = join(root, "real-temp");
+    const linkedTemporaryDirectory = join(root, "linked-temp");
+    mkdirSync(realTemporaryDirectory);
+    symlinkSync(realTemporaryDirectory, linkedTemporaryDirectory);
+    expect(() =>
+      buildLinuxConfinementLaunch(
+        {
+          executable: "/bin/true",
+          args: [],
+          boundRoot,
+          temporaryDirectory: linkedTemporaryDirectory,
+          networkEgress: "none",
+          allowProcessExec: false,
+          allowProcessFork: false,
+        },
+        { bwrapPath },
+      ),
+    ).toThrow(SeatbeltConfinementError);
   });
 
   it("does not install a process-deny seccomp filter when exec and fork stay allowed", () => {

@@ -1,5 +1,6 @@
 import {
   accessSync,
+  chmodSync,
   constants,
   existsSync,
   lstatSync,
@@ -9,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
 import {
   SeatbeltConfinementError,
   type ConfinedProcessLaunch,
@@ -267,11 +268,11 @@ export function buildLinuxConfinementLaunch(
       denyFork: denyProcessFork,
       denyExec: denyProcessExec,
     });
-    const seccompPath = join(
+    const seccompPath = writeProcessDenySeccompFilter(
       input.temporaryDirectory,
-      `octant-linux-process-deny${denyProcessFork ? "-fork" : ""}${denyProcessExec ? "-exec" : ""}.bpf`,
+      filter,
+      `${denyProcessFork ? "-fork" : ""}${denyProcessExec ? "-exec" : ""}`,
     );
-    writeFileSync(seccompPath, filter, { mode: 0o600 });
     return wrapLinuxLaunchWithSeccomp(bwrapPath, args, seccompPath);
   }
 
@@ -282,6 +283,56 @@ interface Mount {
   kind: "ro-bind" | "bind" | "tmpfs" | "tmpfs-rw";
   source: string;
   target: string;
+}
+
+function writeProcessDenySeccompFilter(
+  temporaryDirectory: string,
+  filter: Buffer,
+  suffix: string,
+): string {
+  assertNoSymlinkComponents(temporaryDirectory);
+  const parentStats = lstatSync(temporaryDirectory);
+  if (!parentStats.isDirectory()) {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Linux confinement temporary directory must be a directory.",
+    );
+  }
+  const directory = mkdtempSync(join(temporaryDirectory, "octant-seccomp-"));
+  chmodSync(directory, 0o700);
+  const seccompPath = join(directory, `process-deny${suffix}.bpf`);
+  writeFileSync(seccompPath, filter, { mode: 0o600 });
+  return seccompPath;
+}
+
+function assertNoSymlinkComponents(path: string): void {
+  const absolute = resolve(path);
+  const root = parse(absolute).root;
+  const segments = absolute.slice(root.length).split(sep).filter(Boolean);
+  let current = root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        throw new SeatbeltConfinementError(
+          "invalid-configuration",
+          "Linux confinement temporary directory must not contain symbolic links.",
+        );
+      }
+    } catch (error) {
+      if (isMissingPath(error)) return;
+      throw error;
+    }
+  }
+}
+
+function isMissingPath(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "ENOENT"
+  );
 }
 
 function linuxSeccompArch(arch: NodeJS.Architecture): "x64" | "arm64" {
