@@ -1115,7 +1115,7 @@ describe("ChatWorkspace", () => {
     { outcome: "accepted" as const, sent: true, discardCount: 0 },
     { outcome: "refused" as const, sent: false, discardCount: 1 },
   ])(
-    "does not discard a deferred attachment after unmount when the host has $outcome",
+    "settles a deferred attachment exactly once after unmount when the host has $outcome",
     async ({ sent, discardCount }) => {
       const user = userEvent.setup();
       let resolveSend!: (value: boolean) => void;
