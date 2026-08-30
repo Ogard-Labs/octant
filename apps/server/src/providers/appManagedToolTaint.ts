@@ -51,13 +51,18 @@ function taintSuccessfulResult(
   } catch {
     return { result: { error: "tool-unavailable" }, isError: true };
   }
-  const ingested = input.recordExternalContentIngestion({
-    threadId: input.threadId,
-    provenance: { origin: "tool-result", sourceLabel: toolName },
-    contentReference: `app-managed-${toolName}-${createHash("sha256").update(body).digest("hex")}`,
-    correlationId: input.uuid(),
-    authorized: true,
-  });
+  let ingested: ExternalContentIngestionResult;
+  try {
+    ingested = input.recordExternalContentIngestion({
+      threadId: input.threadId,
+      provenance: { origin: "tool-result", sourceLabel: toolName },
+      contentReference: `app-managed-${toolName}-${createHash("sha256").update(body).digest("hex")}`,
+      correlationId: input.uuid(),
+      authorized: true,
+    });
+  } catch {
+    return { result: { error: "tool-unavailable" }, isError: true };
+  }
   if (ingested.kind === "refused") {
     return { result: { error: "tool-unavailable" }, isError: true };
   }

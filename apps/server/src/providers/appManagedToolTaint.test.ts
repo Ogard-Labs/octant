@@ -47,6 +47,23 @@ describe("taintAppManagedToolResults", () => {
     });
   });
 
+  it("withholds a successful result when taint recording throws", async () => {
+    const record = vi.fn(() => {
+      throw new Error("journal append failed");
+    });
+    const wrapped = taintAppManagedToolResults({
+      tools: tools(async () => ({ result: { transcript: "secret" }, isError: false })),
+      threadId,
+      recordExternalContentIngestion: record,
+      uuid: () => correlationId,
+    });
+
+    await expect(wrapped.execute({ name: "octant_terminal", inputJson: "{}" })).resolves.toEqual({
+      result: { error: "tool-unavailable" },
+      isError: true,
+    });
+  });
+
   it("withholds a successful result when taint recording is refused", async () => {
     const record = vi.fn(
       (): ExternalContentIngestionResult => ({ kind: "refused", reason: "unauthorized" }),
