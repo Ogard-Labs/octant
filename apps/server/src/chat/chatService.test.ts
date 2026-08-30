@@ -371,7 +371,8 @@ function openFixture(options?: {
     readChatThreadView: (threadId: ChatThreadId) => readChatThreadView(connection, threadId),
     readChatContent: (contentId: string) => readChatContent(connection, contentId),
     searchChatThreads: (query: string) => searchChatThreads(connection, query),
-    searchChatTranscript: (query: string) => searchChatTranscript(connection, query),
+    searchChatTranscript: (query: string, excludeThreadIds?: ReadonlySet<string>) =>
+      searchChatTranscript(connection, query, excludeThreadIds ?? new Set()),
     readPendingChatPurges: () => readPendingChatPurges(connection),
     status: () => ({ state: "current", integrity: "ok" }),
   } as unknown as PersistenceService;
@@ -1152,6 +1153,49 @@ describe("ChatService", () => {
     hidden.add(String(sidecar.thread.id));
 
     expect(service.searchTranscript("secret phrase").hits).toEqual([]);
+  });
+
+  it("caps transcript search from visible matches after excluding hidden sidecars", async () => {
+    const hidden = new Set<string>();
+    const { service } = openFixture({ hiddenThreadIds: () => hidden });
+    const visibleThreadIds: ChatThreadId[] = [];
+    for (let index = 0; index < 55; index += 1) {
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: `Visible ${index}`,
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      visibleThreadIds.push(created.thread.id);
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: `needle phrase in visible thread ${index}`,
+      });
+    }
+    for (let index = 0; index < 10; index += 1) {
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: `Hidden ${index}`,
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: `needle phrase in hidden thread ${index}`,
+      });
+      hidden.add(String(created.thread.id));
+    }
+
+    const result = service.searchTranscript("needle");
+    expect(result.hits).toHaveLength(50);
+    expect(
+      result.hits.every((hit) => visibleThreadIds.some((id) => String(id) === hit.threadId)),
+    ).toBe(true);
+    expect(result.truncated).toBe(true);
   });
 
   it("refuses an overlong transcript search query", () => {

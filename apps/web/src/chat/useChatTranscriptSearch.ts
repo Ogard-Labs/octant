@@ -64,7 +64,13 @@ export function useChatTranscriptSearch(
     };
   }, [client, enabled, debouncedQuery]);
 
-  return { hits, truncated, status };
+  const queryPending = enabled && query !== "" && query !== debouncedQuery;
+
+  return {
+    hits: queryPending ? [] : hits,
+    truncated: queryPending ? false : truncated,
+    status: queryPending ? "loading" : status,
+  };
 }
 
 function toContentHit(hit: ChatTranscriptSearchHit): ThreadSearchContentHit {

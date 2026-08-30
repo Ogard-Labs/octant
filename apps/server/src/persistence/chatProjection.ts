@@ -796,18 +796,25 @@ export interface ChatTranscriptSearchRows {
 
 /**
  * Message-body search over per-content projection rows. Returns active and
- * archived threads only; the caller still filters hidden sidecars. Snippets
- * are clipped around the first hit in the stored body text.
+ * archived threads only. Hidden sidecar thread ids are excluded before the
+ * result cap so truncation reflects visible matches only. Snippets are clipped
+ * around the first hit in the stored body text.
  */
 export function searchChatTranscript(
   connection: SqliteConnection,
   query: string,
+  excludeThreadIds: ReadonlySet<string> = new Set<string>(),
   limit: number = MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
 ): ChatTranscriptSearchRows {
   const normalized = normalizeSearchText(query);
   if (normalized.length === 0 || limit <= 0) {
     return { hits: [], truncated: false };
   }
+  const excluded = [...excludeThreadIds];
+  const excludeClause =
+    excluded.length === 0
+      ? ""
+      : `AND thread.thread_id NOT IN (${excluded.map(() => "?").join(", ")})`;
   const fetchLimit = limit + 1;
   const rows = connection
     .prepare(`
@@ -826,10 +833,11 @@ export function searchChatTranscript(
         ON content.content_id = search.content_id
       WHERE search.search_text LIKE '%' || ? || '%' ESCAPE '\\'
         AND thread.lifecycle IN ('active', 'archived')
+        ${excludeClause}
       ORDER BY thread.updated_at DESC, search.turn_id ASC, search.content_id ASC
       LIMIT ?
     `)
-    .all(escapeLikePattern(normalized), fetchLimit) as ReadonlyArray<{
+    .all(escapeLikePattern(normalized), ...excluded, fetchLimit) as ReadonlyArray<{
     readonly search_schema_version: number;
     readonly content_id: string;
     readonly turn_id: string;

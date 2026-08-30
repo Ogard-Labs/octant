@@ -934,12 +934,9 @@ export class ChatService {
       });
     }
     const hidden = this.#hiddenThreadIds();
-    const result = this.#persistence.searchChatTranscript(trimmed);
-    const hits = result.hits.filter((hit) => !hidden.has(String(hit.threadId)));
     return {
       query: trimmed,
-      hits,
-      truncated: result.truncated,
+      ...this.#persistence.searchChatTranscript(trimmed, hidden),
     };
   }
 

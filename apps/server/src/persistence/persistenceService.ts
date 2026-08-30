@@ -194,7 +194,10 @@ export interface PersistenceService {
   readonly readChatThreadView: (threadId: ChatThreadId) => ChatThreadView | undefined;
   readonly readChatContent: (contentId: string) => ProjectedChatContent | undefined;
   readonly searchChatThreads: (query: string) => ReadonlyArray<ChatThread>;
-  readonly searchChatTranscript: (query: string) => ChatTranscriptSearchRows;
+  readonly searchChatTranscript: (
+    query: string,
+    excludeThreadIds?: ReadonlySet<string>,
+  ) => ChatTranscriptSearchRows;
   readonly readPendingChatPurges: () => ReadonlyArray<PendingChatPurge>;
   readonly readThreadCheckpoint: (checkpointId: ThreadCheckpointId) => ThreadCheckpoint | undefined;
   readonly readThreadCheckpoints: (threadId: string) => ReadonlyArray<ThreadCheckpoint>;
@@ -406,7 +409,8 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readChatThreadView: (threadId) => readChatThreadView(connection, threadId),
       readChatContent: (contentId) => readChatContent(connection, contentId),
       searchChatThreads: (query) => searchChatThreads(connection, query),
-      searchChatTranscript: (query) => searchChatTranscript(connection, query),
+      searchChatTranscript: (query, excludeThreadIds) =>
+        searchChatTranscript(connection, query, excludeThreadIds ?? new Set()),
       readPendingChatPurges: () => readPendingChatPurges(connection),
       readThreadCheckpoint: (checkpointId) => readThreadCheckpoint(connection, checkpointId),
       readThreadCheckpoints: (threadId) => readThreadCheckpoints(connection, threadId),
