@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
   readBottomPanelToolPresentation,
+  readUtilityDockOpen,
   readUtilityDockPresentation,
   writeBottomPanelToolPresentation,
   writeUtilityDockPresentation,
@@ -17,7 +18,8 @@ const EMPTY_DOCK_STATE: ThreadUtilityDockState = { tabs: [] };
 
 export interface ThreadUtilityPresentation {
   readonly dockVisible: boolean;
-  readonly setDockVisible: Dispatch<SetStateAction<boolean>>;
+  /** Records an explicit show or hide for this window. */
+  readonly setDockVisible: (next: boolean) => void;
   readonly dockStatesByThread: ThreadUtilityDockStates;
   readonly setDockStatesByThread: Dispatch<SetStateAction<ThreadUtilityDockStates>>;
   readonly fallbackDockState: ThreadUtilityDockState;
@@ -37,10 +39,21 @@ export interface ThreadUtilityPresentation {
 export function useThreadUtilityPresentation(
   windowId: string,
   scope: { readonly localStorage?: Storage } = globalThis,
+  /**
+   * What an unset window shows. A wide window shows the dock, so the workspace
+   * arrives as sidebar, thread, and tools rather than a column in an empty
+   * pane; a narrow window keeps it closed, because there the dock is a modal
+   * drawer that would cover the app on launch. This is read live rather than
+   * frozen at mount: an embedded window can report a zero-width viewport on its
+   * first frame, and freezing that reading hid the dock for the whole session.
+   */
+  defaultOpen = true,
 ): ThreadUtilityPresentation {
-  const [dockVisible, setDockVisible] = useState(
-    () => readUtilityDockPresentation(scope, windowId).open,
-  );
+  const [chosenDockOpen, setChosenDockOpen] = useState(() => readUtilityDockOpen(scope, windowId));
+  const dockVisible = chosenDockOpen ?? defaultOpen;
+  const setDockVisible = useCallback((next: boolean) => {
+    setChosenDockOpen(next);
+  }, []);
   const [dockStatesByThread, setDockStatesByThread] = useState<ThreadUtilityDockStates>(
     () => readUtilityDockPresentation(scope, windowId).threads,
   );
@@ -54,12 +67,15 @@ export function useThreadUtilityPresentation(
   const [fallbackBottomPanelState, setFallbackBottomPanelState] =
     useState<ThreadUtilityDockState>(EMPTY_DOCK_STATE);
 
+  // Only a window that has actually been shown or hidden records an open state.
+  // Writing the default back on mount turned "not chosen yet" into a choice.
   useEffect(() => {
+    if (chosenDockOpen === undefined) return;
     writeUtilityDockPresentation(scope, windowId, {
-      open: dockVisible,
+      open: chosenDockOpen,
       threads: dockStatesByThread,
     });
-  }, [dockStatesByThread, dockVisible, scope, windowId]);
+  }, [chosenDockOpen, dockStatesByThread, scope, windowId]);
   useEffect(() => {
     writeBottomPanelToolPresentation(scope, windowId, bottomPanelStatesByThread);
   }, [bottomPanelStatesByThread, scope, windowId]);

@@ -71,8 +71,22 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import { HostSelector } from "./HostSelector";
 import type { OctantHostBridge } from "./hostBridge";
 
+/** One row of the start screen's recent-work list. */
+export interface DraftRecentThread {
+  readonly id: string;
+  readonly title: string;
+  readonly detail?: string;
+  readonly onOpen: () => void;
+}
+
 export interface DraftThreadWorkspaceProps {
   readonly mode: OctantMode;
+  /**
+   * What this mode already has open, shown under the composer. A start screen
+   * with nothing below the prompt left most of the pane empty and gave the
+   * user no way back into recent work without crossing to the sidebar.
+   */
+  readonly recentThreads?: ReadonlyArray<DraftRecentThread>;
   readonly projectId?: ProjectId;
   readonly projectName?: string;
   readonly projectRoot?: string;
@@ -624,6 +638,29 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             Press Enter to start · Shift+Enter for a new line · Escape to close
           </p>
         </div>
+
+        {props.recentThreads === undefined || props.recentThreads.length === 0 ? null : (
+          <div className="draft-thread__recent">
+            <p className="draft-thread__recent-title">Continue</p>
+            <ul className="draft-thread__recent-list">
+              {props.recentThreads.map((thread) => (
+                <li key={thread.id}>
+                  <OctantButton
+                    className="draft-thread__recent-item"
+                    onClick={thread.onOpen}
+                    type="button"
+                    variant="ghost"
+                  >
+                    <span className="draft-thread__recent-name">{thread.title}</span>
+                    {thread.detail === undefined ? null : (
+                      <span className="draft-thread__recent-detail">{thread.detail}</span>
+                    )}
+                  </OctantButton>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     </section>
   );

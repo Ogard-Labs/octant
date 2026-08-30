@@ -687,7 +687,7 @@ function LaunchedShell(
     setBottomPanelStatesByThread,
     fallbackBottomPanelState,
     setFallbackBottomPanelState,
-  } = useThreadUtilityPresentation(String(props.launch.windowId));
+  } = useThreadUtilityPresentation(String(props.launch.windowId), globalThis, !isNarrow);
   const [previewBottomPanelHeight, setPreviewBottomPanelHeight] = useState<number>();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);

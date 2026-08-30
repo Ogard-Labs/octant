@@ -122,6 +122,31 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByText("Brainstorm ideas")).toBeVisible();
   });
 
+  it("offers the threads this mode already has and opens the one chosen", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        recentThreads={[
+          { id: "thread-a", title: "Latency telemetry", detail: "2 hours ago", onOpen },
+          { id: "thread-b", title: "Cache hit ratio", onOpen: vi.fn() },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Latency telemetry")).toBeVisible();
+    expect(screen.getByText("2 hours ago")).toBeVisible();
+
+    await user.click(screen.getByText("Latency telemetry"));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the start screen to the prompt when the mode has no threads yet", () => {
+    render(<DraftThreadWorkspace {...baseProps} recentThreads={[]} />);
+    expect(screen.queryByText("Continue")).not.toBeInTheDocument();
+  });
+
   it("fills the composer when an intent card is clicked", async () => {
     const user = userEvent.setup();
     render(<DraftThreadWorkspace {...baseProps} />);

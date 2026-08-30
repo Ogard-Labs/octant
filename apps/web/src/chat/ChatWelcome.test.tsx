@@ -15,6 +15,20 @@ describe("ChatWelcome", () => {
     expect(onCreateChat).toHaveBeenCalledWith("Ship the preview");
   });
 
+  it("offers the conversations already open and reopens the one chosen", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(
+      <ChatWelcome
+        onCreateChat={vi.fn()}
+        recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen }]}
+      />,
+    );
+
+    await user.click(screen.getByText("Latency telemetry"));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps provider and model selection visible in the new Chat composer", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();

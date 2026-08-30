@@ -91,6 +91,16 @@ afterEach(() => {
   }
 });
 
+/**
+ * A wide window arrives with the dock already shown, so a test that needs it
+ * visible asks for that state rather than for a click. Narrow windows and
+ * windows that stored a close still need the control.
+ */
+async function showRightUtilityDock(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  const opener = screen.queryByRole("button", { name: "Open Right sidebar" });
+  if (opener !== null) await user.click(opener);
+}
+
 function navigatorAssistantClient(
   transcript: NavigatorAssistantSnapshot["transcript"] = [],
 ): NavigatorAssistantClient {
@@ -420,7 +430,9 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: /Older chat/ }));
+    // The start screen also offers this thread under Continue. The sidebar
+    // renders before the workspace, so its row is the first match.
+    await user.click((await screen.findAllByRole("button", { name: /Older chat/ }))[0]!);
     expect(await screen.findByRole("region", { name: "Workspace pane: Older chat" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Workspace pane: Exact created chat" })).toBeNull();
 
@@ -1362,7 +1374,7 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     expect(inspect.mock.calls.length).toBe(inspectCalls);
 
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(within(dock).queryByRole("tab", { name: "Context" })).toBeNull();
     expect(within(dock).queryByRole("button", { name: /^Context$/ })).toBeNull();
@@ -1543,7 +1555,6 @@ describe("App", () => {
     const overview = (await screen.findByDisplayValue("Octant")).closest(".project-overview");
     if (!(overview instanceof HTMLElement)) throw new Error("Expected Octant Overview.");
     expect(await within(overview).findByText("Keep this Project's memory visible.")).toBeVisible();
-    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     expect(document.querySelector("#environment-hub, #context-sidebar")).toBeNull();
     expect(screen.queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
@@ -1600,7 +1611,6 @@ describe("App", () => {
     ).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Settings" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
 
     await user.type(within(navigator).getByLabelText("Message Navigator"), "Stay on this thread");
     await user.click(within(navigator).getByRole("button", { name: "Send to Navigator" }));
@@ -2029,7 +2039,7 @@ describe("App", () => {
         { timeout: 5_000 },
       ),
     ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
@@ -2091,7 +2101,7 @@ describe("App", () => {
     expect(
       await screen.findByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(await within(dock).findByRole("button", { name: "Plan" })).toBeVisible();
     await user.click(within(dock).getByRole("button", { name: "Plan" }));
@@ -2142,7 +2152,7 @@ describe("App", () => {
     expect(
       await screen.findByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(await within(dock).findByRole("button", { name: "Delivery" })).toBeVisible();
     expect(within(dock).queryByRole("button", { name: "Publish" })).not.toBeInTheDocument();
@@ -2189,7 +2199,7 @@ describe("App", () => {
     );
 
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
-    await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(within(dock).getByText("Current work")).toBeVisible();
     expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
@@ -2260,7 +2270,7 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Open Right sidebar" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /Right sidebar/ })).toBeVisible();
     expect(screen.getByRole("banner", { name: "Workspace actions for Octant" })).toBeVisible();
   });
 
@@ -2286,7 +2296,7 @@ describe("App", () => {
 
     const overflow = screen.getByRole("button", { name: "More window actions" });
     await user.click(overflow);
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
 
     expect(await screen.findByRole("dialog", { name: "Right sidebar" })).toBeVisible();
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
@@ -2312,9 +2322,9 @@ describe("App", () => {
 
     expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     await openSidebarProject(user, "Octant");
-    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Right sidebar/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open Code environment" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
     expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Code environment" })).toBeNull();
   });
@@ -2421,15 +2431,15 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("banner")).toHaveClass("window-chrome--material-opaque");
+    expect((await screen.findAllByRole("banner"))[0]).toHaveClass("window-chrome--material-opaque");
     expect(document.querySelector(".shell")).toHaveClass("shell--material-opaque");
-    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Right sidebar/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
     expect(document.querySelector(".window-chrome__identity")).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Workspace pane: Welcome to Chat" })).toBeVisible();
-    expect(screen.getByRole("banner")).toHaveAccessibleName(
-      "Workspace actions for Welcome to Chat",
-    );
+    expect(
+      screen.getByRole("banner", { name: "Workspace actions for Welcome to Chat" }),
+    ).toBeVisible();
 
     await waitFor(() => expect(subscribeResolvedMaterial).toHaveBeenCalledOnce());
     expect(setSidebarMaterialPreference).toHaveBeenLastCalledWith("system");
@@ -2511,7 +2521,7 @@ describe("App", () => {
       />,
     );
 
-    await screen.findByRole("banner");
+    await screen.findAllByRole("banner");
     expect(document.documentElement.dataset.octantNativeHost).toBeUndefined();
     expect(document.querySelector(".sidebar__native-leading")).not.toBeInTheDocument();
 
@@ -2842,10 +2852,12 @@ describe("App", () => {
     expect(document.querySelector(".shell")?.getAttribute("style")).not.toMatch(
       /grid-template-columns/i,
     );
-    const sidebar = screen.getByRole("complementary");
+    const sidebar = screen.getByRole("complementary", { name: "Octant sidebar" });
     expect(sidebar).toHaveClass("sidebar");
     expect(document.querySelectorAll(".shell-frame")).toHaveLength(1);
-    expect(document.querySelector(".shell-frame")?.children[0]).toBe(screen.getByRole("banner"));
+    expect(document.querySelector(".shell-frame")?.children[0]).toBe(
+      screen.getAllByRole("banner")[0],
+    );
     expect(document.querySelector(".shell-frame")?.children[1]).toBe(sidebar);
     expect(document.querySelector(".shell-frame")?.children[2]).toHaveClass(
       "shell-frame__sidebar-resize",
@@ -2904,7 +2916,7 @@ describe("App", () => {
       codeThread.resolve(readyCodeThread);
     });
     expect(
-      within(screen.getByRole("complementary")).getByRole("button", {
+      within(screen.getByRole("complementary", { name: "Octant sidebar" })).getByRole("button", {
         name: "Pull requests",
       }),
     ).toBeVisible();
@@ -3358,7 +3370,7 @@ describe("App", () => {
     });
     const second = screen.getByRole("region", { name: "Workspace pane: Second thread" });
 
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
     let dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await user.click(within(dock).getByRole("button", { name: "Browser" }));
     expect(within(dock).getByRole("tab", { name: "Browser" })).toHaveAttribute(
@@ -3465,7 +3477,7 @@ describe("App", () => {
       "true",
     );
 
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(within(dock).queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
 
@@ -3574,7 +3586,7 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await user.click(within(dock).getByRole("button", { name: "Terminal" }));
     expect(within(dock).getByRole("tab", { name: "Terminal" })).toHaveAttribute(
@@ -3692,7 +3704,7 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     const overflow = screen.getByRole("button", { name: "More window actions" });
     await user.click(overflow);
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    await showRightUtilityDock(user);
     const drawer = await screen.findByRole("dialog", { name: "Right sidebar" });
     await user.click(within(drawer).getByRole("button", { name: "Review" }));
     expect(await screen.findByRole("dialog", { name: "Review" })).toBeVisible();

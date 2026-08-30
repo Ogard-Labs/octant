@@ -490,7 +490,13 @@ function AttemptBlock(props: {
         ) : (
           <ChatRichText body={responseBody} />
         )}
-        <AttemptStatus outcome={props.attempt.outcome} />
+        <AttemptStatus
+          outcome={props.attempt.outcome}
+          {...(() => {
+            const workedFor = attemptWorkedFor(props.attempt);
+            return workedFor === undefined ? {} : { workedFor };
+          })()}
+        />
         {props.attempt.outcome === "failed" ? (
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
@@ -608,7 +614,31 @@ function MessageBody(props: {
   return <TrackerReferenceText asParagraph text={props.content.body} />;
 }
 
-function AttemptStatus(props: { readonly outcome: ChatAttemptOutcome }) {
+/**
+ * How long a finished attempt took, from when it was created to its last
+ * change. Only a completed attempt reports it: for any other outcome the last
+ * change is whatever ended it, which is not the same as time spent working.
+ */
+function attemptWorkedFor(attempt: {
+  readonly outcome: ChatAttemptOutcome;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}): string | undefined {
+  if (attempt.outcome !== "completed") return undefined;
+  const started = Date.parse(attempt.createdAt);
+  const ended = Date.parse(attempt.updatedAt);
+  if (Number.isNaN(started) || Number.isNaN(ended)) return undefined;
+  const seconds = Math.floor((ended - started) / 1000);
+  if (seconds < 1) return undefined;
+  if (seconds < 60) return `Worked for ${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `Worked for ${minutes}m ${seconds % 60}s`;
+}
+
+function AttemptStatus(props: {
+  readonly outcome: ChatAttemptOutcome;
+  readonly workedFor?: string;
+}) {
   const StatusIcon = attemptStatusIcon(props.outcome);
   return (
     <p
@@ -618,6 +648,9 @@ function AttemptStatus(props: { readonly outcome: ChatAttemptOutcome }) {
       <StatusIcon aria-hidden="true" size={12} strokeWidth={1.8} />
       <span>{attemptLabels[props.outcome]}</span>
       <span className="sr-only"> attempt state</span>
+      {props.workedFor === undefined ? null : (
+        <span className="chat-transcript__worked-for">{props.workedFor}</span>
+      )}
     </p>
   );
 }

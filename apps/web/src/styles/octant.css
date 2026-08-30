@@ -138,10 +138,10 @@
      step read as the pixel value it has always been. */
   --oct-text-step: calc(var(--octant-ui-font-size, 13px) / 13);
   --oct-text-xs: calc(11 * var(--oct-text-step));
-  --oct-text-sm: calc(14 * var(--oct-text-step));
-  --oct-text-base: calc(16 * var(--oct-text-step));
-  --oct-text-lg: calc(19 * var(--oct-text-step));
-  --oct-text-xl: calc(22 * var(--oct-text-step));
+  --oct-text-sm: calc(13 * var(--oct-text-step));
+  --oct-text-base: calc(14 * var(--oct-text-step));
+  --oct-text-lg: calc(17 * var(--oct-text-step));
+  --oct-text-xl: calc(20 * var(--oct-text-step));
   --oct-text-2xl: calc(26 * var(--oct-text-step));
   --oct-text-3xl: calc(36 * var(--oct-text-step));
   --oct-text-4xl: calc(72 * var(--oct-text-step));
@@ -2398,16 +2398,24 @@ input.switch:checked::after {
    ══════════════════════════════════════════════════════════════════════ */
 
 /* the user's turn: a bubble, right-aligned, deliberately narrow */
+/* A right-aligned bubble makes a long agent session read as a messaging app.
+   The user's turn is the instruction that produced everything under it, so it
+   spans the column and pins to the top while its answer scrolls past. */
 .turn-user {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
-  justify-content: flex-end;
-  padding-block: var(--oct-space-4);
+  justify-content: stretch;
+  padding-block: var(--oct-space-3);
+  background: var(--oct-bg);
 }
 .turn-user .bubble {
-  max-width: min(560px, 80%);
+  width: 100%;
   padding: var(--oct-space-3) var(--oct-space-4);
-  border-radius: var(--oct-radius-lg);
-  background: var(--oct-surface-warm);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-fill-4);
+  box-shadow: inset 0 0 0 1px var(--oct-hairline);
   color: var(--oct-fg);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-sm);
@@ -2596,6 +2604,17 @@ input.switch:checked::after {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);
+}
+/* The elapsed figure sits after the outcome as the turn's closing line, so a
+   long transcript reads as a work log with a duration per turn rather than as
+   an unbroken run of prose. */
+.chat-transcript__worked-for {
+  color: var(--oct-meta);
+}
+.chat-transcript__worked-for::before {
+  content: "·";
+  margin-inline: 0.4em;
+  opacity: 0.6;
 }
 .runstatus .sep {
   opacity: 0.6;
@@ -4111,13 +4130,30 @@ input.switch:checked::after {
    The message input. The textarea grows with its content via field-sizing
    where supported, and the row underneath carries the pickers rather than
    floating them over the text. */
+/* The composer is a raised object, not a field ruled onto the page: it sits a
+   step above the surface behind it and carries its hairline as an inset ring
+   so the ring never joins layout or escapes the rounded corners. Focus
+   brightens that ring and deepens the lift instead of painting a hard border,
+   which previously flashed a full-strength line around the whole box. */
 .composer {
-  border: 1px solid var(--oct-border);
+  border: 0;
   border-radius: var(--oct-radius-lg);
-  background: var(--oct-surface);
+  background: var(--octant-floating);
+  box-shadow:
+    inset 0 0 0 1px var(--oct-hairline),
+    0 1px 4px rgb(0 0 0 / 22%);
+  transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
 .composer:focus-within {
-  border-color: var(--oct-accent-fg);
+  box-shadow:
+    inset 0 0 0 1px var(--oct-hairline-strong),
+    0 2px 10px -2px rgb(0 0 0 / 34%);
+}
+/* Keyboard focus still earns a real accent ring; pointer focus does not, so
+   clicking into the box stays quiet. */
+.composer:focus-within:has(.composer-input:focus-visible) {
+  outline: 2px solid var(--oct-accent);
+  outline-offset: 2px;
 }
 .composer-chips {
   display: flex;
@@ -4153,16 +4189,41 @@ input.switch:checked::after {
 .composer-input::placeholder {
   color: var(--oct-meta);
 }
+/* The toolbar belongs to the composer, so it shares its ground. A divider
+   above it split one object into two stacked boxes. */
 .composer-row {
   display: flex;
   align-items: center;
-  min-height: 40px;
+  min-height: 36px;
   gap: 6px;
-  padding: 4px 8px 4px 12px;
-  border-top: 1px solid var(--oct-border-soft);
+  padding: 2px 8px 8px 10px;
+  border-top: 0;
 }
 .composer-row .composer-gap {
   flex: 1;
+}
+/* One control size and one label size across the whole row. Measured before
+   this rule, a single row carried heights of 26, 28 and 29 and label sizes of
+   11, 11.5 and 13 — every control had been sized by whichever surface added
+   it, so the row read as a pile of parts rather than one strip. */
+.composer-row,
+.composer-row * {
+  font-size: var(--oct-text-xs);
+}
+.composer-row button,
+.composer-row [role="button"],
+.composer-row [role="combobox"],
+.composer-row select,
+.composer-row .composer-model-picker__trigger {
+  min-height: 24px;
+  height: 24px;
+  border-radius: 999px;
+}
+/* The send control is the row's one filled affordance, so it stays a circle. */
+.composer-row > button:last-child {
+  width: 24px;
+  min-width: 24px;
+  padding: 0;
 }
 /* Controls riding the composer row are one treatment across Chat, Work, and
    Code; a surface may position them, never restyle them (ADR 0038). Selects
@@ -4171,38 +4232,46 @@ input.switch:checked::after {
 .composer-row [role="combobox"] {
   width: auto;
   max-width: 190px;
-  min-height: 30px;
-  padding-inline: 7px 24px;
+  min-height: 24px;
+  padding-inline: 8px 22px;
+  border-color: transparent;
+  border-radius: 999px;
   color: var(--oct-muted);
   background: transparent;
-  border-color: transparent;
   font-size: var(--oct-text-xs);
+  transition: background-color var(--oct-dur-fast) var(--oct-ease-color);
 }
 .composer-row [role="combobox"]:hover {
   color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-  border-color: var(--oct-border);
+  background: var(--oct-fill-3);
+  border-color: transparent;
 }
+/* A bordered box inside the composer's own box read as a form field nested in
+   a form field. The trigger is a quiet pill that only gains a ground when
+   pointed at, so the typed message stays the loudest thing in the frame. */
 .composer-row .composer-model-picker__trigger {
   display: inline-flex;
   align-items: center;
-  gap: var(--oct-space-2);
-  min-height: 30px;
+  gap: 4px;
+  min-height: 24px;
   padding-block: 0;
-  padding-inline: var(--oct-space-3);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
-  color: var(--oct-fg);
+  padding-inline: 8px 6px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   text-align: left;
+  transition: background-color var(--oct-dur-fast) var(--oct-ease-color);
 }
 .composer-row .composer-model-picker__trigger:hover:not(:disabled) {
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  color: var(--oct-fg);
+  background: var(--oct-fill-3);
 }
 .composer-row .composer-model-picker__trigger[aria-expanded="true"] {
-  border-color: var(--oct-accent-fg);
+  color: var(--oct-fg);
+  background: var(--oct-fill-2);
 }
 /* The frame's direct labels are its message fields; they must be blocks so
    the content-sized textarea has a full-width box to fill (an inline label

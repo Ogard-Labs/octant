@@ -138,9 +138,11 @@ export function ExecutionProfileWorkflow(props: {
       ) : (
         <>
           <header className="execution-profile-workflow__header">
+            {/*
+             * The settings page already titles this surface. Repeating the name
+             * here rendered the word "Profiles" twice down the same page.
+             */}
             <div>
-              <p className="execution-profile-workflow__eyebrow">Execution context</p>
-              <h2>Profiles</h2>
               <p>
                 Reusable behavior defaults are resolved by the server and never change Project,
                 root, worktree, host, extension trust, or authority.

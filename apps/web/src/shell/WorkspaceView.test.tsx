@@ -1492,7 +1492,7 @@ describe("WorkspaceView Work thread tab", () => {
   });
 });
 
-describe("WorkspaceView Chat overview", () => {
+describe("WorkspaceView Chat surfaces", () => {
   it("mounts Chat quick start in the existing Project workspace tab", async () => {
     const project = {
       id: "00000000-0000-4000-8000-000000000912",
@@ -1584,7 +1584,7 @@ describe("WorkspaceView Chat overview", () => {
     expect(within(quickStart).getByRole("button", { name: "Start thread" })).toBeDisabled();
   });
 
-  it("opens a recent Chat Project thread from its Overview", async () => {
+  it("opens a recent Chat Project thread from the Chat start screen", async () => {
     const project = {
       id: "00000000-0000-4000-8000-000000000914",
       type: "chat",
@@ -1603,9 +1603,9 @@ describe("WorkspaceView Chat overview", () => {
     };
     const tab = {
       id: ids.tab,
-      kind: "project",
+      kind: "draft-thread",
       mode: "chat",
-      title: project.name,
+      title: "New Chat",
       projectId: project.id,
     } as WorkspaceTab;
     const base = propsFor(tab);
@@ -1613,9 +1613,6 @@ describe("WorkspaceView Chat overview", () => {
     render(
       <WorkspaceView
         {...base}
-        chatClient={
-          { thread: vi.fn(async () => ({ thread, attachments: [], workItems: [] })) } as never
-        }
         chatController={
           { ...base.chatController, bootstrap: { threads: [thread] }, status: "ready" } as never
         }

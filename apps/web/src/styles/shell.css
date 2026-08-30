@@ -1056,15 +1056,19 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--octant-workspace);
 }
 
+/* Dead-centring the start screen in a tall window left the prompt floating in
+   the middle of an empty pane with several hundred pixels of nothing above and
+   below it. It is anchored in the upper third instead, which is where the eye
+   already is, and the pane stops reading as an empty page. */
 .draft-thread__canvas {
   box-sizing: border-box;
   display: flex;
   width: min(100% - 48px, 720px);
   flex-direction: column;
   align-items: stretch;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 100%;
-  padding: clamp(24px, 7vh, 64px) 0;
+  padding-block: min(16vh, 148px) 48px;
   margin: 0 auto;
   gap: 10px;
 }
@@ -1112,6 +1116,58 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   color: var(--octant-text-secondary);
   font-size: calc(14 * var(--oct-text-step));
   line-height: 1.65;
+}
+
+/* Recent work under the composer. These rows are the way back into open work
+   from a start screen, so they stay quiet until pointed at and never compete
+   with the prompt above them. The button recipe fixes its own height, which a
+   two-line row has to opt out of. */
+.draft-thread__recent {
+  order: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 28px;
+}
+
+.draft-thread__recent-title {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.draft-thread__recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-thread__recent-item {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: var(--oct-radius-md);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+}
+
+.draft-thread__recent-name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+
+.draft-thread__recent-detail {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .draft-thread__intent-cards {
@@ -1464,8 +1520,8 @@ form > .work-composer-adapter__attachments {
   flex-direction: column;
   align-items: stretch;
   min-height: 100%;
-  justify-content: center;
-  padding: clamp(24px, 7vh, 64px) 0;
+  justify-content: flex-start;
+  padding-block: min(16vh, 148px) 48px;
   margin: 0 auto;
   gap: 10px;
 }
@@ -1595,9 +1651,9 @@ form > .work-composer-adapter__attachments {
   width: min(100% - 48px, 680px);
   flex-direction: column;
   align-items: stretch;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 100%;
-  padding: clamp(24px, 7vh, 64px) 0;
+  padding-block: min(16vh, 148px) 48px;
   margin: 0 auto;
   gap: 10px;
 }
@@ -1725,19 +1781,12 @@ form > .work-composer-adapter__attachments {
 .code-composer-adapter__policy-select {
   width: auto;
   min-width: 7rem;
-  height: 28px;
   padding: 0 6px;
-  font-size: var(--oct-text-xs);
 }
 
-.code-composer-adapter__composer-bar > button[data-size="icon"],
-.code-composer-adapter__composer-bar label + button[data-size="icon"] {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
-}
+/* Control sizing on the composer row belongs to the shared row, not to the
+   surface that happens to host it (0038). Sizing icon buttons here is what
+   left one row carrying three different control heights. */
 
 .code-composer-adapter__composer-bar .code-composer-adapter__context-item > svg {
   display: none;

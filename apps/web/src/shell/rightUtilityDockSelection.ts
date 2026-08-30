@@ -149,8 +149,37 @@ function bottomPanelToolsStorageKey(windowId: string): string {
 export function readUtilityDockPresentation(
   scope: { readonly localStorage?: Storage },
   windowId: string,
+  /**
+   * What an unset window shows. A wide window shows the dock, so the workspace
+   * arrives as sidebar, thread, and tools rather than a column in an empty
+   * pane. A narrow window presents the dock as a modal drawer, so defaulting it
+   * open there would cover the app on launch; those windows stay closed until
+   * asked.
+   */
+  defaultOpen = true,
 ): UtilityDockPresentation {
-  return readDockPresentationRecord(scope, utilityDockStorageKey(windowId), true);
+  return readDockPresentationRecord(scope, utilityDockStorageKey(windowId), true, defaultOpen);
+}
+
+/**
+ * Whether this window has ever been told to show or hide the dock. `undefined`
+ * means it has not, so the caller decides from the window it is actually in
+ * rather than from a value frozen before the viewport was measured.
+ */
+export function readUtilityDockOpen(
+  scope: { readonly localStorage?: Storage },
+  windowId: string,
+): boolean | undefined {
+  try {
+    const raw = scope.localStorage?.getItem(utilityDockStorageKey(windowId));
+    if (raw === undefined || raw === null) return undefined;
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") return undefined;
+    const candidate = parsed as { readonly open?: unknown };
+    return typeof candidate.open === "boolean" ? candidate.open : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function writeUtilityDockPresentation(
@@ -185,19 +214,26 @@ function readDockPresentationRecord(
   scope: { readonly localStorage?: Storage },
   storageKey: string,
   readOpen: boolean,
+  defaultOpen = false,
 ): UtilityDockPresentation {
+  // A window that has never been told otherwise follows the caller's default.
+  // Starting hidden left the workspace as a narrow column in an empty window,
+  // with the dock's own region reading as page margin. An explicit close is
+  // still remembered. The bottom panel keeps starting closed (0044), which is
+  // why it reads this with readOpen false.
+  const unset = { open: readOpen && defaultOpen, threads: new Map() };
   try {
     const raw = scope.localStorage?.getItem(storageKey);
     if (raw === undefined || raw === null) {
-      return { open: false, threads: new Map() };
+      return unset;
     }
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== "object") {
-      return { open: false, threads: new Map() };
+      return unset;
     }
     const candidate = parsed as { readonly open?: unknown; readonly threads?: unknown };
     return {
-      open: readOpen && candidate.open === true,
+      open: readOpen && (candidate.open === true || (defaultOpen && candidate.open === undefined)),
       threads: decodeDockStates(candidate.threads),
     };
   } catch {

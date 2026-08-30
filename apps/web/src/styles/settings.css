@@ -494,10 +494,15 @@
   --oct-settings-control-height: 32px;
 }
 
+/* Settings is a pane in an application window, not an article on a page.
+   Centring a fixed column left a wide dead gutter down both sides and made
+   the pane read as a document; content now starts at the pane's edge and only
+   stops growing where a form row would get uncomfortably wide to scan. */
 .settings-view__content-inner {
-  width: min(calc(100% - 48px), 840px);
-  padding: 28px 0 72px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 1080px;
+  padding: 24px 32px 56px;
+  margin: 0;
 }
 
 .settings-view__content-inner > section,
@@ -577,13 +582,26 @@
   box-shadow: var(--oct-focus-ring);
 }
 
+/* A settings group is a raised object: it sits above the pane and carries its
+   edge as an inset ring, so the ring survives the group's own overflow
+   clipping and never reads darker than the surface it borders. */
 .settings-card-section > .setgroup,
 .setgroup {
   overflow: hidden;
-  background: var(--octant-surface-muted);
-  border: 1px solid var(--octant-border);
+  border: 0;
   border-radius: var(--oct-radius-md);
-  box-shadow: none;
+  background: var(--octant-floating);
+  box-shadow:
+    inset 0 0 0 1px var(--oct-hairline),
+    0 1px 3px rgb(0 0 0 / 18%);
+}
+
+/* Rows inside a group are separated by the group's own hairline rather than a
+   solid rule, so a long list reads as one object with divisions instead of a
+   stack of boxed strips. */
+.setgroup > .setrow + .setrow,
+.setgroup > .settings-view__setting + .settings-view__setting {
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .setgroup + .setgroup {
@@ -705,10 +723,21 @@
   min-width: 0;
 }
 
+/* One control height for single-line inputs only. A textarea wearing the same
+   class was being squeezed to one line, which is why multi-line instructions
+   arrived as a clipped strip: it has rows to honour, so only its minimum joins
+   the rhythm. */
 .settings-view__select,
-.settings-view__text-input:not([type="color"]) {
+.settings-view__text-input:not([type="color"], textarea) {
   height: var(--oct-settings-control-height);
   min-height: var(--oct-settings-control-height);
+}
+
+textarea.settings-view__text-input {
+  min-height: calc(var(--oct-settings-control-height) * 2);
+  padding-block: 8px;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .settings-view__textarea {

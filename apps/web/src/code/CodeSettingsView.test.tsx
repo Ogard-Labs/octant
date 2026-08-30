@@ -16,7 +16,10 @@ describe("CodeSettingsView", () => {
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
 
     expect(screen.getByText(/apply only to new Code threads/i)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Ask" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Approval" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(screen.getByRole("button", { name: "Session" })).toHaveAttribute("aria-pressed", "true");
 
     const user = userEvent.setup();
