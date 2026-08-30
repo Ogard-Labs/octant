@@ -42,6 +42,12 @@ import {
 } from "./gitObservationPort";
 import { GitService } from "./gitService";
 import { CodeOperationEventStore } from "./codeOperationEventStore";
+import {
+  CodeRuntimeWorkRecorder,
+  codeRuntimeWorkObserved,
+  codeRuntimeWorkStarted,
+  codeRuntimeWorkStateFrom,
+} from "./codeRuntimeWorkRecorder";
 import { clampTurnAccessPosture, decidesCodeEffectsByApproval } from "@octant/domain";
 import {
   approvalContextDigest,
@@ -254,6 +260,12 @@ export function createCodeOperationRuntime(
     clock: options.clock,
     uuid: options.uuid,
   });
+  const runtimeWork = new CodeRuntimeWorkRecorder({
+    journal: options.persistence.journal,
+    actor: options.actor,
+    clock: options.clock,
+    uuid: options.uuid,
+  });
   const roots = new Map<
     string,
     Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>
@@ -392,7 +404,7 @@ export function createCodeOperationRuntime(
     uuid: options.uuid,
     clock: options.clock,
   });
-  const turns = new RuntimeTurnController({ options, events, roots, gitService });
+  const turns = new RuntimeTurnController({ options, events, roots, gitService, runtimeWork });
   const authorityForTurn: CodeOperationAuthorityPort = {
     ...authority,
     effectiveThread: (windowId, thread) => {
@@ -554,6 +566,19 @@ export function createCodeOperationRuntime(
     execute: async (windowId, rawCommand, options) => {
       const command = decodeCodeOperationCommand(rawCommand);
       if (command.kind === "start-provider-turn") turns.noteStart(command);
+      // The board's record of this unit of work opens here, the last point
+      // that still runs before the work does, and closes on the result. A
+      // command the service refuses therefore leaves an opened-then-closed
+      // pair rather than nothing, which is what the host honestly did; those
+      // closing states are terminal, so the board never shows them as owed.
+      //
+      // A provider turn is the exception: it outlives this call and its states
+      // arrive on the stream long afterwards, so the turn controller owns its
+      // record instead.
+      const started = codeRuntimeWorkStarted(command);
+      if (started !== undefined)
+        runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind });
+      const observed = codeRuntimeWorkObserved(command);
       try {
         const result = await service.execute(windowId, command, options);
         if (
@@ -563,7 +588,29 @@ export function createCodeOperationRuntime(
         ) {
           turns.launch(command.threadId);
         }
+        if (observed !== undefined) {
+          const state = codeRuntimeWorkStateFrom(command, result);
+          if (state !== undefined)
+            runtimeWork.settle({
+              id: observed.id,
+              threadId: command.threadId,
+              kind: observed.kind,
+              state,
+            });
+        }
         return result;
+      } catch (error) {
+        // A throw is the service refusing or breaking, not the work finishing.
+        // The record closes rather than staying open for a unit that will never
+        // report again.
+        if (observed !== undefined)
+          runtimeWork.settle({
+            id: observed.id,
+            threadId: command.threadId,
+            kind: observed.kind,
+            state: "failed",
+          });
+        throw error;
       } finally {
         if (command.kind === "start-provider-turn") turns.clearStart(command.threadId);
       }
@@ -852,6 +899,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>
   >;
   readonly #git: GitService;
+  readonly #runtimeWork: CodeRuntimeWorkRecorder;
   #service: CodeOperationService | undefined;
   readonly #runner = new CodeTurnRunner();
   readonly #pending = new Map<
@@ -865,11 +913,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     events: CodeOperationEventStore;
     roots: Map<string, Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>>;
     gitService: GitService;
+    runtimeWork: CodeRuntimeWorkRecorder;
   }) {
     this.#options = input.options;
     this.#events = input.events;
     this.#roots = input.roots;
     this.#git = input.gitService;
+    this.#runtimeWork = input.runtimeWork;
   }
 
   bindService(service: CodeOperationService): void {
@@ -937,6 +987,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     };
     active.launch = () => this.#launch(active, input.prompt, input.context, input.attachments);
     this.#active.set(key, active);
+    // The turn is the unit of work, so the operation it runs under is the
+    // record's identity. It opens here rather than in `#launch`, because a turn
+    // that never reaches its launch still holds the thread until something
+    // closes it.
+    this.#runtimeWork.open({
+      id: String(active.operationId),
+      threadId: active.thread.id,
+      kind: "provider-turn",
+    });
     return turnState("running");
   }
 
@@ -992,6 +1051,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
     active.state = "interrupted";
+    this.#persistRuntimeWork(active, "interrupted");
     active.abort.abort();
     if (active.connection !== undefined) {
       await Effect.runPromise(
@@ -1010,6 +1070,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     await Promise.all(
       activeTurns.map(async (active) => {
         active.state = "interrupted";
+        this.#persistRuntimeWork(active, "interrupted");
         active.abort.abort();
         if (active.connection === undefined) return;
         await Effect.runPromise(
@@ -1222,6 +1283,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       },
     });
     active.cursor = frame.cursor;
+    this.#persistRuntimeWork(active, outcome);
+  }
+
+  /**
+   * Move this turn's runtime work record to the turn's own state, so the board
+   * reports the thread as executing for exactly as long as the turn runs.
+   *
+   * The record is separate from the operation event the turn also writes: an
+   * operation event is the transcript of one turn, while this is the thread's
+   * live work as the board reads it. The transcript stays authoritative, which
+   * is why it is appended first.
+   */
+  #persistRuntimeWork(active: ActiveTurn, state: CodeTurnOutcome): void {
+    this.#runtimeWork.settle({
+      id: String(active.operationId),
+      threadId: active.thread.id,
+      kind: "provider-turn",
+      state,
+    });
   }
 }
 
