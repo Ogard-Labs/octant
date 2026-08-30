@@ -743,16 +743,6 @@
     box-shadow 140ms ease;
 }
 
-.chat-composer--queued {
-  border-color: color-mix(in oklab, var(--oct-warn-fg) 42%, var(--oct-border));
-  background: color-mix(in oklab, var(--oct-warn-soft) 32%, var(--oct-surface));
-  box-shadow: var(--octant-shadow-md);
-}
-
-.chat-composer--held {
-  border-color: color-mix(in oklab, var(--oct-danger-fg) 38%, var(--oct-border));
-}
-
 .chat-composer__status {
   display: flex;
   min-height: 18px;
@@ -762,16 +752,6 @@
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: 1.35;
-}
-
-.chat-composer--queued .chat-composer__status {
-  color: var(--oct-warn-fg);
-  font-weight: 500;
-}
-
-.chat-composer--held .chat-composer__status {
-  color: var(--oct-danger-fg);
-  font-weight: 500;
 }
 
 .chat-composer__status--quiet {

@@ -453,7 +453,7 @@ describe("WorkThreadWorkspace", () => {
     expect(commits.length).toBe(commitsAfterPolling);
   });
 
-  it("queues a follow-up while a turn is running and sends it once the turn completes", async () => {
+  it("sends a follow-up written while a turn is running once that turn completes", async () => {
     const user = userEvent.setup();
     const startFirstTurn = vi.fn(async () => ({
       kind: "accepted" as const,
@@ -488,12 +488,12 @@ describe("WorkThreadWorkspace", () => {
     const composer = await screen.findByLabelText("Work prompt");
     expect(composer).toBeEnabled();
     await user.type(composer, "Next instruction");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     expect(startFirstTurn).not.toHaveBeenCalled();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "This message is queued and will send when the response finishes.",
-    );
-    expect(composer).toHaveValue("Next instruction");
+    // The message left the composer and joined the transcript: it was sent,
+    // not parked somewhere the user has to go back and release.
+    expect(composer).toHaveValue("");
+    expect(await screen.findByText("Next instruction")).toBeVisible();
 
     turns = [workTurn({ status: "completed" })];
     await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
@@ -506,9 +506,18 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
-  it("leaves a queued follow-up unsent when the turn is cancelled, and lets the user discard it", async () => {
+  it("sends a follow-up written mid-turn even after that turn is cancelled", async () => {
     const user = userEvent.setup();
-    const startFirstTurn = vi.fn();
+    const startFirstTurn = vi.fn(async () => ({
+      kind: "accepted" as const,
+      turn: workTurn({
+        requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        turnId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        status: "accepted",
+        prompt: "Hold this",
+        transcript: [{ role: "user", text: "Hold this" }],
+      }),
+    }));
     let turns = [workTurn({ status: "running" })];
     const threadClient = {
       bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
@@ -530,21 +539,12 @@ describe("WorkThreadWorkspace", () => {
     );
 
     await user.type(await screen.findByLabelText("Work prompt"), "Hold this");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     turns = [workTurn({ status: "cancelled" })];
-    await waitFor(
-      () =>
-        expect(screen.getByRole("status")).toHaveTextContent(
-          "The response was cancelled. The queued message was not sent.",
-        ),
-      { timeout: 2500 },
-    );
-    expect(startFirstTurn).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
-    expect(screen.getByLabelText("Work prompt")).toHaveValue("");
+    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
   });
 
-  it("does not send a queued Work follow-up after the user confirms the thread Done", async () => {
+  it("hands a Work follow-up back to the composer when the thread is confirmed Done", async () => {
     const user = userEvent.setup();
     const startFirstTurn = vi.fn();
     let turns = [workTurn({ status: "running" })];
@@ -572,7 +572,7 @@ describe("WorkThreadWorkspace", () => {
     );
 
     await user.type(await screen.findByLabelText("Work prompt"), "After done");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     await user.click(screen.getByRole("button", { name: "Mark delivery target complete" }));
     await user.type(
       screen.getByRole("textbox", { name: "Delivery satisfaction evidence" }),
@@ -589,42 +589,9 @@ describe("WorkThreadWorkspace", () => {
       { timeout: 2500 },
     );
     expect(startFirstTurn).not.toHaveBeenCalled();
-  });
-
-  it("holds a queued Work follow-up when the turn ends as waiting", async () => {
-    const user = userEvent.setup();
-    const startFirstTurn = vi.fn();
-    let turns = [workTurn({ status: "running" })];
-    const threadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
-      execute: vi.fn(),
-    } as unknown as WorkThreadClient;
-    const turnClient = {
-      transcript: vi.fn(async () => ({ threadId, turns })),
-      startFirstTurn,
-    };
-
-    render(
-      <WorkThreadWorkspace
-        hostId={"local" as never}
-        threadClient={threadClient}
-        threadId={threadId}
-        title="Draft brief"
-        turnClient={turnClient as never}
-      />,
-    );
-
-    await user.type(await screen.findByLabelText("Work prompt"), "Hold this");
-    await user.click(screen.getByRole("button", { name: "Queue message" }));
-    turns = [workTurn({ status: "waiting" })];
-    await waitFor(
-      () =>
-        expect(screen.getByRole("status")).toHaveTextContent(
-          "The response is waiting. The queued message was not sent.",
-        ),
-      { timeout: 2500 },
-    );
-    expect(startFirstTurn).not.toHaveBeenCalled();
+    // The thread will never run it, so the words go back where the user can
+    // still use them rather than disappearing with the message.
+    expect(screen.getByLabelText("Work prompt")).toHaveValue("After done");
   });
 
   it("refuses a follow-up when the thread has no binding authority instead of writing an artifact", async () => {

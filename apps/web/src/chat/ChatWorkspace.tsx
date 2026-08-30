@@ -24,8 +24,8 @@ import { decodeProviderModelId } from "@octant/contracts/providers";
 import type { PickerGroup } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useQueuedSend } from "../composer/useQueuedSend";
-import type { TurnSettlement } from "../composer/queuedSend";
+import { useSteeredSend } from "../composer/useSteeredSend";
+import type { TurnSettlement } from "../composer/steeredSend";
 import { ComposerPoolControl } from "../providers/ComposerPoolControl";
 import {
   ChatComposer,
@@ -114,6 +114,18 @@ interface PendingAttachment {
 }
 
 /**
+ * A message the user sent while a response was still streaming.
+ *
+ * Only the words travel with it: the images, chips, and selections stay in the
+ * composer until the host accepts the message, so a refusal leaves the whole
+ * message retryable rather than half-gone.
+ */
+interface ChatSteeredMessage {
+  readonly id: string;
+  readonly prompt: string;
+}
+
+/**
  * The authoritative thread state a queued model option change builds on.
  *
  * The provider and model travel with the version because an option control is
@@ -159,11 +171,33 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const activeThread = view?.thread;
   const activeThreadId = activeThread?.id;
   const submitTurnRef = useRef<(draft: string) => Promise<boolean>>(async () => false);
-  const queued = useQueuedSend({
+  // Read after an await, so a message sent mid-response sees the draft the user
+  // has typed since rather than the one the render that started it captured.
+  const pendingDraftRef = useRef(props.controller.pendingDraft);
+  pendingDraftRef.current = props.controller.pendingDraft;
+  const setPendingDraftRef = useRef(props.controller.setPendingDraft);
+  setPendingDraftRef.current = props.controller.setPendingDraft;
+  const steered = useSteeredSend<ChatSteeredMessage>({
     threadKey: activeThreadId === undefined ? undefined : String(activeThreadId),
     settlement: chatTurnSettlement(view),
     ready: uploadingAttachments.length === 0 && attachmentStatus.kind !== "removing",
-    send: async () => submitTurnRef.current(props.controller.pendingDraft),
+    send: async (message) => {
+      const laterDraft = pendingDraftRef.current;
+      const sent = await submitTurnRef.current(message.prompt);
+      // The send path owns the composer for the message it is sending: it
+      // clears the draft, and puts the message back if the host refused it.
+      // A draft the user typed while this message was waiting belongs to
+      // neither, so it goes back over whatever that left behind.
+      if (laterDraft.length > 0) setPendingDraftRef.current(laterDraft);
+      return sent;
+    },
+    // The images, chips, and selections were never taken, so putting the words
+    // back leaves the whole message retryable. A newer draft the user typed
+    // while this one waited is the one worth keeping.
+    restore: (message) => {
+      if (pendingDraftRef.current.length > 0) return;
+      setPendingDraftRef.current(message.prompt);
+    },
   });
   const checkpoints = useThreadCheckpoints({
     threadId: String(activeThreadId ?? ""),
@@ -702,6 +736,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         )}
         <ChatTranscript
           busy={isSending || branchPending}
+          {...(steered.pending === undefined ? {} : { pendingUserMessage: steered.pending.prompt })}
           {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
           {...(checkpoints.available
             ? {
@@ -863,51 +898,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           ? {}
           : { onCaretIndexChange: props.controller.setPendingDraftCaret })}
         isSending={isSending}
-        queueStatus={queued.state.status}
-        onDiscardQueued={() => {
-          queued.discard();
-          props.controller.setPendingDraft("");
-          threadMentions.clear();
-          setPendingPreviewSelections([]);
-          if (props.pendingCanvasSelections === undefined) {
-            setLocalCanvasSelections([]);
-          } else {
-            props.onClearCanvasSelections?.();
-          }
-          if (props.pendingExtensionSelections === undefined) extensionDraft.clear();
-          for (const upload of uploadingAttachments) {
-            cancelledUploadsRef.current.add(String(upload.id));
-          }
-          setUploadingAttachments([]);
-          const claimed = pendingAttachmentsRef.current;
-          void (async () => {
-            const kept: PendingAttachment[] = [];
-            for (const attachment of claimed) {
-              try {
-                await discardAttachmentRef.current({
-                  threadId: view.thread.id,
-                  attachmentId: attachment.id,
-                });
-              } catch {
-                kept.push(attachment);
-              }
-            }
-            if (!mountedRef.current || activeThreadIdRef.current !== String(view.thread.id)) {
-              return;
-            }
-            pendingAttachmentsRef.current = kept;
-            setPendingAttachments(kept);
-            if (kept[0] !== undefined) {
-              setAttachmentStatus({
-                kind: "failed",
-                message: `${kept[0].displayName} could not be removed. Try again.`,
-              });
-            }
-          })();
-        }}
-        {...(queued.state.status === "held" && queued.statusMessage !== undefined
-          ? { statusMessage: queued.statusMessage }
-          : {})}
+        hasPendingMessage={steered.pending !== undefined}
         model={{ options: providerState.modelOptions, value: view.thread.modelId }}
         onDraftChange={props.controller.setPendingDraft}
         imageAttachment={imageAttachmentCapability}
@@ -1030,10 +1021,19 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           void changeResearch({ enabled: view.thread.researchEnabled, routing })
         }
         onSend={async (draft) => {
-          if (isSending) return queued.enqueue();
-          const sent = await submitTurn(draft);
-          if (sent) queued.discard();
-          return sent;
+          // Sending during a streaming response is still sending: the message
+          // leaves the composer now and joins the transcript, and the host runs
+          // it as soon as this thread stops running one.
+          if (isSending) {
+            const steeredMessage: ChatSteeredMessage = {
+              id: globalThis.crypto.randomUUID(),
+              prompt: draft,
+            };
+            if (!steered.steer(steeredMessage)) return false;
+            props.controller.setPendingDraft("");
+            return true;
+          }
+          return await submitTurn(draft);
         }}
         pendingCanvasSelections={pendingCanvasSelections}
         pendingAttachments={pendingAttachments}

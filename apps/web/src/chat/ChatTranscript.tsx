@@ -51,6 +51,12 @@ export interface ChatTranscriptProps {
   readonly checkpoints?: ChatTranscriptCheckpoints;
   /** Scrolls this turn into the window. Used by jump-to-message. */
   readonly revealTurnId?: ChatTurnId;
+  /**
+   * A message the user has already sent that the host has not begun running,
+   * because a response was still in flight when it was sent. It belongs at the
+   * end of the transcript with every other sent message, not in the composer.
+   */
+  readonly pendingUserMessage?: string;
 }
 
 export interface ChatTranscriptCheckpoints {
@@ -150,6 +156,17 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     </>
   );
 
+  const pendingMessage =
+    props.pendingUserMessage === undefined ? null : (
+      <div className="chat-transcript__turn">
+        <article aria-label="Your message" className="turn-user">
+          <div className="bubble">
+            <p>{props.pendingUserMessage}</p>
+          </div>
+        </article>
+      </div>
+    );
+
   if (turns.length === 0) {
     return (
       <section aria-label="Conversation" className="chat-transcript thread-column">
@@ -161,6 +178,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         {orphanedRouteDecisions.map((decision) => (
           <RouteReceipt decision={decision} key={String(decision.turnId)} />
         ))}
+        {pendingMessage}
       </section>
     );
   }
@@ -313,9 +331,14 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       restoreKey={String(props.view.thread.id)}
       {...(props.revealTurnId === undefined ? {} : { revealKey: String(props.revealTurnId) })}
       role="region"
-      trail={orphanedRouteDecisions.map((decision) => (
-        <RouteReceipt decision={decision} key={String(decision.turnId)} />
-      ))}
+      trail={
+        <>
+          {orphanedRouteDecisions.map((decision) => (
+            <RouteReceipt decision={decision} key={String(decision.turnId)} />
+          ))}
+          {pendingMessage}
+        </>
+      }
     />
   );
 }

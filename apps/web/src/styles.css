@@ -5529,16 +5529,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   min-height: 30px;
 }
 
-.code-thread-workspace__composer--queued {
-  border-color: color-mix(in oklab, var(--oct-warn-fg) 42%, var(--oct-border));
-  background: color-mix(in oklab, var(--oct-warn-soft) 32%, var(--oct-surface));
-  box-shadow: var(--octant-shadow-md);
-}
-
-.code-thread-workspace__composer--held {
-  border-color: color-mix(in oklab, var(--oct-danger-fg) 38%, var(--oct-border));
-}
-
 /* The typeaheads sit between the input and the row so the open list never
    covers the message; the frameless children carry the frame's gutter. */
 .code-thread-workspace__composer .thread-mention__typeahead {
@@ -5839,24 +5829,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin: 0;
   padding: 1px 12px 6px;
   line-height: 1.3;
-}
-
-.code-thread-workspace__composer--queued .code-thread-workspace__status {
-  color: var(--oct-warn-fg);
-}
-
-.code-thread-workspace__composer--queued
-  .code-thread-workspace__status
-  > .code-thread-workspace__hint:first-child,
-.code-thread-workspace__composer--held
-  .code-thread-workspace__status
-  > .code-thread-workspace__hint:first-child {
-  color: inherit;
-  font-weight: 600;
-}
-
-.code-thread-workspace__composer--held .code-thread-workspace__status {
-  color: var(--oct-danger-fg);
 }
 
 .code-thread-workspace__hint {

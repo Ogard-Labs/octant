@@ -1330,7 +1330,7 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByText("Code turn 999")).not.toBeInTheDocument();
   });
 
-  it("queues a follow-up written while a turn runs instead of sending it", async () => {
+  it("sends a follow-up written while a turn runs, and runs it once that turn finishes", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);
     const { rerender } = render(
@@ -1343,17 +1343,17 @@ describe("CodeThreadWorkspace", () => {
     const composer = screen.getByLabelText("Follow-up message");
     expect(composer).toBeEnabled();
     await user.type(composer, "and then push");
-    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
 
+    // The message left the composer and joined the transcript: it was sent,
+    // not parked somewhere the user has to go back and release.
+    expect(composer).toHaveValue("");
+    expect(await screen.findByText("and then push")).toBeVisible();
     expect(sendFollowUp).not.toHaveBeenCalled();
-    expect(composer).toHaveValue("and then push");
-    expect(
-      screen.getByText("This message is queued and will send when the response finishes."),
-    ).toBeVisible();
 
     rerender(
       <CodeThreadWorkspace
-        controller={controller({ pendingDraft: "and then push", sendFollowUp, turnStatus: "idle" })}
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
         threadId={threadId}
       />,
     );
@@ -1361,7 +1361,7 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], [], [], "approval-gated");
   });
 
-  it("keeps a later Code draft when the queued send settles", async () => {
+  it("keeps a later Code draft when the message it was typed after reaches the host", async () => {
     const user = userEvent.setup();
     let finish: ((value: boolean) => void) | undefined;
     const sendFollowUp = vi.fn(
@@ -1378,10 +1378,10 @@ describe("CodeThreadWorkspace", () => {
     );
 
     await user.type(screen.getByLabelText("Follow-up message"), "and then push");
-    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     rerender(
       <CodeThreadWorkspace
-        controller={controller({ pendingDraft: "and then push", sendFollowUp, turnStatus: "idle" })}
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
         threadId={threadId}
       />,
     );
@@ -1395,10 +1395,36 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledOnce();
   });
 
-  it("keeps a later draft after a queued send fails", async () => {
-    // restoreQueuedSend used to restore the queued prompt unconditionally on
-    // failure, so a draft the user typed while the queued send was still
-    // resolving got silently overwritten by the stale, already-refused text.
+  it("hands the words back to the composer when the host refuses the message", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => false);
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "retry after the provider recovers");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(composer).toHaveValue("");
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
+        threadId={threadId}
+      />,
+    );
+
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
+    await waitFor(() => expect(composer).toHaveValue("retry after the provider recovers"));
+  });
+
+  it("keeps a later draft rather than restoring a message the host refused", async () => {
+    // A refused message used to be restored unconditionally, so a draft the
+    // user typed while the send was still resolving got silently overwritten
+    // by the stale, already-refused text.
     const user = userEvent.setup();
     let finish: ((value: boolean) => void) | undefined;
     const sendFollowUp = vi.fn(
@@ -1415,10 +1441,10 @@ describe("CodeThreadWorkspace", () => {
     );
 
     await user.type(screen.getByLabelText("Follow-up message"), "and then push");
-    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     rerender(
       <CodeThreadWorkspace
-        controller={controller({ pendingDraft: "and then push", sendFollowUp, turnStatus: "idle" })}
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
         threadId={threadId}
       />,
     );
@@ -1428,45 +1454,14 @@ describe("CodeThreadWorkspace", () => {
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "later draft");
     finish?.(false);
-    await screen.findByText("The response was refused. The queued message was not sent.");
-    expect(sendFollowUp).toHaveBeenCalledOnce();
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
     expect(composer).toHaveValue("later draft");
   });
 
-  it("keeps the queued draft when its automatic send is refused", async () => {
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn(async () => false);
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "retry after the provider recovers");
-    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
-
-    rerender(
-      <CodeThreadWorkspace
-        controller={controller({
-          pendingDraft: "retry after the provider recovers",
-          sendFollowUp,
-          turnStatus: "idle",
-        })}
-        threadId={threadId}
-      />,
-    );
-
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
-    expect(composer).toHaveValue("retry after the provider recovers");
-  });
-
-  it("keeps a staged image when its queued automatic send is refused", async () => {
-    // The queued send used to take the staged image for delivery before it
-    // knew the outcome, so a refusal left the composer's text restored but
-    // the image gone — the attachment the user still needed to retry with
-    // was silently lost.
+  it("keeps a staged image when the message it was attached to is refused", async () => {
+    // The images are never taken until the host accepts the message, so a
+    // refusal leaves the whole message retryable rather than restoring the
+    // words with the attachment the user still needs silently gone.
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => false);
     const reference = {
@@ -1493,93 +1488,19 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "retry after the provider recovers");
     pasteImage(composer);
     expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
 
     rerender(
       <CodeThreadWorkspace
         attachmentClient={attachmentClient}
-        controller={controller({
-          pendingDraft: "retry after the provider recovers",
-          sendFollowUp,
-          turnStatus: "idle",
-        })}
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
         threadId={threadId}
       />,
     );
 
     await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
-    expect(composer).toHaveValue("retry after the provider recovers");
+    await waitFor(() => expect(composer).toHaveValue("retry after the provider recovers"));
     expect(screen.getByAltText("pasted.png")).toBeInTheDocument();
-  });
-
-  it("discards staged images with a queued Code message", async () => {
-    const user = userEvent.setup();
-    const discardAttachment = vi.fn(async () => undefined);
-    const reference = {
-      attachmentId: "40000000-0000-4000-8000-000000000009",
-      displayName: "pasted.png",
-      mediaType: "image/png" as const,
-      byteLength: 3,
-      digest: "c".repeat(64),
-    };
-    render(
-      <CodeThreadWorkspace
-        attachmentClient={
-          {
-            putAttachment: vi.fn(async () => reference),
-            discardAttachment,
-            attachment: vi.fn(),
-          } as never
-        }
-        controller={controller({ turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    const composer = screen.getByLabelText("Follow-up message");
-    await user.type(composer, "with a picture");
-    pasteImage(composer);
-    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
-    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
-    await waitFor(() => expect(discardAttachment).toHaveBeenCalled());
-    expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
-    expect(composer).toHaveValue("");
-  });
-
-  it("leaves a queued follow-up unsent when the turn fails, and lets the user discard it", async () => {
-    const user = userEvent.setup();
-    const sendFollowUp = vi.fn(async () => true);
-    const { rerender } = render(
-      <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, turnStatus: "running" })}
-        threadId={threadId}
-      />,
-    );
-
-    await user.type(screen.getByLabelText("Follow-up message"), "retry later");
-    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
-    rerender(
-      <CodeThreadWorkspace
-        controller={controller({
-          pendingDraft: "retry later",
-          sendFollowUp,
-          turnStatus: "failed",
-          turnError: "The provider turn failed.",
-        })}
-        threadId={threadId}
-      />,
-    );
-    await waitFor(() =>
-      expect(
-        screen.getByText("The response failed. The queued message was not sent."),
-      ).toBeVisible(),
-    );
-    expect(sendFollowUp).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
-    expect(screen.getByLabelText("Follow-up message")).toHaveValue("");
-    expect(sendFollowUp).not.toHaveBeenCalled();
   });
 
   it("keeps loading and disconnected states honest", () => {
