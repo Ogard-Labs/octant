@@ -2,13 +2,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute, relative, sep } from "node:path";
 import {
   CodeApprovalId,
-  CodeRuntimeWorkId,
-  CorrelationId,
-  EventId,
   MAX_CODE_OPERATION_TEXT_BYTES,
-  UtcTimestamp,
-  decodeAggregateVersion,
-  decodeCodeRuntimeWork,
   decodeCodeOperationApprovalRequest,
   decodeCodeOperationApprovalConfirmation,
   decodeCodeCheckoutId,
@@ -30,14 +24,13 @@ import {
   type CodeOperationEventFrame,
   type CodeOperationId,
   type CodeOperationResult,
-  type CodeRuntimeWorkState,
   type CodeThread,
   type CodeThreadId,
   type EventActor,
   type ProviderRuntimeEvent,
   type WindowId,
 } from "@octant/contracts";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
 import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
@@ -49,6 +42,12 @@ import {
 } from "./gitObservationPort";
 import { GitService } from "./gitService";
 import { CodeOperationEventStore } from "./codeOperationEventStore";
+import {
+  CodeRuntimeWorkRecorder,
+  codeRuntimeWorkObserved,
+  codeRuntimeWorkStarted,
+  codeRuntimeWorkStateFrom,
+} from "./codeRuntimeWorkRecorder";
 import { clampTurnAccessPosture, decidesCodeEffectsByApproval } from "@octant/domain";
 import {
   approvalContextDigest,
@@ -91,13 +90,6 @@ import { CodeTurnRunner, type CodeTurnEvent, type CodeTurnOutcome } from "./code
 import { createCodeAppManagedTools, type CodeAppManagedToolsOptions } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
-
-const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
-const decodeEventId = Schema.decodeUnknownSync(EventId);
-const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
-
-const CODE_RUNTIME_WORK_UPDATED = "code.runtime-work-updated@1";
-const CODE_RUNTIME_AGGREGATE_TYPE = "code-runtime";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -268,6 +260,12 @@ export function createCodeOperationRuntime(
     clock: options.clock,
     uuid: options.uuid,
   });
+  const runtimeWork = new CodeRuntimeWorkRecorder({
+    journal: options.persistence.journal,
+    actor: options.actor,
+    clock: options.clock,
+    uuid: options.uuid,
+  });
   const roots = new Map<
     string,
     Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>
@@ -406,7 +404,7 @@ export function createCodeOperationRuntime(
     uuid: options.uuid,
     clock: options.clock,
   });
-  const turns = new RuntimeTurnController({ options, events, roots, gitService });
+  const turns = new RuntimeTurnController({ options, events, roots, gitService, runtimeWork });
   const authorityForTurn: CodeOperationAuthorityPort = {
     ...authority,
     effectiveThread: (windowId, thread) => {
@@ -416,6 +414,15 @@ export function createCodeOperationRuntime(
   };
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    onScopedOperation: ({ command }) => {
+      // The service invokes this only after its authoritative scope check and
+      // replay lookup, but before approval or the operation side effect. That
+      // keeps inaccessible commands out of the durable runtime-work journal
+      // while still recording work that waits on approval.
+      const started = codeRuntimeWorkStarted(command);
+      if (started !== undefined)
+        runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind });
+    },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     terminals: terminal,
     repositoryTests,
@@ -568,6 +575,10 @@ export function createCodeOperationRuntime(
     execute: async (windowId, rawCommand, options) => {
       const command = decodeCodeOperationCommand(rawCommand);
       if (command.kind === "start-provider-turn") turns.noteStart(command);
+      // Runtime work is opened by the service after its authoritative scope
+      // check, while provider turns outlive this call and are opened by the
+      // turn controller itself.
+      const observed = codeRuntimeWorkObserved(command);
       try {
         const result = await service.execute(windowId, command, options);
         if (
@@ -577,7 +588,29 @@ export function createCodeOperationRuntime(
         ) {
           turns.launch(command.threadId);
         }
+        if (observed !== undefined) {
+          const state = codeRuntimeWorkStateFrom(command, result);
+          if (state !== undefined)
+            runtimeWork.settle({
+              id: observed.id,
+              threadId: command.threadId,
+              kind: observed.kind,
+              state,
+            });
+        }
         return result;
+      } catch (error) {
+        // A throw is the service refusing or breaking, not the work finishing.
+        // The record closes rather than staying open for a unit that will never
+        // report again.
+        if (observed !== undefined)
+          runtimeWork.settle({
+            id: observed.id,
+            threadId: command.threadId,
+            kind: observed.kind,
+            state: "failed",
+          });
+        throw error;
       } finally {
         if (command.kind === "start-provider-turn") turns.clearStart(command.threadId);
       }
@@ -856,13 +889,6 @@ interface ActiveTurn {
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
   lastPersistedState?: CodeTurnOutcome;
   launch?: () => void;
-  /**
-   * The runtime work record this turn owns. One record per turn, so the board
-   * can tell the turn running now from the one that ran before it.
-   */
-  readonly runtimeWorkId: CodeRuntimeWorkId;
-  runtimeWorkVersion: number;
-  lastPersistedRuntimeState?: CodeRuntimeWorkState;
 }
 
 class RuntimeTurnController implements CodeOperationTurnPort {
@@ -873,6 +899,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>
   >;
   readonly #git: GitService;
+  readonly #runtimeWork: CodeRuntimeWorkRecorder;
   #service: CodeOperationService | undefined;
   readonly #runner = new CodeTurnRunner();
   readonly #pending = new Map<
@@ -886,11 +913,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     events: CodeOperationEventStore;
     roots: Map<string, Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>>;
     gitService: GitService;
+    runtimeWork: CodeRuntimeWorkRecorder;
   }) {
     this.#options = input.options;
     this.#events = input.events;
     this.#roots = input.roots;
     this.#git = input.gitService;
+    this.#runtimeWork = input.runtimeWork;
   }
 
   bindService(service: CodeOperationService): void {
@@ -955,12 +984,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       questions: new Set(),
       cursor: 0,
       state: "running",
-      runtimeWorkId: CodeRuntimeWorkId.make(this.#options.uuid()),
-      runtimeWorkVersion: 0,
     };
     active.launch = () => this.#launch(active, input.prompt, input.context, input.attachments);
-    this.#persistRuntimeWork(active, "running");
     this.#active.set(key, active);
+    // The turn is the unit of work, so the operation it runs under is the
+    // record's identity. It opens here rather than in `#launch`, because a turn
+    // that never reaches its launch still holds the thread until something
+    // closes it.
+    this.#runtimeWork.open({
+      id: String(active.operationId),
+      threadId: active.thread.id,
+      kind: "provider-turn",
+    });
     return turnState("running");
   }
 
@@ -1016,6 +1051,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
     active.state = "interrupted";
+    this.#persistRuntimeWork(active, "interrupted");
     active.abort.abort();
     if (active.connection !== undefined) {
       await Effect.runPromise(
@@ -1034,6 +1070,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     await Promise.all(
       activeTurns.map(async (active) => {
         active.state = "interrupted";
+        this.#persistRuntimeWork(active, "interrupted");
         active.abort.abort();
         if (active.connection === undefined) return;
         await Effect.runPromise(
@@ -1237,7 +1274,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     failure?: CodeOperationFailure,
   ): void {
     active.state = outcome;
-    this.#persistRuntimeWork(active, outcome);
     if (active.lastPersistedState === outcome && failure === undefined) return;
     active.lastPersistedState = outcome;
     const frame = this.#events.append({
@@ -1251,6 +1287,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       },
     });
     active.cursor = frame.cursor;
+    this.#persistRuntimeWork(active, outcome);
   }
 
   /**
@@ -1266,37 +1303,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * an operation frame frozen mid-turn would claim the thread was executing
    * forever.
    */
-  #persistRuntimeWork(active: ActiveTurn, state: CodeRuntimeWorkState): void {
-    if (active.lastPersistedRuntimeState === state) return;
-    this.#options.persistence.journal.append({
-      aggregate: {
-        aggregateType: CODE_RUNTIME_AGGREGATE_TYPE,
-        aggregateId: active.runtimeWorkId,
-      },
-      expectedVersion: decodeAggregateVersion(active.runtimeWorkVersion),
-      events: [
-        {
-          eventId: decodeEventId(this.#options.uuid()),
-          eventName: CODE_RUNTIME_WORK_UPDATED,
-          eventVersion: 1,
-          correlationId: decodeCorrelationId(this.#options.uuid()),
-          actor: this.#options.actor,
-          occurredAt: decodeTimestamp(this.#options.clock()),
-          payload: {
-            kind: "runtime-work-updated",
-            work: decodeCodeRuntimeWork({
-              id: active.runtimeWorkId,
-              threadId: active.thread.id,
-              kind: "provider-turn",
-              state,
-              updatedAt: this.#options.clock(),
-            }),
-          },
-        },
-      ],
+  #persistRuntimeWork(active: ActiveTurn, state: CodeTurnOutcome): void {
+    this.#runtimeWork.settle({
+      id: String(active.operationId),
+      threadId: active.thread.id,
+      kind: "provider-turn",
+      state,
     });
-    active.runtimeWorkVersion += 1;
-    active.lastPersistedRuntimeState = state;
   }
 }
 

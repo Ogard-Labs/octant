@@ -15,6 +15,7 @@ import {
   decodeCodeThreadId,
   decodeProviderSessionId,
   type CodeOperationEventFrame as OperationFrame,
+  type CodeRuntimeWork,
   type CodeThread,
   type ProviderRuntimeEvent,
   type WindowId,
@@ -31,6 +32,7 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { CodeProjection, readCodeRuntimeWorks } from "../persistence/codeProjection";
 import { CODE_OPERATION_EVENT_RECORDED } from "./codeOperationEventStore";
 import { createCodeOperationRuntime } from "./codeOperationRuntime";
+import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import type {
@@ -104,6 +106,29 @@ describe("CodeOperationRuntime", () => {
         },
       }),
     ).resolves.toBeUndefined();
+    fixture.close();
+  });
+
+  it("does not record runtime work for a command outside the window's Project scope", async () => {
+    const fixture = runtimeFixture({ approvalValidator: false });
+    fixture.access.mockResolvedValue(false);
+
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "start-terminal",
+      operationId: operationId(3),
+      threadId,
+      checkoutId,
+      terminalId: operationId(4) as never,
+      columns: 100,
+      rows: 30,
+      credentialRefs: [],
+    });
+
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.runtimeWorks()).toEqual([]);
     fixture.close();
   });
 
@@ -799,17 +824,307 @@ describe("CodeOperationRuntime", () => {
     });
     fixture.close();
   });
+
+  it("reports a thread as executing for exactly as long as its provider turn runs", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    const startOperation = operationId(60);
+
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(fixture.runtimeWorks()).toEqual([
+      { id: String(startOperation), kind: "provider-turn", state: "running" },
+    ]);
+    expect(fixture.boardActivity()).toMatchObject({ executing: true, awaitingInput: false });
+
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+
+    await vi.waitFor(() =>
+      expect(fixture.runtimeWorks().at(-1)).toEqual({
+        id: String(startOperation),
+        kind: "provider-turn",
+        state: "completed",
+      }),
+    );
+    expect(fixture.boardActivity()).toMatchObject({
+      executing: false,
+      awaitingInput: false,
+      interrupted: false,
+    });
+    fixture.close();
+  });
+
+  it("keeps a thread executing until its shell exits", async () => {
+    const fixture = runtimeFixture({ terminalExit: { exitCode: 0 } });
+    const terminalId = operationId(70);
+
+    await fixture.runtime.execute(windowId, {
+      kind: "start-terminal",
+      operationId: operationId(71),
+      threadId,
+      checkoutId,
+      terminalId,
+      columns: 100,
+      rows: 30,
+      credentialRefs: [],
+    });
+
+    expect(fixture.runtimeWorks()).toEqual([
+      { id: String(terminalId), kind: "terminal", state: "running" },
+    ]);
+    expect(fixture.boardActivity()).toMatchObject({ executing: true });
+
+    // A shell that ends on its own tells nobody. The next command that looks at
+    // it is what closes the record, which is why every terminal command settles
+    // it rather than only `stop-terminal`.
+    fixture.exitTerminal();
+    await fixture.runtime.execute(windowId, {
+      kind: "attach-terminal",
+      operationId: operationId(72),
+      threadId,
+      checkoutId,
+      terminalId,
+    });
+
+    expect(fixture.runtimeWorks().at(-1)).toEqual({
+      id: String(terminalId),
+      kind: "terminal",
+      state: "completed",
+    });
+    expect(fixture.boardActivity()).toMatchObject({ executing: false, awaitingInput: false });
+    fixture.close();
+  });
+
+  it("closes a repository test run that could not be executed", async () => {
+    const fixture = runtimeFixture({});
+    const testRunId = operationId(80);
+
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "run-repository-test",
+      operationId: operationId(81),
+      threadId,
+      checkoutId,
+      testRunId,
+      definition: {
+        id: "abcdabcd-abcd-4bcd-8bcd-abcdabcdabcd",
+        name: "test",
+        source: {
+          kind: "package-script",
+          packagePath: "package.json",
+          packageManager: "bun",
+          script: "test",
+        },
+        argv: ["bun", "run", "test"],
+        cwd: ".",
+        environmentRefs: [],
+        timeoutMs: 900_000,
+        artifactPaths: [],
+      },
+    });
+
+    // The discovery this fixture performs finds nothing, so the run is refused
+    // before a process starts. The record still closes: work that never ran is
+    // not work the board should keep showing as owed.
+    expect(result).toMatchObject({ kind: "operation-failed" });
+    expect(fixture.runtimeWorks()).toEqual([
+      { id: String(testRunId), kind: "test", state: "running" },
+      { id: String(testRunId), kind: "test", state: "failed" },
+    ]);
+    expect(fixture.boardActivity()).toMatchObject({ executing: false, awaitingInput: false });
+    fixture.close();
+  });
+
+  // The push may have landed on the remote even though this host never learned
+  // so. Calling it failed would let the thread read as Ready with work possibly
+  // already published; `ambiguous` is what puts it in Waiting instead.
+  it("leaves a push whose outcome it could not establish waiting rather than ready", async () => {
+    // The fixture cannot observe the checkout, so the push never establishes
+    // whether the remote took the refs.
+    const fixture = runtimeFixture({});
+    const gitOperationId = operationId(90);
+
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "push-git",
+      operationId: operationId(91),
+      threadId,
+      checkoutId,
+      gitOperationId,
+      remote: "origin",
+      localRef: "refs/heads/feature/runtime",
+      remoteRef: "refs/heads/feature/runtime",
+      expectedHeadOid: "a".repeat(40),
+      expectedStateToken: "b".repeat(64),
+      confirmation: {
+        remote: "origin",
+        refspec: "refs/heads/feature/runtime:refs/heads/feature/runtime",
+      },
+      authorization: { kind: "full-access" },
+    });
+
+    expect(result).toMatchObject({ kind: "operation-failed" });
+    expect(fixture.runtimeWorks()).toEqual([
+      { id: String(gitOperationId), kind: "git", state: "running" },
+      { id: String(gitOperationId), kind: "git", state: "ambiguous" },
+    ]);
+    expect(fixture.boardActivity()).toMatchObject({
+      executing: false,
+      awaitingInput: true,
+      blockingReason: "Runtime work is waiting for a decision or input.",
+    });
+    fixture.close();
+  });
+
+  it("leaves a pull request GitHub never confirmed waiting rather than ready", async () => {
+    const fixture = runtimeFixture({
+      pullRequestTarget: true,
+      pullRequestPort: {
+        ensure: async () => ({ status: "unavailable" }),
+        observeReview: async () => ({ status: "unavailable" }),
+      },
+    });
+    const delivery = operationId(100);
+
+    const created = await fixture.runtime.execute(windowId, {
+      kind: "create-pull-request",
+      operationId: delivery,
+      threadId,
+      checkoutId,
+      title: "Add the board's runtime work",
+      body: "Body",
+      idempotencyKey: "runtime-work-delivery",
+      authorization: { kind: "approved", approvalId: operationId(101) },
+    });
+
+    expect(created).toMatchObject({ kind: "pull-request-state", state: "unavailable" });
+    expect(fixture.runtimeWorks()).toEqual([
+      { id: String(delivery), kind: "delivery", state: "running" },
+      { id: String(delivery), kind: "delivery", state: "ambiguous" },
+    ]);
+    expect(fixture.boardActivity()).toMatchObject({ executing: false, awaitingInput: true });
+    fixture.close();
+  });
+
+  // The Waiting column exists for exactly this: an effect the host refuses
+  // until someone decides. The approved retry carries the same operation, so it
+  // continues that record rather than leaving a second one owed forever.
+  it("holds delivery waiting until the effect is approved, then continues the same record", async () => {
+    let approved = false;
+    const fixture = runtimeFixture({
+      pullRequestTarget: true,
+      approvalValidator: () => approved,
+      pullRequestPort: {
+        ensure: async () => ({
+          status: "created",
+          pullRequest: {
+            number: 7,
+            url: "https://github.com/octant/octant/pull/7",
+            baseRepository: "octant/octant",
+            baseBranch: "development",
+            headOwner: "octant",
+            headBranch: "feature/runtime",
+          },
+        }),
+        observeReview: async () => ({ status: "unavailable" }),
+      },
+    });
+    const delivery = operationId(120);
+    const command = {
+      kind: "create-pull-request" as const,
+      operationId: delivery,
+      threadId,
+      checkoutId,
+      title: "Add the board's runtime work",
+      body: "Body",
+      idempotencyKey: "runtime-work-delivery",
+    };
+
+    const refused = await fixture.runtime.execute(windowId, {
+      ...command,
+      authorization: { kind: "full-access" },
+    });
+
+    expect(refused).toMatchObject({ failure: { category: "waiting" } });
+    expect(fixture.runtimeWorks().at(-1)).toEqual({
+      id: String(delivery),
+      kind: "delivery",
+      state: "waiting",
+    });
+    expect(fixture.boardActivity()).toMatchObject({
+      awaitingInput: true,
+      blockingReason: "Runtime work is waiting for a decision or input.",
+    });
+
+    approved = true;
+    await fixture.runtime.execute(windowId, {
+      ...command,
+      authorization: { kind: "approved", approvalId: operationId(121) },
+    });
+
+    expect(fixture.runtimeWorks().at(-1)).toEqual({
+      id: String(delivery),
+      kind: "delivery",
+      state: "completed",
+    });
+    expect(fixture.boardActivity()).toMatchObject({ executing: false, awaitingInput: false });
+    fixture.close();
+  });
+
+  // A record whose work resolves inside the call could only ever say "already
+  // finished", so the journal keeps none: the board reads runtime work, and a
+  // read or an index edit is not runtime work.
+  it("journals no runtime work for observing Git or staging paths", async () => {
+    const fixture = runtimeFixture({});
+
+    await fixture.runtime.execute(windowId, {
+      kind: "observe-git",
+      operationId: operationId(110),
+      threadId,
+      checkoutId,
+      gitOperationId: operationId(111),
+      maxDiffBytes: 1_024,
+    });
+    await fixture.runtime.execute(windowId, {
+      kind: "stage-git",
+      operationId: operationId(112),
+      threadId,
+      checkoutId,
+      gitOperationId: operationId(113),
+      paths: ["src/main.ts"],
+      expectedStateToken: "b".repeat(64),
+    });
+
+    expect(fixture.runtimeWorks()).toEqual([]);
+    fixture.close();
+  });
 });
 
 function runtimeFixture(options: {
   provider?: ProviderDriver | undefined;
+  terminalExit?: { readonly exitCode: number };
+  pullRequestPort?: Parameters<typeof createCodeOperationRuntime>[0]["pullRequestPort"];
+  pullRequestTarget?: boolean;
+  repositoryTestProcessPort?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["repositoryTestProcessPort"];
   credential?: string | undefined;
   credentialReferences?: readonly { environmentName: string; reference: string }[];
   gitObservation?: GitObservationResult;
   gitReadDiff?: (
     input: Parameters<GitObservationPort["readDiff"]>[0],
   ) => Promise<GitScopedDiffResult>;
-  approvalValidator?: boolean;
+  approvalValidator?: boolean | (() => boolean);
   evidencePut?: (
     content: string,
     metadata?: { readonly truncated?: boolean },
@@ -823,7 +1138,7 @@ function runtimeFixture(options: {
     connection,
     registry: new EventRegistry()
       .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
-      .register("code.runtime-work-updated@1", 1, CodeRuntimeWorkUpdated),
+      .register(CODE_RUNTIME_WORK_UPDATED, 1, CodeRuntimeWorkUpdated),
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())
       .register(new CodeProjection()),
@@ -847,6 +1162,7 @@ function runtimeFixture(options: {
   ]);
   let evidenceCounter = 50;
   let uuidCounter = 100;
+  let exitTerminal: (() => void) | undefined;
   const runtime = createCodeOperationRuntime({
     persistence: {
       journal,
@@ -864,7 +1180,15 @@ function runtimeFixture(options: {
     }),
     resolveProviderDriver: async () => options.provider,
     credentialResolver: { resolve: async () => options.credential },
-    resolvePullRequestTarget: async () => undefined,
+    resolvePullRequestTarget: async () =>
+      options.pullRequestTarget === true
+        ? {
+            authorization: "confirmed-delivery-target" as const,
+            baseRepository: "octant/octant",
+            baseBranch: "development",
+            head: "octant:feature/runtime",
+          }
+        : undefined,
     reviewFiles: { resolve: () => undefined },
     evidence: {
       put: (content, metadata) => {
@@ -877,16 +1201,34 @@ function runtimeFixture(options: {
     },
     ...(options.approvalValidator === false
       ? {}
-      : { approvalValidator: { validate: async () => true } }),
+      : {
+          approvalValidator: {
+            validate: async () =>
+              typeof options.approvalValidator === "function" ? options.approvalValidator() : true,
+          },
+        }),
     actor,
     clock: () => now,
     uuid: () => `90000000-0000-4000-8000-${(++uuidCounter).toString().padStart(12, "0")}`,
     terminalProcessPort: {
       start: () => {
-        throw new Error("not used");
+        const exit = options.terminalExit;
+        if (exit === undefined) throw new Error("not used");
+        return {
+          write: vi.fn(),
+          resize: vi.fn(),
+          onData: () => () => undefined,
+          onExit: (listener: (event: { exitCode: number; signal?: number }) => void) => {
+            exitTerminal = () => listener(exit);
+            return () => undefined;
+          },
+          pause: vi.fn(),
+          resume: vi.fn(),
+          close: vi.fn(async () => undefined),
+        };
       },
     },
-    repositoryTestProcessPort: {
+    repositoryTestProcessPort: options.repositoryTestProcessPort ?? {
       execute: async () => ({
         termination: "unavailable" as const,
         exitCode: null,
@@ -897,6 +1239,7 @@ function runtimeFixture(options: {
       }),
       readArtifact: async () => undefined,
     },
+    ...(options.pullRequestPort === undefined ? {} : { pullRequestPort: options.pullRequestPort }),
     gitObservationPort: {
       observe: async () => options.gitObservation ?? { status: "unavailable" as const },
       ...(options.gitReadDiff === undefined ? {} : { readDiff: options.gitReadDiff }),
@@ -922,6 +1265,21 @@ function runtimeFixture(options: {
     setThread: (next: CodeThread) => {
       activeThread = next;
     },
+    /** Fire the shell's own exit, the way a `exit` typed into it would. */
+    exitTerminal: () => exitTerminal?.(),
+    /** Every runtime work state this runtime journalled, oldest first. */
+    runtimeWorks: (): ReadonlyArray<{
+      readonly id: string;
+      readonly kind: string;
+      readonly state: string;
+    }> =>
+      journal
+        .replayAggregateType({ aggregateType: "code-runtime", afterSequence: 0, limit: 1_000 })
+        .map((envelope) => {
+          const { work } = envelope.payload as { readonly work: CodeRuntimeWork };
+          return { id: String(work.id), kind: work.kind, state: work.state };
+        }),
+    /** The board reads the rebuildable Code projection, not journal history. */
     boardActivity: () => boardRuntimeActivityFromWorks(readCodeRuntimeWorks(connection, threadId)),
     close: () => connection.close(),
   };
