@@ -1147,6 +1147,64 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.turnStatus).toBe("idle"));
   });
 
+  it("keeps an identical draft typed after a follow-up dispatches", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000042";
+    const finished = deferred<void>();
+    async function* frames() {
+      await finished.promise;
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      };
+    }
+    const executeOperation = vi.fn(async () => ({
+      kind: "provider-turn-state" as const,
+      operationId,
+      state: "running" as const,
+    }));
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+    });
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => result.current.setPendingDraft("same prompt"));
+
+    let sent: Promise<boolean> | undefined;
+    act(() => {
+      sent = result.current.sendFollowUp("same prompt");
+    });
+    await waitFor(() => expect(sent).toBeDefined());
+    await waitFor(() => expect(executeOperation).toHaveBeenCalledOnce());
+    // This is a new draft typed after the send cleared its original value; it
+    // happens to contain the same words and must not be mistaken for the old
+    // value by text equality.
+    act(() => {
+      result.current.setPendingDraft("");
+      result.current.setPendingDraft("same prompt");
+    });
+    await waitFor(() => expect(result.current.pendingDraft).toBe("same prompt"));
+    await act(async () => finished.resolve());
+    await expect(sent).resolves.toBe(true);
+    expect(client.subscribeOperation).toHaveBeenCalledOnce();
+    expect(result.current.pendingDraft).toBe("same prompt");
+    expect(store.read("code", String(ids.thread))).toEqual(
+      expect.objectContaining({ text: "same prompt" }),
+    );
+    unmount();
+  });
+
   it("settles a waiting provider turn and keeps the prompt available for retry", async () => {
     const operationId = "70000000-0000-4000-8000-000000000031";
     async function* waitingFrames() {

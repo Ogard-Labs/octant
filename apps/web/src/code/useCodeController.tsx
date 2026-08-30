@@ -1786,8 +1786,18 @@ export function useCodeController(options: CodeControllerOptions) {
       setTurnError(undefined);
       setTurnStatus("sending");
       const sendingThreadId = String(view.thread.id);
+      const draftRevisionAtDispatch = composerDraftRef.current.revisionFor(sendingThreadId);
       const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
+      const draftRevisionAfterInternalClear =
+        draftRevisionAtDispatch + (previousDraft === undefined ? 0 : 1);
       const restoreFailedPrompt = () => {
+        const currentRevision = composerDraftRef.current.revisionFor(sendingThreadId);
+        if (
+          currentRevision !== draftRevisionAtDispatch &&
+          currentRevision !== draftRevisionAfterInternalClear
+        ) {
+          return;
+        }
         composerDraftRef.current.restoreFor(sendingThreadId, {
           text: trimmed,
           caretIndex: previousDraft?.caretIndex ?? trimmed.length,
@@ -1834,9 +1844,10 @@ export function useCodeController(options: CodeControllerOptions) {
           return false;
         }
         setTurnStatus("running");
-        // A queued send already emptied the composer so the user can keep
-        // typing. Clearing here would wipe that later draft.
-        if (composerDraftRef.current.readFor(sendingThreadId)?.text === trimmed) {
+        // A steered send may have emptied the composer so the user can keep
+        // typing. Clearing here is safe only when no draft revision landed
+        // after this dispatch.
+        if (composerDraftRef.current.revisionFor(sendingThreadId) === draftRevisionAtDispatch) {
           composerDraftRef.current.clearFor(sendingThreadId);
         }
         setConversation((current) => [
