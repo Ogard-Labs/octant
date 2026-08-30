@@ -1096,6 +1096,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           void changeResearch({ enabled: view.thread.researchEnabled, routing })
         }
         onSend={async (draft) => {
+          if (steered.pending !== undefined) return false;
           // Sending during a streaming response is still sending: the message
           // leaves the composer now and joins the transcript, and the host runs
           // it as soon as this thread stops running one.
@@ -1134,6 +1135,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         pendingPreviewSelections={pendingPreviewSelections}
         pendingQuotes={pendingQuotes}
         pendingExtensionSelections={pendingExtensionSelections}
+        {...(steered.pending === undefined
+          ? {}
+          : { sendDisabledReason: "A message is already waiting to run." })}
         onRemoveExtensionSelection={removeExtensionSelection}
         onRemoveQuote={(quoteId) => {
           setPendingQuotes((current) => current.filter((quote) => quote.id !== quoteId));

@@ -834,6 +834,7 @@ describe("ChatWorkspace", () => {
       new File(["second"], "second.png", { type: "image/png" }),
     );
     await screen.findByText("second.png");
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Complete turn" }));
     await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
