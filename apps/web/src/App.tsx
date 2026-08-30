@@ -964,7 +964,9 @@ function LaunchedShell(
     const timer = setTimeout(() => setThreadExportNotice(undefined), 8000);
     return () => clearTimeout(timer);
   }, [threadExportNotice]);
-  const workNavigation = useWorkThreadNavigation(workThreadClient);
+  const workNavigation = useWorkThreadNavigation(workThreadClient, {
+    ...(activeMode === "work" ? {} : { navigationRefreshMs: 0 }),
+  });
   const githubClient = useMemo(
     () => withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable),
     [githubTransport],

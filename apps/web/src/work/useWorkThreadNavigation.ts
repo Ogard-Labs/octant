@@ -1,6 +1,7 @@
 import type { WorkThread, WorkThreadBootstrap } from "@octant/contracts";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 
 export type WorkThreadNavigationStatus = "loading" | "ready" | "unavailable";
@@ -26,20 +27,30 @@ export function buildWorkThreadNavigation(
     }));
 }
 
-export function useWorkThreadNavigation(client: Pick<WorkThreadClient, "bootstrap">) {
+export interface UseWorkThreadNavigationOptions {
+  readonly navigationRefreshMs?: number;
+}
+
+export function useWorkThreadNavigation(
+  client: Pick<WorkThreadClient, "bootstrap">,
+  options: UseWorkThreadNavigationOptions = {},
+) {
+  const navigationRefreshMs = options.navigationRefreshMs ?? 1_000;
   const [bootstrap, setBootstrap] = useState<WorkThreadBootstrap>();
   const [status, setStatus] = useState<WorkThreadNavigationStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string>();
   const mounted = useRef(true);
+  const bootstrapped = useRef(false);
   const requestGeneration = useRef(0);
 
   const refresh = useCallback(async () => {
     const request = ++requestGeneration.current;
-    setStatus("loading");
+    if (!bootstrapped.current) setStatus("loading");
     setErrorMessage(undefined);
     try {
       const next = await client.bootstrap();
       if (!mounted.current || request !== requestGeneration.current) return false;
+      bootstrapped.current = true;
       setBootstrap(next);
       setStatus("ready");
       return true;
@@ -63,6 +74,36 @@ export function useWorkThreadNavigation(client: Pick<WorkThreadClient, "bootstra
       requestGeneration.current += 1;
     };
   }, [refresh]);
+
+  // Only the thread in view streams, so the list is re-read on a timer to keep
+  // titles, lifecycle, and executing state current for threads nobody is watching.
+  useEffect(() => {
+    if (bootstrap === undefined || navigationRefreshMs <= 0) return;
+    let cancelled = false;
+    let inFlight = false;
+    const refreshNavigation = async () => {
+      if (!documentIsVisible() || inFlight) return;
+      inFlight = true;
+      try {
+        const next = await client.bootstrap();
+        if (cancelled || !mounted.current) return;
+        setBootstrap(next);
+      } catch {
+        // A refresh that fails leaves the last list on screen.
+      } finally {
+        inFlight = false;
+      }
+    };
+    const stop = scheduleVisibleInterval(
+      () => void refreshNavigation(),
+      Math.max(10, navigationRefreshMs),
+      { runImmediately: true },
+    );
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [bootstrap, client, navigationRefreshMs]);
 
   const navigation = useMemo(
     () => buildWorkThreadNavigation(bootstrap?.threads ?? [], bootstrap?.runtime ?? []),
