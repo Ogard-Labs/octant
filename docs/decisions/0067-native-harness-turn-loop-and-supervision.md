@@ -26,10 +26,12 @@ must be decided before implementation, not tuned after.
   tool results return in one message, ordered by the original tool-call order
   with stable serialization — completion order never changes request bytes.
 - Context reduction prunes stale bulky tool results mechanically before any
-  model-written summary, per the 0008 ladder. Pruning and summarization change
-  only the assembled request, never the durable journaled history, which keeps
-  the full record for replay. After summarization the goal, its acceptance
-  criteria, and recently-edited files are restored to context.
+  further shrink, per the 0008 ladder as amended by 0068. When the window is
+  still full, hard cutover, evidence-bound notes, and journal lookup follow
+  0068; model-written summary is last resort and runs on `smol` (0066).
+  Pruning and cutover change only the assembled request, never the durable
+  journaled history. After every cutover or last-resort summary the goal, its
+  acceptance criteria, and recently-edited files are restored to context.
 - Meta work — titles, summaries, compaction — never runs on the lead's slot;
   it runs on `smol` (0066). An unconfigured `smol` resolving to the `default`
   chain is 0066's warning case to fix, not a sanctioned routing.
@@ -77,3 +79,4 @@ must be decided before implementation, not tuned after.
 - 0008 Context budget and capacity scheduling
 - 0025 Long-running goal loops
 - 0066 Native harness model role slots
+- 0068 Native harness context overflow (amends overflow and summarization)

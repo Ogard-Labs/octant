@@ -41,7 +41,7 @@ Read the record that owns your change before editing, not all of them:
 | Modes, Projects, thread authority, checkout binding  | `docs/decisions/0003`, `docs/decisions/0017`                        |
 | Package layering and dependency direction            | `docs/decisions/0004`                                               |
 | Provider drivers, capabilities, registry, harness    | `docs/decisions/0005`–`docs/decisions/0007`, `docs/decisions/0055`  |
-| Native harness loop, role slots, advisor, follow-ups | `docs/decisions/0066`, `docs/decisions/0067`                        |
+| Native harness loop, role slots, advisor, follow-ups, overflow | `docs/decisions/0066`, `docs/decisions/0067`, `docs/decisions/0068` |
 | Image generation jobs, adapters, and artifacts       | `docs/decisions/0055`, `docs/decisions/0056`                        |
 | Context limits, capacity, scheduling                 | `docs/decisions/0008`                                               |
 | Usage spend ceilings (Project / thread)              | `docs/decisions/0060`                                               |
