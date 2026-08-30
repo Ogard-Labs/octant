@@ -93,6 +93,34 @@ export function useCodeThreadController(
   return useSyncExternalStore(subscribe, read, read);
 }
 
+/**
+ * Reads live provider requests for every open Code thread so attention signals
+ * can surface background approvals, not just the thread in front.
+ */
+export function useOpenCodeThreadProviderRequests(
+  controllers: CodeThreadControllers,
+  threadIds: ReadonlyArray<CodeThreadId>,
+): Readonly<Record<string, ReadonlyArray<CodeController["providerRequests"][number]>>> {
+  const subscribe = useCallback(
+    (listener: () => void) => controllers.subscribe(listener),
+    [controllers],
+  );
+  const read = useCallback(() => {
+    const byThreadId: Record<
+      string,
+      ReadonlyArray<CodeController["providerRequests"][number]>
+    > = {};
+    for (const threadId of threadIds) {
+      const requests = controllers.get(threadId)?.providerRequests ?? [];
+      if (requests.length > 0) {
+        byThreadId[String(threadId)] = requests;
+      }
+    }
+    return byThreadId;
+  }, [controllers, threadIds]);
+  return useSyncExternalStore(subscribe, read, read);
+}
+
 export interface CodeThreadControllerSlotsProps {
   readonly registry: CodeThreadControllerRegistry;
   readonly threadIds: ReadonlyArray<CodeThreadId>;

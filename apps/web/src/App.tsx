@@ -124,6 +124,7 @@ import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDesti
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
 import { buildInboxAttentionItems, inboxThreadProjectId } from "./inbox/inboxModel";
+import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
 import { evaluateThreadAttention } from "./notifications/threadAttention";
 import { useThreadAttentionNotifications } from "./notifications/useThreadAttentionNotifications";
@@ -269,6 +270,7 @@ import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
   useCodeThreadController,
+  useOpenCodeThreadProviderRequests,
 } from "./code/codeThreadControllers";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
 import type { ZenClient } from "@octant/client-runtime/zen-client";
@@ -1007,7 +1009,7 @@ function LaunchedShell(
     [githubClient],
   );
   const loadAssignedLinearIssues = useCallback(
-    () => linearClient.listIssues({ filter: { assigneeId: "me" }, pageSize: 50 }),
+    () => fetchAssignedLinearIssues((input) => linearClient.listIssues(input)),
     [linearClient],
   );
   useEffect(() => {
@@ -1211,6 +1213,10 @@ function LaunchedShell(
     codeThreadControllers,
     activeCodeThreadId,
   );
+  const codeProviderRequestsByThreadId = useOpenCodeThreadProviderRequests(
+    codeThreadControllers,
+    openCodeThreadIds,
+  );
   const activeCodeThreadView = activeCodeThreadController?.activeView;
   // The Apple projects the host lists at the root of the Code thread in view.
   // The window's own Code reader binds to no thread, so the root comes from
@@ -1241,19 +1247,11 @@ function LaunchedShell(
   const attentionSignals = useMemo(
     () =>
       collectThreadAttentionSignals({
-        ...(activeCodeThreadId === undefined
-          ? {}
-          : { activeCodeThreadId: String(activeCodeThreadId) }),
         chatThreads: chatController.navigation,
-        codeProviderRequests: activeCodeThreadController?.providerRequests ?? [],
+        codeProviderRequestsByThreadId,
         codeThreads: codeController.navigation,
       }),
-    [
-      activeCodeThreadId,
-      chatController.navigation,
-      activeCodeThreadController?.providerRequests,
-      codeController.navigation,
-    ],
+    [chatController.navigation, codeProviderRequestsByThreadId, codeController.navigation],
   );
   useThreadAttentionNotifications({
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
@@ -4231,7 +4229,15 @@ function LaunchedShell(
                   );
                 }}
                 {...(githubIssuesReadAvailable ? { loadAssignedGithubWork } : {})}
-                {...(linearIssuesRead ? { loadAssignedLinearIssues } : {})}
+                {...(linearIssuesRead
+                  ? {
+                      loadAssignedLinearIssues,
+                      onOpenLinearIssues: () => {
+                        setInboxOpen(false);
+                        setLinearIssuesOpen(true);
+                      },
+                    }
+                  : {})}
                 codeBoardOpen={codeBoardOpen}
                 codePullRequestsOpen={codePullRequestsOpen}
                 githubIssuesOpen={githubIssuesOpen}

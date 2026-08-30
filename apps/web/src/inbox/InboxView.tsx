@@ -22,6 +22,8 @@ export interface InboxViewProps {
   readonly loadAssignedGithubWork?: () => Promise<GithubCatalogueReadResponse>;
   /** Absent while Linear issue browsing is not connected; hides the section. */
   readonly loadAssignedLinearIssues?: () => Promise<LinearIssueListPage>;
+  /** Opens the full Linear issue browser when the inbox list is incomplete. */
+  readonly onOpenLinearIssues?: () => void;
 }
 
 type GithubSection =
@@ -231,37 +233,60 @@ export function InboxView(props: InboxViewProps) {
                 No Linear issues are assigned to you.
               </p>
             ) : (
-              <ul className="inbox-view__list">
-                {linear.page.rows.map((row) => {
-                  const key = linearIssueSeenKey(row);
-                  return (
-                    <li key={row.id}>
-                      <a
-                        className="inbox-view__row"
-                        data-unseen={seenKeys.has(key) ? undefined : "true"}
-                        href={row.url}
-                        onClick={() => markSeen(key)}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
-                        <span className="inbox-view__row-title">
-                          <ListTodo
-                            aria-hidden="true"
-                            className="icon"
-                            size={14}
-                            strokeWidth={1.5}
-                          />
-                          {row.title}
-                        </span>
-                        <span className="inbox-view__row-meta">
-                          {row.identifier} · {row.state.name}
-                        </span>
-                      </a>
-                    </li>
-                  );
-                })}
-              </ul>
+              <>
+                {linear.page.hasNextPage ? (
+                  <p className="inbox-view__note" role="status">
+                    Showing the first {linear.page.rows.length} assigned issues.
+                    {props.onOpenLinearIssues === undefined ? (
+                      " Open Linear for the rest."
+                    ) : (
+                      <>
+                        {" "}
+                        <OctantButton
+                          onClick={props.onOpenLinearIssues}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          Open Linear
+                        </OctantButton>{" "}
+                        for the rest.
+                      </>
+                    )}
+                  </p>
+                ) : null}
+                <ul className="inbox-view__list">
+                  {linear.page.rows.map((row) => {
+                    const key = linearIssueSeenKey(row);
+                    return (
+                      <li key={row.id}>
+                        <a
+                          className="inbox-view__row"
+                          data-unseen={seenKeys.has(key) ? undefined : "true"}
+                          href={row.url}
+                          onClick={() => markSeen(key)}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
+                          <span className="inbox-view__row-title">
+                            <ListTodo
+                              aria-hidden="true"
+                              className="icon"
+                              size={14}
+                              strokeWidth={1.5}
+                            />
+                            {row.title}
+                          </span>
+                          <span className="inbox-view__row-meta">
+                            {row.identifier} · {row.state.name}
+                          </span>
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
             )}
           </section>
         )}

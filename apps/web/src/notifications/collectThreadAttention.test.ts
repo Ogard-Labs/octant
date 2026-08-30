@@ -24,16 +24,17 @@ describe("collecting thread attention", () => {
     const threadId = "code-a" as CodeThreadId;
     expect(
       collectThreadAttentionSignals({
-        activeCodeThreadId: "code-a",
         chatThreads: [],
-        codeProviderRequests: [
-          {
-            kind: "approval",
-            approvalId: "approval-1" as CodeApprovalId,
-            summary: "Run bun run verify",
-          },
-          { kind: "input", requestId: "input-1", prompt: "Which branch?", options: [] },
-        ],
+        codeProviderRequestsByThreadId: {
+          "code-a": [
+            {
+              kind: "approval",
+              approvalId: "approval-1" as CodeApprovalId,
+              summary: "Run bun run verify",
+            },
+            { kind: "input", requestId: "input-1", prompt: "Which branch?", options: [] },
+          ],
+        },
         codeThreads: [
           {
             executionPolicy: "approval-gated",
@@ -65,17 +66,59 @@ describe("collecting thread attention", () => {
     ]);
   });
 
-  it("ignores provider requests when no Code thread is active", () => {
+  it("raises provider requests from a background Code thread that is not active", () => {
+    const activeThreadId = "code-active" as CodeThreadId;
+    const backgroundThreadId = "code-background" as CodeThreadId;
     expect(
       collectThreadAttentionSignals({
         chatThreads: [],
-        codeProviderRequests: [
+        codeProviderRequestsByThreadId: {
+          "code-background": [
+            {
+              kind: "approval",
+              approvalId: "approval-bg" as CodeApprovalId,
+              summary: "Delete node_modules",
+            },
+          ],
+        },
+        codeThreads: [
           {
-            kind: "approval",
-            approvalId: "approval-1" as CodeApprovalId,
-            summary: "Run bun run verify",
+            executionPolicy: "approval-gated",
+            lifecycle: "active",
+            providerInstanceId: "provider-one" as never,
+            projectId: "project-1" as CodeThread["projectId"],
+            threadId: activeThreadId,
+            title: "Active thread",
+          },
+          {
+            executionPolicy: "approval-gated",
+            lifecycle: "active",
+            providerInstanceId: "provider-one" as never,
+            projectId: "project-2" as CodeThread["projectId"],
+            threadId: backgroundThreadId,
+            title: "Background thread",
           },
         ],
+      }),
+    ).toEqual([
+      {
+        threadId: "code-background",
+        reason: "approval-required",
+        title: "Background thread",
+        detail: "Delete node_modules",
+        source: "code",
+        projectId: "project-2",
+      },
+    ]);
+  });
+
+  it("ignores empty provider-request entries", () => {
+    expect(
+      collectThreadAttentionSignals({
+        chatThreads: [],
+        codeProviderRequestsByThreadId: {
+          "code-a": [],
+        },
         codeThreads: [],
       }),
     ).toEqual([]);

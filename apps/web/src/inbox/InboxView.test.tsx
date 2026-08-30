@@ -64,4 +64,27 @@ describe("InboxView", () => {
       expect(label).toHaveClass("sr-only");
     }
   });
+
+  it("says when assigned Linear issues were truncated and offers to open Linear", async () => {
+    document.head.insertAdjacentHTML("beforeend", `<style>${stylesheet}</style>`);
+    const onOpenLinearIssues = vi.fn();
+
+    render(
+      <InboxView
+        attentionItems={[]}
+        loadAssignedLinearIssues={vi.fn(async () => ({
+          rows: [linearRow],
+          hasNextPage: true,
+          endCursor: "page-2",
+        }))}
+        onClose={vi.fn()}
+        onOpenLinearIssues={onOpenLinearIssues}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText(/Showing the first 1 assigned issues\./)).toBeVisible();
+    await screen.getByRole("button", { name: "Open Linear" }).click();
+    expect(onOpenLinearIssues).toHaveBeenCalledOnce();
+  });
 });

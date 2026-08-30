@@ -5,9 +5,10 @@ import type { ThreadAttentionSignal } from "./threadAttention";
 export interface ThreadAttentionSources {
   readonly chatThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly codeThreads: ReadonlyArray<CodeThreadNavigationItem>;
-  /** Questions the active Code turn is blocked on right now. */
-  readonly codeProviderRequests?: ReadonlyArray<CodeProviderRequest>;
-  readonly activeCodeThreadId?: string;
+  /** Live provider requests keyed by Code thread id for every open thread. */
+  readonly codeProviderRequestsByThreadId?: Readonly<
+    Record<string, ReadonlyArray<CodeProviderRequest>>
+  >;
 }
 
 /**
@@ -43,21 +44,17 @@ export function collectThreadAttentionSignals(
       ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
     });
   }
-  const activeCodeThreadId = sources.activeCodeThreadId;
-  if (activeCodeThreadId !== undefined) {
-    const activeThread = sources.codeThreads.find(
-      (thread) => String(thread.threadId) === activeCodeThreadId,
-    );
-    const title = activeThread?.title ?? "Code thread";
+  for (const [threadId, requests] of Object.entries(sources.codeProviderRequestsByThreadId ?? {})) {
+    if (requests.length === 0) continue;
+    const thread = sources.codeThreads.find((entry) => String(entry.threadId) === threadId);
+    const title = thread?.title ?? "Code thread";
     const shared = {
-      threadId: activeCodeThreadId,
+      threadId,
       title,
       source: "code" as const,
-      ...(activeThread?.projectId === undefined
-        ? {}
-        : { projectId: String(activeThread.projectId) }),
+      ...(thread?.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
     };
-    for (const request of sources.codeProviderRequests ?? []) {
+    for (const request of requests) {
       signals.push(
         request.kind === "approval"
           ? { ...shared, reason: "approval-required", detail: request.summary }
