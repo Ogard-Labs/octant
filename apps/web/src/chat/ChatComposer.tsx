@@ -848,7 +848,7 @@ export function ChatComposer(props: ChatComposerProps) {
       chips={chips}
       className={`chat-composer thread-column${
         queueStatus === "idle" ? "" : ` chat-composer--${queueStatus}`
-      }`}
+      }${props.isSending ? " chat-composer--running" : ""}`}
       footer={
         <div
           aria-live="polite"

@@ -117,6 +117,20 @@ describe("ChatComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Reply");
   });
 
+  it("marks a running turn on the composer so the streaming state is visible", () => {
+    renderComposer({ isSending: true });
+
+    expect(screen.getByRole("status")).toHaveClass("chat-composer__status--live");
+    expect(document.querySelector(".chat-composer--running")).not.toBeNull();
+  });
+
+  it("keeps the composer quiet when no turn is running", () => {
+    renderComposer({ isSending: false });
+
+    expect(screen.getByRole("status")).not.toHaveClass("chat-composer__status--live");
+    expect(document.querySelector(".chat-composer--running")).toBeNull();
+  });
+
   it("lets the user type during a running turn and says the message is queued", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => true);

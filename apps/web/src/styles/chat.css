@@ -770,6 +770,13 @@
   font-weight: 500;
 }
 
+/* A running thread is being read, not written to, so the follow-up box gives
+   its height back to the transcript until the user starts typing. It still
+   grows from its own content, so a long follow-up is never cramped. */
+.chat-composer--running .composer-input {
+  min-height: 34px;
+}
+
 /* While a response is arriving the status is the only thing telling the user
    the thread is alive, so it reads as a live strip with a marker rather than a
    grey footnote under the box. The marker only pulses where motion is welcome. */
