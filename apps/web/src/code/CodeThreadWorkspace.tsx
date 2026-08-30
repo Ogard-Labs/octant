@@ -218,6 +218,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
+  const mountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
   const scaffolds = useScaffoldCatalog({
     threadId: String(props.threadId),
     checkoutId: String(view?.checkout.id ?? ""),
@@ -508,6 +515,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }
   sendSteeredRef.current = async (message) => {
     try {
+      attachments.markDetachedInFlight(message.detachedAttachments);
       const sent = await props.controller.sendFollowUp(
         message.prompt,
         message.threadMentionIds,
@@ -530,6 +538,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   restoreSteeredRef.current = (message) => {
+    if (!mountedRef.current) {
+      attachments.discardDetached(message.detachedAttachments);
+      return;
+    }
     if (activeThreadKeyRef.current !== message.threadKey) return;
     setTurnAccessOverride((current) => current ?? message.accessOverride);
     if (draftRevisionRef.current !== message.draftRevision) {

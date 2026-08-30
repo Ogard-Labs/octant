@@ -21,6 +21,7 @@ export interface StagedCodeAttachment {
 interface DetachedCodeAttachment {
   readonly attachment: StagedCodeAttachment;
   readonly client: Pick<CodeClient, "discardAttachment">;
+  readonly inFlight: boolean;
   readonly threadId: CodeThreadId | undefined;
 }
 
@@ -39,6 +40,8 @@ export interface CodeAttachments {
   readonly restoreDetached: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
   /** Keep detached images out of the composer after the host accepts them. */
   readonly commitDetached: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
+  /** Mark detached images as owned by an in-flight host request. */
+  readonly markDetachedInFlight: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
   /** Discard detached host attachments when a refused message is superseded. */
   readonly discardDetached: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
   /** The references a send would carry right now, without clearing the chips. */
@@ -110,13 +113,17 @@ export function useCodeAttachments(input: {
     () => () => {
       for (const previewUrl of previews.current) URL.revokeObjectURL(previewUrl);
       previews.current.clear();
+      const inFlight = detached.current.filter((entry) => entry.inFlight);
       for (const entry of detached.current) {
+        // An accepted host request may still be using these ids after the
+        // surface unmounts; its completion owns the eventual commit/discard.
+        if (entry.inFlight) continue;
         if (entry.threadId === undefined) continue;
         void entry.client
           .discardAttachment(entry.threadId, entry.attachment.reference.attachmentId)
           .catch(() => undefined);
       }
-      detached.current = [];
+      detached.current = inFlight;
     },
     [],
   );
@@ -196,7 +203,12 @@ export function useCodeAttachments(input: {
     current.current = [];
     setStaged([]);
     setMessage(undefined);
-    detached.current = entries.map((attachment) => ({ attachment, client, threadId }));
+    detached.current = entries.map((attachment) => ({
+      attachment,
+      client,
+      inFlight: false,
+      threadId,
+    }));
     return entries;
   }, [client, threadId]);
 
@@ -222,6 +234,15 @@ export function useCodeAttachments(input: {
     },
     [forget],
   );
+
+  const markDetachedInFlight = useCallback((attachments: ReadonlyArray<StagedCodeAttachment>) => {
+    const ids = new Set(attachments.map((entry) => String(entry.reference.attachmentId)));
+    detached.current = detached.current.map((entry) =>
+      ids.has(String(entry.attachment.reference.attachmentId))
+        ? { ...entry, inFlight: true }
+        : entry,
+    );
+  }, []);
 
   const discardDetached = useCallback(
     (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
@@ -279,6 +300,7 @@ export function useCodeAttachments(input: {
     detachForSend,
     restoreDetached,
     commitDetached,
+    markDetachedInFlight,
     discardDetached,
     peekForSend,
     peekAbandoned,

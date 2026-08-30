@@ -129,4 +129,88 @@ describe("Code composer attachment ownership", () => {
       revokeObjectURL.mockRestore();
     }
   });
+
+  it("keeps an in-flight detached image until the send commits after unmount", async () => {
+    const reference: CodeAttachmentReference = {
+      attachmentId: "40000000-0000-4000-8000-000000000004" as never,
+      displayName: "in-flight.png",
+      mediaType: "image/png",
+      byteLength: 3,
+      digest: "d".repeat(64) as never,
+    };
+    const putAttachment = vi.fn(async () => reference);
+    const discardAttachment = vi.fn(async () => undefined);
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:in-flight");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    try {
+      const { result, unmount } = renderHook(() =>
+        useCodeAttachments({
+          client: { putAttachment, discardAttachment },
+          threadId,
+        }),
+      );
+      await act(async () => {
+        await result.current.attach([
+          new File([new Uint8Array([1, 2, 3])], "in-flight.png", { type: "image/png" }),
+        ]);
+      });
+      const detached = result.current.detachForSend();
+      result.current.markDetachedInFlight(detached);
+      const commit = result.current.commitDetached;
+
+      unmount();
+      expect(discardAttachment).not.toHaveBeenCalled();
+      commit(detached);
+      expect(discardAttachment).not.toHaveBeenCalled();
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:in-flight");
+    } finally {
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
+  it.each(["refused", "threw"] as const)(
+    "discards an in-flight detached image exactly once when the send %s after unmount",
+    async () => {
+      const reference: CodeAttachmentReference = {
+        attachmentId: "40000000-0000-4000-8000-000000000005" as never,
+        displayName: "failed-in-flight.png",
+        mediaType: "image/png",
+        byteLength: 3,
+        digest: "e".repeat(64) as never,
+      };
+      const putAttachment = vi.fn(async () => reference);
+      const discardAttachment = vi.fn(async () => undefined);
+      const createObjectURL = vi
+        .spyOn(URL, "createObjectURL")
+        .mockReturnValue("blob:failed-in-flight");
+      const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+      try {
+        const { result, unmount } = renderHook(() =>
+          useCodeAttachments({
+            client: { putAttachment, discardAttachment },
+            threadId,
+          }),
+        );
+        await act(async () => {
+          await result.current.attach([
+            new File([new Uint8Array([1, 2, 3])], "failed-in-flight.png", { type: "image/png" }),
+          ]);
+        });
+        const detached = result.current.detachForSend();
+        result.current.markDetachedInFlight(detached);
+        const discard = result.current.discardDetached;
+
+        unmount();
+        expect(discardAttachment).not.toHaveBeenCalled();
+        discard(detached);
+        expect(discardAttachment).toHaveBeenCalledOnce();
+        expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId);
+        expect(revokeObjectURL).toHaveBeenCalledWith("blob:failed-in-flight");
+      } finally {
+        createObjectURL.mockRestore();
+        revokeObjectURL.mockRestore();
+      }
+    },
+  );
 });
