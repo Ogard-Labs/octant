@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { decodeAppleSimulatorId } from "@octant/contracts/apple-toolchain";
@@ -126,6 +126,64 @@ describe("AppleSimulatorLiveFrameView", () => {
     expect(screen.getByLabelText("Tap on iPhone 16 Simulator screen")).toBeEnabled();
     expect(screen.getByLabelText("Type into Simulator")).toBeVisible();
     expect(screen.getByRole("button", { name: "Return" })).toBeVisible();
+  });
+
+  it("sends taps in screenshot image pixels even when the screen renders scaled down", () => {
+    const frame: AppleSimulatorLiveFrame = {
+      status: "live",
+      simulatorId,
+      name: "iPhone 16",
+      screen: { kind: "screenshot", reference: "apple-screenshot-live" },
+      title: "Live · iPhone 16",
+      message: "Showing the latest host-held screen capture for this thread.",
+    };
+    const onInput = vi.fn();
+    render(
+      <AppleSimulatorLiveFrameView
+        frame={frame}
+        inputEnabled
+        onInput={onInput}
+        screenUrl="blob:https://octant.local/screen"
+      />,
+    );
+    const image = screen.getByRole("img", { name: "iPhone 16 screen" });
+    // The capture is 1179×2556 but the pane renders it at a third of that.
+    Object.defineProperty(image, "naturalWidth", { value: 1179 });
+    Object.defineProperty(image, "naturalHeight", { value: 2556 });
+    vi.spyOn(image, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 20, 393, 852));
+    fireEvent.click(screen.getByLabelText("Tap on iPhone 16 Simulator screen"), {
+      clientX: 10 + 100,
+      clientY: 20 + 200,
+    });
+    expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 300, y: 600 } });
+  });
+
+  it("drops a tap that lands before the screenshot has decoded", () => {
+    const frame: AppleSimulatorLiveFrame = {
+      status: "live",
+      simulatorId,
+      name: "iPhone 16",
+      screen: { kind: "screenshot", reference: "apple-screenshot-live" },
+      title: "Live · iPhone 16",
+      message: "Showing the latest host-held screen capture for this thread.",
+    };
+    const onInput = vi.fn();
+    render(
+      <AppleSimulatorLiveFrameView
+        frame={frame}
+        inputEnabled
+        onInput={onInput}
+        screenUrl="blob:https://octant.local/screen"
+      />,
+    );
+    const image = screen.getByRole("img", { name: "iPhone 16 screen" });
+    vi.spyOn(image, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 393, 852));
+    // jsdom leaves naturalWidth/naturalHeight at 0, exactly like an undecoded image.
+    fireEvent.click(screen.getByLabelText("Tap on iPhone 16 Simulator screen"), {
+      clientX: 100,
+      clientY: 200,
+    });
+    expect(onInput).not.toHaveBeenCalled();
   });
 
   it("keeps unavailable frames read-only even when input is requested", () => {
