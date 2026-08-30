@@ -589,6 +589,7 @@ import { localHostDisplayName } from "./localHostDisplayName";
 import { ZenAssistantTools } from "./zen/zenAssistantTools";
 import { createCanvasAgentTools, type CanvasAgentToolPort } from "./canvas/canvasAgentTools";
 import { combineAppManagedToolSets } from "./providers/appManagedToolSet";
+import { taintAppManagedToolResults } from "./providers/appManagedToolTaint";
 import {
   isPrivateListenerFailureCode,
   type PrivateListener,
@@ -3302,6 +3303,7 @@ export function startOctantServer(
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             githubReadToolService.createToolSet({ windowId, thread, readThread }),
           ),
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         // Planner tools resolve their designation on every call through the
         // services declared after this runtime; the closures run only once a
         // turn is live, well after startup finishes wiring them.
@@ -3808,32 +3810,37 @@ export function startOctantServer(
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
       resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) =>
-        combineAppManagedToolSets(
-          zenAssistantTools?.forThread(windowId, thread),
-          threadDialogueService?.forThread({
-            windowId,
-            sourceThreadId: thread.id,
-            sourceTitle: thread.title,
-            targetThreadIds: threadMentionIds ?? [],
-            ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
-          }),
-          canvasAgentToolPort === undefined
-            ? undefined
-            : createCanvasAgentTools({
-                windowId,
-                thread,
-                port: canvasAgentToolPort,
-              }),
-          createImageAgentTools({
-            threadKind: "chat-thread",
-            scopeId: decodeImageGenerationScopeId(String(thread.id)),
-            port: {
-              listInstances: () => persistence.readProviderInstances(),
-              enqueue: (input) => imageJobService.enqueue(input),
-              listJobs: (scopeId) => imageJobService.listByScope(scopeId),
-            },
-          }),
-        ),
+        taintAppManagedToolResults({
+          tools: combineAppManagedToolSets(
+            zenAssistantTools?.forThread(windowId, thread),
+            threadDialogueService?.forThread({
+              windowId,
+              sourceThreadId: thread.id,
+              sourceTitle: thread.title,
+              targetThreadIds: threadMentionIds ?? [],
+              ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
+            }),
+            canvasAgentToolPort === undefined
+              ? undefined
+              : createCanvasAgentTools({
+                  windowId,
+                  thread,
+                  port: canvasAgentToolPort,
+                }),
+            createImageAgentTools({
+              threadKind: "chat-thread",
+              scopeId: decodeImageGenerationScopeId(String(thread.id)),
+              port: {
+                listInstances: () => persistence.readProviderInstances(),
+                enqueue: (input) => imageJobService.enqueue(input),
+                listJobs: (scopeId) => imageJobService.listByScope(scopeId),
+              },
+            }),
+          ),
+          threadId: thread.id,
+          recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+          uuid: randomUUID,
+        }),
       resolveExtensionSelectionContext: createExtensionChatResolver({
         snapshot: () => extensionApiService.snapshot(),
         resolveEffectiveState: (snapshot, query) =>
