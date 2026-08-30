@@ -1412,8 +1412,10 @@ function renderNonCodeTab(
     );
   }
   if (tab.mode === "chat") {
+    const recentThreads = draftRecentThreads("chat", props);
     return (
       <ChatWelcome
+        {...(recentThreads.length === 0 ? {} : { recentThreads })}
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
         {...(props.selectedCreateHostId === undefined
           ? {}

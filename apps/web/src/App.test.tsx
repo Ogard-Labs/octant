@@ -430,7 +430,9 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: /Older chat/ }));
+    // The start screen also offers this thread under Continue. The sidebar
+    // renders before the workspace, so its row is the first match.
+    await user.click((await screen.findAllByRole("button", { name: /Older chat/ }))[0]!);
     expect(await screen.findByRole("region", { name: "Workspace pane: Older chat" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Workspace pane: Exact created chat" })).toBeNull();
 
