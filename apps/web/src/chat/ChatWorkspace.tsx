@@ -559,7 +559,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         return next;
       });
       setPendingPreviewSelections([]);
-      setPendingQuotes([]);
+      setPendingQuotes((current) => {
+        const sent = new Set(quotesForSend.map((quote) => quote.id));
+        return current.filter((quote) => !sent.has(quote.id));
+      });
       if (props.pendingCanvasSelections === undefined) {
         setLocalCanvasSelections([]);
       } else {
