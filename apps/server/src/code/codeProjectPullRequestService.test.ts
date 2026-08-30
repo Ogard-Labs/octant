@@ -102,6 +102,19 @@ function serviceFixture(options: {
     options.detail ?? (async () => ({ status: "unavailable" }) satisfies GhPullRequestReviewResult),
   );
   const journal = options.journal ?? { append: vi.fn() };
+  const listThreads = vi.fn(
+    async () =>
+      options.threads ?? [
+        {
+          threadId: String(threadId),
+          projectId: String(projectA),
+          title: "Manual refresh",
+          repository: { owner: "octant", name: "octant" },
+          deliveryBranch: "feature/manual-refresh",
+          pullRequestNumbers: options.knownPullRequests ?? [],
+        },
+      ],
+  );
   const service = new CodeProjectPullRequestService({
     projects: {
       bootstrap: async () => ({
@@ -131,17 +144,7 @@ function serviceFixture(options: {
     list: { listActive },
     detail: { observeReviewByIdentity },
     threads: {
-      list: async () =>
-        options.threads ?? [
-          {
-            threadId: String(threadId),
-            projectId: String(projectA),
-            title: "Manual refresh",
-            repository: { owner: "octant", name: "octant" },
-            deliveryBranch: "feature/manual-refresh",
-            pullRequestNumbers: options.knownPullRequests ?? [],
-          },
-        ],
+      list: listThreads,
     },
     clock: options.clock ?? (() => now),
     ...(options.cacheStats === undefined ? {} : { cacheStats: options.cacheStats }),
@@ -149,7 +152,7 @@ function serviceFixture(options: {
       ? {}
       : { onSnapshotRefreshed: options.onSnapshotRefreshed }),
   });
-  return { service, listActive, observeReviewByIdentity, journal };
+  return { service, listActive, observeReviewByIdentity, journal, listThreads };
 }
 
 describe("CodeProjectPullRequestService", () => {
@@ -479,6 +482,9 @@ describe("CodeProjectPullRequestService", () => {
     });
 
     await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+
+    expect(fixture.listThreads).toHaveBeenCalled();
+    expect(fixture.listThreads.mock.calls.every((call) => call.length === 0)).toBe(true);
 
     const board = await fixture.service.boardSnapshot(windowB);
     expect(board.rows.map((row) => [row.repositoryName, row.number, row.state])).toEqual([
