@@ -33,36 +33,36 @@ architecture, security, privacy, release, or destructive decision.
 
 Read the record that owns your change before editing, not all of them:
 
-| Change area                                          | Owning record                                                       |
-| ---------------------------------------------------- | ------------------------------------------------------------------- |
-| Journal, projections, replay, migrations             | `docs/decisions/0002`                                               |
-| Thread retention, explicit purge, journal erasure    | `docs/decisions/0035`                                               |
-| Thread export of transcript, evidence, provenance    | `docs/decisions/0036`                                               |
-| Modes, Projects, thread authority, checkout binding  | `docs/decisions/0003`, `docs/decisions/0017`                        |
-| Package layering and dependency direction            | `docs/decisions/0004`                                               |
-| Provider drivers, capabilities, registry, harness    | `docs/decisions/0005`–`docs/decisions/0007`, `docs/decisions/0055`  |
+| Change area                                                    | Owning record                                                       |
+| -------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Journal, projections, replay, migrations                       | `docs/decisions/0002`                                               |
+| Thread retention, explicit purge, journal erasure              | `docs/decisions/0035`                                               |
+| Thread export of transcript, evidence, provenance              | `docs/decisions/0036`                                               |
+| Modes, Projects, thread authority, checkout binding            | `docs/decisions/0003`, `docs/decisions/0017`                        |
+| Package layering and dependency direction                      | `docs/decisions/0004`                                               |
+| Provider drivers, capabilities, registry, harness              | `docs/decisions/0005`–`docs/decisions/0007`, `docs/decisions/0055`  |
 | Native harness loop, role slots, advisor, follow-ups, overflow | `docs/decisions/0066`, `docs/decisions/0067`, `docs/decisions/0068` |
-| Image generation jobs, adapters, and artifacts       | `docs/decisions/0055`, `docs/decisions/0056`                        |
-| Context limits, capacity, scheduling                 | `docs/decisions/0008`                                               |
-| Usage spend ceilings (Project / thread)              | `docs/decisions/0060`                                               |
-| Pull-request snapshot background refresh cadence     | `docs/decisions/0064`                                               |
-| Sandbox, approvals, Plan mode, access postures       | `docs/decisions/0009`, `docs/decisions/0018`, `docs/decisions/0057` |
-| File preview and canvas artifacts                    | `docs/decisions/0010`                                               |
-| Canvas boards, comments, and layout revisions        | `docs/decisions/0052`                                               |
-| Extensions, skills, plugin host                      | `docs/decisions/0011`, `docs/decisions/0001`                        |
-| Subagents and agent runs                             | `docs/decisions/0012`                                               |
-| Project planner thread, board tool, work proposals   | `docs/decisions/0065`                                               |
-| Agent-to-agent messaging authority                   | `docs/decisions/0063`                                               |
-| Remote clients and mobile                            | `docs/decisions/0013`                                               |
-| Multi-host federation registry and pairing at scale  | `docs/decisions/0059`                                               |
-| Collaboration, shared host, git-mediated sharing     | `docs/decisions/0040`                                               |
-| Cross-platform desktop packaging and updates         | `docs/decisions/0034`, `docs/decisions/0058`                        |
-| Apple build and validation                           | `docs/decisions/0014`                                               |
-| Simulator frame input transport                      | `docs/decisions/0062`                                               |
-| Signed updates and in-app changelog                  | `docs/decisions/0034`, `docs/decisions/0061`                        |
-| Computer-use destinations                            | `docs/decisions/0053`                                               |
-| Shell, navigation, workspace layout                  | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`  |
-| Components and theme                                 | `docs/decisions/0016`, `docs/decisions/0046`                        |
+| Image generation jobs, adapters, and artifacts                 | `docs/decisions/0055`, `docs/decisions/0056`                        |
+| Context limits, capacity, scheduling                           | `docs/decisions/0008`                                               |
+| Usage spend ceilings (Project / thread)                        | `docs/decisions/0060`                                               |
+| Pull-request snapshot background refresh cadence               | `docs/decisions/0064`                                               |
+| Sandbox, approvals, Plan mode, access postures                 | `docs/decisions/0009`, `docs/decisions/0018`, `docs/decisions/0057` |
+| File preview and canvas artifacts                              | `docs/decisions/0010`                                               |
+| Canvas boards, comments, and layout revisions                  | `docs/decisions/0052`                                               |
+| Extensions, skills, plugin host                                | `docs/decisions/0011`, `docs/decisions/0001`                        |
+| Subagents and agent runs                                       | `docs/decisions/0012`                                               |
+| Project planner thread, board tool, work proposals             | `docs/decisions/0065`                                               |
+| Agent-to-agent messaging authority                             | `docs/decisions/0063`                                               |
+| Remote clients and mobile                                      | `docs/decisions/0013`                                               |
+| Multi-host federation registry and pairing at scale            | `docs/decisions/0059`                                               |
+| Collaboration, shared host, git-mediated sharing               | `docs/decisions/0040`                                               |
+| Cross-platform desktop packaging and updates                   | `docs/decisions/0034`, `docs/decisions/0058`                        |
+| Apple build and validation                                     | `docs/decisions/0014`                                               |
+| Simulator frame input transport                                | `docs/decisions/0062`                                               |
+| Signed updates and in-app changelog                            | `docs/decisions/0034`, `docs/decisions/0061`                        |
+| Computer-use destinations                                      | `docs/decisions/0053`                                               |
+| Shell, navigation, workspace layout                            | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`  |
+| Components and theme                                           | `docs/decisions/0016`, `docs/decisions/0046`                        |
 
 A change that contradicts an `Accepted` record is not a code change. Supersede
 the record first, in the same pull request, per `docs/decisions/README.md`. A

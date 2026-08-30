@@ -15,9 +15,8 @@ compaction to `smol`. Chat still asks a maintenance model to "Summarize the
 conversation excerpts" for dropped material. 0039's "compaction" is SQLite
 cleanup of identical checkout observations, not LLM context work.
 
-A public tweet claimed Codex CLI would drop LLM compaction for hard cutovers
-with notes and transcript lookup. That is not an official OpenAI ship. OpenAI's
-documented Responses path still offers `/responses/compact` and
+Vendor-managed compaction is not an answer here. OpenAI's documented
+Responses path offers `/responses/compact` and
 `context_management.compact_threshold`, which emit opaque encrypted compaction
 items: vendor-bound, uninspectable, cache-hostile, and against 0007's
 provider-neutral harness. Octant already has a lossless journal (0002),
@@ -44,6 +43,12 @@ that always runs once mechanical prune is done. Every other 0008 rule stands.
   asks for a summary of a cut range. A `smol` summary is never the source of
   truth after a cut; the journal remains authoritative, and any summary is
   attributed continuation material the lead may distrust and re-fetch.
+- **Goal-less threads summarize by design.** Evidence-bound notes need a plan
+  step, Goal evidence, or artifacts; a Chat thread typically has none. For
+  threads without such anchors the last-resort summary is the expected path —
+  still on `smol`, still attributed and distrustable, cut still disclosed.
+  "Last resort" describes goal-driven Work and Code runs, not a promise that
+  Chat never summarizes.
 - **Notes that survive a cut are evidence-bound.** Claims carried forward must
   point at a plan step (0027), a test result or other `ThreadGoalEvidenceRef`
   (0025), an artifact id, or a file content hash. Prose like "we fixed auth"
@@ -56,12 +61,19 @@ that always runs once mechanical prune is done. Every other 0008 rule stands.
   entry count and byte size; truncation, complete, stale, and unavailable are
   explicit, in the same honesty spirit as 0050. Lookup never widens mode,
   Project, or parent authority.
-- **Prefix-cache stability.** Cutover preserves 0067's stable prefix by
-  appending new dynamic content and dropping from the tail of the mutable
-  history window, never by rewriting bytes already in the stable prefix.
+- **Cache cost is paid once per cut, honestly.** A cutover drops the oldest
+  turns of the mutable history, which invalidates the provider prefix cache
+  for everything after the cut point; only the system-prompt and tool prefix
+  (0067) survives a cut. Cuts are therefore chunky and infrequent — one cut
+  frees a meaningful fraction of the window rather than trickling — and the
+  one-time re-paid prefix write is part of the journaled cutover decision.
+  Between cuts, assembly stays append-only so the rebuilt cache holds.
   Journal lookup results append as ordinary tool results under the usual caps.
-- **Still not the failure chain.** Overflow remains 0066's path of reduction
-  then larger-context promotion. It never walks the slot failure list.
+- **Still not the failure chain.** This record defines the inside of 0066's
+  "context reduction" step: prune, then cutover, then last-resort summary all
+  run before 0066's promotion, and promotion to a larger-context model remains
+  the step after all of them still leave the request over budget. Overflow
+  never walks the slot failure list.
 - **Out of scope.** OpenAI `/responses/compact` and opaque compaction items are
   not Octant truth. There is no separate swarm or team memory surface; 0012's
   hierarchy is the product.
@@ -82,9 +94,10 @@ that always runs once mechanical prune is done. Every other 0008 rule stands.
   paying for opaque vendor compaction the host cannot inspect or replay.
 - Evidence-bound notes and journal lookup make "the model forgot" a recoverable
   read, not a silent rewrite of truth.
-- Chat's current maintenance summarize path becomes non-conforming for the
-  native harness once this record is Accepted; replacing it is implementation
-  work gated on acceptance, not part of this documentation change.
+- Chat's maintenance summarize path survives as the goal-less last resort but
+  must adopt this record's attribution and disclosure once Accepted; that is
+  implementation work gated on acceptance, not part of this documentation
+  change.
 - Promotion to a larger-context model (0066) remains available after cutover and
   last-resort summary still leave the request over budget.
 
