@@ -6,17 +6,17 @@ import type { ThreadSearchListingStatus } from "./ThreadSearchOverlay";
 /**
  * What a Code thread's status dot says.
  *
- * An open follow-up outranks everything: it is the one state a person has to
- * come back to. A waiting or interrupted thread is asking for something too.
- * `working` is deliberately absent — the host reports no per-thread run state
- * to the sidebar, and a dot that pulses on a thread nothing is running would
- * be a lie.
+ * A host-projected executing turn lights `working` first: that is the live
+ * claim the board reasons from. An open follow-up or waiting/interrupted
+ * lifecycle outranks unread when the turn has settled. Idle is the rest.
  */
 export function codeThreadActivity(thread: {
+  readonly executing?: boolean;
   readonly followUp?: boolean;
   readonly lifecycle: "active" | "waiting" | "interrupted" | "archived";
   readonly unread?: boolean;
 }): ThreadRowActivity {
+  if (thread.executing === true) return "working";
   if (thread.followUp === true) return "attention";
   if (thread.lifecycle === "waiting" || thread.lifecycle === "interrupted") return "attention";
   if (thread.unread === true) return "unread";

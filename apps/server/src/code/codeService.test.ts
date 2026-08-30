@@ -29,6 +29,7 @@ import {
   MAXIMUM_OPENED_CODE_FILE_ENTRIES,
   CodeService,
   CodeServiceError,
+  codeNavigationCheckoutChip,
   type CodeServiceOptions,
   type CodePersistencePort,
   type CodeWorktreeRefsPort,
@@ -64,6 +65,38 @@ const checkout = decodeCodeCheckoutIdentity({
   availability: "available",
   head: { kind: "branch", name: "feature/phase-7", oid: "c".repeat(40) },
   observedAt: now,
+});
+
+describe("codeNavigationCheckoutChip", () => {
+  it("names only a thread's own managed worktree, and stays quiet on the project default", () => {
+    expect(codeNavigationCheckoutChip(checkout)).toBeUndefined();
+    expect(
+      codeNavigationCheckoutChip(
+        decodeCodeCheckoutIdentity({
+          id: ids.checkout,
+          repositoryId,
+          kind: "managed-worktree",
+          availability: "available",
+          head: { kind: "branch", name: "feature/x", oid: "c".repeat(40) },
+          ownershipReceiptId: "00000000-0000-4000-8000-000000001012",
+          observedAt: now,
+        }),
+      ),
+    ).toEqual({ checkoutKind: "managed-worktree", label: "feature/x" });
+    expect(
+      codeNavigationCheckoutChip(
+        decodeCodeCheckoutIdentity({
+          id: ids.checkout,
+          repositoryId,
+          kind: "managed-worktree",
+          availability: "available",
+          head: { kind: "detached", oid: "c".repeat(40) },
+          ownershipReceiptId: "00000000-0000-4000-8000-000000001012",
+          observedAt: now,
+        }),
+      ),
+    ).toEqual({ checkoutKind: "managed-worktree", label: "Detached HEAD" });
+  });
 });
 
 function thread(
@@ -129,6 +162,7 @@ describe("CodeService reads", () => {
       threads: [allowed],
       checkouts: [checkout],
       activity: [],
+      runtime: [{ threadId: allowed.id, executing: false }],
     });
     expect(fixture.access.canAccessProject).toHaveBeenCalledWith(ids.window, ids.project);
     expect(fixture.access.canAccessProject).toHaveBeenCalledWith(
@@ -247,6 +281,7 @@ describe("CodeService reads", () => {
     await expect(fixture.service.navigation(ids.window)).resolves.toEqual({
       threads: [allowed],
       activity: [{ threadId: allowed.id, lastSequence: 11 }],
+      runtime: [{ threadId: allowed.id, executing: false }],
     });
     expect(fixture.checkouts.observe).not.toHaveBeenCalled();
     expect(fixture.roots.resolve).not.toHaveBeenCalled();
@@ -3276,6 +3311,9 @@ function serviceFixture(
     readCodeThreads: vi.fn(() => threads),
     readCodeThreadActivity: vi.fn(
       () => options.activity ?? ([] as ReturnType<CodePersistencePort["readCodeThreadActivity"]>),
+    ),
+    readCodeRuntimeWorks: vi.fn(
+      () => [] as ReturnType<CodePersistencePort["readCodeRuntimeWorks"]>,
     ),
     readCodeCheckout: vi.fn((checkoutId: string) =>
       checkoutList.find((candidate) => String(candidate.id) === checkoutId),

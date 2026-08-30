@@ -692,6 +692,11 @@ export type ChatBootstrap = typeof ChatBootstrap.Type;
  * The bounded read used to keep the Chat sidebar current. It deliberately
  * carries only row metadata and aggregate activity; transcript turns,
  * attachments, citations, and work items belong to the thread read.
+ *
+ * `executing` is the same run-state signal the thread board reasons from: a
+ * turn attempt is queued or streaming. Optional with a false default so a
+ * remote client that sees an older host still paints an idle row rather than
+ * refusing the whole navigation payload.
  */
 export const ChatNavigationThread = Schema.Struct({
   id: ChatThreadId,
@@ -701,6 +706,7 @@ export const ChatNavigationThread = Schema.Struct({
   updatedAt: UtcTimestamp,
   lastSequence: GlobalSequence,
   followUpOpen: Schema.Boolean,
+  executing: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations(strict);
 export type ChatNavigationThread = typeof ChatNavigationThread.Type;
 

@@ -494,6 +494,10 @@ export function readChatThreads(connection: SqliteConnection): ReadonlyArray<Cha
  * Read the complete sidebar projection in one bounded-metadata query. The
  * thread view intentionally remains the transcript read; using it here would
  * load every turn, attachment, citation, and work item once per row.
+ *
+ * `executing` mirrors the Chat service's in-flight check: a queued or streaming
+ * attempt means a turn is running. Waiting attempts are not executing — they
+ * are awaiting input, which the board treats separately.
  */
 export function readChatNavigation(
   connection: SqliteConnection,
@@ -514,14 +518,21 @@ export function readChatNavigation(
         SELECT thread_id, max(last_sequence) AS last_sequence
         FROM activity
         GROUP BY thread_id
+      ), executing_threads AS (
+        SELECT DISTINCT thread_id
+        FROM chat_attempt_projection
+        WHERE json_extract(attempt_json, '$.outcome') IN ('queued', 'streaming')
       )
       SELECT thread.schema_version, thread.thread_json,
              activity.last_sequence,
-             coalesce(follow_up.state = 'open', 0) AS follow_up_open
+             coalesce(follow_up.state = 'open', 0) AS follow_up_open,
+             CASE WHEN executing.thread_id IS NOT NULL THEN 1 ELSE 0 END AS executing
       FROM chat_thread_projection AS thread
       INNER JOIN activity_by_thread AS activity ON activity.thread_id = thread.thread_id
       LEFT JOIN thread_follow_up_projection AS follow_up
         ON follow_up.thread_id = thread.thread_id
+      LEFT JOIN executing_threads AS executing
+        ON executing.thread_id = thread.thread_id
       WHERE thread.lifecycle = 'active'
       ORDER BY thread.updated_at DESC, thread.thread_id ASC
     `)
@@ -530,6 +541,7 @@ export function readChatNavigation(
     readonly thread_json: string;
     readonly last_sequence: number;
     readonly follow_up_open: number;
+    readonly executing: number;
   }>;
   return rows.map((row) => {
     assertChatProjectionSchema(row.schema_version);
@@ -542,6 +554,7 @@ export function readChatNavigation(
       updatedAt: thread.updatedAt,
       lastSequence: row.last_sequence,
       followUpOpen: row.follow_up_open === 1,
+      executing: row.executing === 1,
     });
   });
 }

@@ -74,6 +74,13 @@ describe("work thread contracts", () => {
 
     const bootstrap = decodeWorkThreadBootstrap({ threads: [threadFixture] });
     expect(bootstrap.threads).toHaveLength(1);
+    expect(bootstrap.runtime).toEqual([]);
+    expect(
+      decodeWorkThreadBootstrap({
+        threads: [threadFixture],
+        runtime: [{ threadId: ids.thread, executing: true }],
+      }).runtime,
+    ).toEqual([{ threadId: ids.thread, executing: true }]);
 
     expect(() =>
       decodeWorkThreadCommand({

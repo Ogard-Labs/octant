@@ -20,7 +20,7 @@ function createThreads(
   const executeCalls: Array<unknown> = [];
   return {
     executeCalls,
-    bootstrap: async () => ({ threads: [] }) as WorkThreadBootstrap,
+    bootstrap: async () => ({ threads: [], runtime: [] }) as WorkThreadBootstrap,
     execute: async (_windowId, input) => {
       executeCalls.push(input);
       return result;
@@ -101,7 +101,7 @@ describe("withWorkflowLifecycle", () => {
   it("propagates the underlying execute rejection without recording a lifecycle fact", async () => {
     const recordThreadLifecycle = vi.fn();
     const threads: WorkThreadRouteService = {
-      bootstrap: async () => ({ threads: [] }) as WorkThreadBootstrap,
+      bootstrap: async () => ({ threads: [], runtime: [] }) as WorkThreadBootstrap,
       execute: async () => {
         throw new Error("thread service unavailable");
       },
@@ -141,6 +141,6 @@ describe("withWorkflowLifecycle", () => {
       threads,
       workflows: { recordThreadLifecycle: vi.fn() },
     });
-    await expect(wrapped.bootstrap(windowId)).resolves.toEqual({ threads: [] });
+    await expect(wrapped.bootstrap(windowId)).resolves.toEqual({ threads: [], runtime: [] });
   });
 });

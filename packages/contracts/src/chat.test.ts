@@ -329,10 +329,28 @@ describe("chat contracts", () => {
             updatedAt: now,
             lastSequence: 7,
             followUpOpen: true,
+            executing: true,
           },
         ],
       }),
-    ).toMatchObject({ threads: [{ id: ids.thread, lastSequence: 7, followUpOpen: true }] });
+    ).toMatchObject({
+      threads: [{ id: ids.thread, lastSequence: 7, followUpOpen: true, executing: true }],
+    });
+    // An older host that omits executing still decodes; the row is not working.
+    expect(
+      decodeChatNavigation({
+        threads: [
+          {
+            id: ids.thread,
+            title: "Planning",
+            providerInstanceId: ids.provider,
+            updatedAt: now,
+            lastSequence: 7,
+            followUpOpen: false,
+          },
+        ],
+      }).threads[0]?.executing,
+    ).toBe(false);
     expect(() =>
       decodeChatNavigation({
         threads: [

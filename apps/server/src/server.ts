@@ -99,6 +99,7 @@ import {
   boardRuntimeActivityFromTurnsAndSignals,
   composeWorkBoardEvidence,
   WorkThreadBoardService,
+  type WorkBoardRuntimeActivity,
   type WorkBoardThread,
 } from "./work/workThreadBoardService";
 import {
@@ -4086,18 +4087,6 @@ export function startOctantServer(
       }),
       "Work artifact",
     );
-    const workThreadService = new WorkThreadService({
-      persistence,
-      projects: projectService,
-      projection: workThreadProjection,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-      workingDirectories: { resolve: resolveThreadWorkingDirectory },
-      onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
-      probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
-      issueContext: githubIssueContextService,
-      linearIssueContext: linearIssueContextService,
-    });
     const workTurnProjection = new WorkTurnProjection();
     requireJournalHydration(
       hydrateWorkTurnProjectionFromJournal({
@@ -4114,6 +4103,24 @@ export function startOctantServer(
       "Work turn",
     );
     workTurnProjection.markInterruptedOnRestart(new Date().toISOString());
+    // Bound after Work request and agent-run ports exist; until then bootstrap
+    // reports no executing threads rather than inventing a second run source.
+    let observeWorkThreadRuntime:
+      | ((threadId: WorkThreadId) => WorkBoardRuntimeActivity)
+      | undefined;
+    const workThreadService = new WorkThreadService({
+      persistence,
+      projects: projectService,
+      projection: workThreadProjection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      workingDirectories: { resolve: resolveThreadWorkingDirectory },
+      onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
+      probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
+      observeRuntime: (threadId) => observeWorkThreadRuntime?.(threadId) ?? { executing: false },
+      issueContext: githubIssueContextService,
+      linearIssueContext: linearIssueContextService,
+    });
     const workTurnService = new WorkTurnService({
       persistence,
       threads: workThreadService,
@@ -5884,6 +5891,25 @@ export function startOctantServer(
     });
     workRequestService.hydrate();
     workRequestService.reconcileUnavailableRequests();
+    observeWorkThreadRuntime = (threadId) => {
+      const thread = workThreadProjection.read(threadId);
+      const pending = thread
+        ? workRequestService
+            .listForThread(thread.projectId, threadId)
+            .some((request) => request.status === "pending")
+        : false;
+      const childRuns = persistence.agentRunProjection.parentSummary(
+        decodeAgentRunParentThreadId(String(threadId)),
+      );
+      return boardRuntimeActivityFromTurnsAndSignals({
+        turns: workTurnProjection.listForThread(threadId),
+        pendingRequest: pending,
+        childActive: childRuns.filter(
+          (run) => isAgentRunActiveStatus(run.lifecycleStatus) && run.lifecycleStatus !== "waiting",
+        ).length,
+        childWaiting: childRuns.filter((run) => run.lifecycleStatus === "waiting").length,
+      });
+    };
     projectService.onWorkProjectArchived((project) => {
       workRequestService.interruptProject(project.id);
     });
@@ -5953,27 +5979,12 @@ export function startOctantServer(
                 }),
             },
             runtime: {
-              observe: (threadId) => {
-                const thread = workThreadProjection.read(threadId);
-                const pending = thread
-                  ? workRequestService
-                      .listForThread(thread.projectId, threadId)
-                      .some((request) => request.status === "pending")
-                  : false;
-                const childRuns = persistence.agentRunProjection.parentSummary(
-                  decodeAgentRunParentThreadId(String(threadId)),
-                );
-                return boardRuntimeActivityFromTurnsAndSignals({
-                  turns: workTurnProjection.listForThread(threadId),
-                  pendingRequest: pending,
-                  childActive: childRuns.filter(
-                    (run) =>
-                      isAgentRunActiveStatus(run.lifecycleStatus) &&
-                      run.lifecycleStatus !== "waiting",
-                  ).length,
-                  childWaiting: childRuns.filter((run) => run.lifecycleStatus === "waiting").length,
-                });
-              },
+              observe: (threadId) =>
+                observeWorkThreadRuntime?.(threadId) ?? {
+                  executing: false,
+                  awaitingInput: false,
+                  interrupted: false,
+                },
             },
             clock: () => new Date().toISOString(),
           });

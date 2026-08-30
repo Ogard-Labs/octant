@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { codeThreadActivity } from "./shellModeRouting";
 
 describe("codeThreadActivity", () => {
-  it("gives follow-up and waiting threads attention, and unread threads an unread mark", () => {
+  it("lights working while a turn executes, then returns to attention and unread when settled", () => {
+    expect(codeThreadActivity({ lifecycle: "active", executing: true, followUp: true })).toBe(
+      "working",
+    );
     expect(codeThreadActivity({ lifecycle: "active", followUp: true })).toBe("attention");
     expect(codeThreadActivity({ lifecycle: "waiting" })).toBe("attention");
     expect(codeThreadActivity({ lifecycle: "interrupted" })).toBe("attention");
