@@ -4,6 +4,7 @@ import {
   decodeWorkMutationRequestId,
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
+  type MentionableThreadId,
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
@@ -11,10 +12,12 @@ import {
 } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { PickerGroup } from "@octant/domain";
+import type { ChatComposerThreadMentionChip } from "../chat/ChatComposer";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
+import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
 import { Check, Globe2, Paperclip } from "lucide-react";
 import {
   useCallback,
@@ -65,13 +68,18 @@ import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentV
 /**
  * A message the user sent while a turn was still running.
  *
- * Only the words travel with it: the images and chips stay in the composer
- * until the host accepts the message, so a refusal leaves the whole message
- * retryable rather than half-gone.
+ * The prompt and every context selection travel with it. Context is detached
+ * from the composer before a second draft can start, then restored if this
+ * message is refused so the sent message never borrows a later draft.
  */
 interface WorkSteeredMessage {
   readonly id: string;
   readonly prompt: string;
+  readonly images: ReadonlyArray<File>;
+  readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+  readonly threadMentionChips: ReadonlyArray<ChatComposerThreadMentionChip>;
+  readonly fileMentionPaths: ReadonlyArray<string>;
+  readonly draftRevision: number;
 }
 
 export interface WorkThreadWorkspaceProps {
@@ -83,6 +91,8 @@ export interface WorkThreadWorkspaceProps {
   readonly mutationClient?: WorkMutationClient;
   readonly onOpenBrowser?: () => void;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
+  readonly threadMentionClient?: ThreadMentionClient;
+  readonly fileMentionClient?: FileMentionClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
@@ -153,6 +163,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(thread === undefined ? {} : { modelId: thread.modelId }),
   });
   const threadMentions = useThreadMentions({
+    ...(props.threadMentionClient === undefined ? {} : { client: props.threadMentionClient }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
@@ -165,6 +176,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     disabled: creating || completionLocked,
   });
   const fileMentions = useWorkFileMentions({
+    ...(props.fileMentionClient === undefined ? {} : { client: props.fileMentionClient }),
     threadId: props.threadId,
     draft: prompt,
     onDraftChange: composerDraft.setDraft,
@@ -177,6 +189,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     trimmed.length > 0 &&
     !creating &&
     !completionLocked &&
+    steered.pending === undefined &&
     projectId !== undefined &&
     (props.turnClient !== undefined || props.mutationClient !== undefined);
 
@@ -321,7 +334,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   );
 
   const sendWorkTurn = useCallback(
-    async (promptOverride?: string): Promise<boolean> => {
+    async (message?: WorkSteeredMessage): Promise<boolean> => {
       if (
         thread !== undefined &&
         thread.bindingRevisionId === undefined &&
@@ -342,16 +355,19 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       ) {
         return false;
       }
-      const promptText = (promptOverride ?? composerDraft.text).trim();
+      const promptText = (message?.prompt ?? composerDraft.text).trim();
       if (promptText.length === 0) return false;
       const sendingThreadId = String(thread.id);
+      const draftRevision = composerDraft.revisionFor(String(props.threadId));
       setCreating(true);
       setErrorMessage(undefined);
       setStatus(undefined);
       try {
         if (String(props.threadId) !== sendingThreadId) return false;
-        const threadMentionIds = await threadMentions.resolveForSend();
-        const staged = images.filesForSend();
+        const staged = message?.images ?? images.filesForSend();
+        const fileMentionPaths = message?.fileMentionPaths ?? [...fileMentions.selectedPaths];
+        const threadMentionIds =
+          message?.threadMentionIds ?? (await threadMentions.resolveForSend());
         const attachmentIds = [];
         for (const file of staged) {
           const attachmentId = decodeWorkAttachmentId(globalThis.crypto.randomUUID());
@@ -381,20 +397,22 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           },
           ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
           ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
-          ...(fileMentions.selectedPaths.length === 0
-            ? {}
-            : { fileMentionPaths: [...fileMentions.selectedPaths] }),
+          ...(fileMentionPaths.length === 0 ? {} : { fileMentionPaths: [...fileMentionPaths] }),
         });
         if (started.kind !== "accepted") {
           setErrorMessage("The Work turn could not be started.");
           return false;
         }
-        images.clearAfterAccepted();
-        // A message sent while a turn was running already emptied the composer.
-        // Clearing again would wipe whatever the user has typed since.
-        if (composerDraft.text.trim() === promptText) composerDraft.clear();
-        threadMentions.clear();
-        fileMentions.clear();
+        if (message === undefined) {
+          images.clearAfterAccepted();
+          threadMentions.clear();
+          fileMentions.clear();
+          // Do not clear text typed while this send was resolving, even when it
+          // happens to be identical to the text this send carried.
+          if (composerDraft.revisionFor(String(props.threadId)) === draftRevision) {
+            composerDraft.clear();
+          }
+        }
         setTurns((current) => [...current, started.turn]);
         textareaRef.current?.focus();
         return true;
@@ -418,26 +436,43 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       threadMentions,
     ],
   );
-  sendSteeredRef.current = (message) => sendWorkTurn(message.prompt);
+  sendSteeredRef.current = (message) => sendWorkTurn(message);
   restoreSteeredRef.current = (message) => {
-    // The images and chips were never taken, so putting the words back leaves
-    // the whole message retryable. A newer draft the user typed while this one
-    // waited is the one worth keeping.
-    if (composerDraft.text.length > 0) return;
+    // A newer draft the user typed while this one waited is the one worth
+    // keeping. The revision check also catches a user who typed the same words
+    // again, rather than mistaking identical text for an unchanged draft.
+    if (composerDraft.revisionFor(String(props.threadId)) !== message.draftRevision + 1) {
+      return;
+    }
     composerDraft.setDraft(message.prompt);
+    images.restore(message.images);
+    threadMentions.restore(message.threadMentionChips);
+    fileMentions.restore(message.fileMentionPaths);
   };
 
   const submit = useCallback(async () => {
+    if (steered.pending !== undefined) return;
     if (turnRunning) {
       // Sending during a running turn is still sending: the message leaves the
       // composer now and joins the transcript, and the host runs it as soon as
       // this thread stops running one.
       if (!canSubmit) return;
+      const threadMentionChips = [...threadMentions.chips];
       const steeredMessage: WorkSteeredMessage = {
         id: globalThis.crypto.randomUUID(),
         prompt: trimmed,
+        images: images.filesForSend(),
+        threadMentionIds: threadMentionChips.map((chip) => chip.threadId),
+        threadMentionChips,
+        fileMentionPaths: [...fileMentions.selectedPaths],
+        draftRevision: composerDraft.revisionFor(String(props.threadId)),
       };
       if (!steered.steer(steeredMessage)) return;
+      // Detach this message's context before the user can start a second draft;
+      // a refused send restores it through the same public hook APIs.
+      images.takeForSend();
+      threadMentions.clear();
+      fileMentions.clear();
       composerDraft.clear();
       return;
     }
