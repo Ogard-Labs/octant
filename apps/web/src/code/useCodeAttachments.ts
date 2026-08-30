@@ -27,6 +27,14 @@ export interface CodeAttachments {
   /** Refuse an attachment the composer itself knows this turn cannot carry. */
   readonly refuse: (message: string) => void;
   readonly remove: (attachmentId: CodeAttachmentId) => void;
+  /** Detach the current images for a message that is waiting to start. */
+  readonly detachForSend: () => ReadonlyArray<StagedCodeAttachment>;
+  /** Put detached images back after the host refuses their message. */
+  readonly restoreDetached: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
+  /** Keep detached images out of the composer after the host accepts them. */
+  readonly commitDetached: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
+  /** Discard detached host attachments when a refused message is superseded. */
+  readonly discardDetached: (attachments: ReadonlyArray<StagedCodeAttachment>) => void;
   /** The references a send would carry right now, without clearing the chips. */
   readonly peekForSend: () => ReadonlyArray<CodeAttachmentReference>;
   /**
@@ -162,6 +170,49 @@ export function useCodeAttachments(input: {
     [apply, client, forget, threadId],
   );
 
+  const detachForSend = useCallback((): ReadonlyArray<StagedCodeAttachment> => {
+    const detached = current.current;
+    current.current = [];
+    setStaged([]);
+    setMessage(undefined);
+    return detached;
+  }, []);
+
+  const restoreDetached = useCallback(
+    (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
+      if (attachments.length === 0) return;
+      apply((list) => {
+        const existing = new Set(list.map((entry) => String(entry.reference.attachmentId)));
+        return [
+          ...attachments.filter((entry) => !existing.has(String(entry.reference.attachmentId))),
+          ...list,
+        ];
+      });
+    },
+    [apply],
+  );
+
+  const commitDetached = useCallback(
+    (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
+      for (const attachment of attachments) forget(attachment.previewUrl);
+    },
+    [forget],
+  );
+
+  const discardDetached = useCallback(
+    (attachments: ReadonlyArray<StagedCodeAttachment>): void => {
+      for (const attachment of attachments) {
+        forget(attachment.previewUrl);
+        if (threadId === undefined) continue;
+        void client.discardAttachment(threadId, attachment.reference.attachmentId).catch(() => {
+          // A refused message that was superseded must not keep its bytes in the
+          // composer; a later host recovery can clean up a failed discard.
+        });
+      }
+    },
+    [client, forget, threadId],
+  );
+
   const peekForSend = useCallback(
     (): ReadonlyArray<CodeAttachmentReference> => current.current.map((entry) => entry.reference),
     [],
@@ -189,6 +240,10 @@ export function useCodeAttachments(input: {
     attach,
     refuse: setMessage,
     remove,
+    detachForSend,
+    restoreDetached,
+    commitDetached,
+    discardDetached,
     peekForSend,
     peekAbandoned,
     takeForSend,

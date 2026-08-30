@@ -1363,9 +1363,10 @@ describe("CodeThreadWorkspace", () => {
 
   it("keeps a second draft visible but disables sending while one message waits", async () => {
     const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
     render(
       <CodeThreadWorkspace
-        controller={controller({ sendFollowUp: vi.fn(async () => true), turnStatus: "running" })}
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
         threadId={threadId}
       />,
     );
@@ -1377,6 +1378,326 @@ describe("CodeThreadWorkspace", () => {
 
     expect(composer).toHaveValue("write the release note");
     expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+    await user.keyboard("{Enter}");
+    expect(sendFollowUp).not.toHaveBeenCalled();
+  });
+
+  it("sends only the first context and preserves a newer draft and image", async () => {
+    const user = userEvent.setup();
+    let resolveFirst!: (sent: boolean) => void;
+    const sendFollowUp = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const references = [
+      {
+        attachmentId: "40000000-0000-4000-8000-000000000021" as CodeAttachmentId,
+        displayName: "first.png",
+        mediaType: "image/png" as const,
+        byteLength: 3,
+        digest: "a".repeat(64),
+      },
+      {
+        attachmentId: "40000000-0000-4000-8000-000000000022" as CodeAttachmentId,
+        displayName: "second.png",
+        mediaType: "image/png" as const,
+        byteLength: 3,
+        digest: "b".repeat(64),
+      },
+    ];
+    let uploaded = 0;
+    const attachmentClient: CodeAttachmentClient = {
+      putAttachment: vi.fn(async () => references[uploaded++]!),
+      discardAttachment: vi.fn(async () => undefined),
+      attachment: vi.fn(),
+    };
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "and then push");
+    pasteImage(composer, "first.png");
+    await screen.findByAltText("first.png");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(screen.queryByAltText("first.png")).not.toBeInTheDocument();
+
+    rerender(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() =>
+      expect(sendFollowUp).toHaveBeenCalledWith(
+        "and then push",
+        [],
+        [references[0]],
+        [],
+        "approval-gated",
+      ),
+    );
+
+    await user.type(composer, "write the release note");
+    pasteImage(composer, "second.png");
+    await screen.findByAltText("second.png");
+    resolveFirst(true);
+
+    await waitFor(() => expect(screen.queryByAltText("first.png")).not.toBeInTheDocument());
+    expect(screen.getByAltText("second.png")).toBeInTheDocument();
+    expect(composer).toHaveValue("write the release note");
+
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledTimes(2));
+    expect(sendFollowUp).toHaveBeenLastCalledWith(
+      "write the release note",
+      [],
+      [references[1]],
+      [],
+      "approval-gated",
+    );
+  });
+
+  it("discards detached host images when a refusal loses to a newer draft", async () => {
+    const user = userEvent.setup();
+    let resolveFirst!: (sent: boolean) => void;
+    const sendFollowUp = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000024" as CodeAttachmentId,
+      displayName: "superseded.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "d".repeat(64),
+    };
+    const discardAttachment = vi.fn(async () => undefined);
+    const attachmentClient: CodeAttachmentClient = {
+      putAttachment: vi.fn(async () => reference),
+      discardAttachment,
+      attachment: vi.fn(),
+    };
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "and then push");
+    pasteImage(composer, "superseded.png");
+    await screen.findByAltText("superseded.png");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    rerender(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
+    await user.type(composer, "newer draft");
+    resolveFirst(false);
+
+    await waitFor(() =>
+      expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId),
+    );
+    expect(screen.queryByAltText("superseded.png")).not.toBeInTheDocument();
+    expect(composer).toHaveValue("newer draft");
+  });
+
+  it("restores the refused prompt, image, thread chip, and path for retry", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000023" as CodeAttachmentId,
+      displayName: "retry.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "c".repeat(64),
+    };
+    const search = vi.fn(async () => [
+      {
+        threadId: mentionedThreadId,
+        mode: "chat" as const,
+        title: "Release notes",
+        placement: { kind: "unfiled" as const },
+        updatedAt: "2026-08-15T09:00:00.000Z" as never,
+      },
+    ]);
+    const resolveMention = vi.fn(async () => ({
+      mentions: [],
+      unavailable: [],
+    }));
+    const list = vi.fn(async () => ({
+      status: "listed" as const,
+      listing: {
+        kind: "code-file-listing" as const,
+        threadId,
+        checkoutId: "20000000-0000-4000-8000-000000000002" as never,
+        entries: [
+          {
+            kind: "file" as const,
+            fileId: "file_" + "a".repeat(59),
+            path: "src/index.ts" as never,
+            byteLength: 12,
+            availability: { status: "available" as const },
+          },
+        ],
+        truncated: false,
+        observedAt: "2026-08-16T09:00:00.000Z" as never,
+      },
+    }));
+    const attachmentClient: CodeAttachmentClient = {
+      putAttachment: vi.fn(async () => reference),
+      discardAttachment: vi.fn(async () => undefined),
+      attachment: vi.fn(),
+    };
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        fileListingClient={{ list } as never}
+        threadId={threadId}
+        threadMentionClient={
+          {
+            search,
+            resolve: resolveMention,
+            openSideChat: vi.fn(),
+            execute: vi.fn(),
+          } as never
+        }
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "#Rel");
+    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
+    await user.type(composer, "explain @ind");
+    await user.click(await screen.findByRole("option", { name: /src\/index\.ts/ }));
+    await user.type(composer, " now");
+    pasteImage(composer, "retry.png");
+    await screen.findByAltText("retry.png");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    rerender(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
+        fileListingClient={{ list } as never}
+        threadId={threadId}
+        threadMentionClient={
+          {
+            search,
+            resolve: resolveMention,
+            openSideChat: vi.fn(),
+            execute: vi.fn(),
+          } as never
+        }
+      />,
+    );
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(composer).toHaveValue("#[Release notes] explain @src/index.ts  now"),
+    );
+    expect(screen.getByAltText("retry.png")).toBeInTheDocument();
+    expect(attachmentClient.discardAttachment).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Release notes");
+
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledTimes(2));
+    expect(sendFollowUp).toHaveBeenLastCalledWith(
+      "#[Release notes] explain @src/index.ts  now",
+      [mentionedThreadId],
+      [reference],
+      ["src/index.ts"],
+      "approval-gated",
+    );
+  });
+
+  it("keeps a newer draft when mention resolution is slow before steering", async () => {
+    const user = userEvent.setup();
+    let resolveMention!: (value: { mentions: never[]; unavailable: never[] }) => void;
+    const mentionResolution = new Promise<{ mentions: never[]; unavailable: never[] }>(
+      (resolve) => {
+        resolveMention = resolve;
+      },
+    );
+    const sendFollowUp = vi.fn(async () => true);
+    const search = vi.fn(async () => [
+      {
+        threadId: mentionedThreadId,
+        mode: "chat" as const,
+        title: "Release notes",
+        placement: { kind: "unfiled" as const },
+        updatedAt: "2026-08-15T09:00:00.000Z" as never,
+      },
+    ]);
+    const resolveClient = vi.fn(() => mentionResolution);
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+        threadMentionClient={
+          {
+            search,
+            resolve: resolveClient,
+            openSideChat: vi.fn(),
+            execute: vi.fn(),
+          } as never
+        }
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "#Rel");
+    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
+    await user.type(composer, "first");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.clear(composer);
+    await user.type(composer, "newer draft");
+    resolveMention({ mentions: [], unavailable: [] });
+
+    await waitFor(() => expect(composer).toHaveValue("newer draft"));
+    expect(screen.getByText("#[Release notes] first")).toBeInTheDocument();
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
+        threadId={threadId}
+        threadMentionClient={
+          {
+            search,
+            resolve: resolveClient,
+            openSideChat: vi.fn(),
+            execute: vi.fn(),
+          } as never
+        }
+      />,
+    );
+    await waitFor(() =>
+      expect(sendFollowUp).toHaveBeenCalledWith(
+        "#[Release notes] first",
+        [mentionedThreadId],
+        [],
+        [],
+        "approval-gated",
+      ),
+    );
+    expect(composer).toHaveValue("newer draft");
   });
 
   it("removes a sent image when clearing the draft also cleared its thread mention", async () => {
@@ -2036,8 +2357,8 @@ function boardCard(overrides: Partial<CodeBoardCard> = {}): CodeBoardCard {
  * Paste one PNG into the composer. jsdom has no real clipboard files, so the
  * event carries the same shape a browser hands React.
  */
-function pasteImage(composer: HTMLElement): void {
-  const file = new File([new Uint8Array([137, 80, 78])], "pasted.png", { type: "image/png" });
+function pasteImage(composer: HTMLElement, name = "pasted.png"): void {
+  const file = new File([new Uint8Array([137, 80, 78])], name, { type: "image/png" });
   fireEvent.paste(composer, { clipboardData: { files: [file], items: [] } });
 }
 
