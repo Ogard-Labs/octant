@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { decodeProjectId } from "@octant/contracts/projects";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
-import { assignedWorkSeenKey, buildInboxAttentionItems } from "./inboxModel";
+import { assignedWorkSeenKey, buildInboxAttentionItems, inboxThreadProjectId } from "./inboxModel";
 
 const signal = (overrides: Partial<ThreadAttentionSignal>): ThreadAttentionSignal => ({
   threadId: "thread-a",
@@ -38,6 +39,21 @@ describe("buildInboxAttentionItems", () => {
       new Map(),
     );
     expect(items).toHaveLength(1);
+  });
+});
+
+describe("inboxThreadProjectId", () => {
+  it("decodes the signal Project for cross-Project thread opens", () => {
+    const otherProjectId = decodeProjectId("00000000-0000-4000-8000-000000000802");
+    const waitingThread: ThreadAttentionSignal = {
+      threadId: "00000000-0000-4000-8000-000000000803",
+      reason: "turn-finished",
+      title: "Cross-project chat",
+      source: "chat",
+      projectId: String(otherProjectId),
+    };
+    expect(inboxThreadProjectId(waitingThread)).toBe(otherProjectId);
+    expect(inboxThreadProjectId({ ...waitingThread, projectId: undefined })).toBeUndefined();
   });
 });
 

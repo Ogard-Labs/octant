@@ -1,5 +1,6 @@
 import type { GithubAssignedWorkItem } from "@octant/contracts";
 import type { LinearIssueRow } from "@octant/contracts/linear-issues";
+import { decodeProjectId, type ProjectId } from "@octant/contracts/projects";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 
 /**
@@ -67,4 +68,9 @@ export function assignedWorkSeenKey(item: GithubAssignedWorkItem): string {
 
 export function linearIssueSeenKey(row: LinearIssueRow): string {
   return `linear:${row.id}`;
+}
+
+/** Decode the signal's Project so cross-Project opens can switch Project. */
+export function inboxThreadProjectId(signal: ThreadAttentionSignal): ProjectId | undefined {
+  return signal.projectId === undefined ? undefined : decodeProjectId(signal.projectId);
 }

@@ -197,6 +197,7 @@ export function InboxView(props: InboxViewProps) {
                           rel="noreferrer"
                           target="_blank"
                         >
+                          {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
                           <span className="inbox-view__row-title">
                             <Icon aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
                             {item.title}
@@ -243,6 +244,7 @@ export function InboxView(props: InboxViewProps) {
                         rel="noreferrer"
                         target="_blank"
                       >
+                        {seenKeys.has(key) ? null : <span className="sr-only">Unseen</span>}
                         <span className="inbox-view__row-title">
                           <ListTodo
                             aria-hidden="true"

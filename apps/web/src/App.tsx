@@ -123,7 +123,7 @@ import { loadPluginSidebarDestinationAction } from "./shell/pluginSidebarDestina
 import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDestinationRegistry";
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
-import { buildInboxAttentionItems } from "./inbox/inboxModel";
+import { buildInboxAttentionItems, inboxThreadProjectId } from "./inbox/inboxModel";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
 import { evaluateThreadAttention } from "./notifications/threadAttention";
 import { useThreadAttentionNotifications } from "./notifications/useThreadAttentionNotifications";
@@ -1001,6 +1001,14 @@ function LaunchedShell(
         if (!available) setLinearIssuesOpen(false);
       }),
     [linearTransport],
+  );
+  const loadAssignedGithubWork = useCallback(
+    () => githubClient.readCatalogue({ kind: "assigned-work" }),
+    [githubClient],
+  );
+  const loadAssignedLinearIssues = useCallback(
+    () => linearClient.listIssues({ filter: { assigneeId: "me" }, pageSize: 50 }),
+    [linearClient],
   );
   useEffect(() => {
     let cancelled = false;
@@ -4206,27 +4214,24 @@ function LaunchedShell(
                 inboxAttentionItems={inboxAttentionItems}
                 onOpenInboxThread={(signal) => {
                   setInboxOpen(false);
+                  const signalProjectId = inboxThreadProjectId(signal);
                   if (signal.source === "chat") {
                     void controller.openChatThread(
                       decodeChatThreadId(signal.threadId),
                       signal.title,
+                      signalProjectId,
                     );
                     return;
                   }
-                  void controller.openCodeThread(decodeCodeThreadId(signal.threadId), signal.title);
+                  void controller.openCodeThread(
+                    decodeCodeThreadId(signal.threadId),
+                    signal.title,
+                    undefined,
+                    signalProjectId,
+                  );
                 }}
-                {...(githubIssuesReadAvailable
-                  ? {
-                      loadAssignedGithubWork: () =>
-                        githubClient.readCatalogue({ kind: "assigned-work" }),
-                    }
-                  : {})}
-                {...(linearIssuesRead
-                  ? {
-                      loadAssignedLinearIssues: () =>
-                        linearClient.listIssues({ filter: { assigneeId: "me" }, pageSize: 50 }),
-                    }
-                  : {})}
+                {...(githubIssuesReadAvailable ? { loadAssignedGithubWork } : {})}
+                {...(linearIssuesRead ? { loadAssignedLinearIssues } : {})}
                 codeBoardOpen={codeBoardOpen}
                 codePullRequestsOpen={codePullRequestsOpen}
                 githubIssuesOpen={githubIssuesOpen}
