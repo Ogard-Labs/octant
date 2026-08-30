@@ -2542,9 +2542,7 @@ export function startOctantServer(
         // thread-fact read entirely rather than replaying journals for a
         // feature that is off.
         pullRequestCadenceProjectsWithIdentities = projects.some((project) => project.enabled)
-          ? new Set(
-              (await listProjectPullRequestThreadFacts()).map((fact) => fact.projectId),
-            )
+          ? new Set((await listProjectPullRequestThreadFacts()).map((fact) => fact.projectId))
           : new Set();
         return projects;
       },
