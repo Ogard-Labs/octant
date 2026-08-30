@@ -109,6 +109,29 @@ describe("UI component boundary check", () => {
     ]);
   });
 
+  it("accepts a raw control documented as a specialized editor surface", () => {
+    const source =
+      "{/* ui-boundary-exception: specialized-editor-surface */}\n" +
+      '<button type="button" onPointerDown={handlePointerDown} />';
+    expect(
+      findRawControlInventory({
+        "apps/web/src/apple/AppleSimulatorLiveFrame.tsx": source,
+      }),
+    ).toEqual([
+      {
+        category: "specialized-editor-surface",
+        file: "apps/web/src/apple/AppleSimulatorLiveFrame.tsx",
+        line: 2,
+        tag: "button",
+      },
+    ]);
+    expect(
+      findRawControlBoundaryViolations({
+        "apps/web/src/apple/AppleSimulatorLiveFrame.tsx": source,
+      }),
+    ).toEqual([]);
+  });
+
   it("treats a native dialog as an ordinary control", () => {
     expect(
       findRawControlBoundaryViolations({
