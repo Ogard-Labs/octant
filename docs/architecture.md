@@ -566,6 +566,9 @@ mechanisms are:
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
+  Plan and Chat also load a seccomp filter that denies fork/clone and `execveat`
+  after start, because Bubblewrap cannot block the first `execve`
+  ([decisions/0068-linux-plan-process-deny.md](decisions/0068-linux-plan-process-deny.md)).
   Sensitive system roots remain denied even where runtime compatibility
   requires a broad file-read rule; each launch's exact roots are re-allowed
   after those denials. Path checks alone are never the boundary. Confined
