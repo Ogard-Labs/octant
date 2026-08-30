@@ -95,12 +95,19 @@ describe("useWorkThreadNavigation", () => {
     expect(result.current.navigation[0]?.activity).toBe("working");
 
     act(() =>
-      result.current.applyThread({
-        ...workThread(),
-        title: "Renamed brief",
-        version: 3,
-        updatedAt: "2026-08-02T20:00:00.000Z",
-      }),
+      result.current.applyThread(
+        decodeWorkThread({
+          id: threadId,
+          projectId: "20000000-0000-4000-8000-000000000101",
+          title: "Renamed brief",
+          lifecycle: "active",
+          providerInstanceId: "80000000-0000-4000-8000-0000000000b1",
+          modelId: "model-one",
+          version: 3,
+          createdAt: "2026-08-01T20:00:00.000Z",
+          updatedAt: "2026-08-02T20:00:00.000Z",
+        }),
+      ),
     );
 
     expect(result.current.navigation[0]).toMatchObject({
