@@ -1535,6 +1535,11 @@ describe("CodeThreadWorkspace", () => {
       discardAttachment,
       attachment: vi.fn(),
     };
+    const attachmentClientB: CodeAttachmentClient = {
+      putAttachment: vi.fn(async () => reference),
+      discardAttachment: vi.fn(async () => undefined),
+      attachment: vi.fn(),
+    };
     const search = vi.fn(async () => [
       {
         threadId: mentionedThreadId,
@@ -1594,7 +1599,7 @@ describe("CodeThreadWorkspace", () => {
 
     rerender(
       <CodeThreadWorkspace
-        attachmentClient={attachmentClient}
+        attachmentClient={attachmentClientB}
         controller={controllerB}
         fileListingClient={{ list } as never}
         threadId={anotherThreadId}
@@ -1612,6 +1617,7 @@ describe("CodeThreadWorkspace", () => {
     unmount();
     expect(discardAttachment).toHaveBeenCalledOnce();
     expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId);
+    expect(attachmentClientB.discardAttachment).not.toHaveBeenCalled();
   });
 
   it("restores the refused prompt, image, thread chip, and path for retry", async () => {
