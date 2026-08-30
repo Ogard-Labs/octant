@@ -206,6 +206,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       const laterDraft = pendingDraftRef.current;
       const draftEditRevision = draftEditRevisionRef.current;
       const sent = await submitTurnRef.current(message);
+      restoreContextAllowedRef.current =
+        laterDraft.length === 0 && draftEditRevisionRef.current === draftEditRevision;
       // The send path owns the composer for the message it is sending: it
       // clears the draft, and puts the message back if the host refused it.
       // A draft the user typed while this message was waiting belongs to
@@ -219,8 +221,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     // back leaves the whole message retryable. A newer draft the user typed
     // while this one waited is the one worth keeping.
     restore: (message) => {
+      if (!restoreContextAllowedRef.current && pendingDraftRef.current.length > 0) return;
       if (pendingDraftRef.current.length === 0) setPendingDraftRef.current(message.prompt);
       threadMentionsRestoreRef.current(message.threadMentionChips);
+      restoreContextAllowedRef.current = false;
     },
   });
   const checkpoints = useThreadCheckpoints({
@@ -238,6 +242,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const threadMentionsRestoreRef = useRef<
     (chips: ReadonlyArray<ChatComposerThreadMentionChip>) => void
   >(() => {});
+  const restoreContextAllowedRef = useRef(false);
   // Every composer command that carries the thread's expected version shares
   // one queue. Two of them dispatched before the first round trip returns
   // would otherwise both send the rendered version, so the second is rejected
