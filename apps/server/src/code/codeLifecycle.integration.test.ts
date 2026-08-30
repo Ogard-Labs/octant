@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ActorId,
   CodeOperationEventFrame,
+  CodeRuntimeWorkUpdated,
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
@@ -21,6 +22,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CODE_OPERATION_EVENT_RECORDED } from "./codeOperationEventStore";
+import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { GitMutationPort } from "./gitMutationPort";
 import { GitObservationPort } from "./gitObservationPort";
@@ -270,11 +272,9 @@ function openJournal(path: string) {
   applyMigrations(connection, MIGRATIONS, () => now);
   const journal = new Journal({
     connection,
-    registry: new EventRegistry().register(
-      CODE_OPERATION_EVENT_RECORDED,
-      1,
-      CodeOperationEventFrame,
-    ),
+    registry: new EventRegistry()
+      .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
+      .register(CODE_RUNTIME_WORK_UPDATED, 1, CodeRuntimeWorkUpdated),
     projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
     clock: () => now,
   });
