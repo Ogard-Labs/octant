@@ -19,7 +19,7 @@ describe("Code composer attachment ownership", () => {
     const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:pasted");
     const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     try {
-      const { result } = renderHook(() =>
+      const { result, unmount } = renderHook(() =>
         useCodeAttachments({
           client: { putAttachment, discardAttachment },
           threadId,
@@ -43,6 +43,8 @@ describe("Code composer attachment ownership", () => {
       });
       expect(result.current.staged).toHaveLength(1);
       expect(discardAttachment).not.toHaveBeenCalled();
+      unmount();
+      expect(discardAttachment).not.toHaveBeenCalled();
     } finally {
       createObjectURL.mockRestore();
       revokeObjectURL.mockRestore();
@@ -62,7 +64,7 @@ describe("Code composer attachment ownership", () => {
     const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:superseded");
     const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     try {
-      const { result } = renderHook(() =>
+      const { result, unmount } = renderHook(() =>
         useCodeAttachments({
           client: { putAttachment, discardAttachment },
           threadId,
@@ -81,6 +83,8 @@ describe("Code composer attachment ownership", () => {
       });
       expect(result.current.staged).toEqual([]);
       expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId);
+      unmount();
+      expect(discardAttachment).toHaveBeenCalledOnce();
     } finally {
       createObjectURL.mockRestore();
       revokeObjectURL.mockRestore();
