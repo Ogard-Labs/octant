@@ -121,8 +121,12 @@ export interface ChatComposerProps {
    * stays here so it can be edited or discarded; the caller sends it through
    * the ordinary path when the turn completes.
    */
-  readonly queueStatus?: "idle" | "queued" | "held";
-  readonly onDiscardQueued?: () => void;
+  /**
+   * True while a message the user already sent is waiting for the response in
+   * flight to finish. The composer only says so; it never asks the user to
+   * manage that message.
+   */
+  readonly hasPendingMessage?: boolean;
   readonly provider: ChatComposerSelection;
   readonly research: ChatComposerResearch;
   /**
@@ -238,14 +242,10 @@ export function ChatComposer(props: ChatComposerProps) {
   const commandOpen = offeredCommands.length > 0 && commandToken !== undefined;
   const activeCommand = commandOpen ? commandMatches[activeCommandIndex] : undefined;
   const trimmedDraft = props.draft.trim();
-  const queueStatus = props.queueStatus ?? "idle";
-  const queued = queueStatus === "queued" || queueStatus === "held";
   const hasQuoteChips = (props.pendingQuotes ?? []).length > 0;
   const baseSendDisabledReason =
     props.sendDisabledReason ??
-    (trimmedDraft.length === 0 && !hasQuoteChips && !queued
-      ? "Enter a message before sending."
-      : undefined);
+    (trimmedDraft.length === 0 && !hasQuoteChips ? "Enter a message before sending." : undefined);
   const [sendPending, setSendPending] = useState(false);
   const [sendError, setSendError] = useState<string | undefined>(undefined);
   const sendDisabledReason = sendPending ? "Sending message…" : baseSendDisabledReason;
@@ -255,7 +255,7 @@ export function ChatComposer(props: ChatComposerProps) {
       ? "Stopping is unavailable for this response."
       : undefined);
   // Settings belong to the running turn; the draft, attachments, and mentions
-  // belong to the next message and stay editable so they can be queued.
+  // belong to the next message and stay editable so it can be sent right away.
   const settingsLocked = props.isSending;
   const [modelOptionsOpen, setModelOptionsOpen] = useState(false);
   const declaredModelOptions = props.modelOptions ?? [];
@@ -276,7 +276,7 @@ export function ChatComposer(props: ChatComposerProps) {
     statusMessage: props.statusMessage,
     stopDisabledReason,
     isSending: props.isSending,
-    queueStatus,
+    hasPendingMessage: props.hasPendingMessage === true,
     ...(props.threadMentions?.statusMessage === undefined
       ? {}
       : { mentionMessage: props.threadMentions.statusMessage }),
@@ -310,7 +310,6 @@ export function ChatComposer(props: ChatComposerProps) {
 
   function send() {
     if (sendDisabledReason !== undefined) return;
-    if (queueStatus === "queued") return;
     markInteraction("renderer", "send-requested");
     setSendPending(true);
     setSendError(undefined);
@@ -600,7 +599,7 @@ export function ChatComposer(props: ChatComposerProps) {
       onKeyDown={onDraftKeyDown}
       onKeyUp={onDraftKeyUp}
       onPaste={onDraftPaste}
-      placeholder={props.isSending ? "Queue the next message…" : "Message Octant"}
+      placeholder={props.isSending ? "Send the next message…" : "Message Octant"}
       ref={messageRef}
       rows={1}
       value={props.draft}
@@ -846,9 +845,7 @@ export function ChatComposer(props: ChatComposerProps) {
     <ThreadComposer
       ariaLabel="Chat composer"
       chips={chips}
-      className={`chat-composer thread-column${
-        queueStatus === "idle" ? "" : ` chat-composer--${queueStatus}`
-      }`}
+      className="chat-composer thread-column"
       footer={
         <div
           aria-live="polite"
@@ -875,7 +872,7 @@ export function ChatComposer(props: ChatComposerProps) {
           cellClassName: "chat-composer__actions",
           sending: props.isSending,
           send: {
-            ariaLabel: props.isSending ? "Queue message" : "Send message",
+            ariaLabel: "Send message",
             disabledReason: sendDisabledReason,
             onSend: send,
           },
@@ -884,15 +881,6 @@ export function ChatComposer(props: ChatComposerProps) {
             disabledReason: stopDisabledReason,
             onStop: () => props.onStop?.(),
           },
-          ...(queued && props.onDiscardQueued !== undefined
-            ? {
-                discard: {
-                  ariaLabel: "Discard queued message",
-                  onDiscard: props.onDiscardQueued,
-                },
-              }
-            : {}),
-          sendHidden: queueStatus === "queued",
         },
       }}
       typeahead={typeahead}
@@ -905,7 +893,7 @@ function composeStatus(input: {
   readonly imageAttachment?: ChatComposerAttachmentCapability;
   readonly isSending: boolean;
   readonly mentionMessage?: string | undefined;
-  readonly queueStatus: "idle" | "queued" | "held";
+  readonly hasPendingMessage: boolean;
   readonly research: ChatComposerResearchBackend;
   readonly sendDisabledReason?: string | undefined;
   readonly sendError?: string | undefined;
@@ -933,18 +921,16 @@ function composeStatus(input: {
   }
   if (input.statusMessage !== undefined) loud.push(input.statusMessage);
   if (input.sendError !== undefined) loud.push(input.sendError);
-  if (input.queueStatus === "queued") {
-    loud.push("This message is queued and will send when the response finishes.");
-  } else if (input.queueStatus === "held" && input.statusMessage === undefined) {
-    loud.push("The queued message was not sent.");
+  if (input.hasPendingMessage) {
+    loud.push("Sent. It runs when the response in progress finishes.");
   }
   if (input.sendPending) {
     loud.push("Sending message…");
   } else if (input.isSending && input.stopDisabledReason !== undefined) {
     loud.push(input.stopDisabledReason);
-  } else if (input.isSending && input.queueStatus === "idle") {
-    loud.push("Response is streaming. You can type the next message.");
-  } else if (input.sendDisabledReason !== undefined && input.queueStatus === "idle") {
+  } else if (input.isSending && !input.hasPendingMessage) {
+    loud.push("Response is streaming. Sending now runs when it finishes.");
+  } else if (input.sendDisabledReason !== undefined && !input.hasPendingMessage) {
     quiet.push(input.sendDisabledReason);
   }
   const messages = [...quiet, ...loud];

@@ -37,6 +37,8 @@ export interface WorkFileMentionsController {
   readonly handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   readonly choose: (candidate: PathMentionCandidate) => void;
   readonly clear: () => void;
+  /** Restore paths that belonged to a send the host refused. */
+  readonly restore: (paths: ReadonlyArray<string>) => void;
 }
 
 /**
@@ -169,6 +171,10 @@ export function useWorkFileMentions(options: WorkFileMentionsOptions): WorkFileM
     return false;
   }
 
+  const restore = (paths: ReadonlyArray<string>): void => {
+    setSelectedPaths([...paths]);
+  };
+
   return {
     open,
     busy,
@@ -181,5 +187,6 @@ export function useWorkFileMentions(options: WorkFileMentionsOptions): WorkFileM
     handleKeyDown,
     choose,
     clear: () => setSelectedPaths([]),
+    restore,
   };
 }

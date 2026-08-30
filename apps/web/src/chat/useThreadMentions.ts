@@ -40,6 +40,8 @@ export interface ThreadMentionsController {
    */
   readonly resolveForSend: () => Promise<ReadonlyArray<MentionableThreadId>>;
   readonly clear: () => void;
+  /** Restore chips that belonged to a send the host refused. */
+  readonly restore: (chips: ReadonlyArray<ChatComposerThreadMentionChip>) => void;
 }
 
 /**
@@ -124,6 +126,13 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
 
   const clear = useCallback(() => {
     setChips([]);
+    setCandidates([]);
+    setQuery(undefined);
+    setStatusMessage(undefined);
+  }, []);
+
+  const restore = useCallback((next: ReadonlyArray<ChatComposerThreadMentionChip>) => {
+    setChips([...next]);
     setCandidates([]);
     setQuery(undefined);
     setStatusMessage(undefined);
@@ -238,7 +247,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     statusMessage,
   ]);
 
-  return { composer, chips, resolveForSend, clear };
+  return { composer, chips, resolveForSend, clear, restore };
 }
 
 function placementLabel(placement: ThreadMentionCandidate["placement"]): string {

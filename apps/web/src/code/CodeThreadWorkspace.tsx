@@ -5,7 +5,11 @@ import {
   type CodeThreadId,
 } from "@octant/contracts/code";
 import type { CodeCheckpoint, CodeThreadChangedFileState } from "@octant/contracts/code-operations";
-import type { ProviderExecutionPolicy } from "@octant/contracts";
+import type {
+  CodeAttachmentReference,
+  MentionableThreadId,
+  ProviderExecutionPolicy,
+} from "@octant/contracts";
 import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
@@ -20,8 +24,8 @@ import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeImageGenerationScopeId } from "@octant/contracts";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { GeneratedImageList } from "../image/GeneratedImageList";
-import { useQueuedSend } from "../composer/useQueuedSend";
-import type { TurnSettlement } from "../composer/queuedSend";
+import { useSteeredSend } from "../composer/useSteeredSend";
+import type { TurnSettlement } from "../composer/steeredSend";
 import {
   applyComposerCaret,
   COMPOSER_STAGED_DROPPED_NOTE,
@@ -44,11 +48,12 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
 import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
-import { useCodeAttachments } from "./useCodeAttachments";
+import { useCodeAttachments, type StagedCodeAttachment } from "./useCodeAttachments";
 import {
   ThreadMentionChips,
   ThreadMentionTypeahead,
   useThreadMentionTypeahead,
+  type ThreadMentionChip,
 } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
@@ -82,13 +87,27 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 };
 
 /**
- * Whether two lists carry the same items, by a caller-supplied identity.
- * Used to tell whether a queued send's attachments, paths, or mentions are
- * still exactly what the composer holds now — order matters, since these
- * lists are only ever appended to or removed from, never reordered.
+ * A message the user sent while a turn was still running.
+ *
+ * Everything the send would have carried is captured when the user presses
+ * Enter, so the message that reaches the host is the one they wrote — not
+ * whatever the composer happens to hold when the running turn finally stops.
  */
-function sameByKey<T>(a: ReadonlyArray<T>, b: ReadonlyArray<T>, key: (item: T) => string): boolean {
-  return JSON.stringify(a.map(key)) === JSON.stringify(b.map(key));
+interface CodeSteeredMessage {
+  readonly id: string;
+  readonly threadKey: string;
+  readonly restore: (message: CodeSteeredMessage) => void;
+  readonly prompt: string;
+  readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+  readonly threadMentionChips: ReadonlyArray<ThreadMentionChip>;
+  readonly attachments: ReadonlyArray<CodeAttachmentReference>;
+  readonly detachedAttachments: ReadonlyArray<StagedCodeAttachment>;
+  readonly fileMentionPaths: ReadonlyArray<string>;
+  readonly access: ProviderExecutionPolicy;
+  /** The one-shot posture the composer had selected, to put back on refusal. */
+  readonly accessOverride: ProviderExecutionPolicy | undefined;
+  /** Revision before this message cleared the composer. */
+  readonly draftRevision: number;
 }
 
 export interface CodeThreadWorkspaceProps {
@@ -179,8 +198,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     threadId: props.threadId,
   });
   const [draft, setDraft] = useState(props.controller.pendingDraft);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
+  // User edits are counted separately from the internal clear performed when
+  // a steered message leaves the composer, so an async mention lookup cannot
+  // erase a newer draft typed while that lookup is pending.
+  const draftRevisionRef = useRef(0);
+  const activeThreadKeyRef = useRef(String(props.threadId));
+  activeThreadKeyRef.current = String(props.threadId);
   const [providerChanging, setProviderChanging] = useState(false);
   const [accessChanging, setAccessChanging] = useState(false);
   const [accessMessage, setAccessMessage] = useState<string>();
@@ -195,6 +218,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const scaffolds = useScaffoldCatalog({
     threadId: String(props.threadId),
     checkoutId: String(view?.checkout.id ?? ""),
@@ -222,18 +252,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   useEffect(() => {
     setDraft(props.controller.pendingDraft);
   }, [props.controller.pendingDraft, props.threadId]);
-  const sendQueuedRef = useRef<() => Promise<boolean>>(async () => false);
+  const sendSteeredRef = useRef<(message: CodeSteeredMessage) => Promise<boolean>>(
+    async () => false,
+  );
+  const restoreSteeredRef = useRef<(message: CodeSteeredMessage) => void>(() => {});
   // Pasting or dropping a picture uploads it now and keeps only its id. The
   // turn names ids, so the host sends the provider bytes it accepted itself.
   const attachments = useCodeAttachments({
     client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
     threadId: props.attachmentClient === undefined ? undefined : props.threadId,
   });
-  const queued = useQueuedSend({
+  const steered = useSteeredSend<CodeSteeredMessage>({
     threadKey: String(props.threadId),
     settlement: codeTurnSettlement(props.controller.turnStatus),
     ready: !attachments.busy,
-    send: () => sendQueuedRef.current(),
+    send: (message) => sendSteeredRef.current(message),
+    restore: (message) => message.restore(message),
   });
 
   const composerReady = view !== undefined && props.controller.status !== "disconnected";
@@ -262,6 +296,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     mentions: threadMentions.composer,
     draft,
     onDraftChange: (next, caretIndex) => {
+      draftRevisionRef.current += 1;
       setDraft(next);
       props.controller.setPendingDraft?.(next, caretIndex);
     },
@@ -278,6 +313,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     checkoutId: view?.checkout.id,
     draft,
     onDraftChange: (next, caretIndex) => {
+      draftRevisionRef.current += 1;
       setDraft(next);
       props.controller.setPendingDraft?.(next, caretIndex);
     },
@@ -287,16 +323,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
-  // Read inside the queued send's async closure, after an await, to see
-  // whether the user has since changed what a queued send would carry.
-  // Plain closure captures of these hook-returned values would only ever see
-  // the render that started the send, never a later one.
-  const pathMentionsSelectedRef = useRef(pathMentions.selectedPaths);
-  pathMentionsSelectedRef.current = pathMentions.selectedPaths;
-  const threadMentionChipsRef = useRef(threadMentions.chips);
-  threadMentionChipsRef.current = threadMentions.chips;
-  const turnAccessOverrideRef = useRef(turnAccessOverride);
-  turnAccessOverrideRef.current = turnAccessOverride;
   const peekAbandoned = attachments.peekAbandoned;
   const markDraftStagedDropped = props.controller.markDraftStagedDropped;
   useEffect(() => {
@@ -378,11 +404,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const trimmed = draft.trim();
   const busy =
     props.controller.turnStatus === "sending" || props.controller.turnStatus === "running";
-  // A running turn queues rather than blocks: the host admits one turn per
-  // thread, so the composer parks the next one instead of making the user wait.
-  const canSend = trimmed.length > 0 && !attachments.busy;
+  // A running turn never blocks the composer: the host admits one turn per
+  // thread, so a message sent during one is held by the surface and sent the
+  // moment that turn stops, without the user having to manage it.
+  const canSend = trimmed.length > 0 && !attachments.busy && steered.pending === undefined;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
+  // A message sent while a turn was running is already the user's message. It
+  // belongs at the end of the transcript, where every other sent message is,
+  // rather than parked in the composer waiting to be administered. It sits
+  // outside the virtualized list because it is the surface's own intent, not
+  // part of the host's authoritative conversation.
+  const pendingMessage =
+    steered.pending === undefined ? null : (
+      <article className="code-thread-workspace__message code-thread-workspace__message--user">
+        <TrackerReferenceText asParagraph text={steered.pending.prompt} />
+        <p className="code-thread-workspace__turn-access">
+          Access · {CODE_ACCESS_POSTURE_LABEL[steered.pending.access]}
+        </p>
+      </article>
+    );
   // An unreachable history is not an empty thread. Treating it as one puts the
   // new-thread copy and the project scaffolds under a banner that says this
   // thread's own turns are missing, and offers to scaffold into a checkout that
@@ -398,110 +439,136 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
   async function submitFollowUp() {
-    if (!canSend) return;
-    // A `#thread` chip names a thread; it never carries one. The turn sends
-    // chip ids and the host reads each one as the turn runs, re-checking that
-    // the sender may still open it, so the follow-up the journal keeps is
-    // exactly what the user typed and no later turn replays a thread they
-    // pointed at once. This check is the composer's own report: a chip the
-    // host refuses is shown as unavailable rather than silently dropped.
-    const threadMentionIds = await threadMentions.resolveForSend();
-    const fileMentionPaths = pathMentions.selectedPaths;
+    if (!canSend || steered.pending !== undefined) return;
+    const draftRevision = draftRevisionRef.current;
+    const originThreadKey = String(props.threadId);
+    // The one-shot override is consumed when the message is sent, not when the
+    // turn later finishes: a long running turn must not leave Plan selected for
+    // whatever the user writes next. A refused send puts it back.
+    const override = turnAccessOverride;
+    const access = nextTurnAccess;
+    setTurnAccessOverride(undefined);
     if (busy) {
-      queued.enqueue();
+      const threadMentionChips = threadMentions.chips;
+      const fileMentionPaths = pathMentions.selectedPaths;
+      const detachedAttachments = attachments.detachForSend();
+      const prompt = trimmed;
+      // Clear immediately so typing during a slow mention lookup edits the
+      // next draft instead of appending to the message being prepared.
+      if (draftRevisionRef.current === draftRevision) {
+        setDraft("");
+        props.controller.setPendingDraft?.("");
+      }
+      // Resolve the captured chips rather than whatever a later draft names;
+      // the host still rechecks authority when the message runs.
+      const threadMentionIds = await threadMentions.resolveForSend();
+      if (activeThreadKeyRef.current !== originThreadKey) {
+        // The user left while the host checked the mention ids. Keep the
+        // abandoned prompt with its originating thread and dispose of its
+        // detached host attachments; never steer them into the new thread.
+        props.controller.writePendingDraftFor?.(originThreadKey, prompt);
+        attachments.discardDetached(detachedAttachments);
+        return;
+      }
+      // Sending while a turn runs is still sending. The message leaves the
+      // composer now and joins the transcript, and the host is asked to run it
+      // as soon as this thread stops running one — the user never administers
+      // a parked message. The first message's context is detached atomically;
+      // a refusal restores it, while later edits stay with the composer.
+      const steeredMessage: CodeSteeredMessage = {
+        id: globalThis.crypto.randomUUID(),
+        threadKey: String(props.threadId),
+        restore: restoreSteeredRef.current,
+        prompt,
+        threadMentionIds,
+        threadMentionChips,
+        attachments: detachedAttachments.map((entry) => entry.reference),
+        detachedAttachments,
+        fileMentionPaths,
+        access,
+        accessOverride: override,
+        draftRevision,
+      };
+      if (!steered.steer(steeredMessage)) {
+        if (draftRevisionRef.current === draftRevision) {
+          attachments.restoreDetached(detachedAttachments);
+          setDraft(prompt);
+          props.controller.setPendingDraft?.(prompt);
+          threadMentions.restore(threadMentionChips);
+          pathMentions.restore(fileMentionPaths);
+          setTurnAccessOverride((current) => current ?? override);
+        } else {
+          // A newer draft won the race to steer this message. Its detached
+          // host attachments and access override must not bleed into that draft.
+          attachments.discardDetached(detachedAttachments);
+        }
+        return;
+      }
       return;
     }
-    // The one-shot override is consumed when the host accepts this start, not
-    // when the turn later finishes: a long running turn must not leave Plan
-    // selected so a queued follow-up inherits it. A refused start puts it back.
-    const override = turnAccessOverride;
-    setTurnAccessOverride(undefined);
     // The chips stay until the host accepts the turn: a refused or dropped send
     // must leave the message retryable with the same images, not just its text.
+    const threadMentionIds = await threadMentions.resolveForSend();
+    const fileMentionPaths = pathMentions.selectedPaths;
     const sent = await props.controller.sendFollowUp(
       trimmed,
       threadMentionIds,
       attachments.peekForSend(),
       fileMentionPaths,
-      nextTurnAccess,
+      access,
     );
     if (sent) {
       attachments.takeForSend();
       setDraft("");
       threadMentions.clear();
       pathMentions.clear();
-      queued.discard();
     } else {
       setTurnAccessOverride((current) => current ?? override);
     }
   }
-  sendQueuedRef.current = async () => {
-    const threadKey = String(props.threadId);
-    const prompt = draft.trim();
-    if (prompt.length === 0) return false;
-    // The full intent this queued send is carrying. A settlement that
-    // arrives after the user has changed any of it belongs to a draft this
-    // send never carried, so clearing state on success must compare against
-    // this whole snapshot rather than the draft text alone. Attachments are
-    // NOT taken here — `takeForSend` also revokes their preview URLs, and a
-    // refused or dropped send must leave the queued images retryable, not
-    // silently gone.
-    const attachmentSnapshot = attachments.peekForSend();
-    const fileMentionPaths = pathMentions.selectedPaths;
-    const threadMentionChips = threadMentions.chips;
-    const access = nextTurnAccess;
-    const queuedAccessOverride = turnAccessOverride;
-    const stillHoldsQueuedSnapshot = () =>
-      String(props.threadId) === threadKey &&
-      draftRef.current.trim() === prompt &&
-      turnAccessOverrideRef.current === queuedAccessOverride &&
-      sameByKey(attachments.peekForSend(), attachmentSnapshot, (ref) => String(ref.attachmentId)) &&
-      sameByKey(pathMentionsSelectedRef.current, fileMentionPaths, (path) => path) &&
-      sameByKey(threadMentionChipsRef.current, threadMentionChips, (chip) => String(chip.threadId));
-    const restoreQueuedSend = () => {
-      if (String(props.threadId) !== threadKey) return;
-      // A queued send is still an ordinary, refusal-capable command. The
-      // staged images were never taken, so restoring the text alone is
-      // enough to leave the whole queued message retryable — but only when
-      // the composer still holds the empty state this queued send cleared
-      // it to. If the user typed a newer draft while resolveForSend or
-      // sendFollowUp was pending, that draft is the one worth keeping; a
-      // stale queued prompt must not overwrite it.
-      if (draftRef.current.length > 0) return;
-      setDraft(prompt);
-      props.controller.setPendingDraft?.(prompt);
-    };
-    setDraft("");
-    props.controller.setPendingDraft?.("");
+  sendSteeredRef.current = async (message) => {
     try {
-      const threadMentionIds = await threadMentions.resolveForSend();
-      if (String(props.threadId) !== threadKey) return false;
+      attachments.markDetachedInFlight(message.detachedAttachments);
       const sent = await props.controller.sendFollowUp(
-        prompt,
-        threadMentionIds,
-        attachmentSnapshot,
-        fileMentionPaths,
-        access,
+        message.prompt,
+        message.threadMentionIds,
+        message.attachments,
+        message.fileMentionPaths,
+        message.access,
+        true,
       );
       if (sent) {
-        // Do not clear or take context the user added while this queued turn
-        // was in flight. The queued prompt owns its original text,
-        // attachments, mentions, paths, and access choice; a newer draft
-        // owns anything changed after it was parked.
-        if (stillHoldsQueuedSnapshot()) {
-          attachments.takeForSend();
+        // The detached images belong to this message only. Keep any images
+        // attached after the steer for the editable draft that follows.
+        attachments.commitDetached(message.detachedAttachments);
+        if (draftRevisionRef.current === message.draftRevision) {
           threadMentions.clear();
           pathMentions.clear();
-          setTurnAccessOverride(undefined);
         }
-      } else {
-        restoreQueuedSend();
       }
       return sent;
     } catch {
-      restoreQueuedSend();
       return false;
     }
+  };
+  restoreSteeredRef.current = (message) => {
+    if (!mountedRef.current || activeThreadKeyRef.current !== message.threadKey) {
+      props.controller.writePendingDraftFor?.(message.threadKey, message.prompt);
+      attachments.discardDetached(message.detachedAttachments);
+      return;
+    }
+    setTurnAccessOverride((current) => current ?? message.accessOverride);
+    if (draftRevisionRef.current !== message.draftRevision) {
+      attachments.discardDetached(message.detachedAttachments);
+      return;
+    }
+    // Restore every captured context alongside the words so a refused message
+    // can be retried exactly as it was sent.
+    attachments.restoreDetached(message.detachedAttachments);
+    setDraft(message.prompt);
+    props.controller.setPendingDraft?.(message.prompt);
+    threadMentions.restore(message.threadMentionChips);
+    pathMentions.restore(message.fileMentionPaths);
   };
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
@@ -780,7 +847,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         ),
       )}
 
-      {messages.length === 0 ? (
+      {messages.length === 0 && pendingMessage === null ? (
         <div className="code-thread-workspace__conversation" role="log" aria-live="polite">
           <div className="code-thread-workspace__transcript thread-column">
             {props.controller.conversationHistory === "loading" ? (
@@ -1033,6 +1100,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           }}
           restoreKey={String(props.threadId)}
           role="region"
+          {...(pendingMessage === null ? {} : { trail: pendingMessage })}
         />
       )}
 
@@ -1065,11 +1133,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         />
       )}
       <ThreadComposer
-        className={`code-thread-workspace__composer thread-column${
-          queued.state.status === "idle"
-            ? ""
-            : ` code-thread-workspace__composer--${queued.state.status}`
-        }`}
+        className="code-thread-workspace__composer thread-column"
         chips={
           <>
             {/*
@@ -1084,11 +1148,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               }
             />
             <TrackerReferenceComposerHints draft={draft} />
-            {queued.statusMessage === undefined ? null : (
-              <p className="code-thread-workspace__hint" role="status">
-                {queued.statusMessage}
-              </p>
-            )}
             {attachments.staged.length === 0 && attachments.message === undefined ? null : (
               <div className="code-thread-workspace__attachments" aria-label="Attached images">
                 {attachments.staged.map(({ previewUrl, reference }) => (
@@ -1156,6 +1215,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             className="composer-input window-no-drag"
             id={`code-thread-composer-${String(thread.id)}`}
             onChange={(event) => {
+              draftRevisionRef.current += 1;
               setDraft(event.currentTarget.value);
               props.controller.setPendingDraft?.(
                 event.currentTarget.value,
@@ -1189,7 +1249,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             onPaste={(event) => {
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={busy ? "Queue the next message…" : "Ask for follow-up changes…"}
+            placeholder={busy ? "Send the next message…" : "Ask for follow-up changes…"}
             ref={textareaRef}
             rows={2}
             value={draft}
@@ -1272,29 +1332,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           actions: {
             kind: "send",
             send: {
-              ariaLabel: busy ? "Queue follow-up" : "Send follow-up",
-              disabled: !canSend,
+              ariaLabel: "Send follow-up",
+              disabled: !canSend || steered.pending !== undefined,
               onSend: () => void submitFollowUp(),
             },
-            ...(queued.state.status === "idle"
-              ? {}
-              : {
-                  discard: {
-                    ariaLabel: "Discard queued message",
-                    onDiscard: () => {
-                      queued.discard();
-                      setDraft("");
-                      props.controller.setPendingDraft?.("");
-                      threadMentions.clear();
-                      pathMentions.clear();
-                      setTurnAccessOverride(undefined);
-                      for (const { reference } of attachments.staged) {
-                        attachments.remove(reference.attachmentId);
-                      }
-                    },
-                  },
-                }),
-            sendHidden: queued.state.status === "queued",
           },
         }}
         footer={
@@ -1302,10 +1343,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             <span className="code-thread-workspace__hint">
               {providerChanging
                 ? "Checking the selected provider…"
-                : queued.state.status !== "idle"
-                  ? "Queued follow-up · Enter to edit · Discard to remove"
+                : steered.pending !== undefined
+                  ? "Sent · runs when the response in progress finishes"
                   : busy
-                    ? "Response in progress · Enter queues this message"
+                    ? "Enter to send · it runs when this response finishes"
                     : "Enter to send · Shift+Enter for a new line"}
             </span>
             {accessMessage === undefined ? null : (

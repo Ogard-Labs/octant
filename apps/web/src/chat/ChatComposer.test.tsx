@@ -117,51 +117,35 @@ describe("ChatComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Reply");
   });
 
-  it("lets the user type during a running turn and says the message is queued", async () => {
-    const user = userEvent.setup();
+  it("says a message sent during a running turn was sent, without asking the user to manage it", async () => {
     const onSend = vi.fn(async () => true);
-    const onDraftChange = vi.fn();
-    const onDiscardQueued = vi.fn();
     const { rerender, props } = renderComposer({
-      draft: "Next instruction",
+      draft: "",
+      hasPendingMessage: true,
       isSending: true,
-      onDiscardQueued,
-      onDraftChange,
       onSend,
-      queueStatus: "queued",
     });
 
     const draft = screen.getByLabelText("Message");
     expect(draft).toBeEnabled();
     expect(screen.getByRole("status")).toHaveTextContent(
-      "This message is queued and will send when the response finishes.",
+      "Sent. It runs when the response in progress finishes.",
     );
-    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
-    expect(onDiscardQueued).toHaveBeenCalledOnce();
-    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /discard/i })).not.toBeInTheDocument();
 
     rerender(
       <ChatComposer
         {...props}
-        draft="Edited follow-up"
-        isSending={false}
-        onDiscardQueued={onDiscardQueued}
-        onDraftChange={onDraftChange}
+        draft="A newer message"
+        hasPendingMessage
+        isSending
         onSend={onSend}
-        queueStatus="held"
-        statusMessage="The response was cancelled. The queued message was not sent."
       />,
     );
-    expect(screen.getByLabelText("Message")).toHaveValue("Edited follow-up");
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "The response was cancelled. The queued message was not sent.",
-    );
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    expect(onSend).toHaveBeenCalledWith("Edited follow-up");
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
   });
 
-  it("queues Enter during a running turn instead of sending immediately", async () => {
+  it("sends on Enter during a running turn instead of refusing until it finishes", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => true);
     renderComposer({ draft: "After this", isSending: true, onSend, onStop: vi.fn() });
@@ -171,7 +155,7 @@ describe("ChatComposer", () => {
     await user.click(draft);
     await user.keyboard("{Enter}");
     expect(onSend).toHaveBeenCalledWith("After this");
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
   });
 
   it("passes only the chosen File to the attachment callback and explains unsupported attachments", async () => {

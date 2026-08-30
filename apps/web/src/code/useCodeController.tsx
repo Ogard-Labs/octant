@@ -475,6 +475,9 @@ export function useCodeController(options: CodeControllerOptions) {
   const setPendingDraftCaret = useCallback((caretIndex: number) => {
     composerDraftRef.current.setCaret(caretIndex);
   }, []);
+  const writePendingDraftFor = useCallback((threadId: string, value: string) => {
+    composerDraftRef.current.writeFor(threadId, value);
+  }, []);
 
   const clearFailure = useCallback(() => {
     setErrorCategory(undefined);
@@ -1776,6 +1779,8 @@ export function useCodeController(options: CodeControllerOptions) {
        * the thread's grant. Absent means the thread's own posture.
        */
       executionPolicy?: ProviderExecutionPolicy,
+      /** True when the composer already cleared this draft while it waited. */
+      delayed?: boolean,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -1786,8 +1791,17 @@ export function useCodeController(options: CodeControllerOptions) {
       setTurnError(undefined);
       setTurnStatus("sending");
       const sendingThreadId = String(view.thread.id);
+      const draftRevisionAtDispatch = composerDraftRef.current.revisionFor(sendingThreadId);
       const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
+      let internalClearRan = false;
       const restoreFailedPrompt = () => {
+        const currentRevision = composerDraftRef.current.revisionFor(sendingThreadId);
+        if (
+          currentRevision !== draftRevisionAtDispatch &&
+          (!internalClearRan || currentRevision !== draftRevisionAtDispatch + 1)
+        ) {
+          return;
+        }
         composerDraftRef.current.restoreFor(sendingThreadId, {
           text: trimmed,
           caretIndex: previousDraft?.caretIndex ?? trimmed.length,
@@ -1834,10 +1848,15 @@ export function useCodeController(options: CodeControllerOptions) {
           return false;
         }
         setTurnStatus("running");
-        // A queued send already emptied the composer so the user can keep
-        // typing. Clearing here would wipe that later draft.
-        if (composerDraftRef.current.readFor(sendingThreadId)?.text === trimmed) {
+        // A steered send may have emptied the composer so the user can keep
+        // typing. Clearing here is safe only when no draft revision landed
+        // after this dispatch.
+        if (
+          delayed !== true &&
+          composerDraftRef.current.revisionFor(sendingThreadId) === draftRevisionAtDispatch
+        ) {
           composerDraftRef.current.clearFor(sendingThreadId);
+          internalClearRan = true;
         }
         setConversation((current) => [
           ...current,
@@ -2103,6 +2122,7 @@ export function useCodeController(options: CodeControllerOptions) {
     sendFollowUp,
     setPendingDraft,
     setPendingDraftCaret,
+    writePendingDraftFor,
     startThreadTurn,
     status,
     threadUsage,
@@ -2130,7 +2150,11 @@ function conversationFallback(
   }
 }
 
-export type CodeController = ReturnType<typeof useCodeController>;
+type CodeControllerResult = ReturnType<typeof useCodeController>;
+export type CodeController = Omit<CodeControllerResult, "writePendingDraftFor"> & {
+  /** Optional for injected fixtures and hosts that do not persist drafts by thread. */
+  readonly writePendingDraftFor?: (threadId: string, value: string) => void;
+};
 
 function required(value: string | undefined): string {
   if (value === undefined) throw new Error("Code controller requires launch authority.");
