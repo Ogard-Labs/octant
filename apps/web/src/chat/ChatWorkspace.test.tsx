@@ -948,6 +948,73 @@ describe("ChatWorkspace", () => {
     );
   });
 
+  it("restores deferred attachment ownership when a mounted Chat send throws", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi
+      .fn<ChatController["sendTurn"]>()
+      .mockRejectedValueOnce(new Error("send failed"))
+      .mockResolvedValueOnce(true);
+    const upload = vi.fn(async (input: Parameters<ChatController["upload"]>[0]) => ({
+      id: input.attachmentId,
+      threadId: input.threadId,
+      displayName: input.displayName,
+      mediaType: input.mediaType as never,
+      byteLength: input.bytes.byteLength,
+      digest: "a".repeat(64) as never,
+      status: "finalized" as const,
+      createdAt: now as never,
+    }));
+    const controller = controllerFixture({
+      activeView: viewWithAttempt("streaming"),
+      sendTurn,
+      upload,
+    });
+    function Harness() {
+      const [draft, setDraft] = useState("Ship this plan");
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              ...controller,
+              activeView: view,
+              pendingDraft: draft,
+              setPendingDraft: setDraft,
+            })}
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setView(viewWithAttempt("completed"))} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["image"], "retry-after-throw.png", { type: "image/png" }),
+    );
+    await screen.findByText("retry-after-throw.png");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue("Ship this plan"));
+    expect(screen.getByText("retry-after-throw.png")).toBeInTheDocument();
+    expect(controller.discard).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledTimes(2));
+    expect(sendTurn).toHaveBeenLastCalledWith(
+      "Ship this plan",
+      [upload.mock.calls[0]![0].attachmentId],
+      [],
+      [],
+      [],
+      [],
+    );
+  });
+
   it("does not clear a newer draft typed while mention resolution is pending", async () => {
     const user = userEvent.setup();
     let resolveMentions!: () => void;
@@ -1042,6 +1109,293 @@ describe("ChatWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
     rerender(<Harness open={false} />);
     expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { outcome: "accepted" as const, sent: true, discardCount: 0 },
+    { outcome: "refused" as const, sent: false, discardCount: 1 },
+  ])(
+    "does not discard a deferred attachment after unmount when the host has $outcome",
+    async ({ sent, discardCount }) => {
+      const user = userEvent.setup();
+      let resolveSend!: (value: boolean) => void;
+      const sendTurn = vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveSend = resolve;
+          }),
+      );
+      const controller = controllerFixture({
+        activeView: viewWithAttempt("streaming"),
+        sendTurn,
+        upload: vi.fn(async (input) => ({
+          id: input.attachmentId,
+          threadId: input.threadId,
+          displayName: input.displayName,
+          mediaType: input.mediaType as never,
+          byteLength: input.bytes.byteLength,
+          digest: "a".repeat(64) as never,
+          status: "finalized" as const,
+          createdAt: now as never,
+        })),
+      });
+      function Harness() {
+        const [view, setView] = useState(viewWithAttempt("streaming"));
+        return (
+          <>
+            <ChatWorkspace
+              controller={controllerFixture({ ...controller, activeView: view })}
+              providerSnapshot={providerSnapshot()}
+            />
+            <button onClick={() => setView(viewWithAttempt("completed"))} type="button">
+              Complete turn
+            </button>
+          </>
+        );
+      }
+      const rendered = render(<Harness />);
+
+      await user.upload(
+        screen.getByLabelText("Choose attachment file"),
+        new File(["image"], "deferred.png", { type: "image/png" }),
+      );
+      await screen.findByText("deferred.png");
+      await user.click(screen.getByRole("button", { name: "Send message" }));
+      await user.click(screen.getByRole("button", { name: "Complete turn" }));
+      await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+
+      rendered.unmount();
+      resolveSend(sent);
+
+      await waitFor(() => expect(controller.discard).toHaveBeenCalledTimes(discardCount));
+      await Promise.resolve();
+      expect(controller.discard).toHaveBeenCalledTimes(discardCount);
+    },
+  );
+
+  it("discards a deferred attachment exactly once when the host throws after unmount", async () => {
+    const user = userEvent.setup();
+    let rejectSend!: (error: Error) => void;
+    const sendTurn = vi.fn(
+      () =>
+        new Promise<boolean>((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+    const controller = controllerFixture({
+      activeView: viewWithAttempt("streaming"),
+      sendTurn,
+      upload: vi.fn(async (input) => ({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType as never,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64) as never,
+        status: "finalized" as const,
+        createdAt: now as never,
+      })),
+    });
+    function Harness() {
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({ ...controller, activeView: view })}
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setView(viewWithAttempt("completed"))} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    const rendered = render(<Harness />);
+
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["image"], "throwing.png", { type: "image/png" }),
+    );
+    await screen.findByText("throwing.png");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+
+    rendered.unmount();
+    rejectSend(new Error("send failed"));
+
+    await waitFor(() => expect(controller.discard).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(controller.discard).toHaveBeenCalledTimes(1);
+  });
+
+  it("abandons a steered attachment before it fires without sending or double-discarding", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    const controller = controllerFixture({
+      activeView: viewWithAttempt("streaming"),
+      sendTurn,
+      upload: vi.fn(async (input) => ({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType as never,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64) as never,
+        status: "finalized" as const,
+        createdAt: now as never,
+      })),
+    });
+    const rendered = render(
+      <ChatWorkspace controller={controller} providerSnapshot={providerSnapshot()} />,
+    );
+
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["image"], "abandoned-deferred.png", { type: "image/png" }),
+    );
+    await screen.findByText("abandoned-deferred.png");
+    // The turn is still running, so this steers the message but has not fired
+    // the host send yet.
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    rendered.unmount();
+
+    await waitFor(() => expect(controller.discard).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(controller.discard).toHaveBeenCalledTimes(1);
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("keeps a later attachment separate when an accepted deferred send unmounts", async () => {
+    const user = userEvent.setup();
+    let resolveSend!: (value: boolean) => void;
+    const sendTurn = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const upload = vi.fn(async (input: Parameters<ChatController["upload"]>[0]) => ({
+      id: input.attachmentId,
+      threadId: input.threadId,
+      displayName: input.displayName,
+      mediaType: input.mediaType as never,
+      byteLength: input.bytes.byteLength,
+      digest: "a".repeat(64) as never,
+      status: "finalized" as const,
+      createdAt: now as never,
+    }));
+    const controller = controllerFixture({
+      activeView: viewWithAttempt("streaming"),
+      sendTurn,
+      upload,
+    });
+    function Harness() {
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({ ...controller, activeView: view })}
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setView(viewWithAttempt("completed"))} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    const rendered = render(<Harness />);
+
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["first"], "first-deferred.png", { type: "image/png" }),
+    );
+    await screen.findByText("first-deferred.png");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["later"], "later-deferred.png", { type: "image/png" }),
+    );
+    await screen.findByText("later-deferred.png");
+    resolveSend(true);
+
+    await waitFor(() => expect(screen.queryByText("first-deferred.png")).not.toBeInTheDocument());
+    expect(screen.getByText("later-deferred.png")).toBeInTheDocument();
+    const laterAttachmentId = upload.mock.calls[1]![0].attachmentId;
+    rendered.unmount();
+
+    await waitFor(() => expect(controller.discard).toHaveBeenCalledTimes(1));
+    expect(controller.discard).toHaveBeenCalledWith({
+      threadId: controller.activeView!.thread.id,
+      attachmentId: laterAttachmentId,
+    });
+  });
+
+  it("preserves an intentionally cleared newer draft when a deferred send is refused", async () => {
+    const user = userEvent.setup();
+    let resolveSend!: (value: boolean) => void;
+    const sendTurn = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const mentionId = "00000000-0000-4000-8000-000000000965";
+    const threadMentionClient = {
+      search: vi.fn(async () => [
+        {
+          threadId: mentionId,
+          mode: "chat" as const,
+          title: "Old context",
+          placement: { kind: "unfiled" as const },
+          updatedAt: now,
+        },
+      ]),
+      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
+      openSideChat: vi.fn(),
+      execute: vi.fn(),
+    } as unknown as ThreadMentionClient;
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+            })}
+            providerSnapshot={providerSnapshot()}
+            threadMentionClient={threadMentionClient}
+          />
+          <button onClick={() => setView(viewWithAttempt("completed"))} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+
+    const composer = screen.getByLabelText("Message");
+    await user.type(composer, "#Old");
+    await user.click(await screen.findByRole("option", { name: /Old context/ }));
+    await user.type(composer, "old prompt");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+
+    await user.type(composer, "newer draft");
+    await user.clear(composer);
+    resolveSend(false);
+
+    await waitFor(() => expect(composer).toHaveValue(""));
+    expect(screen.queryByRole("list", { name: "Mentioned threads" })).not.toBeInTheDocument();
+    expect(composer).toHaveValue("");
   });
 
   it("shows and decides one-time MCP tool approvals for the active thread", async () => {
