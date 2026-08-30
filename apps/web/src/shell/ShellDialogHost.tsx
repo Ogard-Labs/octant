@@ -10,6 +10,7 @@ import type { OctantHostBridge } from "./hostBridge";
 import { visuallyHiddenStyle } from "./shellCommandWiring";
 import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./ThreadSearchOverlay";
 import type {
+  ThreadSearchContentHit,
   ThreadSearchHit,
   ThreadSearchProject,
   ThreadSearchThread,
@@ -38,6 +39,9 @@ export interface ShellDialogHostProps {
   readonly searchProjects: ReadonlyArray<ThreadSearchProject>;
   readonly searchListing: ThreadSearchListingStatus;
   readonly searchArchivedListing: ThreadSearchListingStatus;
+  readonly searchContentHits?: ReadonlyArray<ThreadSearchContentHit>;
+  readonly searchContentListing?: ThreadSearchListingStatus;
+  readonly searchContentTruncated?: boolean;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onCloseSearch: () => void;
   readonly onNewSearchThread?: () => void;
@@ -81,6 +85,15 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
             ? {
                 archivedListing: props.searchArchivedListing,
                 onQueryChange: props.onSearchQueryChange,
+                ...(props.searchContentHits === undefined
+                  ? {}
+                  : { contentHits: props.searchContentHits }),
+                ...(props.searchContentListing === undefined
+                  ? {}
+                  : { contentListing: props.searchContentListing }),
+                ...(props.searchContentTruncated === undefined
+                  ? {}
+                  : { contentTruncated: props.searchContentTruncated }),
               }
             : {})}
           onClose={props.onCloseSearch}

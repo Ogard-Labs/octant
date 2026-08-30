@@ -313,7 +313,7 @@ describe("Code aggregate contracts", () => {
       activity: [{ threadId: ids.thread, lastSequence: 42 }],
     } as const;
 
-    expect(codeContracts.decodeCodeBootstrap(bootstrap)).toEqual(bootstrap);
+    expect(codeContracts.decodeCodeBootstrap(bootstrap)).toEqual({ ...bootstrap, runtime: [] });
     // A thread with no journaled operation event is absent, not reported at
     // zero, so the client can tell silence from "nothing has happened yet".
     expect(codeContracts.decodeCodeBootstrap({ ...bootstrap, activity: [] }).activity).toEqual([]);
@@ -323,23 +323,48 @@ describe("Code aggregate contracts", () => {
     expect(
       codeContracts.decodeCodeBootstrap({ settings, threads: [], checkouts: [] }).activity,
     ).toEqual([]);
+    expect(
+      codeContracts.decodeCodeBootstrap({ settings, threads: [], checkouts: [] }).runtime,
+    ).toEqual([]);
     expect(codeContracts.decodeCodeNavigation({ threads: [thread] })).toEqual({
       threads: [thread],
       activity: [],
+      runtime: [],
     });
     expect(
       codeContracts.decodeCodeNavigation({
         threads: [thread],
         activity: [{ threadId: ids.thread, lastSequence: 42 }],
+        runtime: [
+          {
+            threadId: ids.thread,
+            executing: true,
+            checkoutChip: { checkoutKind: "managed-worktree", label: "feature/x" },
+          },
+        ],
       }),
     ).toEqual({
       threads: [thread],
       activity: [{ threadId: ids.thread, lastSequence: 42 }],
+      runtime: [
+        {
+          threadId: ids.thread,
+          executing: true,
+          checkoutChip: { checkoutKind: "managed-worktree", label: "feature/x" },
+        },
+      ],
     });
     expect(() =>
       codeContracts.decodeCodeNavigation({
         threads: [thread],
         checkouts: [checkout],
+      }),
+    ).toThrow();
+    expect(() =>
+      codeContracts.decodeCodeNavigationRuntime({
+        threadId: ids.thread,
+        executing: true,
+        checkoutChip: { checkoutKind: "existing-worktree", label: "main" },
       }),
     ).toThrow();
     expect(() =>

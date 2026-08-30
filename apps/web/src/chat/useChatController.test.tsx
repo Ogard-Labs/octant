@@ -1781,6 +1781,7 @@ function createMockClient(
 ): ChatClient {
   return {
     search: vi.fn(async () => []),
+    searchTranscript: vi.fn(async () => ({ query: "", hits: [], truncated: false })),
     navigation: vi.fn(async () => ({ threads: [] })),
     execute: vi.fn(async () => ({
       kind: "thread-updated" as const,

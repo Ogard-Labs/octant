@@ -2010,6 +2010,7 @@ describe("useCodeController", () => {
       const navigationRead = vi.fn(async () => ({
         threads: bootstrap(1, 4).threads,
         activity: bootstrap(1, 4).activity ?? [],
+        runtime: [],
       }));
       const client = fakeClient({ bootstrap: bootstrapRead, navigation: navigationRead });
       const { result, unmount } = renderHook(() =>
@@ -2042,6 +2043,7 @@ describe("useCodeController", () => {
     const navigationRead = vi.fn(async () => ({
       threads: bootstrap(1, 9).threads,
       activity: bootstrap(1, 9).activity ?? [],
+      runtime: [],
     }));
     const client = fakeClient({ bootstrap: bootstrapRead, navigation: navigationRead });
     const { result, unmount } = renderHook(() =>
@@ -2064,6 +2066,7 @@ describe("useCodeController", () => {
     const navigationRead = vi.fn(async () => ({
       threads: bootstrap().threads,
       activity: bootstrap().activity ?? [],
+      runtime: [],
     }));
     const client = fakeClient({
       bootstrap: vi.fn(async () => bootstrap()),
@@ -2149,6 +2152,7 @@ describe("useCodeController", () => {
     const navigationRead = vi.fn(async () => ({
       threads: bootstrap().threads,
       activity: bootstrap().activity ?? [],
+      runtime: [],
     }));
     const client = fakeClient({
       bootstrap: vi.fn(async () => bootstrap()),
@@ -2421,7 +2425,11 @@ function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
     bootstrap: bootstrapFn,
     navigation: vi.fn(async () => {
       const next = await bootstrapFn();
-      return { threads: next.threads, activity: next.activity ?? [] };
+      return {
+        threads: next.threads,
+        activity: next.activity ?? [],
+        runtime: next.runtime ?? [],
+      };
     }),
     queryBoard: vi.fn(),
     queryProjectPullRequests: vi.fn(),
@@ -2499,6 +2507,7 @@ function bootstrap(version = 1, activitySequence = 0): CodeBootstrap {
       activitySequence === 0
         ? []
         : [{ threadId: ids.thread as never, lastSequence: activitySequence as never }],
+    runtime: [],
   };
 }
 

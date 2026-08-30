@@ -610,8 +610,30 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 }
 
 .sidebar-navigation__thread-copy {
-  flex: 1 1 auto;
+  display: flex;
   min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+}
+
+.sidebar-navigation__thread-checkout {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 3px;
+  color: var(--oct-meta);
+  font-size: calc(10 * var(--oct-text-step));
+  line-height: 1.3;
+}
+
+.sidebar-navigation__thread-checkout-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /*
