@@ -53,7 +53,13 @@ describe("inboxThreadProjectId", () => {
       projectId: String(otherProjectId),
     };
     expect(inboxThreadProjectId(waitingThread)).toBe(otherProjectId);
-    expect(inboxThreadProjectId({ ...waitingThread, projectId: undefined })).toBeUndefined();
+    const withoutProject: ThreadAttentionSignal = {
+      threadId: waitingThread.threadId,
+      reason: waitingThread.reason,
+      title: waitingThread.title,
+      source: waitingThread.source,
+    };
+    expect(inboxThreadProjectId(withoutProject)).toBeUndefined();
   });
 });
 
