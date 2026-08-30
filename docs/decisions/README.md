@@ -73,6 +73,8 @@ distilled successor of the earlier long-form design specifications.
 | [0063](0063-agent-to-agent-messaging.md)                      | Agent-to-agent messaging authority                                                          | Proposed           |
 | [0064](0064-pull-request-observation-cadence.md)              | Opt-in background refresh of the pull-request snapshot                                      | Accepted           |
 | [0065](0065-project-planner-thread.md)                        | A Project-scoped planner thread surveys the board and proposes work                         | Accepted           |
+| [0066](0066-native-harness-model-role-slots.md)               | Native harness model role slots                                                             | Proposed           |
+| [0067](0067-native-harness-turn-loop-and-supervision.md)      | Native harness turn loop, advisor, and follow-up suggestions                                | Proposed           |
 
 ## Adding an ADR
 
