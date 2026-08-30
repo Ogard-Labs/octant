@@ -68,7 +68,10 @@ function restore(
         ? stored.markedUnread.filter((entry): entry is string => typeof entry === "string")
         : [],
     );
-    return { cursors, markedUnread };
+    return {
+      cursors: new Map([...cursors].slice(-MAX_TRACKED_THREADS)),
+      markedUnread: new Set([...markedUnread].slice(-MAX_TRACKED_THREADS)),
+    };
   } catch {
     return empty;
   }
@@ -102,7 +105,14 @@ export function createReadCursorStore<ThreadId>(options: {
   readonly storageKey: string;
   readonly storage?: Pick<Storage, "getItem" | "setItem"> | undefined;
 }): ReadCursorStore<ThreadId> {
-  const storage = "storage" in options ? options.storage : globalThis.localStorage;
+  const storage = (() => {
+    if ("storage" in options) return options.storage;
+    try {
+      return globalThis.localStorage;
+    } catch {
+      return undefined;
+    }
+  })();
   const restored = restore(storage, options.storageKey);
   let snapshot: ReadonlyMap<string, number> = restored.cursors;
   let markedUnread: ReadonlySet<string> = restored.markedUnread;
@@ -127,7 +137,7 @@ export function createReadCursorStore<ThreadId>(options: {
       if (sequence > (snapshot.get(key) ?? 0)) {
         const next = new Map(snapshot);
         next.set(key, sequence);
-        snapshot = next;
+        snapshot = new Map([...next].slice(-MAX_TRACKED_THREADS));
       } else if (!spendsUnreadMark) {
         return;
       }
@@ -147,7 +157,7 @@ export function createReadCursorStore<ThreadId>(options: {
       }
       const nextMarked = new Set(markedUnread);
       nextMarked.add(key);
-      markedUnread = nextMarked;
+      markedUnread = new Set([...nextMarked].slice(-MAX_TRACKED_THREADS));
       persistChange(storage, options.storageKey, (state) => {
         state.cursors.delete(key);
         state.markedUnread.add(key);

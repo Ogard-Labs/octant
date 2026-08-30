@@ -62,6 +62,49 @@ describe("thread read cursors", () => {
     expect(store.getSnapshot().get("thread-1")).toBe(3);
   });
 
+  it("keeps only the newest 500 read and unread marks before and after restart", () => {
+    const storage = memoryStorage();
+    const before = createReadCursorStore<string>({ storageKey: "cursors", storage });
+
+    for (let index = 0; index <= 500; index += 1) {
+      before.mark(`read-${index}`, index + 1);
+      before.unmark(`unread-${index}`);
+    }
+
+    expect(before.getSnapshot().size).toBe(500);
+    expect(before.getSnapshot().has("read-0")).toBe(false);
+    expect(before.getSnapshot().get("read-500")).toBe(501);
+    expect(before.getMarkedUnread().size).toBe(500);
+    expect(before.getMarkedUnread().has("unread-0")).toBe(false);
+    expect(before.getMarkedUnread().has("unread-500")).toBe(true);
+
+    const after = createReadCursorStore<string>({ storageKey: "cursors", storage });
+    expect(after.getSnapshot()).toEqual(before.getSnapshot());
+    expect(after.getMarkedUnread()).toEqual(before.getMarkedUnread());
+  });
+
+  it("still records reads when the browser denies access to default storage", () => {
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get: () => {
+        throw new DOMException("Access denied", "SecurityError");
+      },
+    });
+
+    try {
+      const store = createReadCursorStore<string>({ storageKey: "cursors" });
+      store.mark("thread-1", 3);
+      expect(store.getSnapshot().get("thread-1")).toBe(3);
+    } finally {
+      if (originalStorage === undefined) {
+        Reflect.deleteProperty(globalThis, "localStorage");
+      } else {
+        Object.defineProperty(globalThis, "localStorage", originalStorage);
+      }
+    }
+  });
+
   it("does not read one mode's cursors as another's", () => {
     const storage = memoryStorage();
     createReadCursorStore<string>({ storageKey: "chat", storage }).mark("thread-1", 7);
