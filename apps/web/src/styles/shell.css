@@ -1729,19 +1729,12 @@ form > .work-composer-adapter__attachments {
 .code-composer-adapter__policy-select {
   width: auto;
   min-width: 7rem;
-  height: 28px;
   padding: 0 6px;
-  font-size: var(--oct-text-xs);
 }
 
-.code-composer-adapter__composer-bar > button[data-size="icon"],
-.code-composer-adapter__composer-bar label + button[data-size="icon"] {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
-}
+/* Control sizing on the composer row belongs to the shared row, not to the
+   surface that happens to host it (0038). Sizing icon buttons here is what
+   left one row carrying three different control heights. */
 
 .code-composer-adapter__composer-bar .code-composer-adapter__context-item > svg {
   display: none;

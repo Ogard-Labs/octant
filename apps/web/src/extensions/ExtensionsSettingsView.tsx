@@ -82,6 +82,17 @@ function sourceLabel(source: ExtensionSnapshot["packages"][number]["source"]): s
   }
 }
 
+/**
+ * A skill's size is a rough sense of how much context it carries, so it reads
+ * as a size. Printing the raw byte count made "11 417 bytes" compete with the
+ * skill's own name for attention.
+ */
+function skillContentSize(bytes: number): string {
+  if (bytes < 1000) return `${bytes} B`;
+  if (bytes < 1000 * 1000) return `${(bytes / 1000).toFixed(1)} KB`;
+  return `${(bytes / (1000 * 1000)).toFixed(1)} MB`;
+}
+
 function standaloneSkillSourceLabel(skill: StandaloneSkillRecord): string {
   if (skill.source.kind !== "agents-skills-directory") return sourceLabel(skill.source);
   const sourceRef = String(skill.source.sourceRef);
@@ -1214,7 +1225,12 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
         </span>
       </span>
       <span className="extcard-src">{standaloneSkillSourceLabel(skill)}</span>
-      <code className="extensions-settings__skill-id">{skill.skill.qualifiedId}</code>
+      {/* The qualified id carries a full content hash. It identifies the exact
+          package for a support question, so it stays reachable, but printing it
+          in full made every card lead with a line of hex. */}
+      <code className="extensions-settings__skill-id" title={String(skill.skill.qualifiedId)}>
+        {skill.skill.qualifiedId}
+      </code>
       {skill.description === undefined ? null : <p className="extcard-desc">{skill.description}</p>}
       <dl className="extensions-settings__compatibility">
         <div>
@@ -1233,7 +1249,7 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
         </div>
         <div>
           <dt>Content</dt>
-          <dd>{skill.contentBytes.toLocaleString()} bytes</dd>
+          <dd>{skillContentSize(skill.contentBytes)}</dd>
         </div>
       </dl>
       {skill.skill.diagnostic === undefined ? null : (

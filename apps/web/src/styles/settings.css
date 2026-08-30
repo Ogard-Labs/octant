@@ -723,10 +723,21 @@
   min-width: 0;
 }
 
+/* One control height for single-line inputs only. A textarea wearing the same
+   class was being squeezed to one line, which is why multi-line instructions
+   arrived as a clipped strip: it has rows to honour, so only its minimum joins
+   the rhythm. */
 .settings-view__select,
-.settings-view__text-input:not([type="color"]) {
+.settings-view__text-input:not([type="color"], textarea) {
   height: var(--oct-settings-control-height);
   min-height: var(--oct-settings-control-height);
+}
+
+textarea.settings-view__text-input {
+  min-height: calc(var(--oct-settings-control-height) * 2);
+  padding-block: 8px;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .settings-view__textarea {

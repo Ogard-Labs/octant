@@ -4191,6 +4191,29 @@ input.switch:checked::after {
 .composer-row .composer-gap {
   flex: 1;
 }
+/* One control size and one label size across the whole row. Measured before
+   this rule, a single row carried heights of 26, 28 and 29 and label sizes of
+   11, 11.5 and 13 — every control had been sized by whichever surface added
+   it, so the row read as a pile of parts rather than one strip. */
+.composer-row,
+.composer-row * {
+  font-size: var(--oct-text-xs);
+}
+.composer-row button,
+.composer-row [role="button"],
+.composer-row [role="combobox"],
+.composer-row select,
+.composer-row .composer-model-picker__trigger {
+  min-height: 24px;
+  height: 24px;
+  border-radius: 999px;
+}
+/* The send control is the row's one filled affordance, so it stays a circle. */
+.composer-row > button:last-child {
+  width: 24px;
+  min-width: 24px;
+  padding: 0;
+}
 /* Controls riding the composer row are one treatment across Chat, Work, and
    Code; a surface may position them, never restyle them (ADR 0038). Selects
    are quiet until pointed at; the provider/model picker trigger is the small
