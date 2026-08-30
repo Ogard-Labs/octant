@@ -198,8 +198,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     threadId: props.threadId,
   });
   const [draft, setDraft] = useState(props.controller.pendingDraft);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
   // User edits are counted separately from the internal clear performed when
   // a steered message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
@@ -537,17 +535,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         message.attachments,
         message.fileMentionPaths,
         message.access,
+        true,
       );
       if (sent) {
         // The detached images belong to this message only. Keep any images
         // attached after the steer for the editable draft that follows.
         attachments.commitDetached(message.detachedAttachments);
-        // The controller also clears its draft after a successful start. If a
-        // newer draft was already present before this deferred send reached the
-        // controller, reassert it after that internal cleanup.
-        if (draftRevisionRef.current !== message.draftRevision && draftRef.current !== "") {
-          props.controller.setPendingDraft?.(draftRef.current);
-        }
         if (draftRevisionRef.current === message.draftRevision) {
           threadMentions.clear();
           pathMentions.clear();

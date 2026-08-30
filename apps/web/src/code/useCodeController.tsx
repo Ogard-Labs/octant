@@ -1779,6 +1779,8 @@ export function useCodeController(options: CodeControllerOptions) {
        * the thread's grant. Absent means the thread's own posture.
        */
       executionPolicy?: ProviderExecutionPolicy,
+      /** True when the composer already cleared this draft while it waited. */
+      delayed?: boolean,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -1849,7 +1851,10 @@ export function useCodeController(options: CodeControllerOptions) {
         // A steered send may have emptied the composer so the user can keep
         // typing. Clearing here is safe only when no draft revision landed
         // after this dispatch.
-        if (composerDraftRef.current.revisionFor(sendingThreadId) === draftRevisionAtDispatch) {
+        if (
+          delayed !== true &&
+          composerDraftRef.current.revisionFor(sendingThreadId) === draftRevisionAtDispatch
+        ) {
           composerDraftRef.current.clearFor(sendingThreadId);
           internalClearRan = true;
         }

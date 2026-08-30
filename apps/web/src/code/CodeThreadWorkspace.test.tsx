@@ -1358,7 +1358,7 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
-    expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], [], [], "approval-gated");
+    expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], [], [], "approval-gated", true);
   });
 
   it("keeps a second draft visible but disables sending while one message waits", async () => {
@@ -1442,6 +1442,7 @@ describe("CodeThreadWorkspace", () => {
         [references[0]],
         [],
         "approval-gated",
+        true,
       ),
     );
 
@@ -1792,13 +1793,7 @@ describe("CodeThreadWorkspace", () => {
         resolveMention = resolve;
       },
     );
-    const setPendingDraft = vi.fn();
-    const sendFollowUp = vi.fn(async () => {
-      // Mirror the controller's successful-start cleanup. The workspace must
-      // reassert the newer draft that was typed while mention resolution ran.
-      setPendingDraft("");
-      return true;
-    });
+    const sendFollowUp = vi.fn(async () => true);
     const search = vi.fn(async () => [
       {
         threadId: mentionedThreadId,
@@ -1811,7 +1806,7 @@ describe("CodeThreadWorkspace", () => {
     const resolveClient = vi.fn(() => mentionResolution);
     const { rerender } = render(
       <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, setPendingDraft, turnStatus: "running" })}
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
         threadId={threadId}
         threadMentionClient={
           {
@@ -1838,7 +1833,7 @@ describe("CodeThreadWorkspace", () => {
 
     rerender(
       <CodeThreadWorkspace
-        controller={controller({ sendFollowUp, setPendingDraft, turnStatus: "idle" })}
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
         threadId={threadId}
         threadMentionClient={
           {
@@ -1857,10 +1852,10 @@ describe("CodeThreadWorkspace", () => {
         [],
         [],
         "approval-gated",
+        true,
       ),
     );
     expect(composer).toHaveValue("newer draft");
-    expect(setPendingDraft).toHaveBeenLastCalledWith("newer draft");
   });
 
   it("persists an abandoned prompt to its origin when navigation wins mention resolution", async () => {
@@ -2041,7 +2036,14 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     await waitFor(() =>
-      expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], [], [], "approval-gated"),
+      expect(sendFollowUp).toHaveBeenCalledWith(
+        "and then push",
+        [],
+        [],
+        [],
+        "approval-gated",
+        true,
+      ),
     );
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "later draft");
@@ -2104,7 +2106,14 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     await waitFor(() =>
-      expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], [], [], "approval-gated"),
+      expect(sendFollowUp).toHaveBeenCalledWith(
+        "and then push",
+        [],
+        [],
+        [],
+        "approval-gated",
+        true,
+      ),
     );
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "later draft");
