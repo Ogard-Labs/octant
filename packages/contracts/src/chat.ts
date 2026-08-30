@@ -689,9 +689,65 @@ export const ChatBootstrap = Schema.Struct({
 export type ChatBootstrap = typeof ChatBootstrap.Type;
 
 /**
+ * Bound on a transcript-search query so a pathological needle never reaches
+ * the projection scan. Mirrors the Code content-search query bound.
+ */
+export const MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH = 200;
+
+/** Bound on how many message-body hits one transcript search reports. */
+export const MAX_CHAT_TRANSCRIPT_SEARCH_HITS = 50;
+
+/** Bound on the clipped body snippet returned with each hit. */
+export const MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH = 160;
+
+/**
+ * Inclusive start and exclusive end of a match inside `snippet`, so the
+ * renderer can highlight without re-scanning the original body.
+ */
+export const ChatTranscriptSearchMatchRange = Schema.Struct({
+  start: Schema.Int.pipe(Schema.nonNegative()),
+  end: Schema.Int.pipe(Schema.positive()),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((range) => range.end > range.start));
+export type ChatTranscriptSearchMatchRange = typeof ChatTranscriptSearchMatchRange.Type;
+
+/**
+ * One Chat message-body match. `turnId` deep-links into the transcript;
+ * `snippet` is a bounded clip of the matched body with optional ranges
+ * relative to that clip. Title-only search stays on `/api/chat/search`.
+ */
+export const ChatTranscriptSearchHit = Schema.Struct({
+  threadId: ChatThreadId,
+  title: Schema.NonEmptyTrimmedString,
+  lifecycle: Schema.Literal("active", "archived"),
+  projectId: Schema.optional(ProjectId),
+  turnId: ChatTurnId,
+  snippet: Schema.String.pipe(Schema.maxLength(MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH)),
+  matchRanges: Schema.optional(
+    Schema.Array(ChatTranscriptSearchMatchRange).pipe(Schema.maxItems(8)),
+  ),
+}).annotations(strict);
+export type ChatTranscriptSearchHit = typeof ChatTranscriptSearchHit.Type;
+
+export const ChatTranscriptSearch = Schema.Struct({
+  query: Schema.String.pipe(Schema.maxLength(MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH)),
+  hits: Schema.Array(ChatTranscriptSearchHit).pipe(
+    Schema.maxItems(MAX_CHAT_TRANSCRIPT_SEARCH_HITS),
+  ),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type ChatTranscriptSearch = typeof ChatTranscriptSearch.Type;
+
+/**
  * The bounded read used to keep the Chat sidebar current. It deliberately
  * carries only row metadata and aggregate activity; transcript turns,
  * attachments, citations, and work items belong to the thread read.
+ *
+ * `executing` is the same run-state signal the thread board reasons from: a
+ * turn attempt is queued or streaming. Optional with a false default so a
+ * remote client that sees an older host still paints an idle row rather than
+ * refusing the whole navigation payload.
  */
 export const ChatNavigationThread = Schema.Struct({
   id: ChatThreadId,
@@ -701,6 +757,7 @@ export const ChatNavigationThread = Schema.Struct({
   updatedAt: UtcTimestamp,
   lastSequence: GlobalSequence,
   followUpOpen: Schema.Boolean,
+  executing: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 }).annotations(strict);
 export type ChatNavigationThread = typeof ChatNavigationThread.Type;
 
@@ -851,6 +908,11 @@ export const decodeChatThread = Schema.decodeUnknownSync(ChatThread);
 export const decodeChatThreadBranchOrigin = Schema.decodeUnknownSync(ChatThreadBranchOrigin);
 export const decodeChatThreadView = Schema.decodeUnknownSync(ChatThreadView);
 export const decodeChatBootstrap = Schema.decodeUnknownSync(ChatBootstrap);
+export const decodeChatTranscriptSearchMatchRange = Schema.decodeUnknownSync(
+  ChatTranscriptSearchMatchRange,
+);
+export const decodeChatTranscriptSearchHit = Schema.decodeUnknownSync(ChatTranscriptSearchHit);
+export const decodeChatTranscriptSearch = Schema.decodeUnknownSync(ChatTranscriptSearch);
 export const decodeChatNavigationThread = Schema.decodeUnknownSync(ChatNavigationThread);
 export const decodeChatNavigation = Schema.decodeUnknownSync(ChatNavigation);
 export const decodeChatSettings = Schema.decodeUnknownSync(ChatSettings);

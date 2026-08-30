@@ -871,6 +871,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         message.operationId !== undefined &&
                         message.status === "completed" &&
                         props.onOpenCodeThread !== undefined,
+                      canCopyMarkdown:
+                        message.role === "assistant" &&
+                        message.status === "completed" &&
+                        message.text.trim().length > 0,
                       canCheckpoint:
                         message.role === "assistant" &&
                         message.operationId !== undefined &&
@@ -895,6 +899,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       } else if (value === "restore-files") {
                         setRestoreMessage(undefined);
                         setConfirmingRestore(message.id);
+                      } else if (value === "copy-markdown") {
+                        void copyText(message.text);
                       } else if (value === "copy-references") {
                         void copyText(message.text);
                       }
@@ -930,6 +936,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       <CodeTranscriptRow
                         activity={activity}
                         running={message.status === "incomplete"}
+                        settled={message.status === "completed"}
                       />
                     )}
                     {/* An assistant reply is markdown — a plan arrives as a
@@ -1354,6 +1361,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
 function codeTurnActions(input: {
   readonly canFork: boolean;
+  readonly canCopyMarkdown: boolean;
   readonly canCheckpoint: boolean;
   readonly canRestoreFiles: boolean;
   readonly checkpointBusy: boolean;
@@ -1368,6 +1376,9 @@ function codeTurnActions(input: {
       value: "fork",
       ...(input.forking ? { disabled: true } : {}),
     });
+  }
+  if (input.canCopyMarkdown) {
+    actions.push({ label: "Copy as Markdown", value: "copy-markdown" });
   }
   if (input.canCheckpoint) {
     if (input.marked) {
@@ -1533,7 +1544,9 @@ function boundModelReadsImages(
 function turnStatusLabel(status: "waiting" | "interrupted" | "failed" | "incomplete"): string {
   switch (status) {
     case "waiting":
-      return "Waiting";
+      // Keep the runstatus slot filled while paused so the transcript does not
+      // jump when the elapsed indicator would otherwise drop.
+      return "Waiting for approval";
     case "interrupted":
       return "Interrupted";
     case "failed":

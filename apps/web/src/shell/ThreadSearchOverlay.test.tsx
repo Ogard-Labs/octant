@@ -161,6 +161,52 @@ describe("ThreadSearchOverlay", () => {
     expect(screen.queryAllByRole("option")).toHaveLength(0);
   });
 
+  it("never reports a refused archived listing as no matching threads", async () => {
+    const user = userEvent.setup();
+    renderOverlay({ archivedListing: "unavailable" });
+
+    await user.type(screen.getByRole("combobox"), "nothing here");
+
+    expect(
+      screen.getByText("No matching live threads; archived threads are unavailable."),
+    ).toBeVisible();
+    expect(screen.queryByText("No matching threads.")).toBeNull();
+  });
+
+  it("never reports a refused message search as a complete empty match", async () => {
+    const user = userEvent.setup();
+    renderOverlay({ contentListing: "unavailable" });
+
+    await user.type(screen.getByRole("combobox"), "nothing here");
+
+    expect(screen.getByText("No matching threads; message search is unavailable.")).toBeVisible();
+    expect(screen.queryByText("No matching threads.")).toBeNull();
+  });
+
+  it("never reports a refused host thread list as a complete empty match", async () => {
+    const user = userEvent.setup();
+    renderOverlay({ listing: "unavailable", threads: [] });
+
+    await user.type(screen.getByRole("combobox"), "nothing here");
+
+    expect(
+      screen.getByText("No matching threads; the host thread list is unavailable."),
+    ).toBeVisible();
+    expect(screen.queryByText("No matching threads.")).toBeNull();
+  });
+
+  it("waits for the host thread list before reporting a complete empty match", async () => {
+    const user = userEvent.setup();
+    renderOverlay({ listing: "loading", threads: [] });
+
+    await user.type(screen.getByRole("combobox"), "nothing here");
+
+    expect(
+      screen.getByText("No matching threads yet; more results are still loading."),
+    ).toBeVisible();
+    expect(screen.queryByText("No matching threads.")).toBeNull();
+  });
+
   it("warns in words when the host thread list is not fully loaded", () => {
     renderOverlay({ listing: "loading" });
 

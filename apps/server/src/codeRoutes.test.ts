@@ -99,7 +99,7 @@ describe("Code routes", () => {
   });
 
   it("passes only the authenticated window identity to navigation", async () => {
-    const navigation = vi.fn(async () => ({ threads: [], activity: [] }));
+    const navigation = vi.fn(async () => ({ threads: [], activity: [], runtime: [] }));
     const bootstrap = vi.fn();
     const route = routeFixture({ bootstrap, navigation });
 
@@ -1234,7 +1234,7 @@ function routeFixture(overrides: Record<string, unknown> = {}, maxJsonBodySize?:
   store.register({ windowId, capability, now: 0 });
   const service = {
     bootstrap: vi.fn(async () => ({ settings: settings(), threads: [], checkouts: [] })),
-    navigation: vi.fn(async () => ({ threads: [], activity: [] })),
+    navigation: vi.fn(async () => ({ threads: [], activity: [], runtime: [] })),
     read: vi.fn(() => ({ thread, checkout, lastSequence: 0 })),
     execute: vi.fn(),
     executeOperation: vi.fn(),

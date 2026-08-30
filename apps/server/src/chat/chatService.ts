@@ -32,6 +32,7 @@ import {
   type ChatBootstrap,
   type ChatNavigation,
   MAX_CHAT_NAVIGATION_THREADS,
+  MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   type ChatCommandResult,
   type ChatContentReference,
   type ChatEventFrame,
@@ -41,6 +42,7 @@ import {
   type ChatThread,
   type ChatThreadId,
   type ChatThreadView,
+  type ChatTranscriptSearch,
   type ChatTurn,
   type ChatTurnRouteDecision,
   type AggregateVersion,
@@ -912,6 +914,30 @@ export class ChatService {
       .searchChatThreads(query)
       .filter((thread) => !hidden.has(String(thread.id)))
       .map((thread) => this.#withAggregateHeadVersion(thread));
+  }
+
+  /**
+   * Message-body search. Same listing authority as title search and bootstrap:
+   * deleted threads stay out of the projection query, and hidden sidecars are
+   * filtered here so a caller never learns they exist.
+   */
+  searchTranscript(query: string): ChatTranscriptSearch {
+    this.#assertReady();
+    const trimmed = query.trim();
+    if (trimmed.length === 0) {
+      return { query: "", hits: [], truncated: false };
+    }
+    if (trimmed.length > MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH) {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Chat transcript search query is too long.",
+      });
+    }
+    const hidden = this.#hiddenThreadIds();
+    return {
+      query: trimmed,
+      ...this.#persistence.searchChatTranscript(trimmed, hidden),
+    };
   }
 
   read(threadId: ChatThreadId): ChatThreadView {

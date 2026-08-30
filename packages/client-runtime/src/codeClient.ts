@@ -38,6 +38,7 @@ import {
   decodeCodeSettings,
   decodeCodeThread,
   decodeCodeNavigation,
+  decodeCodeNavigationRuntime,
   decodeCodeThreadActivity,
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
@@ -1139,13 +1140,21 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
 }
 
 function decodeBootstrap(value: unknown): CodeBootstrap {
-  if (!isRecord(value) || !exactKeys(value, ["settings", "threads", "checkouts", "activity"])) {
+  // `activity` and `runtime` are optional for older hosts; Schema defaults fill them.
+  if (!isRecord(value)) throw new Error("invalid");
+  const keys = Object.keys(value);
+  const allowed = new Set(["settings", "threads", "checkouts", "activity", "runtime"]);
+  if (
+    !["settings", "threads", "checkouts"].every((key) => keys.includes(key)) ||
+    keys.some((key) => !allowed.has(key))
+  ) {
     throw new Error("invalid");
   }
   if (
     !Array.isArray(value.threads) ||
     !Array.isArray(value.checkouts) ||
-    !Array.isArray(value.activity)
+    (value.activity !== undefined && !Array.isArray(value.activity)) ||
+    (value.runtime !== undefined && !Array.isArray(value.runtime))
   ) {
     throw new Error("invalid");
   }
@@ -1153,7 +1162,14 @@ function decodeBootstrap(value: unknown): CodeBootstrap {
     settings: decodeCodeSettings(value.settings),
     threads: value.threads.map((thread) => decodeCodeThread(thread)),
     checkouts: value.checkouts.map((checkout) => decodeCodeCheckoutIdentity(checkout)),
-    activity: value.activity.map((entry) => decodeCodeThreadActivity(entry)),
+    activity:
+      value.activity === undefined
+        ? []
+        : value.activity.map((entry) => decodeCodeThreadActivity(entry)),
+    runtime:
+      value.runtime === undefined
+        ? []
+        : value.runtime.map((entry) => decodeCodeNavigationRuntime(entry)),
   };
 }
 

@@ -361,7 +361,7 @@ describe("ChatTranscript", () => {
     for (const label of [
       "Queued",
       "Streaming",
-      "Waiting",
+      "Waiting for approval",
       "Interrupted",
       "Failed",
       "Cancelled",
@@ -690,6 +690,36 @@ describe("ChatTranscript", () => {
     vi.unstubAllGlobals();
   });
 
+  it("copies finished assistant prose as Markdown from the action menu", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, clipboard: { writeText } });
+    render(<ChatTranscript view={viewFixture()} />);
+
+    await chooseTurnAction("Copy as Markdown");
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Here is the summary."));
+    vi.unstubAllGlobals();
+  });
+
+  it("quotes a finished selection into the composer via Add to chat", async () => {
+    const user = userEvent.setup();
+    const onQuoteSelection = vi.fn();
+    render(<ChatTranscript onQuoteSelection={onQuoteSelection} view={viewFixture()} />);
+
+    const prose = screen.getByText("Here is the summary.");
+    const range = document.createRange();
+    range.selectNodeContents(prose);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    fireEvent(document, new Event("selectionchange"));
+
+    await user.click(await screen.findByRole("button", { name: "Add to chat" }));
+    expect(onQuoteSelection).toHaveBeenCalledWith({
+      turnId: ids.turn,
+      text: "Here is the summary.",
+    });
+  });
+
   it("mirrors fork, checkpoint, and copy on the turn's context menu", async () => {
     const onBranchTurn = vi.fn();
     render(
@@ -709,6 +739,7 @@ describe("ChatTranscript", () => {
     fireEvent.contextMenu(screen.getByText("Please summarize this."));
     expect(await screen.findByRole("menuitem", { name: "Branch from here" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Checkpoint" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Copy as Markdown" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Copy references" })).toBeVisible();
   });
 

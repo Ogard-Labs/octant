@@ -16,13 +16,13 @@ const now = "2026-07-26T22:00:00.000Z";
 
 describe("Work thread routes", () => {
   it("returns an authenticated Work thread bootstrap", async () => {
-    const bootstrap = vi.fn(async () => ({ threads: [thread()] }));
+    const bootstrap = vi.fn(async () => ({ threads: [thread()], runtime: [] }));
     const route = routeFixture({ bootstrap });
 
     const response = await route(request("/api/work/threads/bootstrap"));
 
     expect(response?.status).toBe(200);
-    expect(await response?.json()).toEqual({ threads: [thread()] });
+    expect(await response?.json()).toEqual({ threads: [thread()], runtime: [] });
     expect(bootstrap).toHaveBeenCalledWith(windowId);
   });
 
@@ -214,7 +214,7 @@ function routeFixture(overrides: Record<string, unknown>) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   const service = {
-    bootstrap: vi.fn(async () => ({ threads: [] })),
+    bootstrap: vi.fn(async () => ({ threads: [], runtime: [] })),
     execute: vi.fn(async () => ({ kind: "thread-created", thread: thread() })),
     ...overrides,
   } as never;
