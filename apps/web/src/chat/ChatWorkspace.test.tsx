@@ -628,6 +628,47 @@ describe("ChatWorkspace", () => {
     await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue("later draft"));
   });
 
+  it("keeps the newest Chat draft typed while the deferred send reaches the host", async () => {
+    const user = userEvent.setup();
+    let finish: ((value: boolean) => void) | undefined;
+    function Harness() {
+      const [draft, setDraft] = useState("Next step");
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn: () => {
+                setDraft("");
+                return new Promise<boolean>((resolve) => {
+                  finish = resolve;
+                });
+              },
+              setPendingDraft: setDraft,
+            })}
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setView(viewWithAttempt("completed"))} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.type(screen.getByLabelText("Message"), "later draft");
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(finish).toBeDefined());
+    await user.type(screen.getByLabelText("Message"), "newest draft");
+    finish?.(true);
+
+    await waitFor(() => expect(screen.queryByText("Next step")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue("newest draft"));
+  });
+
   it("does not send a message into a thread whose composer has unmounted", async () => {
     const user = userEvent.setup();
     const sendTurn = vi.fn(async () => true);

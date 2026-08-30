@@ -503,17 +503,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     // sent with. Anything the user added while it waited belongs to the draft
     // they are writing now, so clearing on success must compare the whole
     // snapshot rather than trusting that nothing moved.
-    const stillHoldsMessage = () =>
-      String(props.threadId) === threadKey &&
-      sameByKey(attachments.peekForSend(), message.attachments, (reference) =>
-        String(reference.attachmentId),
-      ) &&
-      sameByKey(pathMentionsSelectedRef.current, message.fileMentionPaths, (path) => path) &&
-      sameByKey(
-        threadMentionChipsRef.current.map((chip) => String(chip.threadId)),
-        message.threadMentionIds.map((mentionedThreadId) => String(mentionedThreadId)),
-        (id) => id,
+    const stillHoldsMessage = () => {
+      const currentPaths = pathMentionsSelectedRef.current;
+      const currentThreadIds = threadMentionChipsRef.current.map((chip) => String(chip.threadId));
+      return (
+        String(props.threadId) === threadKey &&
+        sameByKey(attachments.peekForSend(), message.attachments, (reference) =>
+          String(reference.attachmentId),
+        ) &&
+        (currentPaths.length === 0 ||
+          sameByKey(currentPaths, message.fileMentionPaths, (path) => path)) &&
+        (currentThreadIds.length === 0 ||
+          sameByKey(
+            currentThreadIds,
+            message.threadMentionIds.map((mentionedThreadId) => String(mentionedThreadId)),
+            (id) => id,
+          ))
       );
+    };
     try {
       const sent = await props.controller.sendFollowUp(
         message.prompt,
@@ -1307,7 +1314,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             kind: "send",
             send: {
               ariaLabel: "Send follow-up",
-              disabled: !canSend,
+              disabled: !canSend || steered.pending !== undefined,
               onSend: () => void submitFollowUp(),
             },
           },

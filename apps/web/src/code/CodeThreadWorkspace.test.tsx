@@ -1361,6 +1361,97 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], [], [], "approval-gated");
   });
 
+  it("keeps a second draft visible but disables sending while one message waits", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp: vi.fn(async () => true), turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "and then push");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await user.type(composer, "write the release note");
+
+    expect(composer).toHaveValue("write the release note");
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+  });
+
+  it("removes a sent image when clearing the draft also cleared its thread mention", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000011" as CodeAttachmentId,
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "e".repeat(64),
+    };
+    const attachmentClient: CodeAttachmentClient = {
+      putAttachment: vi.fn(async () => reference),
+      discardAttachment: vi.fn(async () => undefined),
+      attachment: vi.fn(),
+    };
+    const search = vi.fn(async () => [
+      {
+        threadId: mentionedThreadId,
+        mode: "chat" as const,
+        title: "Release notes",
+        placement: { kind: "unfiled" as const },
+        updatedAt: "2026-08-15T09:00:00.000Z" as never,
+      },
+    ]);
+    const resolveMention = vi.fn(async () => ({
+      mentions: [
+        {
+          threadId: mentionedThreadId,
+          mode: "chat" as const,
+          title: "Release notes",
+          placement: { kind: "unfiled" as const },
+          transcript: [],
+          truncated: false,
+        },
+      ],
+      unavailable: [],
+    }));
+    const threadMentionClient = {
+      search,
+      resolve: resolveMention,
+      openSideChat: vi.fn(),
+      execute: vi.fn(),
+    } as never;
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        threadMentionClient={threadMentionClient}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "#Rel");
+    await user.click(await screen.findByRole("option", { name: /Release notes/ }));
+    await user.type(composer, "ship it");
+    pasteImage(composer);
+    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    rerender(
+      <CodeThreadWorkspace
+        attachmentClient={attachmentClient}
+        controller={controller({ sendFollowUp, turnStatus: "idle" })}
+        threadMentionClient={threadMentionClient}
+        threadId={threadId}
+      />,
+    );
+
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument());
+  });
+
   it("keeps a later Code draft when the message it was typed after reaches the host", async () => {
     const user = userEvent.setup();
     let finish: ((value: boolean) => void) | undefined;
@@ -1454,7 +1545,8 @@ describe("CodeThreadWorkspace", () => {
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "later draft");
     finish?.(false);
-    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByText("and then push")).not.toBeInTheDocument());
+    expect(sendFollowUp).toHaveBeenCalledOnce();
     expect(composer).toHaveValue("later draft");
   });
 

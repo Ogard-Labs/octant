@@ -80,6 +80,46 @@ describe("sending a message while a response is running", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("restores through the thread callback that accepted the message", async () => {
+    const send = vi.fn(async () => true);
+    const restoreA = vi.fn();
+    const restoreB = vi.fn();
+    const { rerender, result } = renderHook(
+      (props: { threadKey: string; restore: (message: Message) => void }) =>
+        useSteeredSend<Message>({
+          threadKey: props.threadKey,
+          settlement: "running",
+          send,
+          restore: props.restore,
+        }),
+      { initialProps: { threadKey: "thread-a", restore: restoreA } },
+    );
+
+    act(() => {
+      result.current.steer(message);
+    });
+    rerender({ threadKey: "thread-b", restore: restoreB });
+
+    await waitFor(() => expect(restoreA).toHaveBeenCalledWith(message));
+    expect(restoreB).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("restores a waiting message when its composer unmounts", async () => {
+    const send = vi.fn(async () => true);
+    const restore = vi.fn();
+    const { result, unmount } = harness({ send, restore });
+
+    act(() => {
+      result.current.steer(message);
+    });
+    unmount();
+
+    await waitFor(() => expect(restore).toHaveBeenCalledOnce());
+    expect(restore).toHaveBeenCalledWith(message);
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("gives up on a thread that will never run it, keeping the words", async () => {
     const send = vi.fn(async () => true);
     const restore = vi.fn();

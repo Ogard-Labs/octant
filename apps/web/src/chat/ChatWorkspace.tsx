@@ -175,6 +175,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // has typed since rather than the one the render that started it captured.
   const pendingDraftRef = useRef(props.controller.pendingDraft);
   pendingDraftRef.current = props.controller.pendingDraft;
+  const draftEditRevisionRef = useRef(0);
   const setPendingDraftRef = useRef(props.controller.setPendingDraft);
   setPendingDraftRef.current = props.controller.setPendingDraft;
   const steered = useSteeredSend<ChatSteeredMessage>({
@@ -183,12 +184,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ready: uploadingAttachments.length === 0 && attachmentStatus.kind !== "removing",
     send: async (message) => {
       const laterDraft = pendingDraftRef.current;
+      const draftEditRevision = draftEditRevisionRef.current;
       const sent = await submitTurnRef.current(message.prompt);
       // The send path owns the composer for the message it is sending: it
       // clears the draft, and puts the message back if the host refused it.
       // A draft the user typed while this message was waiting belongs to
       // neither, so it goes back over whatever that left behind.
-      if (laterDraft.length > 0) setPendingDraftRef.current(laterDraft);
+      if (laterDraft.length > 0 && draftEditRevisionRef.current === draftEditRevision) {
+        setPendingDraftRef.current(laterDraft);
+      }
       return sent;
     },
     // The images, chips, and selections were never taken, so putting the words
@@ -900,7 +904,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         isSending={isSending}
         hasPendingMessage={steered.pending !== undefined}
         model={{ options: providerState.modelOptions, value: view.thread.modelId }}
-        onDraftChange={props.controller.setPendingDraft}
+        onDraftChange={(draft, caretIndex) => {
+          draftEditRevisionRef.current += 1;
+          props.controller.setPendingDraft(draft, caretIndex);
+        }}
         imageAttachment={imageAttachmentCapability}
         onImagePasteRejected={(reason) => setAttachmentStatus({ kind: "failed", message: reason })}
         {...(threadMentions.composer === undefined

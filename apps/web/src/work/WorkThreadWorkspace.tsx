@@ -774,7 +774,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 }}
                 placeholder={
                   turnRunning
-                    ? "Queue the next message…"
+                    ? "Send the next message…"
                     : "Describe the deliverable or paste a draft…"
                 }
                 ref={textareaRef}
@@ -892,7 +892,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             {completionLocked
               ? "Reactivate this Work thread before creating another artifact or changing its provider."
               : turnRunning
-                ? "Press Enter to queue the next message · Shift+Enter for a new line"
+                ? "Press Enter to send · it runs when this response finishes · Shift+Enter for a new line"
                 : props.turnClient === undefined
                   ? "Press Enter to save a markdown artifact · Shift+Enter for a new line"
                   : "Press Enter to send · Shift+Enter for a new line · Type # to mention a thread, @ to mention a file"}

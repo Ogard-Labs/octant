@@ -59,14 +59,30 @@ export function useSteeredSend<Message>(input: UseSteeredSendInput<Message>): St
   const stateRef = useRef(state);
   stateRef.current = state;
   const firing = useRef(false);
+  const restoreForPendingRef = useRef<((message: Message) => void) | undefined>(undefined);
+  const restorePending = useCallback((message: Message): void => {
+    const restore = restoreForPendingRef.current;
+    if (restore === undefined) return;
+    restoreForPendingRef.current = undefined;
+    restore(message);
+  }, []);
 
   useEffect(() => {
     const current = stateRef.current;
     const next = disarmSteeredSend(current, input.threadKey);
     if (next === current) return;
-    if (current.status === "steering") restoreRef.current(current.message);
+    if (current.status === "steering") restorePending(current.message);
     setState(next);
-  }, [input.threadKey]);
+  }, [input.threadKey, restorePending]);
+
+  useEffect(
+    () => () => {
+      const current = stateRef.current;
+      if (firing.current || current.status !== "steering") return;
+      restorePending(current.message);
+    },
+    [restorePending],
+  );
 
   useEffect(() => {
     if (firing.current) return;
@@ -89,7 +105,11 @@ export function useSteeredSend<Message>(input: UseSteeredSendInput<Message>): St
           setRelease((current) => current + 1);
         }
         if (threadKeyRef.current !== threadKey) return;
-        if (!sent) restoreRef.current(message);
+        if (sent) {
+          restoreForPendingRef.current = undefined;
+        } else {
+          restorePending(message);
+        }
         setState((current) =>
           current.status === "steering" && current.threadKey === threadKey
             ? EMPTY_STEERED_SEND
@@ -99,22 +119,25 @@ export function useSteeredSend<Message>(input: UseSteeredSendInput<Message>): St
       return;
     }
     if (decision.next !== state) setState(decision.next);
-  }, [input.ready, input.settlement, input.threadKey, release, state]);
+  }, [input.ready, input.settlement, input.threadKey, release, restorePending, state]);
 
   const steer = useCallback((message: Message): boolean => {
     const threadKey = threadKeyRef.current;
     if (threadKey === undefined) return false;
-    const next = steerSend(stateRef.current, threadKey, message, settlementRef.current);
+    const current = stateRef.current;
+    const next = steerSend(current, threadKey, message, settlementRef.current);
+    const accepted = next !== current && next.status === "steering" && next.message === message;
+    if (accepted) restoreForPendingRef.current = restoreRef.current;
     setState(next);
-    return next.status === "steering" && next.message === message;
+    return accepted;
   }, []);
 
   const drop = useCallback((): void => {
     const current = stateRef.current;
     if (current.status !== "steering") return;
-    restoreRef.current(current.message);
+    restorePending(current.message);
     setState(EMPTY_STEERED_SEND);
-  }, []);
+  }, [restorePending]);
 
   return {
     pending: state.status === "steering" ? state.message : undefined,
