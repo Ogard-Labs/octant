@@ -20,8 +20,12 @@ import {
   decodeChatSettings,
   decodeChatThread,
   decodeChatThreadView,
+  decodeChatTranscriptSearch,
   decodeChatTurn,
   decodeChatTurnRouteDecision,
+  MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
+  MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
+  MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
 } from "./chat";
 import { MAX_THREAD_MENTIONS_PER_TURN } from "./threadMention";
 
@@ -329,10 +333,28 @@ describe("chat contracts", () => {
             updatedAt: now,
             lastSequence: 7,
             followUpOpen: true,
+            executing: true,
           },
         ],
       }),
-    ).toMatchObject({ threads: [{ id: ids.thread, lastSequence: 7, followUpOpen: true }] });
+    ).toMatchObject({
+      threads: [{ id: ids.thread, lastSequence: 7, followUpOpen: true, executing: true }],
+    });
+    // An older host that omits executing still decodes; the row is not working.
+    expect(
+      decodeChatNavigation({
+        threads: [
+          {
+            id: ids.thread,
+            title: "Planning",
+            providerInstanceId: ids.provider,
+            updatedAt: now,
+            lastSequence: 7,
+            followUpOpen: false,
+          },
+        ],
+      }).threads[0]?.executing,
+    ).toBe(false);
     expect(() =>
       decodeChatNavigation({
         threads: [
@@ -952,6 +974,36 @@ describe("chat contracts", () => {
       // those stay server-owned so a branch cannot widen or re-route scope.
       expect(() => decodeChatCommand({ ...branch, projectId: ids.project })).toThrow();
       expect(() => decodeChatCommand({ ...branch, modelId: "model-b" })).toThrow();
+    });
+  });
+
+  describe("transcript search", () => {
+    it("decodes a bounded message-body hit with optional match ranges", () => {
+      const search = {
+        query: "migration",
+        truncated: false,
+        hits: [
+          {
+            threadId: ids.thread,
+            title: "Release notes",
+            lifecycle: "archived" as const,
+            projectId: ids.project,
+            turnId: ids.turn,
+            snippet: "…explained that migration…",
+            matchRanges: [{ start: 14, end: 23 }],
+          },
+        ],
+      };
+      expect(decodeChatTranscriptSearch(search)).toEqual(search);
+      expect(MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH).toBe(200);
+      expect(MAX_CHAT_TRANSCRIPT_SEARCH_HITS).toBe(50);
+      expect(MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH).toBe(160);
+      expect(() =>
+        decodeChatTranscriptSearch({
+          ...search,
+          query: "x".repeat(MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH + 1),
+        }),
+      ).toThrow();
     });
   });
 });

@@ -112,6 +112,11 @@ export interface CodeConversationMessage {
 }
 
 export interface CodeThreadNavigationItem {
+  readonly checkoutChip?: {
+    readonly checkoutKind: "managed-worktree";
+    readonly label: string;
+  };
+  readonly executing?: boolean;
   readonly executionPolicy: CodeThread["executionPolicy"];
   readonly lifecycle: CodeThread["lifecycle"];
   readonly projectId: CodeThread["projectId"];
@@ -635,13 +640,15 @@ export function useCodeController(options: CodeControllerOptions) {
         if (
           !(
             samePollingData(currentBootstrap.threads, next.threads) &&
-            samePollingData(currentBootstrap.activity, next.activity)
+            samePollingData(currentBootstrap.activity, next.activity) &&
+            samePollingData(currentBootstrap.runtime, next.runtime)
           )
         ) {
           bootstrapRef.current = {
             ...currentBootstrap,
             threads: next.threads,
             activity: next.activity,
+            runtime: next.runtime,
           };
         }
       }
@@ -649,7 +656,8 @@ export function useCodeController(options: CodeControllerOptions) {
         if (current === undefined) return current;
         if (
           samePollingData(current.threads, next.threads) &&
-          samePollingData(current.activity, next.activity)
+          samePollingData(current.activity, next.activity) &&
+          samePollingData(current.runtime, next.runtime)
         ) {
           return current;
         }
@@ -657,6 +665,7 @@ export function useCodeController(options: CodeControllerOptions) {
           ...current,
           threads: next.threads,
           activity: next.activity,
+          runtime: next.runtime,
         };
       });
       setActiveView((current) => {
@@ -1314,6 +1323,25 @@ export function useCodeController(options: CodeControllerOptions) {
     }
     return byThread;
   }, [bootstrap]);
+  const runtimeByThread = useMemo(() => {
+    const byThread = new Map<
+      string,
+      {
+        readonly executing: boolean;
+        readonly checkoutChip?: {
+          readonly checkoutKind: "managed-worktree";
+          readonly label: string;
+        };
+      }
+    >();
+    for (const entry of bootstrap?.runtime ?? []) {
+      byThread.set(String(entry.threadId), {
+        executing: entry.executing,
+        ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
+      });
+    }
+    return byThread;
+  }, [bootstrap]);
   // Being the thread on screen is not the same as having shown what the host
   // journaled. A refresh reports activity for every thread, including one whose
   // snapshot or operation stream is late or gone, and a read cursor only moves
@@ -1326,29 +1354,34 @@ export function useCodeController(options: CodeControllerOptions) {
     (): ReadonlyArray<CodeThreadNavigationItem> =>
       (bootstrap?.threads ?? [])
         .filter((thread) => thread.lifecycle !== "archived")
-        .map((thread) => ({
-          executionPolicy: thread.executionPolicy,
-          lifecycle: thread.lifecycle,
-          projectId: thread.projectId,
-          providerInstanceId: thread.providerInstanceId,
-          threadId: thread.id,
-          title: thread.title,
-          followUp: followUps.get(String(thread.id))?.followUp?.state === "open",
-          unread:
-            markedUnreadThreads.has(String(thread.id)) ||
-            (activityByThread.get(String(thread.id)) ?? 0) >
-              (readCursors.get(String(thread.id)) ?? 0),
-          ...(thread.pinned === true ? { pinned: true } : {}),
-          ...(thread.forkedFrom === undefined
-            ? {}
-            : { lineageParentThreadId: String(thread.forkedFrom.threadId) }),
-          updatedAt: thread.updatedAt,
-        }))
+        .map((thread) => {
+          const runtime = runtimeByThread.get(String(thread.id));
+          return {
+            executionPolicy: thread.executionPolicy,
+            lifecycle: thread.lifecycle,
+            projectId: thread.projectId,
+            providerInstanceId: thread.providerInstanceId,
+            threadId: thread.id,
+            title: thread.title,
+            followUp: followUps.get(String(thread.id))?.followUp?.state === "open",
+            unread:
+              markedUnreadThreads.has(String(thread.id)) ||
+              (activityByThread.get(String(thread.id)) ?? 0) >
+                (readCursors.get(String(thread.id)) ?? 0),
+            ...(runtime?.executing === true ? { executing: true } : {}),
+            ...(runtime?.checkoutChip === undefined ? {} : { checkoutChip: runtime.checkoutChip }),
+            ...(thread.pinned === true ? { pinned: true } : {}),
+            ...(thread.forkedFrom === undefined
+              ? {}
+              : { lineageParentThreadId: String(thread.forkedFrom.threadId) }),
+            updatedAt: thread.updatedAt,
+          };
+        })
         // Pinned threads lead, and the order inside each group is the host's.
         // Sorting the whole list by recency instead would move a pinned thread
         // the moment anything else ran, which is the opposite of pinning it.
         .sort((left, right) => Number(right.pinned ?? false) - Number(left.pinned ?? false)),
-    [activityByThread, bootstrap, followUps, markedUnreadThreads, readCursors],
+    [activityByThread, bootstrap, followUps, markedUnreadThreads, readCursors, runtimeByThread],
   );
 
   // Only the thread in view streams, so the list is re-read on a timer to keep

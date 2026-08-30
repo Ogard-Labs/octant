@@ -532,6 +532,16 @@
   color: var(--oct-muted);
 }
 
+.chat-transcript__quoteable {
+  position: relative;
+}
+
+.chat-transcript__quote-offer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--oct-space-2);
+}
+
 .chat-transcript__citations {
   display: flex;
   flex-wrap: wrap;

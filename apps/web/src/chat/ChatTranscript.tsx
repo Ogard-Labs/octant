@@ -11,7 +11,7 @@ import type {
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
 import { Ban, Check, Circle, CircleAlert, CircleX, Clock3, LoaderCircle } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -32,6 +32,14 @@ export interface ChatTranscriptProps {
   readonly onEditTurn?: (turnId: ChatTurnId, prompt: string) => void;
   /** Starts a second thread carrying the conversation through this turn. */
   readonly onBranchTurn?: (turnId: ChatTurnId) => void;
+  /**
+   * Quotes a finished assistant excerpt into the same thread's composer as a
+   * structured chip. Absent when the surface cannot accept quotes.
+   */
+  readonly onQuoteSelection?: (input: {
+    readonly turnId: ChatTurnId;
+    readonly text: string;
+  }) => void;
   /** True while a turn is running, so revising and branching stay unavailable. */
   readonly busy?: boolean;
   /**
@@ -58,7 +66,9 @@ export interface ChatTranscriptCheckpoints {
 const attemptLabels: Record<ChatAttemptOutcome, string> = {
   queued: "Queued",
   streaming: "Streaming",
-  waiting: "Waiting",
+  // Keep the runstatus slot filled while paused on approval so the transcript
+  // does not jump when an elapsed indicator would otherwise drop.
+  waiting: "Waiting for approval",
   interrupted: "Interrupted",
   failed: "Failed",
   cancelled: "Cancelled",
@@ -203,6 +213,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               busy: props.busy === true,
               canEdit: userContent !== undefined && props.onEditTurn !== undefined,
               canBranch: props.onBranchTurn !== undefined,
+              canCopyMarkdown: assistantBodies.some((body) => body.trim().length > 0),
               checkpointsAvailable: checkpoints !== undefined,
               checkpointBusy: checkpoints?.busy === true,
               marked: marked !== undefined,
@@ -221,6 +232,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   setCheckpointDraft({ turnId: String(turn.id), kind: "restore" });
                 } else if (value === "checkpoint-forget") {
                   if (marked !== undefined) checkpoints?.onForget(marked);
+                } else if (value === "copy-markdown") {
+                  void copyText(assistantBodies.join("\n\n").trim());
                 } else if (value === "copy-references") {
                   void copyText(
                     chatTurnReferenceText({
@@ -287,6 +300,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   attempt={attempt}
                   contentById={contentById}
                   key={attempt.id}
+                  onQuoteSelection={props.onQuoteSelection}
                   onRetryAttempt={props.onRetryAttempt}
                   previousAttempt={turn.attempts[index - 1]}
                   citations={citationsByAttempt.get(String(attempt.id)) ?? []}
@@ -316,6 +330,7 @@ function chatTurnActions(input: {
   readonly busy: boolean;
   readonly canEdit: boolean;
   readonly canBranch: boolean;
+  readonly canCopyMarkdown: boolean;
   readonly checkpointsAvailable: boolean;
   readonly checkpointBusy: boolean;
   readonly marked: boolean;
@@ -335,6 +350,9 @@ function chatTurnActions(input: {
       value: "branch",
       ...(input.busy ? { disabled: true } : {}),
     });
+  }
+  if (input.canCopyMarkdown) {
+    actions.push({ label: "Copy as Markdown", value: "copy-markdown" });
   }
   if (input.checkpointsAvailable) {
     if (input.marked) {
@@ -410,6 +428,7 @@ function AttemptBlock(props: {
   readonly attempt: ChatAttempt;
   readonly citations: ChatThreadView["citations"];
   readonly contentById: ReadonlyMap<string, ChatContentBody>;
+  readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
   readonly previousAttempt: ChatAttempt | undefined;
 }) {
@@ -422,6 +441,11 @@ function AttemptBlock(props: {
       ? undefined
       : responseContents.map((content) => content!.body).join("");
   const canRetry = props.attempt.outcome === "failed" || props.attempt.outcome === "interrupted";
+  const canQuote =
+    props.onQuoteSelection !== undefined &&
+    props.attempt.outcome === "completed" &&
+    responseBody !== undefined &&
+    responseBody.trim().length > 0;
 
   return (
     <>
@@ -434,6 +458,12 @@ function AttemptBlock(props: {
       >
         {props.attempt.responseRefs.length === 0 ? null : responseBody === undefined ? (
           <p role="alert">Response content is unavailable.</p>
+        ) : canQuote ? (
+          <QuoteableAssistantBody
+            body={responseBody}
+            onQuote={(text) => props.onQuoteSelection?.({ turnId: props.attempt.turnId, text })}
+            rootId={`chat-quote-${String(props.attempt.id)}`}
+          />
         ) : (
           <ChatRichText body={responseBody} />
         )}
@@ -457,10 +487,75 @@ function AttemptBlock(props: {
 }
 
 /**
- * The server persists a diagnostics incident with this exact operation id.
- * Keeping the copy action at the failure site avoids asking a local user to
- * discover a hidden journal correlation before they can use Settings support.
+ * Finished assistant prose that offers "Add to chat" when the user selects
+ * text. The selection becomes a composer chip, not pasted draft text.
  */
+function QuoteableAssistantBody(props: {
+  readonly body: string;
+  readonly rootId: string;
+  readonly onQuote: (text: string) => void;
+}) {
+  const [offer, setOffer] = useState<{ readonly text: string } | undefined>(undefined);
+
+  useEffect(() => {
+    function onSelectionChange() {
+      const selection = document.getSelection();
+      if (selection === null || selection.isCollapsed || selection.rangeCount === 0) {
+        setOffer(undefined);
+        return;
+      }
+      const text = selection.toString().trim();
+      if (text.length === 0) {
+        setOffer(undefined);
+        return;
+      }
+      const root = selection.anchorNode;
+      const focus = selection.focusNode;
+      const container = document.getElementById(props.rootId);
+      if (
+        container === null ||
+        root === null ||
+        focus === null ||
+        !container.contains(root) ||
+        !container.contains(focus)
+      ) {
+        setOffer(undefined);
+        return;
+      }
+      setOffer({ text });
+    }
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, [props.rootId]);
+
+  return (
+    <div className="chat-transcript__quoteable" id={props.rootId}>
+      <ChatRichText body={props.body} />
+      {offer === undefined ? null : (
+        <div className="chat-transcript__quote-offer">
+          <OctantButton
+            onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
+              event.preventDefault();
+              props.onQuote(offer.text);
+              setOffer(undefined);
+              document.getSelection()?.removeAllRanges();
+            }}
+            onMouseDown={(event) => {
+              // Keep the selection until click runs; mouse-down would clear it.
+              event.preventDefault();
+            }}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Add to chat
+          </OctantButton>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SupportCorrelationControl({ correlationId }: { readonly correlationId: string }) {
   return (
     <div aria-label="Support correlation" className="chat-transcript__support-correlation">

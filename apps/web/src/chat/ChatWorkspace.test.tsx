@@ -157,6 +157,107 @@ function viewWithFailedAttempt() {
   return viewWithAttempt("failed");
 }
 
+/** Two completed turns with distinct assistant prose that can be quoted. */
+function viewWithQuotableReplies() {
+  const firstTurnId = "00000000-0000-4000-8000-000000000941";
+  const secondTurnId = "00000000-0000-4000-8000-000000000942";
+  const firstUserContentId = "00000000-0000-4000-8000-000000000943";
+  const secondUserContentId = "00000000-0000-4000-8000-000000000944";
+  const firstResponseContentId = "00000000-0000-4000-8000-000000000945";
+  const secondResponseContentId = "00000000-0000-4000-8000-000000000946";
+  const firstAttemptId = "00000000-0000-4000-8000-000000000947";
+  const secondAttemptId = "00000000-0000-4000-8000-000000000948";
+
+  return decodeChatThreadView({
+    ...controllerFixture().activeView!,
+    lastSequence: 2,
+    turns: [
+      {
+        id: firstTurnId,
+        threadId,
+        sequence: 1,
+        userMessageRef: { contentId: firstUserContentId, digest: "a".repeat(64), byteLength: 12 },
+        attachmentIds: [],
+        attempts: [
+          {
+            id: firstAttemptId,
+            turnId: firstTurnId,
+            threadId,
+            providerInstanceId: providerId,
+            providerSessionId: "20000000-0000-4000-8000-000000000001",
+            modelId: "model-a",
+            contextManifestId: "30000000-0000-4000-8000-000000000001",
+            outcome: "completed",
+            responseRefs: [
+              { contentId: firstResponseContentId, digest: "b".repeat(64), byteLength: 20 },
+            ],
+            citationIds: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        createdAt: now,
+      },
+      {
+        id: secondTurnId,
+        threadId,
+        sequence: 2,
+        userMessageRef: { contentId: secondUserContentId, digest: "c".repeat(64), byteLength: 12 },
+        attachmentIds: [],
+        attempts: [
+          {
+            id: secondAttemptId,
+            turnId: secondTurnId,
+            threadId,
+            providerInstanceId: providerId,
+            providerSessionId: "20000000-0000-4000-8000-000000000001",
+            modelId: "model-a",
+            contextManifestId: "30000000-0000-4000-8000-000000000001",
+            outcome: "completed",
+            responseRefs: [
+              { contentId: secondResponseContentId, digest: "d".repeat(64), byteLength: 20 },
+            ],
+            citationIds: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        createdAt: now,
+      },
+    ],
+    contents: [
+      {
+        contentId: firstUserContentId,
+        role: "user",
+        body: "First question.",
+        digest: "a".repeat(64),
+        byteLength: 15,
+      },
+      {
+        contentId: firstResponseContentId,
+        role: "assistant",
+        body: "First quote excerpt.",
+        digest: "b".repeat(64),
+        byteLength: 20,
+      },
+      {
+        contentId: secondUserContentId,
+        role: "user",
+        body: "Second question.",
+        digest: "c".repeat(64),
+        byteLength: 16,
+      },
+      {
+        contentId: secondResponseContentId,
+        role: "assistant",
+        body: "Second quote excerpt.",
+        digest: "d".repeat(64),
+        byteLength: 21,
+      },
+    ],
+  });
+}
+
 /** Paste clipboard images into the composer the way the OS delivers them. */
 function pasteImages(target: HTMLElement, files: ReadonlyArray<File>): void {
   const event = new Event("paste", { bubbles: true, cancelable: true });
@@ -168,6 +269,20 @@ function pasteImages(target: HTMLElement, files: ReadonlyArray<File>): void {
     },
   });
   fireEvent(target, event);
+}
+
+async function addQuoteFromTranscript(
+  user: ReturnType<typeof userEvent.setup>,
+  text: string,
+): Promise<void> {
+  const prose = screen.getByText(text);
+  const range = document.createRange();
+  range.selectNodeContents(prose);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  fireEvent(document, new Event("selectionchange"));
+  await user.click(await screen.findByRole("button", { name: "Add to chat" }));
 }
 
 function providerSnapshot(
@@ -1529,6 +1644,52 @@ describe("ChatWorkspace", () => {
     const lateAttachmentId = upload.mock.calls[1]![0].attachmentId;
     expect(firstAttachmentId).not.toBe(lateAttachmentId);
     expect(sendTurn).toHaveBeenLastCalledWith("Ship this plan", [lateAttachmentId], [], [], [], []);
+  });
+
+  it("claims exactly the quoted chips after a quote is added during a send", async () => {
+    const user = userEvent.setup();
+    let resolveSend!: (sent: boolean) => void;
+    const sendTurn = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const controller = controllerFixture({
+      activeView: viewWithQuotableReplies(),
+      sendTurn,
+    });
+    render(<ChatWorkspace controller={controller} providerSnapshot={providerSnapshot()} />);
+
+    await addQuoteFromTranscript(user, "First quote excerpt.");
+    await screen.findByText("Quote · First quote excerpt.");
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+
+    await addQuoteFromTranscript(user, "Second quote excerpt.");
+    await screen.findByText("Quote · Second quote excerpt.");
+
+    resolveSend(true);
+    await waitFor(() =>
+      expect(screen.queryByText("Quote · First quote excerpt.")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Quote · Second quote excerpt.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledTimes(2));
+    expect(sendTurn).toHaveBeenLastCalledWith(
+      expect.stringContaining("Second quote excerpt."),
+      [],
+      [],
+      [],
+      [],
+      [],
+    );
+    const lastMessage = String(
+      (sendTurn.mock.calls.at(-1) as ReadonlyArray<unknown> | undefined)?.[0] ?? "",
+    );
+    expect(lastMessage).not.toContain("First quote excerpt.");
   });
 
   it("keeps an attachment visible when authoritative discard fails", async () => {

@@ -141,6 +141,7 @@ describe("code client", () => {
     await expect(client.navigation()).resolves.toEqual({
       threads: [thread],
       activity: [{ threadId: ids.thread, lastSequence: 7 }],
+      runtime: [],
     });
     expect(fetch).toHaveBeenCalledWith(
       `${baseUrl}/api/code/navigation`,

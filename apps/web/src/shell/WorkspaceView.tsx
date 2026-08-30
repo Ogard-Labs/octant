@@ -110,6 +110,10 @@ export interface WorkspaceViewProps {
   readonly chatClient: ChatClient;
   readonly chatController: ChatController;
   readonly chatReadCursorStore: ChatReadCursorStore;
+  readonly revealChatTurn?: {
+    readonly threadId: import("@octant/contracts/chat").ChatThreadId;
+    readonly turnId: import("@octant/contracts/chat").ChatTurnId;
+  };
   readonly codeController: CodeController;
   /**
    * One controller per open Code thread. Every Code surface reads the one for
@@ -991,6 +995,10 @@ function renderNonCodeTab(
               ? {}
               : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
             threadId={tab.threadId}
+            {...(props.revealChatTurn !== undefined &&
+            String(props.revealChatTurn.threadId) === String(tab.threadId)
+              ? { revealTurnId: props.revealChatTurn.turnId }
+              : {})}
             title={tab.title}
             providerGroups={props.workProviderGroups ?? []}
             {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
@@ -1597,6 +1605,7 @@ function ChatThreadWorkspace(props: {
   readonly threadId: Extract<WorkspaceTab, { kind: "chat-thread" }>["threadId"];
   readonly childRunStatus?: ReactNode;
   readonly onOpenAgents?: () => void;
+  readonly revealTurnId?: import("@octant/contracts/chat").ChatTurnId;
 }) {
   const controller = useChatController({
     activeThreadId: props.threadId,
@@ -1630,6 +1639,7 @@ function ChatThreadWorkspace(props: {
       <ChatWorkspace
         controller={controller}
         providerGroups={providerGroups}
+        {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
         onClearCanvasSelections={props.onClearCanvasSelections}
         onRemoveCanvasSelection={props.onRemoveCanvasSelection}
