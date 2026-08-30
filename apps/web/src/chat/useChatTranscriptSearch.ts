@@ -35,12 +35,17 @@ export function useChatTranscriptSearch(
   const [hits, setHits] = useState<ReadonlyArray<ThreadSearchContentHit>>([]);
   const [truncated, setTruncated] = useState(false);
   const [status, setStatus] = useState<ChatTranscriptSearchStatus>("idle");
+  // The query the stored hits/truncated/status answer. Until this equals the
+  // current debounced query, prior results must not paint for the new text —
+  // including the render after debounce catches up but before the effect runs.
+  const [resultQuery, setResultQuery] = useState("");
 
   useEffect(() => {
     if (!enabled || debouncedQuery === "") {
       setHits([]);
       setTruncated(false);
       setStatus("idle");
+      setResultQuery("");
       return;
     }
     let current = true;
@@ -52,11 +57,13 @@ export function useChatTranscriptSearch(
         setHits(result.hits.map(toContentHit));
         setTruncated(result.truncated);
         setStatus("ready");
+        setResultQuery(debouncedQuery);
       } catch {
         if (!current) return;
         setHits([]);
         setTruncated(false);
         setStatus("unavailable");
+        setResultQuery(debouncedQuery);
       }
     })();
     return () => {
@@ -65,11 +72,13 @@ export function useChatTranscriptSearch(
   }, [client, enabled, debouncedQuery]);
 
   const queryPending = enabled && query !== "" && query !== debouncedQuery;
+  const resultsStale = resultQuery !== debouncedQuery;
+  const suppressHits = queryPending || resultsStale;
 
   return {
-    hits: queryPending ? [] : hits,
-    truncated: queryPending ? false : truncated,
-    status: queryPending ? "loading" : status,
+    hits: suppressHits ? [] : hits,
+    truncated: suppressHits ? false : truncated,
+    status: queryPending || (enabled && debouncedQuery !== "" && resultsStale) ? "loading" : status,
   };
 }
 
