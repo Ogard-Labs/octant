@@ -66,7 +66,21 @@ export function linearIssueBrowseAvailable(
 export const LinearUnassignedAssigneeId = Schema.Literal("unassigned");
 export type LinearUnassignedAssigneeId = typeof LinearUnassignedAssigneeId.Type;
 
-export const LinearAssigneeFilterId = Schema.Union(LinearNodeId, LinearUnassignedAssigneeId);
+/**
+ * Resolves to whoever the connected Linear account is, server-side. Reserved
+ * so a client can ask for "my issues" without ever learning or guessing the
+ * viewer's node id; it happens to fit the node-id shape, so the executor must
+ * check for it before treating the value as an id.
+ */
+export const LINEAR_VIEWER_ASSIGNEE_ID = "me";
+export const LinearViewerAssigneeId = Schema.Literal(LINEAR_VIEWER_ASSIGNEE_ID);
+export type LinearViewerAssigneeId = typeof LinearViewerAssigneeId.Type;
+
+export const LinearAssigneeFilterId = Schema.Union(
+  LinearViewerAssigneeId,
+  LinearNodeId,
+  LinearUnassignedAssigneeId,
+);
 export type LinearAssigneeFilterId = typeof LinearAssigneeFilterId.Type;
 
 const linearIssueUrl = Schema.String.pipe(

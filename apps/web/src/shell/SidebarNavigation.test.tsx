@@ -10,6 +10,7 @@ const truthfulInput = {
   agentsCenterEnabled: false,
   artifactLibrary: "unavailable",
   createThread: "unavailable",
+  inbox: "unavailable",
   plugins: "unavailable",
   projects: "available",
   pullRequests: "unavailable",
@@ -159,6 +160,31 @@ describe("SidebarNavigation", () => {
     expect(screen.getByRole("navigation", { name: "Projects" })).toBeVisible();
   });
 
+  it("shows the Inbox row with its waiting count in every mode that wires it", async () => {
+    const user = userEvent.setup();
+    const openInbox = vi.fn();
+    render(
+      <SidebarNavigation
+        actions={{ inbox: openInbox }}
+        counts={{ inbox: 3 }}
+        input={{ ...truthfulInput, activeMode: "chat", inbox: "available" }}
+      />,
+    );
+    const row = screen.getByRole("button", { name: "Inbox, 3 waiting" });
+    await user.click(row);
+    expect(openInbox).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the Inbox row quiet when nothing is waiting", () => {
+    render(
+      <SidebarNavigation
+        actions={{ inbox: vi.fn() }}
+        input={{ ...truthfulInput, activeMode: "chat", inbox: "available" }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
+  });
+
   it("styles New chat like the standard sidebar rows and leaves Chat threads to Projects nesting", () => {
     render(
       <SidebarNavigation
@@ -169,6 +195,7 @@ describe("SidebarNavigation", () => {
           agentsCenterEnabled: false,
           artifactLibrary: "unavailable",
           createThread: "available",
+          inbox: "unavailable",
           plugins: "available",
           projects: "available",
           pullRequests: "unavailable",

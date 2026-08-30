@@ -14,6 +14,8 @@ const MAX_ISSUE_COMMENTS = 10;
 const MAX_ISSUE_LABELS = 20;
 const LABEL_MAX_CHARS = 50;
 const MAX_SEARCH_QUERY_CHARS = 256;
+/** Newest 30 per category; the inbox is a glance, not a catalogue. */
+const ASSIGNED_WORK_CATEGORY_LIMIT = 30;
 const SECRETISH =
   /(?:gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|bearer\s+|token=|authorization)/gi;
 const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
@@ -84,6 +86,17 @@ export interface GhPullRequestObservationRow {
   readonly url: string;
   readonly baseBranch?: string;
   readonly headBranch?: string;
+}
+
+export interface GhAssignedWorkObservationItem {
+  readonly category: "issue" | "pull-request" | "review-request";
+  readonly owner: string;
+  readonly name: string;
+  readonly number: number;
+  readonly title: string;
+  readonly author: string;
+  readonly updatedAt: string;
+  readonly url: string;
 }
 
 export interface GhProjectObservationRow {
@@ -322,6 +335,50 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
     );
     if (result.kind !== "ok") return result;
     return decodeProjectsPage(result.stdout, repository);
+  }
+
+  /**
+   * Open items waiting on the signed-in account, across every repository it
+   * can see. A bounded snapshot rather than a pageable catalogue: three fixed
+   * search reads (assigned issues, assigned pull requests, requested reviews),
+   * first page only. `@me` binds each query to gh's own authentication, so no
+   * caller-chosen login can cross this surface.
+   */
+  async listAssignedWork(
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<readonly GhAssignedWorkObservationItem[]>> {
+    const searches = [
+      { category: "review-request", query: "type:pr is:open archived:false review-requested:@me" },
+      { category: "pull-request", query: "type:pr is:open archived:false assignee:@me" },
+      { category: "issue", query: "type:issue is:open archived:false assignee:@me" },
+    ] as const;
+    const items = new Map<string, GhAssignedWorkObservationItem>();
+    for (const search of searches) {
+      const result = await this.#run(
+        [
+          "api",
+          `search/issues?q=${encodeURIComponent(search.query)}` +
+            `&sort=updated&order=desc&per_page=${ASSIGNED_WORK_CATEGORY_LIMIT}`,
+        ],
+        signal,
+      );
+      if (result.kind !== "ok") return result;
+      const parsed = extractSearchIssueItems(result.stdout);
+      if (parsed === undefined || parsed.length > UPSTREAM_PAGE_SIZE) {
+        return { kind: "unavailable" };
+      }
+      for (const item of parsed) {
+        const decoded = decodeAssignedWorkItem(item, search.category);
+        if (decoded === undefined) return { kind: "unavailable" };
+        if (decoded === "skip") continue;
+        // A pull request can be both assigned and review-requested; the
+        // review request wins because searches run in that order, and one
+        // row per item keeps the inbox honest about how much is waiting.
+        const key = `${decoded.owner}/${decoded.name}#${decoded.number}`;
+        if (!items.has(key)) items.set(key, decoded);
+      }
+    }
+    return { kind: "ok", value: [...items.values()] };
   }
 
   /**
@@ -740,6 +797,26 @@ function composeIssueSearchQuery(input: {
   }
   if (!addedUserTerm) return undefined;
   return parts.join(" ");
+}
+
+const SEARCH_REPOSITORY_URL_PATTERN =
+  /^https:\/\/api\.github\.com\/repos\/([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})\/((?!\.{1,2}$)[A-Za-z0-9_.-]{1,100})$/;
+
+function decodeAssignedWorkItem(
+  item: unknown,
+  category: "issue" | "pull-request" | "review-request",
+): GhAssignedWorkObservationItem | "skip" | undefined {
+  if (!isRecord(item)) return undefined;
+  const shared = decodeSharedItemFacts(item);
+  if (shared === undefined) return undefined;
+  const repository =
+    typeof item.repository_url === "string"
+      ? SEARCH_REPOSITORY_URL_PATTERN.exec(item.repository_url)
+      : null;
+  const owner = repository?.[1];
+  const name = repository?.[2];
+  if (owner === undefined || name === undefined) return undefined;
+  return { category, owner, name, ...shared };
 }
 
 function decodePullRequestItem(item: unknown): GhPullRequestObservationRow | "skip" | undefined {

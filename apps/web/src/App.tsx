@@ -123,7 +123,10 @@ import { loadPluginSidebarDestinationAction } from "./shell/pluginSidebarDestina
 import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDestinationRegistry";
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
+import { buildInboxAttentionItems, inboxThreadProjectId } from "./inbox/inboxModel";
+import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
+import { evaluateThreadAttention } from "./notifications/threadAttention";
 import { useThreadAttentionNotifications } from "./notifications/useThreadAttentionNotifications";
 import { useShellController, type NativeShellHost } from "./shell/useShellController";
 import { useHostObservation } from "./shell/useHostObservation";
@@ -267,6 +270,7 @@ import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
   useCodeThreadController,
+  useOpenCodeThreadProviderRequests,
 } from "./code/codeThreadControllers";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
 import type { ZenClient } from "@octant/client-runtime/zen-client";
@@ -621,6 +625,9 @@ function LaunchedShell(
   }>();
   const [codeBoardOpen, setCodeBoardOpen] = useState(false);
   const [codePullRequestsOpen, setCodePullRequestsOpen] = useState(false);
+  // Deliberately not cleared on mode switch: what waits on the user spans
+  // every mode, so the Inbox survives moving between them.
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
@@ -997,6 +1004,14 @@ function LaunchedShell(
       }),
     [linearTransport],
   );
+  const loadAssignedGithubWork = useCallback(
+    () => githubClient.readCatalogue({ kind: "assigned-work" }),
+    [githubClient],
+  );
+  const loadAssignedLinearIssues = useCallback(
+    () => fetchAssignedLinearIssues((input) => linearClient.listIssues(input)),
+    [linearClient],
+  );
   useEffect(() => {
     let cancelled = false;
     void githubTransport
@@ -1198,6 +1213,10 @@ function LaunchedShell(
     codeThreadControllers,
     activeCodeThreadId,
   );
+  const codeProviderRequestsByThreadId = useOpenCodeThreadProviderRequests(
+    codeThreadControllers,
+    openCodeThreadIds,
+  );
   const activeCodeThreadView = activeCodeThreadController?.activeView;
   // The Apple projects the host lists at the root of the Code thread in view.
   // The window's own Code reader binds to no thread, so the root comes from
@@ -1228,17 +1247,15 @@ function LaunchedShell(
   const attentionSignals = useMemo(
     () =>
       collectThreadAttentionSignals({
-        ...(activeCodeThreadId === undefined
-          ? {}
-          : { activeCodeThreadId: String(activeCodeThreadId) }),
         chatThreads: chatController.navigation,
-        codeProviderRequests: activeCodeThreadController?.providerRequests ?? [],
+        workThreads: workNavigation.navigation,
+        codeProviderRequestsByThreadId,
         codeThreads: codeController.navigation,
       }),
     [
-      activeCodeThreadId,
       chatController.navigation,
-      activeCodeThreadController?.providerRequests,
+      workNavigation.navigation,
+      codeProviderRequestsByThreadId,
       codeController.navigation,
     ],
   );
@@ -1247,6 +1264,17 @@ function LaunchedShell(
     signals: attentionSignals,
     ...(watchedThreadId === undefined ? {} : { watchedThreadId }),
   });
+  // The row count mirrors the dock badge: distinct threads waiting, minus the
+  // one the user is looking at, whose signal the open thread already answers.
+  const inboxCount = useMemo(
+    () =>
+      evaluateThreadAttention({
+        signals: attentionSignals,
+        windowFocused: true,
+        ...(watchedThreadId === undefined ? {} : { watchedThreadId }),
+      }).badgeCount,
+    [attentionSignals, watchedThreadId],
+  );
   const activeProjectId =
     selectedProjectTabId ??
     (activeMode === "code"
@@ -1301,6 +1329,14 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  const inboxAttentionItems = useMemo(
+    () =>
+      buildInboxAttentionItems(
+        attentionSignals,
+        new Map(projectController.projects.map((project) => [String(project.id), project.name])),
+      ),
+    [attentionSignals, projectController.projects],
+  );
   useEffect(() => {
     const target = props.hostBridge?.initialProjectTarget;
     if (
@@ -2457,6 +2493,7 @@ function LaunchedShell(
     railPlaceholder !== undefined ||
     codeBoardOpen ||
     codePullRequestsOpen ||
+    inboxOpen ||
     githubIssuesOpen ||
     linearIssuesOpen ||
     workBoardOpen ||
@@ -2876,6 +2913,7 @@ function LaunchedShell(
       setWorkBoardOpen(false);
       setCodeBoardOpen(false);
       setCodePullRequestsOpen(false);
+      setInboxOpen(false);
       setGithubIssuesOpen(false);
       setLinearIssuesOpen(false);
       setArchiveOpen(false);
@@ -2886,6 +2924,11 @@ function LaunchedShell(
     openGithubIssues: () => setGithubIssuesOpen(true),
     openLinearIssues: () => setLinearIssuesOpen(true),
   };
+
+  function openInbox() {
+    pluginSidebarDestinationActionContext.closeOverlays();
+    setInboxOpen(true);
+  }
 
   const pluginSidebarDestinationActions: Record<string, () => void> = {};
   for (const contribution of resolveSidebarDestinationContributions(
@@ -3955,6 +3998,7 @@ function LaunchedShell(
                   chatNavigation: {
                     actions: {
                       "new-chat": createChat,
+                      inbox: openInbox,
                       agents: openAgentsCenter,
                       "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
@@ -3967,6 +4011,7 @@ function LaunchedShell(
                   codeNavigation: {
                     actions: {
                       "new-code-thread": () => openDraftInActiveProject("code"),
+                      inbox: openInbox,
                       agents: openAgentsCenter,
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
@@ -3981,6 +4026,7 @@ function LaunchedShell(
                   workNavigation: {
                     actions: {
                       "new-work-thread": () => openDraftInActiveProject("work"),
+                      inbox: openInbox,
                       agents: openAgentsCenter,
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
@@ -4007,6 +4053,7 @@ function LaunchedShell(
             onRetryChat={() => void chatController.retry()}
             onSelectMode={handleSelectMode}
             {...(githubIssuesReadAvailable ? { githubIssuesReadAvailable: true } : {})}
+            inboxCount={inboxCount}
             settings={presentedShellSettings ?? controller.settings}
             workspace={controller.workspace}
             resolvedSidebarBackground={resolvedSidebarBackground}
@@ -4166,6 +4213,46 @@ function LaunchedShell(
               <WorkspaceRailLayers
                 {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
                 onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
+                inboxOpen={inboxOpen}
+                onCloseInbox={() => setInboxOpen(false)}
+                inboxAttentionItems={inboxAttentionItems}
+                onOpenInboxThread={(signal) => {
+                  setInboxOpen(false);
+                  const signalProjectId = inboxThreadProjectId(signal);
+                  if (signal.source === "chat") {
+                    void controller.openChatThread(
+                      decodeChatThreadId(signal.threadId),
+                      signal.title,
+                      signalProjectId,
+                    );
+                    return;
+                  }
+                  if (signal.source === "work") {
+                    void controller.openWorkThread(
+                      decodeWorkThreadId(signal.threadId),
+                      signal.title,
+                      undefined,
+                      signalProjectId,
+                    );
+                    return;
+                  }
+                  void controller.openCodeThread(
+                    decodeCodeThreadId(signal.threadId),
+                    signal.title,
+                    undefined,
+                    signalProjectId,
+                  );
+                }}
+                {...(githubIssuesReadAvailable ? { loadAssignedGithubWork } : {})}
+                {...(linearIssuesRead
+                  ? {
+                      loadAssignedLinearIssues,
+                      onOpenLinearIssues: () => {
+                        setInboxOpen(false);
+                        setLinearIssuesOpen(true);
+                      },
+                    }
+                  : {})}
                 codeBoardOpen={codeBoardOpen}
                 codePullRequestsOpen={codePullRequestsOpen}
                 githubIssuesOpen={githubIssuesOpen}
@@ -4403,6 +4490,7 @@ function LaunchedShell(
                       railPlaceholder !== undefined ||
                       codeBoardOpen ||
                       codePullRequestsOpen ||
+                      inboxOpen ||
                       githubIssuesOpen ||
                       linearIssuesOpen ||
                       workBoardOpen ||

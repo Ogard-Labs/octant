@@ -196,6 +196,38 @@ export type GithubProjectPage = typeof GithubProjectPage.Type;
 export const GithubIssueStateFilter = Schema.Literal("open", "closed", "all");
 export type GithubIssueStateFilter = typeof GithubIssueStateFilter.Type;
 
+export const GithubAssignedWorkCategory = Schema.Literal("issue", "pull-request", "review-request");
+export type GithubAssignedWorkCategory = typeof GithubAssignedWorkCategory.Type;
+
+/**
+ * One open item waiting on the signed-in account, with its repository spelled
+ * out: unlike the per-repository catalogue pages, assigned work spans every
+ * repository the account can see, so a row without owner/name would be
+ * unattributable in a cross-repository list.
+ */
+export const GithubAssignedWorkItem = Schema.Struct({
+  category: GithubAssignedWorkCategory,
+  owner: GithubRepositoryOwner,
+  name: GithubRepositoryName,
+  number: Schema.Int.pipe(Schema.positive()),
+  title: safeText(256),
+  author: safeText(128),
+  updatedAt: isoTimestamp,
+  url: githubUrl,
+}).annotations(strict);
+export type GithubAssignedWorkItem = typeof GithubAssignedWorkItem.Type;
+
+/**
+ * A bounded snapshot, not a pageable catalogue: the inbox answers "what is
+ * waiting on me right now", and anything beyond this cap belongs in the
+ * repository catalogues, which do page.
+ */
+export const GithubAssignedWorkPage = Schema.Struct({
+  items: Schema.Array(GithubAssignedWorkItem).pipe(Schema.maxItems(90)),
+  freshness: GithubCatalogueFreshness,
+}).annotations(strict);
+export type GithubAssignedWorkPage = typeof GithubAssignedWorkPage.Type;
+
 /**
  * The only reads a client may request. There is no field, header, endpoint,
  * GraphQL, CLI-flag, host, or mutation selection surface.
@@ -240,6 +272,11 @@ export const GithubCatalogueReadRequest = Schema.Union(
     name: GithubRepositoryName,
     pageSize: GithubCataloguePageSize,
     cursor: Schema.optional(GithubCatalogueCursor),
+  }).annotations(strict),
+  // The viewer is implied by the server's own gh authentication; a client
+  // cannot ask for anyone else's assigned work.
+  Schema.Struct({
+    kind: Schema.Literal("assigned-work"),
   }).annotations(strict),
 );
 export type GithubCatalogueReadRequest = typeof GithubCatalogueReadRequest.Type;
@@ -289,6 +326,10 @@ export const GithubCatalogueReadResponse = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("projects"),
     page: GithubProjectPage,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("assigned-work"),
+    page: GithubAssignedWorkPage,
   }).annotations(strict),
   GithubCatalogueUnavailable,
 );

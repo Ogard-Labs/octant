@@ -1,11 +1,29 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeThreadId } from "@octant/contracts/code";
-import { memo, useCallback, useEffect, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import {
   useCodeController,
   type CodeController,
   type CodeReadCursorStore,
 } from "./useCodeController";
+
+type CodeProviderRequestsByThreadId = Readonly<
+  Record<string, ReadonlyArray<CodeController["providerRequests"][number]>>
+>;
+
+const EMPTY_CODE_PROVIDER_REQUESTS_BY_THREAD_ID: CodeProviderRequestsByThreadId = {};
+
+function sameCodeProviderRequestsByThreadId(
+  left: CodeProviderRequestsByThreadId,
+  right: CodeProviderRequestsByThreadId,
+): boolean {
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  for (const key of leftKeys) {
+    if (left[key] !== right[key]) return false;
+  }
+  return true;
+}
 
 /**
  * The Code threads a window currently has open, each with its own controller.
@@ -90,6 +108,42 @@ export function useCodeThreadController(
       controllers === undefined || threadId === undefined ? undefined : controllers.get(threadId),
     [controllers, threadId],
   );
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+/**
+ * Reads live provider requests for every open Code thread so attention signals
+ * can surface background approvals, not just the thread in front.
+ */
+export function useOpenCodeThreadProviderRequests(
+  controllers: CodeThreadControllers,
+  threadIds: ReadonlyArray<CodeThreadId>,
+): CodeProviderRequestsByThreadId {
+  const cachedSnapshotRef = useRef<CodeProviderRequestsByThreadId>(
+    EMPTY_CODE_PROVIDER_REQUESTS_BY_THREAD_ID,
+  );
+  const subscribe = useCallback(
+    (listener: () => void) => controllers.subscribe(listener),
+    [controllers],
+  );
+  const read = useCallback(() => {
+    const next: Record<string, ReadonlyArray<CodeController["providerRequests"][number]>> = {};
+    for (const threadId of threadIds) {
+      const requests = controllers.get(threadId)?.providerRequests ?? [];
+      if (requests.length > 0) {
+        next[String(threadId)] = requests;
+      }
+    }
+    const cached = cachedSnapshotRef.current;
+    if (Object.keys(next).length === 0) {
+      if (cached === EMPTY_CODE_PROVIDER_REQUESTS_BY_THREAD_ID) return cached;
+      cachedSnapshotRef.current = EMPTY_CODE_PROVIDER_REQUESTS_BY_THREAD_ID;
+      return EMPTY_CODE_PROVIDER_REQUESTS_BY_THREAD_ID;
+    }
+    if (sameCodeProviderRequestsByThreadId(cached, next)) return cached;
+    cachedSnapshotRef.current = next;
+    return next;
+  }, [controllers, threadIds]);
   return useSyncExternalStore(subscribe, read, read);
 }
 

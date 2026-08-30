@@ -167,6 +167,10 @@ function buildIssueFilter(
     clauses.push({ project: { id: { eq: filter.projectId } } });
   }
   if (filter?.assigneeId === "unassigned") clauses.push({ assignee: { null: true } });
+  // "me" fits the node-id shape, so it must be recognized before the id
+  // branch; Linear resolves isMe to the authenticated account server-side,
+  // which keeps the viewer's node id out of the client entirely.
+  else if (filter?.assigneeId === "me") clauses.push({ assignee: { isMe: { eq: true } } });
   else if (filter?.assigneeId !== undefined) {
     clauses.push({ assignee: { id: { eq: filter.assigneeId } } });
   }

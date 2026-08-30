@@ -21,6 +21,10 @@ import type {
 } from "../automation/automationCenterModel";
 import type { CodeThreadOpenTarget } from "../code/CodeThreadBoard";
 import type { CodeBoardProjectRef } from "../code/codeBoardGrouping";
+import type { GithubCatalogueReadResponse } from "@octant/contracts";
+import type { AssignedLinearIssuesList } from "../inbox/loadAssignedLinearIssues";
+import type { InboxAttentionItem } from "../inbox/inboxModel";
+import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import type { ThreadBoardProjectRef } from "../threadBoard/threadBoardGrouping";
 import type { WorkThreadOpenTarget } from "../work/WorkThreadBoard";
 import type { ArchivedThreadEntry, ArchiveProject } from "./ArchiveView";
@@ -51,6 +55,9 @@ const GitHubIssueBrowser = lazy(() =>
   import("../github/GitHubIssueBrowser").then((module) => ({
     default: module.GitHubIssueBrowser,
   })),
+);
+const InboxView = lazy(() =>
+  import("../inbox/InboxView").then((module) => ({ default: module.InboxView })),
 );
 const LinearIssueBrowser = lazy(() =>
   import("../linear/LinearIssueBrowser").then((module) => ({
@@ -125,6 +132,14 @@ export interface WorkspaceRailLayersProps {
   readonly onOpenAgentsThread: (
     target: AgentsCenterThreadTarget & { readonly title: string },
   ) => void;
+  /** The Inbox is mode-independent: what waits on the user spans every mode. */
+  readonly inboxOpen: boolean;
+  readonly onCloseInbox: () => void;
+  readonly inboxAttentionItems: ReadonlyArray<InboxAttentionItem>;
+  readonly onOpenInboxThread: (signal: ThreadAttentionSignal) => void;
+  readonly loadAssignedGithubWork?: () => Promise<GithubCatalogueReadResponse>;
+  readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
+  readonly onOpenLinearIssues?: () => void;
 }
 
 export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
@@ -144,6 +159,26 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
           />
         </div>
       )}
+      {props.inboxOpen ? (
+        <div className="inbox-layer">
+          <LazyRailSurface label="Inbox">
+            <InboxView
+              attentionItems={props.inboxAttentionItems}
+              onClose={props.onCloseInbox}
+              onOpenThread={props.onOpenInboxThread}
+              {...(props.loadAssignedGithubWork === undefined
+                ? {}
+                : { loadAssignedGithubWork: props.loadAssignedGithubWork })}
+              {...(props.loadAssignedLinearIssues === undefined
+                ? {}
+                : { loadAssignedLinearIssues: props.loadAssignedLinearIssues })}
+              {...(props.onOpenLinearIssues === undefined
+                ? {}
+                : { onOpenLinearIssues: props.onOpenLinearIssues })}
+            />
+          </LazyRailSurface>
+        </div>
+      ) : null}
       {props.githubIssuesOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
           <LazyRailSurface label="GitHub issues">
