@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ActorId,
   CodeOperationEventFrame,
+  CodeRuntimeWorkUpdated,
   MAX_CODE_OPERATION_TEXT_BYTES,
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
@@ -27,8 +28,10 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
+import { CodeProjection, readCodeRuntimeWorks } from "../persistence/codeProjection";
 import { CODE_OPERATION_EVENT_RECORDED } from "./codeOperationEventStore";
 import { createCodeOperationRuntime } from "./codeOperationRuntime";
+import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import type {
   GitObservationPort,
@@ -428,6 +431,39 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("reports a thread as executing for exactly as long as its provider turn runs", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    expect(fixture.boardActivity()).toMatchObject({ executing: false });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(30),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(fixture.boardActivity()).toMatchObject({ executing: true, awaitingInput: false });
+
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+    await vi.waitFor(() =>
+      expect(fixture.boardActivity()).toMatchObject({
+        executing: false,
+        awaitingInput: false,
+        interrupted: false,
+      }),
+    );
+    fixture.close();
+  });
+
   it("sanitizes provider claims before durable frames and authorizes subscriptions", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -785,12 +821,12 @@ function runtimeFixture(options: {
   applyMigrations(connection, MIGRATIONS, () => now);
   const journal = new Journal({
     connection,
-    registry: new EventRegistry().register(
-      CODE_OPERATION_EVENT_RECORDED,
-      1,
-      CodeOperationEventFrame,
-    ),
-    projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+    registry: new EventRegistry()
+      .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
+      .register("code.runtime-work-updated@1", 1, CodeRuntimeWorkUpdated),
+    projections: new ProjectionRegistry()
+      .register(new AggregateHeadsProjection())
+      .register(new CodeProjection()),
     clock: () => now,
   });
   let activeThread = thread();
@@ -886,6 +922,7 @@ function runtimeFixture(options: {
     setThread: (next: CodeThread) => {
       activeThread = next;
     },
+    boardActivity: () => boardRuntimeActivityFromWorks(readCodeRuntimeWorks(connection, threadId)),
     close: () => connection.close(),
   };
 }

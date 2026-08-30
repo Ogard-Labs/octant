@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { isAbsolute, relative, sep } from "node:path";
 import {
   CodeApprovalId,
+  CodeRuntimeWorkId,
+  CorrelationId,
+  EventId,
   MAX_CODE_OPERATION_TEXT_BYTES,
+  UtcTimestamp,
+  decodeAggregateVersion,
+  decodeCodeRuntimeWork,
   decodeCodeOperationApprovalRequest,
   decodeCodeOperationApprovalConfirmation,
   decodeCodeCheckoutId,
@@ -24,13 +30,14 @@ import {
   type CodeOperationEventFrame,
   type CodeOperationId,
   type CodeOperationResult,
+  type CodeRuntimeWorkState,
   type CodeThread,
   type CodeThreadId,
   type EventActor,
   type ProviderRuntimeEvent,
   type WindowId,
 } from "@octant/contracts";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
 import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
@@ -84,6 +91,13 @@ import { CodeTurnRunner, type CodeTurnEvent, type CodeTurnOutcome } from "./code
 import { createCodeAppManagedTools, type CodeAppManagedToolsOptions } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
+
+const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
+const decodeEventId = Schema.decodeUnknownSync(EventId);
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+
+const CODE_RUNTIME_WORK_UPDATED = "code.runtime-work-updated@1";
+const CODE_RUNTIME_AGGREGATE_TYPE = "code-runtime";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -842,6 +856,13 @@ interface ActiveTurn {
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
   lastPersistedState?: CodeTurnOutcome;
   launch?: () => void;
+  /**
+   * The runtime work record this turn owns. One record per turn, so the board
+   * can tell the turn running now from the one that ran before it.
+   */
+  readonly runtimeWorkId: CodeRuntimeWorkId;
+  runtimeWorkVersion: number;
+  lastPersistedRuntimeState?: CodeRuntimeWorkState;
 }
 
 class RuntimeTurnController implements CodeOperationTurnPort {
@@ -934,8 +955,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       questions: new Set(),
       cursor: 0,
       state: "running",
+      runtimeWorkId: CodeRuntimeWorkId.make(this.#options.uuid()),
+      runtimeWorkVersion: 0,
     };
     active.launch = () => this.#launch(active, input.prompt, input.context, input.attachments);
+    this.#persistRuntimeWork(active, "running");
     this.#active.set(key, active);
     return turnState("running");
   }
@@ -1050,6 +1074,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     if (replay.status !== "ok") {
       active.state = "waiting";
+      // Nothing downstream reports an outcome for a turn that never reached the
+      // provider, so the record it opened has to be closed here or the board
+      // would read the thread as executing until the next restart.
+      this.#persistRuntimeWork(active, "waiting");
       return;
     }
     active.cursor = replay.nextCursor;
@@ -1209,6 +1237,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     failure?: CodeOperationFailure,
   ): void {
     active.state = outcome;
+    this.#persistRuntimeWork(active, outcome);
     if (active.lastPersistedState === outcome && failure === undefined) return;
     active.lastPersistedState = outcome;
     const frame = this.#events.append({
@@ -1222,6 +1251,52 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       },
     });
     active.cursor = frame.cursor;
+  }
+
+  /**
+   * Mirror the turn's live state into the thread's runtime work record.
+   *
+   * The Code board and the sidebar row both read runtime work, never the
+   * operation journal, so a turn that writes no record is reported as idle for
+   * its whole run: the card sits in Ready while the agent is working and the
+   * row falls through to an unread dot instead of Working.
+   *
+   * The record is also what restart reconciliation looks for. A `running`
+   * provider turn left behind by a killed host becomes `waiting` there, where
+   * an operation frame frozen mid-turn would claim the thread was executing
+   * forever.
+   */
+  #persistRuntimeWork(active: ActiveTurn, state: CodeRuntimeWorkState): void {
+    if (active.lastPersistedRuntimeState === state) return;
+    this.#options.persistence.journal.append({
+      aggregate: {
+        aggregateType: CODE_RUNTIME_AGGREGATE_TYPE,
+        aggregateId: active.runtimeWorkId,
+      },
+      expectedVersion: decodeAggregateVersion(active.runtimeWorkVersion),
+      events: [
+        {
+          eventId: decodeEventId(this.#options.uuid()),
+          eventName: CODE_RUNTIME_WORK_UPDATED,
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#options.uuid()),
+          actor: this.#options.actor,
+          occurredAt: decodeTimestamp(this.#options.clock()),
+          payload: {
+            kind: "runtime-work-updated",
+            work: decodeCodeRuntimeWork({
+              id: active.runtimeWorkId,
+              threadId: active.thread.id,
+              kind: "provider-turn",
+              state,
+              updatedAt: this.#options.clock(),
+            }),
+          },
+        },
+      ],
+    });
+    active.runtimeWorkVersion += 1;
+    active.lastPersistedRuntimeState = state;
   }
 }
 
