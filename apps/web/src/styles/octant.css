@@ -2605,6 +2605,17 @@ input.switch:checked::after {
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);
 }
+/* The elapsed figure sits after the outcome as the turn's closing line, so a
+   long transcript reads as a work log with a duration per turn rather than as
+   an unbroken run of prose. */
+.chat-transcript__worked-for {
+  color: var(--oct-meta);
+}
+.chat-transcript__worked-for::before {
+  content: "·";
+  margin-inline: 0.4em;
+  opacity: 0.6;
+}
 .runstatus .sep {
   opacity: 0.6;
 }

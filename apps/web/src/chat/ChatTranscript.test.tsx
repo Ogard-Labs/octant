@@ -18,7 +18,15 @@ const ids = {
   citation: "00000000-0000-4000-8000-000000000808",
 } as const;
 
-function viewFixture(overrides: Record<string, unknown> = {}) {
+function viewFixture(
+  overrides: Record<string, unknown> & {
+    readonly attemptOutcome?: string;
+    readonly attemptUpdatedAt?: string;
+  } = {},
+) {
+  const { attemptOutcome, attemptUpdatedAt, ...rest } = overrides;
+  const completedAttemptOutcome = attemptOutcome ?? "completed";
+  const completedAttemptUpdatedAt = attemptUpdatedAt ?? now;
   return decodeChatThreadView({
     thread: {
       id: ids.thread,
@@ -64,11 +72,11 @@ function viewFixture(overrides: Record<string, unknown> = {}) {
             providerSessionId: "20000000-0000-4000-8000-000000000002",
             modelId: "model-b",
             contextManifestId: "30000000-0000-4000-8000-000000000002",
-            outcome: "completed",
+            outcome: completedAttemptOutcome,
             responseRefs: [reference(ids.responseContent, "b")],
             citationIds: [ids.citation],
             createdAt: now,
-            updatedAt: now,
+            updatedAt: completedAttemptUpdatedAt,
           },
         ],
         createdAt: now,
@@ -106,7 +114,7 @@ function viewFixture(overrides: Record<string, unknown> = {}) {
     workItems: [],
     workListVersion: 0,
     followUpVersion: 0,
-    ...overrides,
+    ...rest,
   });
 }
 
@@ -197,6 +205,23 @@ describe("ChatTranscript", () => {
     expect(content.textContent).toMatch(
       /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Provider handoff · model-b[\s\S]*Here is the summary\.[\s\S]*Completed/,
     );
+  });
+
+  it("closes a completed turn with how long it took", () => {
+    render(<ChatTranscript view={viewFixture({ attemptUpdatedAt: "2026-07-20T08:00:37.000Z" })} />);
+    expect(screen.getByText("Worked for 37s")).toBeVisible();
+  });
+
+  it("does not claim a duration for a turn that did not complete", () => {
+    render(
+      <ChatTranscript
+        view={viewFixture({
+          attemptOutcome: "interrupted",
+          attemptUpdatedAt: "2026-07-20T08:00:37.000Z",
+        })}
+      />,
+    );
+    expect(screen.queryByText(/Worked for/)).not.toBeInTheDocument();
   });
 
   it("renders streamed response references as one coherent assistant message", () => {

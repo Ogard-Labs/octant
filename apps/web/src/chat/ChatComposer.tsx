@@ -852,7 +852,9 @@ export function ChatComposer(props: ChatComposerProps) {
       footer={
         <div
           aria-live="polite"
-          className={`chat-composer__status${quietStatus ? " chat-composer__status--quiet" : ""}`}
+          className={`chat-composer__status${quietStatus ? " chat-composer__status--quiet" : ""}${
+            props.isSending && !quietStatus ? " chat-composer__status--live" : ""
+          }`}
           id={statusId}
           role="status"
         >

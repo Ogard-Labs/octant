@@ -770,6 +770,39 @@
   font-weight: 500;
 }
 
+/* While a response is arriving the status is the only thing telling the user
+   the thread is alive, so it reads as a live strip with a marker rather than a
+   grey footnote under the box. The marker only pulses where motion is welcome. */
+.chat-composer__status--live {
+  gap: var(--oct-space-2);
+  color: var(--oct-fg-2);
+}
+
+.chat-composer__status--live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 999px;
+  background: var(--oct-accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .chat-composer__status--live::before {
+    animation: chat-composer-live 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes chat-composer-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
 .chat-composer--held .chat-composer__status {
   color: var(--oct-danger-fg);
   font-weight: 500;
