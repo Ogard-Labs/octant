@@ -1,6 +1,6 @@
 import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { GithubAssignedWorkPage } from "@octant/contracts";
-import type { LinearIssueListPage } from "@octant/contracts/linear-issues";
+import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
 import { CircleDot, GitPullRequest, ListTodo, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
@@ -21,7 +21,7 @@ export interface InboxViewProps {
   /** Absent while the GitHub issues read is not connected; hides the section. */
   readonly loadAssignedGithubWork?: () => Promise<GithubCatalogueReadResponse>;
   /** Absent while Linear issue browsing is not connected; hides the section. */
-  readonly loadAssignedLinearIssues?: () => Promise<LinearIssueListPage>;
+  readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
   /** Opens the full Linear issue browser when the inbox list is incomplete. */
   readonly onOpenLinearIssues?: () => void;
 }
@@ -33,7 +33,7 @@ type GithubSection =
 
 type LinearSection =
   | { readonly kind: "loading" }
-  | { readonly kind: "ready"; readonly page: LinearIssueListPage }
+  | { readonly kind: "ready"; readonly page: AssignedLinearIssuesList }
   | { readonly kind: "failed"; readonly message: string };
 
 /**

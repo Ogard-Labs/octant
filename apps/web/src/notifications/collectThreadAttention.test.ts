@@ -12,6 +12,7 @@ describe("collecting thread attention", () => {
           { threadId: "chat-b", title: "Asked thread", followUp: true, unread: true },
           { threadId: "chat-c", title: "Quiet thread" },
         ],
+        workThreads: [],
         codeThreads: [],
       }),
     ).toEqual([
@@ -20,11 +21,34 @@ describe("collecting thread attention", () => {
     ]);
   });
 
+  it("reads Work thread attention the same way as Chat", () => {
+    expect(
+      collectThreadAttentionSignals({
+        chatThreads: [],
+        workThreads: [
+          { threadId: "work-a", title: "Unread work", unread: true, projectId: "project-1" },
+          { threadId: "work-b", title: "Asked work", followUp: true },
+        ],
+        codeThreads: [],
+      }),
+    ).toEqual([
+      {
+        threadId: "work-a",
+        reason: "turn-finished",
+        title: "Unread work",
+        source: "work",
+        projectId: "project-1",
+      },
+      { threadId: "work-b", reason: "question-asked", title: "Asked work", source: "work" },
+    ]);
+  });
+
   it("raises a live Code approval with the summary the workspace shows", () => {
     const threadId = "code-a" as CodeThreadId;
     expect(
       collectThreadAttentionSignals({
         chatThreads: [],
+        workThreads: [],
         codeProviderRequestsByThreadId: {
           "code-a": [
             {
@@ -72,6 +96,7 @@ describe("collecting thread attention", () => {
     expect(
       collectThreadAttentionSignals({
         chatThreads: [],
+        workThreads: [],
         codeProviderRequestsByThreadId: {
           "code-background": [
             {
@@ -116,6 +141,7 @@ describe("collecting thread attention", () => {
     expect(
       collectThreadAttentionSignals({
         chatThreads: [],
+        workThreads: [],
         codeProviderRequestsByThreadId: {
           "code-a": [],
         },

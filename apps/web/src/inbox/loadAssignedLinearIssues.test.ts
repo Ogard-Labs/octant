@@ -33,6 +33,7 @@ describe("loadAssignedLinearIssues", () => {
 
     expect(page.rows).toEqual([row("1"), row("2")]);
     expect(page.hasNextPage).toBe(false);
+    expect(page.truncated).toBe(false);
     expect(listIssues).toHaveBeenCalledTimes(2);
     expect(listIssues.mock.calls[0]?.[0]).toEqual({
       filter: { assigneeId: "me" },
@@ -45,7 +46,7 @@ describe("loadAssignedLinearIssues", () => {
     });
   });
 
-  it("stops at the safety cap and leaves hasNextPage true when more remain", async () => {
+  it("stops at the safety cap and reports truncation when more remain", async () => {
     const listIssues = vi.fn(
       async (): Promise<LinearIssueListPage> => ({
         rows: [row("more")],
@@ -58,6 +59,7 @@ describe("loadAssignedLinearIssues", () => {
 
     expect(page.rows).toHaveLength(ASSIGNED_LINEAR_MAX_PAGES);
     expect(page.hasNextPage).toBe(true);
+    expect(page.truncated).toBe(true);
     expect(page.endCursor).toBe("next");
     expect(listIssues).toHaveBeenCalledTimes(ASSIGNED_LINEAR_MAX_PAGES);
   });

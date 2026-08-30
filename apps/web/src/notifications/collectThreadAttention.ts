@@ -4,6 +4,7 @@ import type { ThreadAttentionSignal } from "./threadAttention";
 
 export interface ThreadAttentionSources {
   readonly chatThreads: ReadonlyArray<ChatThreadNavigationItem>;
+  readonly workThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly codeThreads: ReadonlyArray<CodeThreadNavigationItem>;
   /** Live provider requests keyed by Code thread id for every open thread. */
   readonly codeProviderRequestsByThreadId?: Readonly<
@@ -12,10 +13,10 @@ export interface ThreadAttentionSources {
 }
 
 /**
- * Collects every thread state the user is expected to act on. Chat surfaces a
- * finished turn as unread and a durable question as a follow-up; Code surfaces
- * a durable question the same way, and a live blocked turn through the provider
- * requests the workspace is already rendering.
+ * Collects every thread state the user is expected to act on. Chat and Work
+ * surface a finished turn as unread and a durable question as a follow-up;
+ * Code surfaces a durable question the same way, and a live blocked turn
+ * through the provider requests the workspace is already rendering.
  */
 export function collectThreadAttentionSignals(
   sources: ThreadAttentionSources,
@@ -26,6 +27,19 @@ export function collectThreadAttentionSignals(
       threadId: thread.threadId,
       title: thread.title,
       source: "chat" as const,
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    };
+    if (thread.followUp === true) {
+      signals.push({ ...shared, reason: "question-asked" });
+    } else if (thread.unread === true) {
+      signals.push({ ...shared, reason: "turn-finished" });
+    }
+  }
+  for (const thread of sources.workThreads) {
+    const shared = {
+      threadId: thread.threadId,
+      title: thread.title,
+      source: "work" as const,
       ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
     };
     if (thread.followUp === true) {

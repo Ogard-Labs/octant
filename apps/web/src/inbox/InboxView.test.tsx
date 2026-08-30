@@ -1,8 +1,9 @@
-import type { LinearIssueListPage, LinearIssueRow } from "@octant/contracts/linear-issues";
+import type { LinearIssueRow } from "@octant/contracts/linear-issues";
 import { render, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
 import { InboxView } from "./InboxView";
 
 const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
@@ -16,9 +17,10 @@ const linearRow: LinearIssueRow = {
   url: "https://linear.app/ogard-labs/issue/ENG-12",
 };
 
-const linearPage: LinearIssueListPage = {
+const linearPage: AssignedLinearIssuesList = {
   rows: [linearRow],
   hasNextPage: false,
+  truncated: false,
 };
 
 describe("InboxView", () => {
@@ -75,6 +77,7 @@ describe("InboxView", () => {
         loadAssignedLinearIssues={vi.fn(async () => ({
           rows: [linearRow],
           hasNextPage: true,
+          truncated: true,
           endCursor: "page-2",
         }))}
         onClose={vi.fn()}

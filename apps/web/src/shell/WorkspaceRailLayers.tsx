@@ -22,7 +22,7 @@ import type {
 import type { CodeThreadOpenTarget } from "../code/CodeThreadBoard";
 import type { CodeBoardProjectRef } from "../code/codeBoardGrouping";
 import type { GithubCatalogueReadResponse } from "@octant/contracts";
-import type { LinearIssueListPage } from "@octant/contracts/linear-issues";
+import type { AssignedLinearIssuesList } from "../inbox/loadAssignedLinearIssues";
 import type { InboxAttentionItem } from "../inbox/inboxModel";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import type { ThreadBoardProjectRef } from "../threadBoard/threadBoardGrouping";
@@ -138,7 +138,7 @@ export interface WorkspaceRailLayersProps {
   readonly inboxAttentionItems: ReadonlyArray<InboxAttentionItem>;
   readonly onOpenInboxThread: (signal: ThreadAttentionSignal) => void;
   readonly loadAssignedGithubWork?: () => Promise<GithubCatalogueReadResponse>;
-  readonly loadAssignedLinearIssues?: () => Promise<LinearIssueListPage>;
+  readonly loadAssignedLinearIssues?: () => Promise<AssignedLinearIssuesList>;
   readonly onOpenLinearIssues?: () => void;
 }
 

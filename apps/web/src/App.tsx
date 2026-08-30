@@ -1248,10 +1248,16 @@ function LaunchedShell(
     () =>
       collectThreadAttentionSignals({
         chatThreads: chatController.navigation,
+        workThreads: workNavigation.navigation,
         codeProviderRequestsByThreadId,
         codeThreads: codeController.navigation,
       }),
-    [chatController.navigation, codeProviderRequestsByThreadId, codeController.navigation],
+    [
+      chatController.navigation,
+      workNavigation.navigation,
+      codeProviderRequestsByThreadId,
+      codeController.navigation,
+    ],
   );
   useThreadAttentionNotifications({
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
@@ -4217,6 +4223,15 @@ function LaunchedShell(
                     void controller.openChatThread(
                       decodeChatThreadId(signal.threadId),
                       signal.title,
+                      signalProjectId,
+                    );
+                    return;
+                  }
+                  if (signal.source === "work") {
+                    void controller.openWorkThread(
+                      decodeWorkThreadId(signal.threadId),
+                      signal.title,
+                      undefined,
                       signalProjectId,
                     );
                     return;
