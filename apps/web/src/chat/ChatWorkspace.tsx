@@ -37,6 +37,7 @@ import {
 } from "./ChatComposer";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ChatTranscript } from "./ChatTranscript";
+import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
@@ -135,6 +136,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const [localCanvasSelections, setLocalCanvasSelections] = useState<
     ReadonlyArray<CanvasContextSelection>
   >([]);
+  const [pendingQuotes, setPendingQuotes] = useState<ReadonlyArray<TranscriptQuoteChip>>([]);
   const [canvasRefreshKey, setCanvasRefreshKey] = useState(0);
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false);
   const [toolApprovals, setToolApprovals] = useState<ReadonlyArray<ExtensionToolApproval>>([]);
@@ -203,6 +205,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       // Keep the visible chips in step with the cleared ledger; on unmount
       // this is a no-op, on a thread change it drops the old thread's chips.
       setPendingAttachments([]);
+      setPendingQuotes([]);
       const droppedStagedContext =
         abandoned.length > 0 ||
         uploadingAttachmentsRef.current.length > 0 ||
@@ -494,6 +497,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const submitTurn = async (draft: string): Promise<boolean> => {
     const claimedAttachments = pendingAttachmentsRef.current;
     pendingAttachmentsRef.current = [];
+    const quotesForSend = pendingQuotes;
     // A `#thread` chip names a thread; it never carries one. The turn
     // sends chip ids and the host resolves each one as the turn runs,
     // re-checking that the sender may still open it, so the message
@@ -504,6 +508,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     const sendingThreadId = String(view.thread.id);
     const threadMentionIds = await threadMentions.resolveForSend();
     if (activeThreadIdRef.current !== sendingThreadId) return false;
+    const outgoing = formatOutgoingMessageWithQuotes({ draft, quotes: quotesForSend });
+    if (outgoing.trim().length === 0 && claimedAttachments.length === 0) return false;
     let sent = false;
     try {
       // Behind the same queue as a model or option change: a turn sent
@@ -514,7 +520,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       // The turn moves the version itself, so it carries no base forward.
       sent = await enqueueThreadCommand(async (previous) => ({
         value: await props.controller.sendTurn(
-          draft,
+          outgoing,
           claimedAttachments.map((attachment) => attachment.id),
           pendingPreviewSelections,
           pendingCanvasSelections,
@@ -553,6 +559,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         return next;
       });
       setPendingPreviewSelections([]);
+      setPendingQuotes((current) => {
+        const sent = new Set(quotesForSend.map((quote) => quote.id));
+        return current.filter((quote) => !sent.has(quote.id));
+      });
       if (props.pendingCanvasSelections === undefined) {
         setLocalCanvasSelections([]);
       } else {
@@ -716,6 +726,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           connectionStatus={
             props.controller.status === "disconnected" ? "disconnected" : "connected"
           }
+          onQuoteSelection={({ turnId, text }) => {
+            setPendingQuotes((current) => [
+              ...current,
+              {
+                id: crypto.randomUUID(),
+                turnId: String(turnId),
+                text,
+              },
+            ]);
+          }}
           onBranchTurn={(turnId) => {
             if (branchPending) return;
             setBranchPending(true);
@@ -1014,8 +1034,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         pendingCanvasSelections={pendingCanvasSelections}
         pendingAttachments={pendingAttachments}
         pendingPreviewSelections={pendingPreviewSelections}
+        pendingQuotes={pendingQuotes}
         pendingExtensionSelections={pendingExtensionSelections}
         onRemoveExtensionSelection={removeExtensionSelection}
+        onRemoveQuote={(quoteId) => {
+          setPendingQuotes((current) => current.filter((quote) => quote.id !== quoteId));
+        }}
         onRemoveAttachment={(attachmentId) => {
           const attachment = pendingAttachmentsRef.current.find(
             (candidate) => candidate.id === attachmentId,

@@ -1241,7 +1241,7 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Earliest steps kept")).toBeVisible();
   });
 
-  it("collapses a turn's tool steps and reasoning until the user opens them", async () => {
+  it("folds a settled turn's toolchain behind one summary until the user opens it", async () => {
     const user = userEvent.setup();
     const operationId = "70000000-0000-4000-8000-000000000051";
     render(
@@ -1269,7 +1269,7 @@ describe("CodeThreadWorkspace", () => {
                     state: "completed",
                     summary: "bun run verify",
                   },
-                  { kind: "task", id: "task-1", state: "running", summary: "Rewrite the pane" },
+                  { kind: "task", id: "task-1", state: "completed", summary: "Rewrite the pane" },
                 ],
               },
             ],
@@ -1279,12 +1279,14 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    // Closed by default: each tool is a named row, not the printed summary.
-    expect(screen.getByRole("button", { name: "Bash, done" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Rewrite the pane, running" })).toBeVisible();
+    // Settled turns fold the toolchain behind one quiet line.
+    expect(screen.getByRole("button", { name: "1 tool call" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Bash, done" })).not.toBeVisible();
     expect(screen.queryByText("bun run verify")).not.toBeVisible();
     expect(screen.queryByText("Check the failing suite first.")).not.toBeVisible();
 
+    await user.click(screen.getByRole("button", { name: "1 tool call" }));
+    expect(screen.getByRole("button", { name: "Bash, done" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Bash, done" }));
     expect(screen.getByText("bun run verify")).toBeVisible();
     expect(screen.getByText("Bash")).toBeVisible();
