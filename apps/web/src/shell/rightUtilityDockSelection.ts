@@ -161,6 +161,27 @@ export function readUtilityDockPresentation(
   return readDockPresentationRecord(scope, utilityDockStorageKey(windowId), true, defaultOpen);
 }
 
+/**
+ * Whether this window has ever been told to show or hide the dock. `undefined`
+ * means it has not, so the caller decides from the window it is actually in
+ * rather than from a value frozen before the viewport was measured.
+ */
+export function readUtilityDockOpen(
+  scope: { readonly localStorage?: Storage },
+  windowId: string,
+): boolean | undefined {
+  try {
+    const raw = scope.localStorage?.getItem(utilityDockStorageKey(windowId));
+    if (raw === undefined || raw === null) return undefined;
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") return undefined;
+    const candidate = parsed as { readonly open?: unknown };
+    return typeof candidate.open === "boolean" ? candidate.open : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function writeUtilityDockPresentation(
   scope: { readonly localStorage?: Storage },
   windowId: string,

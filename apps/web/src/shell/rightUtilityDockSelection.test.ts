@@ -3,6 +3,7 @@ import {
   closeThreadUtilityTab,
   openThreadUtilityTab,
   readBottomPanelToolPresentation,
+  readUtilityDockOpen,
   readUtilityDockPresentation,
   removeUtilityTabs,
   retainAvailableUtilityTabs,
@@ -97,6 +98,20 @@ describe("thread utility presentation persistence", () => {
       open: true,
       threads: new Map(),
     });
+  });
+
+  it("reports no choice for a window that has never shown or hidden the dock", () => {
+    expect(readUtilityDockOpen({ localStorage: memoryStorage() }, "fresh")).toBeUndefined();
+  });
+
+  it("reports the choice a window actually made", () => {
+    const localStorage = memoryStorage();
+    writeUtilityDockPresentation({ localStorage }, "window-a", {
+      open: false,
+      threads: new Map(),
+    });
+
+    expect(readUtilityDockOpen({ localStorage }, "window-a")).toBe(false);
   });
 
   it("shows the dock in a window that has never been told otherwise", () => {
