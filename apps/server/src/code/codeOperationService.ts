@@ -617,6 +617,18 @@ export interface CodeOperationExecuteOptions {
 
 export interface CodeOperationServiceOptions {
   readonly authority: CodeOperationAuthorityPort;
+  /**
+   * Runs after the command has passed thread, checkout, lifecycle, and Project
+   * scope checks, but before operation approval or any side effect. Runtime
+   * work uses this seam so an inaccessible command cannot leave a durable
+   * running record behind.
+   */
+  readonly onScopedOperation?: (input: {
+    readonly windowId: WindowId;
+    readonly command: CodeOperationCommand;
+    readonly thread: CodeThread;
+    readonly checkout: CodeCheckoutIdentity;
+  }) => void;
   readonly approvals?: CodeApprovalValidationPort;
   readonly terminals: CodeOperationTerminalPort;
   readonly repositoryTests: CodeOperationRepositoryTestPort;
@@ -762,6 +774,13 @@ export class CodeOperationService {
       }
       return existing.event.result;
     }
+
+    this.#options.onScopedOperation?.({
+      windowId,
+      command,
+      thread: scope.thread,
+      checkout: scope.checkout,
+    });
 
     let result: CodeOperationResult;
     let resultCursor = replay.nextCursor;

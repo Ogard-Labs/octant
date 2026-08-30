@@ -109,6 +109,29 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("does not record runtime work for a command outside the window's Project scope", async () => {
+    const fixture = runtimeFixture({ approvalValidator: false });
+    fixture.access.mockResolvedValue(false);
+
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "start-terminal",
+      operationId: operationId(3),
+      threadId,
+      checkoutId,
+      terminalId: operationId(4) as never,
+      columns: 100,
+      rows: 30,
+      credentialRefs: [],
+    });
+
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.runtimeWorks()).toEqual([]);
+    fixture.close();
+  });
+
   it("prepares and consumes one-shot approval for the exact core Apple action", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     const request = {

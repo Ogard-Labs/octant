@@ -414,6 +414,15 @@ export function createCodeOperationRuntime(
   };
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    onScopedOperation: ({ command }) => {
+      // The service invokes this only after its authoritative scope check and
+      // replay lookup, but before approval or the operation side effect. That
+      // keeps inaccessible commands out of the durable runtime-work journal
+      // while still recording work that waits on approval.
+      const started = codeRuntimeWorkStarted(command);
+      if (started !== undefined)
+        runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind });
+    },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     terminals: terminal,
     repositoryTests,
@@ -566,18 +575,9 @@ export function createCodeOperationRuntime(
     execute: async (windowId, rawCommand, options) => {
       const command = decodeCodeOperationCommand(rawCommand);
       if (command.kind === "start-provider-turn") turns.noteStart(command);
-      // The board's record of this unit of work opens here, the last point
-      // that still runs before the work does, and closes on the result. A
-      // command the service refuses therefore leaves an opened-then-closed
-      // pair rather than nothing, which is what the host honestly did; those
-      // closing states are terminal, so the board never shows them as owed.
-      //
-      // A provider turn is the exception: it outlives this call and its states
-      // arrive on the stream long afterwards, so the turn controller owns its
-      // record instead.
-      const started = codeRuntimeWorkStarted(command);
-      if (started !== undefined)
-        runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind });
+      // Runtime work is opened by the service after its authoritative scope
+      // check, while provider turns outlive this call and are opened by the
+      // turn controller itself.
       const observed = codeRuntimeWorkObserved(command);
       try {
         const result = await service.execute(windowId, command, options);
