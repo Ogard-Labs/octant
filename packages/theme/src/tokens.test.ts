@@ -77,23 +77,33 @@ describe("theme semantic token catalog", () => {
 
   it("uses the design system's neutral graphite palette in both modes", () => {
     expect(DEFAULT_LIGHT_TOKENS).toMatchObject({
-      "app-background": "#f7f7f7",
+      "app-background": "#f2f2f0",
       workspace: "#ffffff",
-      floating: "#f3f3f3",
+      floating: "#f7f7f7",
       "text-primary": "#202020",
-      accent: "#202020",
+      accent: "#1f6f96",
       "accent-foreground": "#ffffff",
-      "accent-text": "#202020",
+      "accent-text": "#1f6f96",
     });
     expect(DEFAULT_DARK_TOKENS).toMatchObject({
-      "app-background": "#171717",
+      "app-background": "#101010",
       workspace: "#171717",
-      floating: "#242424",
+      floating: "#1e1e1e",
       "text-primary": "#f2f2f2",
-      accent: "#f2f2f2",
+      accent: "#4d9ec8",
       "accent-foreground": "#171717",
-      "accent-text": "#f2f2f2",
+      "accent-text": "#4d9ec8",
     });
+  });
+
+  it("keeps the page a visible step below the workspace it holds", () => {
+    expect(DEFAULT_DARK_TOKENS["app-background"]).not.toBe(DEFAULT_DARK_TOKENS["workspace"]);
+    expect(DEFAULT_LIGHT_TOKENS["app-background"]).not.toBe(DEFAULT_LIGHT_TOKENS["workspace"]);
+  });
+
+  it("keeps focus distinguishable from body text in both modes", () => {
+    expect(DEFAULT_DARK_TOKENS["focus-ring"]).not.toBe(DEFAULT_DARK_TOKENS["text-primary"]);
+    expect(DEFAULT_LIGHT_TOKENS["focus-ring"]).not.toBe(DEFAULT_LIGHT_TOKENS["text-primary"]);
   });
 
   it("uses theme-appropriate monochrome accent fills", () => {

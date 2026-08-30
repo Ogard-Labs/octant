@@ -731,16 +731,17 @@
 /* The composer's frame, focus ring, input, chips row, bottom row, and send
    control are the system's; this block only places the composer in the
    workspace column and pads the pieces the system does not know about. */
+/* The frame owns the composer's ring and lift. Adding a shadow here drew a
+   second, solid outline a step brighter than the hairline, so the box read as
+   two stacked borders. */
 .chat-composer {
   position: relative;
   z-index: 2;
   flex: 0 0 auto;
   margin-block: 0 18px;
-  box-shadow: var(--octant-shadow-sm);
   transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
-    box-shadow 140ms ease;
+    background-color var(--oct-dur-base) var(--oct-ease-color),
+    box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
 
 .chat-composer--queued {

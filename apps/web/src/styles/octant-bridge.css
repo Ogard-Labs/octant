@@ -59,6 +59,29 @@
      rather than mapped to the app's solid --octant-control. */
   --oct-fg-soft: color-mix(in oklab, var(--octant-text-primary) 7%, transparent);
 
+  /* ─── fills and hairlines ───────────────────────────────────────────
+     Interior surfaces are tints of the foreground, not fixed greys, so a
+     chip keeps the same weight whether it lands on the workspace, a
+     card, or a popover. A solid grey hairline only reads correctly over
+     one ground; below a certain surface it turns darker than the thing
+     it borders. Hairlines are drawn as inset rings rather than borders
+     so they never take part in layout or fight overflow clipping. */
+  --oct-fill-1: color-mix(in oklab, var(--octant-text-primary) 14%, transparent);
+  --oct-fill-2: color-mix(in oklab, var(--octant-text-primary) 8%, transparent);
+  --oct-fill-3: color-mix(in oklab, var(--octant-text-primary) 6%, transparent);
+  --oct-fill-4: color-mix(in oklab, var(--octant-text-primary) 4%, transparent);
+  --oct-hairline: color-mix(in oklab, var(--octant-text-primary) 10%, transparent);
+  --oct-hairline-strong: color-mix(in oklab, var(--octant-text-primary) 14%, transparent);
+
+  /* ─── motion ────────────────────────────────────────────────────────
+     Colour settles faster than geometry, so hover feels immediate while
+     a lift or a disclosure still reads as movement. */
+  --oct-dur-fast: 0.1s;
+  --oct-dur-base: 0.15s;
+  --oct-dur-slow: 0.2s;
+  --oct-ease-color: cubic-bezier(0.4, 0, 0.2, 1);
+  --oct-ease-motion: cubic-bezier(0.22, 1, 0.36, 1);
+
   /* ─── accent ────────────────────────────────────────────────────────
      accent-text is a real theme role (contrast target: workspace, bar:
      normal text), so accent-as-text follows a custom theme and stays

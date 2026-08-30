@@ -15,10 +15,10 @@ describe("ThemeSettingsProvider", () => {
     expect(root.dataset.octantThemeMode).toBe("light");
     expect(root.style.getPropertyValue("--octant-workspace")).toBe("#ffffff");
     expect(root.style.getPropertyValue("--octant-surface")).toBe("#ffffff");
-    expect(root.style.getPropertyValue("--octant-surface-raised")).toBe("#f3f3f3");
+    expect(root.style.getPropertyValue("--octant-surface-raised")).toBe("#f7f7f7");
     expect(root.style.getPropertyValue("--octant-surface-muted")).toBe("#efefef");
     expect(root.style.getPropertyValue("--octant-border-subtle")).toBe("#dedede");
-    expect(root.style.getPropertyValue("--octant-focus")).toBe("#202020");
+    expect(root.style.getPropertyValue("--octant-focus")).toBe("#1f6f96");
     expect(root.style.getPropertyValue("--octant-palette-green")).toBe("#41761c");
     expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toBe(
       "color-mix(in srgb, #f0f0f0 78%, transparent)",

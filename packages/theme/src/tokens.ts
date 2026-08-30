@@ -30,11 +30,14 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
   // each role actually renders over, because preset tokens are opaque
   // six-digit hex by contract.
   {
+    // The application background is the well every other surface sits in. It
+    // has to be a visible step below the workspace, or panels, cards, and the
+    // page all read as one flat plate.
     id: "app-background",
     displayName: "Application background",
     category: "foundation",
-    defaultLight: "#f7f7f7",
-    defaultDark: "#171717",
+    defaultLight: "#f2f2f0",
+    defaultDark: "#101010",
   },
   {
     id: "chrome",
@@ -69,8 +72,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "surface",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#f3f3f3",
-    defaultDark: "#242424",
+    defaultLight: "#f7f7f7",
+    defaultDark: "#1e1e1e",
   },
   {
     id: "scrim",
@@ -182,8 +185,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "focus",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#202020",
-    defaultDark: "#f2f2f2",
+    defaultLight: "#1f6f96",
+    defaultDark: "#4d9ec8",
   },
   {
     id: "selection",
@@ -195,15 +198,16 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultDark: "#303030",
   },
   {
-    // Primary action fill. Expressive colour is reserved for semantic state,
-    // Project View identity, and user-selected themes.
+    // Primary action fill. One scarce hue, per 0016: it marks focus, the
+    // primary action, and links, and nothing else. A fully achromatic accent
+    // made focus, selection, and primary text indistinguishable from body ink.
     id: "accent",
     displayName: "Accent",
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#202020",
-    defaultDark: "#f2f2f2",
+    defaultLight: "#1f6f96",
+    defaultDark: "#4d9ec8",
   },
   {
     id: "accent-foreground",
@@ -215,15 +219,15 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultDark: "#171717",
   },
   {
-    // Accent as text follows the foreground-strength monochrome role and is
-    // still policed at the normal-text contrast bar.
+    // Accent as text carries the same hue as the fill and is still policed at
+    // the normal-text contrast bar.
     id: "accent-text",
     displayName: "Accent text",
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#202020",
-    defaultDark: "#f2f2f2",
+    defaultLight: "#1f6f96",
+    defaultDark: "#4d9ec8",
   },
   {
     id: "success-surface",
