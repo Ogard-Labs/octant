@@ -30,7 +30,7 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain('class="composer code-composer-adapter__card"');
   });
 
-  it("names the Project in the heading and docks host, checkout, and branch under the card", () => {
+  it("names the Project in the heading and tucks host, checkout, and branch on a second card", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".code-composer-adapter__dock");

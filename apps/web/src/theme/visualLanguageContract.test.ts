@@ -78,6 +78,15 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/border:\s*0/);
   });
 
+  it("tucks the Code checkout card behind the composer as a second raised card", () => {
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const dock = shell.match(/\.code-composer-adapter__dock \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+
+    expect(dock).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
+    expect(dock).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
+    expect(dock).not.toMatch(/border-radius:\s*0 0/);
+  });
+
   it("does not let composer-row native selects keep the field recipe", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     expect(system).toMatch(/\.composer-row select\s*\{[^}]*border:\s*0/);

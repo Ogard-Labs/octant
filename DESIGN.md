@@ -187,9 +187,10 @@ welcome composers, and cards use the raised card recipe (`OctantCard` /
 `--octant-shadow-sm`). Chat, Work, and Code welcome composers share the `.composer` frame (20px,
 `--octant-shadow-md`). In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
-as a sunken field. Code welcome names the Project in the heading and docks
-checkout plus branch under the card: Host, workspace, and the searchable
-ref list sit on that bar, not in the toolbar. Access is a titled menu on
+as a sunken field. Code welcome names the Project in the heading. Checkout and branch sit
+on a second raised card tucked behind the composer, the same object
+peeking out rather than a footer painted on the page. Host, workspace,
+and the searchable ref list live on that back card, not in the toolbar. Access is a titled menu on
 the card, next to the model picker. GitHub and delivery stay a quiet strip
 under the dock. The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
