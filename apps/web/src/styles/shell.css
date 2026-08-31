@@ -1709,7 +1709,7 @@ form > .work-composer-adapter__attachments {
 .code-composer-adapter__stack > .code-composer-adapter__card {
   position: relative;
   z-index: 1;
-  width: 100%;
+  width: calc(100% - 16px);
 }
 
 /* Layout only. The frame, 20px radius, and lift are `.composer` (0038).
@@ -1725,9 +1725,9 @@ form > .work-composer-adapter__attachments {
   min-height: 96px;
 }
 
-/* A second card, not a footer band. Same width as the composer, tucked
-   under it. A step darker than the front card so the peek stays visible
-   when both fills would otherwise merge into one taller box. */
+/* A second card, not a footer band. Wider than the front card so its
+   shoulders peek out. Inset fill stays a step behind the composer in
+   both themes without reading a theme-mode attribute. */
 .code-composer-adapter__dock {
   display: flex;
   flex-wrap: wrap;
@@ -1737,16 +1737,12 @@ form > .work-composer-adapter__attachments {
   position: relative;
   z-index: 0;
   width: 100%;
-  margin-top: -16px;
-  padding: 28px 16px 12px;
+  margin-top: -18px;
+  padding: 30px 16px 12px;
   color: var(--oct-meta);
-  background: var(--octant-floating);
+  background: var(--octant-surface-inset);
   border-radius: var(--oct-radius-lg);
   box-shadow: var(--octant-shadow-sm);
-}
-
-html[data-octant-theme-mode="dark"] .code-composer-adapter__dock {
-  background: var(--octant-surface-inset);
 }
 
 .code-composer-adapter__dock-leading,
