@@ -77,6 +77,7 @@ distilled successor of the earlier long-form design specifications.
 | [0067](0067-native-harness-turn-loop-and-supervision.md)      | Native harness turn loop, advisor, and follow-up suggestions                                | Proposed           |
 | [0068](0068-linux-plan-process-deny.md)                       | Linux Plan process denial uses seccomp                                                      | Accepted           |
 | [0069](0069-native-harness-context-overflow.md)               | Native harness context overflow: hard cutover, evidence notes, and journal lookup           | Proposed           |
+| [0070](0070-setup-surfaces-compose-from-public-blocks.md)     | Setup surfaces compose from public block catalogs                                           | Proposed           |
 
 ## Adding an ADR
 

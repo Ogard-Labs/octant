@@ -322,7 +322,11 @@ fourth authority mode.
 **Approved migration, not yet fully the renderer.** Proposed records
 [0041](decisions/0041-panes-hold-one-surface.md) and
 [0044](decisions/0044-the-dock-hosts-live-thread-owned-tools.md) are the agreed
-interaction model for remaining renderer work. Environment is already a compact
+interaction model for remaining renderer work.
+[0070](decisions/0070-setup-surfaces-compose-from-public-blocks.md)
+is the agreed composition for Settings, first-run, welcome, and the command
+palette: independently restyle those Octant-owned surfaces to match public
+block grouping, without vendoring a catalog or replacing the shell. Environment is already a compact
 header summary with a transient disclosure whose open state is not persisted
 and may include a truthful child-run summary
 ([0045](decisions/0045-environment-summarizes-the-active-thread.md)).
