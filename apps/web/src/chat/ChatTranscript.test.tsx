@@ -402,6 +402,15 @@ describe("ChatTranscript", () => {
     }
   });
 
+  it("shows completed work duration while omitting sub-second durations", () => {
+    const view = viewFixture({ attemptUpdatedAt: "2026-07-20T08:01:05.000Z" });
+    const { rerender } = render(<ChatTranscript view={view} />);
+    expect(screen.getByText("Worked for 1m 5s")).toBeVisible();
+
+    rerender(<ChatTranscript view={viewFixture({ attemptUpdatedAt: now })} />);
+    expect(screen.queryByText(/Worked for/)).not.toBeInTheDocument();
+  });
+
   it("surfaces the exact failed attempt correlation for Settings support", () => {
     const failed = viewFixture().turns[0]!.attempts[0]!;
     render(

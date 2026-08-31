@@ -509,20 +509,6 @@
   white-space: nowrap;
 }
 
-/* The attempt status line rides the system's .runstatus; only the streaming
-   and completed states below are residual. */
-.chat-transcript__attempt-status--completed {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 .chat-transcript__attempt-status--streaming svg {
   animation: chat-status-spin 900ms linear infinite;
 }

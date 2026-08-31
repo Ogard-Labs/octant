@@ -31,11 +31,13 @@ describe("a message sent while a turn is running", () => {
     expect(second).toBe(steering);
   });
 
-  it("runs as soon as the thread stops running a response", () => {
-    for (const settlement of ["completed", "cancelled", "failed", "refused", "waiting"] as const) {
+  it("runs only after a settlement that releases thread ownership", () => {
+    for (const settlement of ["completed", "cancelled", "failed", "refused"] as const) {
       expect(settleSteeredSend(steering, "thread-1", settlement).fire).toBe(true);
     }
-    expect(settleSteeredSend(steering, "thread-1", "running").fire).toBe(false);
+    for (const settlement of ["running", "waiting"] as const) {
+      expect(settleSteeredSend(steering, "thread-1", settlement).fire).toBe(false);
+    }
   });
 
   it("is dropped rather than sent into a thread the user has left", () => {

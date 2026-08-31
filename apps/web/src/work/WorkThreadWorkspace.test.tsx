@@ -547,6 +547,9 @@ describe("WorkThreadWorkspace", () => {
 
     await user.type(await screen.findByLabelText("Work prompt"), "Hold this");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    turns = [workTurn({ status: "waiting" })];
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(startFirstTurn).not.toHaveBeenCalled();
     turns = [workTurn({ status: "cancelled" })];
     await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
   });

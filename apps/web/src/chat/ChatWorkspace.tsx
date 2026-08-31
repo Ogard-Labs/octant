@@ -144,6 +144,7 @@ type ChatSendContext = Pick<
   | "quotes"
   | "extensionReceipts"
   | "threadMentionIds"
+  | "threadMentionChips"
 >;
 
 /**
@@ -684,16 +685,33 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       // and this send owns every controlled selection.
       props.onClearCanvasSelections();
     }
+    const currentExtensionSelections = props.pendingExtensionSelections ?? extensionDraft.receipts;
     if (props.pendingExtensionSelections === undefined) {
-      for (const receipt of context.extensionReceipts) extensionDraft.remove(receipt.reference);
+      for (const receipt of context.extensionReceipts) {
+        // Remove only the receipt object this send captured. A newer draft may
+        // have removed and re-added the same reference; deleting by reference
+        // alone would steal that newer context.
+        if (currentExtensionSelections.some((candidate) => candidate === receipt)) {
+          extensionDraft.remove(receipt.reference);
+        }
+      }
     } else if (props.onRemoveExtensionSelection !== undefined) {
       for (const receipt of context.extensionReceipts) {
-        props.onRemoveExtensionSelection(receipt.reference);
+        if (currentExtensionSelections.some((candidate) => candidate === receipt)) {
+          props.onRemoveExtensionSelection(receipt.reference);
+        }
       }
     }
     const mentionComposer = threadMentions.composer;
     if (mentionComposer !== undefined) {
-      for (const threadId of context.threadMentionIds) mentionComposer.onRemoveChip(threadId);
+      for (const chip of context.threadMentionChips) {
+        // `onRemoveChip` accepts an id for user interactions, but a send owns
+        // one concrete chip instance. Check identity first so an older send
+        // cannot remove a same-id chip re-added to a newer draft.
+        if (threadMentions.chips.some((candidate) => candidate === chip)) {
+          mentionComposer.onRemoveChip(chip.threadId);
+        }
+      }
     }
   }
 
@@ -714,6 +732,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     const extensionReceiptsForSend = deferred
       ? steeredMessage.extensionReceipts
       : pendingExtensionRef.current;
+    const threadMentionChipsForSend = deferred
+      ? steeredMessage.threadMentionChips
+      : [...threadMentions.chips];
     // A `#thread` chip names a thread; it never carries one. The turn
     // sends chip ids and the host resolves each one as the turn runs,
     // re-checking that the sender may still open it, so the message
@@ -738,6 +759,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       previewSelections: previewSelectionsForSend,
       quotes: quotesForSend,
       threadMentionIds,
+      threadMentionChips: threadMentionChipsForSend,
     };
     let sent = false;
     try {

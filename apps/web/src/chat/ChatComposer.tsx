@@ -117,11 +117,6 @@ export interface ChatComposerProps {
   readonly onSend: (draft: string) => Promise<boolean> | boolean;
   readonly onStop?: () => void;
   /**
-   * A follow-up parked in this composer while a turn is running. The draft
-   * stays here so it can be edited or discarded; the caller sends it through
-   * the ordinary path when the turn completes.
-   */
-  /**
    * True while a message the user already sent is waiting for the response in
    * flight to finish. The composer only says so; it never asks the user to
    * manage that message.

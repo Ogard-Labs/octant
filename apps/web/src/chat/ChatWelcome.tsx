@@ -15,6 +15,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import type { DraftRecentThread } from "../shell/DraftThreadWorkspace";
+import { RecentThreadList } from "../shell/RecentThreadList";
 
 export interface ChatWelcomeProps {
   /** The threads this mode already has, shown under the starter ideas. */
@@ -203,28 +204,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             );
           })}
         </div>
-        {props.recentThreads === undefined || props.recentThreads.length === 0 ? null : (
-          <div className="draft-thread__recent">
-            <p className="draft-thread__recent-title">Continue</p>
-            <ul className="draft-thread__recent-list">
-              {props.recentThreads.map((thread) => (
-                <li key={thread.id}>
-                  <OctantButton
-                    className="draft-thread__recent-item"
-                    onClick={thread.onOpen}
-                    type="button"
-                    variant="ghost"
-                  >
-                    <span className="draft-thread__recent-name">{thread.title}</span>
-                    {thread.detail === undefined ? null : (
-                      <span className="draft-thread__recent-detail">{thread.detail}</span>
-                    )}
-                  </OctantButton>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <RecentThreadList threads={props.recentThreads ?? []} />
       </div>
     </section>
   );
