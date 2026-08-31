@@ -214,7 +214,7 @@
   flex-direction: column;
   gap: 0.5rem;
   margin: 0;
-  padding: 0;
+  padding: 0 0 12px;
   border: 0;
 }
 
@@ -222,12 +222,16 @@
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  padding: 0 12px 8px;
 }
 
 .agent-run-settings-panel legend {
-  margin-bottom: 0.25rem;
-  padding: 0;
-  font-size: 0.8125rem;
+  float: none;
+  width: 100%;
+  margin-bottom: 0;
+  padding: 20px 20px 8px;
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
   font-weight: 600;
 }
 

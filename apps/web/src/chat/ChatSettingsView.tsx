@@ -68,7 +68,10 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
   }
 
   return (
-    <section aria-labelledby="chat-defaults-heading" className="provider-settings">
+    <section
+      aria-labelledby="chat-defaults-heading"
+      className="provider-settings settings-card-section"
+    >
       <div className="provider-settings__intro">
         <div>
           <h2 id="chat-defaults-heading">Chat defaults</h2>

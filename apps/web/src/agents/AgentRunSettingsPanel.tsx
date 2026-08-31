@@ -105,7 +105,7 @@ export function AgentRunSettingsPanel(props: { readonly client: AgentRunSettings
 
   return (
     <section aria-label="Agents" className="agent-run-settings-panel">
-      <fieldset>
+      <fieldset className="settings-card-section">
         <legend>Subagent creation posture</legend>
         {message === undefined ? null : (
           <p className="agent-run-settings-panel__message" role="status">

@@ -552,10 +552,10 @@ describe("SettingsView", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(/\.settings-view\s*\{[\s\S]*font-family:\s*var\(--oct-font-display\);/);
-    // Settings reads as a pane, not a centred article: the column starts at the
-    // pane's edge and only stops growing where a form row gets hard to scan.
-    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*max-width:\s*1080px;/);
-    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*margin:\s*0;/);
+    // Form-layout cards need a reading measure. A 1080px edge-aligned pane
+    // stretched every row into the old ops console.
+    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*max-width:\s*760px;/);
+    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*margin:\s*0 auto;/);
     expect(styles).toContain("font-family: var(--oct-font-display)");
     expect(styles).toContain("font-size: var(--octant-ui-font-size)");
     expect(styles).not.toContain("--octant-ui-font-family");
@@ -592,12 +592,20 @@ describe("SettingsView", () => {
     expect(styles).toMatch(/\.settings-scheme__card\s*\{[^}]*height:\s*auto;/);
   });
 
-  it("uses flat, dense setting groups instead of nested dashboard cards", () => {
+  it("reads Settings groups as raised form-layout cards on the app ground", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
-    expect(styles).toContain("background: var(--octant-surface-muted)");
+    expect(styles).toMatch(
+      /\.settings-view\s*\{[\s\S]*background:\s*var\(--octant-app-background\)/,
+    );
+    expect(styles).toMatch(
+      /\.settings-card-section\s*\{[\s\S]*background:\s*var\(--octant-settings-card\)/,
+    );
+    expect(styles).toMatch(
+      /\.settings-card-section\s*\{[\s\S]*box-shadow:\s*var\(--octant-shadow-sm\)/,
+    );
     expect(styles).toContain("border-radius: var(--oct-radius-md)");
-    expect(styles).toContain("gap: var(--oct-space-1)");
+    expect(styles).not.toMatch(/\.code-settings\s*\{[^}]*--octant-surface-muted/);
   });
 
   it("keeps search and the existing mode-switcher mutation wired", async () => {

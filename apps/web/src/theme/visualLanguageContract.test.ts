@@ -131,4 +131,26 @@ describe("the public-block visual language", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     expect(system).not.toMatch(/\.composer-row select\b/);
   });
+
+  it("reads Settings as form-layout cards on the app ground", () => {
+    const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
+
+    expect(settings).toMatch(
+      /\.settings-view\s*\{[^}]*background:\s*var\(--octant-app-background\)/,
+    );
+    expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*max-width:\s*760px/);
+    expect(settings).toMatch(
+      /\.settings-card-section\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\)/,
+    );
+    expect(settings).toMatch(
+      /\.settings-card-section\s*>\s*h2,[\s\S]*?\.settings-card-section\s*>\s*legend\s*\{[\s\S]*?text-transform:\s*none/,
+    );
+    expect(settings).not.toMatch(
+      /\.settings-theme-editor__disclosure,\n\.settings-theme-editor__accessibility \{\n(?:.*\n)*?background:\s*none/,
+    );
+    expect(settings).toMatch(
+      /\.code-settings\s*\{[^}]*background:\s*var\(--octant-settings-card\)/,
+    );
+    expect(settings).not.toMatch(/\.octant-switch\s*\{/);
+  });
 });

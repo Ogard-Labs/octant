@@ -957,49 +957,52 @@ function AdvancedSection({
   );
   return (
     <section aria-label="Advanced" id="settings-advanced">
-      <div className="setgroup">
-        <SettingRow
-          focused={focusedSetting === settingId("reset-layout")}
-          label="Reset active mode layout"
-          scope="app"
-          settingId="reset-layout"
-        >
-          <OctantButton
-            className="settings-view__action"
-            onClick={props.onResetLayout}
-            type="button"
-            variant="secondary"
-          >
-            Reset active mode layout
-          </OctantButton>
-        </SettingRow>
-        {resetBoundsAvailable ? (
+      <div className="settings-card-section">
+        <h2>Maintenance</h2>
+        <div className="setgroup">
           <SettingRow
-            focused={focusedSetting === settingId("reset-window-bounds")}
-            label="Reset native window bounds"
+            focused={focusedSetting === settingId("reset-layout")}
+            label="Reset active mode layout"
             scope="app"
-            settingId="reset-window-bounds"
+            settingId="reset-layout"
           >
             <OctantButton
               className="settings-view__action"
-              onClick={props.onResetNativeBounds}
+              onClick={props.onResetLayout}
               type="button"
               variant="secondary"
             >
-              Reset native window bounds
+              Reset active mode layout
             </OctantButton>
           </SettingRow>
-        ) : null}
-        {diagnosticsExportClient !== undefined ? (
-          <SettingRow
-            focused={focusedSetting === settingId("export-diagnostics")}
-            label="Export diagnostics"
-            scope="host"
-            settingId="export-diagnostics"
-          >
-            <DiagnosticsExportControl client={diagnosticsExportClient} />
-          </SettingRow>
-        ) : null}
+          {resetBoundsAvailable ? (
+            <SettingRow
+              focused={focusedSetting === settingId("reset-window-bounds")}
+              label="Reset native window bounds"
+              scope="app"
+              settingId="reset-window-bounds"
+            >
+              <OctantButton
+                className="settings-view__action"
+                onClick={props.onResetNativeBounds}
+                type="button"
+                variant="secondary"
+              >
+                Reset native window bounds
+              </OctantButton>
+            </SettingRow>
+          ) : null}
+          {diagnosticsExportClient !== undefined ? (
+            <SettingRow
+              focused={focusedSetting === settingId("export-diagnostics")}
+              label="Export diagnostics"
+              scope="host"
+              settingId="export-diagnostics"
+            >
+              <DiagnosticsExportControl client={diagnosticsExportClient} />
+            </SettingRow>
+          ) : null}
+        </div>
       </div>
     </section>
   );

@@ -8,8 +8,25 @@
   grid-template-columns: 248px minmax(0, 1fr);
   overflow: hidden;
   color: var(--octant-text-primary);
-  background: var(--octant-workspace);
+  background: var(--octant-app-background);
   font-family: var(--oct-font-display);
+  /* Light cards are workspace white; dark cards lift with the floating fill.
+     Using floating in light is the grey well. Using workspace in dark is
+     invisible against the same app ground. */
+  --octant-settings-card: var(--octant-workspace);
+}
+
+html[data-octant-theme-mode="dark"] .settings-view,
+html[data-appearance="dark"] .settings-view,
+html[data-theme="dark"] .settings-view {
+  --octant-settings-card: var(--octant-floating);
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-octant-theme-mode="light"]):not([data-appearance="light"]):not([data-theme="light"])
+    .settings-view {
+    --octant-settings-card: var(--octant-floating);
+  }
 }
 
 .settings-view__sidebar {
@@ -86,7 +103,7 @@
   min-height: 0;
   grid-template-rows: 44px minmax(0, 1fr);
   overflow: hidden;
-  background: var(--octant-workspace);
+  background: var(--octant-app-background);
 }
 
 .settings-view__workspace-titlebar {
@@ -226,17 +243,22 @@
   font-weight: 500;
 }
 
-/* --- Settings primitives: app-side residue over .setrow/.setgroup --- */
+/* --- Settings primitives: one raised card per group --- */
 
 .settings-panel {
+  overflow: hidden;
   display: grid;
-  gap: 6px;
+  gap: 0;
+  background: var(--octant-settings-card);
+  border: 0;
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 .settings-panel__header {
   display: grid;
-  gap: 3px;
-  padding-inline: 2px;
+  gap: 4px;
+  padding: 20px 20px 0;
 }
 
 .settings-panel__header h2,
@@ -245,37 +267,38 @@
 }
 
 .settings-panel__header h2 {
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  text-transform: none;
 }
 
 .settings-panel__header p {
   max-width: 68ch;
   color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
 }
 
 .settings-panel__body {
   overflow: hidden;
-  background: var(--octant-floating);
+  background: transparent;
   border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  border-radius: 0;
+  box-shadow: none;
 }
 
-.settings-panel--danger .settings-panel__body {
-  box-shadow: 0 0 0 1px
-    color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
+.settings-panel--danger {
+  box-shadow:
+    var(--octant-shadow-sm),
+    0 0 0 1px color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
 }
 
 .settings-panel__stack {
   display: grid;
-  gap: var(--oct-space-3);
-  padding: 12px 14px;
+  gap: var(--oct-space-4);
+  padding: 16px 20px 20px;
 }
 
 .settings-fact-list {
@@ -285,11 +308,11 @@
 
 .settings-fact-list__row {
   display: grid;
-  min-height: 38px;
+  min-height: 44px;
   grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
   align-items: center;
   gap: var(--oct-space-4);
-  padding: 8px 14px;
+  padding: 16px 20px;
 }
 
 .settings-fact-list__row + .settings-fact-list__row {
@@ -369,12 +392,12 @@
    first row's own border-top, so the note draws none of its own. */
 .setgroup-note {
   margin: 0;
-  padding: var(--oct-space-3) var(--oct-space-4) 0;
+  padding: 0 20px 12px;
   max-width: 64ch;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
 }
 
 /* Compound editors (multi-field controls) stack under their label instead of
@@ -496,15 +519,13 @@
   --oct-settings-control-height: 32px;
 }
 
-/* Settings is a pane in an application window, not an article on a page.
-   Centring a fixed column left a wide dead gutter down both sides and made
-   the pane read as a document; content now starts at the pane's edge and only
-   stops growing where a form row would get uncomfortably wide to scan. */
+/* One reading column. A 1080px edge-aligned pane stretched every row into
+   an ops console; form-layout cards need a measure a person can scan. */
 .settings-view__content-inner {
   width: 100%;
-  max-width: 1080px;
-  padding: 24px 32px 56px;
-  margin: 0;
+  max-width: 760px;
+  padding: 32px 24px 64px;
+  margin: 0 auto;
 }
 
 .settings-view__content-inner > section,
@@ -513,15 +534,8 @@
 }
 
 .settings-view__content-inner > section {
-  padding: 0 0 24px;
+  padding: 0;
   margin: 0 0 24px;
-}
-
-.settings-view__content-inner > section > h2 {
-  margin: 0 0 6px;
-  color: var(--octant-text-primary);
-  font-size: calc(13 * var(--oct-text-step));
-  font-weight: 600;
 }
 
 .settings-section-stack {
@@ -529,29 +543,30 @@
   gap: 20px;
 }
 
+/* The section is the card. Title sits on it, not as a tiny uppercase label
+   floating above a second grey well. */
 .settings-card-section {
   display: grid;
-  gap: 6px;
+  gap: 0;
+  overflow: hidden;
+  background: var(--octant-settings-card);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
-/* One section heading treatment for the whole surface. The Appearance blocks
-   reach it through `summary` and `legend` because a disclosure's heading is
-   also its trigger and a fieldset's heading must be its legend; before this
-   they each carried their own inline-card head, which is why Appearance and
-   General did not read as the same page. */
 .settings-view__content-inner .provider-settings__intro h2,
 .settings-card-section > h2,
 .settings-card-section > summary,
 .settings-card-section > legend {
   margin: 0;
-  padding-inline: 2px;
-  color: var(--octant-text-muted);
+  padding: 20px 20px 0;
+  color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
   font-weight: 600;
-  letter-spacing: 0.06em;
-  line-height: 1.25;
-  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  text-transform: none;
 }
 
 /* A legend is taken out of the fieldset's flow by default, so it has to be
@@ -559,7 +574,7 @@
 .settings-card-section > legend {
   float: none;
   width: 100%;
-  padding-block: 0;
+  padding: 20px 20px 0;
 }
 
 .settings-card-section > summary {
@@ -584,16 +599,44 @@
   box-shadow: var(--oct-focus-ring);
 }
 
-/* A settings group is a raised object: it sits above the pane and carries its
-   edge as an inset ring, so the ring survives the group's own overflow
-   clipping and never reads darker than the surface it borders. */
-.settings-card-section > .setgroup,
+/* Standalone groups are cards. A group already inside settings-card-section
+   must not grow a second well. */
 .setgroup {
   overflow: hidden;
   border: 0;
   border-radius: var(--oct-radius-md);
-  background: var(--octant-floating);
+  background: var(--octant-settings-card);
   box-shadow: var(--octant-shadow-sm);
+}
+
+.settings-card-section > .setgroup,
+.settings-card-section > .provider-settings__form,
+.settings-panel .setgroup {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-view .provider-settings {
+  gap: 20px;
+}
+
+.settings-view .provider-settings.settings-card-section {
+  gap: 0;
+}
+
+.settings-view .provider-settings.settings-card-section > .provider-settings__intro {
+  padding: 20px 20px 0;
+}
+
+.settings-view .provider-settings.settings-card-section > .provider-settings__hint,
+.settings-view .provider-settings.settings-card-section > .provider-settings__alert {
+  padding: 8px 20px 0;
+  margin: 0;
+}
+
+.settings-view .provider-settings.settings-card-section > .provider-settings__form {
+  padding: 8px 0 12px;
 }
 
 /* Rows inside a group are separated by the group's own hairline rather than a
@@ -609,8 +652,8 @@
 }
 
 .setgroup-head {
-  min-height: 42px;
-  padding: 10px 16px;
+  min-height: 48px;
+  padding: 16px 20px 8px;
   color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
@@ -633,8 +676,8 @@
 }
 
 .setrow {
-  column-gap: 20px;
-  padding: 10px 14px;
+  column-gap: 24px;
+  padding: 16px 20px;
   font-family: var(--oct-font-display);
 }
 
@@ -685,7 +728,6 @@
 .settings-view__text-input,
 .settings-view__textarea,
 .settings-view__action,
-.settings-view .octant-switch,
 .settings-view [role="combobox"] {
   font-family: var(--oct-font-display);
 }
@@ -795,13 +837,13 @@ textarea.settings-view__text-input {
   margin: 0;
 }
 
-/* The blocks carry no chrome themselves — the group inside each one does, the
-   same way a `.settings-card-section` does elsewhere. */
+/* details/fieldset reset only. Card fill and shadow stay on
+   `.settings-card-section`; wiping the background here left Typography and
+   Accessibility as title-over-well again. */
 .settings-theme-editor__disclosure,
 .settings-theme-editor__accessibility {
   padding: 0;
   margin: 0;
-  background: none;
   border: 0;
 }
 
@@ -947,8 +989,15 @@ textarea.settings-view__text-input {
 /* A labelled control inside a group is a row of that group, so it takes the
    group's row metrics rather than the looser spacing it used when each block
    was its own card. */
+.setgroup > .settings-view__field,
+.setgroup > .settings-view__toggle,
+.provider-settings__form > .settings-view__field,
+.provider-settings__form > .settings-view__toggle {
+  padding: 16px 20px;
+}
+
 .settings-theme-editor .setgroup > .settings-view__field {
-  padding: 6px 16px;
+  padding: 16px 20px;
   border-top: 1px solid var(--oct-border-soft);
 }
 
@@ -967,7 +1016,7 @@ textarea.settings-view__text-input {
 }
 
 .settings-theme-editor__disclosure-body {
-  padding: 4px 16px 8px;
+  padding: 0 0 8px;
 }
 
 /* Unsaved-changes bar: note on the left, Apply/Cancel/Reset on the right.
@@ -1166,49 +1215,6 @@ textarea.settings-view__text-input {
   display: none;
 }
 
-/* The Base UI switch, drawn to the design system's input.switch metrics.
-   The component is a button with a thumb span, so input.switch's
-   pseudo-element recipe cannot apply directly; this mirrors it. */
-.octant-switch {
-  position: relative;
-  display: inline-flex;
-  width: 38px;
-  height: 22px;
-  flex: 0 0 auto;
-  align-items: center;
-  padding: 3px;
-  color: inherit;
-  background: var(--oct-border);
-  border: 0;
-  border-radius: var(--oct-radius-pill);
-  cursor: pointer;
-  transition: background var(--oct-motion-base) var(--oct-ease-standard);
-}
-
-.octant-switch[data-checked] {
-  background: var(--oct-accent);
-}
-
-.octant-switch[data-disabled] {
-  cursor: not-allowed;
-  opacity: var(--oct-disabled-opacity);
-}
-
-.octant-switch__thumb {
-  display: block;
-  width: 16px;
-  height: 16px;
-  background: var(--oct-fg);
-  border-radius: var(--oct-radius-pill);
-  transform: translateX(0);
-  transition: transform var(--oct-motion-base) var(--oct-ease-standard);
-}
-
-.octant-switch__thumb[data-checked] {
-  background: var(--oct-accent-on);
-  transform: translateX(16px);
-}
-
 .settings-view__actions {
   display: flex;
   flex-wrap: wrap;
@@ -1259,13 +1265,6 @@ textarea.settings-view__text-input {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .octant-switch,
-  .octant-switch__thumb {
-    transition: none;
-  }
-}
-
 @media (prefers-reduced-transparency: reduce) {
   .shell--material-translucent .settings-view__sidebar,
   .shell--material-translucent[data-octant-sidebar-vibrancy="subtle"] .settings-view__sidebar,
@@ -1283,12 +1282,6 @@ textarea.settings-view__text-input {
   .shell--material-translucent .settings-view__effective-note {
     display: block;
   }
-
-  /* The system switch is borderless; increased contrast draws the edge as an
-     inset ring instead of a border so the metrics stay identical. */
-  .octant-switch {
-    box-shadow: inset 0 0 0 1px var(--oct-fg);
-  }
 }
 
 /* Settings > Host: the operational host card. Stacked sections
@@ -1296,7 +1289,7 @@ textarea.settings-view__text-input {
 .host-settings {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 20px;
   font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-fg);
 }
@@ -1379,7 +1372,7 @@ textarea.settings-view__text-input {
 .linear-settings {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 20px;
   font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-fg);
 }
@@ -1504,12 +1497,12 @@ textarea.settings-view__text-input {
 .github-settings__heading {
   margin: 20px 0 8px;
   padding-top: 20px;
-  color: var(--octant-text-secondary);
+  color: var(--octant-text-primary);
   border-top: 1px solid var(--octant-border);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  text-transform: none;
 }
 
 .host-settings > .host-settings__controls:first-child + .host-settings__heading,
@@ -1539,7 +1532,7 @@ textarea.settings-view__text-input {
 .host-data-map {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 20px;
 }
 
 .host-data-map__subheading {
@@ -1657,26 +1650,36 @@ textarea.settings-view__text-input {
 
 .open-in-settings {
   min-width: 0;
-  padding: 0;
+  overflow: hidden;
+  padding: 0 0 8px;
   border: 0;
+  background: var(--octant-settings-card);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 .open-in-settings > legend {
-  padding: 0;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-strong);
+  float: none;
+  width: 100%;
+  padding: 20px 20px 0;
+  color: var(--octant-text-primary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .open-in-settings > p,
 .open-in-settings__state {
-  margin: var(--oct-space-2) 0 var(--oct-space-4);
+  margin: 0;
+  padding: 8px 20px 16px;
   color: var(--oct-muted);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
 }
 
 .open-in-settings__list {
-  border-block: 1px solid var(--oct-border);
+  border-block: 0;
 }
 
 .open-in-settings__row {
@@ -1685,7 +1688,8 @@ textarea.settings-view__text-input {
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border);
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 .open-in-settings__row:last-child {
@@ -1722,10 +1726,10 @@ textarea.settings-view__text-input {
 .code-settings {
   gap: 0;
   padding-block: 0;
-  background: var(--octant-surface-muted);
-  border-color: var(--octant-border);
+  background: var(--octant-settings-card);
+  border: 0;
   border-radius: var(--oct-radius-md);
-  box-shadow: none;
+  box-shadow: var(--octant-shadow-sm);
 }
 
 .code-settings > [data-slot="card-content"] {

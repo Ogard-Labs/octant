@@ -60,7 +60,7 @@ describe("SettingsNavigation", () => {
       /\.setgroup\s*\{[^}]*border-radius:\s*var\(--oct-radius-md\);[^}]*box-shadow:\s*var\(--octant-shadow-sm\);/s,
     );
     expect(settingsStyles).toMatch(
-      /\.settings-panel__body\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\);/s,
+      /\.settings-panel\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\);/s,
     );
   });
 
