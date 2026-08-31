@@ -50,8 +50,9 @@
   min-width: 0;
   padding: var(--oct-space-3);
   background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
+  border: 0;
   border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 .usage-dashboard__field {

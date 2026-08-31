@@ -441,7 +441,7 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   background: var(--oct-bg);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-lg);
-  box-shadow: var(--oct-elev-raised);
+  box-shadow: var(--octant-shadow-overlay);
   outline: 0;
   pointer-events: auto;
 }

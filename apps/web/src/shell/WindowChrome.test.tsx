@@ -429,6 +429,9 @@ describe("WindowChrome", () => {
     expect(cssRule(".thread-environment-disclosure")).toContain(
       "width: min(320px, calc(100vw - 24px));",
     );
+    expect(cssRule(".thread-environment-disclosure")).toContain(
+      "border-radius: var(--oct-radius-lg);",
+    );
     expect(cssRule(".thread-environment-disclosure__header")).toContain("min-height: 44px;");
     expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");
     expect(cssRule(".environment-git-group__error")).toContain("background: transparent;");

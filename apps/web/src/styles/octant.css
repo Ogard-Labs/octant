@@ -1452,7 +1452,7 @@ input.switch:checked::after {
   padding: 3px 7px;
   border: 1px solid var(--oct-border);
   border-bottom-width: 2px;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-surface-warm);
   color: var(--oct-fg-2);
 }
@@ -2310,7 +2310,7 @@ input.switch:checked::after {
   gap: var(--oct-space-3);
   min-height: var(--oct-control-height-sm);
   padding-inline: var(--oct-space-3);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg-2);
   font-size: var(--oct-text-sm);
 }
@@ -2779,6 +2779,7 @@ input.switch:checked::after {
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-lg);
   background: var(--oct-surface);
+  box-shadow: var(--octant-shadow-sm);
 }
 .board-col[data-empty="true"] {
   /* Empty groups keep the same width as populated columns so the grid does
@@ -2851,6 +2852,7 @@ input.switch:checked::after {
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
+  box-shadow: var(--octant-shadow-sm);
   color: inherit;
   text-align: left;
   text-decoration: none;
@@ -4833,9 +4835,10 @@ input.switch:checked::after {
 .usage-total {
   flex: 1 1 128px;
   padding: var(--oct-space-3);
-  border: 1px solid var(--oct-border);
+  border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
+  box-shadow: var(--octant-shadow-sm);
 }
 .usage-total .usage-label {
   display: block;
@@ -6795,7 +6798,7 @@ input.switch:checked::after {
   min-height: var(--oct-control-height-sm);
   padding-inline: var(--oct-space-2);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
@@ -6838,9 +6841,10 @@ input.switch:checked::after {
 }
 
 .setgroup {
-  border: 1px solid var(--oct-border);
-  border-radius: var(--radius-lg);
+  border: 0;
+  border-radius: var(--oct-radius-md);
   background: var(--card);
+  box-shadow: var(--octant-shadow-sm);
   overflow: hidden;
 }
 .setgroup + .setgroup {

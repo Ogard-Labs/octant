@@ -52,6 +52,18 @@ describe("SettingsNavigation", () => {
     );
   });
 
+  it("uses the control radius on navigation rows and raises groups as cards", () => {
+    expect(settingsStyles).toMatch(
+      /\.settings-navigation \.setnav-item,\s*\.settings-view__back\s*\{[^}]*border-radius:\s*var\(--oct-radius-sm\);/s,
+    );
+    expect(settingsStyles).toMatch(
+      /\.setgroup\s*\{[^}]*border-radius:\s*var\(--oct-radius-md\);[^}]*box-shadow:\s*var\(--octant-shadow-sm\);/s,
+    );
+    expect(settingsStyles).toMatch(
+      /\.settings-panel__body\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\);/s,
+    );
+  });
+
   it("stays absent when search leaves no implemented section", () => {
     const { container } = render(
       <SettingsNavigation sections={[]} activeSection="general" onSelect={vi.fn()} />,

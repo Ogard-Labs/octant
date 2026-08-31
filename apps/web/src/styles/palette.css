@@ -95,7 +95,7 @@
   padding-block: 0;
   padding-inline: var(--oct-space-3);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-sm);
   cursor: default;
 }
@@ -115,11 +115,19 @@
   font-size: var(--oct-text-xs);
 }
 
-.command-palette__result-hint {
+.command-palette__result-hint,
+.command-palette__shortcut {
   display: flex;
   align-items: center;
   gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
+}
+
+.command-palette__shortcut {
+  min-height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
 }

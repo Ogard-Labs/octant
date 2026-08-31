@@ -227,6 +227,22 @@ describe("CommandPalette", () => {
     expect(searchChatThreads).not.toHaveBeenCalled();
   });
 
+  it("shows the bound chord on a command that shares a keybinding", async () => {
+    const user = userEvent.setup();
+    harness([
+      {
+        id: "workspace:zen-mode",
+        title: "Toggle Zen mode",
+        group: "Workspace",
+        action: { kind: "run", run: vi.fn() },
+      },
+    ]);
+
+    await openPalette(user);
+
+    expect(screen.getByRole("option", { name: /Toggle Zen mode/ })).toHaveTextContent("⌘⇧Z");
+  });
+
   it("stays inert when this host offers no runnable command", async () => {
     const user = userEvent.setup();
     harness([

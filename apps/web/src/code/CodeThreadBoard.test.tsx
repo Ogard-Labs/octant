@@ -633,6 +633,7 @@ describe("CodeThreadBoard", () => {
   });
 
   it("truncates long card titles and wraps facts instead of letting metadata overlap", async () => {
+    expect(octantCss).toMatch(/\.board-card\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\)/s);
     expect(octantCss).toMatch(/\.board-card-title\s*\{[^}]*overflow:\s*hidden[^}]*\}/s);
     expect(octantCss).toMatch(/\.board-card-title\s*\{[^}]*-webkit-line-clamp:\s*2[^}]*\}/s);
     expect(octantCss).toMatch(/\.board-card-facts\s*\{[^}]*flex-wrap:\s*wrap[^}]*\}/s);

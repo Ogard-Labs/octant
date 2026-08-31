@@ -81,9 +81,9 @@
   --octant-glass-border: rgb(255 255 255 / 9%);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 7%);
   --octant-radius-chip: 6px;
-  --octant-radius-control: 8px;
-  --octant-radius-panel: 10px;
-  --octant-radius-composer: 14px;
+  --octant-radius-control: 10px;
+  --octant-radius-panel: 16px;
+  --octant-radius-composer: 20px;
   --octant-radius-pill: 999px;
   --octant-space-1: 4px;
   --octant-space-2: 8px;
@@ -3077,7 +3077,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding: 0;
   overflow: hidden;
   color: var(--oct-muted);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   border: 1px solid transparent;
 }
 
@@ -3160,7 +3160,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--oct-fg);
   background: var(--octant-floating);
   border-color: var(--octant-border-strong);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-lg);
   box-shadow: var(--octant-shadow-overlay);
   font-family: var(--oct-font-display);
 }
@@ -3207,7 +3207,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   height: 26px;
   min-height: 26px;
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .thread-environment-disclosure__body {

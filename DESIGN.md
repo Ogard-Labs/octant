@@ -217,12 +217,20 @@ threads, with a command-style overlay available for broader actions.
 
 Settings is a grouped form page rather than a dashboard wall. A compact 248px
 navigation rail and search remain fixed while one centered 760px reading column
-scrolls. Related rows sit in raised cards with a title and short description;
-labels and descriptions align left, controls align right, and compound editors
-may expand below. Every control uses the owned Octant/shadcn adapter, inherits
-the interface typography projection, and saves immediately.
+scrolls. Navigation rows use the 10px control radius. Related rows sit in
+raised cards (`--octant-shadow-sm`) with a title and short description;
+section panels use the same card recipe. Labels and descriptions align left,
+controls align right, and compound editors may expand below. Every control uses
+the owned Octant/shadcn adapter, inherits the interface typography projection,
+and saves immediately.
 Scope metadata remains available to assistive technology but does not compete
 with the setting label.
+
+First run is a five-step wizard with a progress rail. Each step is pending,
+current, or completed: the current step is a filled card, completed steps show
+a check, and pending steps show their number. Mode choices on the readiness
+step use `OctantToggleGroup`. Answers still write through to the settings that
+own them.
 
 The right dock follows the active pane and never leaks another pane's content.
 On wide windows it may use at most 38 percent of the viewport, preserving a
@@ -238,7 +246,8 @@ where supported. Selecting a tool removes that presentation from the other
 region; Terminal immediately attaches or starts and preserves one server
 session when moved.
 
-Environment is a transient active-thread disclosure, at most 320px wide. Its
+Environment is a transient active-thread disclosure, at most 320px wide, with
+the 20px overlay radius. Its
 44px header, label/value repository rows, direct View changes action, and
 collapsed 44px detail rows form one compact operating list on an opaque floating
 surface. It summarizes Project, branch, clean/dirty state, working folder,
@@ -249,12 +258,16 @@ stack of cards and does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout. When the right dock
 is open, the disclosure shifts over the central pane and never covers the dock.
 
-The thread board is a flat operational reading surface with four fixed,
+The thread board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. Columns
-use hairline separation, compact one-line cards, and dashed empty states;
+and compact cards use the raised card recipe; empty columns stay dashed.
 Waiting does not become a warning wall. Labels and facts use the selected
 interface typography. Thread listing, pull-request snapshot, and per-thread
 runtime reads overlap where independent.
+
+Usage totals and filters are raised cards. The command palette groups results
+and shows a shortcut badge when a row maps to a user-bindable chord. Shared
+dialogs keep the 20px overlay radius and overlay shadow.
 
 The context meter is a circular composer control, not a dock tab. It opens an
 opaque popover with attributed context segments, used/maximum/free values,

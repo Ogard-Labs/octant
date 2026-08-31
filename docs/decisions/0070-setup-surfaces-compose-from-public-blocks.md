@@ -54,10 +54,10 @@ owned surfaces look_.
 - **Dual paint dies on contact.** A touched surface drops `.btn*` on
   `OctantButton` and feature CSS that repaints adapter color, border, radius,
   shadow, focus, hover, disabled, or error (0046).
-- **Implementation sequence** (design only until Accepted): (1) tokens and
-  recipes; (2) Settings; (3) first-run; (4) welcome and composer; (5)
-  palette and dialogs; (6) shell selection, usage, boards, Environment.
-  Each slice updates DESIGN.md for what shipped.
+- **Implementation sequence**: (1) tokens and recipes; (2) Settings; (3)
+  first-run; (4) welcome and composer; (5) palette and dialogs; (6) shell
+  selection, usage, boards, Environment. Each slice updates DESIGN.md for
+  what shipped.
 
 ## Consequences
 

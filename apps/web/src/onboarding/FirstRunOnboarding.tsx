@@ -332,19 +332,22 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
         <nav aria-label="Setup steps" className="first-run__rail">
           <h2 className="first-run__title">Welcome to Octant</h2>
           <ol className="first-run__rail-list">
-            {steps.map((descriptor) => (
+            {steps.map((descriptor, index) => (
               <li key={descriptor.id}>
                 <OctantButton
                   aria-current={descriptor.current ? "step" : undefined}
                   className="first-run__rail-step"
                   data-configured={descriptor.configured}
+                  data-progress={
+                    descriptor.current ? "current" : descriptor.configured ? "completed" : "pending"
+                  }
                   disabled={importing || (unnamed && descriptor.id !== "profile")}
                   onClick={() => goTo(descriptor.id)}
                   type="button"
-                  variant="ghost"
+                  variant={descriptor.current ? "secondary" : "ghost"}
                 >
                   <span className="first-run__rail-marker" aria-hidden>
-                    {descriptor.configured ? <Check size={14} /> : null}
+                    {descriptor.configured ? <Check size={14} /> : String(index + 1)}
                   </span>
                   <span className="first-run__rail-title">{descriptor.title}</span>
                   <span className="first-run__rail-summary">{descriptor.summary}</span>
