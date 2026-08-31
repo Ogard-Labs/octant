@@ -1,78 +1,75 @@
-# 0070. Setup surfaces compose from public block catalogs
+# 0070. Renderer visual language matches public block catalogs
 
 **Status:** Proposed
 
 ## Context
 
-The renderer already owns its control layer: Base UI recipes under
+The renderer already owns its control stack: Base UI recipes under
 `apps/web/src/ui/shadcn`, Octant adapters under `apps/web/src/ui/base`, and
-`bun run ui:check` forbidding feature imports of either plus undocumented raw
-controls. Settings, first-run, chat welcome, and the command palette all
-compose those adapters. The remaining inconsistency is composition, not
-missing primitives: leftover feature CSS still repaints adapter hover and
-radius, `.btn*` classes still sit on `OctantButton`, and Settings / first-run
-read as a flat dump of `.setrow` groups.
+`bun run ui:check` as the gate. Feature modules do not import Base UI. The
+product still reads as a flat, inconsistent workbench because 0016 and
+DESIGN.md require hairline panes, 8/10/12px radii, and `shadow-none` cards,
+while leftover `.btn*` and feature hover rules repaint those adapters.
 
-[blocks.so](https://blocks.so/) is a MIT, Base UI–backed shadcn registry of
-copy-paste blocks (AI composers, onboarding checklists, command menus, form
-layouts). It is a useful visual reference for those surfaces. 0016 still
-forbids replacing composers, the shell, Monaco, the terminal, or authority UX
-with a recipe catalog. Originality forbids importing another product's source,
-identifiers, or distinctive implementation. This record is the scoped
-exception that lets those four surfaces group and progress like a public
-block without vendoring one.
+[blocks.so](https://blocks.so/) is a MIT, Base UI–backed shadcn catalog. It
+is the approved visual reference for grouping, radius, elevation, and
+progress. It is not a dependency. Originality and 0016 still forbid vendoring
+its source or replacing composers, the shell, Monaco, the terminal, or
+authority UX. This record is the scoped exception that changes *how those
+owned surfaces look*.
 
 ## Decision
 
-- **Controls stay Octant-owned.** Feature code imports `ui/base` only. 0016
-  and 0046 still own interaction, tokens, and who paints a button. `ui:check`
-  remains the gate. Touching a surface removes leftover `.btn*` dual recipes
-  and feature rules that repaint adapter color, border, radius, shadow,
-  focus, hover, disabled, or error.
-- **Public catalogs are reference, not source.** Do not add the blocks.so
-  registry, `@blocks-so/*` identifiers, `cmdk` as a second palette, the Vercel
-  `ai` chat kit, or copied block markup. Implementation is an independent
-  restyle of the existing Octant surfaces.
-- **These surfaces may use card grouping and progress.** This is a scoped
-  exception to 0016's "ordinary panes stay flat" and to DESIGN.md's "Settings
-  is a dense operating surface" / "avoid oversized setup cards", for exactly:
-  the Settings reading column, first-run, Chat/Work/Code welcome, and the
-  command palette. Cards, section progress, and a raised composer chrome are
-  allowed there when they make a discrete setup object scannable. Tokens,
-  radii, density, Lucide, and typography stay Octant. Shell tree, boards,
-  Environment, dock, Monaco, and the terminal stay hairline panes.
-- **Composition targets, not replacements.** Restyle the named Octant owner;
-  do not swap in a foreign block.
+- **Stack unchanged.** Base UI remains the only primitive. Feature code
+  imports `ui/base` only. Tokens stay `--octant-*`. Radix, a second primitive
+  stack, the blocks.so registry, `@blocks-so/*` ids, `cmdk`, and the Vercel
+  `ai` chat kit are not added.
+- **Visual language.** This supersedes 0016's "ordinary panes stay flat" and
+  the 6/8/10/14px radius targets, and DESIGN.md's "avoid oversized setup
+  cards" / "Settings is a dense operating surface" of flat `.setrow` groups.
+  Remaining 0016 rules stand (adapters, token ownership, scarce accent,
+  architecture). New defaults: control radius 10px, panel/card 16px,
+  composer/dialog 20px; `OctantCard` uses `--octant-shadow-sm`; floating
+  overlays keep `--octant-shadow-overlay`; setup and form objects are raised
+  cards with section progress; selected rows use a fill *and* a label.
+  Tokens change once in `packages/theme`, `octant.css`, `shadcn-theme.css`,
+  and the owned recipes so every surface inherits.
+- **Shell stays an ADE.** Navigation rows stay compact (28–32px). Monaco,
+  xterm, the dock grid, and authority copy stay Octant-owned. They consume
+  the new radii and selection fill; they are not replaced by sidebar or
+  table blocks.
+- **Composition targets.** Restyle the Octant owner; do not swap in a
+  foreign block. Login blocks are unused (no account). `ai-05` is unused.
 
-  | Surface | Octant owner | Public-block pattern to match |
-  | ------- | ------------ | ----------------------------- |
-  | Settings rows and provider forms | `SettingRow`, settings registry, Provider Settings | Side-label groups; checkbox/select settings page; workspace field groups |
-  | First-run | `FirstRunOnboarding` (0019 / 0033 steps) | Checklist with completed / active / pending and a progress mark |
-  | Chat welcome and composer chrome | `ChatWelcome`, `ThreadComposer`, `ComposerModelPicker` | Centered heading, model control in the composer, attachment chips, starter prompts |
-  | Command palette | `CommandPalette` | Grouped results and shortcut badges on the existing dialog/combobox |
+  | Surface | Octant owner | Public-block pattern |
+  | ------- | ------------ | -------------------- |
+  | Settings, Provider Settings | `SettingRow`, settings registry | form-layout-01/02/03 |
+  | First-run | `FirstRunOnboarding` (0019 / 0033) | onboarding-01/02/03 |
+  | Welcome + composer chrome | `ChatWelcome`, `ThreadComposer`, `ComposerModelPicker` | ai-01/02/03/04 |
+  | Command palette | `CommandPalette` | command-menu-01/02 |
+  | Shared dialogs | `OctantDialog` callers | dialog-01/02/11 |
+  | Usage | `UsageDashboard` | stats-12/14 |
+  | Boards / empty | board + empty-state owners | grid-list-02, stats-03 |
 
-- **Out of scope.** Sidebar, login, data-table, and full-chat-kit blocks do
-  not replace the workspace shell, transcript, or authority UX. Octant has
-  no account, so login blocks are unused. First-run keeps write-through
-  settings and the five-step order; this record does not add a second wizard.
-- **Implementation sequence** (design only until Accepted): (1) Settings
-  reading column and Provider Settings grouping; (2) first-run checklist and
-  progress; (3) welcome + composer chrome; (4) command-palette grouping and
-  shortcut badges. Each slice updates DESIGN.md for the shipped composition.
+- **Dual paint dies on contact.** A touched surface drops `.btn*` on
+  `OctantButton` and feature CSS that repaints adapter color, border, radius,
+  shadow, focus, hover, disabled, or error (0046).
+- **Implementation sequence** (design only until Accepted): (1) tokens and
+  recipes; (2) Settings; (3) first-run; (4) welcome and composer; (5)
+  palette and dialogs; (6) shell selection, usage, boards, Environment.
+  Each slice updates DESIGN.md for what shipped.
 
 ## Consequences
 
-- Setup surfaces can look like a modern block catalog while the adapter,
-  theme, and originality rules stay one owner.
-- 0016's architectural ban on replacing composers and the shell stands. 0046
-  still forbids a second paint path once a slice is touched.
-- Accepting this record without the slices would leave DESIGN.md describing
-  flat Settings as current truth; DESIGN.md updates only with the shipped
-  surface.
+- The product can look like a modern block catalog while remaining one
+  Octant-owned theme and adapter API.
+- 0016's ban on replacing composers and the shell stands. Accepting this
+  record without the slices would leave DESIGN.md describing the flat
+  workbench as current truth.
 
 ## Related
 
-- 0016 Component foundation and theme (flat-pane rule scoped here)
+- 0016 Component foundation and theme (flat-pane and radius rules scoped here)
 - 0019 User profile and first-run setup
 - 0033 First run asks what to call you
 - 0046 shadcn recipes own product controls
