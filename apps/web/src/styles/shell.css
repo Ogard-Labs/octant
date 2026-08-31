@@ -1651,19 +1651,38 @@ form > .work-composer-adapter__attachments {
   gap: 8px;
 }
 
-.code-composer-adapter__eyebrow {
-  display: block;
-}
-
 .code-composer-adapter__heading {
-  max-width: 22ch;
+  max-width: 28ch;
   margin: 0;
   color: var(--oct-fg);
   font-size: clamp(26px, 3vw, 34px);
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: var(--oct-tracking-tight);
   line-height: 1.15;
   text-wrap: balance;
+}
+
+.code-composer-adapter__project {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+}
+
+.code-composer-adapter__welcome .composer-folder-selector__trigger {
+  height: auto;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+}
+
+.code-composer-adapter__welcome .composer-folder-selector__trigger svg {
+  display: none;
 }
 
 .code-composer-adapter__description {
@@ -1678,7 +1697,12 @@ form > .work-composer-adapter__attachments {
 .code-composer-adapter__composer {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
+}
+
+.code-composer-adapter__stack {
+  display: flex;
+  flex-direction: column;
 }
 
 /* Layout only. The frame, 20px radius, and lift are `.composer` (0038).
@@ -1692,6 +1716,31 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__card > .composer-input {
   min-height: 96px;
+}
+
+.code-composer-adapter__dock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: -2px;
+  padding: 8px 12px 10px;
+  color: var(--oct-meta);
+  background: var(--octant-floating);
+  border-radius: 0 0 var(--oct-radius-lg) var(--oct-radius-lg);
+}
+
+html[data-octant-theme-mode="dark"] .code-composer-adapter__dock {
+  background: var(--octant-app-background);
+}
+
+.code-composer-adapter__dock-leading,
+.code-composer-adapter__dock-trailing {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
 }
 
 .code-composer-adapter__context-strip {
@@ -1904,6 +1953,118 @@ form > .work-composer-adapter__attachments {
   border-top: 1px solid var(--octant-border);
   font-size: 11.5px;
   font-weight: 500;
+}
+
+.code-composer-choice__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(16rem, 46vw);
+  min-height: 24px;
+  padding: 0 7px;
+  color: var(--octant-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.code-composer-choice__trigger:hover:not(:disabled) {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
+.code-composer-choice__trigger:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.code-composer-choice__trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.code-composer-adapter__composer-bar .code-composer-choice__trigger {
+  margin-inline-start: 4px;
+  padding-inline-start: 10px;
+  border-inline-start: 1px solid var(--octant-border);
+}
+
+.code-composer-choice__menu {
+  display: flex;
+  flex-direction: column;
+  width: min(280px, calc(100vw - 32px));
+  overflow: hidden;
+  background: var(--octant-surface);
+  border: 1px solid var(--octant-border-strong);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-overlay);
+}
+
+.code-composer-choice__caption {
+  margin: 0;
+  padding: 8px 12px 2px;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.code-composer-choice__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+}
+
+.code-composer-choice__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 8px;
+  color: var(--octant-text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.code-composer-choice__option:hover {
+  background: var(--octant-control-hover);
+}
+
+.code-composer-choice__option[aria-selected="true"] {
+  background: var(--oct-selection);
+}
+
+.code-composer-choice__option-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--octant-text-muted);
+}
+
+.code-composer-choice__option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.code-composer-choice__option-label {
+  font-size: calc(13 * var(--oct-text-step));
+  font-weight: 550;
+}
+
+.code-composer-choice__option-detail {
+  color: var(--octant-text-muted);
+  font-size: calc(11.5 * var(--oct-text-step));
+  line-height: 1.4;
 }
 
 .code-composer-adapter__composer-bar .code-composer-adapter__context-picker {

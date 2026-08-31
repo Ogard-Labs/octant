@@ -182,7 +182,7 @@ describe("CodeOverview", () => {
     expect(screen.getByText("Opened pull request · Pending")).toBeVisible();
     expect(screen.getByText("Reviewing the checkout")).toBeVisible();
     expect(screen.getByRole("region", { name: "Code quick start" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "Access policy" })).toHaveValue("approval-gated");
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Approval");
     expect(
       screen.getByText("Checkout and worktree are confirmed by the Code service before creation."),
     ).toBeVisible();
@@ -352,7 +352,7 @@ describe("CodeOverview", () => {
     // composer preselects the same habit rather than a second truth.
     const habit = await screen.findByRole("combobox", { name: "New threads start in" });
     expect(habit).toHaveValue("current-checkout");
-    expect(screen.getByRole("combobox", { name: "Workspace" })).toHaveValue("current-checkout");
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Current checkout");
 
     fireEvent.change(habit, { target: { value: "managed-worktree" } });
     await waitFor(() =>
@@ -375,7 +375,7 @@ describe("CodeOverview", () => {
     expect(screen.getByRole("combobox", { name: "New threads start in" })).toHaveValue(
       "managed-worktree",
     );
-    expect(screen.getByRole("combobox", { name: "Workspace" })).toHaveValue("managed-worktree");
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
   });
 
   it("keeps quick-start creation read-only until the ordinary callback is supplied", async () => {

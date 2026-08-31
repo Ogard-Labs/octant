@@ -24,17 +24,7 @@ import {
   suggestCodeDeliveryOutcome,
 } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import {
-  Aperture,
-  Bug,
-  ChevronDown,
-  ChevronUp,
-  FolderOpen,
-  FolderSearch,
-  Paperclip,
-  Rocket,
-  ShieldCheck,
-} from "lucide-react";
+import { ChevronDown, ChevronUp, FolderOpen, Paperclip } from "lucide-react";
 import type { ImageGenerationProfileView, ImageGenerationScopeId } from "@octant/contracts";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { ImageGenerationAction } from "../../image/ImageGenerationAction";
@@ -56,6 +46,8 @@ import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantNativeSelect } from "../../ui/base/OctantSelect";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
+import { CodeComposerAccessMenu } from "./CodeComposerAccessMenu";
+import { CodeWorkspaceSelector } from "./CodeWorkspaceSelector";
 import { CodeWorktreeSourceControl } from "./CodeWorktreeSourceControl";
 import { useCodeWorktreeSourcePreview } from "./useCodeWorktreeSourcePreview";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
@@ -84,24 +76,6 @@ export const CODE_DELIVERY_OUTCOME_LABELS: Record<CodeDeliveryOutcomeKind, strin
   "opened-pr": "Opened pull request",
   "merged-pr": "Merged pull request",
 };
-
-const starterIdeas = [
-  {
-    label: "Inspect",
-    prompt: "Read this repository and tell me how it is structured.",
-    icon: FolderSearch,
-  },
-  {
-    label: "Fix",
-    prompt: "Find the most likely bug in the current checkout and propose a fix.",
-    icon: Bug,
-  },
-  {
-    label: "Ship",
-    prompt: "Propose a small, complete change I can review.",
-    icon: Rocket,
-  },
-] as const;
 
 export interface CodeComposerAdapterProps {
   readonly projectId?: ProjectId;
@@ -436,23 +410,29 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     }
   }
 
+  const hasProject = props.projectId !== undefined;
+  const headingProject = hasProject ? (props.folderControl ?? props.projectName) : undefined;
+
   return (
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="code-composer-adapter__canvas">
         <div className="code-composer-adapter__welcome">
-          <Aperture
-            aria-hidden="true"
-            className="new-thread-welcome__mark"
-            size={24}
-            strokeWidth={1.4}
-          />
-          <p className="code-composer-adapter__eyebrow">Octant Code</p>
-          <h1 className="code-composer-adapter__heading">What should we build?</h1>
-          <p className="code-composer-adapter__description">
-            {props.projectId === undefined
-              ? "Choose a Project to build in. Its repository is the checkout this thread works against."
-              : "Start a Code thread in this repository. The thread inherits the current checkout and approval policy."}
-          </p>
+          <h1 className="code-composer-adapter__heading">
+            What should we build
+            {headingProject === undefined ? null : (
+              <>
+                {" "}
+                in <span className="code-composer-adapter__project">{headingProject}</span>
+              </>
+            )}
+            ?
+          </h1>
+          {hasProject ? null : (
+            <p className="code-composer-adapter__description">
+              Choose a Project to build in. Its repository is the checkout this thread works
+              against.
+            </p>
+          )}
           {props.projectAvailable === false &&
           props.projectId !== undefined &&
           props.errorMessage === undefined ? (
@@ -461,220 +441,215 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         </div>
 
         <div className="code-composer-adapter__composer">
-          <ThreadComposer
-            className="code-composer-adapter__card"
-            chips={
-              <>
-                <ThreadMentionChips
-                  chips={threadMentions.chips}
-                  onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
-                />
-                <TrackerReferenceComposerHints draft={prompt} />
-                <WorkImageAttachmentChips images={images} />
-              </>
-            }
-            input={
-              <OctantTextarea
-                aria-label="First message"
-                autoFocus
-                className="composer-input"
-                disabled={props.creating}
-                onChange={(event) => {
-                  setPrompt(event.target.value);
-                  mention.sync(event.target.value, event.currentTarget.selectionStart);
-                }}
-                onClick={(event) =>
-                  mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
-                onKeyDown={handleKeyDown}
-                onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
-                  if (props.creating === true) return;
-                  if (attachFromTransfer(event.clipboardData)) event.preventDefault();
-                }}
-                placeholder="What should we build?"
-                ref={textareaRef}
-                rows={3}
-                value={prompt}
-              />
-            }
-            typeahead={
-              mention.open ? (
-                <ThreadMentionTypeahead
-                  activeIndex={mention.activeIndex}
-                  {...(threadMentions.composer?.busy === undefined
-                    ? {}
-                    : { busy: threadMentions.composer.busy })}
-                  candidates={threadMentions.composer?.candidates ?? []}
-                  listId={mentionListId}
-                  onChoose={mention.choose}
-                  onHover={mention.setActiveIndex}
-                />
-              ) : null
-            }
-            row={{
-              className: "code-composer-adapter__composer-bar",
-              leading: (
+          <div className="code-composer-adapter__stack">
+            <ThreadComposer
+              className="code-composer-adapter__card"
+              chips={
                 <>
-                  <HostSelector
-                    {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                    {...(props.selectedHostId === undefined
-                      ? {}
-                      : { selectedHostId: props.selectedHostId })}
-                    {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-                    {...(props.lastSelectedHealthyHostId === undefined
-                      ? {}
-                      : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-                    {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-                    {...(props.onSelectHost === undefined
-                      ? {}
-                      : { onSelectHost: props.onSelectHost })}
-                    requiredCapability="code"
+                  <ThreadMentionChips
+                    chips={threadMentions.chips}
+                    onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
                   />
-                  {props.folderControl}
-                  {props.folderControl === undefined && props.projectName !== undefined ? (
-                    <span className="code-composer-adapter__context-item" title={props.projectRoot}>
-                      <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
-                      <span>{props.projectName}</span>
-                    </span>
-                  ) : null}
-                  <label>
-                    <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-                    {/* ui-boundary-exception: native-file-input */}
-                    <input
-                      aria-label="Choose attachment file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      className="work-composer-adapter__file-input"
-                      disabled={props.creating === true || imageSupport === false}
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.item(0);
-                        if (file !== null && file !== undefined) {
-                          if (imageSupport === false) {
-                            images.refuse(
-                              "The selected model does not accept images. Choose an image-capable model.",
-                            );
-                          } else {
-                            images.attach([file]);
-                          }
-                        }
-                        event.currentTarget.value = "";
-                      }}
-                      type="file"
-                    />
-                  </label>
-                  <OctantButton
-                    aria-label="Add attachment"
-                    disabled={props.creating === true || imageSupport === false}
-                    onClick={(event) => {
-                      event.currentTarget.parentElement
-                        ?.querySelector<HTMLInputElement>('input[type="file"]')
-                        ?.click();
-                    }}
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
-                  </OctantButton>
-                  {props.imageGeneration === undefined ? null : (
-                    <ImageGenerationAction
-                      {...(props.imageGeneration.client === undefined
-                        ? {}
-                        : { client: props.imageGeneration.client })}
-                      {...(props.imageGeneration.scopeId === undefined
-                        ? {}
-                        : { scopeId: props.imageGeneration.scopeId })}
-                      {...(props.imageGeneration.onOpenSettings === undefined
-                        ? {}
-                        : { onOpenSettings: props.imageGeneration.onOpenSettings })}
-                      disabled={props.creating === true}
-                      profiles={props.imageGeneration.profiles}
-                      threadKind="code-thread"
-                    />
-                  )}
-                  <span className="code-composer-adapter__context-picker">
-                    <ComposerModelPicker
-                      ariaLabel="Provider and model"
-                      groups={props.providerGroups}
-                      menuSide="bottom"
-                      onSelect={props.onSelectProvider}
-                      {...(props.selectedModelId === undefined
-                        ? {}
-                        : { selectedModelId: props.selectedModelId })}
-                      {...(props.selectedProviderInstanceId === undefined
-                        ? {}
-                        : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                    />
-                  </span>
-                  {props.poolControl}
-                  {props.profileControl}
-                  <span className="code-composer-adapter__context-item">
-                    <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
-                    <OctantNativeSelect
-                      aria-label="Access policy"
-                      className="code-composer-adapter__policy-select"
-                      onChange={(e) =>
-                        setExecutionPolicy(e.target.value as ProviderExecutionPolicy)
-                      }
-                      value={executionPolicy}
-                    >
-                      <option value="plan">Plan</option>
-                      <option value="approval-gated">Approval</option>
-                      <option value="auto-accept-edits">Auto-accept edits</option>
-                      <option value="full-access">Full access</option>
-                    </OctantNativeSelect>
-                  </span>
+                  <TrackerReferenceComposerHints draft={prompt} />
+                  <WorkImageAttachmentChips images={images} />
                 </>
-              ),
-              actions: {
-                kind: "send",
-                send: {
-                  ariaLabel:
-                    props.errorMessage === undefined ? "Create thread" : "Retry creating thread",
-                  disabled: !canSubmit,
-                  onSend: submit,
+              }
+              input={
+                <OctantTextarea
+                  aria-label="First message"
+                  autoFocus
+                  className="composer-input"
+                  disabled={props.creating}
+                  onChange={(event) => {
+                    setPrompt(event.target.value);
+                    mention.sync(event.target.value, event.currentTarget.selectionStart);
+                  }}
+                  onClick={(event) =>
+                    mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
+                  }
+                  onKeyDown={handleKeyDown}
+                  onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+                    if (props.creating === true) return;
+                    if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+                  }}
+                  placeholder="What should we build?"
+                  ref={textareaRef}
+                  rows={3}
+                  value={prompt}
+                />
+              }
+              typeahead={
+                mention.open ? (
+                  <ThreadMentionTypeahead
+                    activeIndex={mention.activeIndex}
+                    {...(threadMentions.composer?.busy === undefined
+                      ? {}
+                      : { busy: threadMentions.composer.busy })}
+                    candidates={threadMentions.composer?.candidates ?? []}
+                    listId={mentionListId}
+                    onChoose={mention.choose}
+                    onHover={mention.setActiveIndex}
+                  />
+                ) : null
+              }
+              row={{
+                className: "code-composer-adapter__composer-bar",
+                leading: (
+                  <>
+                    <span className="code-composer-adapter__context-picker">
+                      <ComposerModelPicker
+                        ariaLabel="Provider and model"
+                        groups={props.providerGroups}
+                        menuSide="bottom"
+                        onSelect={props.onSelectProvider}
+                        {...(props.selectedModelId === undefined
+                          ? {}
+                          : { selectedModelId: props.selectedModelId })}
+                        {...(props.selectedProviderInstanceId === undefined
+                          ? {}
+                          : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                      />
+                    </span>
+                    {props.poolControl}
+                    {props.profileControl}
+                    <CodeComposerAccessMenu
+                      onChange={setExecutionPolicy}
+                      value={executionPolicy}
+                      {...(props.creating === true ? { disabled: true } : {})}
+                    />
+                    <label>
+                      <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                      {/* ui-boundary-exception: native-file-input */}
+                      <input
+                        aria-label="Choose attachment file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        className="work-composer-adapter__file-input"
+                        disabled={props.creating === true || imageSupport === false}
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.item(0);
+                          if (file !== null && file !== undefined) {
+                            if (imageSupport === false) {
+                              images.refuse(
+                                "The selected model does not accept images. Choose an image-capable model.",
+                              );
+                            } else {
+                              images.attach([file]);
+                            }
+                          }
+                          event.currentTarget.value = "";
+                        }}
+                        type="file"
+                      />
+                    </label>
+                    <OctantButton
+                      aria-label="Add attachment"
+                      disabled={props.creating === true || imageSupport === false}
+                      onClick={(event) => {
+                        event.currentTarget.parentElement
+                          ?.querySelector<HTMLInputElement>('input[type="file"]')
+                          ?.click();
+                      }}
+                      size="icon"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
+                    </OctantButton>
+                    {props.imageGeneration === undefined ? null : (
+                      <ImageGenerationAction
+                        {...(props.imageGeneration.client === undefined
+                          ? {}
+                          : { client: props.imageGeneration.client })}
+                        {...(props.imageGeneration.scopeId === undefined
+                          ? {}
+                          : { scopeId: props.imageGeneration.scopeId })}
+                        {...(props.imageGeneration.onOpenSettings === undefined
+                          ? {}
+                          : { onOpenSettings: props.imageGeneration.onOpenSettings })}
+                        disabled={props.creating === true}
+                        profiles={props.imageGeneration.profiles}
+                        threadKind="code-thread"
+                      />
+                    )}
+                  </>
+                ),
+                actions: {
+                  kind: "send",
+                  send: {
+                    ariaLabel:
+                      props.errorMessage === undefined ? "Create thread" : "Retry creating thread",
+                    disabled: !canSubmit,
+                    onSend: submit,
+                  },
                 },
-              },
-            }}
-          />
+              }}
+            />
 
-          <div className="code-composer-adapter__context-strip" aria-label="Thread context">
+            <div className="code-composer-adapter__dock" aria-label="Thread context">
+              <div className="code-composer-adapter__dock-leading">
+                <HostSelector
+                  {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                  {...(props.selectedHostId === undefined
+                    ? {}
+                    : { selectedHostId: props.selectedHostId })}
+                  {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+                  {...(props.lastSelectedHealthyHostId === undefined
+                    ? {}
+                    : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                  {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+                  {...(props.onSelectHost === undefined
+                    ? {}
+                    : { onSelectHost: props.onSelectHost })}
+                  requiredCapability="code"
+                />
+                {hasProject ? null : props.folderControl}
+                {hasProject ? null : props.folderControl === undefined &&
+                  props.projectName !== undefined ? (
+                  <span className="code-composer-adapter__context-item" title={props.projectRoot}>
+                    <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+                    <span>{props.projectName}</span>
+                  </span>
+                ) : null}
+                {hasProject ? (
+                  <CodeWorkspaceSelector
+                    onChange={setWorkspaceOverride}
+                    value={workspace}
+                    {...(props.creating === true ? { disabled: true } : {})}
+                  />
+                ) : null}
+              </div>
+              <div className="code-composer-adapter__dock-trailing">
+                {hasProject ? (
+                  <CodeBranchSelector
+                    key={String(props.projectId)}
+                    branch={baseBranch.trim() || "development"}
+                    loading={refsLoading}
+                    onOpen={loadWorktreeRefs}
+                    onSelectRef={handleSelectRef}
+                    onStartFromOriginChange={setStartFromOriginOverride}
+                    remoteName={resolvedWorktreeRemote}
+                    startFromOrigin={startFromOrigin}
+                    startFromOriginAvailable={
+                      preferredRemote.status === "selected" || worktreeRemote !== undefined
+                    }
+                    {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
+                    {...(props.creating === true ? { disabled: true } : {})}
+                  />
+                ) : props.branchName !== undefined ? (
+                  <span className="code-composer-adapter__context-item">
+                    <span>{props.branchName}</span>
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="code-composer-adapter__context-strip"
+            aria-label="Repository and delivery"
+          >
             {props.githubControl}
             {props.createFromControl}
-            {props.projectId === undefined ? null : (
-              <span className="code-composer-adapter__context-item">
-                <OctantNativeSelect
-                  aria-label="Workspace"
-                  className="code-composer-adapter__policy-select"
-                  onChange={(e) => setWorkspaceOverride(e.target.value as CodeNewThreadWorkspace)}
-                  {...(props.creating === true ? { disabled: true } : {})}
-                  value={workspace}
-                >
-                  <option value="current-checkout">Current checkout</option>
-                  <option value="managed-worktree">Managed worktree</option>
-                </OctantNativeSelect>
-              </span>
-            )}
-            {props.projectId !== undefined ? (
-              <CodeBranchSelector
-                key={String(props.projectId)}
-                branch={baseBranch.trim() || "development"}
-                loading={refsLoading}
-                onOpen={loadWorktreeRefs}
-                onSelectRef={handleSelectRef}
-                onStartFromOriginChange={setStartFromOriginOverride}
-                remoteName={resolvedWorktreeRemote}
-                startFromOrigin={startFromOrigin}
-                startFromOriginAvailable={
-                  preferredRemote.status === "selected" || worktreeRemote !== undefined
-                }
-                {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
-                {...(props.creating === true ? { disabled: true } : {})}
-              />
-            ) : props.branchName !== undefined ? (
-              <span className="code-composer-adapter__context-item">
-                <span>{props.branchName}</span>
-              </span>
-            ) : null}
             <OctantButton
               aria-expanded={showDelivery}
               className="code-composer-adapter__disclosure-toggle"
@@ -801,34 +776,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               )}
             </div>
           ) : null}
-          <p className="code-composer-adapter__hint">
-            Press Enter to start · Shift+Enter for a new line · Escape to close
-          </p>
-          <div
-            aria-label="Starter ideas"
-            className="code-composer-adapter__suggestions"
-            role="group"
-          >
-            {starterIdeas.map((idea) => {
-              const Icon = idea.icon;
-              return (
-                <OctantButton
-                  disabled={props.creating === true}
-                  key={idea.label}
-                  onClick={() => {
-                    setPrompt(idea.prompt);
-                    textareaRef.current?.focus();
-                  }}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
-                  {idea.label}
-                </OctantButton>
-              );
-            })}
-          </div>
         </div>
       </div>
     </section>

@@ -103,7 +103,6 @@ describe("DraftThreadWorkspace", () => {
 
   it("renders mode-specific welcome copy for code", () => {
     render(<DraftThreadWorkspace {...baseProps} mode="code" />);
-    expect(screen.getByText("Octant Code")).toBeVisible();
     expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
   });
@@ -221,7 +220,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByText("my-repo")).toBeVisible();
     // The branch context now lives on the branch selector trigger.
     expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("feature/test");
-    expect(screen.getByRole("combobox", { name: "Access policy" })).toHaveValue("approval-gated");
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Approval");
   });
 
   it("shows the authoritative host health in the context strip", () => {
@@ -542,9 +541,10 @@ describe("DraftThreadWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: /Octant/ }));
-    const workspace = screen.getByRole("combobox", { name: "Workspace" });
-    expect(workspace).toHaveValue("managed-worktree");
-    await user.selectOptions(workspace, "current-checkout");
+    const workspace = screen.getByRole("button", { name: "Workspace" });
+    expect(workspace).toHaveTextContent("Managed worktree");
+    await user.click(workspace);
+    await user.click(screen.getByRole("option", { name: /Current checkout/ }));
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 
@@ -612,10 +612,8 @@ describe("DraftThreadWorkspace", () => {
 
     const prompt = screen.getByRole("textbox", { name: "First message" });
     await user.type(prompt, "Keep this exact prompt");
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Access policy" }),
-      "full-access",
-    );
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(screen.getByRole("option", { name: /Full access/ }));
     await user.click(screen.getByRole("button", { name: "Delivery target" }));
     await user.clear(screen.getByRole("textbox", { name: "Branch intent" }));
     await user.type(screen.getByRole("textbox", { name: "Branch intent" }), "feature/keep-me");
@@ -628,7 +626,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep this exact prompt",
     );
-    expect(screen.getByRole("combobox", { name: "Access policy" })).toHaveValue("full-access");
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Full access");
     expect(screen.getByRole("textbox", { name: "Branch intent" })).toHaveValue("feature/keep-me");
     expect(screen.getByRole("button", { name: "Project: new-repository" })).toBeVisible();
   });

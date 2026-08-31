@@ -40,10 +40,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
     return refs.filter((ref) => ref.name.toLowerCase().includes(trimmed));
   }, [props.refs, query]);
 
-  const triggerLabel =
-    props.startFromOrigin && props.remoteName !== undefined
-      ? `From ${props.remoteName}/${props.branch}`
-      : `From ${props.branch}`;
+  const triggerLabel = props.branch;
 
   return (
     <OctantPopover

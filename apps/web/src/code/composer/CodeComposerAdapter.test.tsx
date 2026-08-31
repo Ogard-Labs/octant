@@ -20,8 +20,7 @@ const defaultProps = {
 describe("CodeComposerAdapter", () => {
   it("renders composer with project and branch context", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toContain("Octant Code");
-    expect(html).toContain("What should we build?");
+    expect(html).toContain("What should we build");
     expect(html).toContain("My Repo");
     expect(html).toContain("development");
   });
@@ -31,12 +30,18 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain('class="composer code-composer-adapter__card"');
   });
 
-  it("keeps host and Project on the composer toolbar", () => {
+  it("names the Project in the heading and docks host, checkout, and branch under the card", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
+    const dock = container.querySelector(".code-composer-adapter__dock");
+    expect(screen.getByRole("heading", { name: /What should we build in My Repo/ })).toBeVisible();
     expect(frame).not.toBeNull();
-    expect(frame?.querySelector(".host-selector")).not.toBeNull();
-    expect(frame?.textContent).toContain("My Repo");
+    expect(dock).not.toBeNull();
+    expect(frame?.querySelector(".host-selector")).toBeNull();
+    expect(frame?.textContent).not.toContain("My Repo");
+    expect(dock?.querySelector(".host-selector")).not.toBeNull();
+    expect(dock?.textContent).toContain("Current checkout");
+    expect(dock?.textContent).toContain("development");
   });
 
   it("keeps GitHub and delivery outside the raised composer frame", () => {
@@ -50,16 +55,6 @@ describe("CodeComposerAdapter", () => {
     expect(frame?.contains(strip)).toBe(false);
     expect(strip?.textContent).toContain("GitHub control slot");
     expect(strip?.textContent).toContain("Delivery target");
-  });
-
-  it("offers quiet starter ideas that prepare a draft without sending it", () => {
-    const onCreateThread = vi.fn();
-    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
-    fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
-    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
-      "Read this repository and tell me how it is structured.",
-    );
-    expect(onCreateThread).not.toHaveBeenCalled();
   });
 
   it("renders approval policy selector", () => {
@@ -120,13 +115,7 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain("disabled");
   });
 
-  it("has keyboard hint", () => {
-    const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toContain("Press Enter to start");
-    expect(html).toContain("Escape to close");
-  });
-
-  it("renders the multi-model pool control slot in the context strip", () => {
+  it("renders the multi-model pool control slot in the composer bar", () => {
     const html = renderToStaticMarkup(
       <CodeComposerAdapter {...defaultProps} poolControl={<span>Pool control slot</span>} />,
     );
@@ -252,10 +241,12 @@ describe("CodeComposerAdapter interactions", () => {
       );
     });
     expect(onExecutionPolicyChange).toHaveBeenCalledWith("approval-gated");
-    const access = container.querySelector('select[aria-label="Access policy"]');
-    expect(access).not.toBeNull();
+    const access = screen.getByRole("button", { name: "Access policy" });
     await act(async () => {
-      fireEvent.change(access!, { target: { value: "plan" } });
+      fireEvent.click(access);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: /Plan/ }));
     });
     expect(onExecutionPolicyChange).toHaveBeenCalledWith("plan");
     root.unmount();

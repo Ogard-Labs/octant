@@ -29,9 +29,7 @@ describe("CodeBranchSelector", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent(
-      "From origin/development",
-    );
+    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("development");
     await user.click(screen.getByRole("button", { name: "Base branch" }));
     expect(onOpen).toHaveBeenCalled();
 
@@ -81,9 +79,7 @@ describe("CodeBranchSelector", () => {
         startFromOrigin={false}
       />,
     );
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent(
-      "From development",
-    );
+    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("development");
   });
 
   it("disables the start-from-origin switch when no usable remote exists", async () => {
