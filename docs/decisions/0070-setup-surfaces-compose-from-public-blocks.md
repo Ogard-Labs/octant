@@ -15,8 +15,8 @@ while leftover `.btn*` and feature hover rules repaint those adapters.
 is the approved visual reference for grouping, radius, elevation, and
 progress. It is not a dependency. Originality and 0016 still forbid vendoring
 its source or replacing composers, the shell, Monaco, the terminal, or
-authority UX. This record is the scoped exception that changes *how those
-owned surfaces look*.
+authority UX. This record is the scoped exception that changes _how those
+owned surfaces look_.
 
 ## Decision
 
@@ -31,7 +31,7 @@ owned surfaces look*.
   architecture). New defaults: control radius 10px, panel/card 16px,
   composer/dialog 20px; `OctantCard` uses `--octant-shadow-sm`; floating
   overlays keep `--octant-shadow-overlay`; setup and form objects are raised
-  cards with section progress; selected rows use a fill *and* a label.
+  cards with section progress; selected rows use a fill _and_ a label.
   Tokens change once in `packages/theme`, `octant.css`, `shadcn-theme.css`,
   and the owned recipes so every surface inherits.
 - **Shell stays an ADE.** Navigation rows stay compact (28–32px). Monaco,
@@ -41,15 +41,15 @@ owned surfaces look*.
 - **Composition targets.** Restyle the Octant owner; do not swap in a
   foreign block. Login blocks are unused (no account). `ai-05` is unused.
 
-  | Surface | Octant owner | Public-block pattern |
-  | ------- | ------------ | -------------------- |
-  | Settings, Provider Settings | `SettingRow`, settings registry | form-layout-01/02/03 |
-  | First-run | `FirstRunOnboarding` (0019 / 0033) | onboarding-01/02/03 |
-  | Welcome + composer chrome | `ChatWelcome`, `ThreadComposer`, `ComposerModelPicker` | ai-01/02/03/04 |
-  | Command palette | `CommandPalette` | command-menu-01/02 |
-  | Shared dialogs | `OctantDialog` callers | dialog-01/02/11 |
-  | Usage | `UsageDashboard` | stats-12/14 |
-  | Boards / empty | board + empty-state owners | grid-list-02, stats-03 |
+  | Surface                     | Octant owner                                           | Public-block pattern   |
+  | --------------------------- | ------------------------------------------------------ | ---------------------- |
+  | Settings, Provider Settings | `SettingRow`, settings registry                        | form-layout-01/02/03   |
+  | First-run                   | `FirstRunOnboarding` (0019 / 0033)                     | onboarding-01/02/03    |
+  | Welcome + composer chrome   | `ChatWelcome`, `ThreadComposer`, `ComposerModelPicker` | ai-01/02/03/04         |
+  | Command palette             | `CommandPalette`                                       | command-menu-01/02     |
+  | Shared dialogs              | `OctantDialog` callers                                 | dialog-01/02/11        |
+  | Usage                       | `UsageDashboard`                                       | stats-12/14            |
+  | Boards / empty              | board + empty-state owners                             | grid-list-02, stats-03 |
 
 - **Dual paint dies on contact.** A touched surface drops `.btn*` on
   `OctantButton` and feature CSS that repaints adapter color, border, radius,
