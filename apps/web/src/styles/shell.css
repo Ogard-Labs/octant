@@ -1701,15 +1701,17 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-adapter__stack {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display: grid;
+  grid-template-areas: "stack";
+  justify-items: center;
 }
 
 .code-composer-adapter__stack > .code-composer-adapter__card {
-  position: relative;
+  grid-area: stack;
   z-index: 1;
-  width: calc(100% - 16px);
+  width: calc(100% - 20px);
+  margin-bottom: 40px;
+  align-self: start;
 }
 
 /* Layout only. The frame, 20px radius, and lift are `.composer` (0038).
@@ -1726,23 +1728,28 @@ form > .work-composer-adapter__attachments {
 }
 
 /* A second card, not a footer band. Wider than the front card so its
-   shoulders peek out. Inset fill stays a step behind the composer in
-   both themes without reading a theme-mode attribute. */
+   shoulders peek out. Workspace (dark) / floating (light) sits between
+   the page well and the composer fill; inset vanished into the page. */
 .code-composer-adapter__dock {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 8px 12px;
-  position: relative;
+  grid-area: stack;
   z-index: 0;
   width: 100%;
-  margin-top: -18px;
-  padding: 30px 16px 12px;
+  min-height: 100%;
+  margin: 0;
+  padding: 0 16px 12px;
   color: var(--oct-meta);
-  background: var(--octant-surface-inset);
+  background: var(--octant-workspace);
   border-radius: var(--oct-radius-lg);
   box-shadow: var(--octant-shadow-sm);
+}
+
+html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
+  background: var(--octant-floating);
 }
 
 .code-composer-adapter__dock-leading,
