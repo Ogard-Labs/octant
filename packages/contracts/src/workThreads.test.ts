@@ -3,6 +3,7 @@ import {
   WORK_THREAD_EVENT_NAMES,
   decodeWorkThread,
   decodeWorkThreadBootstrap,
+  decodeWorkThreadNavigation,
   decodeWorkThreadCommand,
   decodeWorkThreadCommandResult,
   decodeWorkThreadId,
@@ -46,6 +47,16 @@ describe("work thread contracts", () => {
     ).toMatchObject({ workingDirectory: "research/brief" });
     expect(() => decodeWorkThread({ ...threadFixture, projectId: undefined })).toThrow();
     expect(() => decodeWorkThread({ ...threadFixture, secret: "x" })).toThrow();
+  });
+
+  it("keeps sidebar navigation projection-only and requires explicit runtime state", () => {
+    expect(
+      decodeWorkThreadNavigation({
+        threads: [threadFixture],
+        runtime: [],
+      }),
+    ).toEqual({ threads: [threadFixture], runtime: [] });
+    expect(() => decodeWorkThreadNavigation({ threads: [threadFixture] })).toThrow();
   });
 
   it("decodes create-work-thread command and bootstrap", () => {

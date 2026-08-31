@@ -5933,6 +5933,7 @@ export function startOctantServer(
     const workThreadRoutes = createWorkThreadRouteHandler({
       service: {
         bootstrap: (windowId) => workThreadServiceWithWorkflows.bootstrap(windowId),
+        navigation: (windowId) => workThreadServiceWithWorkflows.navigation(windowId),
         execute: (windowId, command) => workThreadServiceWithWorkflows.execute(windowId, command),
         queryBoard: async (windowId, query) => {
           const bootstrap = await workThreadServiceWithWorkflows.bootstrap(windowId);

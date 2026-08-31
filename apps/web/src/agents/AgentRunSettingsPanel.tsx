@@ -5,7 +5,7 @@ import {
   AgentRunSettingsClientFailure,
   type AgentRunSettingsClient,
 } from "@octant/client-runtime/agent-run-settings-client";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import "./agent-hierarchy.css";
 
 const POSTURES: ReadonlyArray<{
@@ -112,27 +112,34 @@ export function AgentRunSettingsPanel(props: { readonly client: AgentRunSettings
             {message}
           </p>
         )}
-        <div aria-label="Subagent creation posture" role="radiogroup">
+        <OctantToggleGroup<AgentRunCreationPosture>
+          aria-label="Subagent creation posture"
+          className="grid w-full grid-cols-1 gap-2"
+          onValueChange={(value) => {
+            const posture = value[0];
+            if (posture !== undefined && posture !== settings?.creationPosture) {
+              void choose(posture);
+            }
+          }}
+          role="radiogroup"
+          value={settings === undefined ? [] : [settings.creationPosture]}
+        >
           {POSTURES.map((posture) => (
-            <OctantButton
+            <OctantToggleGroupItem
               aria-checked={settings?.creationPosture === posture.value}
-              className="agent-run-settings-panel__option"
+              className="h-auto min-h-0 w-full items-start justify-start whitespace-normal px-3 py-2.5 text-left"
               disabled={saving}
               key={posture.value}
-              onClick={() => void choose(posture.value)}
               role="radio"
-              type="button"
-              variant="ghost"
+              value={posture.value}
             >
-              <span>
+              <span className="flex flex-col items-start gap-0.5">
                 <strong>{posture.label}</strong>
-                <span className="agent-run-settings-panel__option-description">
-                  {posture.description}
-                </span>
+                <span className="text-xs font-normal opacity-80">{posture.description}</span>
               </span>
-            </OctantButton>
+            </OctantToggleGroupItem>
           ))}
-        </div>
+        </OctantToggleGroup>
       </fieldset>
     </section>
   );

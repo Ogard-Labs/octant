@@ -121,6 +121,23 @@ describe("thread utility presentation persistence", () => {
     });
   });
 
+  it("uses the caller's default when the dock record is malformed", () => {
+    const localStorage = memoryStorage();
+    localStorage.setItem("octant.shell.utility-dock.window-a.v1", "not json");
+
+    expect(readUtilityDockPresentation({ localStorage }, "window-a", true).open).toBe(true);
+  });
+
+  it("uses the caller's default when the persisted open value is invalid", () => {
+    const localStorage = memoryStorage();
+    localStorage.setItem(
+      "octant.shell.utility-dock.window-a.v1",
+      JSON.stringify({ open: "yes", threads: {} }),
+    );
+
+    expect(readUtilityDockPresentation({ localStorage }, "window-a", true).open).toBe(true);
+  });
+
   it("keeps the dock closed once a window has closed it", () => {
     const localStorage = memoryStorage();
     writeUtilityDockPresentation({ localStorage }, "window-a", {

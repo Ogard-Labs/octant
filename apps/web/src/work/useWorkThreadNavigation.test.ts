@@ -64,8 +64,12 @@ describe("useWorkThreadNavigation", () => {
         runtime: [{ threadId, executing }],
       }),
     );
+    const navigation = vi.fn(async () => ({
+      threads: [workThread()],
+      runtime: [{ threadId, executing }],
+    }));
     const { result, unmount } = renderHook(() =>
-      useWorkThreadNavigation({ bootstrap }, { navigationRefreshMs: 10 }),
+      useWorkThreadNavigation({ bootstrap, navigation }, { navigationRefreshMs: 10 }),
     );
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
@@ -73,7 +77,8 @@ describe("useWorkThreadNavigation", () => {
 
     executing = true;
     await waitFor(() => expect(result.current.navigation[0]?.activity).toBe("working"));
-    expect(bootstrap.mock.calls.length).toBeGreaterThan(1);
+    expect(navigation.mock.calls.length).toBeGreaterThan(0);
+    expect(bootstrap).toHaveBeenCalledTimes(1);
 
     executing = false;
     await waitFor(() => expect(result.current.navigation[0]?.activity).toBeUndefined());
@@ -88,7 +93,7 @@ describe("useWorkThreadNavigation", () => {
       }),
     );
     const { result } = renderHook(() =>
-      useWorkThreadNavigation({ bootstrap }, { navigationRefreshMs: 0 }),
+      useWorkThreadNavigation({ bootstrap, navigation: vi.fn() }, { navigationRefreshMs: 0 }),
     );
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
@@ -115,5 +120,65 @@ describe("useWorkThreadNavigation", () => {
       title: "Renamed brief",
       updatedAt: "2026-08-02T20:00:00.000Z",
     });
+  });
+
+  it("does not re-bootstrap or start navigation polling before the interval elapses", async () => {
+    vi.useFakeTimers();
+    const bootstrap = vi.fn(async () => decodeWorkThreadBootstrap({ threads: [workThread()] }));
+    const navigation = vi.fn(async () => ({ threads: [workThread()], runtime: [] }));
+    const { result, unmount } = renderHook(() =>
+      useWorkThreadNavigation({ bootstrap, navigation }, { navigationRefreshMs: 1_000 }),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.status).toBe("ready");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(bootstrap).toHaveBeenCalledTimes(1);
+    expect(navigation).not.toHaveBeenCalled();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("drops a navigation response that began before the document became hidden", async () => {
+    let resolveNavigation:
+      | ((value: { threads: ReadonlyArray<ReturnType<typeof workThread>>; runtime: [] }) => void)
+      | undefined;
+    const navigation = vi.fn(
+      () =>
+        new Promise<{ threads: ReadonlyArray<ReturnType<typeof workThread>>; runtime: [] }>(
+          (resolve) => {
+            resolveNavigation = resolve;
+          },
+        ),
+    );
+    const { result, unmount } = renderHook(() =>
+      useWorkThreadNavigation(
+        {
+          bootstrap: async () => decodeWorkThreadBootstrap({ threads: [workThread()] }),
+          navigation,
+        },
+        { navigationRefreshMs: 10 },
+      ),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await waitFor(() => expect(navigation).toHaveBeenCalledTimes(1));
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    resolveNavigation?.({
+      threads: [decodeWorkThread({ ...workThread(), title: "Stale title" })],
+      runtime: [],
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.navigation[0]?.title).toBe("Research brief");
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    unmount();
   });
 });

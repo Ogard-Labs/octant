@@ -105,10 +105,11 @@
   /* ── elevation and focus ── */
   --oct-elev-flat: none;
   --oct-elev-ring: 0 0 0 1px var(--oct-border);
+  --oct-elev-subtle:
+    0 1px 4px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.28)), 0 0 0 1px var(--oct-border);
   --oct-elev-raised:
-    light-dark(0 28px 70px rgba(38, 37, 30, 0.13), 0 28px 70px rgba(0, 0, 0, 0.5)),
-    light-dark(0 14px 32px rgba(38, 37, 30, 0.1), 0 14px 32px rgba(0, 0, 0, 0.36)),
-    0 0 0 1px var(--oct-border);
+    0 28px 70px light-dark(rgba(38, 37, 30, 0.13), rgba(0, 0, 0, 0.5)),
+    0 14px 32px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.36)), 0 0 0 1px var(--oct-border);
   --oct-focus-ring: 0 0 0 2px var(--oct-bg), 0 0 0 4px var(--oct-accent-fg);
 
   /* ── type ── */
@@ -4114,12 +4115,6 @@ html[data-octant-theme-mode="light"] .composer {
   color: var(--oct-muted);
   background: transparent;
   font-size: var(--oct-text-xs);
-  transition: background-color var(--oct-dur-fast) var(--oct-ease-color);
-}
-.composer-row [role="combobox"]:hover {
-  color: var(--oct-fg);
-  background: var(--oct-fill-3);
-  border-color: transparent;
 }
 /* A bordered box inside the composer's own box read as a form field nested in
    a form field. The trigger is a quiet pill that only gains a ground when
@@ -4138,15 +4133,6 @@ html[data-octant-theme-mode="light"] .composer {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   text-align: left;
-  transition: background-color var(--oct-dur-fast) var(--oct-ease-color);
-}
-.composer-row .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fill-3);
-}
-.composer-row .composer-model-picker__trigger[aria-expanded="true"] {
-  color: var(--oct-fg);
-  background: var(--oct-fill-2);
 }
 /* The frame's direct labels are its message fields; they must be blocks so
    the content-sized textarea has a full-width box to fill (an inline label

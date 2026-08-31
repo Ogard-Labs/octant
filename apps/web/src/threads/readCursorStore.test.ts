@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createReadCursorStore } from "./readCursorStore";
 
 function memoryStorage(seed: Record<string, string> = {}): Pick<Storage, "getItem" | "setItem"> {
@@ -12,6 +12,48 @@ function memoryStorage(seed: Record<string, string> = {}): Pick<Storage, "getIte
 }
 
 describe("thread read cursors", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("coalesces streamed read cursors while keeping the in-memory cursor current", () => {
+    vi.useFakeTimers();
+    const storage = countingStorage();
+    const store = createReadCursorStore<string>({ storageKey: "cursors", storage });
+
+    for (let index = 1; index <= 5_000; index += 1) store.markDeferred("thread-1", index);
+
+    expect(store.getSnapshot().get("thread-1")).toBe(5_000);
+    expect(storage.setItem).not.toHaveBeenCalled();
+    vi.runAllTimers();
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(
+      createReadCursorStore<string>({ storageKey: "cursors", storage })
+        .getSnapshot()
+        .get("thread-1"),
+    ).toBe(5_000);
+  });
+
+  it("keeps the most recently streamed thread after later marks fill the limit", () => {
+    vi.useFakeTimers();
+    const storage = memoryStorage();
+    const store = createReadCursorStore<string>({ storageKey: "cursors", storage });
+
+    store.markDeferred("thread-a", 1);
+    store.markDeferred("thread-b", 1);
+    store.markDeferred("thread-a", 2);
+    vi.runAllTimers();
+
+    const afterFlush = createReadCursorStore<string>({ storageKey: "cursors", storage });
+    for (let index = 0; index < 499; index += 1) {
+      afterFlush.mark(`later-${index}`, index + 1);
+    }
+
+    const afterRestart = createReadCursorStore<string>({ storageKey: "cursors", storage });
+    expect(afterRestart.getSnapshot().get("thread-a")).toBe(2);
+    expect(afterRestart.getSnapshot().has("thread-b")).toBe(false);
+  });
+
   it("keeps a thread read after the app is restarted", () => {
     const storage = memoryStorage();
     const before = createReadCursorStore<string>({ storageKey: "cursors", storage });
@@ -62,7 +104,8 @@ describe("thread read cursors", () => {
     expect(store.getSnapshot().get("thread-1")).toBe(3);
   });
 
-  it("keeps only the newest 500 read and unread marks before and after restart", () => {
+  it("keeps only the newest 500 threads across read and unread marks before and after restart", () => {
+    vi.useFakeTimers();
     const storage = memoryStorage();
     const before = createReadCursorStore<string>({ storageKey: "cursors", storage });
 
@@ -71,13 +114,15 @@ describe("thread read cursors", () => {
       before.unmark(`unread-${index}`);
     }
 
-    expect(before.getSnapshot().size).toBe(500);
+    expect(before.getSnapshot().size + before.getMarkedUnread().size).toBe(500);
     expect(before.getSnapshot().has("read-0")).toBe(false);
     expect(before.getSnapshot().get("read-500")).toBe(501);
-    expect(before.getMarkedUnread().size).toBe(500);
+    expect(before.getSnapshot().size).toBe(250);
+    expect(before.getMarkedUnread().size).toBe(250);
     expect(before.getMarkedUnread().has("unread-0")).toBe(false);
     expect(before.getMarkedUnread().has("unread-500")).toBe(true);
 
+    vi.runAllTimers();
     const after = createReadCursorStore<string>({ storageKey: "cursors", storage });
     expect(after.getSnapshot()).toEqual(before.getSnapshot());
     expect(after.getMarkedUnread()).toEqual(before.getMarkedUnread());
@@ -115,6 +160,18 @@ describe("thread read cursors", () => {
   });
 });
 
+function countingStorage(): Pick<Storage, "getItem" | "setItem"> & {
+  readonly setItem: ReturnType<typeof vi.fn>;
+} {
+  const entries = new Map<string, string>();
+  return {
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: vi.fn((key: string, value: string) => {
+      entries.set(key, value);
+    }),
+  };
+}
+
 describe("thread read cursors across windows", () => {
   it("keeps a read another window recorded while this one records its own", () => {
     const storage = memoryStorage();
@@ -128,4 +185,58 @@ describe("thread read cursors across windows", () => {
     expect(relaunched.getSnapshot().get("thread-1")).toBe(4);
     expect(relaunched.getSnapshot().get("thread-2")).toBe(9);
   });
+
+  it("does not let an older deferred read overwrite another window's explicit unread mark", () => {
+    vi.useFakeTimers();
+    const storage = memoryStorage();
+    const events = new EventTarget();
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const originalAdd = Object.getOwnPropertyDescriptor(globalThis, "addEventListener");
+    const originalRemove = Object.getOwnPropertyDescriptor(globalThis, "removeEventListener");
+    Object.defineProperties(globalThis, {
+      localStorage: { configurable: true, value: storage },
+      addEventListener: {
+        configurable: true,
+        value: events.addEventListener.bind(events),
+      },
+      removeEventListener: {
+        configurable: true,
+        value: events.removeEventListener.bind(events),
+      },
+    });
+
+    try {
+      const windowOne = createReadCursorStore<string>({ storageKey: "cursors" });
+      windowOne.mark("thread-1", 4);
+      const windowTwo = createReadCursorStore<string>({ storageKey: "cursors" });
+      const unsubscribe = windowTwo.subscribe(() => undefined);
+
+      windowTwo.markDeferred("thread-1", 5);
+      windowOne.unmark("thread-1");
+      const event = new Event("storage");
+      Object.defineProperties(event, {
+        key: { value: "cursors" },
+        storageArea: { value: storage },
+      });
+      events.dispatchEvent(event);
+      vi.runAllTimers();
+
+      const relaunched = createReadCursorStore<string>({ storageKey: "cursors" });
+      expect(relaunched.getSnapshot().has("thread-1")).toBe(false);
+      expect(relaunched.getMarkedUnread().has("thread-1")).toBe(true);
+      unsubscribe();
+    } finally {
+      restoreGlobalProperty("localStorage", originalStorage);
+      restoreGlobalProperty("addEventListener", originalAdd);
+      restoreGlobalProperty("removeEventListener", originalRemove);
+    }
+  });
 });
+
+function restoreGlobalProperty(
+  name: "localStorage" | "addEventListener" | "removeEventListener",
+  descriptor: PropertyDescriptor | undefined,
+): void {
+  if (descriptor === undefined) Reflect.deleteProperty(globalThis, name);
+  else Object.defineProperty(globalThis, name, descriptor);
+}

@@ -202,9 +202,11 @@ integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,
 never the navigation grammar. See [decisions/0015-workspace-shell-model.md](decisions/0015-workspace-shell-model.md).
 
-Chat and Code keep the active mode's sidebar current with projection-only
-navigation reads (`GET /api/chat/navigation`, `GET /api/code/navigation`). Code
-bootstrap still observes waiting checkouts on the filesystem so a restart can
+Chat, Work, and Code keep the active mode's sidebar current with projection-only
+navigation reads (`GET /api/chat/navigation`, `GET /api/work/navigation`,
+`GET /api/code/navigation`). Work bootstrap still validates Project roots, while
+the Work navigation read uses only active Work Project and thread projections plus
+in-process runtime state. Code bootstrap still observes waiting checkouts on the filesystem so a restart can
 recover them; available and unavailable checkouts are not re-probed, and the
 sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next

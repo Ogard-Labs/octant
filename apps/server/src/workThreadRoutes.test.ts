@@ -26,6 +26,17 @@ describe("Work thread routes", () => {
     expect(bootstrap).toHaveBeenCalledWith(windowId);
   });
 
+  it("returns projection-only Work navigation for the authenticated window", async () => {
+    const navigation = vi.fn(async () => ({ threads: [thread()], runtime: [] }));
+    const route = routeFixture({ navigation });
+
+    const response = await route(request("/api/work/navigation"));
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ threads: [thread()], runtime: [] });
+    expect(navigation).toHaveBeenCalledWith(windowId);
+  });
+
   it("executes Work thread commands for an authenticated window", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-created", thread: thread() }));
     const route = routeFixture({ execute });
@@ -59,6 +70,15 @@ describe("Work thread routes", () => {
     expect((await route(new Request("http://127.0.0.1/api/work/threads/bootstrap")))?.status).toBe(
       401,
     );
+    expect((await route(new Request("http://127.0.0.1/api/work/navigation")))?.status).toBe(401);
+
+    expect(
+      (
+        await route(
+          request(`/api/work/navigation?windowId=${encodeURIComponent(String(windowId))}`),
+        )
+      )?.status,
+    ).toBe(400);
 
     expect(
       (
@@ -215,6 +235,7 @@ function routeFixture(overrides: Record<string, unknown>) {
   store.register({ windowId, capability, now: 0 });
   const service = {
     bootstrap: vi.fn(async () => ({ threads: [], runtime: [] })),
+    navigation: vi.fn(async () => ({ threads: [], runtime: [] })),
     execute: vi.fn(async () => ({ kind: "thread-created", thread: thread() })),
     ...overrides,
   } as never;

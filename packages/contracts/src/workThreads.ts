@@ -178,6 +178,16 @@ export const WorkThreadBootstrap = Schema.Struct({
 }).annotations(strict);
 export type WorkThreadBootstrap = typeof WorkThreadBootstrap.Type;
 
+/**
+ * Projection-only Work sidebar state. Unlike bootstrap, this read never
+ * validates Project roots or observes repositories.
+ */
+export const WorkThreadNavigation = Schema.Struct({
+  threads: Schema.Array(WorkThread),
+  runtime: Schema.Array(WorkThreadNavigationRuntime),
+}).annotations(strict);
+export type WorkThreadNavigation = typeof WorkThreadNavigation.Type;
+
 export const WORK_THREAD_EVENT_NAMES = [
   "work.thread-created@1",
   "work.thread-updated@1",
@@ -189,6 +199,7 @@ export const decodeWorkThread = Schema.decodeUnknownSync(WorkThread);
 export const decodeWorkThreadCommand = Schema.decodeUnknownSync(WorkThreadCommand);
 export const decodeWorkThreadCommandResult = Schema.decodeUnknownSync(WorkThreadCommandResult);
 export const decodeWorkThreadBootstrap = Schema.decodeUnknownSync(WorkThreadBootstrap);
+export const decodeWorkThreadNavigation = Schema.decodeUnknownSync(WorkThreadNavigation);
 export const decodeWorkThreadNavigationRuntime = Schema.decodeUnknownSync(
   WorkThreadNavigationRuntime,
 );

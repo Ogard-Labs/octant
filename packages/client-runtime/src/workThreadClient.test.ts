@@ -39,6 +39,25 @@ describe("createWorkThreadClient", () => {
     );
   });
 
+  it("loads projection-only Work navigation from the authenticated route", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ threads: [thread()], runtime: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = createWorkThreadClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.navigation()).resolves.toEqual({ threads: [thread()], runtime: [] });
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/work/navigation`,
+      expect.objectContaining({
+        method: "GET",
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+  });
+
   it("posts Work thread commands to the authenticated route", async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(successResult()), {

@@ -3,11 +3,13 @@ import {
   decodeWorkBoardQuery,
   decodeWorkBoardView,
   decodeWorkThreadBootstrap,
+  decodeWorkThreadNavigation,
   decodeWorkThreadCommand,
   decodeWorkThreadCommandResult,
   type WorkBoardQuery,
   type WorkBoardView,
   type WorkThreadBootstrap,
+  type WorkThreadNavigation,
   type WorkThreadCommandResult,
   type WorkThreadFailure,
   type WindowId,
@@ -26,6 +28,9 @@ export interface WorkThreadRouteService {
   readonly bootstrap: (
     authenticatedWindowId: WindowId,
   ) => Promise<WorkThreadBootstrap> | WorkThreadBootstrap;
+  readonly navigation: (
+    authenticatedWindowId: WindowId,
+  ) => Promise<WorkThreadNavigation> | WorkThreadNavigation;
   readonly execute: (
     authenticatedWindowId: WindowId,
     command: unknown,
@@ -48,7 +53,11 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
   const jsonLimit = dependencies.maxJsonBodySize ?? JSON_BODY_LIMIT;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== "/api/work/board" && !url.pathname.startsWith("/api/work/threads")) {
+    if (
+      url.pathname !== "/api/work/navigation" &&
+      url.pathname !== "/api/work/board" &&
+      !url.pathname.startsWith("/api/work/threads")
+    ) {
       return undefined;
     }
     const origin = request.headers.get("origin");
@@ -71,9 +80,10 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
     }
 
     const isBootstrap = url.pathname === "/api/work/threads/bootstrap";
+    const isNavigation = url.pathname === "/api/work/navigation";
     const isCommands = url.pathname === "/api/work/threads/commands";
     const isBoard = url.pathname === "/api/work/board";
-    if (!isBootstrap && !isCommands && !isBoard) return undefined;
+    if (!isBootstrap && !isNavigation && !isCommands && !isBoard) return undefined;
 
     let authenticatedWindowId: WindowId;
     try {
@@ -110,6 +120,16 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
         }
         return jsonResponse(
           decodeWorkThreadBootstrap(await dependencies.service.bootstrap(authenticatedWindowId)),
+          200,
+          origin,
+        );
+      }
+      if (isNavigation) {
+        if (request.method !== "GET" || url.search !== "") {
+          throw new WorkThreadRouteRejected("Work thread request is invalid.", 400);
+        }
+        return jsonResponse(
+          decodeWorkThreadNavigation(await dependencies.service.navigation(authenticatedWindowId)),
           200,
           origin,
         );

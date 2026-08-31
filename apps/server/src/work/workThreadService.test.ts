@@ -46,6 +46,25 @@ describe("WorkThreadService", () => {
     expect(fixture.projects.bootstrap).toHaveBeenCalledWith(ids.window);
   });
 
+  it("reads navigation from projections without bootstrapping Projects", async () => {
+    const allowed = thread();
+    const archived = thread({
+      id: "72000000-0000-4000-8000-000000000009" as never,
+      lifecycle: "archived",
+    });
+    const deleted = thread({
+      id: "72000000-0000-4000-8000-000000000010" as never,
+      lifecycle: "deleted",
+    });
+    const fixture = serviceFixture({ threads: [allowed, archived, deleted] });
+
+    await expect(fixture.service.navigation(ids.window)).resolves.toEqual({
+      threads: [allowed],
+      runtime: [{ threadId: allowed.id, executing: false }],
+    });
+    expect(fixture.projects.bootstrap).not.toHaveBeenCalled();
+  });
+
   it("creates a thread for the active Work Project with a local-user event", async () => {
     const fixture = serviceFixture({ threads: [] });
 

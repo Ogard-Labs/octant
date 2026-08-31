@@ -117,6 +117,7 @@
      shadows. Inside the app the app wins, because a flat card in a
      shadowed shell reads as a rendering bug rather than as restraint. */
   --oct-elev-ring: var(--octant-shadow-hairline);
+  --oct-elev-subtle: var(--octant-shadow-sm);
   --oct-elev-raised: var(--octant-shadow-overlay);
 
   /* ─── focus and scrim ───────────────────────────────────────────────
