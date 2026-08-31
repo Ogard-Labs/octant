@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createReadCursorStore } from "./readCursorStore";
 
 function memoryStorage(seed: Record<string, string> = {}): Pick<Storage, "getItem" | "setItem"> {
@@ -12,6 +12,27 @@ function memoryStorage(seed: Record<string, string> = {}): Pick<Storage, "getIte
 }
 
 describe("thread read cursors", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("coalesces streamed read cursors while keeping the in-memory cursor current", () => {
+    vi.useFakeTimers();
+    const storage = countingStorage();
+    const store = createReadCursorStore<string>({ storageKey: "cursors", storage });
+
+    for (let index = 1; index <= 5_000; index += 1) store.markDeferred("thread-1", index);
+
+    expect(store.getSnapshot().get("thread-1")).toBe(5_000);
+    expect(storage.setItem).not.toHaveBeenCalled();
+    vi.runAllTimers();
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(
+      createReadCursorStore<string>({ storageKey: "cursors", storage })
+        .getSnapshot()
+        .get("thread-1"),
+    ).toBe(5_000);
+  });
   it("keeps a thread read after the app is restarted", () => {
     const storage = memoryStorage();
     const before = createReadCursorStore<string>({ storageKey: "cursors", storage });
@@ -62,7 +83,8 @@ describe("thread read cursors", () => {
     expect(store.getSnapshot().get("thread-1")).toBe(3);
   });
 
-  it("keeps only the newest 500 read and unread marks before and after restart", () => {
+  it("keeps only the newest 500 threads across read and unread marks before and after restart", () => {
+    vi.useFakeTimers();
     const storage = memoryStorage();
     const before = createReadCursorStore<string>({ storageKey: "cursors", storage });
 
@@ -71,13 +93,15 @@ describe("thread read cursors", () => {
       before.unmark(`unread-${index}`);
     }
 
-    expect(before.getSnapshot().size).toBe(500);
+    expect(before.getSnapshot().size + before.getMarkedUnread().size).toBe(500);
     expect(before.getSnapshot().has("read-0")).toBe(false);
     expect(before.getSnapshot().get("read-500")).toBe(501);
-    expect(before.getMarkedUnread().size).toBe(500);
+    expect(before.getSnapshot().size).toBe(250);
+    expect(before.getMarkedUnread().size).toBe(250);
     expect(before.getMarkedUnread().has("unread-0")).toBe(false);
     expect(before.getMarkedUnread().has("unread-500")).toBe(true);
 
+    vi.runAllTimers();
     const after = createReadCursorStore<string>({ storageKey: "cursors", storage });
     expect(after.getSnapshot()).toEqual(before.getSnapshot());
     expect(after.getMarkedUnread()).toEqual(before.getMarkedUnread());
@@ -114,6 +138,18 @@ describe("thread read cursors", () => {
     expect(code.getSnapshot().size).toBe(0);
   });
 });
+
+function countingStorage(): Pick<Storage, "getItem" | "setItem"> & {
+  readonly setItem: ReturnType<typeof vi.fn>;
+} {
+  const entries = new Map<string, string>();
+  return {
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: vi.fn((key: string, value: string) => {
+      entries.set(key, value);
+    }),
+  };
+}
 
 describe("thread read cursors across windows", () => {
   it("keeps a read another window recorded while this one records its own", () => {

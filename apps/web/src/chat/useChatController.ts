@@ -315,7 +315,7 @@ export function useChatController(options: ChatControllerOptions) {
       recordFollowUp(view.thread.id, view.followUp?.state === "open");
       recordUpdatedAt(view.thread.id, view.thread.updatedAt);
       setActiveView(view);
-      if (markRead) readCursorStore.mark(view.thread.id, view.lastSequence);
+      if (markRead) readCursorStore.markDeferred(view.thread.id, view.lastSequence);
     },
     [readCursorStore, recordFollowUp, recordSequence, recordUpdatedAt],
   );

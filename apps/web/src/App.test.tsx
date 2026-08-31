@@ -2665,6 +2665,35 @@ describe("App", () => {
     );
   });
 
+  it("keeps native menu subscriptions while the shell controller refreshes", async () => {
+    const unsubscribe = vi.fn();
+    const subscribeStartNewAgent = vi.fn(() => unsubscribe);
+    const hostBridge: OctantHostBridge = {
+      ...credentialHostOperations(),
+      close: vi.fn(),
+      maximizeOrRestore: vi.fn(),
+      minimize: vi.fn(),
+      projectWindowCapability,
+      resetBounds: vi.fn(),
+      selectProjectRoot: vi.fn(),
+      setSidebarMaterialPreference: vi.fn(),
+      subscribeResolvedMaterial: vi.fn(() => () => undefined),
+      subscribeStartNewAgent,
+    };
+    const props = {
+      hostBridge,
+      launch: { serverUrl: "http://127.0.0.1:13773", windowId },
+      shellClient: client(chatShellBootstrap()),
+    };
+    const rendered = render(<App {...props} />);
+
+    await screen.findByRole("region", { name: "Workspace pane: Welcome to Chat" });
+    rendered.rerender(<App {...props} />);
+
+    expect(subscribeStartNewAgent).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).not.toHaveBeenCalled();
+  });
+
   it("consumes an Electron Project-window target once after Project bootstrap", async () => {
     const shellApi = client(bootstrap());
     const hostBridge: OctantHostBridge = {
