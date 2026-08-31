@@ -684,6 +684,66 @@ describe("ChatWorkspace", () => {
     await waitFor(() => expect(screen.getByLabelText("Message")).toHaveValue("newest draft"));
   });
 
+  it("does not remove an extension receipt re-added to a newer draft", async () => {
+    const user = userEvent.setup();
+    let finish: ((value: boolean) => void) | undefined;
+    const selection = {
+      kind: "plugin" as const,
+      extensionId: "00000000-0000-4000-8000-000000000941",
+      packageId: "00000000-0000-4000-8000-000000000942",
+      componentId: "instructions",
+      packageVersion: "1.0.0",
+      packageDigest: `sha256:${"a".repeat(64)}`,
+      catalogEpoch: `sha256:${"b".repeat(64)}`,
+      origin: { kind: "draft" as const, reference: "@guide" },
+    } as unknown as ExtensionSelection;
+    const original = {
+      reference: "@guide",
+      label: "Original guide",
+      selection,
+      status: { kind: "selected" as const },
+    };
+    const replacement = { ...original, label: "Replacement guide" };
+    function Harness() {
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      const [receipts, setReceipts] = useState([original]);
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: "First message",
+              sendTurn: () =>
+                new Promise<boolean>((resolve) => {
+                  finish = resolve;
+                }),
+            })}
+            pendingExtensionSelections={receipts}
+            onRemoveExtensionSelection={(reference) =>
+              setReceipts((current) => current.filter((receipt) => receipt.reference !== reference))
+            }
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setReceipts([replacement])} type="button">
+            Re-add guide
+          </button>
+          <button onClick={() => setView(viewWithAttempt("completed"))} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.click(screen.getByRole("button", { name: "Re-add guide" }));
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(finish).toBeDefined());
+    finish?.(true);
+
+    expect(await screen.findByText("Replacement guide")).toBeVisible();
+  });
+
   it("uses only the context captured when steering and preserves later context", async () => {
     const user = userEvent.setup();
     let finish: ((value: boolean) => void) | undefined;
