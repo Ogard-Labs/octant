@@ -132,6 +132,14 @@ describe("the public-block visual language", () => {
     expect(system).not.toMatch(/\.composer-row select\b/);
   });
 
+  it("aligns Appearance subgroups to the Settings card content inset", () => {
+    const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
+    const themeGroup = settings.match(/\.settings-view__theme-group \{[^}]+\}/)?.[0] ?? "";
+
+    expect(themeGroup).toMatch(/padding:\s*12px 20px 8px/);
+    expect(themeGroup).not.toMatch(/padding:\s*12px 0 8px/);
+  });
+
   it("reads Settings as form-layout cards on the app ground", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
 
