@@ -189,8 +189,10 @@ welcome composers, and cards use the raised card recipe (`OctantCard` /
 `--octant-app-background` well, not the grey floating fill — that fill reads
 as a sunken field. Host and Project sit on the toolbar, like Chat. GitHub
 and delivery stay a quiet strip under the card. Starter ideas are ghost
-actions under the hint, not outlined pills. The prompt itself is frameless
-so the shadcn textarea cannot paint a 10px field inside the card. Opaque shadcn
+actions under the hint, not outlined pills. The prompt itself is frameless:
+`OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
+Composer-row selects drop the same field chrome. Feature CSS must not
+repaint those controls a third time. Opaque shadcn
 popovers, menus, dialogs, Environment, and forms use the floating surface and
 overlay shadow. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced

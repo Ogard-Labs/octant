@@ -4127,6 +4127,14 @@ html[data-octant-theme-mode="light"] .composer {
   height: 32px;
   border-radius: var(--oct-radius-sm);
 }
+/* Native selects still ship the field recipe (border, secondary fill).
+   Inside the composer that is a second form field sitting in the card. */
+.composer-row select {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--oct-muted);
+}
 /* The send control is the row's one filled affordance, so it stays a circle. */
 .composer-row button[data-size="icon"] {
   width: 32px;

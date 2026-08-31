@@ -77,4 +77,10 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/box-shadow:\s*none/);
     expect(input).toMatch(/border:\s*0/);
   });
+
+  it("does not let composer-row native selects keep the field recipe", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    expect(system).toMatch(/\.composer-row select\s*\{[^}]*border:\s*0/);
+    expect(system).toMatch(/\.composer-row select\s*\{[^}]*background:\s*transparent/);
+  });
 });

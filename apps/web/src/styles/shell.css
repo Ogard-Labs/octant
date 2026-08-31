@@ -1353,23 +1353,6 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   margin-inline-start: 0;
 }
 
-/* The shared provider/model picker keeps the quiet trigger the bar's other
-   controls wear; the menu opens downward because the draft composer sits
-   mid-screen rather than at the window's bottom edge. */
-.work-composer-adapter__composer-bar .composer-model-picker__trigger {
-  min-height: 28px;
-  padding: 0 7px;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-  font-size: var(--oct-text-xs);
-}
-
-.work-composer-adapter__composer-bar .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
 .work-composer-adapter__visually-hidden {
   position: absolute;
   width: 1px;
@@ -1925,36 +1908,6 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__composer-bar .code-composer-adapter__context-picker {
   margin-inline-start: 0;
-}
-
-.code-composer-adapter__composer-bar .composer-model-picker__trigger {
-  min-height: 28px;
-  padding: 0 7px;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-  font-size: var(--oct-text-xs);
-}
-
-.code-composer-adapter__composer-bar .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
-/* The profile trigger is a peer of the model picker in this row, so it wears
-   the same quiet chrome rather than the outlined button it is elsewhere. */
-.code-composer-adapter__composer-bar .execution-profile-workflow__trigger {
-  min-height: 28px;
-  padding: 0 7px;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-  font-size: var(--oct-text-xs);
-}
-
-.code-composer-adapter__composer-bar .execution-profile-workflow__trigger:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
 }
 
 .code-composer-adapter__context-strip {
