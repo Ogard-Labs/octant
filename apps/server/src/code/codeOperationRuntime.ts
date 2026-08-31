@@ -276,7 +276,12 @@ export function createCodeOperationRuntime(
       console.warn(`Code runtime work record ${failure.kind}.`);
     });
   const observeRuntimeWorkOutcome = (outcome: CodeRuntimeWorkRecordOutcome): void => {
-    if (outcome.status === "failed") reportRuntimeWorkFailure(outcome);
+    if (outcome.status !== "failed") return;
+    try {
+      reportRuntimeWorkFailure(outcome);
+    } catch {
+      // Diagnostics must never replace the operation result they describe.
+    }
   };
   const roots = new Map<
     string,

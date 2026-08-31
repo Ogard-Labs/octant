@@ -179,7 +179,9 @@ export function createReadCursorStore<ThreadId>(options: {
     const next = applyChange(state, change);
     if (next === state) return;
     state = next;
-    pending.push(change);
+    const existing = pending.findIndex((candidate) => candidate.key === change.key);
+    if (existing === -1) pending.push(change);
+    else pending.splice(existing, 1, change);
     if (immediately) flush();
     else scheduleFlush();
     announce();

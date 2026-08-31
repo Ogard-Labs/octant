@@ -48,4 +48,10 @@ describe("shared control paint ownership", () => {
     expect(systemStyles).not.toContain("border-radius: 999px;");
     expect(chatStyles).not.toContain("border-radius: 999px;");
   });
+
+  it("keeps light-dark selection inside elevation colors", () => {
+    const elevationTokens = between(systemStyles, "--oct-elev-subtle:", "--oct-focus-ring:");
+
+    expect(elevationTokens).not.toMatch(/light-dark\(\s*\d/);
+  });
 });

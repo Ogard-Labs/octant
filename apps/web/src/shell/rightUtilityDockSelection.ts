@@ -235,7 +235,7 @@ function readDockPresentationRecord(
     if (!isRecord(parsed)) return unset;
     const candidate = parsed;
     return {
-      open: readOpen && (candidate.open === true || (defaultOpen && candidate.open === undefined)),
+      open: readOpen && (typeof candidate.open === "boolean" ? candidate.open : defaultOpen),
       threads: decodeDockStates(candidate.threads),
     };
   } catch {

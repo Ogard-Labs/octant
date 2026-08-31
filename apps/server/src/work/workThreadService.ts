@@ -207,11 +207,14 @@ export class WorkThreadService {
     try {
       const threads = this.#projection.list().filter((thread) => {
         const project = this.#persistence.readProject(thread.projectId);
-        return project?.type === "work" && project.lifecycle === "active";
+        return (
+          project?.type === "work" &&
+          project.lifecycle === "active" &&
+          thread.lifecycle === "active"
+        );
       });
       const runtime = [];
       for (const thread of threads) {
-        if (thread.lifecycle === "archived" || thread.lifecycle === "deleted") continue;
         const activity =
           this.#observeRuntime === undefined
             ? { executing: false }

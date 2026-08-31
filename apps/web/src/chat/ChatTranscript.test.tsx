@@ -409,7 +409,9 @@ describe("ChatTranscript", () => {
     expect(workedFor).toBeVisible();
     expect(getComputedStyle(workedFor.closest("p")!).position).not.toBe("absolute");
 
-    rerender(<ChatTranscript view={viewFixture({ attemptUpdatedAt: now })} />);
+    rerender(
+      <ChatTranscript view={viewFixture({ attemptUpdatedAt: "2026-07-20T08:00:00.999Z" })} />,
+    );
     expect(screen.queryByText(/Worked for/)).not.toBeInTheDocument();
   });
 

@@ -48,7 +48,15 @@ describe("WorkThreadService", () => {
 
   it("reads navigation from projections without bootstrapping Projects", async () => {
     const allowed = thread();
-    const fixture = serviceFixture({ threads: [allowed] });
+    const archived = thread({
+      id: "72000000-0000-4000-8000-000000000009" as never,
+      lifecycle: "archived",
+    });
+    const deleted = thread({
+      id: "72000000-0000-4000-8000-000000000010" as never,
+      lifecycle: "deleted",
+    });
+    const fixture = serviceFixture({ threads: [allowed, archived, deleted] });
 
     await expect(fixture.service.navigation(ids.window)).resolves.toEqual({
       threads: [allowed],

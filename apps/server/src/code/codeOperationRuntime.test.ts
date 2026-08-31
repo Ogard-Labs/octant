@@ -911,6 +911,7 @@ describe("CodeOperationRuntime", () => {
     const fixture = runtimeFixture({
       terminalExit: { exitCode: 0 },
       failRuntimeWorkJournal: true,
+      throwRuntimeWorkReporter: true,
     });
 
     const result = await fixture.runtime.execute(windowId, {
@@ -1149,6 +1150,7 @@ function runtimeFixture(options: {
   ) => Promise<GitScopedDiffResult>;
   approvalValidator?: boolean | (() => boolean);
   failRuntimeWorkJournal?: boolean;
+  throwRuntimeWorkReporter?: boolean;
   evidencePut?: (
     content: string,
     metadata?: { readonly truncated?: boolean },
@@ -1252,7 +1254,10 @@ function runtimeFixture(options: {
     actor,
     clock: () => now,
     uuid: () => `90000000-0000-4000-8000-${(++uuidCounter).toString().padStart(12, "0")}`,
-    reportRuntimeWorkFailure: (failure) => runtimeWorkFailures.push(failure.kind),
+    reportRuntimeWorkFailure: (failure) => {
+      runtimeWorkFailures.push(failure.kind);
+      if (options.throwRuntimeWorkReporter === true) throw new Error("diagnostic reporter failed");
+    },
     terminalProcessPort: {
       start: () => {
         const exit = options.terminalExit;

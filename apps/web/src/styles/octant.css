@@ -106,12 +106,10 @@
   --oct-elev-flat: none;
   --oct-elev-ring: 0 0 0 1px var(--oct-border);
   --oct-elev-subtle:
-    light-dark(0 1px 4px rgba(38, 37, 30, 0.1), 0 1px 4px rgba(0, 0, 0, 0.28)),
-    0 0 0 1px var(--oct-border);
+    0 1px 4px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.28)), 0 0 0 1px var(--oct-border);
   --oct-elev-raised:
-    light-dark(0 28px 70px rgba(38, 37, 30, 0.13), 0 28px 70px rgba(0, 0, 0, 0.5)),
-    light-dark(0 14px 32px rgba(38, 37, 30, 0.1), 0 14px 32px rgba(0, 0, 0, 0.36)),
-    0 0 0 1px var(--oct-border);
+    0 28px 70px light-dark(rgba(38, 37, 30, 0.13), rgba(0, 0, 0, 0.5)),
+    0 14px 32px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.36)), 0 0 0 1px var(--oct-border);
   --oct-focus-ring: 0 0 0 2px var(--oct-bg), 0 0 0 4px var(--oct-accent-fg);
 
   /* ── type ── */
