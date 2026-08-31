@@ -2076,7 +2076,7 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
 
 .code-composer-choice__option-label {
   font-size: calc(13 * var(--oct-text-step));
-  font-weight: 550;
+  font-weight: 500;
 }
 
 .code-composer-choice__option-detail {
