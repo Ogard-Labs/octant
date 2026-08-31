@@ -184,11 +184,14 @@ the native host and the status bar is 26px.
 
 Navigation panes stay compact hairline rails. Grouped forms, setup objects,
 welcome composers, and cards use the raised card recipe (`OctantCard` /
-`--octant-shadow-sm`). Opaque shadcn popovers, menus, dialogs, Environment,
-and forms use the floating surface and overlay shadow. Frosted material is
-limited to native/optional sidebar translucency and the floating activity
-picture-in-picture; reduced transparency and unsupported `backdrop-filter`
-resolve to opaque surfaces.
+`--octant-shadow-sm`). Chat, Work, and Code welcome composers share the
+`.composer` frame (20px, floating fill, `--octant-shadow-sm`). A surface may
+size the first-message field and place a context strip; it must not flatten
+the frame or paint the input and toolbar as separate boxes. Opaque shadcn
+popovers, menus, dialogs, Environment, and forms use the floating surface and
+overlay shadow. Frosted material is limited to native/optional sidebar
+translucency and the floating activity picture-in-picture; reduced
+transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-sm`,
 `--octant-shadow-md`, `--octant-shadow-lg`, `--octant-shadow-overlay`, and

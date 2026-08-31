@@ -5453,16 +5453,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   z-index: 2;
   flex: 0 0 auto;
   margin: 0 auto 12px;
-  border-radius: var(--oct-radius-sm);
-  box-shadow: none;
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease;
-}
-
-.code-thread-workspace__composer:focus-within {
-  border-color: var(--octant-border-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-fg) 5%, transparent);
 }
 
 .code-thread-workspace__composer .composer-input {

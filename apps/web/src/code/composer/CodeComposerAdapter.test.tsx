@@ -26,6 +26,11 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain("development");
   });
 
+  it("keeps the welcome prompt on the shared composer frame", () => {
+    const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
+    expect(html).toContain('class="composer code-composer-adapter__card"');
+  });
+
   it("renders approval policy selector", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
     expect(html).toContain("Approval");

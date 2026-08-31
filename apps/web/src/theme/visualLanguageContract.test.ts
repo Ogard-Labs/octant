@@ -44,4 +44,17 @@ describe("the public-block visual language", () => {
 
     expect(leftovers).toEqual([]);
   });
+
+  it("does not flatten the Code composer into two hairline boxes", () => {
+    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+
+    // The adapter card is a layout hook on `.composer`. Flattening it
+    // (transparent, no radius, no lift) and boxing the input and row as
+    // separate fields is what left Code welcome looking like the old chrome
+    // after the shared recipe shipped.
+    expect(shell).not.toMatch(/\.code-composer-adapter__card\s*\{[^}]*box-shadow:\s*none/);
+    expect(shell).not.toMatch(/\.code-composer-adapter__card\s*>\s*\.composer-row\s*\{/);
+    expect(styles).not.toMatch(/\.code-thread-workspace__composer\s*\{[^}]*box-shadow:\s*none/);
+  });
 });

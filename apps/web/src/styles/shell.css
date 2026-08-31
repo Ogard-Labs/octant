@@ -1648,14 +1648,20 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__canvas {
   display: flex;
-  width: min(100% - 48px, 680px);
+  width: min(100% - 40px, var(--oct-thread-measure));
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
   min-height: 100%;
   padding-block: min(16vh, 148px) 48px;
   margin: 0 auto;
-  gap: 10px;
+  gap: 18px;
+}
+
+.code-composer-adapter__welcome {
+  justify-items: center;
+  text-align: center;
+  gap: 8px;
 }
 
 .code-composer-adapter__eyebrow {
@@ -1663,20 +1669,21 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-adapter__heading {
+  max-width: 22ch;
   margin: 0;
-  color: var(--octant-text-primary);
-  font-size: clamp(25px, 3vw, 31px);
-  font-weight: 500;
-  letter-spacing: -0.03em;
-  line-height: 1.2;
+  color: var(--oct-fg);
+  font-size: clamp(26px, 3vw, 34px);
+  font-weight: 600;
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.15;
   text-wrap: balance;
 }
 
 .code-composer-adapter__description {
-  max-width: 58ch;
-  margin: 2px 0 0;
-  color: var(--octant-text-secondary);
-  font-size: 13.5px;
+  max-width: 52ch;
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: calc(13 * var(--oct-text-step));
   line-height: 1.55;
   text-wrap: pretty;
 }
@@ -1687,32 +1694,17 @@ form > .work-composer-adapter__attachments {
   gap: 6px;
 }
 
+/* Layout only. The frame, 20px radius, and lift are `.composer` (0038).
+   Painting the prompt and the row as two hairline boxes is what left Code
+   welcome looking like the old flat chrome after the shared recipe shipped. */
 .code-composer-adapter__card {
   display: flex;
   flex-direction: column;
   overflow: visible;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
 }
 
 .code-composer-adapter__card > .composer-input {
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-bottom: 0;
-  border-radius: var(--oct-radius-sm) 8px 0 0;
-}
-
-.code-composer-adapter__card > .composer-row {
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: 0 0 8px 8px;
-}
-
-.code-composer-adapter__card:focus-within > .composer-input,
-.code-composer-adapter__card:focus-within > .composer-row {
-  border-color: var(--octant-border-strong);
+  min-height: 96px;
 }
 
 .code-composer-adapter__context-strip {
@@ -1721,10 +1713,10 @@ form > .work-composer-adapter__attachments {
   align-items: center;
   order: -1;
   gap: 5px 10px;
-  margin: 0 0 8px;
-  padding: 0 2px;
+  margin: 0;
+  padding: 10px 12px 0;
   color: var(--oct-meta);
-  background: var(--octant-workspace);
+  background: transparent;
   border: 0;
 }
 
@@ -1733,11 +1725,12 @@ form > .work-composer-adapter__attachments {
    a bordered card reads as two cards, not as one that grew a row. */
 .code-composer-adapter__card > .code-worktree-source,
 .code-composer-adapter__card > .code-composer-adapter__delivery {
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
+  margin: 0;
+  padding: 10px 14px 12px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--oct-hairline);
+  border-radius: 0;
 }
 
 @media (max-width: 640px) {
