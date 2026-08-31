@@ -29,7 +29,7 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
     { readonly job: ImageJob; readonly artifact: ImageArtifactRecord } | undefined
   >(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
-  const inFlight = useRef(false);
+  const inFlightGeneration = useRef<number | undefined>(undefined);
   const generation = useRef(0);
   const refreshRef = useRef<() => void>(() => undefined);
   const hasPendingJob = jobs.some((job) => job.status === "queued" || job.status === "running");
@@ -37,9 +37,13 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
   useEffect(() => {
     let cancelled = false;
     const refreshGeneration = ++generation.current;
+    setJobs([]);
+    setRevise(undefined);
     const refresh = () => {
-      if (!documentIsVisible() || inFlight.current) return;
-      inFlight.current = true;
+      if (!documentIsVisible() || inFlightGeneration.current === refreshGeneration) {
+        return;
+      }
+      inFlightGeneration.current = refreshGeneration;
       void props.client
         .list({ threadKind: props.threadKind, scopeId: props.scopeId })
         .then((outcome) => {
@@ -53,7 +57,9 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
           }
         })
         .finally(() => {
-          inFlight.current = false;
+          if (inFlightGeneration.current === refreshGeneration) {
+            inFlightGeneration.current = undefined;
+          }
         });
     };
     refreshRef.current = refresh;
