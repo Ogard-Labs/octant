@@ -1063,7 +1063,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .draft-thread__canvas {
   box-sizing: border-box;
   display: flex;
-  width: min(100% - 48px, 720px);
+  width: min(100% - 48px, 768px);
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
@@ -1345,8 +1345,25 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 }
 
 .work-composer-adapter__context-strip {
-  padding: 8px 12px 8px 14px;
-  border-top: 1px solid var(--oct-border-soft);
+  position: relative;
+  z-index: 0;
+  width: calc(100% - 40px);
+  margin: -18px auto 0;
+  padding: 22px 16px 6px;
+  background: var(--octant-workspace);
+  border: 0;
+  border-radius: var(--oct-radius-lg);
+  box-shadow: var(--octant-shadow-sm);
+}
+
+.work-composer-adapter__composer {
+  position: relative;
+  isolation: isolate;
+}
+
+.work-composer-adapter__composer > .work-composer-adapter__card {
+  position: relative;
+  z-index: 1;
 }
 
 .work-composer-adapter__composer-bar .work-composer-adapter__context-picker {
@@ -1503,7 +1520,7 @@ form > .work-composer-adapter__attachments {
 .work-thread-workspace .draft-thread__canvas {
   box-sizing: border-box;
   display: flex;
-  width: min(100% - 48px, 720px);
+  width: min(100% - 48px, 768px);
   flex-direction: column;
   align-items: stretch;
   min-height: 100%;
@@ -1635,7 +1652,7 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__canvas {
   display: flex;
-  width: min(100% - 40px, var(--oct-thread-measure));
+  width: min(100% - 40px, 768px);
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
@@ -1697,7 +1714,7 @@ form > .work-composer-adapter__attachments {
 .code-composer-adapter__composer {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .code-composer-adapter__stack {
@@ -1739,9 +1756,9 @@ form > .work-composer-adapter__attachments {
   align-items: center;
   justify-content: space-between;
   gap: 8px 12px;
-  width: calc(100% - 20px);
-  margin: -20px auto 0;
-  padding: 28px 14px 10px;
+  width: calc(100% - 40px);
+  margin: -18px auto 0;
+  padding: 22px 16px 6px;
   color: var(--oct-meta);
   background: var(--octant-workspace);
   border-radius: var(--oct-radius-lg);
@@ -1834,6 +1851,12 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
 
 .code-composer-adapter__composer-bar .code-composer-adapter__context-item > svg {
   display: none;
+}
+
+.code-composer-adapter__composer-bar .execution-profile-workflow {
+  margin-inline-start: 2px;
+  padding-inline-start: 8px;
+  border-inline-start: 1px solid var(--oct-border);
 }
 
 .code-composer-adapter__composer-bar .code-composer-adapter__policy-select {
@@ -2097,10 +2120,17 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: auto;
-  padding: 4px 2px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 2px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+.code-composer-adapter__context-strip button {
+  height: 24px;
+  min-height: 24px;
+  padding-block: 0;
 }
 
 .code-composer-adapter__delivery {

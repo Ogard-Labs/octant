@@ -26,8 +26,11 @@ describe("CodeComposerAdapter", () => {
   });
 
   it("keeps the welcome prompt on the shared composer frame", () => {
-    const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toContain('class="composer code-composer-adapter__card"');
+    render(<CodeComposerAdapter {...defaultProps} />);
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveAttribute(
+      "placeholder",
+      "Describe what to build, ask a follow-up, or attach an image…",
+    );
   });
 
   it("names the Project in the heading and tucks host, checkout, and branch on a second card", () => {

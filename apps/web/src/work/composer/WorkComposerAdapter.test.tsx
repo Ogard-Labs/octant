@@ -44,6 +44,17 @@ describe("WorkComposerAdapter", () => {
     expect(html).not.toContain("Attach folder");
   });
 
+  it("tucks host and Project context behind the prompt instead of boxing it inside", () => {
+    const { container } = render(<WorkComposerAdapter {...baseProps} />);
+    const frame = container.querySelector(".composer");
+    const strip = container.querySelector(".work-composer-adapter__context-strip");
+
+    expect(frame).not.toBeNull();
+    expect(strip).not.toBeNull();
+    expect(frame?.contains(strip)).toBe(false);
+    expect(strip?.parentElement).toHaveClass("work-composer-adapter__composer");
+  });
+
   it("renders disabled send button when empty", () => {
     const html = renderToStaticMarkup(<WorkComposerAdapter {...baseProps} />);
     expect(html).toContain('aria-label="Create thread"');

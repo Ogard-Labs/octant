@@ -4040,7 +4040,7 @@ html[data-octant-theme-mode="light"] .composer {
   width: 100%;
   min-height: 48px;
   max-height: 180px;
-  padding: 12px 14px 10px;
+  padding: 18px 16px 12px;
   border: 0;
   border-radius: 0;
   background: none;
@@ -4072,7 +4072,7 @@ html[data-octant-theme-mode="light"] .composer {
   align-items: center;
   min-height: 36px;
   gap: 6px;
-  padding: 2px 8px 8px 10px;
+  padding: 0 12px 12px 14px;
   border-top: 0;
 }
 .composer-row .composer-gap {
@@ -4133,6 +4133,16 @@ html[data-octant-theme-mode="light"] .composer {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   text-align: left;
+}
+
+/* An unavailable provider is still a toolbar item, not a second outlined
+   field inside the raised prompt. The disabled trigger keeps the truthful
+   state and settings route while the row keeps one continuous surface. */
+.composer-row .composer-model-picker--empty {
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 /* The frame's direct labels are its message fields; they must be blocks so
    the content-sized textarea has a full-width box to fill (an inline label

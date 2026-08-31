@@ -24,12 +24,11 @@
   background: var(--octant-app-background);
 }
 
-/* The un-ported draft-thread base (shell.css) imports after the system sheet
-   and wins width ties against `.thread-column`, so the welcome hero restates
-   the shared measure through its token instead of wearing the class. The
-   literal goes when the draft-thread surface itself is ported. */
+/* Chat, Work, and Code share one welcome-prompt geometry. Transcript width is
+   a reading preference and must not make the new-thread card jump between
+   modes. */
 .chat-welcome .draft-thread__canvas {
-  width: min(100% - 40px, var(--oct-thread-measure));
+  width: min(100% - 40px, 768px);
   gap: 18px;
 }
 

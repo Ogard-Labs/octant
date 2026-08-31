@@ -160,7 +160,9 @@ Static type tokens in `octant.css` are:
 Transcript settings are explicit and centered: Small is 13px, Medium 14px,
 Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. The default thread
 measure is 760px and the column uses `width: min(100% - 40px, measure)` with
-automatic horizontal margins. Canvas documents use a 62ch measure.
+automatic horizontal margins. Welcome composers share a 768px maximum so
+Chat, Work, and Code start from the same prompt geometry independently of the
+reading-width preference. Canvas documents use a 62ch measure.
 
 ## Spacing, shapes, and depth
 

@@ -472,7 +472,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     if (props.creating === true) return;
                     if (attachFromTransfer(event.clipboardData)) event.preventDefault();
                   }}
-                  placeholder="What should we build?"
+                  placeholder="Describe what to build, ask a follow-up, or attach an image…"
                   ref={textareaRef}
                   rows={3}
                   value={prompt}

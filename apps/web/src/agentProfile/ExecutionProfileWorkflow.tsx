@@ -131,7 +131,7 @@ export function ExecutionProfileWorkflow(props: {
           }
           triggerClassName="execution-profile-workflow__trigger"
           triggerLabel={`Execution profile: ${selectedName}`}
-          triggerVariant="outline"
+          triggerVariant="ghost"
         >
           {body}
         </OctantPopover>

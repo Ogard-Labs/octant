@@ -171,9 +171,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         </div>
 
         <div className="work-composer-adapter__composer">
-          {/* One card holds the prompt and everything the thread will be bound
-              to. The strip used to sit outside it, which read as loose chrome
-              under the composer rather than as part of what is being started. */}
           <ThreadComposer
             className="work-composer-adapter__card"
             chips={
@@ -310,50 +307,47 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 },
               },
             }}
-            footer={
-              <div className="work-composer-adapter__context-strip" aria-label="Thread context">
-                <HostSelector
-                  {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                  {...(props.selectedHostId === undefined
-                    ? {}
-                    : { selectedHostId: props.selectedHostId })}
-                  {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-                  {...(props.lastSelectedHealthyHostId === undefined
-                    ? {}
-                    : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-                  {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-                  {...(props.onSelectHost === undefined
-                    ? {}
-                    : { onSelectHost: props.onSelectHost })}
-                  requiredCapability="work"
-                />
-                {props.folderControl}
-                {props.createFromControl}
-                {props.folderControl !== undefined ? null : hasFolder &&
-                  props.projectName !== undefined ? (
-                  <span className="work-composer-adapter__context-item" title={props.projectRoot}>
-                    <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
-                    <span>{props.projectName}</span>
-                  </span>
-                ) : (
-                  <span className="work-composer-adapter__context-item">
-                    <AlertTriangle aria-hidden="true" size={12} strokeWidth={1.8} />
-                    <span>No folder</span>
-                    {props.onAttachFolder !== undefined ? (
-                      <OctantButton
-                        className="work-composer-adapter__attach-btn"
-                        onClick={props.onAttachFolder}
-                        type="button"
-                        variant="ghost"
-                      >
-                        Attach folder
-                      </OctantButton>
-                    ) : null}
-                  </span>
-                )}
-              </div>
-            }
           />
+
+          <div className="work-composer-adapter__context-strip" aria-label="Thread context">
+            <HostSelector
+              {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+              {...(props.selectedHostId === undefined
+                ? {}
+                : { selectedHostId: props.selectedHostId })}
+              {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+              {...(props.lastSelectedHealthyHostId === undefined
+                ? {}
+                : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+              {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+              {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
+              requiredCapability="work"
+            />
+            {props.folderControl}
+            {props.createFromControl}
+            {props.folderControl !== undefined ? null : hasFolder &&
+              props.projectName !== undefined ? (
+              <span className="work-composer-adapter__context-item" title={props.projectRoot}>
+                <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+                <span>{props.projectName}</span>
+              </span>
+            ) : (
+              <span className="work-composer-adapter__context-item">
+                <AlertTriangle aria-hidden="true" size={12} strokeWidth={1.8} />
+                <span>No folder</span>
+                {props.onAttachFolder !== undefined ? (
+                  <OctantButton
+                    className="work-composer-adapter__attach-btn"
+                    onClick={props.onAttachFolder}
+                    type="button"
+                    variant="ghost"
+                  >
+                    Attach folder
+                  </OctantButton>
+                ) : null}
+              </span>
+            )}
+          </div>
 
           {props.errorMessage !== undefined ? (
             <p className="work-composer-adapter__error" role="alert">

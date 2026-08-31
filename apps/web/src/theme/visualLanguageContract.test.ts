@@ -109,6 +109,17 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/border-radius:\s*0/);
     expect(input).toMatch(/box-shadow:\s*none/);
     expect(input).toMatch(/border:\s*0/);
+    expect(input).toMatch(/padding:\s*18px 16px 12px/);
+  });
+
+  it("keeps empty composer pickers as quiet toolbar items instead of nested fields", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const emptyPicker =
+      system.match(/\.composer-row \.composer-model-picker--empty\s*\{[^}]+\}/)?.[0] ?? "";
+
+    expect(emptyPicker).toMatch(/padding:\s*0/);
+    expect(emptyPicker).toMatch(/border:\s*0/);
+    expect(emptyPicker).toMatch(/background:\s*transparent/);
   });
 
   it("tucks the Code checkout card behind the composer as a second raised card", () => {
@@ -119,8 +130,9 @@ describe("the public-block visual language", () => {
     expect(stack).toMatch(/position:\s*relative/);
     expect(stack).toMatch(/isolation:\s*isolate/);
     expect(stack).toMatch(/flex-direction:\s*column/);
-    expect(dock).toMatch(/margin:\s*-20px auto 0/);
-    expect(dock).toMatch(/width:\s*calc\(100% - 20px\)/);
+    expect(dock).toMatch(/margin:\s*-18px auto 0/);
+    expect(dock).toMatch(/width:\s*calc\(100% - 40px\)/);
+    expect(dock).toMatch(/padding:\s*22px 16px 6px/);
     expect(dock).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
     expect(dock).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
     expect(dock).not.toMatch(/border-radius:\s*0 0/);

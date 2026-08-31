@@ -82,8 +82,11 @@ describe("ExecutionProfileWorkflow", () => {
     const user = userEvent.setup();
     render(<ExecutionProfileWorkflow controller={controller()} variant="composer" />);
 
-    expect(screen.getByRole("button", { name: "Execution profile: Code reviewer" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Execution profile: Code reviewer" }));
+    const trigger = screen.getByRole("button", { name: "Execution profile: Code reviewer" });
+    expect(trigger).toBeVisible();
+    expect(trigger).toHaveClass("shadow-none");
+    expect(trigger).not.toHaveClass("border");
+    await user.click(trigger);
     expect(screen.getAllByText("OpenAI").length).toBeGreaterThan(0);
     expect(screen.getAllByText("GPT-5").length).toBeGreaterThan(0);
     expect(screen.getAllByText("This Mac").length).toBeGreaterThan(0);
