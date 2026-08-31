@@ -1,8 +1,7 @@
 /* Residual rules for the Extensions/Skills settings surface. Cards, chips,
-   buttons, and group chrome come from octant.css (.extcard, .tag, .badge,
-   .btn, .setgroup); what remains here is the group body layout, the in-card
-   detail blocks, and the pre-install review panel the system has no
-   vocabulary for. */
+   and group chrome come from octant.css (.extcard, .tag, .badge, .setgroup);
+   what remains here is the group body layout, the in-card detail blocks,
+   and the pre-install review panel the system has no vocabulary for. */
 
 .extensions-settings__description {
   margin: 0 0 var(--oct-space-5);
@@ -109,7 +108,7 @@
   background: var(--oct-surface-warm);
 }
 
-.extensions-settings__component > .btn {
+.extensions-settings__component > button {
   grid-column: 2;
   grid-row: 1 / -1;
 }
@@ -141,7 +140,7 @@
   margin-top: var(--oct-space-3);
 }
 
-.extensions-settings__preview > .btn {
+.extensions-settings__preview > button {
   justify-self: start;
 }
 

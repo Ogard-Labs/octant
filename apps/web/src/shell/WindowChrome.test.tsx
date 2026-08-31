@@ -375,7 +375,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".environment-git-group dl")).toContain(
       "border: 1px solid var(--octant-border);",
     );
-    expect(cssRule(".environment-git-group dl")).toContain("border-radius: 8px;");
+    expect(cssRule(".environment-git-group dl")).toContain("border-radius: var(--oct-radius-sm);");
     expect(cssRule(".environment-git-group__row")).toContain("min-height: 30px;");
     expect(cssRule(".environment-git-group__row + .environment-git-group__row")).toContain(
       "border-top: 1px solid var(--octant-border);",

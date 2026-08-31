@@ -213,7 +213,7 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   justify-content: stretch;
   gap: var(--oct-space-2);
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   text-align: left;
 }
 
@@ -366,7 +366,7 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
 }
 

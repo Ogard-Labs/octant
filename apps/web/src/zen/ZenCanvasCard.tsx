@@ -75,11 +75,10 @@ export function ZenCanvasCard(props: ZenCanvasCardProps) {
     <div className="zen-canvas-card">
       <div className="zen-canvas-card__chrome">
         <OctantButton
+          size="icon"
           aria-label="Re-read this canvas"
-          className="btn-icon"
           disabled={reading}
           onClick={() => setAttempt((previous) => previous + 1)}
-          size="icon"
           type="button"
           variant="ghost"
         >

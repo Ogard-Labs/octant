@@ -103,7 +103,7 @@
   min-height: 0;
   padding: var(--oct-space-2);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: inherit;
   font: inherit;

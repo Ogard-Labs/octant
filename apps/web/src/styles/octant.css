@@ -613,92 +613,9 @@ h4 {
   text-underline-offset: 3px;
 }
 
-/* ─── buttons ───────────────────────────────────────────────────────── */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--oct-space-2);
-  min-height: var(--oct-control-height);
-  padding-block: 0;
-  padding-inline: var(--oct-space-5);
-  border-radius: var(--oct-radius-sm);
-  border: 1px solid transparent;
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
-  transition:
-    background var(--oct-motion-fast) var(--oct-ease-standard),
-    border-color var(--oct-motion-fast) var(--oct-ease-standard),
-    color var(--oct-motion-fast) var(--oct-ease-standard),
-    transform 60ms var(--oct-ease-standard);
-}
-.btn:active {
-  transform: translateY(1px);
-}
-.btn-sm {
-  min-height: var(--oct-control-height-sm);
-  padding-inline: var(--oct-space-4);
-  font-size: var(--oct-text-xs);
-}
-.btn-block {
-  display: flex;
-  width: 100%;
-}
-.btn-primary {
-  background: var(--oct-accent);
-  color: var(--oct-accent-on);
-  border-color: var(--oct-accent);
-}
-.btn-primary:hover {
-  background: var(--oct-accent-hover);
-  border-color: var(--oct-accent-hover);
-  color: var(--oct-accent-on);
-}
-.btn-primary:active {
-  background: var(--oct-accent-active);
-  border-color: var(--oct-accent-active);
-}
-.btn-secondary {
-  background: transparent;
-  color: var(--oct-fg);
-  border-color: var(--oct-border);
-}
-.btn-secondary:hover {
-  background: var(--oct-surface-warm);
-  border-color: var(--oct-fg);
-  color: var(--oct-fg);
-}
-.btn-ghost {
-  background: transparent;
-  color: var(--oct-muted);
-  border-color: transparent;
-  padding-inline: var(--oct-space-2);
-}
-.btn-ghost:hover {
-  color: var(--oct-fg);
-}
-.btn-danger {
-  background: transparent;
-  color: var(--oct-danger-fg);
-  border-color: color-mix(in oklab, var(--oct-danger) 45%, transparent);
-}
-.btn-danger:hover {
-  background: var(--oct-danger-soft);
-  border-color: var(--oct-danger-fg);
-}
-.btn[disabled],
-.btn[aria-disabled="true"] {
-  opacity: var(--oct-disabled-opacity);
-  pointer-events: none;
-}
-.btn-arrow::after {
-  content: "→";
-  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
-}
-.btn-arrow:hover::after {
-  transform: translateX(3px);
-}
+/* ─── buttons ─────────────────────────────────────────────────────────
+   Colour, hover, focus, and disabled paint live on OctantButton. This
+   keeps only the layout cluster first-run still uses to space siblings. */
 .btn-group {
   display: inline-flex;
   gap: var(--oct-space-3);
@@ -708,8 +625,9 @@ h4 {
 /* ─── card / surface ────────────────────────────────────────────────── */
 .card {
   background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
+  border: 0;
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
   padding: var(--oct-space-8);
 }
 .card-flat {
@@ -1018,7 +936,7 @@ h4 {
   margin: 0;
   flex: 0 0 auto;
   border: 1px solid var(--oct-border);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
   display: grid;
   place-items: center;
@@ -1408,7 +1326,7 @@ input.switch:checked::after {
   display: grid;
   place-items: center;
   border: 1px solid var(--oct-border);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-bg);
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
@@ -1424,7 +1342,7 @@ input.switch:checked::after {
   font-family: var(--oct-font-mono);
   font-size: 0.9em;
   padding: 2px 6px;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-fg-soft);
   color: var(--oct-fg-2);
 }
@@ -1502,7 +1420,7 @@ input.switch:checked::after {
   min-height: 26px;
   padding-inline: var(--oct-space-3);
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   background: transparent;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
@@ -1939,7 +1857,7 @@ input.switch:checked::after {
   min-height: var(--oct-control-height-sm);
   padding-inline: var(--oct-space-3);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-fg-2);
   font-family: var(--oct-font-display);
@@ -2076,7 +1994,7 @@ input.switch:checked::after {
   left: 50%;
   translate: -50% 0;
   padding: var(--oct-space-2) var(--oct-space-3);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-fg);
   color: var(--oct-bg);
   font-family: var(--oct-font-mono);
@@ -2171,7 +2089,7 @@ input.switch:checked::after {
   display: inline-grid;
   place-items: center;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-mono);
@@ -2478,7 +2396,7 @@ input.switch:checked::after {
    script and the collapsed state is the default. The whole row is the
    summary; the marker is a chevron that turns. */
 .toolrow {
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 .toolrow > summary {
   display: flex;
@@ -2654,7 +2572,7 @@ input.switch:checked::after {
   min-height: 28px;
   padding-inline: var(--oct-space-2);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-sm);
@@ -2706,7 +2624,7 @@ input.switch:checked::after {
   gap: var(--oct-space-1);
   min-height: 22px;
   padding-inline: var(--oct-space-2);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-warn-soft);
   color: var(--oct-warn-fg);
   font-family: var(--oct-font-mono);
@@ -2849,7 +2767,7 @@ input.switch:checked::after {
   width: 100%;
   min-width: 0;
   padding: var(--oct-space-2) var(--oct-space-3);
-  border: 1px solid var(--oct-border);
+  border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
   box-shadow: var(--octant-shadow-sm);
@@ -2858,7 +2776,6 @@ input.switch:checked::after {
   text-decoration: none;
 }
 .board-card:hover {
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
   background: var(--oct-surface-warm);
 }
 .board-card:focus-visible {
@@ -3186,7 +3103,7 @@ input.switch:checked::after {
   min-width: 58px;
   min-height: 20px;
   padding-inline: var(--oct-space-2);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
   font-size: calc(10 * var(--oct-text-step));
   letter-spacing: var(--oct-tracking-wide);
@@ -3450,7 +3367,7 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   min-height: 26px;
   padding-inline: var(--oct-space-2);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
 }
 .tree-item:hover {
@@ -3721,7 +3638,7 @@ input.switch:checked::after {
   min-height: var(--oct-control-height-sm);
   padding-inline: var(--oct-space-2);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
@@ -3851,7 +3768,7 @@ input.switch:checked::after {
   min-height: var(--oct-control-height-sm);
   padding-inline: var(--oct-space-2);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
@@ -3932,7 +3849,7 @@ input.switch:checked::after {
   min-height: 0;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-muted);
 }
@@ -4940,7 +4857,7 @@ input.switch:checked::after {
   width: 24px;
   height: 24px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-meta);
   cursor: grab;
@@ -5729,7 +5646,7 @@ input.switch:checked::after {
   grid-column: 2;
   margin-top: var(--oct-space-1);
   padding: var(--oct-space-2);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-danger-soft);
   color: var(--oct-danger-fg);
   font-family: var(--oct-font-mono);
@@ -6221,7 +6138,7 @@ input.switch:checked::after {
   width: 100%;
   padding: var(--oct-space-2) var(--oct-space-3);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-fg-2);
   text-align: left;
@@ -6656,11 +6573,11 @@ input.switch:checked::after {
   font-variant-numeric: tabular-nums;
   color: var(--oct-meta);
 }
-.ckpt .btn {
+.ckpt button {
   opacity: 0;
 }
-.ckpt:hover .btn,
-.ckpt:focus-within .btn {
+.ckpt:hover button,
+.ckpt:focus-within button {
   opacity: 1;
 }
 
@@ -6672,9 +6589,10 @@ input.switch:checked::after {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: var(--oct-space-1) var(--oct-space-3);
   padding: var(--oct-space-3);
-  border: 1px solid var(--oct-border);
+  border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
+  box-shadow: var(--octant-shadow-sm);
 }
 .extcard > .icon-mark {
   grid-row: span 3;
@@ -6978,7 +6896,7 @@ input.switch:checked::after {
   height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-meta);
   cursor: grab;
@@ -7495,16 +7413,16 @@ input.switch:checked::after {
   gap: var(--oct-space-3);
   width: 100%;
   padding: var(--oct-space-3);
-  border: 1px solid var(--oct-border);
+  border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
+  box-shadow: var(--octant-shadow-sm);
   color: var(--oct-fg-2);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-sm);
   text-align: left;
 }
 .welcome-suggest button:hover {
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
   background: var(--oct-surface-warm);
   color: var(--oct-fg);
 }
@@ -8458,7 +8376,7 @@ input.switch:checked::after {
 .is-context-target {
   outline: 1px solid var(--oct-accent-fg);
   outline-offset: -1px;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
 }
 
 @media (prefers-reduced-motion: reduce) {

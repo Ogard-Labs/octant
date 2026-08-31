@@ -13,7 +13,7 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   font-weight: 600;
   letter-spacing: 0.01em;
   line-height: 1;
@@ -116,7 +116,7 @@ fieldset.profile-editor__field > legend {
   opacity: 1;
   padding: 0.45rem 0.6rem;
   border: 1px dashed var(--octant-border, color-mix(in srgb, CanvasText 25%, transparent));
-  border-radius: var(--octant-radius-panel, 0.625rem);
+  border-radius: var(--octant-radius-panel, 16px);
 }
 
 .profile-editor__accents {
@@ -132,7 +132,7 @@ fieldset.profile-editor__field > legend {
   inline-size: 1.6rem;
   block-size: 1.6rem;
   padding: 0;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   border: 2px solid transparent;
   cursor: pointer;
   background: var(--octant-avatar-bg);

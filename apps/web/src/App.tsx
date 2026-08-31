@@ -3613,6 +3613,10 @@ function LaunchedShell(
     onNewThread: () => void controller.openDraftThread(activeMode),
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
+    onOpenZen: () => {
+      if (zen.active) zen.exitZen();
+      else void zen.enterZen();
+    },
     threads: threadSearchThreads
       .filter((thread) => thread.lifecycle === "active")
       .map((thread) => ({

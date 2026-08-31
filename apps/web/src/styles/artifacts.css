@@ -135,19 +135,20 @@
   width: 100%;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--oct-border);
+  border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
+  box-shadow: var(--octant-shadow-sm);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--oct-motion-fast) var(--oct-ease-standard);
+  transition: box-shadow var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .artifact-card__button:hover,
 .artifact-card__button:focus-visible {
-  border-color: var(--oct-accent);
+  box-shadow: var(--octant-shadow-md);
 }
 
 @media (prefers-reduced-motion: reduce) {

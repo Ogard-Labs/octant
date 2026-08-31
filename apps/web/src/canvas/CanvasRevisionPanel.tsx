@@ -67,7 +67,6 @@ export function ReviseCanvasDraft(props: ReviseCanvasDraftProps) {
         rows={3}
       />
       <OctantButton
-        className="btn btn-secondary btn-sm"
         type="submit"
         data-testid="canvas-revise-submit"
         disabled={submitting}

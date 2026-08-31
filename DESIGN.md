@@ -167,7 +167,10 @@ automatic horizontal margins. Canvas documents use a 62ch measure.
 Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Use `gap-*`
 for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
 chains. The desktop radius scale is 10px compact control, 16px panel and card, 20px
-composer and dialog, and 9999px only for a compact chip or meter. Phone-only
+composer and dialog, and 9999px only for a compact chip or meter. Product
+chrome uses those tokens. Pixel radii of 1–4px remain only for chart bars,
+marks, and status dots. Leftover `.btn` colour recipes are gone; adapters own
+button paint. Phone-only
 surfaces use the larger 22/26/30px mobile radii.
 
 Controls are 44px by default and 34px compact. Dense operating rails use a
@@ -265,9 +268,10 @@ Waiting does not become a warning wall. Labels and facts use the selected
 interface typography. Thread listing, pull-request snapshot, and per-thread
 runtime reads overlap where independent.
 
-Usage totals and filters are raised cards. The command palette groups results
-and shows a shortcut badge when a row maps to a user-bindable chord. Shared
-dialogs keep the 20px overlay radius and overlay shadow.
+Usage totals and filters are raised cards. Provider create forms, extension
+cards, and artifact cards use the same raised recipe. The command palette
+groups results and shows a shortcut badge when a row maps to a user-bindable
+chord. Shared dialogs keep the 20px overlay radius and overlay shadow.
 
 The context meter is a circular composer control, not a dock tab. It opens an
 opaque popover with attributed context segments, used/maximum/free values,

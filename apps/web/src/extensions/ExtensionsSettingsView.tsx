@@ -753,7 +753,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   value={marketplaceQuery}
                 />
                 <OctantButton
-                  className="btn btn-secondary"
+                  variant="outline"
                   disabled={catalogOffline || marketplaceQuery.trim() === ""}
                   onClick={() => void runSearch()}
                   type="button"
@@ -764,7 +764,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               {props.pickLocalPluginFolder !== undefined ? (
                 <div className="extensions-settings__local-import">
                   <OctantButton
-                    className="btn btn-secondary"
+                    variant="outline"
                     disabled={importingLocal || installing}
                     onClick={() => {
                       void (async () => {
@@ -823,8 +823,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                         <span className="extcard-name">{entry.displayName}</span>
                         <span className="extcard-right">
                           <OctantButton
+                            size="sm"
+                            variant="outline"
                             aria-label={`Inspect ${entry.displayName}`}
-                            className="btn btn-secondary btn-sm"
                             disabled={
                               !marketplaceFetchesEnabled ||
                               inspectingEntryId === entryKey ||
@@ -937,8 +938,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                               </ul>
                             ) : null}
                             <OctantButton
+                              variant="default"
                               aria-label="Confirm install"
-                              className="btn btn-primary"
                               disabled={installing}
                               onClick={() => void confirmInstall(preview.entry)}
                               type="button"
@@ -1029,8 +1030,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                       </ul>
                     ) : null}
                     <OctantButton
+                      variant="default"
                       aria-label="Confirm install"
-                      className="btn btn-primary"
                       disabled={installing}
                       onClick={() => void confirmInstall(localPreview.entry)}
                       type="button"
@@ -1063,7 +1064,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   value={skillQuery}
                 />
                 <OctantButton
-                  className="btn btn-secondary"
+                  variant="outline"
                   disabled={
                     !marketplaceFetchesEnabled ||
                     skillQuery.trim() === "" ||
@@ -1105,8 +1106,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                         <span className="extcard-name">{entry.displayName}</span>
                         <span className="extcard-right">
                           <OctantButton
+                            size="sm"
+                            variant="outline"
                             aria-label={`Preview ${entry.displayName}`}
-                            className="btn btn-secondary btn-sm"
                             disabled={
                               !marketplaceFetchesEnabled ||
                               inspectingSkillId === entryKey ||
@@ -1171,6 +1173,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                               </div>
                             </dl>
                             <OctantButton
+                              variant="default"
                               aria-label={
                                 skillPreviewAction === "current"
                                   ? "Skill already installed"
@@ -1178,7 +1181,6 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                     ? "Confirm skill update"
                                     : "Confirm skill install"
                               }
-                              className="btn btn-primary"
                               disabled={installingSkill || skillPreviewAction === "current"}
                               onClick={() => void confirmSkillInstall(skillPreview)}
                               type="button"
@@ -1295,8 +1297,9 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
       <span className="extcard-name">{pkg.displayName ?? pkg.slug ?? pkg.extensionId}</span>
       <span className="extcard-right">
         <OctantButton
+          size="sm"
+          variant="outline"
           aria-label={pkg.activation.trusted ? "Revoke trust" : "Trust source"}
-          className="btn btn-secondary btn-sm"
           disabled={props.busy}
           onClick={() => void props.onTrust(!pkg.activation.trusted)}
           type="button"
@@ -1306,8 +1309,9 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
         {/* Disabling revokes what the plugin was granted, so the control is a
             button that names the action, not a preference switch. */}
         <OctantButton
+          size="sm"
+          variant="outline"
           aria-label={pkg.activation.pluginDesired ? "Disable plugin" : "Enable plugin"}
-          className="btn btn-secondary btn-sm"
           disabled={pluginEnableDisabled}
           onClick={() => void props.onPluginDesired(!pkg.activation.pluginDesired)}
           type="button"
@@ -1315,8 +1319,9 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
           {pkg.activation.pluginDesired ? "Disable plugin" : "Enable plugin"}
         </OctantButton>
         <OctantButton
+          size="sm"
+          variant="outline"
           aria-label="Uninstall"
-          className="btn btn-secondary btn-sm"
           disabled={props.busy}
           onClick={() => void props.onUninstall()}
           type="button"
@@ -1369,12 +1374,13 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
                   {effectiveLabel(componentState.effectiveState)}
                 </p>
                 <OctantButton
+                  size="sm"
+                  variant="outline"
                   aria-label={
                     componentState.activation.componentDesired
                       ? "Disable component"
                       : "Enable component"
                   }
-                  className="btn btn-secondary btn-sm"
                   disabled={componentEnableDisabled}
                   onClick={() =>
                     void props.onComponentDesired(

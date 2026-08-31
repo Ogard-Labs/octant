@@ -295,23 +295,21 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
       <header className="zen-research__header" onPointerDown={beginMove}>
         <span className="zen-research__title">Research</span>
         <OctantButton
-          aria-label="Collapse research browser"
-          className="btn-icon"
-          onClick={() => props.onCollapse(true)}
           size="icon"
+          aria-label="Collapse research browser"
+          onClick={() => props.onCollapse(true)}
           type="button"
           variant="ghost"
         >
           <ChevronRight aria-hidden="true" size={14} />
         </OctantButton>
         <OctantButton
+          size="icon"
           aria-label="Undock research browser"
-          className="btn-icon"
           onClick={() => {
             void close();
             props.onUndock();
           }}
-          size="icon"
           type="button"
           variant="ghost"
         >
@@ -375,10 +373,9 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
                 </OctantButton>
                 {tabs.length > 1 ? (
                   <OctantButton
-                    aria-label={`Close ${tab.title === "" ? "new tab" : tab.title}`}
-                    className="btn-icon"
-                    onClick={() => void tabCommand("close", tab.tabId)}
                     size="icon"
+                    aria-label={`Close ${tab.title === "" ? "new tab" : tab.title}`}
+                    onClick={() => void tabCommand("close", tab.tabId)}
                     type="button"
                     variant="ghost"
                   >
@@ -389,10 +386,9 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
             ))}
             {canOpenTab ? (
               <OctantButton
-                aria-label="Open a new research tab"
-                className="btn-icon"
-                onClick={() => void tabCommand("open")}
                 size="icon"
+                aria-label="Open a new research tab"
+                onClick={() => void tabCommand("open")}
                 type="button"
                 variant="ghost"
               >
@@ -402,32 +398,29 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
           </div>
           <div className="zen-research__chrome">
             <OctantButton
+              size="icon"
               aria-label="Back"
-              className="btn-icon"
               disabled={state?.canGoBack !== true}
               onClick={() => void command("back")}
-              size="icon"
               type="button"
               variant="ghost"
             >
               <ArrowLeft aria-hidden="true" size={14} />
             </OctantButton>
             <OctantButton
+              size="icon"
               aria-label="Forward"
-              className="btn-icon"
               disabled={state?.canGoForward !== true}
               onClick={() => void command("forward")}
-              size="icon"
               type="button"
               variant="ghost"
             >
               <ArrowRight aria-hidden="true" size={14} />
             </OctantButton>
             <OctantButton
-              aria-label={state?.loading === true ? "Stop loading" : "Reload"}
-              className="btn-icon"
-              onClick={() => void command(state?.loading === true ? "stop" : "reload")}
               size="icon"
+              aria-label={state?.loading === true ? "Stop loading" : "Reload"}
+              onClick={() => void command(state?.loading === true ? "stop" : "reload")}
               type="button"
               variant="ghost"
             >

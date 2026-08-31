@@ -34,7 +34,8 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         <span>Detected on this Mac</span>
         <span className="setgroup-gap" />
         <OctantButton
-          className="btn btn-secondary btn-sm"
+          size="sm"
+          variant="outline"
           disabled={scanning}
           onClick={() => void props.onScan()}
           type="button"
@@ -58,8 +59,9 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         <p className="setgroup-note" role="alert">
           {props.message}{" "}
           <OctantButton
+            size="sm"
+            variant="ghost"
             aria-label="Retry provider discovery"
-            className="btn btn-ghost btn-sm"
             onClick={() => void props.onScan()}
             type="button"
           >
@@ -71,11 +73,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       {snapshot !== undefined && snapshot.status === "cancelled" ? (
         <p className="setgroup-note" role="status">
           Scan was cancelled.{" "}
-          <OctantButton
-            className="btn btn-ghost btn-sm"
-            onClick={() => void props.onScan()}
-            type="button"
-          >
+          <OctantButton size="sm" variant="ghost" onClick={() => void props.onScan()} type="button">
             Retry
           </OctantButton>
         </p>
@@ -90,11 +88,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       {snapshot !== undefined && snapshot.status === "failed" ? (
         <p className="setgroup-note" role="alert">
           {snapshot.message ?? "Discovery scan failed."}{" "}
-          <OctantButton
-            className="btn btn-ghost btn-sm"
-            onClick={() => void props.onScan()}
-            type="button"
-          >
+          <OctantButton size="sm" variant="ghost" onClick={() => void props.onScan()} type="button">
             Retry
           </OctantButton>
         </p>
@@ -151,7 +145,8 @@ function DiscoveryRow(props: DiscoveryRowProps) {
           </span>
         ) : (
           <OctantButton
-            className="btn btn-secondary btn-sm"
+            size="sm"
+            variant="outline"
             disabled={connecting}
             onClick={() => {
               void props.onConnect(candidate).then((ok) => {

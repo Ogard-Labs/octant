@@ -475,12 +475,12 @@ function ProviderRow(props: ProviderRowProps) {
       </span>
       <span className="prov-actions">
         <OctantButton
+          size="icon"
           aria-controls={`provider-details-${props.instance.id}`}
           aria-expanded={detailsOpen}
           aria-label={`Details for ${name}`}
-          className="btn-icon prov-details-trigger window-no-drag"
+          className="prov-details-trigger window-no-drag"
           onClick={() => setDetailsOpen((current) => !current)}
-          size="icon"
           type="button"
           variant="ghost"
         >
@@ -575,10 +575,11 @@ function ProviderRow(props: ProviderRowProps) {
                 return (
                   <span key={String(modelId)}>
                     <OctantButton
-                      className="provider-card__inline-action"
                       disabled={disabled || !props.instance.enabled}
                       onClick={() => void props.onVerifyFoundryTools(props.instance.id, modelId)}
+                      size="sm"
                       type="button"
+                      variant="outline"
                     >
                       {props.probing
                         ? "Verifying…"
@@ -722,7 +723,9 @@ function ProviderRow(props: ProviderRowProps) {
               <OctantButton
                 disabled={disabled || !props.instance.enabled}
                 onClick={() => void props.onProbe(props.instance.id)}
+                size="sm"
                 type="button"
+                variant="outline"
               >
                 {props.probing
                   ? "Checking connection…"
@@ -745,10 +748,11 @@ function ProviderRow(props: ProviderRowProps) {
               />
             </OctantButton>
             <OctantButton
-              className="provider-card__danger"
               disabled={disabled || (usesCredential && !props.credentialManagementAvailable)}
               onClick={() => void props.onRemove(props.instance.id)}
+              size="sm"
               type="button"
+              variant="destructive"
             >
               Remove {props.instance.displayName}
             </OctantButton>

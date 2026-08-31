@@ -138,7 +138,7 @@
   color: var(--oct-fg-2);
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
 }
 
@@ -230,7 +230,7 @@
   align-items: center;
   gap: var(--oct-space-2);
   padding: var(--oct-space-1) var(--oct-space-2);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   text-align: left;
@@ -381,7 +381,7 @@
   padding: 5px var(--oct-space-2);
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: var(--oct-text-xs);
   text-align: left;
@@ -461,7 +461,7 @@
 
 /* Layout only: the header's system buttons keep their width instead of
    shrinking against the ellipsised file name beside them. */
-.code-diff-pane__detail-header .btn {
+.code-diff-pane__detail-header button {
   flex: none;
 }
 
@@ -597,7 +597,7 @@
   justify-content: space-between;
   gap: var(--oct-space-1) var(--oct-space-3);
   padding: 5px var(--oct-space-2);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
 }
 

@@ -93,8 +93,9 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
   return (
     <section className="provider-settings__manual" data-expanded={manualOpen ? "true" : "false"}>
       <OctantButton
+        size="sm"
         aria-expanded={manualOpen}
-        className="btn btn-secondary btn-sm window-no-drag"
+        className="window-no-drag"
         onClick={() => setManualOpen((current) => !current)}
         type="button"
         variant="secondary"

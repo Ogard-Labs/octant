@@ -154,7 +154,7 @@
 
 .settings-view__field--search .settings-view__text-input {
   min-height: 32px;
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-control);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -711,7 +711,7 @@
 .settings-view__select,
 .settings-view__text-input,
 .settings-view__textarea {
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
 }
 
@@ -980,7 +980,7 @@ textarea.settings-view__text-input {
   padding: 8px 12px;
   background: var(--octant-surface-muted);
   border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-display);
 }
 

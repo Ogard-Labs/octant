@@ -249,7 +249,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   color: var(--oct-muted);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
 }
 
@@ -300,7 +300,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   color: var(--oct-muted);
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   text-align: left;
 }
@@ -650,7 +650,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   width: 8px;
   height: 8px;
   border: 1.5px solid var(--octant-divider-strong);
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
 }
 
 .sidebar-navigation__thread-status[data-activity="idle"] {
@@ -829,7 +829,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   min-height: 24px;
   padding: 0;
   color: var(--oct-meta);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .sidebar-navigation__thread-action:hover,
@@ -1186,7 +1186,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   padding: 5px 12px;
   background: transparent;
   border: 1px solid var(--octant-border);
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   cursor: pointer;
   text-align: start;
   white-space: normal;
@@ -1263,7 +1263,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   overflow: auto;
   background: var(--octant-surface-raised, var(--octant-surface));
   border: 1px solid var(--octant-border-strong);
-  border-radius: 10px;
+  border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-overlay);
 }
 
@@ -1701,7 +1701,7 @@ form > .work-composer-adapter__attachments {
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
   border-bottom: 0;
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--oct-radius-sm) 8px 0 0;
 }
 
 .code-composer-adapter__card > .composer-row {
@@ -1737,7 +1737,7 @@ form > .work-composer-adapter__attachments {
   padding: 10px 12px;
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
 }
 
 @media (max-width: 640px) {
@@ -1816,7 +1816,7 @@ form > .work-composer-adapter__attachments {
   color: var(--octant-text-secondary);
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   font-size: 11.5px;
@@ -1856,7 +1856,7 @@ form > .work-composer-adapter__attachments {
   overflow: hidden;
   background: var(--octant-surface);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 12px;
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
 }
 
@@ -1880,7 +1880,7 @@ form > .work-composer-adapter__attachments {
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   font-size: calc(12 * var(--oct-text-step));
@@ -2143,7 +2143,7 @@ form > .work-composer-adapter__attachments {
   place-items: center;
   color: var(--oct-muted);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: transparent;
 }
 
@@ -2166,7 +2166,7 @@ form > .work-composer-adapter__attachments {
   height: 28px;
   padding: 0 9px;
   border: 1px solid var(--oct-border-soft);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg);
   background: var(--oct-bg);
 }

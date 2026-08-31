@@ -32,9 +32,9 @@
 /* Raised opaque card for in-flow containers. */
 .octant-card {
   background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
+  border: 0;
   border-radius: var(--octant-radius-panel, 16px);
-  box-shadow: var(--octant-shadow-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 .octant-card--flat {
@@ -304,7 +304,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   padding-block: 6px;
   padding-inline: 8px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-sm);
   cursor: default;
 }
@@ -561,7 +561,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   align-items: start;
   gap: 10px;
   padding: 6px 6px 6px 4px;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 
 /* The run of marks reads as one track rather than four loose dots, so the
@@ -738,7 +738,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   display: block;
   block-size: 0.35rem;
   inline-size: 100%;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   background: var(--octant-surface-selected);
   overflow: hidden;
 }
