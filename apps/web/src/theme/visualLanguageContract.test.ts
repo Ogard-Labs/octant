@@ -93,10 +93,16 @@ describe("the public-block visual language", () => {
 
   it("lifts the composer with the mid shadow, not the hairline-only small shadow", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
     const frame = system.match(/^\.composer \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+    const darkShadow = runtime.match(/--octant-shadow-md:\s*[^;]+;/s)?.[0] ?? "";
+    const lightTheme =
+      runtime.match(/html\[data-octant-theme-mode="light"\]\s*\{[^}]+\}/s)?.[0] ?? "";
 
     expect(frame).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
     expect(frame).not.toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
+    expect(darkShadow).toMatch(/0 10px 18px -8px/);
+    expect(lightTheme).toMatch(/--octant-shadow-md:[^;]*0 10px 15px -3px/s);
   });
 
   it("keeps the composer prompt frameless so the shadcn textarea cannot paint a second field", () => {

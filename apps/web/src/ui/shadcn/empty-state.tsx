@@ -6,7 +6,7 @@ export function EmptyState({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
       className={cn(
-        "grid w-full max-w-[440px] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2.5 p-[18px] text-left",
+        "grid w-full max-w-[480px] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-3 rounded-[var(--octant-radius-panel)] bg-card p-5 text-left text-card-foreground shadow-[var(--octant-shadow-sm)]",
         className,
       )}
       data-slot="empty-state"
@@ -16,7 +16,7 @@ export function EmptyState({ className, ...props }: ComponentProps<"section">) {
 }
 
 const emptyStateMediaVariants = cva(
-  "grid size-[30px] shrink-0 place-items-center rounded-[7px] border border-border bg-secondary text-muted-foreground",
+  "grid size-8 shrink-0 place-items-center rounded-[var(--octant-radius-control)] border border-border bg-secondary text-muted-foreground",
   {
     variants: {
       tone: {
@@ -78,7 +78,7 @@ export function EmptyStateDescription({ className, ...props }: ComponentProps<"p
   return (
     <p
       className={cn(
-        "m-0 mt-[5px] max-w-[420px] text-xs leading-relaxed text-muted-foreground",
+        "m-0 mt-1.5 max-w-[420px] text-[13px] leading-relaxed text-muted-foreground",
         className,
       )}
       data-slot="empty-state-description"

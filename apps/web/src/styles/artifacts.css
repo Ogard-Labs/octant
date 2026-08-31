@@ -117,11 +117,14 @@
 }
 
 .artifact-library__message,
-.artifact-library__empty,
 .artifact-library__truncated {
   margin: 0;
   color: var(--oct-muted);
   font-size: 0.75rem;
+}
+
+.artifact-library__empty {
+  margin: clamp(24px, 6vh, 56px) auto;
 }
 
 .artifact-card {
@@ -218,9 +221,24 @@
   max-width: 520px;
   margin: 1rem auto 0;
   padding: 0.75rem;
-  border: 1px solid var(--oct-border);
+  background: var(--oct-surface-1);
+  border: 0;
   border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
   font-size: 0.875rem;
+}
+
+.artifact-mirror__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.artifact-mirror__header > div,
+.artifact-mirror__body {
+  display: grid;
+  gap: 0.5rem;
 }
 
 .artifact-mirror__title {
@@ -229,6 +247,12 @@
   font-family: var(--oct-font-display);
   font-size: 0.875rem;
   font-weight: var(--oct-weight-strong);
+}
+
+.artifact-mirror__summary {
+  margin: 0.15rem 0 0;
+  color: var(--oct-muted);
+  font-size: 0.75rem;
 }
 
 .artifact-mirror__note,

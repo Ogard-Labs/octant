@@ -814,6 +814,13 @@ describe("SettingsView", () => {
 
     expect(screen.getByRole("heading", { name: "Provider limits" })).toBeVisible();
     expect(await screen.findByText("No configured providers have reported limits.")).toBeVisible();
+    const dashboard = document.querySelector(".usage-dashboard");
+    const limits = screen.getByRole("heading", { name: "Provider limits" }).closest("section");
+    expect(dashboard).not.toBeNull();
+    expect(limits).not.toBeNull();
+    expect(
+      dashboard!.compareDocumentPosition(limits!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(providerUsageLimitsClient.list).toHaveBeenCalledOnce();
   });
 

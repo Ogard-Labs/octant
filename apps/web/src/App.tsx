@@ -3957,10 +3957,10 @@ function LaunchedShell(
             isNarrow={isNarrow}
             material={material}
             nativeTitlebarInset={hostReservesTitlebarInset}
-            {...(sidebarCollapsed && !isNarrow
+            {...(sidebarCollapsed
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}
-            {...(sidebarCollapsed && !isNarrow
+            {...(sidebarCollapsed
               ? {
                   onNewThread: () => {
                     if (activeMode === "chat") createChat();
@@ -3984,7 +3984,7 @@ function LaunchedShell(
           void controller.updateSettings({ sidebarWidth: width });
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
-        sidebarCollapsed={sidebarCollapsed && !isNarrow}
+        sidebarCollapsed={sidebarCollapsed}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
@@ -4059,7 +4059,7 @@ function LaunchedShell(
             nativeHost={hostReservesTitlebarInset}
             navigatorAvailable={navigatorAssistant.state.kind === "ready"}
             onOpenSearch={openThreadSearch}
-            {...(isNarrow ? {} : { onCollapseSidebar: () => setSidebarCollapsedPersistent(true) })}
+            onCollapseSidebar={() => setSidebarCollapsedPersistent(true)}
             onOpenNavigator={() => {
               navigatorOpener.current = document.querySelector<HTMLElement>(
                 ".sidebar-profile .sidebar-item",

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantEmptyState } from "../ui/base/OctantEmptyState";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
@@ -206,11 +207,45 @@ function AgentsCenterListBody(props: {
     );
   }
   if (controller.visibleItems.length === 0) {
+    const hasActiveFilters =
+      controller.statusFilter !== "all" ||
+      controller.modeFilter !== "all" ||
+      controller.search.trim() !== "" ||
+      controller.projectId !== undefined ||
+      controller.providerInstanceId !== undefined ||
+      controller.parentThreadId !== undefined;
     return (
-      <div className="agents-center__empty empty" role="status">
-        <p>No agent runs match the current filters.</p>
-        <p>Nothing was deleted; adjust the filters or create a child from a thread.</p>
-      </div>
+      <OctantEmptyState
+        {...(hasActiveFilters
+          ? {
+              action: (
+                <OctantButton
+                  onClick={() => {
+                    controller.setStatusFilter("all");
+                    controller.setModeFilter("all");
+                    controller.setSearch("");
+                    controller.setProjectId(undefined);
+                    controller.setProviderInstanceId(undefined);
+                    controller.setParentThreadId(undefined);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Clear filters
+                </OctantButton>
+              ),
+            }
+          : {})}
+        className="agents-center__empty"
+        message={
+          hasActiveFilters
+            ? "Clear or adjust the active filters to see other runs."
+            : "Child agents appear here after a thread starts one."
+        }
+        role="status"
+        title={hasActiveFilters ? "No agent runs match these filters" : "No agent runs yet"}
+      />
     );
   }
   return (

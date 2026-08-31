@@ -63,6 +63,7 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
       ) : null}
       <form
         className="work-promotion__propose"
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
           const target = props.targetCodeProjectLabels[Number(targetIndex)];

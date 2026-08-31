@@ -195,10 +195,10 @@ as a sunken field. Code welcome names the Project in the heading. Checkout and b
 on a second raised card stacked behind the composer: slightly narrower,
 slid under the prompt by one corner radius so the front card's bottom
 corners hang over the checkout row. A wider back sheet reads as a tray.
-Host, workspace, and the searchable ref list live on that back card,
-not in the toolbar. Access is a titled menu on
-the card, next to the model picker. GitHub and delivery stay a quiet strip
-under the dock. The prompt itself is frameless:
+Host, repository, workspace, the searchable ref list, branch, and delivery
+disclosure live on that back card, not in the prompt toolbar or a third strip
+below it. Access is a titled menu on the card, next to the model picker. The
+prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not
 repaint those controls a third time. Opaque shadcn
@@ -207,11 +207,14 @@ overlay shadow. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced
 transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 
-Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-sm`,
-`--octant-shadow-md`, `--octant-shadow-lg`, `--octant-shadow-overlay`, and
-`--octant-shadow-pop`. Use the smallest level that establishes a genuine
-layer; navigation panes stay unshadowed; grouped cards use `--octant-shadow-sm`;
-composers use `--octant-shadow-md` so the card actually lifts in light.
+Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
+`--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
+`--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level
+that establishes a genuine layer: navigation panes and open form layouts stay
+unshadowed; compact state and grouped cards use `--octant-shadow-sm`; composers
+use the catalog-calibrated `--octant-shadow-md`; focused or promoted raised
+objects may use `--octant-shadow-lg`; overlays use only their overlay or pop
+token. A shadow must explain depth, not decorate a flat row.
 
 ## Shell and layout
 
@@ -305,8 +308,10 @@ assistant prose or display an empty plan form.
 
 Responsive breakpoints are 560px, 720px, and 920px. Below 920px the right dock
 is removed rather than squeezing the transcript unreadably. Below 720px split
-layouts stack; below 560px compact spacing and single-column forms apply. The
-mobile app has a separate design system under `apps/mobile/design-system`.
+layouts stack and the navigation sidebar becomes a dismissible overlay instead
+of consuming a second vertical row above the workspace. Below 560px compact
+spacing and single-column forms apply. The mobile app has a separate design
+system under `apps/mobile/design-system`.
 
 ## Component ownership and composition
 
@@ -398,6 +403,10 @@ for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
 ## Accessibility and reliability
 
+- Every product-owned scroll surface inherits the global thin scrollbar
+  baseline: a tokenized visible thumb, transparent track, hover state, and
+  forced-colors fallback. Feature CSS may adjust gutter or density but does not
+  hide the scrollbar or introduce a second theme.
 - Normal text targets 4.5:1 contrast; large text 3:1; non-text UI marks 3:1.
 - Status, diff, provider, and activity states always include text, shape,
   pattern, or an accessible label in addition to colour.

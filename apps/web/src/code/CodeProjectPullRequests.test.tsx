@@ -112,6 +112,18 @@ describe("CodeProjectPullRequests", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it("guides setup instead of offering refresh and search before a Code Project exists", async () => {
+    renderWorkspace({
+      load: vi.fn(async () => view({ projects: [], rows: [] })),
+    });
+
+    const title = await screen.findByText("No Code Projects yet");
+    expect(title.closest("[role='status']")).toHaveAttribute("data-slot", "empty-state");
+    expect(screen.getByText("Add a Code Project to see pull requests here.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Refresh all" })).toBeNull();
+    expect(screen.queryByRole("searchbox", { name: "Search pull requests" })).toBeNull();
+  });
+
   it("groups rows by Project then repository and keeps an unconnected Project visible", async () => {
     renderWorkspace();
 

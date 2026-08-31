@@ -70,12 +70,19 @@
   --octant-divider-strong: #6b6b6b;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
-  --octant-shadow-sm: 0 0 0 1px var(--octant-border-strong), 0 1px 2px rgb(0 0 0 / 30%);
+  --octant-shadow-xs: 0 0 0 1px var(--octant-border), 0 1px 2px rgb(0 0 0 / 24%);
+  --octant-shadow-sm:
+    0 0 0 1px var(--octant-border-strong), 0 1px 2px rgb(0 0 0 / 28%),
+    0 6px 18px -10px rgb(0 0 0 / 60%);
   --octant-shadow-md:
-    0 0 0 1px var(--octant-border), 0 1px 2px rgb(0 0 0 / 20%), 0 2px 6px rgb(0 0 0 / 20%);
-  --octant-shadow-lg: 0 0 0 1px var(--octant-border), 0 2px 10px rgb(0 0 0 / 22%);
-  --octant-shadow-overlay: 0 0 0 1px var(--octant-border-strong), 0 8px 28px rgb(0 0 0 / 34%);
-  --octant-shadow-pop: 0 8px 28px rgb(0 0 0 / 38%);
+    0 0 0 1px var(--octant-border), 0 4px 6px -4px rgb(0 0 0 / 36%),
+    0 10px 18px -8px rgb(0 0 0 / 60%);
+  --octant-shadow-lg:
+    0 0 0 1px var(--octant-border), 0 10px 18px -8px rgb(0 0 0 / 50%),
+    0 22px 46px -16px rgb(0 0 0 / 68%);
+  --octant-shadow-overlay:
+    0 0 0 1px var(--octant-border-strong), 0 18px 48px -16px rgb(0 0 0 / 72%);
+  --octant-shadow-pop: 0 18px 48px -16px rgb(0 0 0 / 78%);
   --octant-glass-blur: 24px;
   --octant-glass-saturate: 150%;
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 72%, transparent);
@@ -138,17 +145,56 @@ html[data-octant-theme-mode="light"] {
   --octant-text-muted-high-contrast: #63666c;
   --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 10%, transparent);
   --octant-scrim: rgb(15 17 19 / 45%);
+  --octant-shadow-xs: 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 2px rgb(16 24 40 / 5%);
   --octant-shadow-sm:
-    0 0 0 1px rgb(16 24 40 / 8%), 0 1px 2px rgb(16 24 40 / 6%), 0 4px 12px rgb(16 24 40 / 5%);
+    0 0 0 1px rgb(16 24 40 / 8%), 0 1px 2px rgb(16 24 40 / 7%), 0 6px 18px -10px rgb(16 24 40 / 16%);
   --octant-shadow-md:
-    0 0 0 1px rgb(16 24 40 / 8%), 0 2px 4px rgb(16 24 40 / 6%), 0 8px 24px rgb(16 24 40 / 8%);
+    0 0 0 1px rgb(16 24 40 / 8%), 0 4px 6px -4px rgb(16 24 40 / 10%),
+    0 10px 15px -3px rgb(16 24 40 / 10%);
   --octant-shadow-lg:
-    0 0 0 1px rgb(16 24 40 / 8%), 0 4px 12px rgb(16 24 40 / 6%), 0 16px 40px rgb(16 24 40 / 8%);
-  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 8px 28px rgb(0 0 0 / 10%);
-  --octant-shadow-pop: 0 8px 28px rgb(16 24 40 / 12%);
+    0 0 0 1px rgb(16 24 40 / 8%), 0 10px 15px -3px rgb(16 24 40 / 12%),
+    0 20px 38px -10px rgb(16 24 40 / 16%);
+  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 20px 50px -14px rgb(16 24 40 / 20%);
+  --octant-shadow-pop: 0 20px 50px -14px rgb(16 24 40 / 22%);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
   --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);
+}
+
+/* Every Octant-owned scroll surface inherits one quiet, visible scrollbar.
+   Feature panels may change geometry, but not silently fall back to browser
+   chrome or hide the only pointer affordance. */
+:where(*) {
+  scrollbar-color: var(--octant-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+:where(*)::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+:where(*)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:where(*)::-webkit-scrollbar-thumb {
+  background: var(--octant-border-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--octant-radius-pill);
+}
+
+:where(*)::-webkit-scrollbar-thumb:hover {
+  background: var(--octant-divider-strong);
+  background-clip: padding-box;
+}
+
+@media (forced-colors: active) {
+  :where(*) {
+    scrollbar-color: auto;
+    scrollbar-width: auto;
+  }
 }
 
 html[data-octant-native-host="true"],
@@ -4963,13 +5009,14 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   height: 100%;
   padding: 8px 0;
   overflow-y: auto;
-  scrollbar-width: none;
+  scrollbar-color: var(--octant-border-strong) transparent;
+  scrollbar-width: thin;
   background: var(--octant-control);
   border-right: 1px solid var(--octant-border);
 }
 
 .composer-model-picker__rail::-webkit-scrollbar {
-  display: none;
+  width: 8px;
 }
 
 .composer-model-picker__rail-item {
@@ -7706,15 +7753,7 @@ p.board-col-empty {
 }
 
 .code-board__empty {
-  display: grid;
-  gap: 6px;
-  max-width: 460px;
   margin: var(--oct-space-3) auto;
-  padding: var(--oct-space-3);
-  color: var(--oct-fg-2);
-  text-align: center;
-  border: 1px dashed var(--oct-border);
-  border-radius: var(--oct-radius-lg);
 }
 
 .code-board__refresh-status {
@@ -8251,6 +8290,10 @@ p.board-col-empty {
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+}
+
+.code-project-pull-requests__setup-empty {
+  margin: clamp(32px, 8vh, 72px) auto;
 }
 
 .code-project-pull-requests__project {

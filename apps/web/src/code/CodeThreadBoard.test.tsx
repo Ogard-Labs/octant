@@ -418,14 +418,16 @@ describe("CodeThreadBoard", () => {
     expect(screen.getByText("2 active runs")).toBeVisible();
   });
 
-  it("explains active filters on an empty result without implying deletion", async () => {
+  it("uses the shared empty state without contradictory filter guidance", async () => {
     const loadBoard = vi.fn(async () => view([]));
     render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
-    const message = await screen.findByText("No Code threads match the current filters.");
+    const message = await screen.findByText("No Code threads yet");
     const empty = message.closest("[role='status']");
     expect(empty).not.toBeNull();
-    expect(empty).toHaveTextContent("No threads were deleted or completed");
+    expect(empty).toHaveAttribute("data-slot", "empty-state");
+    expect(empty).toHaveTextContent("Create a Code thread to see it here.");
+    expect(empty).not.toHaveTextContent("adjust the filters");
 
     // Status grouping still shows its four fixed columns: the column view is
     // the point, and a board with nothing in it is when its shape matters most.

@@ -163,13 +163,18 @@ describe("the artifact gallery", () => {
     expect(screen.getByText(/Showing 2 of 500/)).toBeInTheDocument();
   });
 
-  it("says plainly when nothing is shared rather than looking broken", () => {
-    view({
+  it("uses the shared empty state and offers a way back when nothing is shared", async () => {
+    const user = userEvent.setup();
+    const { onFiltersChange } = view({
       filters: { tab: "shared", query: "" },
       listing: { ...listing, entries: [], matchCount: 0 } as ArtifactLibraryListing,
     });
 
-    expect(screen.getByText("Nothing is shared right now.")).toBeInTheDocument();
+    const title = screen.getByText("Nothing is shared right now.");
+    expect(title.closest("[role='status']")).toHaveAttribute("data-slot", "empty-state");
+    expect(screen.getByText("Artifacts you share will appear here.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "View all artifacts" }));
+    expect(onFiltersChange).toHaveBeenLastCalledWith({ tab: "all", query: "" });
   });
 
   it("hides the create action on a host that cannot start a thread", () => {

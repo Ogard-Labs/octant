@@ -151,6 +151,7 @@ function NewBriefForm(props: {
   return (
     <form
       className="work-research__new-brief"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
@@ -382,6 +383,7 @@ function AddSourceForm(props: {
   return (
     <form
       className="work-research__source-form"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
@@ -515,6 +517,7 @@ function EvidenceForm(props: {
   return (
     <form
       className="work-research__evidence-form"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
@@ -602,6 +605,7 @@ function ClaimForm(props: {
   return (
     <form
       className="work-research__claim-form"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void submit();

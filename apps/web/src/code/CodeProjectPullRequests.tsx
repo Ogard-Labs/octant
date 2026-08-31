@@ -14,6 +14,7 @@ import { ShellState } from "../shell/ShellState";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
+  OctantEmptyState,
   OctantEmptyStateActions,
   OctantEmptyStateCopy,
   OctantEmptyStateRoot,
@@ -110,6 +111,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const visibleRows = view?.rows.filter((row) => pullRequestMatches(row, normalizedSearch)) ?? [];
   const freshnessStatus = view?.freshness.status ?? "loading";
+  const hasProjects = view !== undefined && view.projects.length > 0;
 
   return (
     <section
@@ -126,16 +128,18 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           </p>
         </div>
         <div className="code-project-pull-requests__actions">
-          <OctantButton
-            disabled={workspace.status === "loading" || workspace.status === "refreshing"}
-            onClick={() => void runRefresh({ kind: "refresh-all" })}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-            Refresh all
-          </OctantButton>
+          {hasProjects ? (
+            <OctantButton
+              disabled={workspace.status === "loading" || workspace.status === "refreshing"}
+              onClick={() => void runRefresh({ kind: "refresh-all" })}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+              Refresh all
+            </OctantButton>
+          ) : null}
           {props.onClose === undefined ? null : (
             <OctantButton onClick={props.onClose} size="sm" type="button" variant="ghost">
               Back to workspace
@@ -144,7 +148,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         </div>
       </header>
 
-      {view === undefined ? null : (
+      {view === undefined || !hasProjects ? null : (
         <div className="code-project-pull-requests__toolbar">
           <label className="code-project-pull-requests__search">
             <Search aria-hidden="true" size={14} strokeWidth={1.7} />
@@ -192,6 +196,13 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             {workspace.message}
           </p>
         ) : null
+      ) : !hasProjects ? (
+        <OctantEmptyState
+          className="code-project-pull-requests__setup-empty"
+          message="Add a Code Project to see pull requests here."
+          role="status"
+          title="No Code Projects yet"
+        />
       ) : (
         <>
           <p

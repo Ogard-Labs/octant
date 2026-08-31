@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { OctantEmptyState } from "../ui/base/OctantEmptyState";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -414,6 +415,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
         filters={filters}
         grouping={grouping}
         isNarrow={props.isNarrow === true}
+        onResetFilters={() => setFilters(DEFAULT_FILTERS)}
         projectNames={projectNames}
         projects={props.projects}
         showEmptyGroups={showEmptyGroups}
@@ -438,6 +440,7 @@ function CodeBoardBody(props: {
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly showEmptyGroups: boolean;
   readonly isNarrow: boolean;
+  readonly onResetFilters: () => void;
   readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
   readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
@@ -484,13 +487,33 @@ function CodeBoardBody(props: {
   // board with no matches is exactly when someone needs to see that shape, so
   // the result flows through grouping and the explanation sits above it.
   const showsFixedColumns = props.grouping === "status" && props.showEmptyGroups;
+  const hasActiveFilters = activeFilterLabels(props.filters, props.projectNames).length > 0;
   const emptyNote =
     cards.length === 0 ? (
-      <div className="code-board__empty" role="status">
-        <p>No Code threads match the current filters.</p>
-        <p>{activeFilterSummary(props.filters)}</p>
-        <p>No threads were deleted or completed; adjust the filters to see more.</p>
-      </div>
+      <OctantEmptyState
+        {...(hasActiveFilters
+          ? {
+              action: (
+                <OctantButton
+                  onClick={props.onResetFilters}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Clear filters
+                </OctantButton>
+              ),
+            }
+          : {})}
+        className="code-board__empty"
+        message={
+          hasActiveFilters
+            ? activeFilterSummary(props.filters)
+            : "Create a Code thread to see it here."
+        }
+        role="status"
+        title={hasActiveFilters ? "No Code threads match these filters" : "No Code threads yet"}
+      />
     ) : null;
   if (cards.length === 0 && !showsFixedColumns) {
     return <div className="code-board__body">{emptyNote}</div>;

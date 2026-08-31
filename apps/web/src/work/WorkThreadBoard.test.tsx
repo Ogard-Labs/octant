@@ -329,14 +329,16 @@ describe("WorkThreadBoard", () => {
     expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
   });
 
-  it("explains active filters on an empty result without implying deletion", async () => {
+  it("uses the shared empty state without contradictory filter guidance", async () => {
     const loadBoard = vi.fn(async () => view([]));
     render(<WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
-    const message = await screen.findByText("No Work threads match the current filters.");
+    const message = await screen.findByText("No Work threads yet");
     const empty = message.closest("[role='status']");
     expect(empty).not.toBeNull();
-    expect(empty).toHaveTextContent("No threads were deleted or completed");
+    expect(empty).toHaveAttribute("data-slot", "empty-state");
+    expect(empty).toHaveTextContent("Create a Work thread to see it here.");
+    expect(empty).not.toHaveTextContent("adjust the filters");
     for (const column of ["Ready (0)", "In Progress (0)", "Waiting (0)", "Done (0)"]) {
       expect(screen.getByRole("region", { name: column })).toBeVisible();
     }

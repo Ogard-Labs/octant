@@ -58,17 +58,19 @@ describe("CodeComposerAdapter", () => {
     expect(trailing?.textContent).toContain("Choose a Project");
   });
 
-  it("keeps GitHub and delivery outside the raised composer frame", () => {
+  it("keeps repository and delivery context in the checkout bar", () => {
     const { container } = render(
       <CodeComposerAdapter {...defaultProps} githubControl={<span>GitHub control slot</span>} />,
     );
     const frame = container.querySelector(".composer");
-    const strip = container.querySelector(".code-composer-adapter__context-strip");
+    const dock = container.querySelector(".code-composer-adapter__dock");
     expect(frame).not.toBeNull();
-    expect(strip).not.toBeNull();
-    expect(frame?.contains(strip)).toBe(false);
-    expect(strip?.textContent).toContain("GitHub control slot");
-    expect(strip?.textContent).toContain("Delivery target");
+    expect(dock).not.toBeNull();
+    expect(frame?.contains(dock)).toBe(false);
+    expect(dock?.textContent).toContain("GitHub control slot");
+    expect(dock?.textContent).toContain("development");
+    expect(dock?.textContent).toContain("Delivery target");
+    expect(container.querySelector(".code-composer-adapter__context-strip")).toBeNull();
   });
 
   it("renders approval policy selector", () => {

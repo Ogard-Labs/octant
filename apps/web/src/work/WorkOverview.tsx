@@ -222,7 +222,7 @@ export function WorkOverview(props: WorkOverviewProps) {
         {!createAvailable ? (
           <p role="status">Thread creation is unavailable for this Project.</p>
         ) : null}
-        <form onSubmit={(event) => void submit(event)}>
+        <form noValidate onSubmit={(event) => void submit(event)}>
           <label className="sr-only" htmlFor="work-overview-quick-start">
             Start a new Work thread
           </label>
@@ -298,7 +298,7 @@ export function WorkOverview(props: WorkOverviewProps) {
 
       {createStarterArtifactAvailable ? (
         <section aria-label="Create starter artifact" className="work-overview__composer">
-          <form onSubmit={(event) => void submitStarterArtifact(event)}>
+          <form noValidate onSubmit={(event) => void submitStarterArtifact(event)}>
             <label>
               <span>Artifact kind</span>
               <OctantSelectField

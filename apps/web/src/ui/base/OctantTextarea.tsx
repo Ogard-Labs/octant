@@ -17,7 +17,7 @@ export const OctantTextarea = forwardRef<HTMLTextAreaElement, OctantTextareaProp
     const composerOwned = classListHas(className, "composer-input");
     return (
       <Textarea
-        className={cn("window-no-drag", className)}
+        className={cn("window-no-drag resize-none", className)}
         ref={ref}
         {...(unstyled === true || composerOwned ? { unstyled: true } : {})}
         {...props}

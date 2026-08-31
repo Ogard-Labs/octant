@@ -15,7 +15,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
 ) {
   return (
     <textarea
-      className={cn(unstyled === true ? undefined : fieldRecipe, className)}
+      className={cn("resize-none", unstyled === true ? undefined : fieldRecipe, className)}
       data-slot="textarea"
       ref={ref}
       {...props}

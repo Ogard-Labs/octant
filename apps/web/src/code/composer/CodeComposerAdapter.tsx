@@ -602,6 +602,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     : { onSelectHost: props.onSelectHost })}
                   requiredCapability="code"
                 />
+                {props.githubControl}
+                {props.createFromControl}
                 {hasProject ? (
                   <CodeWorkspaceSelector
                     onChange={setWorkspaceOverride}
@@ -646,30 +648,22 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     ) : null}
                   </>
                 )}
+                <OctantButton
+                  aria-expanded={showDelivery}
+                  className="code-composer-adapter__disclosure-toggle"
+                  onClick={() => setShowDelivery(!showDelivery)}
+                  type="button"
+                  variant="ghost"
+                >
+                  {showDelivery ? (
+                    <ChevronUp aria-hidden="true" size={12} />
+                  ) : (
+                    <ChevronDown aria-hidden="true" size={12} />
+                  )}
+                  <span>Delivery target</span>
+                </OctantButton>
               </div>
             </div>
-          </div>
-
-          <div
-            className="code-composer-adapter__context-strip"
-            aria-label="Repository and delivery"
-          >
-            {props.githubControl}
-            {props.createFromControl}
-            <OctantButton
-              aria-expanded={showDelivery}
-              className="code-composer-adapter__disclosure-toggle"
-              onClick={() => setShowDelivery(!showDelivery)}
-              type="button"
-              variant="ghost"
-            >
-              {showDelivery ? (
-                <ChevronUp aria-hidden="true" size={12} />
-              ) : (
-                <ChevronDown aria-hidden="true" size={12} />
-              )}
-              <span>Delivery target</span>
-            </OctantButton>
           </div>
 
           {/* Start from origin only decides where a new worktree branches from.

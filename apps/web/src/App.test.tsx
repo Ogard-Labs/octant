@@ -252,6 +252,29 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Hide sidebar" })).toHaveFocus();
   });
 
+  it("lets the narrow sidebar overlay be dismissed and restored", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        isNarrow
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Hide sidebar" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Show sidebar" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Show sidebar" }));
+    expect(screen.getByRole("complementary", { name: "Octant sidebar" })).toBeVisible();
+  });
+
   it("sends Plugins to the Settings destination that actually exists", async () => {
     const user = userEvent.setup();
     render(

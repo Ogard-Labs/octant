@@ -142,10 +142,7 @@
 }
 
 .agents-center__empty {
-  padding: 1rem;
-  color: var(--oct-muted);
-  border: 1px dashed var(--oct-border);
-  border-radius: var(--oct-radius-md);
+  margin: 1rem auto;
 }
 
 @media (max-width: 720px) {

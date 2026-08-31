@@ -2,7 +2,9 @@ import type {
   ArtifactMirrorDestination,
   ArtifactMirrorSettings as MirrorSettings,
 } from "@octant/contracts/artifact-mirror";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -10,6 +12,7 @@ import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggl
 export interface ArtifactMirrorSettingsProps {
   readonly settings: MirrorSettings | undefined;
   readonly busy: boolean;
+  readonly defaultOpen?: boolean;
   readonly message?: string;
   readonly onChangeDestination: (destination: ArtifactMirrorDestination) => void;
   readonly onChangeAutoCommit: (autoCommit: boolean) => void;
@@ -44,98 +47,127 @@ const TIERS = [
  * changes nothing until it is imported, which adds a version.
  */
 export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
+  const [open, setOpen] = useState(props.defaultOpen === true);
   const [folder, setFolder] = useState("");
   const [directory, setDirectory] = useState("docs/artifacts");
   const current = props.settings?.fallback.kind ?? "internal-only";
 
   return (
     <section aria-label="Artifact files" className="artifact-mirror">
-      <h3 className="artifact-mirror__title">Artifact files</h3>
-      <p className="artifact-mirror__note">
-        Octant keeps every artifact and its history itself. A mirrored file is a copy for other
-        tools: deleting one does not delete the artifact, and editing one changes nothing until you
-        import it, which adds a new version.
-      </p>
+      <header className="artifact-mirror__header">
+        <div>
+          <h3 className="artifact-mirror__title">File mirroring</h3>
+          <p className="artifact-mirror__summary">
+            {TIERS.find((tier) => tier.kind === current)?.label}
+          </p>
+        </div>
+        <OctantButton
+          aria-expanded={open}
+          aria-label={open ? "Hide file mirroring settings" : "Configure file mirroring"}
+          onClick={() => setOpen((currentOpen) => !currentOpen)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {open ? (
+            <ChevronUp aria-hidden="true" size={14} />
+          ) : (
+            <ChevronDown aria-hidden="true" size={14} />
+          )}
+          {open ? "Hide" : "Configure"}
+        </OctantButton>
+      </header>
 
-      <OctantToggleGroup<ArtifactMirrorDestination["kind"]>
-        aria-label="Artifact file destination"
-        className="artifact-mirror__tiers"
-        disabled={props.busy}
-        onValueChange={(value) => {
-          const next = value[0];
-          if (next === "internal-only") props.onChangeDestination({ kind: "internal-only" });
-          if (next === "global-folder" && folder.trim().length > 0) {
-            props.onChangeDestination({
-              kind: "global-folder",
-              canonicalRoot: folder.trim() as never,
-            });
-          }
-          if (next === "project-repository" && directory.trim().length > 0) {
-            props.onChangeDestination({
-              kind: "project-repository",
-              relativeDirectory: directory.trim() as never,
-            });
-          }
-        }}
-        value={[current]}
-      >
-        {TIERS.map((tier) => (
-          <OctantToggleGroupItem
-            className="artifact-mirror__tier"
-            key={tier.kind}
-            value={tier.kind}
+      {open ? (
+        <div className="artifact-mirror__body">
+          <p className="artifact-mirror__note">
+            Octant keeps every artifact and its history itself. A mirrored file is a copy for other
+            tools: deleting one does not delete the artifact, and editing one changes nothing until
+            you import it, which adds a new version.
+          </p>
+
+          <OctantToggleGroup<ArtifactMirrorDestination["kind"]>
+            aria-label="Artifact file destination"
+            className="artifact-mirror__tiers"
+            disabled={props.busy}
+            onValueChange={(value) => {
+              const next = value[0];
+              if (next === "internal-only") props.onChangeDestination({ kind: "internal-only" });
+              if (next === "global-folder" && folder.trim().length > 0) {
+                props.onChangeDestination({
+                  kind: "global-folder",
+                  canonicalRoot: folder.trim() as never,
+                });
+              }
+              if (next === "project-repository" && directory.trim().length > 0) {
+                props.onChangeDestination({
+                  kind: "project-repository",
+                  relativeDirectory: directory.trim() as never,
+                });
+              }
+            }}
+            value={[current]}
           >
-            <span className="artifact-mirror__tier-body">
-              <span className="artifact-mirror__tier-label">{tier.label}</span>
-              <span className="artifact-mirror__tier-detail">{tier.detail}</span>
+            {TIERS.map((tier) => (
+              <OctantToggleGroupItem
+                className="artifact-mirror__tier"
+                key={tier.kind}
+                value={tier.kind}
+              >
+                <span className="artifact-mirror__tier-body">
+                  <span className="artifact-mirror__tier-label">{tier.label}</span>
+                  <span className="artifact-mirror__tier-detail">{tier.detail}</span>
+                </span>
+              </OctantToggleGroupItem>
+            ))}
+          </OctantToggleGroup>
+
+          <label className="artifact-mirror__field">
+            <span>Folder</span>
+            <OctantInput
+              className="input"
+              disabled={props.busy || current !== "global-folder"}
+              onChange={(event) => setFolder(event.target.value)}
+              placeholder="/Users/you/Artifacts"
+              value={folder}
+            />
+          </label>
+
+          <label className="artifact-mirror__field">
+            <span>Folder inside the repository</span>
+            <OctantInput
+              className="input"
+              disabled={props.busy || current !== "project-repository"}
+              onChange={(event) => setDirectory(event.target.value)}
+              placeholder="docs/artifacts"
+              value={directory}
+            />
+          </label>
+
+          <label className="artifact-mirror__auto-commit check">
+            <OctantCheckbox
+              checked={props.settings?.autoCommit === true}
+              disabled={props.busy || current !== "project-repository"}
+              onChange={(event) => props.onChangeAutoCommit(event.target.checked)}
+            />
+            <span>
+              Commit mirrored files automatically. Off by default. It commits the artifact files and
+              nothing else — if you have anything else staged it declines instead — and it never
+              pushes.
             </span>
-          </OctantToggleGroupItem>
-        ))}
-      </OctantToggleGroup>
+          </label>
 
-      <label className="artifact-mirror__field">
-        <span>Folder</span>
-        <OctantInput
-          className="input"
-          disabled={props.busy}
-          onChange={(event) => setFolder(event.target.value)}
-          placeholder="/Users/you/Artifacts"
-          value={folder}
-        />
-      </label>
+          {props.message === undefined ? null : (
+            <p className="artifact-mirror__message" role="status">
+              {props.message}
+            </p>
+          )}
 
-      <label className="artifact-mirror__field">
-        <span>Folder inside the repository</span>
-        <OctantInput
-          className="input"
-          disabled={props.busy}
-          onChange={(event) => setDirectory(event.target.value)}
-          placeholder="docs/artifacts"
-          value={directory}
-        />
-      </label>
-
-      <label className="artifact-mirror__auto-commit check">
-        <OctantCheckbox
-          checked={props.settings?.autoCommit === true}
-          disabled={props.busy || current !== "project-repository"}
-          onChange={(event) => props.onChangeAutoCommit(event.target.checked)}
-        />
-        <span>
-          Commit mirrored files automatically. Off by default. It commits the artifact files and
-          nothing else — if you have anything else staged it declines instead — and it never pushes.
-        </span>
-      </label>
-
-      {props.message === undefined ? null : (
-        <p className="artifact-mirror__message" role="status">
-          {props.message}
-        </p>
-      )}
-
-      <p aria-live="polite" className="artifact-mirror__saved">
-        {props.busy ? "Saving…" : "Saved automatically"}
-      </p>
+          <p aria-live="polite" className="artifact-mirror__saved">
+            {props.busy ? "Saving…" : "Saved automatically"}
+          </p>
+        </div>
+      ) : null}
     </section>
   );
 }

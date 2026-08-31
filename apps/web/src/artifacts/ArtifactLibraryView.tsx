@@ -7,6 +7,7 @@ import type {
 import type { OctantMode, ProjectId } from "@octant/contracts";
 import { Plus, Search } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantEmptyState } from "../ui/base/OctantEmptyState";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
@@ -57,6 +58,11 @@ const MODES: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
 export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   const { filters, listing } = props;
   const entries = listing?.entries ?? [];
+  const hasActiveFilters =
+    filters.query.trim() !== "" ||
+    filters.kind !== undefined ||
+    filters.projectId !== undefined ||
+    filters.mode !== undefined;
   const change = (next: Partial<ArtifactLibraryFilters>) =>
     props.onFiltersChange({ ...filters, ...next });
   // Clearing a filter removes the key rather than setting it to undefined:
@@ -198,11 +204,38 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       )}
 
       {props.busy || entries.length > 0 ? null : (
-        <p className="artifact-library__empty" role="status">
-          {filters.tab === "shared"
-            ? "Nothing is shared right now."
-            : "No artifacts match what you are looking for."}
-        </p>
+        <OctantEmptyState
+          {...(filters.tab === "shared" || hasActiveFilters
+            ? {
+                action: (
+                  <OctantButton
+                    onClick={() => props.onFiltersChange({ tab: "all", query: "" })}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {filters.tab === "shared" ? "View all artifacts" : "Clear filters"}
+                  </OctantButton>
+                ),
+              }
+            : {})}
+          className="artifact-library__empty"
+          message={
+            filters.tab === "shared"
+              ? "Artifacts you share will appear here."
+              : hasActiveFilters
+                ? "Clear or adjust the active filters to see other artifacts."
+                : "Create an artifact from a thread to see it here."
+          }
+          role="status"
+          title={
+            filters.tab === "shared"
+              ? "Nothing is shared right now."
+              : hasActiveFilters
+                ? "No artifacts match these filters"
+                : "No artifacts yet"
+          }
+        />
       )}
 
       {listing?.truncated === true ? (

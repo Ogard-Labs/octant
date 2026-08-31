@@ -402,17 +402,17 @@ function ActiveSectionContent({
     case "usage":
       return props.usageClient !== undefined ? (
         <div className="settings-usage-stack" id="settings-usage">
+          <UsageDashboard
+            client={props.usageClient}
+            {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
+            showHeading={false}
+          />
           {props.providerUsageLimitsClient === undefined ? null : (
             <ProviderUsageLimitsPanel
               client={props.providerUsageLimitsClient}
               instances={props.providerController?.instances ?? []}
             />
           )}
-          <UsageDashboard
-            client={props.usageClient}
-            {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
-            showHeading={false}
-          />
         </div>
       ) : null;
     case "host":
