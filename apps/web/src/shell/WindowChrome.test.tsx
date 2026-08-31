@@ -268,8 +268,8 @@ describe("WindowChrome", () => {
     );
     const sectionLabel = cssRule(".project-section > .sidebar-section");
     expect(sectionLabel).toContain("font-family: var(--oct-font-display);");
-    expect(sectionLabel).toContain("letter-spacing: normal;");
-    expect(sectionLabel).toContain("text-transform: none;");
+    expect(sectionLabel).toContain("letter-spacing: 0.04em;");
+    expect(sectionLabel).toContain("text-transform: uppercase;");
     expect(sectionLabel).not.toContain("mono");
     expect(cssRule('.sidebar-navigation__thread-status[data-activity="unread"]')).toContain(
       "background: var(--octant-text-secondary);",
