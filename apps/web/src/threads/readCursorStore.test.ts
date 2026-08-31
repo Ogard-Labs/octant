@@ -164,4 +164,58 @@ describe("thread read cursors across windows", () => {
     expect(relaunched.getSnapshot().get("thread-1")).toBe(4);
     expect(relaunched.getSnapshot().get("thread-2")).toBe(9);
   });
+
+  it("does not let an older deferred read overwrite another window's explicit unread mark", () => {
+    vi.useFakeTimers();
+    const storage = memoryStorage();
+    const events = new EventTarget();
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const originalAdd = Object.getOwnPropertyDescriptor(globalThis, "addEventListener");
+    const originalRemove = Object.getOwnPropertyDescriptor(globalThis, "removeEventListener");
+    Object.defineProperties(globalThis, {
+      localStorage: { configurable: true, value: storage },
+      addEventListener: {
+        configurable: true,
+        value: events.addEventListener.bind(events),
+      },
+      removeEventListener: {
+        configurable: true,
+        value: events.removeEventListener.bind(events),
+      },
+    });
+
+    try {
+      const windowOne = createReadCursorStore<string>({ storageKey: "cursors" });
+      windowOne.mark("thread-1", 4);
+      const windowTwo = createReadCursorStore<string>({ storageKey: "cursors" });
+      const unsubscribe = windowTwo.subscribe(() => undefined);
+
+      windowTwo.markDeferred("thread-1", 5);
+      windowOne.unmark("thread-1");
+      const event = new Event("storage");
+      Object.defineProperties(event, {
+        key: { value: "cursors" },
+        storageArea: { value: storage },
+      });
+      events.dispatchEvent(event);
+      vi.runAllTimers();
+
+      const relaunched = createReadCursorStore<string>({ storageKey: "cursors" });
+      expect(relaunched.getSnapshot().has("thread-1")).toBe(false);
+      expect(relaunched.getMarkedUnread().has("thread-1")).toBe(true);
+      unsubscribe();
+    } finally {
+      restoreGlobalProperty("localStorage", originalStorage);
+      restoreGlobalProperty("addEventListener", originalAdd);
+      restoreGlobalProperty("removeEventListener", originalRemove);
+    }
+  });
 });
+
+function restoreGlobalProperty(
+  name: "localStorage" | "addEventListener" | "removeEventListener",
+  descriptor: PropertyDescriptor | undefined,
+): void {
+  if (descriptor === undefined) Reflect.deleteProperty(globalThis, name);
+  else Object.defineProperty(globalThis, name, descriptor);
+}

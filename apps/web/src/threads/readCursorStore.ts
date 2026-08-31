@@ -106,6 +106,25 @@ function sameState(first: CursorState, second: CursorState): boolean {
   return true;
 }
 
+function changedKeys(first: CursorState, second: CursorState): ReadonlySet<string> {
+  const keys = new Set([
+    ...first.cursors.keys(),
+    ...first.markedUnread,
+    ...second.cursors.keys(),
+    ...second.markedUnread,
+  ]);
+  const changed = new Set<string>();
+  for (const key of keys) {
+    if (
+      first.cursors.get(key) !== second.cursors.get(key) ||
+      first.markedUnread.has(key) !== second.markedUnread.has(key)
+    ) {
+      changed.add(key);
+    }
+  }
+  return changed;
+}
+
 function encode(state: CursorState): string {
   return JSON.stringify({
     version: 2,
@@ -128,7 +147,8 @@ export function createReadCursorStore<ThreadId>(options: {
       return undefined;
     }
   })();
-  let state = restore(storage, options.storageKey);
+  let persistedState = restore(storage, options.storageKey);
+  let state = persistedState;
   const pending: PendingChange[] = [];
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -145,6 +165,7 @@ export function createReadCursorStore<ThreadId>(options: {
       let persisted = restore(storage, options.storageKey);
       for (const change of pending) persisted = applyChange(persisted, change);
       storage.setItem(options.storageKey, encode(persisted));
+      persistedState = persisted;
       pending.length = 0;
     } catch {
       // Keeping the updates in memory is still correct; a later lifecycle
@@ -165,11 +186,18 @@ export function createReadCursorStore<ThreadId>(options: {
   };
   const onStorage = (event: StorageEvent) => {
     if (event.key !== options.storageKey || event.storageArea !== storage) return;
-    let next = restore(storage, options.storageKey);
+    const incoming = restore(storage, options.storageKey);
+    const superseded = changedKeys(persistedState, incoming);
+    if (superseded.size > 0) {
+      const retained = pending.filter((change) => !superseded.has(change.key));
+      pending.splice(0, pending.length, ...retained);
+    }
+    let next = incoming;
     for (const change of pending) next = applyChange(next, change);
-    if (sameState(state, next)) return;
+    const changed = !sameState(state, next);
+    persistedState = incoming;
     state = next;
-    announce();
+    if (changed) announce();
   };
   const onVisibility = () => {
     if (typeof document !== "undefined" && document.visibilityState === "hidden") flush();
