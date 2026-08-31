@@ -18,7 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ProviderSettingsView, type ProviderSettingsViewProps } from "./ProviderSettingsView";
 import { useProviderController } from "./useProviderController";
 import type { OctantHostBridge } from "../shell/hostBridge";
-import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-000000000092");
 

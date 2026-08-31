@@ -11,7 +11,7 @@ import type {
 import type { PurgeThreadsOutcome } from "@octant/contracts/thread-retention";
 import { localHostDisplayName } from "@octant/client-runtime";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
-import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { HostSettingsSection } from "./HostSettingsSection";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
 

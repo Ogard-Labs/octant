@@ -10,7 +10,7 @@ import {
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { ProjectMemoryInspector } from "./ProjectMemoryInspector";
 
 const sourceProjectId = decodeProjectId("00000000-0000-4000-8000-000000000901");

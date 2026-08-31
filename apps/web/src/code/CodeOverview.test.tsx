@@ -2,7 +2,7 @@ import type { CodeBoardCard, CodeBoardView } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { CodeOverview } from "./CodeOverview";
 import type { CodeController } from "./useCodeController";
 

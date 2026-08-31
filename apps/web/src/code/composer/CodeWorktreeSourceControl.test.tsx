@@ -5,7 +5,7 @@ import type {
   WorktreeRemoteFacts,
   WorktreeSourceResolution,
 } from "@octant/domain/code-worktree-source-policy";
-import { chooseSelectFieldOption } from "../../test/chooseSelectFieldOption";
+import { chooseSelectFieldOption } from "../../test/chooseSelectFieldOption.test-support";
 import { CodeWorktreeSourceControl } from "./CodeWorktreeSourceControl";
 
 const FULL_SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9011223344";

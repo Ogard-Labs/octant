@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import { decodeDiagnosticsExportOutcome } from "@octant/contracts/diagnostics";
 import { DiagnosticsExportControl } from "./DiagnosticsExportControl";

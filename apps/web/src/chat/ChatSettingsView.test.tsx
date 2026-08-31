@@ -3,7 +3,7 @@ import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { ChatSettingsView, type UpdateChatSettingsCommand } from "./ChatSettingsView";
 
 const now = "2026-07-20T08:00:00.000Z";

@@ -7,7 +7,7 @@ import type {
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 
 const canvasId = "11111111-1111-4111-8111-111111111111" as CanvasId;

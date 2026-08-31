@@ -9,7 +9,7 @@ import {
   transientCredential,
   useCredentialStatus,
 } from "./ProviderSettingsCredentials";
-import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-000000000092");
 
