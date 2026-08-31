@@ -119,4 +119,33 @@ describe("GeneratedImageList polling", () => {
     await act(async () => resolveNextScope?.({ jobs: [queuedJob(nextScopeId)] }));
     expect(screen.getByText("Image queued…")).toBeInTheDocument();
   });
+
+  it("does not carry an unavailable status into a new scope", async () => {
+    const list = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise(() => undefined));
+    const client = { list } as unknown as ImageGenerationClient;
+    const view = render(
+      <GeneratedImageList
+        client={client}
+        profiles={[]}
+        scopeId={scopeId}
+        threadKind="chat-thread"
+      />,
+    );
+
+    expect(await screen.findByText("Generated images are unavailable.")).toBeInTheDocument();
+    view.rerender(
+      <GeneratedImageList
+        client={client}
+        profiles={[]}
+        scopeId={nextScopeId}
+        threadKind="code-thread"
+      />,
+    );
+
+    expect(screen.queryByText("Generated images are unavailable.")).not.toBeInTheDocument();
+    expect(list).toHaveBeenCalledTimes(2);
+  });
 });

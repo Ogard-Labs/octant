@@ -39,6 +39,7 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
     const refreshGeneration = ++generation.current;
     setJobs([]);
     setRevise(undefined);
+    setError(undefined);
     const refresh = () => {
       if (!documentIsVisible() || inFlightGeneration.current === refreshGeneration) {
         return;
