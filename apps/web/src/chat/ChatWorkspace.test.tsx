@@ -545,6 +545,44 @@ describe("ChatWorkspace", () => {
     expect(sendTurn).toHaveBeenCalledWith("Next step", [], [], [], [], []);
   });
 
+  it("keeps a steered Chat message pending while the provider waits", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    function Harness() {
+      const [draft, setDraft] = useState("Next step");
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+            })}
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setView(viewWithAttempt("waiting"))} type="button">
+            Wait for input
+          </button>
+          <button onClick={() => setView(viewWithAttempt("completed"))} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.click(screen.getByRole("button", { name: "Wait for input" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sendTurn).not.toHaveBeenCalled();
+    expect(screen.getByText("Next step")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+  });
+
   it("sends a message written mid-response even after the response is cancelled", async () => {
     const user = userEvent.setup();
     const sendTurn = vi.fn(async () => true);
