@@ -10,6 +10,9 @@ describe("CodeComposerAccessMenu", () => {
     const trigger = screen.getByRole("button", { name: "Access policy" });
     expect(trigger).toHaveTextContent("Approval");
     fireEvent.click(trigger);
+    expect(screen.getByRole("option", { name: /Full access/ })).toHaveTextContent(
+      "Allow commands and edits without prompts.",
+    );
     fireEvent.click(screen.getByRole("option", { name: /Full access/ }));
 
     expect(onChange).toHaveBeenCalledWith("full-access");

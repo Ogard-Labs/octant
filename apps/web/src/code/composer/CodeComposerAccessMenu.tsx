@@ -75,8 +75,10 @@ export function CodeComposerAccessMenu(props: CodeComposerAccessMenuProps) {
             type="button"
             variant="ghost"
           >
-            <span className="code-composer-choice__option-label">{option.label}</span>
-            <span className="code-composer-choice__option-detail">{option.detail}</span>
+            <span className="code-composer-choice__option-copy">
+              <span className="code-composer-choice__option-label">{option.label}</span>
+              <span className="code-composer-choice__option-detail">{option.detail}</span>
+            </span>
           </OctantButton>
         ))}
       </div>

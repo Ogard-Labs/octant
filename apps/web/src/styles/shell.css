@@ -2002,7 +2002,7 @@ html[data-octant-theme-mode="dark"] .code-composer-adapter__dock {
 .code-composer-choice__menu {
   display: flex;
   flex-direction: column;
-  width: min(280px, calc(100vw - 32px));
+  width: min(300px, calc(100vw - 32px));
   overflow: hidden;
   background: var(--octant-surface);
   border: 1px solid var(--octant-border-strong);
