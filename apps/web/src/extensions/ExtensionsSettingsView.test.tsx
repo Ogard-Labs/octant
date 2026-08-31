@@ -351,11 +351,17 @@ describe("ExtensionsSettingsView", () => {
 
     await waitFor(() => expect(screen.getByText("Project review")).toBeInTheDocument());
     expect(screen.getByText("Global review")).toBeInTheDocument();
-    expect(screen.getByText("Project skills · parent 1")).toBeInTheDocument();
-    expect(screen.getByText("User-global · ~/.agents/skills")).toBeInTheDocument();
-    expect(screen.getByText(String(projectSkillId))).toBeInTheDocument();
-    expect(screen.getByText(String(globalSkillId))).toBeInTheDocument();
+    expect(screen.getByText("Project skill")).toBeInTheDocument();
+    expect(screen.getByText("User skill")).toBeInTheDocument();
+    expect(screen.queryByText("Project skills · parent 1")).toBeNull();
+    expect(screen.queryByText("User-global · ~/.agents/skills")).toBeNull();
+    expect(screen.queryByText(String(projectSkillId))).toBeNull();
+    expect(screen.queryByText(String(globalSkillId))).toBeNull();
     expect(screen.getAllByText("Blocked — Untrusted")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Show details for Project review" }));
+    expect(screen.getByText("Project skills · parent 1")).toBeVisible();
+    expect(screen.getByText(String(projectSkillId))).toBeVisible();
+    expect(screen.queryByText(String(globalSkillId))).toBeNull();
     expect(screen.getByRole("status", { name: "Skill name collision: review" })).toHaveTextContent(
       "2 source-qualified candidates",
     );
@@ -1315,6 +1321,7 @@ describe("ExtensionsSettingsView", () => {
     );
     fireEvent.click(screen.getByRole("tab", { name: /installed/i }));
     expect(await screen.findByText("Blocked — Untrusted")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show details for Frontend Design" }));
     expect(screen.getByText("Disabled")).toBeInTheDocument();
   });
 

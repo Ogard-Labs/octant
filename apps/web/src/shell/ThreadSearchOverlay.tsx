@@ -333,7 +333,9 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
         </div>
       )}
       <p className="thread-search__scope" role="note">
-        {modeLabel} threads only. Project, Recents, and Unfiled are folder labels.
+        {props.mode === "chat"
+          ? "Searches Chat thread titles, messages, and archived history."
+          : `Searches current and archived ${modeLabel} thread titles.`}
       </p>
     </OctantDialog>
   );

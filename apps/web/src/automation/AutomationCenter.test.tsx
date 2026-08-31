@@ -680,8 +680,9 @@ describe("AutomationCenter arranging", () => {
     await userEvent.click(await screen.findByRole("option", { name: "Needs attention" }));
 
     expect(screen.queryByRole("list", { name: /Automations/ })).toBeNull();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "No automations match the current filters",
-    );
+    const empty = screen.getByRole("status");
+    expect(empty).toHaveAttribute("data-slot", "empty-state");
+    expect(empty).toHaveTextContent("No automations match these filters");
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeVisible();
   });
 });

@@ -81,6 +81,7 @@ export type ProviderSettingsListProps = Pick<
 };
 
 export function ProviderSettingsList(props: ProviderSettingsListProps) {
+  const [reordering, setReordering] = useState(false);
   // Row order is the order the model picker offers providers in, so the list
   // renders in that order and the row grips edit it directly.
   const ordered = useMemo(() => {
@@ -108,11 +109,22 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         <div className="setgroup-head">
           <span>Providers</span>
           <span className="setgroup-gap" />
-          <span>Model-picker order</span>
+          {ordered.length < 2 ? null : (
+            <OctantButton
+              aria-pressed={reordering}
+              onClick={() => setReordering((current) => !current)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              {reordering ? "Done reordering" : "Reorder providers"}
+            </OctantButton>
+          )}
         </div>
         <p className="setgroup-note">
-          Rows follow the model-picker order. The first ready provider is the default for new
-          threads.
+          {reordering
+            ? "Use the arrow controls to change the model-picker order."
+            : "The first ready provider is the default for new threads."}
         </p>
         {ordered.length === 0 ? (
           <p className="provider-settings__empty">No providers configured.</p>
@@ -159,6 +171,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onRename={props.onRename}
                 onSetEnabled={props.onSetEnabled}
                 probing={props.probingIds.has(instance.id)}
+                reordering={reordering}
               />
             ))}
           </div>
@@ -338,6 +351,7 @@ interface ProviderRowProps {
   readonly discoverySnapshot?: DiscoverySnapshot;
   readonly busy: boolean;
   readonly probing: boolean;
+  readonly reordering: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly index: number;
   readonly count: number;
@@ -426,31 +440,34 @@ function ProviderRow(props: ProviderRowProps) {
       aria-label={name}
       className="provrow"
       data-enabled={props.instance.enabled ? "true" : "false"}
+      data-reordering={props.reordering ? "true" : "false"}
     >
-      <span className="prov-grip-slot">
-        <OctantButton
-          aria-label={`Move ${name} up`}
-          className="prov-grip window-no-drag"
-          disabled={props.busy || props.index === 0}
-          onClick={() => props.onMove(props.index, -1)}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <ChevronUp aria-hidden="true" size={14} />
-        </OctantButton>
-        <OctantButton
-          aria-label={`Move ${name} down`}
-          className="prov-grip window-no-drag"
-          disabled={props.busy || props.index === props.count - 1}
-          onClick={() => props.onMove(props.index, 1)}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <ChevronDown aria-hidden="true" size={14} />
-        </OctantButton>
-      </span>
+      {props.reordering ? (
+        <span className="prov-grip-slot">
+          <OctantButton
+            aria-label={`Move ${name} up`}
+            className="prov-grip window-no-drag"
+            disabled={props.busy || props.index === 0}
+            onClick={() => props.onMove(props.index, -1)}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronUp aria-hidden="true" size={14} />
+          </OctantButton>
+          <OctantButton
+            aria-label={`Move ${name} down`}
+            className="prov-grip window-no-drag"
+            disabled={props.busy || props.index === props.count - 1}
+            onClick={() => props.onMove(props.index, 1)}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <ChevronDown aria-hidden="true" size={14} />
+          </OctantButton>
+        </span>
+      ) : null}
       <span className="icon-mark">
         <ProviderGlyph displayName={name} driverKind={props.instance.driverKind} size={16} />
       </span>
@@ -467,10 +484,12 @@ function ProviderRow(props: ProviderRowProps) {
           : `${props.observed.models.length} ${props.observed.models.length === 1 ? "model" : "models"}`}
       </span>
       <span className="prov-status">
-        <span className={readinessBadgeClass(readiness)}>
-          {readiness === undefined
-            ? "Not checked"
-            : providerRowReadinessLabel(readiness, props.observed?.models.length ?? 0)}
+        <span className={readinessBadgeClass(props.instance.enabled ? readiness : undefined)}>
+          {!props.instance.enabled
+            ? "Off"
+            : readiness === undefined
+              ? "Not checked"
+              : providerRowReadinessLabel(readiness, props.observed?.models.length ?? 0)}
         </span>
       </span>
       <span className="prov-actions">
@@ -766,6 +785,7 @@ function ProviderRow(props: ProviderRowProps) {
               <form
                 className="provider-card__edit"
                 key={`name:${props.instance.version}`}
+                noValidate
                 onSubmit={(event) => {
                   event.preventDefault();
                   const data = new FormData(event.currentTarget);
@@ -790,6 +810,7 @@ function ProviderRow(props: ProviderRowProps) {
                 <form
                   className="provider-card__edit"
                   key={`binary:${props.instance.version}`}
+                  noValidate
                   onSubmit={(event) => {
                     event.preventDefault();
                     const data = new FormData(event.currentTarget);

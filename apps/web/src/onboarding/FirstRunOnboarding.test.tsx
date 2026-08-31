@@ -818,6 +818,7 @@ describe("FirstRunOnboarding", () => {
     expect(workspaceStep).toHaveAttribute("data-progress", "pending");
     expect(navigatorStep).toHaveAttribute("data-progress", "pending");
     expect(profileStep).toHaveAttribute("aria-current", "step");
+    expect(profileStep.querySelector(".sr-only")).toBeNull();
 
     await user.click(workspaceStep);
 
@@ -826,6 +827,7 @@ describe("FirstRunOnboarding", () => {
     expect(navigatorStep).toHaveAttribute("data-progress", "pending");
     expect(workspaceStep).toHaveAttribute("aria-current", "step");
     expect(profileStep).not.toHaveAttribute("aria-current");
+    expect(profileStep.querySelector(".sr-only")).toHaveTextContent("Configured");
   });
 
   it("reports provider, Project, and default model separately on a clean host", async () => {

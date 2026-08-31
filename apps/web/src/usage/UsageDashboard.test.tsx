@@ -187,6 +187,21 @@ describe("UsageDashboard", () => {
     expect(screen.getByLabelText("Usage by provider")).toBeInTheDocument();
   });
 
+  it("shows the summary before a collapsed technical filter disclosure", async () => {
+    const user = userEvent.setup();
+    render(<UsageDashboard client={createMockClient(seededResponse())} />);
+
+    const summary = await screen.findByRole("group", { name: "Summary totals" });
+    const filters = screen.getByRole("button", { name: "Filters" });
+    expect(filters).toHaveAttribute("aria-expanded", "false");
+    expect(
+      summary.compareDocumentPosition(filters) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getByLabelText("Filter by provider instance id")).not.toBeVisible();
+    await user.click(filters);
+    expect(screen.getByLabelText("Filter by provider instance id")).toBeVisible();
+  });
+
   it("renders host latency measurements after the totals", async () => {
     const response = {
       ...seededResponse(),
@@ -234,9 +249,11 @@ describe("UsageDashboard", () => {
   it("shows an empty state when no records match", async () => {
     const client = createMockClient(emptyResponse());
     render(<UsageDashboard client={client} />);
+    const title = await screen.findByText("No usage recorded yet");
+    expect(title.closest("[role='status']")).toHaveAttribute("data-slot", "empty-state");
     expect(
-      await screen.findByText("No usage records match the selected filters."),
-    ).toBeInTheDocument();
+      screen.getByText("Usage appears after an agent completes a provider request."),
+    ).toBeVisible();
     expect(screen.queryByText("Unavailable: 0")).not.toBeInTheDocument();
   });
 
@@ -301,7 +318,7 @@ describe("UsageDashboard", () => {
     expect(screen.getByText("thread-1")).toBeInTheDocument();
     expect(screen.getByText("Refreshing usage data…")).toBeInTheDocument();
     resolveNext?.(emptyResponse());
-    await waitFor(() => expect(screen.getByText("No usage records match the selected filters.")));
+    await waitFor(() => expect(screen.getByText("No usage matches these filters")));
   });
 
   it("does not let an older filter response overwrite the newest result", async () => {
@@ -319,10 +336,10 @@ describe("UsageDashboard", () => {
     fireEvent.change(provider, { target: { value: "provider-2" } });
     expect(resolvers).toHaveLength(2);
     resolvers[1]!(emptyResponse());
-    await waitFor(() => expect(screen.getByText("No usage records match the selected filters.")));
+    await waitFor(() => expect(screen.getByText("No usage matches these filters")));
     resolvers[0]!(seededResponse());
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(screen.getByText("No usage records match the selected filters.")).toBeInTheDocument();
+    expect(screen.getByText("No usage matches these filters")).toBeInTheDocument();
   });
 
   it("renders keyboard-usable custom date range controls", async () => {
@@ -389,11 +406,11 @@ describe("UsageDashboard", () => {
     );
     expect(screen.getByRole("button", { name: /Purge older than 30 days/ })).toHaveAttribute(
       "data-variant",
-      "destructive",
+      "destructive-outline",
     );
     expect(screen.getByRole("button", { name: /Reset all usage/ })).toHaveAttribute(
       "data-variant",
-      "destructive",
+      "destructive-outline",
     );
   });
 

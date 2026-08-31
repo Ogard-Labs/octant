@@ -414,7 +414,7 @@
 }
 
 .automation-center__empty {
-  font-size: 0.875rem;
+  margin: 1rem auto;
 }
 
 .automation-detail {

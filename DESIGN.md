@@ -250,6 +250,14 @@ and saves immediately.
 Scope metadata remains available to assistive technology but does not compete
 with the setting label.
 
+Operational settings use progressive disclosure. Provider rows show identity,
+one effective status, details, and enablement; ordering controls appear only in
+an explicit Reorder mode. Skill rows show the source class and one effective
+state; filesystem paths, qualified identifiers, hashes, requested/effective
+breakdowns, and content size live behind Details. Usage opens on totals and
+measurement quality, with technical filters collapsed and provider-capacity
+diagnostics after the locally recorded dashboard.
+
 First run is a five-step wizard with a progress rail. Each step is pending,
 current, or completed: the current step is a filled card, completed steps show
 a check, and pending steps show their number. Mode choices on the readiness
@@ -323,8 +331,11 @@ Switch, Slider, Checkbox, ToggleGroup, Tabs, DropdownMenu, ContextMenu, Dialog,
 and Tooltip. Composition rules:
 
 - Buttons use `OctantButton` or `OctantIconButton`; variants are default,
-  destructive, outline, secondary, ghost, and link. Sizes are default, sm, lg,
-  and icon. Icon-only buttons always have an accessible label and tooltip/title.
+  destructive, destructive-outline, outline, secondary, ghost, and link.
+  Destructive-outline names a risky action on an ordinary page; the filled
+  destructive variant is reserved for the final confirmation. Sizes are
+  default, sm, lg, and icon. Icon-only buttons always have an accessible label
+  and tooltip/title.
 - Form layouts use `OctantFieldGroup` and `OctantField`; labels, descriptions,
   and errors remain associated with their controls. Invalid state uses
   `data-invalid` and `aria-invalid`.

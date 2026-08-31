@@ -687,6 +687,9 @@ describe("SettingsView", () => {
     );
     expect(screen.getByRole("heading", { name: "Advanced" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveFocus();
+    expect(
+      screen.getByText(/Restores the current mode's pane arrangement.*Threads and data are kept/i),
+    ).toBeVisible();
     expect(onDeepLinkApplied).toHaveBeenCalledOnce();
   });
 

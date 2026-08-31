@@ -32,6 +32,7 @@ import { ListArrangementMenu } from "../shell/ListArrangementMenu";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { OctantEmptyState } from "../ui/base/OctantEmptyState";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { AutomationDefinitionEditor } from "./AutomationDefinitionEditor";
@@ -574,10 +575,25 @@ function AutomationListBody(props: {
   });
   if (groups.length === 0) {
     return (
-      <div className="automation-center__empty empty" role="status">
-        <p>No automations match the current filters.</p>
-        <p>Nothing was deleted; adjust the filters or create a new automation.</p>
-      </div>
+      <OctantEmptyState
+        action={
+          <OctantButton
+            onClick={() => {
+              controller.setFilter("all");
+              controller.setSearch("");
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Clear filters
+          </OctantButton>
+        }
+        className="automation-center__empty"
+        message="Clear or adjust the active filters to see other automations."
+        role="status"
+        title="No automations match these filters"
+      />
     );
   }
   return (

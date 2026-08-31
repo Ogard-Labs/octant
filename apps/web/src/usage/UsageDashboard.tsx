@@ -9,10 +9,21 @@ import type { ContextEntryCategory } from "@octant/contracts/context";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { HostId } from "@octant/contracts/host";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
-import { BarChart3, RefreshCw, AlertTriangle, Download, Trash2, Eraser } from "lucide-react";
+import {
+  AlertTriangle,
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Eraser,
+  Filter,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
+import { OctantEmptyState } from "../ui/base/OctantEmptyState";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -232,8 +243,6 @@ export function UsageDashboard(props: UsageDashboardProps) {
         </OctantButton>
       </header>
 
-      <UsageFilters filter={filter} onChange={setFilter} />
-
       {refreshing ? (
         <p className="usage-dashboard__status" role="status">
           Refreshing usage data…
@@ -269,6 +278,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
           suffix=" ms"
         />
       </div>
+      <UsageFilters filter={filter} onChange={setFilter} />
       <LatencyStatsSection
         className="usage-dashboard__section"
         connectionLatencyMs={connectionLatencyMs}
@@ -288,9 +298,34 @@ export function UsageDashboard(props: UsageDashboardProps) {
       </div>
 
       {isEmpty ? (
-        <p className="usage-dashboard__empty" role="status">
-          No usage records match the selected filters.
-        </p>
+        <OctantEmptyState
+          {...(Object.keys(filter).length === 0
+            ? {}
+            : {
+                action: (
+                  <OctantButton
+                    onClick={() => setFilter({})}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Clear filters
+                  </OctantButton>
+                ),
+              })}
+          className="usage-dashboard__empty"
+          message={
+            Object.keys(filter).length === 0
+              ? "Usage appears after an agent completes a provider request."
+              : "Clear or adjust the active filters to see other usage."
+          }
+          role="status"
+          title={
+            Object.keys(filter).length === 0
+              ? "No usage recorded yet"
+              : "No usage matches these filters"
+          }
+        />
       ) : (
         <>
           <ActivitySection
@@ -435,7 +470,21 @@ interface UsageFiltersProps {
 }
 
 function UsageFilters({ filter, onChange }: UsageFiltersProps) {
+  const [open, setOpen] = useState(false);
   const [rangeError, setRangeError] = useState<string>();
+  const activeCount = [
+    filter.providerInstanceId,
+    filter.modelId,
+    filter.hostId,
+    filter.mode,
+    filter.projectId,
+    filter.subjectAggregateId,
+    filter.requestShape,
+    filter.quality,
+    filter.category,
+    filter.from,
+    filter.to,
+  ].filter((value) => value !== undefined && value !== "").length;
   const update = <K extends keyof UsageQueryFilter>(
     key: K,
     value: UsageQueryFilter[K] | undefined,
@@ -467,189 +516,219 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
     onChange(next);
   };
   return (
-    <div className="usage-dashboard__filters" role="group" aria-label="Usage filters">
-      <label className="usage-dashboard__field">
-        <span>Provider</span>
-        <OctantInput
-          aria-label="Filter by provider instance id"
-          className="usage-dashboard__text-input input window-no-drag"
-          onChange={(event) =>
-            update(
-              "providerInstanceId",
-              event.currentTarget.value.trim() === ""
-                ? undefined
-                : (event.currentTarget.value.trim() as ProviderInstanceId),
-            )
-          }
-          placeholder="provider instance id"
-          type="search"
-          value={filter.providerInstanceId ?? ""}
-        />
-      </label>
-      <label className="usage-dashboard__field">
-        <span>Model</span>
-        <OctantInput
-          aria-label="Filter by model id"
-          className="usage-dashboard__text-input input window-no-drag"
-          onChange={(event) =>
-            update(
-              "modelId",
-              event.currentTarget.value.trim() === ""
-                ? undefined
-                : (event.currentTarget.value.trim() as ProviderModelId),
-            )
-          }
-          placeholder="model id"
-          type="search"
-          value={filter.modelId ?? ""}
-        />
-      </label>
-      <label className="usage-dashboard__field">
-        <span>Host</span>
-        <OctantInput
-          aria-label="Filter by host id"
-          className="usage-dashboard__text-input input window-no-drag"
-          onChange={(event) =>
-            update(
-              "hostId",
-              event.currentTarget.value.trim() === ""
-                ? undefined
-                : (event.currentTarget.value.trim() as HostId),
-            )
-          }
-          placeholder="host id"
-          type="search"
-          value={filter.hostId ?? ""}
-        />
-      </label>
-      <label className="usage-dashboard__field">
-        <span>Mode</span>
-        <OctantSelectField
-          aria-label="Filter by mode"
-          className="usage-dashboard__select select window-no-drag"
-          onValueChange={(value) =>
-            update("mode", value === "" ? undefined : (value as UsageQueryFilter["mode"]))
-          }
-          options={MODE_OPTIONS.map((option) => ({
-            id: option.value,
-            label: option.label,
-          }))}
-          value={filter.mode ?? ""}
-        />
-      </label>
-      <label className="usage-dashboard__field">
-        <span>Project</span>
-        <OctantInput
-          aria-label="Filter by project id"
-          className="usage-dashboard__text-input input window-no-drag"
-          onChange={(event) =>
-            update(
-              "projectId",
-              event.currentTarget.value.trim() === ""
-                ? undefined
-                : event.currentTarget.value.trim(),
-            )
-          }
-          placeholder="project id"
-          type="search"
-          value={filter.projectId ?? ""}
-        />
-      </label>
-      <label className="usage-dashboard__field">
-        <span>Thread</span>
-        <OctantInput
-          aria-label="Filter by thread id"
-          className="usage-dashboard__text-input input window-no-drag"
-          onChange={(event) => {
-            const value = event.currentTarget.value.trim();
-            if (value === "") {
-              clear("subjectAggregateType", "subjectAggregateId");
-              return;
+    <section className="usage-dashboard__filter-panel" data-expanded={open ? "true" : "false"}>
+      <OctantButton
+        aria-controls="usage-dashboard-filters"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+        variant="ghost"
+      >
+        <Filter aria-hidden="true" size={14} />
+        <span>Filters</span>
+        {activeCount === 0 ? null : (
+          <span className="usage-dashboard__filter-count">{activeCount}</span>
+        )}
+        {open ? (
+          <ChevronUp aria-hidden="true" size={14} />
+        ) : (
+          <ChevronDown aria-hidden="true" size={14} />
+        )}
+      </OctantButton>
+      <div
+        aria-label="Usage filters"
+        className="usage-dashboard__filters"
+        hidden={!open}
+        id="usage-dashboard-filters"
+        role="group"
+      >
+        <label className="usage-dashboard__field">
+          <span>Provider</span>
+          <OctantInput
+            aria-label="Filter by provider instance id"
+            className="usage-dashboard__text-input input window-no-drag"
+            onChange={(event) =>
+              update(
+                "providerInstanceId",
+                event.currentTarget.value.trim() === ""
+                  ? undefined
+                  : (event.currentTarget.value.trim() as ProviderInstanceId),
+              )
             }
-            onChange({ ...filter, subjectAggregateType: "chat-thread", subjectAggregateId: value });
-          }}
-          placeholder="thread id"
-          type="search"
-          value={filter.subjectAggregateId ?? ""}
-        />
-      </label>
-      <label className="usage-dashboard__field">
-        <span>Request shape</span>
-        <OctantInput
-          aria-label="Filter by request shape"
-          className="usage-dashboard__text-input input window-no-drag"
-          onChange={(event) =>
-            update(
-              "requestShape",
-              event.currentTarget.value.trim() === ""
-                ? undefined
-                : event.currentTarget.value.trim(),
-            )
-          }
-          placeholder="request shape"
-          type="search"
-          value={filter.requestShape ?? ""}
-        />
-      </label>
-      <label className="usage-dashboard__field">
-        <span>Quality</span>
-        <OctantSelectField
-          aria-label="Filter by measurement quality"
-          className="usage-dashboard__select select window-no-drag"
-          onValueChange={(value) =>
-            update("quality", value === "" ? undefined : (value as UsageQueryFilter["quality"]))
-          }
-          options={QUALITY_OPTIONS.map((option) => ({
-            id: option.value,
-            label: option.label,
-          }))}
-          value={filter.quality ?? ""}
-        />
-      </label>
-      <label className="usage-dashboard__field">
-        <span>Category</span>
-        <OctantSelectField
-          aria-label="Filter by context category"
-          className="usage-dashboard__select select window-no-drag"
-          onValueChange={(value) =>
-            update("category", value === "" ? undefined : (value as ContextEntryCategory))
-          }
-          options={[
-            { id: "", label: "All categories" },
-            ...CATEGORY_OPTIONS.map((option) => ({
+            placeholder="provider instance id"
+            type="search"
+            value={filter.providerInstanceId ?? ""}
+          />
+        </label>
+        <label className="usage-dashboard__field">
+          <span>Model</span>
+          <OctantInput
+            aria-label="Filter by model id"
+            className="usage-dashboard__text-input input window-no-drag"
+            onChange={(event) =>
+              update(
+                "modelId",
+                event.currentTarget.value.trim() === ""
+                  ? undefined
+                  : (event.currentTarget.value.trim() as ProviderModelId),
+              )
+            }
+            placeholder="model id"
+            type="search"
+            value={filter.modelId ?? ""}
+          />
+        </label>
+        <label className="usage-dashboard__field">
+          <span>Host</span>
+          <OctantInput
+            aria-label="Filter by host id"
+            className="usage-dashboard__text-input input window-no-drag"
+            onChange={(event) =>
+              update(
+                "hostId",
+                event.currentTarget.value.trim() === ""
+                  ? undefined
+                  : (event.currentTarget.value.trim() as HostId),
+              )
+            }
+            placeholder="host id"
+            type="search"
+            value={filter.hostId ?? ""}
+          />
+        </label>
+        <label className="usage-dashboard__field">
+          <span>Mode</span>
+          <OctantSelectField
+            aria-label="Filter by mode"
+            className="usage-dashboard__select select window-no-drag"
+            onValueChange={(value) =>
+              update("mode", value === "" ? undefined : (value as UsageQueryFilter["mode"]))
+            }
+            options={MODE_OPTIONS.map((option) => ({
               id: option.value,
               label: option.label,
-            })),
-          ]}
-          value={filter.category ?? ""}
-        />
-      </label>
-      <label className="usage-dashboard__field">
-        <span>From date</span>
-        <OctantInput
-          aria-label="Usage from date"
-          className="usage-dashboard__text-input input window-no-drag"
-          onChange={(event) => updateDate("from", event.currentTarget.value)}
-          type="date"
-          value={dateInputValue(filter.from)}
-        />
-      </label>
-      <label className="usage-dashboard__field">
-        <span>To date</span>
-        <OctantInput
-          aria-label="Usage to date"
-          className="usage-dashboard__text-input input window-no-drag"
-          onChange={(event) => updateDate("to", event.currentTarget.value)}
-          type="date"
-          value={dateInputValue(filter.to)}
-        />
-      </label>
-      {rangeError !== undefined ? (
-        <p className="usage-dashboard__filter-error" role="alert">
-          {rangeError}
-        </p>
-      ) : null}
-    </div>
+            }))}
+            value={filter.mode ?? ""}
+          />
+        </label>
+        <label className="usage-dashboard__field">
+          <span>Project</span>
+          <OctantInput
+            aria-label="Filter by project id"
+            className="usage-dashboard__text-input input window-no-drag"
+            onChange={(event) =>
+              update(
+                "projectId",
+                event.currentTarget.value.trim() === ""
+                  ? undefined
+                  : event.currentTarget.value.trim(),
+              )
+            }
+            placeholder="project id"
+            type="search"
+            value={filter.projectId ?? ""}
+          />
+        </label>
+        <label className="usage-dashboard__field">
+          <span>Thread</span>
+          <OctantInput
+            aria-label="Filter by thread id"
+            className="usage-dashboard__text-input input window-no-drag"
+            onChange={(event) => {
+              const value = event.currentTarget.value.trim();
+              if (value === "") {
+                clear("subjectAggregateType", "subjectAggregateId");
+                return;
+              }
+              onChange({
+                ...filter,
+                subjectAggregateType: "chat-thread",
+                subjectAggregateId: value,
+              });
+            }}
+            placeholder="thread id"
+            type="search"
+            value={filter.subjectAggregateId ?? ""}
+          />
+        </label>
+        <label className="usage-dashboard__field">
+          <span>Request shape</span>
+          <OctantInput
+            aria-label="Filter by request shape"
+            className="usage-dashboard__text-input input window-no-drag"
+            onChange={(event) =>
+              update(
+                "requestShape",
+                event.currentTarget.value.trim() === ""
+                  ? undefined
+                  : event.currentTarget.value.trim(),
+              )
+            }
+            placeholder="request shape"
+            type="search"
+            value={filter.requestShape ?? ""}
+          />
+        </label>
+        <label className="usage-dashboard__field">
+          <span>Quality</span>
+          <OctantSelectField
+            aria-label="Filter by measurement quality"
+            className="usage-dashboard__select select window-no-drag"
+            onValueChange={(value) =>
+              update("quality", value === "" ? undefined : (value as UsageQueryFilter["quality"]))
+            }
+            options={QUALITY_OPTIONS.map((option) => ({
+              id: option.value,
+              label: option.label,
+            }))}
+            value={filter.quality ?? ""}
+          />
+        </label>
+        <label className="usage-dashboard__field">
+          <span>Category</span>
+          <OctantSelectField
+            aria-label="Filter by context category"
+            className="usage-dashboard__select select window-no-drag"
+            onValueChange={(value) =>
+              update("category", value === "" ? undefined : (value as ContextEntryCategory))
+            }
+            options={[
+              { id: "", label: "All categories" },
+              ...CATEGORY_OPTIONS.map((option) => ({
+                id: option.value,
+                label: option.label,
+              })),
+            ]}
+            value={filter.category ?? ""}
+          />
+        </label>
+        <label className="usage-dashboard__field">
+          <span>From date</span>
+          <OctantInput
+            aria-label="Usage from date"
+            className="usage-dashboard__text-input input window-no-drag"
+            onChange={(event) => updateDate("from", event.currentTarget.value)}
+            type="date"
+            value={dateInputValue(filter.from)}
+          />
+        </label>
+        <label className="usage-dashboard__field">
+          <span>To date</span>
+          <OctantInput
+            aria-label="Usage to date"
+            className="usage-dashboard__text-input input window-no-drag"
+            onChange={(event) => updateDate("to", event.currentTarget.value)}
+            type="date"
+            value={dateInputValue(filter.to)}
+          />
+        </label>
+        {rangeError !== undefined ? (
+          <p className="usage-dashboard__filter-error" role="alert">
+            {rangeError}
+          </p>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -761,10 +840,10 @@ function UsageControls(props: UsageControlsProps) {
       <OctantButton onClick={props.onExportJson} type="button" variant="secondary">
         <Download aria-hidden="true" size={14} /> Export JSON
       </OctantButton>
-      <OctantButton onClick={props.onRetain} type="button" variant="destructive">
+      <OctantButton onClick={props.onRetain} type="button" variant="destructive-outline">
         <Eraser aria-hidden="true" size={14} /> Purge older than 30 days
       </OctantButton>
-      <OctantButton onClick={props.onReset} type="button" variant="destructive">
+      <OctantButton onClick={props.onReset} type="button" variant="destructive-outline">
         <Trash2 aria-hidden="true" size={14} /> Reset all usage
       </OctantButton>
       {props.message !== undefined ? (

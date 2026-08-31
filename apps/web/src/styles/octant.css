@@ -3755,10 +3755,10 @@ input.switch:checked::after {
 .mode-trigger {
   display: flex;
   align-items: center;
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-1);
   width: 100%;
   min-height: var(--oct-control-height-sm);
-  padding-inline: var(--oct-space-2);
+  padding-inline: var(--oct-space-1);
   border: 0;
   border-radius: var(--oct-radius-sm);
   background: none;
@@ -4027,7 +4027,7 @@ html[data-octant-theme-mode="light"] .composer {
    clicking into the box stays quiet. */
 .composer:focus-within:has(.composer-input:focus-visible) {
   outline: 2px solid var(--oct-accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 .composer-chips {
   display: flex;
@@ -6828,15 +6828,14 @@ html[data-octant-theme-mode="light"] .composer {
    Both matter, and neither implies the other. A provider can be on and
    unreachable (the key expired), or off and perfectly healthy. Folding
    them into one green light is how you get a user staring at "Ready"
-   wondering why nothing routes to it. So when a provider is off the
-   badge is hidden rather than recoloured, because reachability is not a
-   question worth answering about something that will not be used — but
-   the space is kept, so the rows do not jump as you toggle down a list.
+   wondering why nothing routes to it. When a provider is off, the row
+   says Off rather than preserving a stale reachability label. The name
+   stays readable so restoring it never becomes a re-setup puzzle.
 
    Order is meaningful: it is the fallback order, the thing the
    "Provider unreachable" callout means by "the next provider in your
-   order". That is why every row has a grip and why the list is a list
-   rather than a set of cards. */
+   order". Reorder mode reveals the row controls only while that order is
+   being edited; the list remains a compact scan surface otherwise. */
 .provlist {
   margin: 0;
   padding: 0;
@@ -6849,6 +6848,12 @@ html[data-octant-theme-mode="light"] .composer {
   gap: 0 var(--oct-space-3);
   padding: var(--oct-space-3) var(--oct-space-4);
   border-top: 1px solid var(--oct-border-soft);
+}
+.provrow[data-reordering="false"] {
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+}
+.provrow[data-reordering="false"] .prov-main {
+  grid-column: 2;
 }
 .provrow:first-child {
   border-top: 0;
@@ -6905,19 +6910,13 @@ html[data-octant-theme-mode="light"] .composer {
   place-items: center;
 }
 
-/* off keeps everything: the key, the endpoint, the place in the order.
-   Turning a provider back on must never be a re-setup, so this dims the
-   identity and touches nothing else. The switch stays at full strength —
-   it is the one thing you came to the row to press. */
+/* Off keeps everything: key, endpoint, and model-picker position. Dim only
+   the mark and model count; the name, Off label, details, and switch remain
+   readable and operable. */
 .provrow[data-enabled="false"] > .icon-mark,
-.provrow[data-enabled="false"] .prov-main,
 .provrow[data-enabled="false"] .prov-models {
-  opacity: var(--oct-disabled-opacity);
+  opacity: 0.68;
 }
-.provrow[data-enabled="false"] .prov-status {
-  visibility: hidden;
-}
-
 /* ── settings, narrow ─────────────────────────────────────────────────
    Below the medium breakpoint the nav and the pane are fighting over a
    few hundred pixels, and the nav wins by being a fixed width — at phone
@@ -6988,6 +6987,9 @@ html[data-octant-theme-mode="light"] .composer {
     column-gap: var(--oct-space-2);
     row-gap: var(--oct-space-2);
   }
+  .provrow[data-reordering="false"] {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
   .provrow > .icon-mark {
     display: none;
   }
@@ -6995,6 +6997,12 @@ html[data-octant-theme-mode="light"] .composer {
     grid-area: 1 / 1;
   }
   .prov-main {
+    grid-area: 1 / 2;
+  }
+  .provrow[data-reordering="false"] .prov-main {
+    grid-area: 1 / 1;
+  }
+  .provrow[data-reordering="false"] > .prov-actions {
     grid-area: 1 / 2;
   }
   .provrow > input.switch {

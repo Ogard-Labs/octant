@@ -20,6 +20,28 @@ const chatProjectB = {
 } as ProjectSummary;
 
 describe("ProjectSidebarSection chat thread nesting", () => {
+  it("keeps one empty Projects affordance and hides an empty Archive", () => {
+    render(
+      <ProjectSidebarSection
+        addProjectLabel="folder"
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onAddProject={vi.fn()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projects={[]}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Projects" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add folder" })).toBeVisible();
+    expect(screen.queryByText("No Projects in this mode.")).toBeNull();
+    expect(screen.queryByText("Archive")).toBeNull();
+  });
+
   it("nests chat threads under their Project and keeps Unfiled for threads with none", async () => {
     const user = userEvent.setup();
     const onSelectThread = vi.fn();

@@ -347,11 +347,17 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   variant={descriptor.current ? "secondary" : "ghost"}
                 >
                   <span className="first-run__rail-marker" aria-hidden>
-                    {descriptor.configured ? <Check size={14} /> : String(index + 1)}
+                    {descriptor.configured && !descriptor.current ? (
+                      <Check size={14} />
+                    ) : (
+                      String(index + 1)
+                    )}
                   </span>
                   <span className="first-run__rail-title">{descriptor.title}</span>
                   <span className="first-run__rail-summary">{descriptor.summary}</span>
-                  {descriptor.configured ? <span className="sr-only">Configured</span> : null}
+                  {descriptor.configured && !descriptor.current ? (
+                    <span className="sr-only">Configured</span>
+                  ) : null}
                 </OctantButton>
               </li>
             ))}

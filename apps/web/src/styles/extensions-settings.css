@@ -75,13 +75,28 @@
 }
 
 .extensions-settings__skill-id {
-  grid-column: 2 / -1;
+  display: block;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   overflow: hidden;
   color: var(--oct-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.extensions-settings__technical-details {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: var(--oct-space-3);
+  margin-top: var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  background: var(--oct-surface-warm);
+  border-radius: var(--oct-radius-sm);
+}
+
+.extensions-settings__technical-source {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .extensions-settings__components {

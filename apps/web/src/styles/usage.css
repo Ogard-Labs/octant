@@ -43,16 +43,46 @@
   font-weight: var(--oct-weight-strong);
 }
 
+.usage-dashboard__filter-panel {
+  background: var(--oct-surface);
+  border: 0;
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
+}
+
+.usage-dashboard__filter-panel > button {
+  width: 100%;
+  justify-content: flex-start;
+  padding-inline: var(--oct-space-4);
+}
+
+.usage-dashboard__filter-count {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  margin-inline-start: auto;
+  place-items: center;
+  color: var(--oct-fg);
+  background: var(--oct-selection);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-dashboard__filter-panel > button > svg:last-child {
+  margin-inline-start: var(--oct-space-1);
+}
+
 .usage-dashboard__filters {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   min-width: 0;
-  padding: var(--oct-space-3);
-  background: var(--oct-surface);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  padding: 0 var(--oct-space-3) var(--oct-space-3);
+}
+
+.usage-dashboard__filters[hidden] {
+  display: none;
 }
 
 .usage-dashboard__field {

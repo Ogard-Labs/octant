@@ -961,6 +961,7 @@ function AdvancedSection({
         <h2>Maintenance</h2>
         <div className="setgroup">
           <SettingRow
+            description="Restores the current mode's pane arrangement, sidebar, and dock to defaults. Threads and data are kept."
             focused={focusedSetting === settingId("reset-layout")}
             label="Reset active mode layout"
             scope="app"
@@ -977,6 +978,7 @@ function AdvancedSection({
           </SettingRow>
           {resetBoundsAvailable ? (
             <SettingRow
+              description="Moves and resizes the native window to its default bounds. Workspace data is kept."
               focused={focusedSetting === settingId("reset-window-bounds")}
               label="Reset native window bounds"
               scope="app"
@@ -994,6 +996,7 @@ function AdvancedSection({
           ) : null}
           {diagnosticsExportClient !== undefined ? (
             <SettingRow
+              description="Creates a local support bundle from the selected host. Review it before sharing."
               focused={focusedSetting === settingId("export-diagnostics")}
               label="Export diagnostics"
               scope="host"

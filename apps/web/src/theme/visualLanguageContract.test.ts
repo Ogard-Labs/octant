@@ -118,6 +118,17 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/padding:\s*18px 16px 12px/);
   });
 
+  it("keeps keyboard focus inside the composer edge instead of drawing a detached halo", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const focus =
+      system.match(
+        /\.composer:focus-within:has\(\.composer-input:focus-visible\)\s*\{[^}]+\}/,
+      )?.[0] ?? "";
+
+    expect(focus).toMatch(/outline:\s*2px solid var\(--oct-accent\)/);
+    expect(focus).toMatch(/outline-offset:\s*-2px/);
+  });
+
   it("keeps empty composer pickers as quiet toolbar items instead of nested fields", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const emptyPicker =
@@ -148,6 +159,14 @@ describe("the public-block visual language", () => {
   it("does not keep a native select recipe on the composer row", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     expect(system).not.toMatch(/\.composer-row select\b/);
+  });
+
+  it("keeps the labeled mode switcher compact enough to preserve the Octant name", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const trigger = system.match(/\.mode-trigger\s*\{[^}]+\}/)?.[0] ?? "";
+
+    expect(trigger).toMatch(/gap:\s*var\(--oct-space-1\)/);
+    expect(trigger).toMatch(/padding-inline:\s*var\(--oct-space-1\)/);
   });
 
   it("aligns Appearance subgroups to the Settings card content inset", () => {

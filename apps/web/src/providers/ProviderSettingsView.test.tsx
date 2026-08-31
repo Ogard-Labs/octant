@@ -1478,6 +1478,8 @@ describe("ProviderSettingsView", () => {
       />,
     );
 
+    expect(screen.queryByRole("button", { name: "Move Second Provider up" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Reorder providers" }));
     expect(screen.getByRole("button", { name: "Move Second Provider up" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Move Second Provider down" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Move First Provider up" })).toBeDisabled();

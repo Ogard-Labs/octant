@@ -1,4 +1,4 @@
-import { BookOpen, Puzzle } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronUp, Puzzle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
@@ -101,6 +101,11 @@ function standaloneSkillSourceLabel(skill: StandaloneSkillRecord): string {
   if (projectSource?.[1] === "working") return "Project skills · working directory";
   if (projectSource?.[2] !== undefined) return `Project skills · parent ${projectSource[2]}`;
   return "Agents skills directory";
+}
+
+function standaloneSkillSummarySourceLabel(skill: StandaloneSkillRecord): string {
+  if (skill.source.kind !== "agents-skills-directory") return sourceLabel(skill.source);
+  return String(skill.source.sourceRef) === "user-global" ? "User skill" : "Project skill";
 }
 
 function licenseLabel(license: ExtensionPackagePreview["review"]["license"]): string {
@@ -609,8 +614,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         <h2 id="extensions-settings-heading">Skills &amp; Extensions</h2>
       )}
       <p className="extensions-settings__description">
-        Installed plugins and skills contribute context or executable components only after explicit
-        trust, enablement, compatibility, and host/mode/Project/thread policy all resolve effective.
+        Skills extend what agents can do. Review the source, then trust and enable only what you
+        want available.
       </p>
       <OctantTabs defaultValue="installed">
         <OctantTabsList>
@@ -1215,6 +1220,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
 
 function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
   const skill = props.skill;
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const blocked = skill.effectiveState.kind === "blocked";
   return (
     <li className="extcard">
       <span aria-hidden="true" className="icon-mark">
@@ -1222,38 +1229,63 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
       </span>
       <span className="extcard-name">{skill.displayName}</span>
       <span className="extcard-right">
-        <span className={skill.skill.available ? "badge" : "badge badge-warn"}>
-          {skill.skill.available ? "Available" : "Unavailable"}
+        <span className={blocked || !skill.skill.available ? "badge badge-warn" : "badge badge-ok"}>
+          {blocked
+            ? effectiveLabel(skill.effectiveState)
+            : skill.skill.available
+              ? "Available"
+              : "Unavailable"}
         </span>
+        <OctantButton
+          aria-expanded={detailsOpen}
+          aria-label={`${detailsOpen ? "Hide" : "Show"} details for ${skill.displayName}`}
+          onClick={() => setDetailsOpen((current) => !current)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {detailsOpen ? (
+            <ChevronUp aria-hidden="true" size={14} />
+          ) : (
+            <ChevronDown aria-hidden="true" size={14} />
+          )}
+          Details
+        </OctantButton>
       </span>
-      <span className="extcard-src">{standaloneSkillSourceLabel(skill)}</span>
-      {/* The qualified id carries a full content hash. It identifies the exact
-          package for a support question, so it stays reachable, but printing it
-          in full made every card lead with a line of hex. */}
-      <code className="extensions-settings__skill-id" title={String(skill.skill.qualifiedId)}>
-        {skill.skill.qualifiedId}
-      </code>
+      <span className="extcard-src">{standaloneSkillSummarySourceLabel(skill)}</span>
       {skill.description === undefined ? null : <p className="extcard-desc">{skill.description}</p>}
-      <dl className="extensions-settings__compatibility">
-        <div>
-          <dt>Review</dt>
-          <dd>{skill.reviewed ? "Reviewed" : "Review required"}</dd>
+      {detailsOpen ? (
+        <div className="extensions-settings__technical-details">
+          <span className="extensions-settings__technical-source">
+            {standaloneSkillSourceLabel(skill)}
+          </span>
+          {/* The qualified id carries a full content hash. It identifies the
+              exact package for support and remains available on demand. */}
+          <code className="extensions-settings__skill-id" title={String(skill.skill.qualifiedId)}>
+            {skill.skill.qualifiedId}
+          </code>
+          <dl className="extensions-settings__compatibility">
+            <div>
+              <dt>Review</dt>
+              <dd>{skill.reviewed ? "Reviewed" : "Review required"}</dd>
+            </div>
+            <div>
+              <dt>Requested</dt>
+              <dd>{skill.desiredEnabled ? "Enabled" : "Disabled"}</dd>
+            </div>
+            <div>
+              <dt>Effective state</dt>
+              <dd data-blocked={blocked ? "true" : "false"}>
+                {effectiveLabel(skill.effectiveState)}
+              </dd>
+            </div>
+            <div>
+              <dt>Content</dt>
+              <dd>{skillContentSize(skill.contentBytes)}</dd>
+            </div>
+          </dl>
         </div>
-        <div>
-          <dt>Desired</dt>
-          <dd>{skill.desiredEnabled ? "Enabled" : "Disabled"}</dd>
-        </div>
-        <div>
-          <dt>State</dt>
-          <dd data-blocked={skill.effectiveState.kind === "blocked" ? "true" : "false"}>
-            {effectiveLabel(skill.effectiveState)}
-          </dd>
-        </div>
-        <div>
-          <dt>Content</dt>
-          <dd>{skillContentSize(skill.contentBytes)}</dd>
-        </div>
-      </dl>
+      ) : null}
       {skill.skill.diagnostic === undefined ? null : (
         <p className="extensions-settings__failure" role="status">
           <span>{skill.skill.diagnostic.code}</span>
