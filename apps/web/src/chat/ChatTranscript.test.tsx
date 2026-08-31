@@ -405,7 +405,9 @@ describe("ChatTranscript", () => {
   it("shows completed work duration while omitting sub-second durations", () => {
     const view = viewFixture({ attemptUpdatedAt: "2026-07-20T08:01:05.000Z" });
     const { rerender } = render(<ChatTranscript view={view} />);
-    expect(screen.getByText("Worked for 1m 5s")).toBeVisible();
+    const workedFor = screen.getByText("Worked for 1m 5s");
+    expect(workedFor).toBeVisible();
+    expect(getComputedStyle(workedFor.closest("p")!).position).not.toBe("absolute");
 
     rerender(<ChatTranscript view={viewFixture({ attemptUpdatedAt: now })} />);
     expect(screen.queryByText(/Worked for/)).not.toBeInTheDocument();
