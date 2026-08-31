@@ -8,7 +8,7 @@ import type { OctantCommand } from "./commandModel";
 function harness(commands: ReadonlyArray<OctantCommand>) {
   return render(
     <OctantCommandProvider commands={commands}>
-      <button type="button">Opener</button>
+      <input aria-label="Opener" />
       <CommandPalette />
     </OctantCommandProvider>,
   );
@@ -72,7 +72,7 @@ describe("CommandPalette", () => {
   it("opens on Cmd+K, searches and runs by keyboard alone, then restores focus", async () => {
     const user = userEvent.setup();
     harness(hostCommands());
-    const opener = screen.getByRole("button", { name: "Opener" });
+    const opener = screen.getByRole("textbox", { name: "Opener" });
     opener.focus();
 
     const search = await openPalette(user);
@@ -241,6 +241,20 @@ describe("CommandPalette", () => {
     await openPalette(user);
 
     expect(screen.getByRole("option", { name: /Toggle Zen mode/ })).toHaveTextContent("⌘⇧Z");
+  });
+
+  it("keeps host authority context and the close key in a quiet footer", async () => {
+    const user = userEvent.setup();
+    harness(hostCommands());
+
+    await openPalette(user);
+
+    const footer = screen.getByRole("contentinfo");
+    expect(footer).toHaveTextContent(
+      "Host-offered commands. Every action still runs its normal authority check.",
+    );
+    expect(footer).toHaveTextContent("Esc");
+    expect(footer).toHaveTextContent("Close");
   });
 
   it("stays inert when this host offers no runnable command", async () => {

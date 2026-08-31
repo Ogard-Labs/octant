@@ -33,6 +33,10 @@ or Project-wide surfaces.
   tools, not threads, and shows only capabilities valid for that pane. Hiding
   a tool does not stop its server-owned process; close and stop keep their
   existing product meaning. Narrow windows keep the existing overlay drawer.
+- **Tooling opens on demand.** New windows start with both utility regions
+  closed, so an empty dock never narrows the primary workspace. Selecting a
+  tool opens its chosen region; an explicit per-window show or hide choice is
+  restored on later launches.
 - **Terminal-first bottom panel.** The pane title row may open a horizontal
   bottom panel below the central workspace and right dock. Terminal is its
   first supported tab; the strip remains tool-shaped so another horizontal

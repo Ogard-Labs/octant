@@ -150,13 +150,11 @@ export function readUtilityDockPresentation(
   scope: { readonly localStorage?: Storage },
   windowId: string,
   /**
-   * What an unset window shows. A wide window shows the dock, so the workspace
-   * arrives as sidebar, thread, and tools rather than a column in an empty
-   * pane. A narrow window presents the dock as a modal drawer, so defaulting it
-   * open there would cover the app on launch; those windows stay closed until
-   * asked.
+   * What an unset window shows. A new window starts with the workspace as the
+   * only primary region. Opening a tool or restoring an explicit prior choice
+   * reveals the dock; an empty third column is not useful state.
    */
-  defaultOpen = true,
+  defaultOpen = false,
 ): UtilityDockPresentation {
   return readDockPresentationRecord(scope, utilityDockStorageKey(windowId), true, defaultOpen);
 }
@@ -218,10 +216,8 @@ function readDockPresentationRecord(
   defaultOpen = false,
 ): UtilityDockPresentation {
   // A window that has never been told otherwise follows the caller's default.
-  // Starting hidden left the workspace as a narrow column in an empty window,
-  // with the dock's own region reading as page margin. An explicit close is
-  // still remembered. The bottom panel keeps starting closed (0044), which is
-  // why it reads this with readOpen false.
+  // The dock and bottom panel both start closed; a tool selection or an
+  // explicit restored preference is what earns another workspace region.
   const unset = { open: readOpen && defaultOpen, threads: new Map() };
   try {
     const raw = scope.localStorage?.getItem(storageKey);

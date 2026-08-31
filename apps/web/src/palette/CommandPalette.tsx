@@ -165,10 +165,12 @@ export function CommandPalette() {
           value={query}
         />
       </div>
-      <p className="command-palette__scope" role="note">
-        Commands this host offers right now. Each one runs through its ordinary authority check.
-      </p>
-      <p aria-atomic="true" aria-live="polite" className="command-palette__status" role="status">
+      <p
+        aria-atomic="true"
+        aria-live="polite"
+        className="command-palette__status sr-only"
+        role="status"
+      >
         {statusMessage}
       </p>
       <div
@@ -222,6 +224,15 @@ export function CommandPalette() {
           </div>
         ))}
       </div>
+      <footer className="command-palette__footer">
+        <p className="command-palette__scope" role="note">
+          Host-offered commands. Every action still runs its normal authority check.
+        </p>
+        <span aria-hidden="true" className="command-palette__close-hint">
+          <kbd>Esc</kbd>
+          <span>Close</span>
+        </span>
+      </footer>
     </OctantDialog>
   );
 }

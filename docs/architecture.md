@@ -326,7 +326,7 @@ fourth authority mode.
 [0044](decisions/0044-the-dock-hosts-live-thread-owned-tools.md) are the agreed
 interaction model for remaining renderer work.
 [0070](decisions/0070-setup-surfaces-compose-from-public-blocks.md)
-is the agreed visual language: raise grouped forms and setup objects, enlarge
+is the accepted visual language: raise grouped forms and setup objects, enlarge
 radii, and match public block composition on Octant-owned surfaces, without
 vendoring a catalog or replacing the shell. Environment is already a compact
 header summary with a transient disclosure whose open state is not persisted

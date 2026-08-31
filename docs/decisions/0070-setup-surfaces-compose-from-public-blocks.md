@@ -1,6 +1,6 @@
 # 0070. Renderer visual language matches public block catalogs
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -30,8 +30,9 @@ _how those owned surfaces look_.
   composer/dialog 20px; `OctantCard` uses `--octant-shadow-sm`; floating
   overlays keep `--octant-shadow-overlay`; setup and form objects are raised
   cards with section progress; selected rows use a fill _and_ a label.
-  Tokens change once in `packages/theme`, `octant.css`, `shadcn-theme.css`,
-  and the owned recipes so every surface inherits.
+  Runtime radius and elevation aliases change once in `styles.css`,
+  `octant.css`, `shadcn-theme.css`, and the owned recipes so every surface
+  inherits. Persisted semantic colours remain owned by `packages/theme`.
 - **Shell stays an ADE.** Navigation rows stay compact (28–32px). Monaco,
   xterm, the dock grid, and authority copy stay Octant-owned. They consume
   the new radii and selection fill; they are not replaced by sidebar or
@@ -39,31 +40,29 @@ _how those owned surfaces look_.
 - **Composition targets.** Restyle the Octant owner; do not swap in a
   foreign block. There is no account login surface.
 
-  | Surface                     | Octant owner                                           | Visual pattern                         |
-  | --------------------------- | ------------------------------------------------------ | -------------------------------------- |
-  | Settings, Provider Settings | `SettingRow`, settings registry                        | Raised form cards                      |
-  | First-run                   | `FirstRunOnboarding` (0019 / 0033)                     | Stepped progress on cards              |
-  | Welcome + composer chrome   | `ChatWelcome`, `ThreadComposer`, `ComposerModelPicker` | Raised prompt card, quiet chrome       |
-  | Command palette             | `CommandPalette`                                       | Searchable command list                |
-  | Shared dialogs              | `OctantDialog` callers                                 | Raised dialog card                     |
-  | Usage                       | `UsageDashboard`                                       | Stat cards                             |
-  | Boards / empty              | board + empty-state owners                             | Card grid and empty state              |
+  | Surface                     | Octant owner                                           | Visual pattern                   |
+  | --------------------------- | ------------------------------------------------------ | -------------------------------- |
+  | Settings, Provider Settings | `SettingRow`, settings registry                        | Raised form cards                |
+  | First-run                   | `FirstRunOnboarding` (0019 / 0033)                     | Stepped progress on cards        |
+  | Welcome + composer chrome   | `ChatWelcome`, `ThreadComposer`, `ComposerModelPicker` | Raised prompt card, quiet chrome |
+  | Command palette             | `CommandPalette`                                       | Searchable command list          |
+  | Shared dialogs              | `OctantDialog` callers                                 | Raised dialog card               |
+  | Usage                       | `UsageDashboard`                                       | Stat cards                       |
+  | Boards / empty              | board + empty-state owners                             | Card grid and empty state        |
 
 - **Dual paint dies on contact.** A touched surface drops `.btn*` on
   `OctantButton` and feature CSS that repaints adapter color, border, radius,
   shadow, focus, hover, disabled, or error (0046).
-- **Implementation sequence**: (1) tokens and recipes; (2) Settings; (3)
-  first-run; (4) welcome and composer; (5) palette and dialogs; (6) shell
-  selection, usage, boards, Environment. Each slice updates DESIGN.md for
-  what shipped.
+- **Implementation sequence**: tokens and recipes first, followed by Settings,
+  first-run, welcome and composer, palette and dialogs, then shell selection,
+  usage, boards, and Environment. Each shipped slice updates `DESIGN.md`.
 
 ## Consequences
 
 - The product can look like a modern block catalog while remaining one
   Octant-owned theme and adapter API.
-- 0016's ban on replacing composers and the shell stands. Accepting this
-  record without the slices would leave DESIGN.md describing the flat
-  workbench as current truth.
+- 0016's ban on replacing composers and the shell stands. `DESIGN.md`, the
+  owned recipes, and the visual-language contract tests ship with this record.
 
 ## Related
 

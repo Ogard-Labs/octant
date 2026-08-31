@@ -95,7 +95,7 @@ describe("thread utility presentation persistence", () => {
       threads: openThreadUtilityTab(new Map(), key, "terminal"),
     });
     expect(readUtilityDockPresentation({ localStorage }, "window-b")).toEqual({
-      open: true,
+      open: false,
       threads: new Map(),
     });
   });
@@ -114,9 +114,9 @@ describe("thread utility presentation persistence", () => {
     expect(readUtilityDockOpen({ localStorage }, "window-a")).toBe(false);
   });
 
-  it("shows the dock in a window that has never been told otherwise", () => {
+  it("keeps the dock closed until a window chooses to show it", () => {
     expect(readUtilityDockPresentation({ localStorage: memoryStorage() }, "fresh")).toEqual({
-      open: true,
+      open: false,
       threads: new Map(),
     });
   });

@@ -91,14 +91,10 @@ afterEach(() => {
   }
 });
 
-/**
- * A wide window arrives with the dock already shown, so a test that needs it
- * visible asks for that state rather than for a click. Narrow windows and
- * windows that stored a close still need the control.
- */
+/** Tests that need a visible dock ask for it through the ordinary shell action. */
 async function showRightUtilityDock(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  const opener = screen.queryByRole("button", { name: "Open Right sidebar" });
-  if (opener !== null) await user.click(opener);
+  if (screen.queryByRole("complementary", { name: "Right Utility Dock" }) !== null) return;
+  await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
 }
 
 function navigatorAssistantClient(
@@ -491,6 +487,23 @@ describe("App", () => {
       }),
     );
     expect(screen.queryByRole("combobox", { name: "Search commands" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a fresh wide workspace focused until a utility is chosen", async () => {
+    render(
+      <App
+        chatClient={chats()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    expect(await screen.findByRole("region", { name: "Chat welcome" })).toBeVisible();
+    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
   });
 
   it("opens the exact thread returned by the authoritative New chat command", async () => {

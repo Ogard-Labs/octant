@@ -180,8 +180,9 @@ pointer targets. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace sidebar defaults to 232px, supports
 resizing, and may collapse completely while leaving Show sidebar and New thread
 in the native title rail. Settings uses a separate compact 248px navigation
-rail. The right dock defaults to 320px. The pane/title control rail is 34px in
-the native host and the status bar is 26px.
+rail. The right dock defaults to 320px when open. A fresh window starts with it
+closed; choosing a tool or restoring an explicit prior choice opens it. The
+pane/title control rail is 34px in the native host and the status bar is 26px.
 
 Navigation panes stay compact hairline rails. Grouped forms, setup objects,
 welcome composers, and cards use the raised card recipe (`OctantCard` /
@@ -329,8 +330,9 @@ and Tooltip. Composition rules:
   titled for assistive technology. Use `OctantDialog` with a real label even
   when the title is visually hidden.
 - Use Badge for status labels, Alert for callouts, Empty for empty states,
-  Skeleton for loading, and `sonner` for toasts. Do not recreate these with
-  styled spans or animated divs.
+  Skeleton for loading, and the shared `.toast-stack` notification owner for
+  transient acknowledgements. Do not add another toast package or recreate
+  these with styled spans or animated divs.
 - Use `cn()` for conditional classes, semantic Tailwind tokens (`bg-primary`,
   `text-muted-foreground`, `border-border`), `size-*` for equal dimensions,
   and `truncate` for clipping. Feature classes position; recipe classes paint.
