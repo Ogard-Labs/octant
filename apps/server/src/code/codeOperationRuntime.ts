@@ -47,6 +47,8 @@ import {
   codeRuntimeWorkObserved,
   codeRuntimeWorkStarted,
   codeRuntimeWorkStateFrom,
+  type CodeRuntimeWorkRecordFailure,
+  type CodeRuntimeWorkRecordOutcome,
 } from "./codeRuntimeWorkRecorder";
 import { clampTurnAccessPosture, decidesCodeEffectsByApproval } from "@octant/domain";
 import {
@@ -131,6 +133,8 @@ export interface CodeOperationRuntimeOptions {
   readonly actor: EventActor;
   readonly clock: () => string;
   readonly uuid: () => string;
+  /** Reports a board-record failure without exposing journal or provider details. */
+  readonly reportRuntimeWorkFailure?: (failure: CodeRuntimeWorkRecordFailure) => void;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
@@ -266,6 +270,14 @@ export function createCodeOperationRuntime(
     clock: options.clock,
     uuid: options.uuid,
   });
+  const reportRuntimeWorkFailure =
+    options.reportRuntimeWorkFailure ??
+    ((failure: CodeRuntimeWorkRecordFailure) => {
+      console.warn(`Code runtime work record ${failure.kind}.`);
+    });
+  const observeRuntimeWorkOutcome = (outcome: CodeRuntimeWorkRecordOutcome): void => {
+    if (outcome.status === "failed") reportRuntimeWorkFailure(outcome);
+  };
   const roots = new Map<
     string,
     Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>
@@ -404,7 +416,14 @@ export function createCodeOperationRuntime(
     uuid: options.uuid,
     clock: options.clock,
   });
-  const turns = new RuntimeTurnController({ options, events, roots, gitService, runtimeWork });
+  const turns = new RuntimeTurnController({
+    options,
+    events,
+    roots,
+    gitService,
+    runtimeWork,
+    observeRuntimeWorkOutcome,
+  });
   const authorityForTurn: CodeOperationAuthorityPort = {
     ...authority,
     effectiveThread: (windowId, thread) => {
@@ -421,7 +440,9 @@ export function createCodeOperationRuntime(
       // while still recording work that waits on approval.
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)
-        runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind });
+        observeRuntimeWorkOutcome(
+          runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind }),
+        );
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     terminals: terminal,
@@ -591,12 +612,14 @@ export function createCodeOperationRuntime(
         if (observed !== undefined) {
           const state = codeRuntimeWorkStateFrom(command, result);
           if (state !== undefined)
-            runtimeWork.settle({
-              id: observed.id,
-              threadId: command.threadId,
-              kind: observed.kind,
-              state,
-            });
+            observeRuntimeWorkOutcome(
+              runtimeWork.settle({
+                id: observed.id,
+                threadId: command.threadId,
+                kind: observed.kind,
+                state,
+              }),
+            );
         }
         return result;
       } catch (error) {
@@ -604,12 +627,14 @@ export function createCodeOperationRuntime(
         // The record closes rather than staying open for a unit that will never
         // report again.
         if (observed !== undefined)
-          runtimeWork.settle({
-            id: observed.id,
-            threadId: command.threadId,
-            kind: observed.kind,
-            state: "failed",
-          });
+          observeRuntimeWorkOutcome(
+            runtimeWork.settle({
+              id: observed.id,
+              threadId: command.threadId,
+              kind: observed.kind,
+              state: "failed",
+            }),
+          );
         throw error;
       } finally {
         if (command.kind === "start-provider-turn") turns.clearStart(command.threadId);
@@ -900,6 +925,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   >;
   readonly #git: GitService;
   readonly #runtimeWork: CodeRuntimeWorkRecorder;
+  readonly #observeRuntimeWorkOutcome: (outcome: CodeRuntimeWorkRecordOutcome) => void;
   #service: CodeOperationService | undefined;
   readonly #runner = new CodeTurnRunner();
   readonly #pending = new Map<
@@ -914,12 +940,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     roots: Map<string, Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>>;
     gitService: GitService;
     runtimeWork: CodeRuntimeWorkRecorder;
+    observeRuntimeWorkOutcome: (outcome: CodeRuntimeWorkRecordOutcome) => void;
   }) {
     this.#options = input.options;
     this.#events = input.events;
     this.#roots = input.roots;
     this.#git = input.gitService;
     this.#runtimeWork = input.runtimeWork;
+    this.#observeRuntimeWorkOutcome = input.observeRuntimeWorkOutcome;
   }
 
   bindService(service: CodeOperationService): void {
@@ -991,11 +1019,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // record's identity. It opens here rather than in `#launch`, because a turn
     // that never reaches its launch still holds the thread until something
     // closes it.
-    this.#runtimeWork.open({
-      id: String(active.operationId),
-      threadId: active.thread.id,
-      kind: "provider-turn",
-    });
+    this.#observeRuntimeWorkOutcome(
+      this.#runtimeWork.open({
+        id: active.operationId,
+        threadId: active.thread.id,
+        kind: "provider-turn",
+      }),
+    );
     return turnState("running");
   }
 
@@ -1304,12 +1334,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * forever.
    */
   #persistRuntimeWork(active: ActiveTurn, state: CodeTurnOutcome): void {
-    this.#runtimeWork.settle({
-      id: String(active.operationId),
-      threadId: active.thread.id,
-      kind: "provider-turn",
-      state,
-    });
+    this.#observeRuntimeWorkOutcome(
+      this.#runtimeWork.settle({
+        id: active.operationId,
+        threadId: active.thread.id,
+        kind: "provider-turn",
+        state,
+      }),
+    );
   }
 }
 

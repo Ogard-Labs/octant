@@ -907,6 +907,29 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("preserves the operation result when its runtime board record cannot be journaled", async () => {
+    const fixture = runtimeFixture({
+      terminalExit: { exitCode: 0 },
+      failRuntimeWorkJournal: true,
+    });
+
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "start-terminal",
+      operationId: operationId(74),
+      threadId,
+      checkoutId,
+      terminalId: operationId(75),
+      columns: 100,
+      rows: 30,
+      credentialRefs: [],
+    });
+
+    expect(result).toMatchObject({ kind: "terminal-state", state: "running" });
+    expect(fixture.runtimeWorkFailures).toEqual(["journal-unavailable"]);
+    expect(fixture.runtimeWorks()).toEqual([]);
+    fixture.close();
+  });
+
   it("closes a repository test run that could not be executed", async () => {
     const fixture = runtimeFixture({});
     const testRunId = operationId(80);
@@ -1125,6 +1148,7 @@ function runtimeFixture(options: {
     input: Parameters<GitObservationPort["readDiff"]>[0],
   ) => Promise<GitScopedDiffResult>;
   approvalValidator?: boolean | (() => boolean);
+  failRuntimeWorkJournal?: boolean;
   evidencePut?: (
     content: string,
     metadata?: { readonly truncated?: boolean },
@@ -1144,6 +1168,23 @@ function runtimeFixture(options: {
       .register(new CodeProjection()),
     clock: () => now,
   });
+  if (options.failRuntimeWorkJournal === true) {
+    const append = journal.append.bind(journal);
+    vi.spyOn(journal, "append").mockImplementation((input: Parameters<Journal["append"]>[0]) => {
+      const aggregate =
+        typeof input === "object" && input !== null && "aggregate" in input
+          ? input.aggregate
+          : undefined;
+      if (
+        typeof aggregate === "object" &&
+        aggregate !== null &&
+        "aggregateType" in aggregate &&
+        aggregate.aggregateType === "code-runtime"
+      )
+        throw new Error("runtime work journal unavailable");
+      return append(input);
+    });
+  }
   let activeThread = thread();
   const checkout = decodeCodeCheckoutIdentity({
     id: checkoutId,
@@ -1162,6 +1203,7 @@ function runtimeFixture(options: {
   ]);
   let evidenceCounter = 50;
   let uuidCounter = 100;
+  const runtimeWorkFailures: string[] = [];
   let exitTerminal: (() => void) | undefined;
   const runtime = createCodeOperationRuntime({
     persistence: {
@@ -1210,6 +1252,7 @@ function runtimeFixture(options: {
     actor,
     clock: () => now,
     uuid: () => `90000000-0000-4000-8000-${(++uuidCounter).toString().padStart(12, "0")}`,
+    reportRuntimeWorkFailure: (failure) => runtimeWorkFailures.push(failure.kind),
     terminalProcessPort: {
       start: () => {
         const exit = options.terminalExit;
@@ -1281,6 +1324,7 @@ function runtimeFixture(options: {
         }),
     /** The board reads the rebuildable Code projection, not journal history. */
     boardActivity: () => boardRuntimeActivityFromWorks(readCodeRuntimeWorks(connection, threadId)),
+    runtimeWorkFailures,
     close: () => connection.close(),
   };
 }

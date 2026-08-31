@@ -1,10 +1,15 @@
 import {
   decodeCodeRuntimeWork,
+  decodeCodeRuntimeWorkId,
   type CodeRuntimeWork,
   type CodeRuntimeWorkKind,
   type CodeRuntimeWorkState,
   type CodeOperationCommand,
   type CodeOperationResult,
+  type CodeOperationId,
+  type CodeTerminalId,
+  type CodeTestRunId,
+  type CodeGitOperationId,
   type CodeThreadId,
   type EventActor,
 } from "@octant/contracts";
@@ -13,7 +18,9 @@ import type { Journal } from "../persistence/journal";
 export const CODE_RUNTIME_WORK_UPDATED = "code.runtime-work-updated@1";
 const CODE_RUNTIME_AGGREGATE_TYPE = "code-runtime";
 
-type JournalPort = Pick<Journal, "append">;
+type JournalPort = {
+  readonly append: (...args: Parameters<Journal["append"]>) => unknown;
+};
 
 export interface CodeRuntimeWorkRecorderOptions {
   readonly journal: JournalPort;
@@ -28,7 +35,31 @@ export interface CodeRuntimeWorkRecorderOptions {
  * unit seen from the board, so it carries the unit's own identity rather than a
  * second one nothing else can join on.
  */
-export type CodeRuntimeWorkUnitId = string;
+export type CodeRuntimeWorkUnitId =
+  | CodeOperationId
+  | CodeTerminalId
+  | CodeTestRunId
+  | CodeGitOperationId;
+
+export type CodeRuntimeWorkRecordFailureKind = "invalid-runtime-work" | "journal-unavailable";
+
+export type CodeRuntimeWorkRecordOutcome =
+  | { readonly status: "recorded" }
+  | { readonly status: "unchanged" }
+  | { readonly status: "not-owned" }
+  | { readonly status: "failed"; readonly kind: CodeRuntimeWorkRecordFailureKind };
+
+export type CodeRuntimeWorkRecordFailure = Extract<
+  CodeRuntimeWorkRecordOutcome,
+  { readonly status: "failed" }
+>;
+
+export interface CodeRuntimeWorkPlan {
+  readonly id: CodeRuntimeWorkUnitId;
+  readonly kind: CodeRuntimeWorkKind;
+  readonly starts: boolean;
+  readonly reachesNetwork: boolean;
+}
 
 /**
  * Appends one `code.runtime-work-updated@1` record per unit of runtime work, so
@@ -51,7 +82,7 @@ export class CodeRuntimeWorkRecorder {
   readonly #clock: () => string;
   readonly #actor: typeof EventActor.Type;
   readonly #open = new Map<
-    string,
+    CodeRuntimeWorkUnitId,
     { readonly version: number; readonly state: CodeRuntimeWorkState }
   >();
 
@@ -67,8 +98,8 @@ export class CodeRuntimeWorkRecorder {
     readonly id: CodeRuntimeWorkUnitId;
     readonly threadId: CodeThreadId;
     readonly kind: CodeRuntimeWorkKind;
-  }): void {
-    this.#record(input.id, input.threadId, input.kind, "running");
+  }): CodeRuntimeWorkRecordOutcome {
+    return this.#record(input.id, input.threadId, input.kind, "running");
   }
 
   /**
@@ -76,19 +107,21 @@ export class CodeRuntimeWorkRecorder {
    * record and releases its version, so a unit id that is never reused cannot
    * grow this map without bound.
    *
-   * Settling a record this recorder never opened is a no-op: the work either
-   * belongs to a different host process or was never observed starting, and
-   * inventing an opening event for it would report work that did not run.
+   * Settling a record this recorder never opened returns `not-owned`: the work
+   * either belongs to a different host process or was never observed starting,
+   * and inventing an opening event for it would report work that did not run.
    */
   settle(input: {
     readonly id: CodeRuntimeWorkUnitId;
     readonly threadId: CodeThreadId;
     readonly kind: CodeRuntimeWorkKind;
     readonly state: CodeRuntimeWorkState;
-  }): void {
-    if (!this.#open.has(input.id)) return;
-    this.#record(input.id, input.threadId, input.kind, input.state);
-    if (input.state !== "running" && input.state !== "waiting") this.#open.delete(input.id);
+  }): CodeRuntimeWorkRecordOutcome {
+    if (!this.#open.has(input.id)) return { status: "not-owned" };
+    const outcome = this.#record(input.id, input.threadId, input.kind, input.state);
+    if (outcome.status === "recorded" && input.state !== "running" && input.state !== "waiting")
+      this.#open.delete(input.id);
+    return outcome;
   }
 
   /** Whether this recorder currently owns an open record for the unit. */
@@ -101,21 +134,27 @@ export class CodeRuntimeWorkRecorder {
     threadId: CodeThreadId,
     kind: CodeRuntimeWorkKind,
     state: CodeRuntimeWorkState,
-  ): void {
+  ): CodeRuntimeWorkRecordOutcome {
     const current = this.#open.get(id);
     // One record per state change. A turn that reports `running` again after it
     // was opened has not moved, and a row saying so would push its work past
     // work that actually finished in between.
-    if (current?.state === state) return;
+    if (current?.state === state) return { status: "unchanged" };
     const expectedVersion = current?.version ?? 0;
     let work: CodeRuntimeWork;
     try {
-      work = decodeCodeRuntimeWork({ id, threadId, kind, state, updatedAt: this.#clock() });
+      work = decodeCodeRuntimeWork({
+        id: decodeCodeRuntimeWorkId(String(id)),
+        threadId,
+        kind,
+        state,
+        updatedAt: this.#clock(),
+      });
     } catch {
       // A unit id that is not a work identity is a wiring mistake, not a
       // runtime condition. The work itself still ran, so the operation keeps
       // its own result rather than failing on its board record.
-      return;
+      return { status: "failed", kind: "invalid-runtime-work" };
     }
     try {
       this.#journal.append({
@@ -138,9 +177,10 @@ export class CodeRuntimeWorkRecorder {
       // did even on a host whose journal refused the board's view of it, and
       // the record stays unopened so nothing later settles a row that is not
       // there.
-      return;
+      return { status: "failed", kind: "journal-unavailable" };
     }
     this.#open.set(id, { version: expectedVersion + 1, state });
+    return { status: "recorded" };
   }
 }
 
@@ -166,22 +206,8 @@ export class CodeRuntimeWorkRecorder {
 export function codeRuntimeWorkStarted(
   command: CodeOperationCommand,
 ): { readonly id: CodeRuntimeWorkUnitId; readonly kind: CodeRuntimeWorkKind } | undefined {
-  switch (command.kind) {
-    case "start-terminal":
-      return { id: String(command.terminalId), kind: "terminal" };
-    case "run-repository-test":
-      return { id: String(command.testRunId), kind: "test" };
-    case "commit-git":
-    case "push-git":
-    case "discard-git-changes":
-    case "restore-git-checkpoint":
-    case "merge-run":
-      return { id: String(command.gitOperationId), kind: "git" };
-    case "create-pull-request":
-      return { id: String(command.operationId), kind: "delivery" };
-    default:
-      return undefined;
-  }
+  const plan = codeRuntimeWorkPlan(command);
+  return plan?.starts === true ? { id: plan.id, kind: plan.kind } : undefined;
 }
 
 /**
@@ -193,16 +219,45 @@ export function codeRuntimeWorkStarted(
 export function codeRuntimeWorkObserved(
   command: CodeOperationCommand,
 ): { readonly id: CodeRuntimeWorkUnitId; readonly kind: CodeRuntimeWorkKind } | undefined {
+  const plan = codeRuntimeWorkPlan(command);
+  return plan === undefined ? undefined : { id: plan.id, kind: plan.kind };
+}
+
+/**
+ * Classifies every command that can open or observe a runtime work record.
+ * Keeping identity, lifecycle role, and network reach in one plan means the
+ * recorder and state mapping cannot drift into different command switches.
+ */
+export function codeRuntimeWorkPlan(
+  command: CodeOperationCommand,
+): CodeRuntimeWorkPlan | undefined {
   switch (command.kind) {
+    case "start-terminal":
+      return { id: command.terminalId, kind: "terminal", starts: true, reachesNetwork: false };
     case "attach-terminal":
     case "write-terminal":
     case "resize-terminal":
     case "stop-terminal":
-      return { id: String(command.terminalId), kind: "terminal" };
+      return { id: command.terminalId, kind: "terminal", starts: false, reachesNetwork: false };
+    case "run-repository-test":
+      return { id: command.testRunId, kind: "test", starts: true, reachesNetwork: false };
     case "cancel-repository-test":
-      return { id: String(command.testRunId), kind: "test" };
+      return { id: command.testRunId, kind: "test", starts: false, reachesNetwork: false };
+    case "commit-git":
+    case "push-git":
+    case "discard-git-changes":
+    case "restore-git-checkpoint":
+    case "merge-run":
+      return {
+        id: command.gitOperationId,
+        kind: "git",
+        starts: true,
+        reachesNetwork: command.kind === "push-git",
+      };
+    case "create-pull-request":
+      return { id: command.operationId, kind: "delivery", starts: true, reachesNetwork: true };
     default:
-      return codeRuntimeWorkStarted(command);
+      return undefined;
   }
 }
 
@@ -266,14 +321,11 @@ export function codeRuntimeWorkStateFrom(
       // owed a decision until they give one — an approved retry carries the
       // same unit id, so it continues this record rather than opening another.
       if (result.failure.category === "waiting") return "waiting";
-      return reachesNetwork(command) && result.failure.category === "unavailable"
+      return codeRuntimeWorkPlan(command)?.reachesNetwork === true &&
+        result.failure.category === "unavailable"
         ? "ambiguous"
         : "failed";
     default:
       return "failed";
   }
-}
-
-function reachesNetwork(command: CodeOperationCommand): boolean {
-  return command.kind === "push-git" || command.kind === "create-pull-request";
 }
