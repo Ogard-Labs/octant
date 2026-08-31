@@ -84,6 +84,7 @@ describe("the public-block visual language", () => {
 
     expect(dock).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
     expect(dock).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
+    expect(dock).toMatch(/justify-self:\s*stretch/);
     expect(dock).not.toMatch(/border-radius:\s*0 0/);
   });
 

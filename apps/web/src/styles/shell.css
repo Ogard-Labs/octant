@@ -1703,7 +1703,6 @@ form > .work-composer-adapter__attachments {
 .code-composer-adapter__stack {
   display: grid;
   grid-template-areas: "stack";
-  justify-items: center;
 }
 
 .code-composer-adapter__stack > .code-composer-adapter__card {
@@ -1711,6 +1710,7 @@ form > .work-composer-adapter__attachments {
   z-index: 1;
   width: calc(100% - 20px);
   margin-bottom: 40px;
+  justify-self: center;
   align-self: start;
 }
 
@@ -1738,7 +1738,10 @@ form > .work-composer-adapter__attachments {
   gap: 8px 12px;
   grid-area: stack;
   z-index: 0;
-  width: 100%;
+  justify-self: stretch;
+  align-self: stretch;
+  width: auto;
+  min-width: 0;
   min-height: 100%;
   margin: 0;
   padding: 0 16px 12px;
