@@ -86,8 +86,8 @@ describe("the public-block visual language", () => {
     expect(stack).toMatch(/position:\s*relative/);
     expect(stack).toMatch(/isolation:\s*isolate/);
     expect(stack).toMatch(/flex-direction:\s*column/);
-    expect(dock).toMatch(/margin:\s*-20px 0 0/);
-    expect(dock).toMatch(/width:\s*100%/);
+    expect(dock).toMatch(/margin:\s*-20px auto 0/);
+    expect(dock).toMatch(/width:\s*calc\(100% - 20px\)/);
     expect(dock).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
     expect(dock).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
     expect(dock).not.toMatch(/border-radius:\s*0 0/);
