@@ -597,10 +597,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
           aria-label="Filter by measurement quality"
           className="usage-dashboard__select select window-no-drag"
           onValueChange={(value) =>
-            update(
-              "quality",
-              value === "" ? undefined : (value as UsageQueryFilter["quality"]),
-            )
+            update("quality", value === "" ? undefined : (value as UsageQueryFilter["quality"]))
           }
           options={QUALITY_OPTIONS.map((option) => ({
             id: option.value,
@@ -615,10 +612,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
           aria-label="Filter by context category"
           className="usage-dashboard__select select window-no-drag"
           onValueChange={(value) =>
-            update(
-              "category",
-              value === "" ? undefined : (value as ContextEntryCategory),
-            )
+            update("category", value === "" ? undefined : (value as ContextEntryCategory))
           }
           options={[
             { id: "", label: "All categories" },

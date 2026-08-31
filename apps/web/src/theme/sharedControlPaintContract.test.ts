@@ -34,11 +34,7 @@ describe("shared control paint ownership", () => {
       "/* The composer is a raised object, not a field ruled onto the page:",
       ".composer-chips {",
     );
-    const settingsGroupRules = between(
-      settingsStyles,
-      ".setgroup {",
-      "/* Rows inside a group",
-    );
+    const settingsGroupRules = between(settingsStyles, ".setgroup {", "/* Rows inside a group");
 
     expect(composerRules).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
     expect(composerRules).toMatch(/--octant-(?:floating|workspace)/);

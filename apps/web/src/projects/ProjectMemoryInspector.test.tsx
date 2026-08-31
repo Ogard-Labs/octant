@@ -216,7 +216,11 @@ describe("ProjectMemoryInspector", () => {
 
     await user.click(screen.getByRole("button", { name: "Add memory" }));
     const createDialog = screen.getByRole("dialog", { name: "Add Project memory" });
-    await chooseSelectFieldOption(user, within(createDialog).getByLabelText("Memory kind"), "Outcome");
+    await chooseSelectFieldOption(
+      user,
+      within(createDialog).getByLabelText("Memory kind"),
+      "Outcome",
+    );
     await user.type(within(createDialog).getByLabelText("Memory content"), "Renderer QA passed.");
     await user.click(within(createDialog).getByRole("button", { name: "Add memory" }));
     expect(props.onCreate).toHaveBeenCalledWith("outcome", "Renderer QA passed.");

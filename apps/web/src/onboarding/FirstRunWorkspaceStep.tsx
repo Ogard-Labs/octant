@@ -101,9 +101,7 @@ export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
             <OctantSelectField
               aria-label="Mode switcher"
               id="first-run-mode-switcher"
-              onValueChange={(value) =>
-                props.onSelectModeSwitcher(value as "buttons" | "dropdown")
-              }
+              onValueChange={(value) => props.onSelectModeSwitcher(value as "buttons" | "dropdown")}
               options={[
                 { id: "buttons", label: "Compact buttons" },
                 { id: "dropdown", label: "Dropdown" },

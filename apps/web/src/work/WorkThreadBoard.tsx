@@ -241,8 +241,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
                       onValueChange={(value) =>
                         setFilters((prev) => ({
                           ...prev,
-                          projectIds:
-                            value === "" ? new Set<string>() : new Set<string>([value]),
+                          projectIds: value === "" ? new Set<string>() : new Set<string>([value]),
                         }))
                       }
                       options={[

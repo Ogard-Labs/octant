@@ -24,9 +24,7 @@ export function ClaudeCreateAuthenticationFields(props: {
         <OctantSelectField
           aria-label="Claude authentication"
           className="settings-view__select window-no-drag"
-          onValueChange={(value) =>
-            props.onAuthenticationChange(value as ClaudeAuthentication)
-          }
+          onValueChange={(value) => props.onAuthenticationChange(value as ClaudeAuthentication)}
           options={[
             { id: "subscription", label: "Claude subscription" },
             { id: "api-key", label: "Anthropic API key" },
@@ -123,9 +121,7 @@ export function GrokCreateAuthenticationFields(props: {
         <OctantSelectField
           aria-label="Grok Build authentication"
           className="settings-view__select window-no-drag"
-          onValueChange={(value) =>
-            props.onAuthenticationChange(value as GrokAuthentication)
-          }
+          onValueChange={(value) => props.onAuthenticationChange(value as GrokAuthentication)}
           options={[
             { id: "subscription", label: "xAI subscription" },
             { id: "api-key", label: "xAI API key" },

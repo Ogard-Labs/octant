@@ -102,9 +102,7 @@ export function ThemeAppearanceEditor(props: {
             <OctantSelectField
               aria-label="Light preset"
               className="settings-view__select"
-              onValueChange={(value) =>
-                void theme.applyPatch({ lightPresetId: value as never })
-              }
+              onValueChange={(value) => void theme.applyPatch({ lightPresetId: value as never })}
               options={availablePresets
                 .filter((preset) => preset.supportedModes.includes("light"))
                 .map((preset) => ({ id: preset.id, label: preset.displayName }))}
@@ -116,9 +114,7 @@ export function ThemeAppearanceEditor(props: {
             <OctantSelectField
               aria-label="Dark preset"
               className="settings-view__select"
-              onValueChange={(value) =>
-                void theme.applyPatch({ darkPresetId: value as never })
-              }
+              onValueChange={(value) => void theme.applyPatch({ darkPresetId: value as never })}
               options={availablePresets
                 .filter((preset) => preset.supportedModes.includes("dark"))
                 .map((preset) => ({ id: preset.id, label: preset.displayName }))}

@@ -23,7 +23,9 @@ html[data-theme="dark"] .settings-view {
 }
 
 @media (prefers-color-scheme: dark) {
-  html:not([data-octant-theme-mode="light"]):not([data-appearance="light"]):not([data-theme="light"])
+  html:not([data-octant-theme-mode="light"]):not([data-appearance="light"]):not(
+      [data-theme="light"]
+    )
     .settings-view {
     --octant-settings-card: var(--octant-floating);
   }

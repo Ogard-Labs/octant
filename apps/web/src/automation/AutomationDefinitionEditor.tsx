@@ -427,9 +427,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           id={ids.host}
           onValueChange={setHostId}
           options={[
-            ...(catalog.hosts.length === 0
-              ? [{ id: "", label: "No environments available" }]
-              : []),
+            ...(catalog.hosts.length === 0 ? [{ id: "", label: "No environments available" }] : []),
             ...catalog.hosts.map((host) => ({
               id: String(host.hostId),
               label: environmentLabel({

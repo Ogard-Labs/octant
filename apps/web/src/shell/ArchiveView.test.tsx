@@ -58,7 +58,11 @@ describe("ArchiveView", () => {
     expect(screen.getByRole("button", { name: /Archived implementation/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /Archived brief/ })).toBeVisible();
 
-    await chooseSelectFieldOption(user, screen.getByLabelText("Filter archive by Project"), "Octant");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Filter archive by Project"),
+      "Octant",
+    );
     expect(screen.getByRole("button", { name: /Archived conversation/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /Archived implementation/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Archived brief/ })).not.toBeInTheDocument();

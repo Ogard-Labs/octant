@@ -843,10 +843,7 @@ function CodeProjectQuickStart(props: {
               <OctantSelectField
                 aria-label="New threads start in"
                 onValueChange={(value) =>
-                  void onChangeNewThreadWorkspace(
-                    props.projectId,
-                    value as CodeNewThreadWorkspace,
-                  )
+                  void onChangeNewThreadWorkspace(props.projectId, value as CodeNewThreadWorkspace)
                 }
                 options={[
                   { id: "current-checkout", label: "This Project's current checkout" },

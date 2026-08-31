@@ -259,8 +259,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                       onValueChange={(value) =>
                         setFilters((prev) => ({
                           ...prev,
-                          projectIds:
-                            value === "" ? new Set<string>() : new Set<string>([value]),
+                          projectIds: value === "" ? new Set<string>() : new Set<string>([value]),
                         }))
                       }
                       options={[

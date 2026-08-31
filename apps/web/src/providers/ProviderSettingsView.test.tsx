@@ -250,7 +250,11 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: ollamaProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Ollama native HTTP");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "Ollama native HTTP",
+    );
     const create = screen.getByRole("form", { name: "Add Ollama provider" });
     await user.type(within(create).getByLabelText("Provider name"), "Ollama local");
     expect(within(create).queryByLabelText(/binary|api key|credential/i)).not.toBeInTheDocument();
@@ -413,15 +417,19 @@ describe("ProviderSettingsView", () => {
       await user.click(await screen.findByRole("button", { name: "Add provider manually" }));
       await screen.findByLabelText("Provider type");
 
-      await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+      await chooseSelectFieldOption(
+        user,
+        screen.getByLabelText("Provider type"),
+        "Claude Agent SDK",
+      );
       const create = screen.getByRole("form", { name: "Add Claude provider" });
       await user.type(within(create).getByLabelText("Provider name"), "Claude key");
       await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
       await chooseSelectFieldOption(
-      user,
-      within(create).getByLabelText("Claude authentication"),
-      "Anthropic API key",
-    );
+        user,
+        within(create).getByLabelText("Claude authentication"),
+        "Anthropic API key",
+      );
       const apiKey = within(create).getByLabelText("Anthropic API key");
       await user.type(apiKey, "private-value");
       await user.click(within(create).getByRole("button", { name: "Add Claude" }));
