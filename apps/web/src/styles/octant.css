@@ -4068,7 +4068,9 @@ input.switch:checked::after {
   max-height: 180px;
   padding: 12px 14px 10px;
   border: 0;
+  border-radius: 0;
   background: none;
+  box-shadow: none;
   color: var(--oct-fg);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-sm);

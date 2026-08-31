@@ -57,4 +57,16 @@ describe("the public-block visual language", () => {
     expect(shell).not.toMatch(/\.code-composer-adapter__card\s*>\s*\.composer-row\s*\{/);
     expect(styles).not.toMatch(/\.code-thread-workspace__composer\s*\{[^}]*box-shadow:\s*none/);
   });
+
+  it("keeps the composer prompt frameless so the shadcn textarea cannot paint a second field", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const input = system.match(/\.composer-input\s*\{[^}]+\}/)?.[0] ?? "";
+
+    // OctantTextarea ships rounded-md + shadow-xs. Those must not survive
+    // inside `.composer`, or Code/Chat welcome read as a 10px field sitting
+    // in a 20px frame — the old two-box chrome.
+    expect(input).toMatch(/border-radius:\s*0/);
+    expect(input).toMatch(/box-shadow:\s*none/);
+    expect(input).toMatch(/border:\s*0/);
+  });
 });
