@@ -66,18 +66,14 @@ import {
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
 import { OctantButton } from "../ui/base/OctantButton";
+import { RecentThreadList, type RecentThreadListItem } from "./RecentThreadList";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { HostSelector } from "./HostSelector";
 import type { OctantHostBridge } from "./hostBridge";
 
 /** One row of the start screen's recent-work list. */
-export interface DraftRecentThread {
-  readonly id: string;
-  readonly title: string;
-  readonly detail?: string;
-  readonly onOpen: () => void;
-}
+export type DraftRecentThread = RecentThreadListItem;
 
 export interface DraftThreadWorkspaceProps {
   readonly mode: OctantMode;
@@ -639,28 +635,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           </p>
         </div>
 
-        {props.recentThreads === undefined || props.recentThreads.length === 0 ? null : (
-          <div className="draft-thread__recent">
-            <p className="draft-thread__recent-title">Continue</p>
-            <ul className="draft-thread__recent-list">
-              {props.recentThreads.map((thread) => (
-                <li key={thread.id}>
-                  <OctantButton
-                    className="draft-thread__recent-item"
-                    onClick={thread.onOpen}
-                    type="button"
-                    variant="ghost"
-                  >
-                    <span className="draft-thread__recent-name">{thread.title}</span>
-                    {thread.detail === undefined ? null : (
-                      <span className="draft-thread__recent-detail">{thread.detail}</span>
-                    )}
-                  </OctantButton>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <RecentThreadList threads={props.recentThreads ?? []} />
       </div>
     </section>
   );

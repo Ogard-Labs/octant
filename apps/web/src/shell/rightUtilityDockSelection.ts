@@ -175,7 +175,8 @@ export function readUtilityDockOpen(
     if (raw === undefined || raw === null) return undefined;
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== "object") return undefined;
-    const candidate = parsed as { readonly open?: unknown };
+    if (!isRecord(parsed)) return undefined;
+    const candidate = parsed;
     return typeof candidate.open === "boolean" ? candidate.open : undefined;
   } catch {
     return undefined;
@@ -231,13 +232,14 @@ function readDockPresentationRecord(
     if (parsed === null || typeof parsed !== "object") {
       return unset;
     }
-    const candidate = parsed as { readonly open?: unknown; readonly threads?: unknown };
+    if (!isRecord(parsed)) return unset;
+    const candidate = parsed;
     return {
-      open: readOpen && (candidate.open === true || (defaultOpen && candidate.open === undefined)),
+      open: readOpen && (typeof candidate.open === "boolean" ? candidate.open : defaultOpen),
       threads: decodeDockStates(candidate.threads),
     };
   } catch {
-    return { open: false, threads: new Map() };
+    return unset;
   }
 }
 
@@ -283,8 +285,8 @@ function decodeDockStates(value: unknown): ThreadUtilityDockStates {
 }
 
 function decodeDockState(value: unknown): ThreadUtilityDockState | undefined {
-  if (value === null || typeof value !== "object") return undefined;
-  const candidate = value as { readonly tabs?: unknown; readonly active?: unknown };
+  if (!isRecord(value)) return undefined;
+  const candidate = value;
   if (!Array.isArray(candidate.tabs)) return undefined;
   const tabs: RightUtilityDockSurfaceId[] = [];
   for (const item of candidate.tabs) {
@@ -297,6 +299,10 @@ function decodeDockState(value: unknown): ThreadUtilityDockState | undefined {
   const active =
     activeCandidate !== undefined && tabs.includes(activeCandidate) ? activeCandidate : fallback;
   return { tabs, active };
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function decodeDockSurfaceId(value: unknown): RightUtilityDockSurfaceId | undefined {

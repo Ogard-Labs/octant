@@ -572,7 +572,7 @@ export function useCodeController(options: CodeControllerOptions) {
    */
   const markRenderedActivity = useCallback(
     (threadId: CodeThreadId) => {
-      readCursorStore.mark(threadId, observedActivity.current.get(String(threadId)) ?? 0);
+      readCursorStore.markDeferred(threadId, observedActivity.current.get(String(threadId)) ?? 0);
     },
     [readCursorStore],
   );
@@ -641,7 +641,7 @@ export function useCodeController(options: CodeControllerOptions) {
    * refresh that fails falls back to the last sequence actually observed.
    */
   const recordSeenActivity = useCallback(
-    async (threadId: CodeThreadId) => {
+    async (threadId: CodeThreadId, immediately = false) => {
       try {
         const read = nextNavigationRead();
         const next = await client.navigation();
@@ -650,7 +650,9 @@ export function useCodeController(options: CodeControllerOptions) {
         const seen = next.activity.find(
           (entry) => String(entry.threadId) === String(threadId),
         )?.lastSequence;
-        readCursorStore.mark(threadId, Number(seen ?? 0));
+        const sequence = Number(seen ?? 0);
+        if (immediately) readCursorStore.mark(threadId, sequence);
+        else readCursorStore.markDeferred(threadId, sequence);
       } catch {
         if (!mounted.current) return;
         markRenderedActivity(threadId);
@@ -669,7 +671,7 @@ export function useCodeController(options: CodeControllerOptions) {
   const markThreadRead = useCallback(
     (threadId: CodeThreadId) => {
       markInteraction("renderer", "code-thread-read");
-      void recordSeenActivity(threadId);
+      void recordSeenActivity(threadId, true);
     },
     [recordSeenActivity],
   );

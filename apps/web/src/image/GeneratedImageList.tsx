@@ -6,7 +6,7 @@ import type {
   ImageJobThreadKind,
 } from "@octant/contracts";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { samePollingData } from "../polling/samePollingData";
 import { GeneratedImageCard } from "./GeneratedImageCard";
@@ -29,30 +29,51 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
     { readonly job: ImageJob; readonly artifact: ImageArtifactRecord } | undefined
   >(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
+  const inFlightGeneration = useRef<number | undefined>(undefined);
+  const generation = useRef(0);
+  const refreshRef = useRef<() => void>(() => undefined);
+  const hasPendingJob = jobs.some((job) => job.status === "queued" || job.status === "running");
 
   useEffect(() => {
     let cancelled = false;
+    const refreshGeneration = ++generation.current;
+    setJobs([]);
+    setRevise(undefined);
+    setError(undefined);
     const refresh = () => {
-      if (!documentIsVisible()) return;
+      if (!documentIsVisible() || inFlightGeneration.current === refreshGeneration) {
+        return;
+      }
+      inFlightGeneration.current = refreshGeneration;
       void props.client
         .list({ threadKind: props.threadKind, scopeId: props.scopeId })
         .then((outcome) => {
-          if (cancelled) return;
+          if (cancelled || generation.current !== refreshGeneration) return;
           setJobs((current) => (samePollingData(current, outcome.jobs) ? current : outcome.jobs));
           setError(undefined);
         })
         .catch(() => {
-          if (!cancelled) setError("Generated images are unavailable.");
+          if (!cancelled && generation.current === refreshGeneration) {
+            setError("Generated images are unavailable.");
+          }
+        })
+        .finally(() => {
+          if (inFlightGeneration.current === refreshGeneration) {
+            inFlightGeneration.current = undefined;
+          }
         });
     };
+    refreshRef.current = refresh;
     refresh();
-    const inFlight = jobs.some((job) => job.status === "queued" || job.status === "running");
-    const stop = scheduleVisibleInterval(refresh, inFlight ? 750 : 4_000);
     return () => {
       cancelled = true;
-      stop();
     };
-  }, [jobs, props.client, props.scopeId, props.threadKind]);
+  }, [props.client, props.scopeId, props.threadKind]);
+
+  useEffect(
+    () => scheduleVisibleInterval(() => refreshRef.current(), hasPendingJob ? 750 : 4_000),
+    [hasPendingJob],
+  );
 
   async function submitRevision(draft: ImageGenerationDraft) {
     const parent = revise?.artifact;

@@ -1416,6 +1416,18 @@ function LaunchedShell(
       .filter((project) => project.type === "code" && project.lifecycle === "active")
       .map((project) => project.id),
   });
+  const latestShellActions = useRef({
+    openDraftThread: controller.openDraftThread,
+    openSettings: controller.openSettings,
+    status: controller.status,
+    workspace: controller.workspace,
+  });
+  latestShellActions.current = {
+    openDraftThread: controller.openDraftThread,
+    openSettings: controller.openSettings,
+    status: controller.status,
+    workspace: controller.workspace,
+  };
   useEffect(() => {
     const subscribe = props.hostBridge?.subscribeCodeDeepLinks;
     if (subscribe === undefined) return;
@@ -1425,18 +1437,20 @@ function LaunchedShell(
     const subscribe = props.hostBridge?.subscribeStartNewAgent;
     if (subscribe === undefined) return;
     return subscribe(() => {
-      if (controller.status !== "ready") return;
-      void controller.openDraftThread(controller.workspace?.activeMode ?? "chat");
+      const latest = latestShellActions.current;
+      if (latest.status !== "ready") return;
+      void latest.openDraftThread(latest.workspace?.activeMode ?? "chat");
     });
-  }, [controller, props.hostBridge]);
+  }, [props.hostBridge?.subscribeStartNewAgent]);
   useEffect(() => {
     const subscribe = props.hostBridge?.subscribeOpenSettings;
     if (subscribe === undefined) return;
     return subscribe(() => {
-      if (controller.status !== "ready") return;
-      void controller.openSettings();
+      const latest = latestShellActions.current;
+      if (latest.status !== "ready") return;
+      void latest.openSettings();
     });
-  }, [controller, props.hostBridge]);
+  }, [props.hostBridge?.subscribeOpenSettings]);
   useEffect(() => {
     const target = pendingCodeDeepLink;
     if (target === undefined || controller.status !== "ready") return;

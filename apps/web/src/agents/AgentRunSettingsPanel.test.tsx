@@ -21,7 +21,9 @@ describe("AgentRunSettingsPanel", () => {
       update: vi.fn(),
     };
     render(<AgentRunSettingsPanel client={client} />);
-    await waitFor(() => expect(screen.getByRole("radio", { name: /Automatic/ })).toBeChecked());
+    const automatic = await screen.findByRole("radio", { name: /Automatic/ });
+    expect(automatic).toBeChecked();
+    expect(automatic).toHaveAttribute("data-slot", "toggle-group-item");
     expect(screen.getByRole("radio", { name: /^Off/ })).not.toBeChecked();
   });
 

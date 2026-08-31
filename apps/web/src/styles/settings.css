@@ -590,10 +590,8 @@
   overflow: hidden;
   border: 0;
   border-radius: var(--oct-radius-md);
-  background: var(--octant-floating);
-  box-shadow:
-    inset 0 0 0 1px var(--oct-hairline),
-    0 1px 3px rgb(0 0 0 / 18%);
+  background: var(--oct-surface);
+  box-shadow: var(--oct-elev-subtle);
 }
 
 /* Rows inside a group are separated by the group's own hairline rather than a

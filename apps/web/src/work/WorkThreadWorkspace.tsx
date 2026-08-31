@@ -1,6 +1,7 @@
 import {
   decodeWorkAttachmentId,
   decodeWorkAttachmentMediaType,
+  decodeThreadWorkingDirectory,
   decodeWorkMutationRequestId,
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
@@ -401,7 +402,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             hostId: props.hostId ?? LOCAL_HOST_ID,
             projectId,
             bindingRevisionId: thread.bindingRevisionId,
-            workingDirectory: thread.workingDirectory ?? ("." as never),
+            workingDirectory: thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
             confinementPosture: "project-root-confined",
             providerInstanceId: thread.providerInstanceId,
             modelId: thread.modelId,

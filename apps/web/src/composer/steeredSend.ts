@@ -54,10 +54,10 @@ export function disarmSteeredSend<Message>(
 /**
  * A message sent mid-response runs the moment the thread stops running one.
  *
- * Completion is the ordinary case, but a response that was cancelled, failed,
- * refused, or is waiting has also stopped occupying the thread, so the message
- * the user already sent is sent then too. Holding it back would leave the
- * transcript showing a message the thread never ran.
+ * Completion is the ordinary case. Cancellation, failure, or refusal also
+ * release the thread, so the message the user already sent is sent then too.
+ * Waiting is deliberately excluded: the provider still owns the thread while
+ * it is paused for approval or input, and sending would race that decision.
  */
 export function settleSteeredSend<Message>(
   current: SteeredSendState<Message>,
@@ -68,6 +68,8 @@ export function settleSteeredSend<Message>(
   if (threadKey === undefined || current.threadKey !== threadKey) {
     return { next: EMPTY_STEERED_SEND, fire: false };
   }
-  if (settlement === "running") return { next: current, fire: false };
+  if (settlement === "running" || settlement === "waiting" || settlement === "idle") {
+    return { next: current, fire: false };
+  }
   return { next: current, fire: true };
 }

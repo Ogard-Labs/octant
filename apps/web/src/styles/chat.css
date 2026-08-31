@@ -509,20 +509,6 @@
   white-space: nowrap;
 }
 
-/* The attempt status line rides the system's .runstatus; only the streaming
-   and completed states below are residual. */
-.chat-transcript__attempt-status--completed {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 .chat-transcript__attempt-status--streaming svg {
   animation: chat-status-spin 900ms linear infinite;
 }
@@ -776,7 +762,7 @@
   width: 6px;
   height: 6px;
   flex: 0 0 6px;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   background: var(--oct-accent);
 }
 
@@ -872,7 +858,7 @@
   right: 3px;
   width: 5px;
   height: 5px;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   background: var(--oct-accent-fg);
 }
 

@@ -101,6 +101,37 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
   });
 
+  it("does not send a steered follow-up while the provider is waiting", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    await user.type(screen.getByLabelText("Follow-up message"), "Hold this");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp, turnStatus: "waiting" })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sendFollowUp).not.toHaveBeenCalled();
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp, turnStatus: "failed" })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalled());
+  });
+
   /**
    * A thread whose history could not be fetched has an empty transcript for a
    * reason that has nothing to do with being new. Showing it the new-thread

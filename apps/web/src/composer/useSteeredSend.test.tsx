@@ -64,6 +64,22 @@ describe("sending a message while a response is running", () => {
     await waitFor(() => expect(result.current.pending).toBeUndefined());
   });
 
+  it("keeps it owned by a waiting turn until that turn reaches a terminal state", async () => {
+    const send = vi.fn(async () => true);
+    const { rerender, result } = harness({ send });
+
+    act(() => {
+      result.current.steer(message);
+    });
+    rerender({ settlement: "waiting", threadKey: "thread-a" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(send).not.toHaveBeenCalled();
+    expect(result.current.pending).toEqual(message);
+
+    rerender({ settlement: "completed", threadKey: "thread-a" });
+    await waitFor(() => expect(send).toHaveBeenCalledWith(message));
+  });
+
   it("hands the words back when the host refuses it", async () => {
     const send = vi.fn(async () => false);
     const restore = vi.fn();

@@ -105,10 +105,11 @@
   /* ── elevation and focus ── */
   --oct-elev-flat: none;
   --oct-elev-ring: 0 0 0 1px var(--oct-border);
+  --oct-elev-subtle:
+    0 1px 4px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.28)), 0 0 0 1px var(--oct-border);
   --oct-elev-raised:
-    light-dark(0 28px 70px rgba(38, 37, 30, 0.13), 0 28px 70px rgba(0, 0, 0, 0.5)),
-    light-dark(0 14px 32px rgba(38, 37, 30, 0.1), 0 14px 32px rgba(0, 0, 0, 0.36)),
-    0 0 0 1px var(--oct-border);
+    0 28px 70px light-dark(rgba(38, 37, 30, 0.13), rgba(0, 0, 0, 0.5)),
+    0 14px 32px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.36)), 0 0 0 1px var(--oct-border);
   --oct-focus-ring: 0 0 0 2px var(--oct-bg), 0 0 0 4px var(--oct-accent-fg);
 
   /* ── type ── */
@@ -4138,16 +4139,12 @@ input.switch:checked::after {
 .composer {
   border: 0;
   border-radius: var(--oct-radius-lg);
-  background: var(--octant-floating);
-  box-shadow:
-    inset 0 0 0 1px var(--oct-hairline),
-    0 1px 4px rgb(0 0 0 / 22%);
+  background: var(--oct-surface);
+  box-shadow: var(--oct-elev-subtle);
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
 .composer:focus-within {
-  box-shadow:
-    inset 0 0 0 1px var(--oct-hairline-strong),
-    0 2px 10px -2px rgb(0 0 0 / 34%);
+  box-shadow: var(--oct-elev-raised);
 }
 /* Keyboard focus still earns a real accent ring; pointer focus does not, so
    clicking into the box stays quiet. */
@@ -4217,7 +4214,6 @@ input.switch:checked::after {
 .composer-row .composer-model-picker__trigger {
   min-height: 24px;
   height: 24px;
-  border-radius: 999px;
 }
 /* The send control is the row's one filled affordance, so it stays a circle. */
 .composer-row > button:last-child {
@@ -4234,17 +4230,7 @@ input.switch:checked::after {
   max-width: 190px;
   min-height: 24px;
   padding-inline: 8px 22px;
-  border-color: transparent;
-  border-radius: 999px;
-  color: var(--oct-muted);
-  background: transparent;
   font-size: var(--oct-text-xs);
-  transition: background-color var(--oct-dur-fast) var(--oct-ease-color);
-}
-.composer-row [role="combobox"]:hover {
-  color: var(--oct-fg);
-  background: var(--oct-fill-3);
-  border-color: transparent;
 }
 /* A bordered box inside the composer's own box read as a form field nested in
    a form field. The trigger is a quiet pill that only gains a ground when
@@ -4256,22 +4242,8 @@ input.switch:checked::after {
   min-height: 24px;
   padding-block: 0;
   padding-inline: 8px 6px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   text-align: left;
-  transition: background-color var(--oct-dur-fast) var(--oct-ease-color);
-}
-.composer-row .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fill-3);
-}
-.composer-row .composer-model-picker__trigger[aria-expanded="true"] {
-  color: var(--oct-fg);
-  background: var(--oct-fill-2);
 }
 /* The frame's direct labels are its message fields; they must be blocks so
    the content-sized textarea has a full-width box to fill (an inline label

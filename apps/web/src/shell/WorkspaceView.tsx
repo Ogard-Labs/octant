@@ -784,18 +784,24 @@ function draftRecentThreads(
   if (mode === "chat") {
     const open = props.onOpenChatThread;
     if (open === undefined) return [];
-    return (props.chatController.bootstrap?.threads ?? []).slice(0, limit).map((thread) => ({
-      id: String(thread.id),
-      title: thread.title,
-      onOpen: () => open(thread.id, thread.title, thread.projectId),
-    }));
+    return (props.chatController.bootstrap?.threads ?? [])
+      .filter((thread) => thread.lifecycle === undefined || thread.lifecycle === "active")
+      .slice(0, limit)
+      .map((thread) => ({
+        id: String(thread.id),
+        title: thread.title,
+        onOpen: () => open(thread.id, thread.title, thread.projectId),
+      }));
   }
   if (mode === "code") {
-    return (props.codeController.bootstrap?.threads ?? []).slice(0, limit).map((thread) => ({
-      id: String(thread.id),
-      title: thread.title,
-      onOpen: () => props.onOpenCodeThread(thread.id, thread.title, thread.projectId),
-    }));
+    return (props.codeController.bootstrap?.threads ?? [])
+      .filter((thread) => thread.lifecycle !== "archived")
+      .slice(0, limit)
+      .map((thread) => ({
+        id: String(thread.id),
+        title: thread.title,
+        onOpen: () => props.onOpenCodeThread(thread.id, thread.title, thread.projectId),
+      }));
   }
   return [];
 }

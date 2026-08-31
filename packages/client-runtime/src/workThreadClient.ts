@@ -2,11 +2,13 @@ import {
   decodeWorkBoardQuery,
   decodeWorkBoardView,
   decodeWorkThreadBootstrap,
+  decodeWorkThreadNavigation,
   decodeWorkThreadCommand,
   decodeWorkThreadCommandResult,
   type WorkBoardQuery,
   type WorkBoardView,
   type WorkThreadBootstrap,
+  type WorkThreadNavigation,
   type WorkThreadCommand,
   type WorkThreadCommandResult,
 } from "@octant/contracts";
@@ -20,6 +22,7 @@ export interface WorkThreadClientOptions {
 
 export interface WorkThreadClient {
   bootstrap(): Promise<WorkThreadBootstrap>;
+  navigation(): Promise<WorkThreadNavigation>;
   execute(command: WorkThreadCommand): Promise<WorkThreadCommandResult>;
   queryBoard(query: WorkBoardQuery): Promise<WorkBoardView>;
 }
@@ -62,6 +65,35 @@ export function createWorkThreadClient(options: WorkThreadClientOptions): WorkTh
       } catch {
         throw new WorkThreadClientFailure(
           "Work thread service returned an invalid bootstrap response.",
+          0,
+        );
+      }
+    },
+
+    async navigation() {
+      let response: Response;
+      try {
+        response = await fetch(new URL("/api/work/navigation", options.baseUrl).toString(), {
+          method: "GET",
+          headers: { "x-octant-window-capability": options.windowCapability },
+        });
+      } catch {
+        throw new WorkThreadClientFailure("Work thread service is unavailable.", 0);
+      }
+
+      const body: unknown = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new WorkThreadClientFailure(
+          responseMessage(body, "Work thread navigation failed."),
+          response.status,
+        );
+      }
+
+      try {
+        return decodeWorkThreadNavigation(body);
+      } catch {
+        throw new WorkThreadClientFailure(
+          "Work thread service returned an invalid navigation response.",
           0,
         );
       }
