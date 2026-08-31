@@ -209,7 +209,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".window-chrome__button")).toContain("height: 26px;");
     expect(cssRule(".window-chrome__button")).toContain("background: transparent;");
     // The hover fill is the design system's neutral soft ink (--oct-fg-soft),
-    // the same feedback .btn-icon gives, still no accent.
+    // the same feedback .shell-icon-button gives, still no accent.
     expect(cssRule(".window-chrome__button:hover")).toContain("background: var(--oct-fg-soft);");
     expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
       "background: var(--oct-fg-soft);",
