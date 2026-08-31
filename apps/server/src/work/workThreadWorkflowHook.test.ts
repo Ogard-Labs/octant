@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { WorkThreadBootstrap, WorkThreadCommandResult, WindowId } from "@octant/contracts";
+import type {
+  WorkThreadBootstrap,
+  WorkThreadCommandResult,
+  WorkThreadNavigation,
+  WindowId,
+} from "@octant/contracts";
 import { withWorkflowLifecycle } from "./workThreadWorkflowHook";
 import type { WorkThreadRouteService } from "../workThreadRoutes";
 
@@ -21,6 +26,7 @@ function createThreads(
   return {
     executeCalls,
     bootstrap: async () => ({ threads: [], runtime: [] }) as WorkThreadBootstrap,
+    navigation: async () => ({ threads: [], runtime: [] }) as WorkThreadNavigation,
     execute: async (_windowId, input) => {
       executeCalls.push(input);
       return result;
@@ -102,6 +108,7 @@ describe("withWorkflowLifecycle", () => {
     const recordThreadLifecycle = vi.fn();
     const threads: WorkThreadRouteService = {
       bootstrap: async () => ({ threads: [], runtime: [] }) as WorkThreadBootstrap,
+      navigation: async () => ({ threads: [], runtime: [] }) as WorkThreadNavigation,
       execute: async () => {
         throw new Error("thread service unavailable");
       },
@@ -142,5 +149,17 @@ describe("withWorkflowLifecycle", () => {
       workflows: { recordThreadLifecycle: vi.fn() },
     });
     await expect(wrapped.bootstrap(windowId)).resolves.toEqual({ threads: [], runtime: [] });
+  });
+
+  it("delegates projection-only navigation unchanged", async () => {
+    const threads = createThreads({
+      kind: "invalid",
+      message: "n/a",
+    } as unknown as WorkThreadCommandResult);
+    const wrapped = withWorkflowLifecycle({
+      threads,
+      workflows: { recordThreadLifecycle: vi.fn() },
+    });
+    await expect(wrapped.navigation(windowId)).resolves.toEqual({ threads: [], runtime: [] });
   });
 });

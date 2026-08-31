@@ -36,6 +36,8 @@ export function withWorkflowLifecycle(
   return {
     bootstrap: (authenticatedWindowId: WindowId) =>
       dependencies.threads.bootstrap(authenticatedWindowId),
+    navigation: (authenticatedWindowId: WindowId) =>
+      dependencies.threads.navigation(authenticatedWindowId),
     async execute(authenticatedWindowId: WindowId, input: unknown) {
       const result = await dependencies.threads.execute(authenticatedWindowId, input);
       recordIfLifecycleFact(dependencies.workflows, input, result);

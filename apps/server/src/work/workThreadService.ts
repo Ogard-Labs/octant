@@ -6,9 +6,11 @@ import {
   UtcTimestamp,
   decodeWorkThread,
   decodeWorkThreadBootstrap,
+  decodeWorkThreadNavigation,
   decodeWorkThreadCommand,
   type WorkThread,
   type WorkThreadBootstrap,
+  type WorkThreadNavigation,
   type WorkThreadCommand,
   type WorkThreadCommandResult,
   type WorkThreadFailure,
@@ -190,6 +192,33 @@ export class WorkThreadService {
         }
       }
       return decodeWorkThreadBootstrap({ threads, runtime });
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  /**
+   * Reads the Work sidebar from rebuildable thread and Project projections.
+   * Root validation belongs to bootstrap and command admission; performing it
+   * here would turn an ordinary sidebar tick into filesystem observation.
+   */
+  async navigation(_authenticatedWindowId: WindowId): Promise<WorkThreadNavigation> {
+    this.#assertReady();
+    try {
+      const threads = this.#projection.list().filter((thread) => {
+        const project = this.#persistence.readProject(thread.projectId);
+        return project?.type === "work" && project.lifecycle === "active";
+      });
+      const runtime = [];
+      for (const thread of threads) {
+        if (thread.lifecycle === "archived" || thread.lifecycle === "deleted") continue;
+        const activity =
+          this.#observeRuntime === undefined
+            ? { executing: false }
+            : await this.#observeRuntime(thread.id);
+        runtime.push({ threadId: thread.id, executing: activity.executing });
+      }
+      return decodeWorkThreadNavigation({ threads, runtime });
     } catch (error) {
       throw this.#mapFailure(error);
     }

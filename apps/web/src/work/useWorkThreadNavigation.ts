@@ -1,4 +1,4 @@
-import type { WorkThread, WorkThreadBootstrap } from "@octant/contracts";
+import type { WorkThread, WorkThreadBootstrap, WorkThreadNavigation } from "@octant/contracts";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
@@ -32,23 +32,25 @@ export interface UseWorkThreadNavigationOptions {
 }
 
 export function useWorkThreadNavigation(
-  client: Pick<WorkThreadClient, "bootstrap">,
+  client: Pick<WorkThreadClient, "bootstrap" | "navigation">,
   options: UseWorkThreadNavigationOptions = {},
 ) {
   const navigationRefreshMs = options.navigationRefreshMs ?? 1_000;
-  const [bootstrap, setBootstrap] = useState<WorkThreadBootstrap>();
+  const [bootstrap, setBootstrap] = useState<WorkThreadBootstrap | WorkThreadNavigation>();
   const [status, setStatus] = useState<WorkThreadNavigationStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string>();
   const mounted = useRef(true);
   const bootstrapped = useRef(false);
   const requestGeneration = useRef(0);
+  const clientRef = useRef(client);
+  clientRef.current = client;
 
   const refresh = useCallback(async () => {
     const request = ++requestGeneration.current;
     if (!bootstrapped.current) setStatus("loading");
     setErrorMessage(undefined);
     try {
-      const next = await client.bootstrap();
+      const next = await clientRef.current.bootstrap();
       if (!mounted.current || request !== requestGeneration.current) return false;
       bootstrapped.current = true;
       setBootstrap(next);
@@ -64,7 +66,7 @@ export function useWorkThreadNavigation(
       );
       return false;
     }
-  }, [client]);
+  }, []);
 
   useEffect(() => {
     mounted.current = true;
@@ -75,8 +77,10 @@ export function useWorkThreadNavigation(
     };
   }, [refresh]);
 
-  // Only the thread in view streams, so the list is re-read on a timer to keep
-  // titles, lifecycle, and executing state current for threads nobody is watching.
+  // Only the thread in view streams, so the list is re-read from projections
+  // on a timer to keep titles, lifecycle, and executing state current for
+  // threads nobody is watching. Full bootstrap validates Project roots and
+  // must not run in this background path.
   useEffect(() => {
     if (bootstrap === undefined || navigationRefreshMs <= 0) return;
     let cancelled = false;
@@ -84,9 +88,17 @@ export function useWorkThreadNavigation(
     const refreshNavigation = async () => {
       if (!documentIsVisible() || inFlight) return;
       inFlight = true;
+      const request = ++requestGeneration.current;
       try {
-        const next = await client.bootstrap();
-        if (cancelled || !mounted.current) return;
+        const next = await clientRef.current.navigation();
+        if (
+          cancelled ||
+          !mounted.current ||
+          !documentIsVisible() ||
+          request !== requestGeneration.current
+        ) {
+          return;
+        }
         setBootstrap(next);
       } catch {
         // A refresh that fails leaves the last list on screen.
@@ -97,13 +109,22 @@ export function useWorkThreadNavigation(
     const stop = scheduleVisibleInterval(
       () => void refreshNavigation(),
       Math.max(10, navigationRefreshMs),
-      { runImmediately: true },
     );
+    const invalidateHiddenRequest = () => {
+      if (!documentIsVisible()) requestGeneration.current += 1;
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", invalidateHiddenRequest);
+    }
     return () => {
       cancelled = true;
+      requestGeneration.current += 1;
       stop();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", invalidateHiddenRequest);
+      }
     };
-  }, [bootstrap, client, navigationRefreshMs]);
+  }, [bootstrap !== undefined, navigationRefreshMs]);
 
   const navigation = useMemo(
     () => buildWorkThreadNavigation(bootstrap?.threads ?? [], bootstrap?.runtime ?? []),

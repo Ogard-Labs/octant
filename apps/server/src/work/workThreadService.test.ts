@@ -46,6 +46,17 @@ describe("WorkThreadService", () => {
     expect(fixture.projects.bootstrap).toHaveBeenCalledWith(ids.window);
   });
 
+  it("reads navigation from projections without bootstrapping Projects", async () => {
+    const allowed = thread();
+    const fixture = serviceFixture({ threads: [allowed] });
+
+    await expect(fixture.service.navigation(ids.window)).resolves.toEqual({
+      threads: [allowed],
+      runtime: [{ threadId: allowed.id, executing: false }],
+    });
+    expect(fixture.projects.bootstrap).not.toHaveBeenCalled();
+  });
+
   it("creates a thread for the active Work Project with a local-user event", async () => {
     const fixture = serviceFixture({ threads: [] });
 
