@@ -1706,7 +1706,7 @@ form > .work-composer-adapter__attachments {
   /* Shoulders and the bottom peek are padding. Grid stretch plus a
      percentage width collapsed the back card to its content box in
      Chromium, so checkout sat behind the prompt instead of peeking. */
-  padding: 0 16px 44px;
+  padding: 0 20px 48px;
 }
 
 .code-composer-adapter__stack > .code-composer-adapter__card {
@@ -1744,14 +1744,16 @@ form > .work-composer-adapter__attachments {
   margin: 0;
   padding: 0 16px 10px;
   color: var(--oct-meta);
-  /* Same fill as `.composer` so the peek is a second sheet, not a darker
-     footer band. Workspace on the page well vanished into a status line. */
-  background: var(--octant-floating);
+  /* A step below the prompt. Same fill as `.composer` on #101010 reads as
+     one silhouette — dark shadow-md is too weak to split two sheets. */
+  background: var(--octant-workspace);
   border-radius: var(--oct-radius-lg);
   box-shadow: var(--octant-shadow-sm);
 }
 
 html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
+  /* Light shadow-md already splits two white sheets. Keep the peek the
+     same material as the prompt so it does not become a grey well. */
   background: var(--octant-workspace);
 }
 
