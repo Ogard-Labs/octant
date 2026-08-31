@@ -195,7 +195,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 }}
                 size="sm"
                 type="button"
-                variant="ghost"
+                variant="outline"
               >
                 <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
                 {idea.label}

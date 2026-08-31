@@ -1045,8 +1045,8 @@ button:focus-visible {
   font-family: var(--oct-font-display);
   font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
   font-weight: 500;
-  letter-spacing: normal;
-  text-transform: none;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 /* The header's controls answer for the section the pointer is already on, so

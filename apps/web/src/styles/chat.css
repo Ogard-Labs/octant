@@ -2,7 +2,7 @@
  * Residual Chat styles. The transcript and composer adopt the design system's
  * chat vocabulary (`.thread-column`, `.turn-user`/`.bubble`, `.turn-agent`,
  * `.runstatus`, `.composer`, `.composer-input`, `.composer-chips`,
- * `.composer-row`, `.btn-send`, `.chip`) from styles/octant.css; the welcome
+ * `.composer-row`, `.chip`) from styles/octant.css; the welcome
  * screen rides the same composer vocabulary with hero-scale overrides. What remains here is
  * either a sub-surface that has not been ported (work shelf, workspace chrome)
  * or behavior the system has no vocabulary for (streaming state,
@@ -41,7 +41,7 @@
   max-width: 22ch;
   color: var(--oct-fg);
   font-size: clamp(26px, 3vw, 34px);
-  font-weight: 400;
+  font-weight: 600;
   letter-spacing: var(--oct-tracking-tight);
   line-height: 1.15;
   text-wrap: balance;
@@ -81,25 +81,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 6px;
-}
-
-/* Starter categories are the system ghost button reshaped into a pill. */
-.chat-welcome__suggestions button {
-  min-height: 32px;
-  gap: 7px;
-  padding-inline: 11px;
-  color: var(--oct-muted);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
-  font-size: var(--oct-text-xs);
-  font-weight: 500;
-}
-
-.chat-welcome__suggestions button:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  gap: 8px;
 }
 
 .chat-welcome__retry {

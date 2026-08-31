@@ -165,20 +165,22 @@ function ThreadComposerTrailing(props: { readonly actions: ThreadComposerActions
       {sending ? (
         <OctantButton
           aria-label={stop.ariaLabel}
-          className="btn-send window-no-drag"
           disabled={stop.disabledReason !== undefined}
           onClick={stop.onStop}
+          size="icon"
           type="button"
+          variant="default"
         >
           <Square aria-hidden="true" fill="currentColor" size={12} strokeWidth={1.5} />
         </OctantButton>
       ) : null}
       <OctantButton
         aria-label={send.ariaLabel}
-        className="btn-send window-no-drag"
         disabled={sendRefused(send)}
         {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
+        size="icon"
         type="button"
+        variant="default"
       >
         <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
       </OctantButton>

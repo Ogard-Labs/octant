@@ -7,7 +7,7 @@
 :root,
 .dark {
   color-scheme: dark;
-  --radius: 0.5rem;
+  --radius: 0.625rem;
   --background: var(--octant-workspace);
   --foreground: var(--octant-text-primary);
   --card: var(--octant-surface-raised);

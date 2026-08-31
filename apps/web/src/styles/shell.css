@@ -576,13 +576,13 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
      not three controls, so they sit at glyph spacing. At list spacing the row
      spent 46px before the first letter of the title. */
   gap: var(--oct-space-1);
-  min-height: 26px;
+  min-height: 28px;
   padding-block: 0;
-  padding-inline: 6px;
+  padding-inline: 8px;
   color: var(--oct-muted);
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
   cursor: pointer;

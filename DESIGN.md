@@ -166,9 +166,9 @@ automatic horizontal margins. Canvas documents use a 62ch measure.
 
 Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Use `gap-*`
 for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
-chains. The desktop radius scale is 8px compact control, 10px panel, 12px
-large panel, and 9999px only for a compact chip or meter. Composer radius is
-14px. Phone-only surfaces use the larger 22/26/30px mobile radii.
+chains. The desktop radius scale is 10px compact control, 16px panel and card, 20px
+composer and dialog, and 9999px only for a compact chip or meter. Phone-only
+surfaces use the larger 22/26/30px mobile radii.
 
 Controls are 44px by default and 34px compact. Dense operating rails use a
 28px navigation row and a 30px terminal toolbar while retaining at least 24px
@@ -179,17 +179,18 @@ in the native title rail. Settings uses a separate compact 248px navigation
 rail. The right dock defaults to 320px. The pane/title control rail is 34px in
 the native host and the status bar is 26px.
 
-Panes are flat and separated by a one-pixel semantic border. Cards are for a
-discrete object or a grouped form, not for every row. Opaque shadcn popovers,
-menus, dialogs, Environment, and forms use the floating surface and overlay
-shadow. Frosted material is limited to native/optional sidebar translucency
-and the floating activity picture-in-picture; reduced transparency and
-unsupported `backdrop-filter` resolve to opaque surfaces.
+Navigation panes stay compact hairline rails. Grouped forms, setup objects,
+welcome composers, and cards use the raised card recipe (`OctantCard` /
+`--octant-shadow-sm`). Opaque shadcn popovers, menus, dialogs, Environment,
+and forms use the floating surface and overlay shadow. Frosted material is
+limited to native/optional sidebar translucency and the floating activity
+picture-in-picture; reduced transparency and unsupported `backdrop-filter`
+resolve to opaque surfaces.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-sm`,
 `--octant-shadow-md`, `--octant-shadow-lg`, `--octant-shadow-overlay`, and
 `--octant-shadow-pop`. Use the smallest level that establishes a genuine
-layer; ordinary in-flow content should have no shadow.
+layer; navigation panes stay unshadowed; grouped cards and composers use `--octant-shadow-sm`.
 
 ## Shell and layout
 
@@ -214,12 +215,12 @@ Navigator, Agents, Providers, Usage, Plugins, Automations, Artifacts, and Zen
 entry points. Search is a compact in-place filter for the current mode's visible
 threads, with a command-style overlay available for broader actions.
 
-Settings is a dense operating surface rather than a dashboard. A compact 248px
+Settings is a grouped form page rather than a dashboard wall. A compact 248px
 navigation rail and search remain fixed while one centered 760px reading column
-scrolls. Section labels sit outside quiet, flat row groups; labels and
-descriptions align left, controls align right, and compound editors may expand
-below without becoming nested cards. Every control uses the owned Octant/shadcn
-adapter, inherits the interface typography projection, and saves immediately.
+scrolls. Related rows sit in raised cards with a title and short description;
+labels and descriptions align left, controls align right, and compound editors
+may expand below. Every control uses the owned Octant/shadcn adapter, inherits
+the interface typography projection, and saves immediately.
 Scope metadata remains available to assistive technology but does not compete
 with the setting label.
 

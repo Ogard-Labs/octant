@@ -5,7 +5,7 @@ export function Card({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
       className={cn(
-        "flex flex-col gap-6 rounded-lg border border-border bg-card py-6 text-card-foreground shadow-none",
+        "flex flex-col gap-6 rounded-xl border border-border bg-card py-6 text-card-foreground shadow-sm",
         className,
       )}
       data-slot="card"

@@ -33,7 +33,7 @@
 .octant-card {
   background: var(--octant-surface-raised);
   border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-panel, 10px);
+  border-radius: var(--octant-radius-panel, 16px);
   box-shadow: var(--octant-shadow-md);
 }
 
