@@ -1729,8 +1729,8 @@ form > .work-composer-adapter__attachments {
 
 /* Same width as the prompt, slid under it by one corner radius so the
    back sheet's top corners stay hidden. Side shoulders read as a tray;
-   a downward tuck is the stacked card. Same fill as `.composer` so the
-   peek is a second sheet, not a darker status band. */
+   a downward tuck is the stacked card. Workspace fill in dark so the
+   prompt's bottom corners read against the peek — same charcoal hid them. */
 .code-composer-adapter__dock {
   position: relative;
   z-index: 0;
@@ -1743,7 +1743,7 @@ form > .work-composer-adapter__attachments {
   margin: -20px 0 0;
   padding: 28px 16px 10px;
   color: var(--oct-meta);
-  background: var(--octant-floating);
+  background: var(--octant-workspace);
   border-radius: var(--oct-radius-lg);
   box-shadow: var(--octant-shadow-sm);
 }

@@ -190,7 +190,8 @@ welcome composers, and cards use the raised card recipe (`OctantCard` /
 as a sunken field. Code welcome names the Project in the heading. Checkout and branch sit
 on a second raised card stacked behind the composer: same width, slid
 under the prompt by one corner radius so only the checkout row peeks.
-Side shoulders read as a tray. The back sheet uses the composer fill.
+Side shoulders read as a tray. In dark the back sheet is a step below
+the prompt so the front card's bottom corners stay visible.
 Host, workspace, and the searchable ref list live on that back card,
 not in the toolbar. Access is a titled menu on
 the card, next to the model picker. GitHub and delivery stay a quiet strip
