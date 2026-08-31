@@ -11,19 +11,17 @@ product still reads as a flat, inconsistent workbench because 0016 and
 DESIGN.md require hairline panes, 8/10/12px radii, and `shadow-none` cards,
 while leftover `.btn*` and feature hover rules repaint those adapters.
 
-[blocks.so](https://blocks.so/) is an MIT-licensed React/Tailwind/shadcn/ui
-registry. It is the approved visual reference for grouping, radius, elevation,
-and progress. It is not a dependency. Originality and 0016 still forbid vendoring
-its source or replacing composers, the shell, Monaco, the terminal, or
-authority UX. This record is the scoped exception that changes _how those
-owned surfaces look_.
+Public block catalogs are the approved visual reference for grouping, radius,
+elevation, and progress. They are not a dependency. Originality and 0016 still
+forbid vendoring catalog source or replacing composers, the shell, Monaco, the
+terminal, or authority UX. This record is the scoped exception that changes
+_how those owned surfaces look_.
 
 ## Decision
 
 - **Stack unchanged.** Base UI remains the only primitive. Feature code
-  imports `ui/base` only. Tokens stay `--octant-*`. Radix, a second primitive
-  stack, the blocks.so registry, `@blocks-so/*` ids, `cmdk`, and the Vercel
-  `ai` chat kit are not added.
+  imports `ui/base` only. Tokens stay `--octant-*`. A second primitive stack,
+  a catalog registry package, or a third-party chat kit is not added.
 - **Visual language.** This supersedes 0016's "ordinary panes stay flat" and
   the 6/8/10/14px radius targets, and DESIGN.md's "avoid oversized setup
   cards" / "Settings is a dense operating surface" of flat `.setrow` groups.
@@ -39,17 +37,17 @@ owned surfaces look_.
   the new radii and selection fill; they are not replaced by sidebar or
   table blocks.
 - **Composition targets.** Restyle the Octant owner; do not swap in a
-  foreign block. Login blocks are unused (no account). `ai-05` is unused.
+  foreign block. There is no account login surface.
 
-  | Surface                     | Octant owner                                           | Public-block pattern   |
-  | --------------------------- | ------------------------------------------------------ | ---------------------- |
-  | Settings, Provider Settings | `SettingRow`, settings registry                        | form-layout-01/02/03   |
-  | First-run                   | `FirstRunOnboarding` (0019 / 0033)                     | onboarding-01/02/03    |
-  | Welcome + composer chrome   | `ChatWelcome`, `ThreadComposer`, `ComposerModelPicker` | ai-01/02/03/04         |
-  | Command palette             | `CommandPalette`                                       | command-menu-01/02     |
-  | Shared dialogs              | `OctantDialog` callers                                 | dialog-01/02/11        |
-  | Usage                       | `UsageDashboard`                                       | stats-12/14            |
-  | Boards / empty              | board + empty-state owners                             | grid-list-02, stats-03 |
+  | Surface                     | Octant owner                                           | Visual pattern                         |
+  | --------------------------- | ------------------------------------------------------ | -------------------------------------- |
+  | Settings, Provider Settings | `SettingRow`, settings registry                        | Raised form cards                      |
+  | First-run                   | `FirstRunOnboarding` (0019 / 0033)                     | Stepped progress on cards              |
+  | Welcome + composer chrome   | `ChatWelcome`, `ThreadComposer`, `ComposerModelPicker` | Raised prompt card, quiet chrome       |
+  | Command palette             | `CommandPalette`                                       | Searchable command list                |
+  | Shared dialogs              | `OctantDialog` callers                                 | Raised dialog card                     |
+  | Usage                       | `UsageDashboard`                                       | Stat cards                             |
+  | Boards / empty              | board + empty-state owners                             | Card grid and empty state              |
 
 - **Dual paint dies on contact.** A touched surface drops `.btn*` on
   `OctantButton` and feature CSS that repaints adapter color, border, radius,
