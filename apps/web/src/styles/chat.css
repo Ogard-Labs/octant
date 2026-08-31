@@ -776,7 +776,7 @@
   width: 6px;
   height: 6px;
   flex: 0 0 6px;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   background: var(--oct-accent);
 }
 
@@ -872,7 +872,7 @@
   right: 3px;
   width: 5px;
   height: 5px;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   background: var(--oct-accent-fg);
 }
 
