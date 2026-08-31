@@ -20,6 +20,10 @@
   background: var(--oct-bg);
 }
 
+.chat-welcome {
+  background: var(--octant-app-background);
+}
+
 /* The un-ported draft-thread base (shell.css) imports after the system sheet
    and wins width ties against `.thread-column`, so the welcome hero restates
    the shared measure through its token instead of wearing the class. The
@@ -76,12 +80,26 @@
   text-align: center;
 }
 
-.chat-welcome__suggestions {
+.chat-welcome__suggestions,
+.code-composer-adapter__suggestions {
   order: 3;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
+}
+
+.chat-welcome__suggestions button,
+.code-composer-adapter__suggestions button {
+  color: var(--oct-muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.chat-welcome__suggestions button:hover:not(:disabled),
+.code-composer-adapter__suggestions button:hover:not(:disabled) {
+  color: var(--oct-fg);
+  background: transparent;
 }
 
 .chat-welcome__retry {

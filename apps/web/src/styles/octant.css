@@ -4043,11 +4043,17 @@ input.switch:checked::after {
   border: 0;
   border-radius: var(--oct-radius-lg);
   background: var(--octant-floating);
-  box-shadow: var(--octant-shadow-sm);
+  box-shadow: var(--octant-shadow-md);
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
+/* Light: white card on the inset welcome well. Floating is a grey step
+   below workspace, so it reads as a sunken field — the opposite of the
+   public-block composer the welcome is supposed to match. */
+html[data-octant-theme-mode="light"] .composer {
+  background: var(--octant-workspace);
+}
 .composer:focus-within {
-  box-shadow: var(--octant-shadow-md);
+  box-shadow: var(--octant-shadow-lg);
 }
 /* Keyboard focus still earns a real accent ring; pointer focus does not, so
    clicking into the box stays quiet. */

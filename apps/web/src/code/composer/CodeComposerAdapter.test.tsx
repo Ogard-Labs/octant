@@ -31,13 +31,35 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain('class="composer code-composer-adapter__card"');
   });
 
-  it("keeps thread bindings outside the raised composer frame", () => {
+  it("keeps host and Project on the composer toolbar", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
+    const frame = container.querySelector(".composer");
+    expect(frame).not.toBeNull();
+    expect(frame?.querySelector(".host-selector")).not.toBeNull();
+    expect(frame?.textContent).toContain("My Repo");
+  });
+
+  it("keeps GitHub and delivery outside the raised composer frame", () => {
+    const { container } = render(
+      <CodeComposerAdapter {...defaultProps} githubControl={<span>GitHub control slot</span>} />,
+    );
     const frame = container.querySelector(".composer");
     const strip = container.querySelector(".code-composer-adapter__context-strip");
     expect(frame).not.toBeNull();
     expect(strip).not.toBeNull();
     expect(frame?.contains(strip)).toBe(false);
+    expect(strip?.textContent).toContain("GitHub control slot");
+    expect(strip?.textContent).toContain("Delivery target");
+  });
+
+  it("offers quiet starter ideas that prepare a draft without sending it", () => {
+    const onCreateThread = vi.fn();
+    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+      "Read this repository and tell me how it is structured.",
+    );
+    expect(onCreateThread).not.toHaveBeenCalled();
   });
 
   it("renders approval policy selector", () => {

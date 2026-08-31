@@ -1512,6 +1512,10 @@ form > .work-composer-adapter__attachments {
   background: var(--octant-workspace);
 }
 
+.work-composer-adapter {
+  background: var(--octant-app-background);
+}
+
 .work-composer-adapter__canvas,
 .work-thread-workspace .draft-thread__canvas {
   box-sizing: border-box;
@@ -1643,7 +1647,7 @@ form > .work-composer-adapter__attachments {
   flex: 1 1 auto;
   flex-direction: column;
   color: var(--octant-text-primary);
-  background: var(--octant-workspace);
+  background: var(--octant-app-background);
 }
 
 .code-composer-adapter__canvas {
@@ -2008,9 +2012,12 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__hint {
   margin: 0;
-  padding: 0 2px;
-  color: var(--oct-meta);
+  padding: 0;
+  color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+  line-height: 1.4;
+  opacity: 0.7;
+  text-align: center;
 }
 
 /* Quiet worktree-source status line below the context strip. */

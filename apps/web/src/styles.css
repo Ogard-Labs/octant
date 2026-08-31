@@ -37,6 +37,7 @@
   --octant-border: #2d2d2d;
   --octant-border-subtle: #2d2d2d;
   --octant-border-strong: #454545;
+  --octant-app-background: #101010;
   --octant-workspace: #171717;
   --octant-surface: #171717;
   --octant-surface-canvas: #171717;
@@ -130,18 +131,21 @@
 }
 
 html[data-octant-theme-mode="light"] {
+  --octant-app-background: #f2f2f0;
   --octant-surface-inset: #f6f7f8;
   --octant-text-primary-high-contrast: #0e0f11;
   --octant-text-secondary-high-contrast: #45484e;
   --octant-text-muted-high-contrast: #63666c;
   --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 10%, transparent);
   --octant-scrim: rgb(15 17 19 / 45%);
-  --octant-shadow-sm: 0 0 0 1px var(--octant-border-strong), 0 1px 2px rgb(16 24 40 / 6%);
+  --octant-shadow-sm:
+    0 0 0 1px rgb(16 24 40 / 8%), 0 1px 2px rgb(16 24 40 / 6%), 0 4px 12px rgb(16 24 40 / 5%);
   --octant-shadow-md:
-    0 0 0 1px var(--octant-border), 0 1px 2px rgb(16 24 40 / 4%), 0 2px 6px rgb(16 24 40 / 3%);
-  --octant-shadow-lg: 0 0 0 1px var(--octant-border), 0 2px 10px rgb(0 0 0 / 5%);
-  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 8px 28px rgb(0 0 0 / 7%);
-  --octant-shadow-pop: 0 8px 28px rgb(16 24 40 / 10%);
+    0 0 0 1px rgb(16 24 40 / 8%), 0 2px 4px rgb(16 24 40 / 6%), 0 8px 24px rgb(16 24 40 / 8%);
+  --octant-shadow-lg:
+    0 0 0 1px rgb(16 24 40 / 8%), 0 4px 12px rgb(16 24 40 / 6%), 0 16px 40px rgb(16 24 40 / 8%);
+  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 8px 28px rgb(0 0 0 / 10%);
+  --octant-shadow-pop: 0 8px 28px rgb(16 24 40 / 12%);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
   --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);

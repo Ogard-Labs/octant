@@ -184,12 +184,13 @@ the native host and the status bar is 26px.
 
 Navigation panes stay compact hairline rails. Grouped forms, setup objects,
 welcome composers, and cards use the raised card recipe (`OctantCard` /
-`--octant-shadow-sm`). Chat, Work, and Code welcome composers share the
-`.composer` frame (20px, floating fill, `--octant-shadow-sm`). A surface may
-size the first-message field. Code bindings (host, Project, GitHub, delivery)
-sit above that frame as a quiet strip — not inside it, and not as a second
-box. The prompt itself is frameless so the shadcn textarea cannot paint a
-10px field inside the card. Opaque shadcn
+`--octant-shadow-sm`). Chat, Work, and Code welcome composers share the `.composer` frame (20px,
+`--octant-shadow-md`). In light the card is workspace white on the
+`--octant-app-background` well, not the grey floating fill — that fill reads
+as a sunken field. Host and Project sit on the toolbar, like Chat. GitHub
+and delivery stay a quiet strip under the card. Starter ideas are ghost
+actions under the hint, not outlined pills. The prompt itself is frameless
+so the shadcn textarea cannot paint a 10px field inside the card. Opaque shadcn
 popovers, menus, dialogs, Environment, and forms use the floating surface and
 overlay shadow. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced
@@ -198,7 +199,8 @@ transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-sm`,
 `--octant-shadow-md`, `--octant-shadow-lg`, `--octant-shadow-overlay`, and
 `--octant-shadow-pop`. Use the smallest level that establishes a genuine
-layer; navigation panes stay unshadowed; grouped cards and composers use `--octant-shadow-sm`.
+layer; navigation panes stay unshadowed; grouped cards use `--octant-shadow-sm`;
+composers use `--octant-shadow-md` so the card actually lifts in light.
 
 ## Shell and layout
 

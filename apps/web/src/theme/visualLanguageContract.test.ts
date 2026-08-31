@@ -58,6 +58,14 @@ describe("the public-block visual language", () => {
     expect(styles).not.toMatch(/\.code-thread-workspace__composer\s*\{[^}]*box-shadow:\s*none/);
   });
 
+  it("lifts the composer with the mid shadow, not the hairline-only small shadow", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const frame = system.match(/^\.composer \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+
+    expect(frame).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
+    expect(frame).not.toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
+  });
+
   it("keeps the composer prompt frameless so the shadcn textarea cannot paint a second field", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const input = system.match(/\.composer-input\s*\{[^}]+\}/)?.[0] ?? "";
