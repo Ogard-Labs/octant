@@ -11,9 +11,9 @@ product still reads as a flat, inconsistent workbench because 0016 and
 DESIGN.md require hairline panes, 8/10/12px radii, and `shadow-none` cards,
 while leftover `.btn*` and feature hover rules repaint those adapters.
 
-[blocks.so](https://blocks.so/) is a MIT, Base UI–backed shadcn catalog. It
-is the approved visual reference for grouping, radius, elevation, and
-progress. It is not a dependency. Originality and 0016 still forbid vendoring
+[blocks.so](https://blocks.so/) is an MIT-licensed React/Tailwind/shadcn/ui
+registry. It is the approved visual reference for grouping, radius, elevation,
+and progress. It is not a dependency. Originality and 0016 still forbid vendoring
 its source or replacing composers, the shell, Monaco, the terminal, or
 authority UX. This record is the scoped exception that changes _how those
 owned surfaces look_.

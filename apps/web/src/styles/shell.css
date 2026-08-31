@@ -2025,7 +2025,8 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
   margin: 0;
   padding: 8px 12px 2px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
   font-weight: 500;
 }
 

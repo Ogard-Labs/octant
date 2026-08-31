@@ -292,7 +292,7 @@ html[data-theme="dark"] .settings-view {
 .settings-panel--danger {
   box-shadow:
     var(--octant-shadow-sm),
-    0 0 0 1px color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
+    inset 0 0 0 1px color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
 }
 
 .settings-panel__stack {
