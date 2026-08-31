@@ -186,8 +186,10 @@ Navigation panes stay compact hairline rails. Grouped forms, setup objects,
 welcome composers, and cards use the raised card recipe (`OctantCard` /
 `--octant-shadow-sm`). Chat, Work, and Code welcome composers share the
 `.composer` frame (20px, floating fill, `--octant-shadow-sm`). A surface may
-size the first-message field and place a context strip; it must not flatten
-the frame or paint the input and toolbar as separate boxes. Opaque shadcn
+size the first-message field. Code bindings (host, Project, GitHub, delivery)
+sit above that frame as a quiet strip — not inside it, and not as a second
+box. The prompt itself is frameless so the shadcn textarea cannot paint a
+10px field inside the card. Opaque shadcn
 popovers, menus, dialogs, Environment, and forms use the floating surface and
 overlay shadow. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced

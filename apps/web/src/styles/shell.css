@@ -1711,25 +1711,23 @@ form > .work-composer-adapter__attachments {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  order: -1;
+  justify-content: center;
   gap: 5px 10px;
   margin: 0;
-  padding: 10px 12px 0;
+  padding: 0 2px;
   color: var(--oct-meta);
   background: transparent;
   border: 0;
 }
 
-/* Panels a strip control expands into are further rows of the same card, so
-   they drop the frame they wore as free-standing panels: a bordered box inside
-   a bordered card reads as two cards, not as one that grew a row. */
-.code-composer-adapter__card > .code-worktree-source,
-.code-composer-adapter__card > .code-composer-adapter__delivery {
+/* Delivery and worktree source expand from the strip, not from inside the
+   raised composer. They stay unboxed so they do not read as a second card. */
+.code-composer-adapter__composer > .code-worktree-source,
+.code-composer-adapter__composer > .code-composer-adapter__delivery {
   margin: 0;
-  padding: 10px 14px 12px;
+  padding: 4px 2px 0;
   background: transparent;
   border: 0;
-  border-top: 1px solid var(--oct-hairline);
   border-radius: 0;
 }
 
@@ -1955,10 +1953,8 @@ form > .work-composer-adapter__attachments {
   background: var(--oct-fg-soft);
 }
 
-/* Inside the card the strip is a row of it, so it starts on the same edge as
-   the prompt and the toolbar above it rather than centring against nothing. */
 .code-composer-adapter__context-strip {
-  justify-content: flex-start;
+  justify-content: center;
 }
 
 .code-composer-adapter__disclosure-toggle {

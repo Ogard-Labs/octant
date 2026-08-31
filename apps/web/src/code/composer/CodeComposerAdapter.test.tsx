@@ -31,6 +31,15 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain('class="composer code-composer-adapter__card"');
   });
 
+  it("keeps thread bindings outside the raised composer frame", () => {
+    const { container } = render(<CodeComposerAdapter {...defaultProps} />);
+    const frame = container.querySelector(".composer");
+    const strip = container.querySelector(".code-composer-adapter__context-strip");
+    expect(frame).not.toBeNull();
+    expect(strip).not.toBeNull();
+    expect(frame?.contains(strip)).toBe(false);
+  });
+
   it("renders approval policy selector", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
     expect(html).toContain("Approval");
