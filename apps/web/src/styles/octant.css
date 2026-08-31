@@ -613,15 +613,6 @@ h4 {
   text-underline-offset: 3px;
 }
 
-/* ─── buttons ─────────────────────────────────────────────────────────
-   Colour, hover, focus, and disabled paint live on OctantButton. This
-   keeps only the layout cluster first-run still uses to space siblings. */
-.btn-group {
-  display: inline-flex;
-  gap: var(--oct-space-3);
-  flex-wrap: wrap;
-}
-
 /* ─── card / surface ────────────────────────────────────────────────── */
 .card {
   background: var(--oct-surface);
@@ -3838,30 +3829,6 @@ input.switch:checked::after {
   flex: 1;
 }
 
-/* ─── icon button ─────────────────────────────────────────────────────
-   Square, for toolbars and title bars. It has no text, so it always needs
-   an aria-label. */
-.btn-icon {
-  display: inline-grid;
-  place-items: center;
-  width: var(--oct-control-height-sm);
-  height: var(--oct-control-height-sm);
-  min-height: 0;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--oct-radius-sm);
-  background: none;
-  color: var(--oct-muted);
-}
-.btn-icon:hover {
-  background: var(--oct-fg-soft);
-  color: var(--oct-fg);
-}
-.btn-icon[aria-expanded="true"] {
-  background: var(--oct-fg-soft);
-  color: var(--oct-fg);
-}
-
 /* ─── file tabs ───────────────────────────────────────────────────────── */
 .filetabs {
   display: flex;
@@ -5478,9 +5445,6 @@ html[data-octant-theme-mode="light"] .composer {
   border-radius: var(--oct-radius-pill);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
-}
-.zen-bar .btn-icon {
-  border-radius: var(--oct-radius-pill);
 }
 .zen-bar-sep {
   width: 1px;
@@ -7683,15 +7647,6 @@ html[data-octant-theme-mode="light"] .composer {
   background: var(--oct-glass-highlight);
   opacity: 0.6;
   pointer-events: none;
-}
-
-/* The desktop icon button is 34px, which is a comfortable mouse target
-   and an uncomfortable thumb one. Inside a phone it takes the touch
-   floor instead — the same component, resized by its surface rather than
-   forked into a second one. */
-:where(.phone) .btn-icon {
-  width: var(--oct-touch-min);
-  height: var(--oct-touch-min);
 }
 
 /* ─── tab bar ─────────────────────────────────────────────────────────

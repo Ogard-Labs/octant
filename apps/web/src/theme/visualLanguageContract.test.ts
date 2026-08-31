@@ -4,20 +4,25 @@ import { describe, expect, it } from "vitest";
 
 const webRoot = join(process.cwd(), "src");
 const leftoverRadius = /border-radius:\s*(?:[5-9]|1[0-4])px\b/;
-const leftoverButtonPaint = /\.btn-(?:primary|secondary|ghost|danger)\b/;
+const leftoverButtonPaint = /\.btn-(?:primary|secondary|ghost|danger|icon|group)\b/;
+const leftoverButtonClass = /\bbtn-(?:icon|group)\b/;
 
-function cssFiles(directory: string): ReadonlyArray<string> {
+function sourceFiles(directory: string, suffix: string): ReadonlyArray<string> {
   const found: string[] = [];
   for (const entry of readdirSync(directory)) {
     const path = join(directory, entry);
     const stat = statSync(path);
     if (stat.isDirectory()) {
-      found.push(...cssFiles(path));
+      found.push(...sourceFiles(path, suffix));
       continue;
     }
-    if (entry.endsWith(".css")) found.push(path);
+    if (entry.endsWith(suffix)) found.push(path);
   }
   return found;
+}
+
+function cssFiles(directory: string): ReadonlyArray<string> {
+  return sourceFiles(directory, ".css");
 }
 
 describe("the public-block visual language", () => {
@@ -40,6 +45,20 @@ describe("the public-block visual language", () => {
         css: readFileSync(path, "utf8"),
       }))
       .filter((file) => leftoverButtonPaint.test(file.css))
+      .map((file) => file.path);
+
+    expect(leftovers).toEqual([]);
+  });
+
+  it("does not leave leftover btn-icon or btn-group class names on product surfaces", () => {
+    const leftovers = ["tsx", "ts"]
+      .flatMap((suffix) => sourceFiles(webRoot, `.${suffix}`))
+      .filter((path) => !path.includes(".test."))
+      .map((path) => ({
+        path: relative(webRoot, path),
+        source: readFileSync(path, "utf8"),
+      }))
+      .filter((file) => leftoverButtonClass.test(file.source))
       .map((file) => file.path);
 
     expect(leftovers).toEqual([]);

@@ -478,7 +478,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
         )}
 
         <footer className="first-run__actions">
-          <div className="first-run__buttons btn-group">
+          <div className="first-run__buttons">
             {handoffOpen || back !== undefined ? (
               <OctantButton
                 disabled={importing}

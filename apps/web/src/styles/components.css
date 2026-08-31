@@ -186,7 +186,7 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
     pointer-events: auto;
   }
 
-  .turn-action-menu__more .btn-icon {
+  .turn-action-menu__more .shell-icon-button {
     border-color: var(--octant-border-strong);
   }
 }

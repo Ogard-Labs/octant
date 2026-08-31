@@ -169,7 +169,7 @@ for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
 chains. The desktop radius scale is 10px compact control, 16px panel and card, 20px
 composer and dialog, and 9999px only for a compact chip or meter. Product
 chrome uses those tokens. Pixel radii of 1–4px remain only for chart bars,
-marks, and status dots. Leftover `.btn` colour recipes are gone; adapters own
+    marks, and status dots. Leftover `.btn*` recipes are gone; adapters own
 button paint. Phone-only
 surfaces use the larger 22/26/30px mobile radii.
 

@@ -376,8 +376,13 @@ button.first-run__fact-action {
   border-top: 1px solid var(--oct-border-soft);
 }
 
-/* `.btn-group` spaces and wraps the buttons; the footer right-aligns them. */
+.first-run__button-row,
 .first-run__buttons {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-3);
+}
+
+.first-run__buttons {
   justify-content: flex-end;
 }

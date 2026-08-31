@@ -150,7 +150,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
           else if (value === "canvas") props.canvas?.onToggle();
         }}
         trigger={<Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />}
-        triggerClassName="btn-icon window-no-drag"
+        triggerClassName="shell-icon-button"
         triggerLabel="Thread actions"
         // No item is a persistent choice: an empty value keeps every click a
         // fresh action instead of a radio selection that would stop firing.

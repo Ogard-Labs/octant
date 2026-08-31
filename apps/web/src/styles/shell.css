@@ -237,8 +237,8 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   pointer-events: auto;
 }
 
-/* The btn-icon recipe owns the shape and states; this override keeps the
-   compact 26px square the 34px native titlebar row can actually hold. */
+/* Compact 26px square so the 34px native titlebar row can actually hold
+   the control. Paint stays on the owned icon-button recipe. */
 .window-chrome__button {
   display: grid;
   flex: 0 0 auto;

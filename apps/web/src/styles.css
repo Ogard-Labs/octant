@@ -1078,8 +1078,8 @@ button:focus-visible {
   }
 }
 
-/* The system's .btn-icon recipe, compacted: a full 34px square would give the
-   quiet header back the item weight this port removes. */
+/* Compact header actions: a full 34px square would give the quiet header
+   back the item weight this port removes. */
 .project-section__add,
 .project-section__header .octant-menu__trigger {
   width: 24px;

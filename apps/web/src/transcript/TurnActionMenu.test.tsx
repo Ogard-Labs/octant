@@ -24,7 +24,10 @@ describe("the turn action menu", () => {
   it("keeps secondary actions in one More actions control instead of as permanent text", () => {
     menu();
 
-    expect(screen.getByRole("button", { name: "More actions" })).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "More actions" });
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveClass("shell-icon-button");
+    expect(trigger.className).not.toMatch(/\bbtn-icon\b/);
     expect(screen.queryByRole("button", { name: "Branch from here" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Checkpoint" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy references" })).not.toBeInTheDocument();
