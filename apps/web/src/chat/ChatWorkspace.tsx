@@ -200,6 +200,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const cancelledUploadsRef = useRef(new Set<string>());
   const uploadingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
   const pendingExtensionRef = useRef<ReadonlyArray<ChatComposerExtensionSelection>>([]);
+  const threadMentionChipsRef = useRef<ReadonlyArray<ChatComposerThreadMentionChip>>([]);
   const pendingCanvasRef = useRef<ReadonlyArray<CanvasContextSelection>>([]);
   const pendingPreviewRef = useRef<ReadonlyArray<PreviewContextSelection>>([]);
   const pendingQuotesRef = useRef<ReadonlyArray<TranscriptQuoteChip>>([]);
@@ -375,6 +376,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ...(props.onOpenSideChat === undefined ? {} : { onSideChatOpened: props.onOpenSideChat }),
   });
   threadMentionsRestoreRef.current = threadMentions.restore;
+  threadMentionChipsRef.current = threadMentions.chips;
   const parallelReview = useLinkedThreadParallelReview({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -685,7 +687,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       // and this send owns every controlled selection.
       props.onClearCanvasSelections();
     }
-    const currentExtensionSelections = props.pendingExtensionSelections ?? extensionDraft.receipts;
+    const currentExtensionSelections = pendingExtensionRef.current;
     if (props.pendingExtensionSelections === undefined) {
       for (const receipt of context.extensionReceipts) {
         // Remove only the receipt object this send captured. A newer draft may
@@ -708,7 +710,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         // `onRemoveChip` accepts an id for user interactions, but a send owns
         // one concrete chip instance. Check identity first so an older send
         // cannot remove a same-id chip re-added to a newer draft.
-        if (threadMentions.chips.some((candidate) => candidate === chip)) {
+        if (threadMentionChipsRef.current.some((candidate) => candidate === chip)) {
           mentionComposer.onRemoveChip(chip.threadId);
         }
       }

@@ -782,6 +782,122 @@ describe("ChatWorkspace", () => {
     expect(await screen.findByText("Replacement guide")).toBeVisible();
   });
 
+  it("does not remove an extension receipt re-added while the send is in flight", async () => {
+    const user = userEvent.setup();
+    let finish: ((value: boolean) => void) | undefined;
+    const selection = {
+      kind: "plugin" as const,
+      extensionId: "00000000-0000-4000-8000-000000000943",
+      packageId: "00000000-0000-4000-8000-000000000944",
+      componentId: "instructions",
+      packageVersion: "1.0.0",
+      packageDigest: `sha256:${"c".repeat(64)}`,
+      catalogEpoch: `sha256:${"d".repeat(64)}`,
+      origin: { kind: "draft" as const, reference: "@guide" },
+    } as unknown as ExtensionSelection;
+    const original = {
+      reference: "@guide",
+      label: "Original guide",
+      selection,
+      status: { kind: "selected" as const },
+    };
+    const replacement = { ...original, label: "Replacement guide" };
+    const sendTurn = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    function Harness() {
+      const [draft, setDraft] = useState("Send now");
+      const [receipts, setReceipts] = useState([original]);
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+            })}
+            pendingExtensionSelections={receipts}
+            onRemoveExtensionSelection={(reference) =>
+              setReceipts((current) => current.filter((receipt) => receipt.reference !== reference))
+            }
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setReceipts([replacement])} type="button">
+            Re-add guide
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole("button", { name: "Re-add guide" }));
+    finish?.(true);
+
+    expect(await screen.findByText("Replacement guide")).toBeVisible();
+  });
+
+  it("does not remove a thread mention re-added while the send is in flight", async () => {
+    const user = userEvent.setup();
+    let finish: ((value: boolean) => void) | undefined;
+    const sendTurn = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const mentionedThreadId = "00000000-0000-4000-8000-000000000945";
+    const threadMentionClient = {
+      search: vi.fn(async () => [
+        {
+          threadId: mentionedThreadId,
+          mode: "chat" as const,
+          title: "First context",
+          placement: { kind: "unfiled" as const },
+          updatedAt: now,
+        },
+      ]),
+      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
+      openSideChat: vi.fn(),
+      execute: vi.fn(),
+    } as unknown as ThreadMentionClient;
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            pendingDraft: draft,
+            sendTurn,
+            setPendingDraft: setDraft,
+          })}
+          providerSnapshot={providerSnapshot()}
+          threadMentionClient={threadMentionClient}
+        />
+      );
+    }
+    render(<Harness />);
+
+    const composer = screen.getByRole("textbox", { name: "Message" });
+    await user.type(composer, "#First");
+    await user.click(await screen.findByRole("option", { name: /First context/ }));
+    await user.type(composer, " send now");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole("button", { name: "Remove First context thread mention" }));
+    await user.clear(composer);
+    await user.type(composer, "#First");
+    await user.click(await screen.findByRole("option", { name: /First context/ }));
+    finish?.(true);
+
+    expect(await screen.findByRole("list", { name: "Mentioned threads" })).toHaveTextContent(
+      "First context",
+    );
+  });
+
   it("uses only the context captured when steering and preserves later context", async () => {
     const user = userEvent.setup();
     let finish: ((value: boolean) => void) | undefined;
