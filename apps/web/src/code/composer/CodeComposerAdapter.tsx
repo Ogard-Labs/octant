@@ -602,14 +602,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     : { onSelectHost: props.onSelectHost })}
                   requiredCapability="code"
                 />
-                {hasProject ? null : props.folderControl}
-                {hasProject ? null : props.folderControl === undefined &&
-                  props.projectName !== undefined ? (
-                  <span className="code-composer-adapter__context-item" title={props.projectRoot}>
-                    <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
-                    <span>{props.projectName}</span>
-                  </span>
-                ) : null}
                 {hasProject ? (
                   <CodeWorkspaceSelector
                     onChange={setWorkspaceOverride}
@@ -635,11 +627,25 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
                     {...(props.creating === true ? { disabled: true } : {})}
                   />
-                ) : props.branchName !== undefined ? (
-                  <span className="code-composer-adapter__context-item">
-                    <span>{props.branchName}</span>
-                  </span>
-                ) : null}
+                ) : (
+                  <>
+                    {props.folderControl}
+                    {props.folderControl === undefined && props.projectName !== undefined ? (
+                      <span
+                        className="code-composer-adapter__context-item"
+                        title={props.projectRoot}
+                      >
+                        <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+                        <span>{props.projectName}</span>
+                      </span>
+                    ) : null}
+                    {props.branchName !== undefined ? (
+                      <span className="code-composer-adapter__context-item">
+                        <span>{props.branchName}</span>
+                      </span>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
           </div>

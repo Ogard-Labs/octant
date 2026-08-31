@@ -44,6 +44,17 @@ describe("CodeComposerAdapter", () => {
     expect(dock?.textContent).toContain("development");
   });
 
+  it("puts the Project picker on the trailing edge of the checkout card when none is selected", () => {
+    const { projectId: _projectId, projectName: _projectName, ...rest } = defaultProps;
+    const { container } = render(
+      <CodeComposerAdapter {...rest} folderControl={<span>Choose a Project</span>} />,
+    );
+    const leading = container.querySelector(".code-composer-adapter__dock-leading");
+    const trailing = container.querySelector(".code-composer-adapter__dock-trailing");
+    expect(leading?.textContent).not.toContain("Choose a Project");
+    expect(trailing?.textContent).toContain("Choose a Project");
+  });
+
   it("keeps GitHub and delivery outside the raised composer frame", () => {
     const { container } = render(
       <CodeComposerAdapter {...defaultProps} githubControl={<span>GitHub control slot</span>} />,
