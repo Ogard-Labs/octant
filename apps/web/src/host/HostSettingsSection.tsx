@@ -16,7 +16,7 @@ import type {
 import { purgeComposerThreadDrafts } from "../composer/composerThreadDraftStore";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
 import { SettingsFactList, SettingsPanel, SettingsState } from "../settings/primitives";
 import {
@@ -477,18 +477,18 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
         <p className="host-settings__note">Host default: {formatRetentionWindow(state)}.</p>
         <div className="host-settings__field">
           <label htmlFor="thread-retention-scope">Scope</label>
-          <OctantNativeSelect
+          <OctantSelectField
             id="thread-retention-scope"
-            onChange={(event) => {
-              const value = event.currentTarget.value;
+            onValueChange={(value) => {
               if (isRetentionScopeKind(value)) setScopeKind(value);
             }}
+            options={[
+              { id: "host", label: "This host" },
+              { id: "project", label: "One Project" },
+              { id: "thread", label: "One thread" },
+            ]}
             value={scopeKind}
-          >
-            <option value="host">This host</option>
-            <option value="project">One Project</option>
-            <option value="thread">One thread</option>
-          </OctantNativeSelect>
+          />
         </div>
         {scopeKind === "project" ? (
           <div className="host-settings__field">
@@ -504,18 +504,18 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
           <>
             <div className="host-settings__field">
               <label htmlFor="thread-retention-mode">Mode</label>
-              <OctantNativeSelect
+              <OctantSelectField
                 id="thread-retention-mode"
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
+                onValueChange={(value) => {
                   if (isThreadMode(value)) setMode(value);
                 }}
+                options={[
+                  { id: "chat", label: "Chat" },
+                  { id: "work", label: "Work" },
+                  { id: "code", label: "Code" },
+                ]}
                 value={mode}
-              >
-                <option value="chat">Chat</option>
-                <option value="work">Work</option>
-                <option value="code">Code</option>
-              </OctantNativeSelect>
+              />
             </div>
             <div className="host-settings__field">
               <label htmlFor="thread-retention-thread">Thread id</label>
@@ -529,17 +529,18 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
         ) : null}
         <div className="host-settings__field">
           <label htmlFor="thread-retention-window">Retention window</label>
-          <OctantNativeSelect
+          <OctantSelectField
             id="thread-retention-window"
-            onChange={(event) => setWindowValue(event.currentTarget.value)}
+            onValueChange={(value) => setWindowValue(value)}
+            options={[
+              { id: "forever", label: "Keep forever" },
+              { id: "7", label: "7 days" },
+              { id: "30", label: "30 days" },
+              { id: "90", label: "90 days" },
+              { id: "365", label: "365 days" },
+            ]}
             value={windowValue}
-          >
-            <option value="forever">Keep forever</option>
-            <option value="7">7 days</option>
-            <option value="30">30 days</option>
-            <option value="90">90 days</option>
-            <option value="365">365 days</option>
-          </OctantNativeSelect>
+          />
         </div>
         <div className="host-settings__controls">
           <OctantButton

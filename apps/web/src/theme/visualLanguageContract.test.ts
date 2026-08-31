@@ -50,6 +50,20 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
+  it("does not leave leftover OctantNativeSelect on product surfaces", () => {
+    const leftovers = ["tsx", "ts"]
+      .flatMap((suffix) => sourceFiles(webRoot, `.${suffix}`))
+      .filter((path) => !path.includes(".test."))
+      .map((path) => ({
+        path: relative(webRoot, path),
+        source: readFileSync(path, "utf8"),
+      }))
+      .filter((file) => file.source.includes("OctantNativeSelect"))
+      .map((file) => file.path);
+
+    expect(leftovers).toEqual([]);
+  });
+
   it("does not leave leftover btn-icon or btn-group class names on product surfaces", () => {
     const leftovers = ["tsx", "ts"]
       .flatMap((suffix) => sourceFiles(webRoot, `.${suffix}`))
@@ -113,9 +127,8 @@ describe("the public-block visual language", () => {
     expect(dock).not.toMatch(/position:\s*absolute/);
   });
 
-  it("does not let composer-row native selects keep the field recipe", () => {
+  it("does not keep a native select recipe on the composer row", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    expect(system).toMatch(/\.composer-row select\s*\{[^}]*border:\s*0/);
-    expect(system).toMatch(/\.composer-row select\s*\{[^}]*background:\s*transparent/);
+    expect(system).not.toMatch(/\.composer-row select\b/);
   });
 });

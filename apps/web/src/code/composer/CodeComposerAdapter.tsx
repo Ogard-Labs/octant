@@ -43,7 +43,7 @@ import { ThreadComposer } from "../../composer/ThreadComposer";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
-import { OctantNativeSelect } from "../../ui/base/OctantSelect";
+import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
 import { CodeComposerAccessMenu } from "./CodeComposerAccessMenu";
@@ -696,17 +696,15 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             <div className="code-composer-adapter__delivery" aria-label="Delivery target">
               <label className="code-composer-adapter__field">
                 <span>Outcome</span>
-                <OctantNativeSelect
+                <OctantSelectField
                   aria-label="Delivery outcome"
-                  onChange={(e) => setOutcomeOverride(e.target.value as CodeDeliveryOutcomeKind)}
+                  onValueChange={(value) => setOutcomeOverride(value as CodeDeliveryOutcomeKind)}
+                  options={CODE_DELIVERY_OUTCOME_ORDER.map((kind) => ({
+                    id: kind,
+                    label: CODE_DELIVERY_OUTCOME_LABELS[kind],
+                  }))}
                   value={outcomeKind}
-                >
-                  {CODE_DELIVERY_OUTCOME_ORDER.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {CODE_DELIVERY_OUTCOME_LABELS[kind]}
-                    </option>
-                  ))}
-                </OctantNativeSelect>
+                />
               </label>
               <label className="code-composer-adapter__field">
                 <span>Branch</span>
@@ -746,16 +744,17 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               </label>
               <label className="code-composer-adapter__field">
                 <span>Permission duration</span>
-                <OctantNativeSelect
+                <OctantSelectField
                   aria-label="Permission persistence"
-                  onChange={(e) =>
-                    setPermissionPersistence(e.target.value as PermissionPersistence)
+                  onValueChange={(value) =>
+                    setPermissionPersistence(value as PermissionPersistence)
                   }
+                  options={[
+                    { id: "current-session", label: "Current session" },
+                    { id: "project-default", label: "Project default" },
+                  ]}
                   value={permissionPersistence}
-                >
-                  <option value="current-session">Current session</option>
-                  <option value="project-default">Project default</option>
-                </OctantNativeSelect>
+                />
               </label>
             </div>
           ) : null}

@@ -2,7 +2,7 @@ import type { ActiveMemoryEntry, ProjectId, ProjectSummary } from "@octant/contr
 import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 
 export interface MemoryTransferDialogProps {
   readonly busy: boolean;
@@ -63,19 +63,17 @@ export function MemoryTransferDialog(props: MemoryTransferDialogProps) {
       <form noValidate onSubmit={(event) => void submit(event)}>
         <label>
           Destination Project
-          <OctantNativeSelect
-            autoFocus
-            onChange={(event) => setDestination(event.target.value as ProjectId)}
-            required
+          <OctantSelectField
+            onValueChange={(value) => setDestination(value as ProjectId)}
+            options={[
+              { id: "", label: "Choose an active Project" },
+              ...props.destinations.map((project) => ({
+                id: project.id,
+                label: project.name,
+              })),
+            ]}
             value={destination}
-          >
-            <option value="">Choose an active Project</option>
-            {props.destinations.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </OctantNativeSelect>
+          />
         </label>
         {props.destinations.length === 0 ? (
           <p className="project-dialog__status">No other active Projects can receive this entry.</p>

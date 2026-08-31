@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Select,
   SelectItem,
@@ -29,73 +29,95 @@ export interface OctantSelectOption {
 
 export interface OctantSelectFieldProps {
   readonly "aria-label"?: string;
+  readonly "data-testid"?: string;
   readonly className?: string;
+  readonly defaultValue?: string;
   readonly disabled?: boolean;
   readonly id?: string;
-  readonly onValueChange: (value: string) => void;
+  readonly name?: string;
+  readonly onValueChange?: (value: string) => void;
   readonly options: ReadonlyArray<OctantSelectOption>;
   readonly placeholder?: ReactNode;
   readonly triggerClassName?: string;
-  readonly value: string;
+  readonly value?: string;
 }
 
 /**
- * Convenience select for product forms that previously used native `<select>`.
- * Compound primitives remain available for advanced layouts.
+ * Base UI rejects an empty item value, but product filters still use "" for
+ * "all" / "default". Encode only at the recipe boundary.
+ */
+const EMPTY_SELECT_VALUE = "octant-select:empty";
+
+function encodeSelectValue(id: string): string {
+  return id === "" ? EMPTY_SELECT_VALUE : id;
+}
+
+function decodeSelectValue(value: string): string {
+  return value === EMPTY_SELECT_VALUE ? "" : value;
+}
+
+/**
+ * Convenience select for product forms. Compound primitives remain available
+ * for advanced layouts.
  */
 export function OctantSelectField(props: OctantSelectFieldProps) {
-  const selectedOption = props.options.find((option) => option.id === props.value);
+  const initialValue = props.defaultValue ?? props.value ?? props.options[0]?.id ?? "";
+  const [uncontrolledValue, setUncontrolledValue] = useState(initialValue);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const selectedId = props.value ?? uncontrolledValue;
+  const selectedOption = props.options.find((option) => option.id === selectedId);
+
+  useEffect(() => {
+    if (props.value !== undefined) return undefined;
+    const form = rootRef.current?.closest("form");
+    if (form === null || form === undefined) return undefined;
+    const onReset = () => {
+      setUncontrolledValue(props.defaultValue ?? props.options[0]?.id ?? "");
+    };
+    form.addEventListener("reset", onReset);
+    return () => form.removeEventListener("reset", onReset);
+  }, [props.defaultValue, props.options, props.value]);
+
   return (
-    <Select
-      disabled={props.disabled}
-      onValueChange={(value) => {
-        if (typeof value === "string") {
-          props.onValueChange(value);
-        }
-      }}
-      value={props.value}
-    >
-      <SelectTrigger
-        aria-label={props["aria-label"]}
-        className={cn("window-no-drag", props.triggerClassName, props.className)}
-        id={props.id}
+    <span className="contents" ref={rootRef}>
+      <Select
+        disabled={props.disabled}
+        onValueChange={(value) => {
+          if (typeof value !== "string") return;
+          const next = decodeSelectValue(value);
+          if (props.value === undefined) setUncontrolledValue(next);
+          props.onValueChange?.(next);
+        }}
+        value={encodeSelectValue(selectedId)}
       >
-        <SelectValue placeholder={props.placeholder}>{selectedOption?.label}</SelectValue>
-      </SelectTrigger>
-      <SelectPortal>
-        <SelectPositioner className="z-50 outline-none window-no-drag" sideOffset={4}>
-          <SelectPopup>
-            {props.options.map((option) => (
-              <SelectItem
-                disabled={option.disabled}
-                key={option.id}
-                title={option.disabledReason}
-                value={option.id}
-              >
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </SelectPositioner>
-      </SelectPortal>
-    </Select>
-  );
-}
-
-export type OctantNativeSelectProps = ComponentProps<"select">;
-
-/**
- * Styled native select for dense forms where Base UI Select would fight
- * existing label/CSS structure (settings grids). Prefer SelectField for new UI.
- */
-export function OctantNativeSelect({ className, ...props }: OctantNativeSelectProps) {
-  return (
-    <select
-      className={cn(
-        "flex h-8 w-full rounded-md border border-input bg-secondary px-2.5 text-sm text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 window-no-drag",
-        className,
+        <SelectTrigger
+          {...(props["aria-label"] === undefined ? {} : { "aria-label": props["aria-label"] })}
+          {...(props["data-testid"] === undefined ? {} : { "data-testid": props["data-testid"] })}
+          className={cn("window-no-drag", props.triggerClassName, props.className)}
+          {...(props.id === undefined ? {} : { id: props.id })}
+        >
+          <SelectValue placeholder={props.placeholder}>{selectedOption?.label}</SelectValue>
+        </SelectTrigger>
+        <SelectPortal>
+          <SelectPositioner className="z-50 outline-none window-no-drag" sideOffset={4}>
+            <SelectPopup>
+              {props.options.map((option) => (
+                <SelectItem
+                  disabled={option.disabled}
+                  key={encodeSelectValue(option.id)}
+                  {...(option.disabledReason === undefined ? {} : { title: option.disabledReason })}
+                  value={encodeSelectValue(option.id)}
+                >
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </SelectPositioner>
+        </SelectPortal>
+      </Select>
+      {props.name === undefined ? null : (
+        <input name={props.name} type="hidden" value={selectedId} />
       )}
-      {...props}
-    />
+    </span>
   );
 }

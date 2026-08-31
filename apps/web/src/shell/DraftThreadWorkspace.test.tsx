@@ -294,9 +294,10 @@ describe("DraftThreadWorkspace", () => {
     );
 
     const combobox = screen.getByRole("combobox", { name: /destination host/i });
-    expect(combobox).toHaveValue(String(studio));
+    expect(combobox).toHaveTextContent(/Studio/);
     expect(screen.getByTestId("host-selector")).toHaveAttribute("data-host-id", String(studio));
-    await user.selectOptions(combobox, String(LOCAL_HOST_ID));
+    await user.click(combobox);
+    await user.click(await screen.findByRole("option", { name: /This Mac/ }));
     expect(onSelectHost).toHaveBeenCalledWith(LOCAL_HOST_ID);
   });
 

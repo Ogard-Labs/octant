@@ -3262,7 +3262,9 @@ describe("App", () => {
     fireEvent.keyDown(providersListbox, { key: "ArrowDown" });
     fireEvent.keyDown(providersListbox, { key: "Enter" });
     expect(screen.getByRole("heading", { name: "Providers & Models" })).toBeVisible();
-    expect(screen.getByLabelText("Permission persistence")).toHaveValue("current-session");
+    expect(screen.getByLabelText("Permission persistence")).toHaveTextContent(
+      "Current session only",
+    );
 
     // Keyword search still routes to the Providers section.
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "OpenCode");

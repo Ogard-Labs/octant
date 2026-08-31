@@ -8,7 +8,7 @@ import type { OctantMode, ProjectId } from "@octant/contracts";
 import { Plus, Search } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
 import { ArtifactCard } from "./ArtifactCard";
 import type { ArtifactLibraryFilters } from "./useArtifactLibrary";
@@ -104,67 +104,59 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
         <label className="sr-only" htmlFor="artifact-library-kind">
           Filter by kind
         </label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="artifact-library__select select"
           id="artifact-library-kind"
-          onChange={(event) =>
-            event.target.value === ""
-              ? clear("kind")
-              : change({ kind: event.target.value as ArtifactKind })
+          onValueChange={(value) =>
+            value === "" ? clear("kind") : change({ kind: value as ArtifactKind })
           }
+          options={[
+            { id: "", label: "Any kind" },
+            ...KINDS.map((kind) => ({
+              id: kind,
+              label: `${kind[0]?.toUpperCase()}${kind.slice(1)}`,
+            })),
+          ]}
           value={filters.kind ?? ""}
-        >
-          <option value="">Any kind</option>
-          {KINDS.map((kind) => (
-            <option key={kind} value={kind}>
-              {kind[0]?.toUpperCase()}
-              {kind.slice(1)}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
 
         <label className="sr-only" htmlFor="artifact-library-project">
           Filter by Project
         </label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="artifact-library__select select"
           id="artifact-library-project"
-          onChange={(event) =>
-            event.target.value === ""
-              ? clear("projectId")
-              : change({ projectId: event.target.value as ProjectId })
+          onValueChange={(value) =>
+            value === "" ? clear("projectId") : change({ projectId: value as ProjectId })
           }
+          options={[
+            { id: "", label: "Any Project" },
+            ...(listing?.projects ?? []).map((project) => ({
+              id: String(project.projectId),
+              label: `${project.name} (${String(project.artifactCount)})`,
+            })),
+          ]}
           value={filters.projectId === undefined ? "" : String(filters.projectId)}
-        >
-          <option value="">Any Project</option>
-          {(listing?.projects ?? []).map((project) => (
-            <option key={String(project.projectId)} value={String(project.projectId)}>
-              {project.name} ({String(project.artifactCount)})
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
 
         <label className="sr-only" htmlFor="artifact-library-mode">
           Filter by mode
         </label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="artifact-library__select select"
           id="artifact-library-mode"
-          onChange={(event) =>
-            event.target.value === ""
-              ? clear("mode")
-              : change({ mode: event.target.value as OctantMode })
+          onValueChange={(value) =>
+            value === "" ? clear("mode") : change({ mode: value as OctantMode })
           }
+          options={[
+            { id: "", label: "Any mode" },
+            ...MODES.map((mode) => ({
+              id: mode,
+              label: `${mode[0]?.toUpperCase()}${mode.slice(1)}`,
+            })),
+          ]}
           value={filters.mode ?? ""}
-        >
-          <option value="">Any mode</option>
-          {MODES.map((mode) => (
-            <option key={mode} value={mode}>
-              {mode[0]?.toUpperCase()}
-              {mode.slice(1)}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
       </div>
 
       <OctantTabs

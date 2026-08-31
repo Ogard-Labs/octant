@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import "../styles/usage.css";
 import { LatencyStatsSection } from "./LatencyStatsSection";
@@ -524,25 +524,18 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
       </label>
       <label className="usage-dashboard__field">
         <span>Mode</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Filter by mode"
           className="usage-dashboard__select select window-no-drag"
-          onChange={(event) =>
-            update(
-              "mode",
-              event.currentTarget.value === ""
-                ? undefined
-                : (event.currentTarget.value as UsageQueryFilter["mode"]),
-            )
+          onValueChange={(value) =>
+            update("mode", value === "" ? undefined : (value as UsageQueryFilter["mode"]))
           }
+          options={MODE_OPTIONS.map((option) => ({
+            id: option.value,
+            label: option.label,
+          }))}
           value={filter.mode ?? ""}
-        >
-          {MODE_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
       </label>
       <label className="usage-dashboard__field">
         <span>Project</span>
@@ -600,48 +593,42 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
       </label>
       <label className="usage-dashboard__field">
         <span>Quality</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Filter by measurement quality"
           className="usage-dashboard__select select window-no-drag"
-          onChange={(event) =>
+          onValueChange={(value) =>
             update(
               "quality",
-              event.currentTarget.value === ""
-                ? undefined
-                : (event.currentTarget.value as UsageQueryFilter["quality"]),
+              value === "" ? undefined : (value as UsageQueryFilter["quality"]),
             )
           }
+          options={QUALITY_OPTIONS.map((option) => ({
+            id: option.value,
+            label: option.label,
+          }))}
           value={filter.quality ?? ""}
-        >
-          {QUALITY_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
       </label>
       <label className="usage-dashboard__field">
         <span>Category</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Filter by context category"
           className="usage-dashboard__select select window-no-drag"
-          onChange={(event) =>
+          onValueChange={(value) =>
             update(
               "category",
-              event.currentTarget.value === ""
-                ? undefined
-                : (event.currentTarget.value as ContextEntryCategory),
+              value === "" ? undefined : (value as ContextEntryCategory),
             )
           }
+          options={[
+            { id: "", label: "All categories" },
+            ...CATEGORY_OPTIONS.map((option) => ({
+              id: option.value,
+              label: option.label,
+            })),
+          ]}
           value={filter.category ?? ""}
-        >
-          <option value="">All categories</option>
-          {CATEGORY_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
       </label>
       <label className="usage-dashboard__field">
         <span>From date</span>

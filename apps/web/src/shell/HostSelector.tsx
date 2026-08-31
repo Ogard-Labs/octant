@@ -7,7 +7,7 @@ import {
   type CreateHostViewScope,
 } from "@octant/domain";
 import { useEffect, useMemo, useState } from "react";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 
 export interface HostSelectorProps {
   /**
@@ -159,31 +159,27 @@ export function HostSelector(props: HostSelectorProps) {
       <span aria-hidden="true" className={`host-selector__dot ${dotClass(health)}`} />
       <label className="host-selector__label">
         <span className="host-selector__label-text">Destination host</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Destination host"
           className="host-selector__select"
-          onChange={(event) => handleChange(event.target.value)}
-          value={String(selectedHostId)}
-        >
-          {options.map((option) => {
+          onValueChange={handleChange}
+          options={options.map((option) => {
             const optionHealth = healthLabels[option.host.health];
             const suffix =
               option.disabledReason !== undefined
                 ? ` — ${option.disabledReason}`
                 : ` — ${optionHealth}`;
-            return (
-              <option
-                disabled={!option.selectable}
-                key={String(option.host.hostId)}
-                title={option.disabledReason}
-                value={String(option.host.hostId)}
-              >
-                {option.host.displayName}
-                {suffix}
-              </option>
-            );
+            return {
+              id: String(option.host.hostId),
+              label: `${option.host.displayName}${suffix}`,
+              ...(!option.selectable ? { disabled: true } : {}),
+              ...(option.disabledReason === undefined
+                ? {}
+                : { disabledReason: option.disabledReason }),
+            };
           })}
-        </OctantNativeSelect>
+          value={String(selectedHostId)}
+        />
       </label>
     </span>
   );

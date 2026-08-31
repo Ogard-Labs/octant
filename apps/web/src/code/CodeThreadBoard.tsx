@@ -16,7 +16,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   codeBoardStatusLabel,
@@ -255,82 +255,83 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                 {props.projects.length === 0 ? null : (
                   <label>
                     <span>Project</span>
-                    <OctantNativeSelect
-                      onChange={(event) =>
+                    <OctantSelectField
+                      onValueChange={(value) =>
                         setFilters((prev) => ({
                           ...prev,
                           projectIds:
-                            event.target.value === ""
-                              ? new Set<string>()
-                              : new Set<string>([event.target.value]),
+                            value === "" ? new Set<string>() : new Set<string>([value]),
                         }))
                       }
+                      options={[
+                        { id: "", label: "All Projects" },
+                        ...props.projects.map((project) => ({
+                          id: String(project.id),
+                          label: project.name,
+                        })),
+                      ]}
                       value={firstOrEmpty(filters.projectIds)}
-                    >
-                      <option value="">All Projects</option>
-                      {props.projects.map((project) => (
-                        <option key={String(project.id)} value={String(project.id)}>
-                          {project.name}
-                        </option>
-                      ))}
-                    </OctantNativeSelect>
+                    />
                   </label>
                 )}
 
                 <label>
                   <span>Pull request</span>
-                  <OctantNativeSelect
-                    onChange={(event) =>
+                  <OctantSelectField
+                    onValueChange={(value) =>
                       setFilters((prev) => ({
                         ...prev,
-                        pullRequest: event.target.value as FilterState["pullRequest"],
+                        pullRequest: value as FilterState["pullRequest"],
                       }))
                     }
+                    options={[
+                      { id: "any", label: "Any" },
+                      { id: "linked", label: "Linked" },
+                      { id: "none", label: "No PR" },
+                      { id: "open", label: "Open" },
+                      { id: "merged", label: "Merged" },
+                      { id: "closed", label: "Closed" },
+                    ]}
                     value={filters.pullRequest}
-                  >
-                    <option value="any">Any</option>
-                    <option value="linked">Linked</option>
-                    <option value="none">No PR</option>
-                    <option value="open">Open</option>
-                    <option value="merged">Merged</option>
-                    <option value="closed">Closed</option>
-                  </OctantNativeSelect>
+                  />
                 </label>
 
                 <label>
                   <span>Checks</span>
-                  <OctantNativeSelect
-                    onChange={(event) =>
+                  <OctantSelectField
+                    onValueChange={(value) =>
                       setFilters((prev) => ({
                         ...prev,
-                        checks: event.target.value as FilterState["checks"],
+                        checks: value as FilterState["checks"],
                       }))
                     }
+                    options={[
+                      { id: "any", label: "Any" },
+                      { id: "passing", label: "Passing" },
+                      { id: "failing", label: "Failing" },
+                      { id: "pending", label: "Pending" },
+                      { id: "unknown", label: "Unknown" },
+                    ]}
                     value={filters.checks}
-                  >
-                    <option value="any">Any</option>
-                    <option value="passing">Passing</option>
-                    <option value="failing">Failing</option>
-                    <option value="pending">Pending</option>
-                    <option value="unknown">Unknown</option>
-                  </OctantNativeSelect>
+                  />
                 </label>
 
                 <label>
                   <span>Follow-up</span>
-                  <OctantNativeSelect
-                    onChange={(event) =>
+                  <OctantSelectField
+                    onValueChange={(value) =>
                       setFilters((prev) => ({
                         ...prev,
-                        followUp: event.target.value as FilterState["followUp"],
+                        followUp: value as FilterState["followUp"],
                       }))
                     }
+                    options={[
+                      { id: "any", label: "Any" },
+                      { id: "only", label: "Only follow-up" },
+                      { id: "excluded", label: "Exclude follow-up" },
+                    ]}
                     value={filters.followUp}
-                  >
-                    <option value="any">Any</option>
-                    <option value="only">Only follow-up</option>
-                    <option value="excluded">Exclude follow-up</option>
-                  </OctantNativeSelect>
+                  />
                 </label>
               </div>
 

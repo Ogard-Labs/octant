@@ -7,7 +7,9 @@ import type {
 } from "@octant/contracts/canvas-refresh";
 import type { CanvasSkillContribution } from "@octant/contracts/canvas-skill";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
 import {
   CanvasRefreshPanel,
   deriveCanvasRefreshRecipe,
@@ -275,6 +277,7 @@ describe("CanvasRefreshPanel", () => {
   });
 
   it("names the skill the user chose from the host's published options", async () => {
+    const user = userEvent.setup();
     const onRefresh = vi.fn(
       async (): Promise<CanvasRefreshResult> => ({
         kind: "accepted",
@@ -294,10 +297,10 @@ describe("CanvasRefreshPanel", () => {
 
     // Default is no skill: a refresh must not silently acquire a contribution
     // the user never selected.
-    const select = screen.getByTestId("canvas-refresh-skill");
-    expect(select).toHaveValue("");
+    const skill = screen.getByTestId("canvas-refresh-skill");
+    expect(skill).toHaveTextContent("No skill");
 
-    fireEvent.change(select, { target: { value: String(contribution.qualifiedId) } });
+    await chooseSelectFieldOption(user, skill, "Review");
     fireEvent.click(screen.getByRole("button", { name: /Refresh canvas/i }));
 
     await waitFor(() => {

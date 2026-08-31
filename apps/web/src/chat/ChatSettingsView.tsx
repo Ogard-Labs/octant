@@ -10,7 +10,7 @@ import { ModelPicker } from "../providers/ModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 export type UpdateChatSettingsCommand = Extract<
@@ -164,24 +164,24 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
         </label>
         <label className="settings-view__field">
           <span>Default research backend</span>
-          <OctantNativeSelect
+          <OctantSelectField
             aria-label="Default research backend"
             className="settings-view__select"
             disabled={busy}
-            onChange={(event) => {
-              const defaultResearchRouting = event.currentTarget
-                .value as ChatSettings["defaultResearchRouting"];
+            onValueChange={(value) => {
+              const defaultResearchRouting = value as ChatSettings["defaultResearchRouting"];
               setDraft((current) => ({
                 ...current,
                 defaultResearchRouting,
               }));
             }}
+            options={[
+              { id: "automatic", label: "Automatic" },
+              { id: "searxng", label: "SearXNG" },
+              { id: "provider-native", label: "Provider-native" },
+            ]}
             value={draft.defaultResearchRouting}
-          >
-            <option value="automatic">Automatic</option>
-            <option value="searxng">SearXNG</option>
-            <option value="provider-native">Provider-native</option>
-          </OctantNativeSelect>
+          />
         </label>
         <label className="settings-view__field">
           <span>SearXNG base URL</span>

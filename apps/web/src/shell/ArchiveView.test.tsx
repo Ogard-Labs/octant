@@ -4,6 +4,7 @@ import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contrac
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
 import { ArchiveView, type ArchivedThreadEntry } from "./ArchiveView";
 
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
@@ -57,7 +58,7 @@ describe("ArchiveView", () => {
     expect(screen.getByRole("button", { name: /Archived implementation/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /Archived brief/ })).toBeVisible();
 
-    await user.selectOptions(screen.getByLabelText("Filter archive by Project"), String(projectId));
+    await chooseSelectFieldOption(user, screen.getByLabelText("Filter archive by Project"), "Octant");
     expect(screen.getByRole("button", { name: /Archived conversation/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /Archived implementation/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Archived brief/ })).not.toBeInTheDocument();

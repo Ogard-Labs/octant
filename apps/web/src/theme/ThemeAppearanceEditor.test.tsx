@@ -102,12 +102,17 @@ describe("ThemeAppearanceEditor", () => {
     expect(screen.getByRole("textbox", { name: "Interface font custom stack" })).not.toBeVisible();
   });
 
-  it("offers the Octant appearance pack while that plugin is effective", () => {
+  it("offers the Octant appearance pack while that plugin is effective", async () => {
+    const user = userEvent.setup();
     render(<ThemeAppearanceEditor controller={controller()} />);
-    expect(screen.getByLabelText("Light preset")).toHaveTextContent("Octant");
+    const light = screen.getByLabelText("Light preset");
+    expect(light).toHaveTextContent("System");
+    await user.click(light);
+    expect(await screen.findByRole("option", { name: "Octant" })).toBeVisible();
   });
 
-  it("omits the Octant appearance pack when that plugin is not effective", () => {
+  it("omits the Octant appearance pack when that plugin is not effective", async () => {
+    const user = userEvent.setup();
     render(
       <ThemeAppearanceEditor
         controller={controller()}
@@ -116,7 +121,8 @@ describe("ThemeAppearanceEditor", () => {
     );
     const light = screen.getByLabelText("Light preset");
     expect(light).toHaveTextContent("System");
-    expect(light).not.toHaveTextContent("Octant");
+    await user.click(light);
+    expect(screen.queryByRole("option", { name: "Octant" })).not.toBeInTheDocument();
   });
 });
 

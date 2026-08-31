@@ -115,7 +115,8 @@ describe("the artifact gallery", () => {
       filters: { tab: "all", query: "", kind: "chart" } as ArtifactLibraryFilters,
     });
 
-    await user.selectOptions(screen.getByLabelText("Filter by mode"), "code");
+    await user.click(screen.getByLabelText("Filter by mode"));
+    await user.click(await screen.findByRole("option", { name: "Code" }));
     expect(onFiltersChange).toHaveBeenCalledWith({
       tab: "all",
       query: "",
@@ -123,16 +124,19 @@ describe("the artifact gallery", () => {
       mode: "code",
     });
 
-    await user.selectOptions(screen.getByLabelText("Filter by kind"), "");
+    await user.click(screen.getByLabelText("Filter by kind"));
+    await user.click(await screen.findByRole("option", { name: "Any kind" }));
     // Cleared, not set to undefined: the query the host decodes has no room for
     // a field that is explicitly absent.
     expect(onFiltersChange).toHaveBeenLastCalledWith({ tab: "all", query: "" });
   });
 
-  it("offers each Project with how many artifacts it holds", () => {
+  it("offers each Project with how many artifacts it holds", async () => {
+    const user = userEvent.setup();
     view();
 
-    expect(screen.getByRole("option", { name: "Storefront (1)" })).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Filter by Project"));
+    expect(await screen.findByRole("option", { name: "Storefront (1)" })).toBeInTheDocument();
   });
 
   it("groups by Project only on the tab that asks for it", () => {

@@ -391,10 +391,8 @@ describe("UsageWorkspace", () => {
     render(<UsageWorkspace client={client} />);
 
     await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
-    await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: "Usage range" }),
-      "All recorded usage",
-    );
+    await userEvent.click(screen.getByRole("combobox", { name: "Usage range" }));
+    await userEvent.click(await screen.findByRole("option", { name: "All recorded usage" }));
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
     const lastRequest = load.mock.calls[load.mock.calls.length - 1]![0] as UsageDashboardRequest;
     expect(lastRequest.filter).toEqual({});
@@ -453,9 +451,8 @@ describe("UsageWorkspace", () => {
       expect(screen.getByRole("region", { name: "Summary" })).toBeInTheDocument(),
     );
 
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Filter usage by mode" }), [
-      "work",
-    ]);
+    await userEvent.click(screen.getByRole("combobox", { name: "Filter usage by mode" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Work" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("out of scope"));
     // The refused filter must not be sitting above the previous filter's rows.

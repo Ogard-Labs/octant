@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import { decodeDiagnosticsExportOutcome } from "@octant/contracts/diagnostics";
 import { DiagnosticsExportControl } from "./DiagnosticsExportControl";
@@ -11,10 +13,14 @@ function makeClient(
 }
 
 describe("DiagnosticsExportControl", () => {
-  it("advertises only failure domains with a production support incident source", () => {
+  it("advertises only failure domains with a production support incident source", async () => {
+    const user = userEvent.setup();
     render(<DiagnosticsExportControl client={makeClient(vi.fn())} />);
 
-    expect(screen.getAllByRole("option")).toHaveLength(1);
+    const domain = screen.getByLabelText(/failure domain/i);
+    expect(domain).toHaveTextContent("Provider");
+    await user.click(domain);
+    expect(await screen.findAllByRole("option")).toHaveLength(1);
     expect(screen.getByRole("option", { name: "Provider" })).toBeInTheDocument();
   });
 
@@ -52,9 +58,10 @@ describe("DiagnosticsExportControl", () => {
         },
       }),
     );
+    const user = userEvent.setup();
     render(<DiagnosticsExportControl client={makeClient(exportEvidence)} />);
 
-    fireEvent.change(screen.getByLabelText(/failure domain/i), { target: { value: "provider" } });
+    await chooseSelectFieldOption(user, screen.getByLabelText(/failure domain/i), "Provider");
     fireEvent.change(screen.getByLabelText(/failure correlation id/i), {
       target: { value: "00000000-0000-4000-8000-000000000001" },
     });

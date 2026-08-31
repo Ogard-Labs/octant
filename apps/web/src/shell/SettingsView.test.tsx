@@ -356,8 +356,8 @@ describe("SettingsView", () => {
 
     navigateTo("Chat");
     expect(screen.getByRole("heading", { name: "Chat defaults" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveValue(
-      "automatic",
+    expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveTextContent(
+      "Automatic",
     );
     expect(screen.getByRole("alert")).toHaveTextContent("changed elsewhere");
   });

@@ -8,7 +8,7 @@ import type {
 } from "@octant/contracts";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import type { TransientProviderCredential } from "./useProviderController";
 
 export function ClaudeCreateAuthenticationFields(props: {
@@ -21,17 +21,18 @@ export function ClaudeCreateAuthenticationFields(props: {
     <>
       <label>
         <span>Authentication</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Claude authentication"
           className="settings-view__select window-no-drag"
-          onChange={(event) =>
-            props.onAuthenticationChange(event.currentTarget.value as ClaudeAuthentication)
+          onValueChange={(value) =>
+            props.onAuthenticationChange(value as ClaudeAuthentication)
           }
+          options={[
+            { id: "subscription", label: "Claude subscription" },
+            { id: "api-key", label: "Anthropic API key" },
+          ]}
           value={props.authentication}
-        >
-          <option value="subscription">Claude subscription</option>
-          <option value="api-key">Anthropic API key</option>
-        </OctantNativeSelect>
+        />
       </label>
       {props.authentication === "api-key" ? (
         <>
@@ -73,17 +74,18 @@ export function VibeCreateAuthenticationFields(props: {
     <>
       <label>
         <span>Authentication</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Mistral Vibe authentication"
           className="settings-view__select window-no-drag"
-          onChange={(event) =>
-            props.onAuthenticationChange(event.currentTarget.value as MistralVibeAuthentication)
+          onValueChange={(value) =>
+            props.onAuthenticationChange(value as MistralVibeAuthentication)
           }
+          options={[
+            { id: "subscription", label: "Mistral subscription" },
+            { id: "api-key", label: "Mistral API key" },
+          ]}
           value={props.authentication}
-        >
-          <option value="subscription">Mistral subscription</option>
-          <option value="api-key">Mistral API key</option>
-        </OctantNativeSelect>
+        />
       </label>
       {props.authentication === "api-key" ? (
         <label>
@@ -118,17 +120,18 @@ export function GrokCreateAuthenticationFields(props: {
     <>
       <label>
         <span>Authentication</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Grok Build authentication"
           className="settings-view__select window-no-drag"
-          onChange={(event) =>
-            props.onAuthenticationChange(event.currentTarget.value as GrokAuthentication)
+          onValueChange={(value) =>
+            props.onAuthenticationChange(value as GrokAuthentication)
           }
+          options={[
+            { id: "subscription", label: "xAI subscription" },
+            { id: "api-key", label: "xAI API key" },
+          ]}
           value={props.authentication}
-        >
-          <option value="subscription">xAI subscription</option>
-          <option value="api-key">xAI API key</option>
-        </OctantNativeSelect>
+        />
       </label>
       {props.authentication === "api-key" ? (
         <label>
@@ -180,32 +183,36 @@ export function HttpCredentialFields(props: HttpCredentialFieldsProps) {
     <>
       <label>
         <span>Authentication</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={props.authenticationLabel}
           className={`settings-view__select ${props.controlClassName ?? ""}`}
           disabled={fixed}
           name="authentication"
-          onChange={(event) => {
-            const next = event.currentTarget.value as "api-key" | "bearer" | "none";
+          onValueChange={(value) => {
+            const next = value as "api-key" | "bearer" | "none";
             if (next === "none" && props.credentialInput.current !== null) {
               props.credentialInput.current.value = "";
             }
             setAuthentication(next);
           }}
+          options={[
+            ...(props.supportsApiKey
+              ? [
+                  {
+                    id: "api-key",
+                    label: `API key (${fixed ? "api-key header" : "x-api-key header"})`,
+                  },
+                ]
+              : []),
+            ...(fixed
+              ? []
+              : [
+                  { id: "bearer", label: "Bearer API key" },
+                  { id: "none", label: "No authentication (trusted loopback only)" },
+                ]),
+          ]}
           value={effectiveAuthentication}
-        >
-          {props.supportsApiKey ? (
-            <option value="api-key">
-              API key ({fixed ? "api-key header" : "x-api-key header"})
-            </option>
-          ) : null}
-          {fixed ? null : (
-            <>
-              <option value="bearer">Bearer API key</option>
-              <option value="none">No authentication (trusted loopback only)</option>
-            </>
-          )}
-        </OctantNativeSelect>
+        />
       </label>
       <label>
         <span>API key (leave blank to preserve)</span>

@@ -299,7 +299,7 @@ describe("WorkOverview", () => {
     });
 
     expect(pathInput).toHaveValue("notes.md");
-    expect(within(composer).getByRole("combobox", { name: "Artifact kind" })).toHaveValue(
+    expect(within(composer).getByRole("combobox", { name: "Artifact kind" })).toHaveTextContent(
       "markdown",
     );
 

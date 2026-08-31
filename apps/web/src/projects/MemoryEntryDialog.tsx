@@ -2,7 +2,7 @@ import type { MemoryEntryId, MemoryKind } from "@octant/contracts/projects";
 import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 type MemoryEntryDialogMode =
@@ -83,16 +83,17 @@ export function MemoryEntryDialog(props: MemoryEntryDialogProps) {
       {props.mode.kind === "create" ? (
         <label>
           Memory kind
-          <OctantNativeSelect
-            onChange={(event) => setKind(event.target.value as MemoryKind)}
+          <OctantSelectField
+            onValueChange={(value) => setKind(value as MemoryKind)}
+            options={[
+              { id: "decision", label: "Decision" },
+              { id: "fact", label: "Fact" },
+              { id: "preference", label: "Preference" },
+              { id: "summary", label: "Summary" },
+              { id: "outcome", label: "Outcome" },
+            ]}
             value={kind}
-          >
-            <option value="decision">Decision</option>
-            <option value="fact">Fact</option>
-            <option value="preference">Preference</option>
-            <option value="summary">Summary</option>
-            <option value="outcome">Outcome</option>
-          </OctantNativeSelect>
+          />
         </label>
       ) : (
         <blockquote className="memory-entry-dialog__original">{props.mode.content}</blockquote>

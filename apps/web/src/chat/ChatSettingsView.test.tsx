@@ -3,6 +3,7 @@ import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
 import { ChatSettingsView, type UpdateChatSettingsCommand } from "./ChatSettingsView";
 
 const now = "2026-07-20T08:00:00.000Z";
@@ -27,8 +28,8 @@ describe("ChatSettingsView", () => {
       "provider-settings__form",
       "setgroup",
     );
-    expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveValue(
-      "automatic",
+    expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveTextContent(
+      "Automatic",
     );
     expect(
       screen.getByText(
@@ -38,9 +39,10 @@ describe("ChatSettingsView", () => {
 
     await user.click(screen.getByRole("option", { name: /Model B Plus/ }));
     await user.click(screen.getByLabelText("Enable research by default"));
-    await user.selectOptions(
+    await chooseSelectFieldOption(
+      user,
       screen.getByRole("combobox", { name: "Default research backend" }),
-      "searxng",
+      "SearXNG",
     );
     await user.type(screen.getByLabelText("SearXNG base URL"), "https://search.example/");
     await user.clear(screen.getByLabelText("Calm personality instructions"));

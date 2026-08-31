@@ -24,7 +24,7 @@ import { ShellState } from "../shell/ShellState";
 import type { CodeController, CodeThreadNavigationItem } from "./useCodeController";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ThreadRenameField } from "../projects/ThreadRenameField";
 import { CodeComposerAdapter, type CodeComposerSubmitInput } from "./composer/CodeComposerAdapter";
 import { useWorktreeRemoteFacts } from "./composer/useWorktreeRemoteFacts";
@@ -840,19 +840,20 @@ function CodeProjectQuickStart(props: {
           {onChangeNewThreadWorkspace === undefined ? null : (
             <label className="code-project-overview__quick-start-copy">
               <span>New threads start in</span>
-              <OctantNativeSelect
+              <OctantSelectField
                 aria-label="New threads start in"
-                onChange={(event) =>
+                onValueChange={(value) =>
                   void onChangeNewThreadWorkspace(
                     props.projectId,
-                    event.target.value as CodeNewThreadWorkspace,
+                    value as CodeNewThreadWorkspace,
                   )
                 }
+                options={[
+                  { id: "current-checkout", label: "This Project's current checkout" },
+                  { id: "managed-worktree", label: "A managed worktree Octant creates" },
+                ]}
                 value={habit}
-              >
-                <option value="current-checkout">This Project's current checkout</option>
-                <option value="managed-worktree">A managed worktree Octant creates</option>
-              </OctantNativeSelect>
+              />
             </label>
           )}
           <CodeComposerAdapter

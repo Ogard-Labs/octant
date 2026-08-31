@@ -6,6 +6,7 @@ import type {
 } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CodeThreadBoard } from "./CodeThreadBoard";
 import { readFileSync } from "node:fs";
@@ -322,12 +323,11 @@ describe("CodeThreadBoard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
     const panel = await screen.findByRole("dialog", { name: "Filters" });
     expect(within(panel).getByRole("checkbox", { name: "Ready" })).toBeChecked();
-    fireEvent.change(within(panel).getByRole("combobox", { name: "Project" }), {
-      target: { value: String(projectB) },
-    });
-    fireEvent.change(screen.getByRole("combobox", { name: "Pull request" }), {
-      target: { value: "open" },
-    });
+    const user = userEvent.setup();
+    await user.click(within(panel).getByRole("combobox", { name: "Project" }));
+    await user.click(await screen.findByRole("option", { name: "Project B" }));
+    await user.click(screen.getByRole("combobox", { name: "Pull request" }));
+    await user.click(await screen.findByRole("option", { name: "Open" }));
 
     await waitFor(() =>
       expect(loadBoard).toHaveBeenLastCalledWith({
@@ -373,14 +373,13 @@ describe("CodeThreadBoard", () => {
 
     // Fixed-vocabulary filter labels stay plain tags and keep the label look.
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    fireEvent.change(await screen.findByRole("combobox", { name: "Pull request" }), {
-      target: { value: "open" },
-    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("combobox", { name: "Pull request" }));
+    await user.click(await screen.findByRole("option", { name: "Open" }));
     expect(await within(activeFilters).findByText("Open PR")).not.toHaveClass("tag-value");
     // A Project name is user-entered text too, so its tag renders verbatim.
-    fireEvent.change(screen.getByRole("combobox", { name: "Project" }), {
-      target: { value: String(projectB) },
-    });
+    await user.click(screen.getByRole("combobox", { name: "Project" }));
+    await user.click(await screen.findByRole("option", { name: "Project B" }));
     expect(await within(activeFilters).findByText("Project B")).toHaveClass("tag", "tag-value");
   });
 

@@ -22,7 +22,7 @@ import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -1028,11 +1028,10 @@ function SidebarBackgroundSettings({
     <div className="settings-view__setting">
       <label className="settings-view__field">
         <span>Background type</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Sidebar background type"
           className="settings-view__select"
-          onChange={(event) => {
-            const kind = event.currentTarget.value;
+          onValueChange={(kind) => {
             if (kind === "none") {
               setBackground({
                 kind: "none",
@@ -1062,12 +1061,13 @@ function SidebarBackgroundSettings({
               }
             }
           }}
+          options={[
+            { id: "none", label: "None" },
+            { id: "preset", label: "Preset" },
+            { id: "custom", label: "Custom" },
+          ]}
           value={background.kind === "custom" ? "custom" : background.kind}
-        >
-          <option value="none">None</option>
-          <option value="preset">Preset</option>
-          <option value="custom">Custom</option>
-        </OctantNativeSelect>
+        />
       </label>
       {background.kind === "preset" ? (
         <div className="settings-view__field" aria-label="Sidebar background presets">
@@ -1144,21 +1144,22 @@ function SidebarBackgroundSettings({
       {sidebarVibrancySupported ? (
         <label className="settings-view__field">
           <span>Vibrancy mode</span>
-          <OctantNativeSelect
+          <OctantSelectField
             aria-label="Sidebar vibrancy mode"
             className="settings-view__select"
-            onChange={(event) =>
+            onValueChange={(value) =>
               setBackground({
                 ...background,
-                vibrancyMode: event.currentTarget.value as SidebarVibrancyMode,
+                vibrancyMode: value as SidebarVibrancyMode,
               } as SidebarBackground)
             }
+            options={[
+              { id: "off", label: "Off" },
+              { id: "subtle", label: "Subtle" },
+              { id: "strong", label: "Strong" },
+            ]}
             value={vibrancyMode}
-          >
-            <option value="off">Off</option>
-            <option value="subtle">Subtle</option>
-            <option value="strong">Strong</option>
-          </OctantNativeSelect>
+          />
         </label>
       ) : null}
     </div>

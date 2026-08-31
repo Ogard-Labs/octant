@@ -10,6 +10,7 @@ import {
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
 import { ProjectMemoryInspector } from "./ProjectMemoryInspector";
 
 const sourceProjectId = decodeProjectId("00000000-0000-4000-8000-000000000901");
@@ -192,7 +193,7 @@ describe("ProjectMemoryInspector", () => {
       ),
     );
 
-    await user.selectOptions(screen.getByLabelText("Filter memory by kind"), "fact");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Filter memory by kind"), "Fact");
     expect(screen.queryByText("Use explicit Project memory.")).not.toBeInTheDocument();
     expect(screen.getAllByText("The workspace remains local-first.")[0]).toBeVisible();
   });
@@ -215,7 +216,7 @@ describe("ProjectMemoryInspector", () => {
 
     await user.click(screen.getByRole("button", { name: "Add memory" }));
     const createDialog = screen.getByRole("dialog", { name: "Add Project memory" });
-    await user.selectOptions(within(createDialog).getByLabelText("Memory kind"), "outcome");
+    await chooseSelectFieldOption(user, within(createDialog).getByLabelText("Memory kind"), "Outcome");
     await user.type(within(createDialog).getByLabelText("Memory content"), "Renderer QA passed.");
     await user.click(within(createDialog).getByRole("button", { name: "Add memory" }));
     expect(props.onCreate).toHaveBeenCalledWith("outcome", "Renderer QA passed.");
@@ -237,17 +238,12 @@ describe("ProjectMemoryInspector", () => {
 
     await user.click(screen.getByRole("button", { name: "Transfer Use explicit Project memory." }));
     const transferDialog = screen.getByRole("dialog", { name: "Transfer Project memory" });
-    expect(within(transferDialog).getByRole("option", { name: "Destination" })).toBeVisible();
-    expect(
-      within(transferDialog).queryByRole("option", { name: "Source" }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(transferDialog).queryByRole("option", { name: "Archived" }),
-    ).not.toBeInTheDocument();
-    await user.selectOptions(
-      within(transferDialog).getByLabelText("Destination Project"),
-      destinationProjectId,
-    );
+    const destination = within(transferDialog).getByLabelText("Destination Project");
+    await user.click(destination);
+    expect(await screen.findByRole("option", { name: "Destination" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "Source" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Archived" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Destination" }));
     await user.click(within(transferDialog).getByRole("button", { name: "Transfer memory" }));
     expect(props.onTransfer).toHaveBeenCalledWith(decisionId, destinationProjectId);
     const transferCall = vi.mocked(props.onTransfer).mock.calls[0]?.[0];

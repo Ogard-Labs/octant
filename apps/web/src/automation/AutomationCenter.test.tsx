@@ -417,7 +417,7 @@ describe("AutomationCenter creation and editing", () => {
     expect(within(form).getByLabelText("Task for each run")).toHaveValue(
       "summarise what changed in this Project overnight",
     );
-    expect(within(form).getByLabelText("Schedule")).toHaveValue("weekly-local");
+    expect(within(form).getByLabelText("Schedule")).toHaveTextContent("Weekly on chosen days");
     expect(within(form).getByRole("checkbox", { name: "Mon" })).toBeChecked();
     expect(within(form).getByRole("checkbox", { name: "Fri" })).toBeChecked();
     expect(within(form).getByLabelText("Time of day")).toHaveValue("09:00");
@@ -444,16 +444,12 @@ describe("AutomationCenter creation and editing", () => {
 
     await userEvent.type(within(form).getByLabelText("Name"), "Weekly summary");
     await userEvent.type(within(form).getByLabelText("Task for each run"), "Summarize work.");
-    await userEvent.selectOptions(
-      within(form).getByLabelText("Project"),
-      String(workDraft.projectId),
-    );
-    await userEvent.selectOptions(within(form).getByLabelText("Execution profile"), [
-      String(workDraft.executionProfile.profileId),
-    ]);
-    await userEvent.selectOptions(within(form).getByLabelText("Authority profile"), [
-      String(workDraft.authorityProfile.profileId),
-    ]);
+    await userEvent.click(within(form).getByLabelText("Project"));
+    await userEvent.click(await screen.findByRole("option", { name: "Docs Project" }));
+    await userEvent.click(within(form).getByLabelText("Execution profile"));
+    await userEvent.click(await screen.findByRole("option", { name: "Work default" }));
+    await userEvent.click(within(form).getByLabelText("Authority profile"));
+    await userEvent.click(await screen.findByRole("option", { name: "Approval-gated Work" }));
     fireEvent.change(within(form).getByLabelText("Run at"), {
       target: { value: "2026-09-01T09:00" },
     });
@@ -639,7 +635,8 @@ describe("AutomationCenter arranging", () => {
     renderWithRemote();
     await screen.findByRole("list", { name: "Automations" });
 
-    await userEvent.selectOptions(screen.getByLabelText("Status"), "needs-attention");
+    await userEvent.click(screen.getByLabelText("Status"));
+    await userEvent.click(await screen.findByRole("option", { name: "Needs attention" }));
 
     const rows = screen.getByRole("list", { name: "Automations" });
     expect(within(rows).getAllByRole("listitem")).toHaveLength(1);
@@ -650,7 +647,8 @@ describe("AutomationCenter arranging", () => {
     renderWithRemote();
     await screen.findByRole("list", { name: "Automations" });
 
-    await userEvent.selectOptions(screen.getByLabelText("Group"), "environment");
+    await userEvent.click(screen.getByLabelText("Group"));
+    await userEvent.click(await screen.findByRole("option", { name: "By environment" }));
 
     const local = screen.getByRole("list", { name: "Automations in Local" });
     const devbox = screen.getByRole("list", { name: "Automations in Devbox" });
@@ -678,7 +676,8 @@ describe("AutomationCenter arranging", () => {
     });
     await screen.findByRole("list", { name: "Automations" });
 
-    await userEvent.selectOptions(screen.getByLabelText("Status"), "needs-attention");
+    await userEvent.click(screen.getByLabelText("Status"));
+    await userEvent.click(await screen.findByRole("option", { name: "Needs attention" }));
 
     expect(screen.queryByRole("list", { name: /Automations/ })).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent(

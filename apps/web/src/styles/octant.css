@@ -4088,19 +4088,10 @@ html[data-octant-theme-mode="light"] .composer {
 .composer-row button,
 .composer-row [role="button"],
 .composer-row [role="combobox"],
-.composer-row select,
 .composer-row .composer-model-picker__trigger {
   min-height: 32px;
   height: 32px;
   border-radius: var(--oct-radius-sm);
-}
-/* Native selects still ship the field recipe (border, secondary fill).
-   Inside the composer that is a second form field sitting in the card. */
-.composer-row select {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  color: var(--oct-muted);
 }
 /* The send control is the row's one filled affordance, so it stays a circle. */
 .composer-row button[data-size="icon"] {

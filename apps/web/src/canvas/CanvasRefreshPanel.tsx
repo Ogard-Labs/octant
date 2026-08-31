@@ -14,7 +14,7 @@ import type { CanvasSkillContribution } from "@octant/contracts/canvas-skill";
 import { Ban, Check, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 import { useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { CanvasSkillProvenance } from "./CanvasSkillProvenance";
 
 /**
@@ -211,22 +211,19 @@ export function CanvasRefreshPanel(props: CanvasRefreshPanelProps) {
       {skillOptions.length === 0 ? null : (
         <label className="canvas-refresh__skill">
           <span>Presentation skill</span>
-          <OctantNativeSelect
+          <OctantSelectField
             data-testid="canvas-refresh-skill"
             disabled={running}
+            onValueChange={(value) => setSelectedSkillId(value)}
+            options={[
+              { id: "", label: "No skill" },
+              ...skillOptions.map((option) => ({
+                id: String(option.skill.qualifiedId),
+                label: option.displayName,
+              })),
+            ]}
             value={selectedSkillId}
-            onChange={(event) => setSelectedSkillId(event.target.value)}
-          >
-            <option value="">No skill</option>
-            {skillOptions.map((option) => (
-              <option
-                key={String(option.skill.qualifiedId)}
-                value={String(option.skill.qualifiedId)}
-              >
-                {option.displayName}
-              </option>
-            ))}
-          </OctantNativeSelect>
+          />
         </label>
       )}
       <div className="canvas-refresh__row">

@@ -9,7 +9,7 @@ import { HostSelector } from "../shell/HostSelector";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 
@@ -301,14 +301,13 @@ export function WorkOverview(props: WorkOverviewProps) {
           <form onSubmit={(event) => void submitStarterArtifact(event)}>
             <label>
               <span>Artifact kind</span>
-              <OctantNativeSelect
+              <OctantSelectField
                 aria-label="Artifact kind"
                 disabled={starterArtifactSubmitting}
-                onChange={() => {}}
+                onValueChange={() => {}}
+                options={[{ id: "markdown", label: "markdown" }]}
                 value="markdown"
-              >
-                <option value="markdown">markdown</option>
-              </OctantNativeSelect>
+              />
             </label>
             <label>
               <span>Artifact path</span>

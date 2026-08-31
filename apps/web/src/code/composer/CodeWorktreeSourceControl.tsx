@@ -5,7 +5,7 @@ import {
   type WorktreeSourceResolution,
 } from "@octant/domain/code-worktree-source-policy";
 import { OctantButton } from "../../ui/base/OctantButton";
-import { OctantNativeSelect } from "../../ui/base/OctantSelect";
+import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 
 export interface CodeWorktreeSourceControlProps {
@@ -82,18 +82,16 @@ export function CodeWorktreeSourceControl(props: CodeWorktreeSourceControlProps)
       {props.startFromOrigin && remoteAvailable && props.remoteFacts.remotes.length > 0 ? (
         <label className="code-worktree-source__field">
           <span>Remote</span>
-          <OctantNativeSelect
+          <OctantSelectField
             aria-label="Remote"
             disabled={props.disabled === true || props.onSelectRemote === undefined}
-            onChange={(event) => props.onSelectRemote?.(event.target.value)}
-            value={activeRemote ?? props.remoteFacts.remotes[0]}
-          >
-            {props.remoteFacts.remotes.map((remote) => (
-              <option key={remote} value={remote}>
-                {remote}
-              </option>
-            ))}
-          </OctantNativeSelect>
+            onValueChange={(value) => props.onSelectRemote?.(value)}
+            options={props.remoteFacts.remotes.map((remote) => ({
+              id: remote,
+              label: remote,
+            }))}
+            value={activeRemote ?? props.remoteFacts.remotes[0] ?? ""}
+          />
         </label>
       ) : null}
     </section>

@@ -4,7 +4,7 @@ import { Archive, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantEmptyState } from "../ui/base/OctantEmptyState";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { IconButton } from "./IconButton";
 import { ShellState } from "./ShellState";
 
@@ -104,19 +104,19 @@ export function ArchiveView(props: ArchiveViewProps) {
         <div className="archive-view__actions">
           <label>
             <span>Project</span>
-            <OctantNativeSelect
+            <OctantSelectField
               aria-label="Filter archive by Project"
-              onChange={(event) => setProjectFilter(event.currentTarget.value)}
+              onValueChange={(value) => setProjectFilter(value)}
+              options={[
+                { id: ALL_PROJECTS, label: "All Projects" },
+                { id: UNFILED, label: "Unfiled" },
+                ...props.projects.map((project) => ({
+                  id: project.id,
+                  label: project.name,
+                })),
+              ]}
               value={projectFilter}
-            >
-              <option value={ALL_PROJECTS}>All Projects</option>
-              <option value={UNFILED}>Unfiled</option>
-              {props.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </OctantNativeSelect>
+            />
           </label>
           <IconButton icon={X} label="Close Archive" onClick={props.onClose} />
         </div>

@@ -132,7 +132,7 @@ export interface ChatComposerProps {
   /**
    * When picker groups are provided (with `onSelectModel`), the composer
    * renders the shared searchable provider/model picker instead of the
-   * fallback native selects.
+   * fallback OctantSelectField rows.
    */
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;

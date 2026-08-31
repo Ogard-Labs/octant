@@ -5,7 +5,9 @@ import type {
   CanvasShareSnapshotRequest,
 } from "@octant/contracts/canvas-share-snapshot";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 
 const canvasId = "11111111-1111-4111-8111-111111111111" as CanvasId;
@@ -116,6 +118,7 @@ function renderPanel(props: {
 
 describe("CanvasSharePanel", () => {
   it("shares only after explicit dual consent, with the host-published owner as audience", async () => {
+    const user = userEvent.setup();
     const onShare = vi.fn(
       async (_request: CanvasShareSnapshotRequest): Promise<CanvasShareResult> =>
         ({ kind: "accepted", snapshot: activeSnapshot() }) as unknown as CanvasShareResult,
@@ -127,7 +130,7 @@ describe("CanvasSharePanel", () => {
 
     fireEvent.click(screen.getByTestId("canvas-share-consent-snapshot"));
     fireEvent.click(screen.getByTestId("canvas-share-consent-audience"));
-    fireEvent.change(screen.getByTestId("canvas-share-expiry"), { target: { value: "1h" } });
+    await chooseSelectFieldOption(user, screen.getByTestId("canvas-share-expiry"), "1 hour");
     fireEvent.click(screen.getByTestId("canvas-share-submit"));
 
     await waitFor(() => expect(onShare).toHaveBeenCalledTimes(1));

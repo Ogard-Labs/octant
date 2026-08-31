@@ -22,7 +22,7 @@ import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
 
 /**
@@ -234,18 +234,16 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
           </label>
           <label className="canvas-share__field">
             <span>Expires after</span>
-            <OctantNativeSelect
+            <OctantSelectField
               data-testid="canvas-share-expiry"
               disabled={working}
-              onChange={(event) => setExpiry(event.target.value)}
+              onValueChange={(value) => setExpiry(value)}
+              options={EXPIRY_CHOICES.map((choice) => ({
+                id: choice.id,
+                label: choice.label,
+              }))}
               value={expiry}
-            >
-              {EXPIRY_CHOICES.map((choice) => (
-                <option key={choice.id} value={choice.id}>
-                  {choice.label}
-                </option>
-              ))}
-            </OctantNativeSelect>
+            />
           </label>
           <p className="canvas-share__note">
             This host can only authenticate you right now, so this snapshot is addressed to you on

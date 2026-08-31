@@ -6,7 +6,7 @@ import { useState, type FormEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ExecutionContextPicker } from "./ExecutionContextPicker";
@@ -363,41 +363,45 @@ function ProfileForm(props: {
         </label>
         <label>
           <span>Execution policy</span>
-          <OctantNativeSelect
+          <OctantSelectField
             aria-label="Execution policy"
-            onChange={(event) => setPolicy(event.target.value as typeof policy)}
+            onValueChange={(value) => setPolicy(value as typeof policy)}
+            options={[
+              { id: "plan", label: "Plan (read-only)" },
+              { id: "approval-gated", label: "Approval gated" },
+              { id: "auto-accept-edits", label: "Auto-accept edits" },
+              { id: "full-access", label: "Full access (still bounded by Project)" },
+            ]}
             value={policy}
-          >
-            <option value="plan">Plan (read-only)</option>
-            <option value="approval-gated">Approval gated</option>
-            <option value="auto-accept-edits">Auto-accept edits</option>
-            <option value="full-access">Full access (still bounded by Project)</option>
-          </OctantNativeSelect>
+          />
         </label>
         <label>
           <span>Permission persistence</span>
-          <OctantNativeSelect
+          <OctantSelectField
             aria-label="Permission persistence"
-            onChange={(event) => setPersistence(event.target.value as typeof persistence)}
+            onValueChange={(value) => setPersistence(value as typeof persistence)}
+            options={[
+              { id: "current-session", label: "Current session" },
+              { id: "project-default", label: "Project default" },
+            ]}
             value={persistence}
-          >
-            <option value="current-session">Current session</option>
-            <option value="project-default">Project default</option>
-          </OctantNativeSelect>
+          />
         </label>
         {props.mode === "create" ? (
           <label>
             <span>Profile scope</span>
-            <OctantNativeSelect
+            <OctantSelectField
               aria-label="Profile scope"
-              onChange={(event) => setScopeKind(event.target.value as typeof scopeKind)}
+              onValueChange={(value) => setScopeKind(value as typeof scopeKind)}
+              options={[
+                { id: "user", label: "User default" },
+                {
+                  id: props.controller.scope.scopeKind,
+                  label: scopeLabel(props.controller.scope.scopeKind),
+                },
+              ]}
               value={scopeKind}
-            >
-              <option value="user">User default</option>
-              <option value={props.controller.scope.scopeKind}>
-                {scopeLabel(props.controller.scope.scopeKind)}
-              </option>
-            </OctantNativeSelect>
+            />
           </label>
         ) : null}
         <p className="execution-profile-workflow__form-note">

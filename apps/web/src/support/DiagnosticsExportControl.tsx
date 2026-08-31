@@ -9,7 +9,7 @@ import type {
 import { serializeDiagnosticsEvidencePacket } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 /**
@@ -66,17 +66,15 @@ export function DiagnosticsExportControl({ client }: DiagnosticsExportControlPro
       <label className="settings-view__field" htmlFor={domainId}>
         Failure domain
       </label>
-      <OctantNativeSelect
+      <OctantSelectField
         id={domainId}
-        onChange={(event) => setDomain(event.target.value as DiagnosticFailureDomain)}
+        onValueChange={(value) => setDomain(value as DiagnosticFailureDomain)}
+        options={DOMAIN_OPTIONS.map((option) => ({
+          id: option.id,
+          label: option.label,
+        }))}
         value={domain}
-      >
-        {DOMAIN_OPTIONS.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.label}
-          </option>
-        ))}
-      </OctantNativeSelect>
+      />
 
       <label className="settings-view__field" htmlFor={correlationIdInputId}>
         Failure correlation ID

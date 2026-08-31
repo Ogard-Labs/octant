@@ -4,7 +4,7 @@ import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/prov
 import { useState } from "react";
 import type { WorkPromotionController } from "./useWorkPromotionController";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 export interface WorkPromotionFlowProps {
@@ -88,34 +88,30 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
         </label>
         <label className="work-promotion__field">
           <span>Selected Work artifact</span>
-          <OctantNativeSelect
+          <OctantSelectField
             aria-label="Selected Work artifact"
+            onValueChange={setArtifactIndex}
+            options={
+              props.controller.availableArtifactRefs.length === 0
+                ? [{ id: "", label: "No Work artifacts available" }]
+                : props.controller.availableArtifactRefs.map((ref, index) => ({
+                    id: String(index),
+                    label: ref,
+                  }))
+            }
             value={artifactIndex}
-            onChange={(event) => setArtifactIndex(event.currentTarget.value)}
-          >
-            {props.controller.availableArtifactRefs.length === 0 ? (
-              <option value="">No Work artifacts available</option>
-            ) : (
-              props.controller.availableArtifactRefs.map((ref, index) => (
-                <option key={ref} value={String(index)}>
-                  {ref}
-                </option>
-              ))
-            )}
-          </OctantNativeSelect>
+          />
         </label>
         <label className="work-promotion__field">
           <span>Target Code Project</span>
-          <OctantNativeSelect
+          <OctantSelectField
+            onValueChange={setTargetIndex}
+            options={props.targetCodeProjectLabels.map((project, index) => ({
+              id: String(index),
+              label: project.name,
+            }))}
             value={targetIndex}
-            onChange={(event) => setTargetIndex(event.currentTarget.value)}
-          >
-            {props.targetCodeProjectLabels.map((project, index) => (
-              <option key={String(project.id)} value={String(index)}>
-                {project.name}
-              </option>
-            ))}
-          </OctantNativeSelect>
+          />
         </label>
         <OctantButton
           className="project-button"
@@ -211,19 +207,14 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
                         tool-capable model before approving this promotion.
                       </p>
                     ) : (
-                      <OctantNativeSelect
+                      <OctantSelectField
+                        onValueChange={setProviderIndex}
+                        options={props.providerChoices.map((choice, index) => ({
+                          id: String(index),
+                          label: choice.label,
+                        }))}
                         value={providerIndex}
-                        onChange={(event) => setProviderIndex(event.currentTarget.value)}
-                      >
-                        {props.providerChoices.map((choice, index) => (
-                          <option
-                            key={`${choice.instanceId}:${choice.modelId}`}
-                            value={String(index)}
-                          >
-                            {choice.label}
-                          </option>
-                        ))}
-                      </OctantNativeSelect>
+                      />
                     )}
                   </label>
                 </article>
