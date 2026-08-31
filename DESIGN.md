@@ -291,7 +291,8 @@ and Tooltip. Composition rules:
 - Use `OctantSelectField`/Combobox for searchable or bounded choices, not a
   custom dropdown. Option sets of 2–7 choices use `OctantToggleGroup`.
 - Use complete Card composition (`Header`, `Title`, `Description`, `Content`,
-  `Footer`) for discrete objects. Use flat rows and `Separator` for lists.
+  `Footer`) for discrete objects and grouped forms. Use compact rows and
+  `Separator` for navigation lists.
 - Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
   titled for assistive technology. Use `OctantDialog` with a real label even
   when the title is visually hidden.
