@@ -188,8 +188,9 @@ welcome composers, and cards use the raised card recipe (`OctantCard` /
 `--octant-shadow-md`). In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
 as a sunken field. Code welcome names the Project in the heading. Checkout and branch sit
-on a second raised card stacked behind the composer: same grid cell,
-slightly wider, a step between the page well and the prompt fill.
+on a second raised card stacked behind the composer: the stack's padding
+is the peek, the back card fills that box, and the prompt sits in front —
+slightly narrower, a step between the page well and the prompt fill.
 Host, workspace, and the searchable ref list live on that back card,
 not in the toolbar. Access is a titled menu on
 the card, next to the model picker. GitHub and delivery stay a quiet strip

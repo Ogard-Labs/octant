@@ -1701,17 +1701,19 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-adapter__stack {
-  display: grid;
-  grid-template-areas: "stack";
+  position: relative;
+  isolation: isolate;
+  /* Shoulders and the bottom peek are padding. Grid stretch plus a
+     percentage width collapsed the back card to its content box in
+     Chromium, so checkout sat behind the prompt instead of peeking. */
+  padding: 0 10px 40px;
 }
 
 .code-composer-adapter__stack > .code-composer-adapter__card {
-  grid-area: stack;
+  position: relative;
   z-index: 1;
-  width: calc(100% - 20px);
-  margin-bottom: 40px;
-  justify-self: center;
-  align-self: start;
+  width: 100%;
+  margin: 0;
 }
 
 /* Layout only. The frame, 20px radius, and lift are `.composer` (0038).
@@ -1727,24 +1729,21 @@ form > .work-composer-adapter__attachments {
   min-height: 96px;
 }
 
-/* A second card, not a footer band. Wider than the front card so its
-   shoulders peek out. Workspace (dark) / floating (light) sits between
-   the page well and the composer fill; inset vanished into the page. */
+/* A second card, not a footer band. Absolute fill of the stack's
+   padding box — wider and taller than the in-flow composer — so the
+   shoulders and the checkout row peek around it. Workspace (dark) /
+   floating (light) sits between the page well and the composer fill. */
 .code-composer-adapter__dock {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 8px 12px;
-  grid-area: stack;
-  z-index: 0;
-  justify-self: stretch;
-  align-self: stretch;
-  width: auto;
-  min-width: 0;
-  min-height: 100%;
   margin: 0;
-  padding: 0 16px 12px;
+  padding: 0 16px 10px;
   color: var(--oct-meta);
   background: var(--octant-workspace);
   border-radius: var(--oct-radius-lg);

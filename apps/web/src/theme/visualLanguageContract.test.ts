@@ -80,11 +80,16 @@ describe("the public-block visual language", () => {
 
   it("tucks the Code checkout card behind the composer as a second raised card", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
+    const stack = shell.match(/\.code-composer-adapter__stack \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const dock = shell.match(/\.code-composer-adapter__dock \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
 
+    expect(stack).toMatch(/position:\s*relative/);
+    expect(stack).toMatch(/isolation:\s*isolate/);
+    expect(stack).toMatch(/padding:\s*0 10px 40px/);
+    expect(dock).toMatch(/position:\s*absolute/);
+    expect(dock).toMatch(/inset:\s*0/);
     expect(dock).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
     expect(dock).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
-    expect(dock).toMatch(/justify-self:\s*stretch/);
     expect(dock).not.toMatch(/border-radius:\s*0 0/);
   });
 
