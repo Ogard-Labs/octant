@@ -1705,6 +1705,11 @@ form > .work-composer-adapter__attachments {
   flex-direction: column;
 }
 
+.code-composer-adapter__stack > .code-composer-adapter__card {
+  position: relative;
+  z-index: 1;
+}
+
 /* Layout only. The frame, 20px radius, and lift are `.composer` (0038).
    Painting the prompt and the row as two hairline boxes is what left Code
    welcome looking like the old flat chrome after the shared recipe shipped. */
@@ -1724,15 +1729,16 @@ form > .work-composer-adapter__attachments {
   align-items: center;
   justify-content: space-between;
   gap: 8px 12px;
-  margin-top: -2px;
-  padding: 8px 12px 10px;
+  margin-top: -10px;
+  padding: 16px 14px 10px;
   color: var(--oct-meta);
-  background: var(--octant-floating);
+  background: color-mix(in srgb, var(--octant-text-primary) 5%, var(--octant-workspace));
   border-radius: 0 0 var(--oct-radius-lg) var(--oct-radius-lg);
+  box-shadow: inset 0 1px 0 var(--octant-border);
 }
 
 html[data-octant-theme-mode="dark"] .code-composer-adapter__dock {
-  background: var(--octant-app-background);
+  background: color-mix(in srgb, var(--octant-text-primary) 7%, var(--octant-floating));
 }
 
 .code-composer-adapter__dock-leading,
