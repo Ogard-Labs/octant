@@ -180,8 +180,8 @@ export function createReadCursorStore<ThreadId>(options: {
     if (next === state) return;
     state = next;
     const existing = pending.findIndex((candidate) => candidate.key === change.key);
-    if (existing === -1) pending.push(change);
-    else pending.splice(existing, 1, change);
+    if (existing !== -1) pending.splice(existing, 1);
+    pending.push(change);
     if (immediately) flush();
     else scheduleFlush();
     announce();

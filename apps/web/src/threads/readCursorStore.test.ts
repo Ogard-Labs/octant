@@ -33,6 +33,27 @@ describe("thread read cursors", () => {
         .get("thread-1"),
     ).toBe(5_000);
   });
+
+  it("keeps the most recently streamed thread after later marks fill the limit", () => {
+    vi.useFakeTimers();
+    const storage = memoryStorage();
+    const store = createReadCursorStore<string>({ storageKey: "cursors", storage });
+
+    store.markDeferred("thread-a", 1);
+    store.markDeferred("thread-b", 1);
+    store.markDeferred("thread-a", 2);
+    vi.runAllTimers();
+
+    const afterFlush = createReadCursorStore<string>({ storageKey: "cursors", storage });
+    for (let index = 0; index < 499; index += 1) {
+      afterFlush.mark(`later-${index}`, index + 1);
+    }
+
+    const afterRestart = createReadCursorStore<string>({ storageKey: "cursors", storage });
+    expect(afterRestart.getSnapshot().get("thread-a")).toBe(2);
+    expect(afterRestart.getSnapshot().has("thread-b")).toBe(false);
+  });
+
   it("keeps a thread read after the app is restarted", () => {
     const storage = memoryStorage();
     const before = createReadCursorStore<string>({ storageKey: "cursors", storage });
