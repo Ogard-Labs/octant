@@ -104,11 +104,10 @@ describe("WindowChrome", () => {
     expect(onNewThread).toHaveBeenCalledOnce();
   });
 
-  it("makes development authentication visibly distinct", () => {
+  it("keeps development authentication out of the working chrome", () => {
     render(
       <WindowChrome
         activeSurface="Chat"
-        developmentAuthentication
         dockAvailable={false}
         dockExpanded={false}
         dockLabel="Utility dock"
@@ -118,7 +117,7 @@ describe("WindowChrome", () => {
       />,
     );
 
-    expect(screen.getByText("Development authentication")).toBeVisible();
+    expect(screen.queryByText("Development authentication")).not.toBeInTheDocument();
   });
   it("uses neutral semantic roles for the shell palette", () => {
     const root = cssRule(":root");

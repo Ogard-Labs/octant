@@ -374,7 +374,6 @@ export interface AppProps {
   readonly settings?: ProductSurfaceSettings;
   readonly typography?: ThemeTypography;
   readonly availableFonts?: ReadonlyArray<string>;
-  readonly developmentAuthentication?: boolean;
   readonly extensionClient?: ExtensionClient;
   readonly navigatorAssistantClient?: NavigatorAssistantClient;
   readonly planClient?: PlanClient;
@@ -464,7 +463,6 @@ export function App(props: AppProps) {
           {...props}
           launch={resolvedLaunch}
           projectWindowCapability={launchSession.capability}
-          developmentAuthentication={launchSession.authentication === "development-bypass"}
         />
       );
     }
@@ -2885,6 +2883,26 @@ function LaunchedShell(
     }));
   }
 
+  /**
+   * Global workspace destinations are mutually exclusive. A reader may hide
+   * the workspace while it is open, so any navigation that targets a draft or
+   * thread dismisses the reader first instead of opening the destination
+   * invisibly behind it.
+   */
+  function closeWorkspaceReaders() {
+    setRailPlaceholder(undefined);
+    setAutomationCenterOpen(false);
+    setAgentsCenterOpen(false);
+    setArtifactLibraryOpen(false);
+    setWorkBoardOpen(false);
+    setCodeBoardOpen(false);
+    setCodePullRequestsOpen(false);
+    setInboxOpen(false);
+    setGithubIssuesOpen(false);
+    setLinearIssuesOpen(false);
+    setArchiveOpen(false);
+  }
+
   async function openDraftInProject(projectId: ProjectId) {
     const project = projectController.allProjects.find((candidate) => candidate.id === projectId);
     if (project === undefined || project.lifecycle !== "active") return;
@@ -2902,6 +2920,7 @@ function LaunchedShell(
   // still call `openDraftInProject`, but a failed folder must never become the
   // sticky default for every later draft opened from the sidebar.
   function openDraftInActiveProject(mode: "work" | "code") {
+    closeWorkspaceReaders();
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
     setDraftResetRevision((revision) => revision + 1);
@@ -2910,6 +2929,7 @@ function LaunchedShell(
 
   function createChat(prompt?: string) {
     if (prompt === undefined || prompt.trim() === "") {
+      closeWorkspaceReaders();
       void controller.openDraftThread("chat");
       return;
     }
@@ -2996,19 +3016,7 @@ function LaunchedShell(
   }
 
   const pluginSidebarDestinationActionContext: SidebarDestinationActionContext = {
-    closeOverlays: () => {
-      setRailPlaceholder(undefined);
-      setAutomationCenterOpen(false);
-      setAgentsCenterOpen(false);
-      setArtifactLibraryOpen(false);
-      setWorkBoardOpen(false);
-      setCodeBoardOpen(false);
-      setCodePullRequestsOpen(false);
-      setInboxOpen(false);
-      setGithubIssuesOpen(false);
-      setLinearIssuesOpen(false);
-      setArchiveOpen(false);
-    },
+    closeOverlays: closeWorkspaceReaders,
     openThreadBoard:
       activeMode === "code" ? () => setCodeBoardOpen(true) : () => setWorkBoardOpen(true),
     openPullRequests: () => setCodePullRequestsOpen(true),
@@ -4004,9 +4012,6 @@ function LaunchedShell(
             activeSurface={activeSurface}
             bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
             bottomPanelExpanded={bottomPanelOpen}
-            {...(props.developmentAuthentication === undefined
-              ? {}
-              : { developmentAuthentication: props.developmentAuthentication })}
             dockAvailable={dockAvailable}
             dockExpanded={dockOpen}
             dockLabel="Right sidebar"
@@ -4594,6 +4599,28 @@ function LaunchedShell(
                         void chatController.refreshNavigation();
                       }
                       void controller.openChatThread(threadId, title, projectId);
+                    }}
+                    onActivateThreadTab={(tab) => {
+                      closeWorkspaceReaders();
+                      if (tab.mode === "chat") {
+                        void controller.openChatThread(tab.threadId, tab.title, tab.projectId);
+                        return;
+                      }
+                      if (tab.mode === "work") {
+                        void controller.openWorkThread(
+                          tab.threadId,
+                          tab.title,
+                          tab.hostId,
+                          tab.projectId,
+                        );
+                        return;
+                      }
+                      void controller.openCodeThread(
+                        tab.threadId,
+                        tab.title,
+                        tab.hostId,
+                        tab.projectId,
+                      );
                     }}
                     onViewAllChatProjectThreads={viewAllChatProjectThreads}
                     onOpenSideChat={(sidecar) => void controller.openSideChat(sidecar)}

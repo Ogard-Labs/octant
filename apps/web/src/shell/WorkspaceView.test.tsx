@@ -63,6 +63,16 @@ const codeTabs: ReadonlyArray<
 ];
 
 describe("WorkspaceView Code tab registration", () => {
+  it("uses the window thread strip instead of duplicating an unsplit pane header", async () => {
+    render(<WorkspaceView {...propsFor(codeTab("code-overview", "Planning"))} />);
+
+    expect(await screen.findByRole("tab", { name: "Planning" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByTitle("Drag to move or split")).not.toBeInTheDocument();
+  });
+
   it.each(codeTabs)(
     "routes %s through an explicit Code pane boundary",
     async (kind, title, deferredAdapter, expected) => {

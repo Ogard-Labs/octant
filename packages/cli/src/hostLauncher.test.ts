@@ -184,6 +184,7 @@ describe("attachOrCreateHost", () => {
         fetch,
         spawn,
         developmentWebBootstrap: true,
+        environment: { OCTANT_CODE_FILE_HELPER_PATH: "/repo/dist/octant-code-file-helper" },
         waitForHost: vi.fn(async () => ({
           status: "ready" as const,
           url: new URL("http://127.0.0.1:13773"),
@@ -194,7 +195,10 @@ describe("attachOrCreateHost", () => {
 
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({
-        env: expect.objectContaining({ OCTANT_DEV_WEB_BOOTSTRAP: "1" }),
+        env: expect.objectContaining({
+          OCTANT_CODE_FILE_HELPER_PATH: "/repo/dist/octant-code-file-helper",
+          OCTANT_DEV_WEB_BOOTSTRAP: "1",
+        }),
       }),
     );
   });

@@ -97,6 +97,31 @@ describe("WorkspaceRailLayers", () => {
     expect(codeApi.refreshProjectPullRequests).not.toHaveBeenCalled();
   });
 
+  it("opens a new thread directly from a blocking workspace reader", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Pull requests" }));
+    expect(await screen.findByRole("region", { name: "Pull requests" })).toBeVisible();
+    expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
+
+    await user.click(screen.getByRole("button", { name: "New thread" }));
+
+    expect(await screen.findByRole("region", { name: "New Code thread" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Pull requests" })).not.toBeInTheDocument();
+    expect(document.querySelector(".workspace")).not.toHaveAttribute("hidden");
+  });
+
   it("opens the host-scoped GitHub issue browser from the gated Issues row", async () => {
     const user = userEvent.setup();
     vi.stubGlobal(

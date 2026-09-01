@@ -825,14 +825,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         </p>
       )}
       <div className="chat-workspace__conversation">
-        <header className="chat-workspace__header thread-column">
-          <div>
-            <h1>{view.thread.title}</h1>
-            <p className="chat-workspace__meta">
-              {view.thread.projectId === undefined ? "Unfiled" : "Chat Project"} ·{" "}
-              {providerState.providerLabel} · {providerState.modelLabel}
-            </p>
-          </div>
+        <header className="chat-workspace__header">
+          <h1 className="sr-only">{view.thread.title}</h1>
           {props.childRunStatus}
           <ChatThreadActionsMenu
             connectionStatus={

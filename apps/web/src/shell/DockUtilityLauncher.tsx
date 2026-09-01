@@ -37,17 +37,18 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
   return (
     <span className="dock-utility-launcher">
       <OctantButton
+        aria-label="Add tool"
         aria-controls={disclosureId}
         aria-expanded={open}
         className="dock-utility-launcher__trigger"
         onClick={() => setOpen((current) => !current)}
         ref={trigger}
-        size="sm"
+        size="icon"
+        title="Add tool"
         type="button"
         variant="ghost"
       >
         <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
-        <span>Add tool</span>
       </OctantButton>
       {open ? (
         <span

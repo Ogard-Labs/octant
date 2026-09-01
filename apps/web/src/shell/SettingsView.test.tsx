@@ -187,6 +187,20 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("slider", { name: "Sidebar width" })).not.toBeInTheDocument();
   });
 
+  it("keeps the active section in the Settings breadcrumb", () => {
+    renderSettings();
+
+    expect(screen.getByRole("navigation", { name: "Settings breadcrumb" })).toHaveTextContent(
+      /Settings\s*\/\s*General/,
+    );
+
+    navigateTo("Appearance");
+
+    expect(screen.getByRole("navigation", { name: "Settings breadcrumb" })).toHaveTextContent(
+      /Settings\s*\/\s*Appearance/,
+    );
+  });
+
   it("returns to the app from the dedicated Settings sidebar", async () => {
     const user = userEvent.setup();
     const onBack = vi.fn();

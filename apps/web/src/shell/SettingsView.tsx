@@ -299,10 +299,16 @@ export function SettingsView(props: SettingsViewProps) {
             />
           </header>
         ) : (
-          <div
-            aria-hidden="true"
-            className="settings-view__workspace-titlebar window-drag-region"
-          />
+          <div className="settings-view__workspace-titlebar window-drag-region">
+            <nav
+              aria-label="Settings breadcrumb"
+              className="settings-view__breadcrumb window-no-drag"
+            >
+              <span>Settings</span>
+              <span aria-hidden="true">/</span>
+              <strong>{currentSectionLabel}</strong>
+            </nav>
+          </div>
         )}
         <main className="settings-view__content">
           <div className="settings-view__content-inner">

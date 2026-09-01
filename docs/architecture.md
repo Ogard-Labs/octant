@@ -692,6 +692,11 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   run the script manually and source `session.env` the same way. Provider
   CLIs are ordinary host binaries: install one to a user-writable path such
   as `~/.local/bin` and point the provider instance at that absolute path.
+- `octant web --dev` owns a persistent development host profile. Its storage,
+  host discovery receipts, and bridge authority resolve from one development
+  data directory across launches; the renderer still requests a fresh window
+  capability for each browser session. This keeps browser QA history stable
+  without sharing production storage or persisting a window capability.
 - `bun run package:desktop` packages the peer Machine for the build host:
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with

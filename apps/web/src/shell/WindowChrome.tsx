@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } from "lucide-react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
-import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
 
@@ -12,7 +11,6 @@ export interface WindowChromeProps {
   readonly dockLabel: string;
   readonly bottomPanelAvailable?: boolean;
   readonly bottomPanelExpanded?: boolean;
-  readonly developmentAuthentication?: boolean;
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
   readonly material: ResolvedSidebarMaterial;
@@ -101,15 +99,6 @@ export function WindowChrome(props: WindowChromeProps) {
         </div>
       )}
       <span aria-hidden="true" className="window-chrome__drag-space" />
-      {props.developmentAuthentication ? (
-        <OctantBadge
-          className="window-chrome__development-auth window-no-drag"
-          role="status"
-          variant="warning"
-        >
-          Development authentication
-        </OctantBadge>
-      ) : null}
       {props.zenRecoveryNeeded ? (
         <div className="window-chrome__zen-recovery window-no-drag" role="status">
           <span>Zen needs recovery.</span>

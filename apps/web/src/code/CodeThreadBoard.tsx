@@ -96,10 +96,10 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
-  // The Status board is a column view: every status column is visible by
-  // default so an empty column reads as "nothing here" rather than vanishing.
+  // Empty lanes are optional detail. The default scan path spends width on
+  // work that exists; View can still reveal the complete status workflow.
   const [showEmptyGroups, setShowEmptyGroups] = useState(
-    () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? true,
+    () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? false,
   );
   const [board, setBoard] = useState<BoardState>({ status: "loading" });
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -483,10 +483,6 @@ function CodeBoardBody(props: {
       </p>
     ) : null;
   const cards = view.cards;
-  // Status grouping with empty groups shown promises four fixed columns. A
-  // board with no matches is exactly when someone needs to see that shape, so
-  // the result flows through grouping and the explanation sits above it.
-  const showsFixedColumns = props.grouping === "status" && props.showEmptyGroups;
   const hasActiveFilters = activeFilterLabels(props.filters, props.projectNames).length > 0;
   const emptyNote =
     cards.length === 0 ? (
@@ -515,8 +511,13 @@ function CodeBoardBody(props: {
         title={hasActiveFilters ? "No Code threads match these filters" : "No Code threads yet"}
       />
     ) : null;
-  if (cards.length === 0 && !showsFixedColumns) {
-    return <div className="code-board__body">{emptyNote}</div>;
+  if (cards.length === 0) {
+    return (
+      <div className="code-board__body code-board__body--empty">
+        {refreshNotice}
+        {emptyNote}
+      </div>
+    );
   }
   const columns = groupCodeBoardCards(cards, props.grouping, { projects: props.projects });
   const visibleColumns = props.showEmptyGroups

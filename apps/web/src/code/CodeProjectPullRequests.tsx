@@ -128,18 +128,6 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           </p>
         </div>
         <div className="code-project-pull-requests__actions">
-          {hasProjects ? (
-            <OctantButton
-              disabled={workspace.status === "loading" || workspace.status === "refreshing"}
-              onClick={() => void runRefresh({ kind: "refresh-all" })}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-              Refresh all
-            </OctantButton>
-          ) : null}
           {props.onClose === undefined ? null : (
             <OctantButton onClick={props.onClose} size="sm" type="button" variant="ghost">
               Back to workspace
@@ -178,6 +166,17 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           >
             {pullRequestCountCopy(view.freshness, visibleRows.length)}
           </span>
+          <OctantButton
+            aria-label="Refresh all"
+            disabled={workspace.status === "loading" || workspace.status === "refreshing"}
+            onClick={() => void runRefresh({ kind: "refresh-all" })}
+            size="icon"
+            title="Refresh all pull requests"
+            type="button"
+            variant="ghost"
+          >
+            <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+          </OctantButton>
         </div>
       )}
 

@@ -96,6 +96,11 @@ import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
 import type { ThreadProviderIdentity } from "./navigationModel";
+import {
+  WorkspaceThreadTabs,
+  workspaceThreadTabFromSurface,
+  type WorkspaceThreadTab,
+} from "./WorkspaceThreadTabs";
 
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
 const PreviewWorkspaceTab = lazy(() =>
@@ -186,6 +191,8 @@ export interface WorkspaceViewProps {
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   readonly onFocus: (paneId: PaneId) => void;
   readonly onOpenCodeThread: (threadId: CodeThreadId, title: string, projectId?: ProjectId) => void;
+  /** Reopens a window-local thread tab through the ordinary authoritative shell command. */
+  readonly onActivateThreadTab?: (tab: WorkspaceThreadTab) => void;
   readonly onOpenWorkThread?: (threadId: WorkThreadId, projectId: ProjectId) => void;
   /** Opens one repository file as a Code file tab, from the file explorer. */
   readonly onOpenCodeFile?: (input: {
@@ -427,11 +434,54 @@ export function WorkspaceView(props: WorkspaceViewProps) {
     [props.browserAutomationClient, props.codeController, props.onClosePane, props.workspace],
   );
 
+  const activePaneId = props.workspace.activePaneIds[props.mode];
+  const activeSurface = findPaneInLayout(props.layout, activePaneId)?.surface;
+  const contextProjectId = props.workspace.contextByMode[props.mode].projectId ?? undefined;
+  const contextProject = props.projects.find(
+    (project) => String(project.id) === String(contextProjectId),
+  );
+  const activeCodeThreadTitle =
+    activeSurface !== undefined && "threadId" in activeSurface && activeSurface.mode === "code"
+      ? props.codeController.bootstrap?.threads.find(
+          (thread) => String(thread.id) === String(activeSurface.threadId),
+        )?.title
+      : undefined;
+  const activeThreadTab = useMemo(
+    () =>
+      activeSurface === undefined
+        ? undefined
+        : workspaceThreadTabFromSurface(activeSurface, contextProjectId, activeCodeThreadTitle),
+    [activeCodeThreadTitle, activeSurface, contextProjectId],
+  );
+
+  function activateThreadTab(tab: WorkspaceThreadTab) {
+    if (props.onActivateThreadTab !== undefined) {
+      props.onActivateThreadTab(tab);
+      return;
+    }
+    if (tab.mode === "chat") {
+      props.onOpenChatThread?.(tab.threadId, tab.title, tab.projectId);
+      return;
+    }
+    if (tab.mode === "work") {
+      if (tab.projectId !== undefined) props.onOpenWorkThread?.(tab.threadId, tab.projectId);
+      return;
+    }
+    props.onOpenCodeThread(tab.threadId, tab.title, tab.projectId);
+  }
+
   return (
     <TabActivationProvider
       {...(props.tabActivation === undefined ? {} : { registry: props.tabActivation })}
     >
       <main className="workspace" hidden={props.hidden}>
+        <WorkspaceThreadTabs
+          {...(activeThreadTab === undefined ? {} : { activeTab: activeThreadTab })}
+          {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
+          fallbackTitle={activeSurface?.title ?? "Workspace"}
+          mode={props.mode}
+          onActivate={activateThreadTab}
+        />
         {props.crossContextOffer === undefined ? null : (
           <CrossContextBanner
             message={props.crossContextOffer.message}
@@ -477,6 +527,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             (count, layout) => count + countPanes(layout),
             0,
           )}
+          showSinglePaneHeader={singlePaneSurfaceNeedsHeader(activeSurface)}
         />
         {props.statusBar}
       </main>
@@ -1734,6 +1785,22 @@ function findPaneInLayout(layout: WorkspaceLayoutNode, paneId: PaneId): Workspac
     return String(layout.paneId) === String(paneId) ? layout : undefined;
   }
   return findPaneInLayout(layout.first, paneId) ?? findPaneInLayout(layout.second, paneId);
+}
+
+function singlePaneSurfaceNeedsHeader(surface: WorkspaceTab | undefined): boolean {
+  if (surface === undefined) return false;
+  switch (surface.kind) {
+    case "welcome":
+    case "draft-thread":
+    case "settings":
+    case "project":
+    case "chat-thread":
+    case "work-thread":
+    case "code-overview":
+      return false;
+    default:
+      return true;
+  }
 }
 
 function WorkProjectOverviewSlot(props: {

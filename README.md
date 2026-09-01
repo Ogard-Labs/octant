@@ -181,6 +181,18 @@ bun --cwd packages/cli src/bin.ts server run   # terminal 1
 bun --cwd packages/cli src/bin.ts web          # terminal 2
 ```
 
+For browser UI development with hot reload, use the development launcher
+instead of pairing a hand-started server with Vite:
+
+```sh
+bun --cwd packages/cli src/bin.ts web --dev --no-open --port 10111
+```
+
+It prints the local browser URL, mints a fresh development window session on
+each open, and keeps Projects, threads, and settings in a separate persistent
+development data directory. Reopening the URL therefore does not reset the
+workspace, while production Octant data remains untouched.
+
 Common checks:
 
 | Command             | Purpose                                                               |

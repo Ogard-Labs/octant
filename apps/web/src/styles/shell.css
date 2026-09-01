@@ -157,12 +157,6 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   pointer-events: none;
 }
 
-/* The badge recipe carries the warning palette and type; the chrome only
-   keeps the marker from flexing away in the 34px rail. */
-.window-chrome__development-auth {
-  flex: 0 0 auto;
-}
-
 .window-chrome__zen-recovery {
   display: flex;
   flex: 0 1 auto;
@@ -232,7 +226,6 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   background: var(--oct-fg-soft);
 }
 
-.window-chrome__development-auth,
 .window-chrome__zen-recovery {
   pointer-events: auto;
 }

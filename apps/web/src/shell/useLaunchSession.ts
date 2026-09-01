@@ -124,9 +124,23 @@ function exchangeLaunchToken(
 function exchangeDevelopmentSession(
   fetch: typeof globalThis.fetch,
   serverUrl: string,
+  previous?: {
+    readonly capability: string;
+    readonly windowId: WindowId;
+  },
 ): Promise<{ readonly status: number; readonly body: unknown }> {
   const endpoint = new URL("/api/shell/development-session", serverUrl);
-  return sharedExchange(`${endpoint.toString()}#development`, fetch, endpoint, { method: "POST" });
+  const body = JSON.stringify(
+    previous === undefined
+      ? {}
+      : { windowId: String(previous.windowId), capability: previous.capability },
+  );
+  return sharedExchange(
+    `${endpoint.toString()}#development:${previous?.capability ?? "fresh"}`,
+    fetch,
+    endpoint,
+    { method: "POST", headers: { "content-type": "application/json" }, body },
+  );
 }
 
 function sharedExchange(
@@ -179,15 +193,19 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
     }
     if (launchToken === undefined) {
       const stored = readStoredAuthority(storage, serverUrl);
-      if (stored !== undefined) {
-        setResult({ status: "ready", ...stored });
-      } else if (options.allowDevelopmentBootstrap === true) {
+      // Development capabilities belong to one host process. Thread and
+      // Project history survives a dev-host restart, but the previous
+      // capability intentionally does not, so the token-free development URL
+      // must ask the current host for fresh window authority on every page
+      // load instead of restoring sessionStorage first.
+      if (options.allowDevelopmentBootstrap === true) {
         const fetch = options.fetch ?? globalThis.fetch;
         let cancelled = false;
         setResult({ status: "loading" });
         void (async () => {
           try {
-            const response = await exchangeDevelopmentSession(fetch, serverUrl);
+            const reusable = stored?.authentication === "development-bypass" ? stored : undefined;
+            const response = await exchangeDevelopmentSession(fetch, serverUrl, reusable);
             if (cancelled) return;
             if (response.status !== 200) {
               setResult({
@@ -241,9 +259,9 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
         return () => {
           cancelled = true;
         };
-      } else {
-        setResult({ status: "idle" });
       }
+      if (stored !== undefined) setResult({ status: "ready", ...stored });
+      else setResult({ status: "idle" });
       return;
     }
     const fetch = options.fetch ?? globalThis.fetch;

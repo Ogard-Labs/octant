@@ -85,6 +85,77 @@ describe("useLaunchSession", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("refreshes development authority after a host restart instead of restoring a stale session", async () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      `octant:launch-session:${serverUrl}`,
+      JSON.stringify({
+        capability,
+        windowId,
+        authentication: "development-bypass",
+      }),
+    );
+    const nextWindowId = "00000000-0000-4000-8000-000000000602";
+    const nextCapability = `${"D".repeat(42)}A`;
+    const fetchMock = mockFetch(
+      jsonResponse({
+        windowId: nextWindowId,
+        capability: nextCapability,
+        authentication: "development-bypass",
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useLaunchSession({
+        serverUrl,
+        href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}&developmentWebBootstrap=1`,
+        allowDevelopmentBootstrap: true,
+        fetch: fetchMock,
+        storage,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.capability).toBe(nextCapability);
+    expect(result.current.windowId).toBe(nextWindowId);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("/api/shell/development-session", serverUrl),
+      expect.objectContaining({
+        body: JSON.stringify({ windowId, capability }),
+        method: "POST",
+      }),
+    );
+  });
+
+  it("keeps the same development window when the current host validates it", async () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      `octant:launch-session:${serverUrl}`,
+      JSON.stringify({ capability, windowId, authentication: "development-bypass" }),
+    );
+    const fetchMock = mockFetch(
+      jsonResponse({ windowId, capability, authentication: "development-bypass" }),
+    );
+
+    const { result } = renderHook(() =>
+      useLaunchSession({
+        serverUrl,
+        href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}&developmentWebBootstrap=1`,
+        allowDevelopmentBootstrap: true,
+        fetch: fetchMock,
+        storage,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current).toMatchObject({
+      authentication: "development-bypass",
+      capability,
+      windowId,
+    });
+  });
+
   it("is idle when no server URL is available", () => {
     const { result } = renderHook(() =>
       useLaunchSession({ href: `http://127.0.0.1:13773/#launchToken=${launchToken}` }),

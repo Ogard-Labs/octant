@@ -36,6 +36,7 @@ export interface HostLauncherDependencies {
   };
   readonly resolveAttachedHost?: () => Promise<AttachedHostCandidate | undefined>;
   readonly developmentWebBootstrap?: true;
+  readonly environment?: NodeJS.ProcessEnv;
   /** Persisted automatic-startup policy. Launch paths inject a real store. */
   readonly policyStore?: HostServicePolicyReader;
 }
@@ -144,6 +145,7 @@ export async function attachOrCreateHost(
     args: command.args,
     env: {
       ...process.env,
+      ...dependencies.environment,
       OCTANT_DESKTOP_BRIDGE_SECRET: dependencies.bridgeSecret,
       OCTANT_SERVER_PORT: String(port),
       OCTANT_HOST_SERVICE_MODE: "web",
@@ -280,10 +282,12 @@ function defaultServerRoot(): string {
   return process.env.OCTANT_SERVER_ROOT ?? resolveDefaultServerRoot();
 }
 
-export function createDefaultServicePolicyStore(): ServicePolicyStore {
+export function createDefaultServicePolicyStore(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): ServicePolicyStore {
   return new ServicePolicyStore({
     path: resolveHostRuntimePaths({
-      env: process.env,
+      env,
       platform: process.platform,
       home: homedir(),
       temporaryDirectory: canonicalTemporaryDirectory(),

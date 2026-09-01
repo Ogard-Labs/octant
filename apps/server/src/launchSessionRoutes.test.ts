@@ -380,6 +380,27 @@ describe("createLaunchSessionRouteHandler — development bootstrap", () => {
     expect(authorityStore.authenticate(capability, now())).toBe(windowId);
   });
 
+  it("reuses a development window authority that belongs to the current host", async () => {
+    const { handler, authorityStore } = makeHandler({ developmentWebBootstrap: true });
+    await handler(post("/api/shell/development-session", {}, { origin: "http://127.0.0.1:5173" }));
+
+    const response = await handler(
+      post(
+        "/api/shell/development-session",
+        { windowId, capability },
+        { origin: "http://127.0.0.1:5173" },
+      ),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({
+      windowId,
+      capability,
+      authentication: "development-bypass",
+    });
+    expect(authorityStore.size()).toBe(1);
+  });
+
   it("is unavailable unless the host was explicitly started for development web", async () => {
     const { handler } = makeHandler();
     const response = await handler(

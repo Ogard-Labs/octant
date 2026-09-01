@@ -14,6 +14,10 @@ star is a quiet graphite workbench:
 
 - One active thread, board, Project overview, or Project-level list is the
   primary work surface.
+- The main title band is a Project/mode breadcrumb plus window-local thread
+  navigation. One unpinned conversation is the current preview; pinned
+  conversations remain within reach. Selecting one reopens it through the
+  authoritative shell command rather than keeping a hidden transcript alive.
 - Navigation is a compact Project and thread tree. Low-frequency actions live
   in the bottom-left identity menu or an accessible overflow menu.
 - The right dock and bottom panel are contextual working regions for the active
@@ -225,9 +229,12 @@ token. A shadow must explain depth, not decorate a flat row.
 The shell is a CSS grid: sidebar, central workspace, optional right dock, and a
 full-width status bar. A horizontal bottom panel is an optional sibling below
 the central workspace. The central pane remains the thread, board, Project
-overview, or Project-level list. The title bar contains the pane title and
-capability-gated toggles for Open in, Environment, bottom panel, and right
-dock. Zen remains in the bottom-left identity menu.
+overview, or Project-level list. An unsplit conversation uses the title band
+for the Project/mode breadcrumb and compact thread strip, so the transcript
+does not repeat a second title block. Split panes and utility surfaces retain
+their own pane headers and lifecycle controls. Capability-gated toggles for
+Open in, Environment, bottom panel, and right dock remain window chrome. Zen
+remains in the bottom-left identity menu.
 
 The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
 available as a labeled selector, compact list, or icon presentation according

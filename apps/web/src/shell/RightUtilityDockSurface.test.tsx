@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RIGHT_UTILITY_DOCK_SURFACES } from "./rightUtilityDockModel";
@@ -63,6 +63,10 @@ describe("the right sidebar surface", () => {
     expect(screen.getByRole("tab", { name: "Browser" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Live Browser")).toBeVisible();
     expect(screen.getByText("Live Terminal")).not.toBeVisible();
+    const tabs = screen.getByRole("tablist", { name: "Open tools" }).parentElement;
+    if (tabs === null) throw new Error("Expected the right-dock tab cluster.");
+    expect(tabs).toHaveClass("right-utility-dock__tabs");
+    expect(within(tabs).getByRole("button", { name: "Add tool" })).toBeVisible();
     await user.click(screen.getByRole("tab", { name: "Terminal" }));
     expect(onSelectSurface).toHaveBeenCalledWith("terminal");
     await user.click(screen.getByRole("button", { name: "Hide Browser" }));

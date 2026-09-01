@@ -67,18 +67,20 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   return (
     <div className="right-utility-dock__surface" data-dock-surface={activeSurface?.id ?? "empty"}>
       <header className="dock-head right-utility-dock__toolbar">
-        {props.tabs.length === 0 ? (
-          <span aria-hidden="true" className="right-utility-dock__title-spacer" />
-        ) : (
-          <DockToolStrip
-            {...(activeTabId === undefined ? {} : { active: activeTabId })}
-            onClose={props.onCloseTab}
-            onSelect={props.onSelectSurface}
-            tabs={props.tabs}
-          />
-        )}
-        <div className="right-utility-dock__actions">
+        <div className="right-utility-dock__tabs">
+          {props.tabs.length === 0 ? (
+            <span aria-hidden="true" className="right-utility-dock__title-spacer" />
+          ) : (
+            <DockToolStrip
+              {...(activeTabId === undefined ? {} : { active: activeTabId })}
+              onClose={props.onCloseTab}
+              onSelect={props.onSelectSurface}
+              tabs={props.tabs}
+            />
+          )}
           <DockUtilityLauncher onOpen={props.onOpenTab} surfaces={remaining} />
+        </div>
+        <div className="right-utility-dock__actions">
           {props.onClose === undefined ? null : (
             <IconButton
               icon={X}

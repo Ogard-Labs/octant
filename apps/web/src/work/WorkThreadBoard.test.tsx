@@ -377,7 +377,7 @@ describe("WorkThreadBoard", () => {
 
   it("keeps the board body horizontally scrollable instead of overflowing the page", async () => {
     expect(stylesCss).toMatch(/\.code-board__body\s*\{[^}]*overflow-x:\s*auto[^}]*\}/s);
-    expect(stylesCss).toMatch(/\.code-board__body\s*\{[^}]*overflow-y:\s*hidden[^}]*\}/s);
+    expect(stylesCss).not.toMatch(/\.code-board__body\s*\{[^}]*overflow-y:\s*hidden[^}]*\}/s);
     expect(stylesCss).toMatch(/\.code-board \.board\s*\{[^}]*overflow:\s*visible[^}]*\}/s);
 
     const loadBoard = vi.fn(async () =>
