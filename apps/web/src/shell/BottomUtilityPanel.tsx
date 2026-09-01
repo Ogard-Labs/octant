@@ -52,8 +52,14 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
         <div className="bottom-utility-panel__tabs">
           <DockToolStrip
             active={props.activeSurface.id}
-            onClose={props.onClose}
-            onSelect={props.onOpenTool}
+            onClose={(tabId) => {
+              const surface = props.tabs.find((tab) => tab.id === tabId);
+              if (surface !== undefined) props.onClose(surface.id);
+            }}
+            onSelect={(tabId) => {
+              const surface = props.tabs.find((tab) => tab.id === tabId);
+              if (surface !== undefined) props.onOpenTool(surface.id);
+            }}
             tabs={props.tabs}
           />
           <DockUtilityLauncher

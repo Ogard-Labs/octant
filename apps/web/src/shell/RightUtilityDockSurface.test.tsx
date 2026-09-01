@@ -67,9 +67,9 @@ describe("the right sidebar surface", () => {
     expect(onSelectSurface).toHaveBeenCalledWith("terminal");
     await user.click(screen.getByRole("button", { name: "Hide Browser" }));
     expect(onCloseTab).toHaveBeenCalledWith("browser");
-    // Both launchable tools are already open here, so there is nothing left to
-    // add and the launcher stays out of the strip.
-    expect(screen.queryByRole("button", { name: "Add tool" })).not.toBeInTheDocument();
+    // Browser and Terminal are repeatable workspaces, so the launcher remains
+    // available even when one instance of each is already open.
+    expect(screen.getByRole("button", { name: "Add tool" })).toBeVisible();
   });
 
   it("moves between tools from the keyboard without leaving the strip", async () => {

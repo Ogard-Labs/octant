@@ -33,11 +33,12 @@
 }
 
 .extensions-settings__cards .extcard {
-  padding: 12px 4px;
+  padding: 10px 4px;
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--oct-border-soft);
   border-radius: 0;
+  box-shadow: none;
 }
 
 .extensions-settings__cards > li.extcard:last-child {
@@ -58,6 +59,35 @@
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
+}
+
+.extensions-settings__installed-filter {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.extensions-settings__installed-filter > svg {
+  color: var(--oct-meta);
+}
+
+.extensions-settings__installed-filter-clear {
+  position: absolute;
+  right: 3px;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+}
+
+.extensions-settings__installed-filter input {
+  padding-right: 34px;
+}
+
+.extensions-settings__show-all {
+  justify-self: start;
 }
 
 .extensions-settings__state-label {

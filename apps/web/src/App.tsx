@@ -243,8 +243,11 @@ import {
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceId,
+  type RightUtilityDockTabDescriptor,
 } from "./shell/rightUtilityDockModel";
 import {
+  addThreadUtilityTab,
+  addUtilityTabState,
   closeThreadUtilityTab,
   closeUtilityTabState,
   openThreadUtilityTab,
@@ -256,6 +259,9 @@ import {
   threadUtilityDockState,
   threadUtilityDockKey,
   type ThreadUtilityDockKey,
+  type ThreadUtilityDockTab,
+  updateThreadUtilityTabBrowserContext,
+  updateUtilityTabBrowserContext,
 } from "./shell/rightUtilityDockSelection";
 import { isDockToolLaunchable, isDockToolStillOpenable } from "./shell/dockToolAvailability";
 import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
@@ -320,6 +326,27 @@ function windowIdFromHostBridge(hostBridge: OctantHostBridge | undefined): Windo
   } catch {
     return undefined;
   }
+}
+
+function describeUtilityTabs(
+  tabs: ReadonlyArray<ThreadUtilityDockTab>,
+): ReadonlyArray<RightUtilityDockTabDescriptor> {
+  const totals = new Map<RightUtilityDockSurfaceId, number>();
+  for (const tab of tabs) totals.set(tab.surface, (totals.get(tab.surface) ?? 0) + 1);
+  const seen = new Map<RightUtilityDockSurfaceId, number>();
+  return tabs.flatMap((tab) => {
+    const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === tab.surface);
+    if (surface === undefined) return [];
+    const index = (seen.get(tab.surface) ?? 0) + 1;
+    seen.set(tab.surface, index);
+    return [
+      {
+        id: tab.id,
+        label: (totals.get(tab.surface) ?? 0) > 1 ? `${surface.label} ${index}` : surface.label,
+        surface,
+      },
+    ];
+  });
 }
 
 export interface AppProps {
@@ -618,6 +645,7 @@ function LaunchedShell(
   }
   const [draftCreating, setDraftCreating] = useState(false);
   const [draftError, setDraftError] = useState<string>();
+  const [draftResetRevision, setDraftResetRevision] = useState(0);
   const [draftPendingMessage, setDraftPendingMessage] = useState<string>();
   const [railPlaceholder, setRailPlaceholder] = useState<{
     readonly title: string;
@@ -1589,23 +1617,34 @@ function LaunchedShell(
   );
   const defaultBottomSurface =
     bottomPanelSurfaces.find((surface) => surface.id === "terminal") ?? bottomPanelSurfaces[0];
+  const activeBottomTab = retainedBottomPanelState.tabs.find(
+    (tab) => tab.id === retainedBottomPanelState.active,
+  );
   const activeBottomSurface =
-    bottomPanelSurfaces.find((surface) => surface.id === retainedBottomPanelState.active) ??
+    bottomPanelSurfaces.find((surface) => surface.id === activeBottomTab?.surface) ??
     defaultBottomSurface;
   const renderedBottomPanelState =
     retainedBottomPanelState.tabs.length === 0 && activeBottomSurface !== undefined
-      ? { tabs: [activeBottomSurface.id], active: activeBottomSurface.id }
+      ? {
+          tabs: [{ id: activeBottomSurface.id, surface: activeBottomSurface.id }],
+          active: activeBottomSurface.id,
+        }
       : retainedBottomPanelState;
-  const bottomPanelTabs = renderedBottomPanelState.tabs.flatMap((surfaceId) => {
-    const surface = bottomPanelSurfaces.find((candidate) => candidate.id === surfaceId);
+  const bottomPanelTabs = renderedBottomPanelState.tabs.flatMap((tab) => {
+    const surface = bottomPanelSurfaces.find((candidate) => candidate.id === tab.surface);
     return surface === undefined ? [] : [surface];
   });
   const bottomPanelAvailable = bottomPanelSurfaces.length > 0;
   const bottomPanelOpen = bottomPanelPresentation.open && bottomPanelAvailable && !isNarrow;
   const displayedDockState = bottomPanelOpen
-    ? removeUtilityTabs(retainedDockState, new Set(renderedBottomPanelState.tabs))
+    ? removeUtilityTabs(
+        retainedDockState,
+        new Set(renderedBottomPanelState.tabs.map((tab) => tab.surface)),
+      )
     : retainedDockState;
-  const dockSurface = displayedDockState.active;
+  const dockSurface = displayedDockState.tabs.find(
+    (tab) => tab.id === displayedDockState.active,
+  )?.surface;
   const dockResolution = resolveDockSurface(dockSurface);
   const launchableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
     (surface) =>
@@ -1614,11 +1653,7 @@ function LaunchedShell(
       (!bottomPanelOpen || surface.id !== activeBottomSurface?.id),
   );
   const dockTabs = useMemo(
-    () =>
-      displayedDockState.tabs.flatMap((surfaceId) => {
-        const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
-        return surface === undefined ? [] : [surface];
-      }),
+    () => describeUtilityTabs(displayedDockState.tabs),
     [displayedDockState.tabs],
   );
   const dockAvailable =
@@ -2051,18 +2086,21 @@ function LaunchedShell(
   const enabledProjectTypes = new Set(
     enabledModes(controller.settings ?? { chatEnabled: true, workEnabled: true }),
   );
-  function threadUtility(surface: RightUtilityDockSurfaceId) {
+  function threadUtility(surface: RightUtilityDockSurfaceId, utilityTab?: ThreadUtilityDockTab) {
     if (dockThread === undefined || dockThreadKey === undefined) return null;
     const sidecarThreadId = dockSidecarsByThread.get(dockThreadKey);
     const appleProjectPath = appleProjects[0]?.projectPath;
     return (
       <ThreadUtilityDockContent
-        key={`${dockThreadKey}:${surface}`}
+        key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
         appleToolchainClient={appleToolchainClient}
         {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
+        {...(utilityTab?.browserContextId === undefined
+          ? {}
+          : { browserContextId: utilityTab.browserContextId })}
         canvasClient={canvasClient}
         chatClient={chatClient}
         chatReadCursorStore={chatReadCursorStore}
@@ -2082,6 +2120,23 @@ function LaunchedShell(
             relativePath,
           });
         }}
+        onBrowserContextCreated={(contextId) => {
+          if (utilityTab === undefined || utilityTab.surface !== "browser") return;
+          if (dockThreadKey === undefined) {
+            setFallbackDockState((current) =>
+              updateUtilityTabBrowserContext(current, utilityTab.id, contextId),
+            );
+          } else {
+            setDockStatesByThread((current) =>
+              updateThreadUtilityTabBrowserContext(
+                current,
+                dockThreadKey,
+                utilityTab.id,
+                contextId,
+              ),
+            );
+          }
+        }}
         onSidecarOpened={(sidecar: SideChatSidecar) => {
           setDockSidecarsByThread((current) => {
             if (current.get(dockThreadKey) === sidecar.sidecarThreadId) return current;
@@ -2100,6 +2155,7 @@ function LaunchedShell(
           ...(activeProjectId === undefined ? {} : { projectId: activeProjectId }),
         }}
         surface={surface}
+        {...(utilityTab === undefined ? {} : { utilityTabId: utilityTab.id })}
         windowCapability={props.projectWindowCapability}
       />
     );
@@ -2148,23 +2204,39 @@ function LaunchedShell(
       setDockStatesByThread((current) => openThreadUtilityTab(current, dockThreadKey, surface));
     }
   }
+  function addDockTab(surface: RightUtilityDockSurfaceId) {
+    const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
+    if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    if (bottomPanelPresentation.open) {
+      persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
+    }
+    const instanceId = crypto.randomUUID();
+    setDockVisible(true);
+    if (dockThreadKey === undefined) {
+      setFallbackDockState((current) => addUtilityTabState(current, surface, instanceId));
+    } else {
+      setDockStatesByThread((current) =>
+        addThreadUtilityTab(current, dockThreadKey, surface, instanceId),
+      );
+    }
+  }
   function openReviewForThread(threadId: string) {
     const key = threadUtilityDockKey("code", threadId);
     setDockVisible(true);
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "review"));
   }
-  function selectDockTab(surface: RightUtilityDockSurfaceId) {
+  function selectDockTab(tabId: string) {
     if (dockThreadKey === undefined) {
-      setFallbackDockState((current) => selectUtilityTabState(current, surface));
+      setFallbackDockState((current) => selectUtilityTabState(current, tabId));
     } else {
-      setDockStatesByThread((current) => selectThreadUtilityTab(current, dockThreadKey, surface));
+      setDockStatesByThread((current) => selectThreadUtilityTab(current, dockThreadKey, tabId));
     }
   }
-  function closeDockTab(surface: RightUtilityDockSurfaceId) {
+  function closeDockTab(tabId: string) {
     if (dockThreadKey === undefined) {
-      setFallbackDockState((current) => closeUtilityTabState(current, surface));
+      setFallbackDockState((current) => closeUtilityTabState(current, tabId));
     } else {
-      setDockStatesByThread((current) => closeThreadUtilityTab(current, dockThreadKey, surface));
+      setDockStatesByThread((current) => closeThreadUtilityTab(current, dockThreadKey, tabId));
     }
   }
   /**
@@ -2826,14 +2898,14 @@ function LaunchedShell(
     await controller.openDraftThread(mode, projectId);
   }
 
-  // The sidebar's "New thread" starts in the highlighted Project when there
-  // is one; the composer still lets the user switch to no folder.
+  // The global New thread action starts a clean draft. Project-scoped actions
+  // still call `openDraftInProject`, but a failed folder must never become the
+  // sticky default for every later draft opened from the sidebar.
   function openDraftInActiveProject(mode: "work" | "code") {
-    const project = projectController.activeProject;
-    void controller.openDraftThread(
-      mode,
-      project?.type === mode && project.lifecycle === "active" ? project.id : undefined,
-    );
+    setDraftError(undefined);
+    setDraftPendingMessage(undefined);
+    setDraftResetRevision((revision) => revision + 1);
+    void controller.openDraftThread(mode);
   }
 
   function createChat(prompt?: string) {
@@ -3173,21 +3245,6 @@ function LaunchedShell(
         );
         return false;
       }
-      // Profiles are read from the launch host, so an identifier from here
-      // means nothing on another host — it would be refused as missing, or
-      // worse, match a different profile that happens to share the id. The
-      // composer still shows the selection, so starting the thread without it
-      // would leave someone believing a posture they never got; say so and
-      // start nothing instead.
-      if (
-        executionProfileController.selectedProfile !== undefined &&
-        String(destinationHostId) !== String(LOCAL_HOST_ID)
-      ) {
-        setDraftError(
-          "Profiles belong to this host. Clear the selected profile to start this thread on another host.",
-        );
-        return false;
-      }
       const timestamp = new Date().toISOString();
       const title = input.prompt.length > 60 ? `${input.prompt.slice(0, 57)}…` : input.prompt;
       // The Project's remembered habit — overridable for this one thread
@@ -3202,11 +3259,6 @@ function LaunchedShell(
         threadId: globalThis.crypto.randomUUID(),
         timestamp,
         title,
-        // The server, not the composer, decides what the profile does to the
-        // thread's posture; the renderer only says which one was selected.
-        ...(executionProfileController.selectedProfile === undefined
-          ? {}
-          : { profileId: executionProfileController.selectedProfile.id }),
       });
       if (plan.kind === "rejected") {
         setDraftError(plan.message);
@@ -4461,6 +4513,7 @@ function LaunchedShell(
                 >
                   <ComposerContextMeterShortcut />
                   <WorkspaceView
+                    draftResetRevision={draftResetRevision}
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
@@ -4722,12 +4775,6 @@ function LaunchedShell(
                       void controller.openSettings({ section: "providers" })
                     }
                     onOpenSettings={() => void controller.openSettings()}
-                    draftExecutionProfile={
-                      <ExecutionProfileWorkflow
-                        controller={executionProfileController}
-                        variant="composer"
-                      />
-                    }
                   />
                 </ComposerContextMeterProvider>
               </AgentProfileNamesProvider>
@@ -4743,6 +4790,9 @@ function LaunchedShell(
               restoreFocus={navigatorOpener}
             />
             <RightUtilityDock
+              {...(displayedDockState.active === undefined
+                ? {}
+                : { activeTabId: displayedDockState.active })}
               agents={
                 bottomPanelOpen && activeBottomSurface?.id === "agents"
                   ? undefined
@@ -4802,7 +4852,7 @@ function LaunchedShell(
                 void controller.updateSettings({ contextSidebarWidth: width });
               }}
               onPreviewWidth={setPreviewContextWidth}
-              onOpenTab={(surface) => openDockTab(surface)}
+              onOpenTab={addDockTab}
               onSelectSurface={selectDockTab}
               open={dockOpen}
               plan={
@@ -4811,6 +4861,31 @@ function LaunchedShell(
                   : threadUtility("plan")
               }
               resolution={dockResolution}
+              renderTab={(descriptor) => {
+                const utilityTab = displayedDockState.tabs.find((tab) => tab.id === descriptor.id);
+                if (utilityTab === undefined) return null;
+                if (
+                  utilityTab.surface === "review" &&
+                  projectPullRequestReviewOpen &&
+                  selectedProjectPullRequest !== undefined
+                ) {
+                  return (
+                    <DockProjectPullRequestReviewTool
+                      key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
+                      load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+                      onOpenLinkedThread={(thread) =>
+                        openLinkedProjectPullRequestThread(
+                          thread,
+                          selectedProjectPullRequest.projectId,
+                        )
+                      }
+                      query={selectedProjectPullRequest}
+                      refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
+                    />
+                  );
+                }
+                return threadUtility(utilityTab.surface, utilityTab);
+              }}
               sideChat={
                 bottomPanelOpen && activeBottomSurface?.id === "side-chat"
                   ? undefined

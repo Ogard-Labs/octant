@@ -138,6 +138,8 @@ export interface WorkspaceViewProps {
    * pane grips feed the same drag. Its root ref lands on the split workspace.
    */
   readonly drag: WorkspaceSurfaceDragHandle;
+  /** Remounts an already-open draft when the global New thread action starts over. */
+  readonly draftResetRevision?: number;
   readonly focusedPaneId?: PaneId;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedCreateHostId?: import("@octant/contracts/host").HostId;
@@ -346,7 +348,6 @@ export interface WorkspaceViewProps {
   readonly providerBootstrapMessage?: string;
   readonly chatWelcomeCreating?: boolean;
   readonly chatWelcomeError?: string;
-  readonly draftExecutionProfile?: ReactNode;
 }
 
 export function WorkspaceView(props: WorkspaceViewProps) {
@@ -822,12 +823,9 @@ function renderNonCodeTab(
     const recentThreads = draftRecentThreads(tab.mode, props);
     return (
       <DraftThreadWorkspace
-        key={tab.id}
+        key={`${String(tab.id)}:${String(tab.projectId ?? "unbound")}:${String(props.draftResetRevision ?? 0)}`}
         {...(recentThreads.length === 0 ? {} : { recentThreads })}
         mode={tab.mode}
-        {...(tab.mode === "code" && props.draftExecutionProfile !== undefined
-          ? { executionProfile: props.draftExecutionProfile }
-          : {})}
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
         {...(props.selectedCreateHostId === undefined
           ? {}

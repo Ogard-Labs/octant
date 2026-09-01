@@ -1257,6 +1257,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-overlay);
+  font-size: var(--oct-text-sm);
+  text-align: left;
 }
 
 .composer-folder-selector__search {
@@ -1661,14 +1663,19 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-adapter__heading {
-  max-width: 28ch;
+  max-width: 36ch;
   margin: 0;
   color: var(--oct-fg);
-  font-size: clamp(26px, 3vw, 34px);
+  font-size: clamp(24px, 2.5vw, 30px);
   font-weight: 500;
   letter-spacing: var(--oct-tracking-tight);
   line-height: 1.15;
   text-wrap: balance;
+}
+
+.code-composer-adapter__welcome .composer-folder-selector {
+  display: inline-flex;
+  vertical-align: baseline;
 }
 
 .code-composer-adapter__project {
@@ -1735,12 +1742,12 @@ form > .work-composer-adapter__attachments {
   position: relative;
   z-index: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px 12px;
   width: calc(100% - 40px);
-  margin: -18px auto 0;
+  margin: -26px auto 0;
   padding: 22px 16px 6px;
   color: var(--oct-meta);
   background: var(--octant-workspace);
@@ -1760,10 +1767,27 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
   gap: 8px;
 }
 
-/* Delivery and worktree source expand from the context bar, not from inside
-   the raised composer. They stay unboxed so they do not read as a third card. */
-.code-composer-adapter__composer > .code-worktree-source,
-.code-composer-adapter__composer > .code-composer-adapter__delivery {
+.code-composer-adapter__dock-leading {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.code-composer-adapter__dock-trailing {
+  flex: 0 0 auto;
+}
+
+.code-composer-adapter__dock .host-selector__health {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Worktree source expands from the context bar, not from inside the raised
+   composer. It stays unboxed so it does not read as a third card. */
+.code-composer-adapter__composer > .code-worktree-source {
   margin: 0;
   padding: 4px 2px 0;
   background: transparent;
@@ -1772,6 +1796,15 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
 }
 
 @media (max-width: 640px) {
+  .code-composer-adapter__dock {
+    flex-wrap: wrap;
+  }
+
+  .code-composer-adapter__dock-leading,
+  .code-composer-adapter__dock-trailing {
+    flex: 1 1 100%;
+  }
+
   .draft-thread__context-strip,
   .work-composer-adapter__context-strip {
     align-items: stretch;
@@ -1820,12 +1853,6 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
 
 .code-composer-adapter__composer-bar .code-composer-adapter__context-item > svg {
   display: none;
-}
-
-.code-composer-adapter__composer-bar .execution-profile-workflow {
-  margin-inline-start: 2px;
-  padding-inline-start: 8px;
-  border-inline-start: 1px solid var(--oct-border);
 }
 
 .code-composer-adapter__composer-bar .code-composer-adapter__policy-select {
@@ -1900,7 +1927,7 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: min(280px, 40vh);
+  max-height: min(180px, 30vh);
   padding: 6px;
   overflow: auto;
 }
@@ -2094,9 +2121,35 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
 
 .code-composer-adapter__delivery {
   display: grid;
+  width: min(420px, calc(100vw - 32px));
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 9px 10px;
   padding: 12px;
+}
+
+.code-composer-adapter__delivery-header {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 3px;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-composer-adapter__delivery-header h2,
+.code-composer-adapter__delivery-header p {
+  margin: 0;
+}
+
+.code-composer-adapter__delivery-header h2 {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.code-composer-adapter__delivery-header p {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
 }
 
 .code-composer-adapter__field {

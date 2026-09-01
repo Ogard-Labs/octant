@@ -2310,6 +2310,29 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
   });
 
+  it("starts the global New thread action without carrying the previous Code Project", async () => {
+    const user = userEvent.setup();
+    const projectApi = projects({ ...projectBootstrap(), availability: [] });
+    render(
+      <App
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "New thread" }));
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    await user.click(await screen.findByRole("option", { name: /Octant/ }));
+    expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "New thread" }));
+
+    expect(await screen.findByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
+  });
+
   it("uses one narrow modal dock and restores focus through Escape dismissal", async () => {
     const user = userEvent.setup();
     const projectApi = projects();
@@ -3488,7 +3511,13 @@ describe("App", () => {
       threads: new Map([
         [
           threadUtilityDockKey("code", String(codeThreadId)),
-          { tabs: ["terminal", "browser"], active: "browser" },
+          {
+            tabs: [
+              { id: "terminal", surface: "terminal" },
+              { id: "browser", surface: "browser" },
+            ],
+            active: "browser",
+          },
         ],
       ]),
     });
@@ -3512,6 +3541,39 @@ describe("App", () => {
       "true",
     );
     expect(within(dock).getByRole("tab", { name: "Terminal" })).toBeVisible();
+  });
+
+  it("adds independent Browser tabs from the right sidebar launcher", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await showRightUtilityDock(user);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await user.click(within(dock).getByRole("button", { name: "Browser" }));
+    await user.click(within(dock).getByRole("button", { name: "Add tool" }));
+    const browserActions = within(dock).getAllByRole("button", { name: "Browser" });
+    const addBrowser = browserActions.at(-1);
+    if (addBrowser === undefined) throw new Error("Expected the Browser add action.");
+    await user.click(addBrowser);
+
+    expect(within(dock).getByRole("tab", { name: "Browser 1" })).toBeVisible();
+    expect(within(dock).getByRole("tab", { name: "Browser 2" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   it("moves the active thread Terminal into a remembered bottom panel", async () => {

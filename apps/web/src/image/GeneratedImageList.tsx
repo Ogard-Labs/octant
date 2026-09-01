@@ -28,7 +28,6 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
   const [revise, setRevise] = useState<
     { readonly job: ImageJob; readonly artifact: ImageArtifactRecord } | undefined
   >(undefined);
-  const [error, setError] = useState<string | undefined>(undefined);
   const inFlightGeneration = useRef<number | undefined>(undefined);
   const generation = useRef(0);
   const refreshRef = useRef<() => void>(() => undefined);
@@ -39,7 +38,6 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
     const refreshGeneration = ++generation.current;
     setJobs([]);
     setRevise(undefined);
-    setError(undefined);
     const refresh = () => {
       if (!documentIsVisible() || inFlightGeneration.current === refreshGeneration) {
         return;
@@ -50,12 +48,12 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
         .then((outcome) => {
           if (cancelled || generation.current !== refreshGeneration) return;
           setJobs((current) => (samePollingData(current, outcome.jobs) ? current : outcome.jobs));
-          setError(undefined);
         })
         .catch(() => {
-          if (!cancelled && generation.current === refreshGeneration) {
-            setError("Generated images are unavailable.");
-          }
+          // This is background history polling, not an explicit image action.
+          // Keep the last useful list (or the empty transcript) and retry on
+          // the next interval instead of parking a dead-end error above the
+          // composer. ImageGenerationAction owns actionable create failures.
         })
         .finally(() => {
           if (inFlightGeneration.current === refreshGeneration) {
@@ -99,13 +97,6 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
     setRevise(undefined);
   }
 
-  if (error !== undefined) {
-    return (
-      <p data-testid="generated-image-list-error" role="status">
-        {error}
-      </p>
-    );
-  }
   if (jobs.length === 0) return null;
 
   return (

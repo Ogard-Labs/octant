@@ -267,6 +267,13 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   flex: none;
 }
 
+.dock-utility-launcher__trigger {
+  min-height: 28px;
+  height: 28px;
+  padding-inline: 7px;
+  font-size: var(--oct-text-xs);
+}
+
 .dock-utility-launcher__disclosure {
   top: calc(100% + 4px);
   right: auto;

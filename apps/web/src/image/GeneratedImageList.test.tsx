@@ -120,7 +120,7 @@ describe("GeneratedImageList polling", () => {
     expect(screen.getByText("Image queued…")).toBeInTheDocument();
   });
 
-  it("does not carry an unavailable status into a new scope", async () => {
+  it("keeps background list failures out of the transcript and retries in a new scope", async () => {
     const list = vi
       .fn()
       .mockRejectedValueOnce(new Error("offline"))
@@ -135,7 +135,9 @@ describe("GeneratedImageList polling", () => {
       />,
     );
 
-    expect(await screen.findByText("Generated images are unavailable.")).toBeInTheDocument();
+    await act(async () => undefined);
+    expect(screen.queryByText("Generated images are unavailable.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("generated-image-list-error")).not.toBeInTheDocument();
     view.rerender(
       <GeneratedImageList
         client={client}
@@ -145,7 +147,6 @@ describe("GeneratedImageList polling", () => {
       />,
     );
 
-    expect(screen.queryByText("Generated images are unavailable.")).not.toBeInTheDocument();
     expect(list).toHaveBeenCalledTimes(2);
   });
 });

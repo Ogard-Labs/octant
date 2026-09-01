@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
   ExtensionCommand,
@@ -374,6 +375,42 @@ describe("ExtensionsSettingsView", () => {
       "2 source-qualified candidates",
     );
     expect(c.calls).toContainEqual({ kind: "reconcile-skills" });
+  });
+
+  it("bounds a long installed skill list and filters it locally", async () => {
+    const user = userEvent.setup();
+    const base = installedSnapshot({ activation: baseActivation({ installed: false }) });
+    const skills = Array.from({ length: 14 }, (_, index) => ({
+      skill: {
+        qualifiedId:
+          `agents-skills-directory:skill-${String(index)}:sha256:${String(index).padStart(64, "0")}` as never,
+        name: `skill-${String(index)}`,
+        sourceKind: "agents-skills-directory" as const,
+        digest: `sha256:${String(index).padStart(64, "0")}` as never,
+        available: true,
+      },
+      source: { kind: "agents-skills-directory" as const, sourceRef: "user-global" },
+      displayName: `Skill ${String(index)}`,
+      provenance: { reviewed: false },
+      contentBytes: 128,
+      reviewed: false,
+      desiredEnabled: false,
+      effectiveState: { kind: "blocked" as const, reason: "untrusted" as const },
+    }));
+    const c = client({ snapshot: { ...base, skills } as unknown as ExtensionSnapshot });
+
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+
+    await screen.findByText("Skill 0");
+    const list = screen.getByRole("list", { name: "Standalone skills" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(12);
+    expect(screen.getByRole("button", { name: "Show all 14 skills" })).toBeVisible();
+
+    const search = screen.getByRole("searchbox", { name: "Filter installed skills" });
+    await user.type(search, "Skill 13");
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(list).getByText("Skill 13")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Clear installed skill filter" })).toBeVisible();
   });
 
   it("shows an honest blocked state and reason when a component is not effective", async () => {

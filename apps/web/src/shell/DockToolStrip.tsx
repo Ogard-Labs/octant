@@ -7,17 +7,18 @@ import { OctantButton } from "../ui/base/OctantButton";
 import type {
   RightUtilityDockSurfaceDescriptor,
   RightUtilityDockSurfaceId,
+  RightUtilityDockTabDescriptor,
 } from "./rightUtilityDockModel";
 
 const TOOL_SLOT_WIDTH = 92;
 const OVERFLOW_SLOT_WIDTH = 30;
 
 export interface DockToolStripProps {
-  readonly active?: RightUtilityDockSurfaceId;
+  readonly active?: string;
   readonly capacity?: number;
-  readonly onClose: (surface: RightUtilityDockSurfaceId) => void;
-  readonly onSelect: (surface: RightUtilityDockSurfaceId) => void;
-  readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+  readonly onClose: (tabId: string) => void;
+  readonly onSelect: (tabId: string) => void;
+  readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor>;
 }
 
 export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripProps) {
@@ -102,7 +103,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
             type="button"
             variant="ghost"
           >
-            <DockToolIcon surface={tool.id} />
+            <DockToolIcon surface={dockToolSurface(tool)} />
             <span>{tool.label}</span>
           </OctantButton>
           <IconButton
@@ -145,7 +146,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
                     type="button"
                     variant="ghost"
                   >
-                    <DockToolIcon surface={tool.id} />
+                    <DockToolIcon surface={dockToolSurface(tool)} />
                     <span>{tool.label}</span>
                   </OctantButton>
                   <IconButton
@@ -162,3 +163,9 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
     </div>
   );
 });
+
+function dockToolSurface(
+  tool: RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor,
+): RightUtilityDockSurfaceId {
+  return "surface" in tool ? tool.surface.id : tool.id;
+}

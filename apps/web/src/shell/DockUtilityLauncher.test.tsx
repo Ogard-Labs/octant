@@ -36,9 +36,10 @@ describe("right sidebar tool launcher", () => {
     );
 
     const trigger = screen.getByRole("button", { name: "Add tool" });
+    expect(trigger).toHaveTextContent("Add tool");
     fireEvent.click(trigger);
     expect(screen.getAllByRole("button").map((button) => button.textContent?.trim())).toEqual([
-      "",
+      "Add tool",
       "Browser",
       "Terminal",
       "iOS Simulator",

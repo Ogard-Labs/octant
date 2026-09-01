@@ -1,5 +1,5 @@
-import { BookOpen, ChevronDown, ChevronUp, Puzzle } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { BookOpen, ChevronDown, ChevronUp, Puzzle, Search, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
   ExtensionCatalogEntry,
@@ -20,7 +20,7 @@ import type {
 import type { ExtensionPackagePreview } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantTabs, OctantTabsList, OctantTabsPanel, OctantTabsTab } from "../ui/base/OctantTabs";
 
 /**
@@ -224,6 +224,7 @@ const DEFAULT_EXTENSION_SETTINGS_SCOPE: ExtensionActivationScope = {
 
 /** Command version shared by every desired-state mutation. */
 const COMMAND_VERSION = 1 as never;
+const INSTALLED_SKILL_PREVIEW_LIMIT = 12;
 
 export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const scope = props.scope ?? DEFAULT_EXTENSION_SETTINGS_SCOPE;
@@ -251,6 +252,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [inspectingSkillId, setInspectingSkillId] = useState<string | undefined>();
   const [installingSkill, setInstallingSkill] = useState(false);
   const [importingLocal, setImportingLocal] = useState(false);
+  const [installedSkillQuery, setInstalledSkillQuery] = useState("");
+  const [showAllInstalledSkills, setShowAllInstalledSkills] = useState(false);
+  const installedSkillSearch = useRef<HTMLInputElement>(null);
 
   const importLocalPlugin = useCallback(
     async (selection: Readonly<{ receiptId: string; displayName: string }>) => {
@@ -600,6 +604,22 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const catalogOffline = effective?.catalogStatus === "offline";
   const installedPackages = snapshot.packages.filter((pkg) => pkg.activation.installed);
   const standaloneSkills = snapshot.skills ?? [];
+  const normalizedInstalledSkillQuery = installedSkillQuery.trim().toLocaleLowerCase();
+  const filteredStandaloneSkills =
+    normalizedInstalledSkillQuery === ""
+      ? standaloneSkills
+      : standaloneSkills.filter((skill) =>
+          [
+            skill.displayName,
+            skill.skill.name,
+            skill.description ?? "",
+            standaloneSkillSummarySourceLabel(skill),
+          ].some((value) => value.toLocaleLowerCase().includes(normalizedInstalledSkillQuery)),
+        );
+  const visibleStandaloneSkills =
+    normalizedInstalledSkillQuery !== "" || showAllInstalledSkills
+      ? filteredStandaloneSkills
+      : filteredStandaloneSkills.slice(0, INSTALLED_SKILL_PREVIEW_LIMIT);
   const standaloneSkillSummary = standaloneSkills.reduce(
     (summary, skill) => {
       if (skill.effectiveState.kind === "blocked" && skill.effectiveState.reason === "untrusted") {
@@ -718,6 +738,34 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                 </p>
               ) : (
                 <>
+                  <div className="extensions-settings__installed-filter">
+                    <Search aria-hidden="true" size={14} strokeWidth={1.7} />
+                    <OctantInput
+                      aria-label="Filter installed skills"
+                      onChange={(event) => {
+                        setInstalledSkillQuery(event.currentTarget.value);
+                        setShowAllInstalledSkills(false);
+                      }}
+                      placeholder="Filter installed skills…"
+                      ref={installedSkillSearch}
+                      type="search"
+                      value={installedSkillQuery}
+                    />
+                    {installedSkillQuery === "" ? null : (
+                      <OctantIconButton
+                        className="extensions-settings__installed-filter-clear"
+                        label="Clear installed skill filter"
+                        onClick={() => {
+                          setInstalledSkillQuery("");
+                          setShowAllInstalledSkills(false);
+                          installedSkillSearch.current?.focus();
+                        }}
+                        type="button"
+                      >
+                        <X aria-hidden="true" size={14} strokeWidth={1.7} />
+                      </OctantIconButton>
+                    )}
+                  </div>
                   <div
                     aria-label="Standalone skill summary"
                     className="extensions-settings__summary"
@@ -728,12 +776,35 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                     {standaloneSkillSummary.other === 0 ? null : (
                       <span>{standaloneSkillSummary.other} need attention</span>
                     )}
+                    <span>
+                      Showing {visibleStandaloneSkills.length} of {filteredStandaloneSkills.length}
+                    </span>
                   </div>
-                  <ul className="extensions-settings__cards">
-                    {standaloneSkills.map((skill) => (
-                      <StandaloneSkillCard key={String(skill.skill.qualifiedId)} skill={skill} />
-                    ))}
-                  </ul>
+                  {visibleStandaloneSkills.length === 0 ? (
+                    <p className="extensions-settings__state" role="status">
+                      No installed skills match this filter.
+                    </p>
+                  ) : (
+                    <ul aria-label="Standalone skills" className="extensions-settings__cards">
+                      {visibleStandaloneSkills.map((skill) => (
+                        <StandaloneSkillCard key={String(skill.skill.qualifiedId)} skill={skill} />
+                      ))}
+                    </ul>
+                  )}
+                  {normalizedInstalledSkillQuery !== "" ||
+                  standaloneSkills.length <= INSTALLED_SKILL_PREVIEW_LIMIT ? null : (
+                    <OctantButton
+                      className="extensions-settings__show-all"
+                      onClick={() => setShowAllInstalledSkills((current) => !current)}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      {showAllInstalledSkills
+                        ? "Show fewer skills"
+                        : `Show all ${String(standaloneSkills.length)} skills`}
+                    </OctantButton>
+                  )}
                 </>
               )}
             </div>

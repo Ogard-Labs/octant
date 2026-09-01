@@ -287,6 +287,12 @@ where supported. Selecting a tool removes that presentation from the other
 region; Terminal immediately attaches or starts and preserves one server
 session when moved.
 
+Browser and Terminal are repeatable right-dock workspaces: Add tool creates a
+new tab identity, an isolated Browser context or Terminal session, and a stable
+numbered label when siblings are open. Files, Review, Agents, Canvas, Plan,
+Delivery, Simulator, and Side chat are singleton destinations. One instance
+still appears in only one region at a time.
+
 A welcome, Project, or other pane with neither a bound thread nor a valid
 launchable tool keeps the dock closed and omits its toggle. Restored presentation
 for another subject never makes unavailable chrome visible.

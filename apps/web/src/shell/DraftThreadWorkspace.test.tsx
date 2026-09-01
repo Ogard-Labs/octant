@@ -642,6 +642,7 @@ describe("DraftThreadWorkspace", () => {
       "Keep this exact prompt",
     );
     expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Full access");
+    await user.click(screen.getByRole("button", { name: "Delivery target" }));
     expect(screen.getByRole("textbox", { name: "Branch intent" })).toHaveValue("feature/keep-me");
     expect(screen.getByRole("button", { name: "Project: new-repository" })).toBeVisible();
   });
@@ -754,6 +755,28 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("status", { name: /Host: This computer/ })).toBeVisible();
     expect(screen.getByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
     expect(screen.getByRole("button", { name: "GitHub repository" })).toBeVisible();
+  });
+
+  it("keeps another folder reachable from the Project control after Code creation is refused", async () => {
+    const user = userEvent.setup();
+    const onCreateProject = vi.fn(async () => codeProjectId);
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        errorMessage="This Project folder has no Git checkout."
+        mode="code"
+        onCreateProject={onCreateProject}
+        projectId={codeProjectId}
+        projects={projects}
+      />,
+    );
+
+    const project = screen.getByRole("button", { name: "Project: Octant" });
+    expect(screen.getByRole("heading", { level: 1 })).toContainElement(project);
+
+    await user.click(project);
+    await user.click(screen.getByRole("option", { name: "Add local folder…" }));
+    expect(screen.getByRole("dialog", { name: "Create Project" })).toBeVisible();
   });
 
   it("omits the GitHub repository selection when the GitHub clients are unavailable", () => {

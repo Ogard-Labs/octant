@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CodeComposerAdapter } from "./CodeComposerAdapter";
@@ -45,6 +46,23 @@ describe("CodeComposerAdapter", () => {
     expect(dock?.querySelector(".host-selector")).not.toBeNull();
     expect(dock?.textContent).toContain("Current checkout");
     expect(dock?.textContent).toContain("development");
+  });
+
+  it("keeps delivery settings in an anchored popover instead of expanding the composer", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<CodeComposerAdapter {...defaultProps} />);
+
+    await user.click(screen.getByRole("button", { name: "Delivery target" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Delivery target" })).toBeVisible(),
+    );
+    expect(screen.getByRole("textbox", { name: "Branch intent" })).toBeVisible();
+    expect(
+      container.querySelector(
+        ".code-composer-adapter__composer > .code-composer-adapter__delivery",
+      ),
+    ).toBeNull();
   });
 
   it("puts the Project picker on the trailing edge of the checkout card when none is selected", () => {

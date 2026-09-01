@@ -43,6 +43,7 @@ import { ThreadComposer } from "../../composer/ThreadComposer";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
+import { OctantPopover } from "../../ui/base/OctantPopover";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
@@ -97,10 +98,7 @@ export interface CodeComposerAdapterProps {
   readonly baseBranch?: string;
   readonly defaultExecutionPolicy: ProviderExecutionPolicy;
   readonly defaultPermissionPersistence: PermissionPersistence;
-  /**
-   * The access dropdown is composer-local, but the execution-profile picker
-   * lives in the shell and must judge profiles by the same requested posture.
-   */
+  /** Reports the composer-local access posture to the shell. */
   readonly onExecutionPolicyChange?: (executionPolicy: ProviderExecutionPolicy) => void;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
@@ -126,13 +124,6 @@ export interface CodeComposerAdapterProps {
   readonly createFromControl?: ReactNode;
   /** Optional multi-model pool control slot rendered in the composer bar. */
   readonly poolControl?: ReactNode;
-  /**
-   * The execution-profile control, rendered beside model and access because a
-   * profile decides the same thing they do: what this thread may do. It is a
-   * slot rather than a direct mount so the composer keeps no profile state of
-   * its own — the selection belongs to the shell that starts the thread.
-   */
-  readonly profileControl?: ReactNode;
   /**
    * The selected Code Project's remembered habit for how new threads start. It only
    * preselects the Workspace control: choosing differently here overrides one thread
@@ -505,7 +496,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       />
                     </span>
                     {props.poolControl}
-                    {props.profileControl}
                     <CodeComposerAccessMenu
                       onChange={setExecutionPolicy}
                       value={executionPolicy}
@@ -642,20 +632,97 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     ) : null}
                   </>
                 )}
-                <OctantButton
-                  aria-expanded={showDelivery}
-                  className="code-composer-adapter__disclosure-toggle"
-                  onClick={() => setShowDelivery(!showDelivery)}
-                  type="button"
-                  variant="ghost"
+                <OctantPopover
+                  align="end"
+                  className="code-composer-adapter__delivery"
+                  onOpenChange={setShowDelivery}
+                  open={showDelivery}
+                  side="bottom"
+                  sideOffset={8}
+                  titledBy="code-delivery-target-heading"
+                  trigger={
+                    <>
+                      {showDelivery ? (
+                        <ChevronUp aria-hidden="true" size={12} />
+                      ) : (
+                        <ChevronDown aria-hidden="true" size={12} />
+                      )}
+                      <span>Delivery target</span>
+                    </>
+                  }
+                  triggerClassName="code-composer-adapter__disclosure-toggle"
+                  triggerLabel="Delivery target"
+                  triggerVariant="ghost"
                 >
-                  {showDelivery ? (
-                    <ChevronUp aria-hidden="true" size={12} />
-                  ) : (
-                    <ChevronDown aria-hidden="true" size={12} />
-                  )}
-                  <span>Delivery target</span>
-                </OctantButton>
+                  <header className="code-composer-adapter__delivery-header">
+                    <h2 id="code-delivery-target-heading">Delivery target</h2>
+                    <p>Confirm what this thread should deliver and where it should land.</p>
+                  </header>
+                  <label className="code-composer-adapter__field">
+                    <span>Outcome</span>
+                    <OctantSelectField
+                      aria-label="Delivery outcome"
+                      onValueChange={(value) =>
+                        setOutcomeOverride(value as CodeDeliveryOutcomeKind)
+                      }
+                      options={CODE_DELIVERY_OUTCOME_ORDER.map((kind) => ({
+                        id: kind,
+                        label: CODE_DELIVERY_OUTCOME_LABELS[kind],
+                      }))}
+                      value={outcomeKind}
+                    />
+                  </label>
+                  <label className="code-composer-adapter__field">
+                    <span>Branch</span>
+                    <OctantInput
+                      aria-label="Branch intent"
+                      onChange={(e) => setBranchIntent(e.target.value)}
+                      value={branchIntent}
+                    />
+                  </label>
+                  <label className="code-composer-adapter__field">
+                    <span>Remote</span>
+                    <OctantInput
+                      aria-label="Remote name"
+                      onChange={(e) => setRemoteName(e.target.value)}
+                      value={remoteName}
+                    />
+                  </label>
+                  <label className="code-composer-adapter__field">
+                    <span>Base repository</span>
+                    <OctantInput
+                      aria-label="Base repository"
+                      onChange={(e) => {
+                        setBaseRepositoryEdited(true);
+                        setBaseRepository(e.target.value);
+                      }}
+                      placeholder="owner/repository"
+                      value={baseRepository}
+                    />
+                  </label>
+                  <label className="code-composer-adapter__field">
+                    <span>Base branch</span>
+                    <OctantInput
+                      aria-label="Base branch"
+                      onChange={(e) => setBaseBranch(e.target.value)}
+                      value={baseBranch}
+                    />
+                  </label>
+                  <label className="code-composer-adapter__field">
+                    <span>Permission duration</span>
+                    <OctantSelectField
+                      aria-label="Permission persistence"
+                      onValueChange={(value) =>
+                        setPermissionPersistence(value as PermissionPersistence)
+                      }
+                      options={[
+                        { id: "current-session", label: "Current session" },
+                        { id: "project-default", label: "Project default" },
+                      ]}
+                      value={permissionPersistence}
+                    />
+                  </label>
+                </OctantPopover>
               </div>
             </div>
           </div>
@@ -679,73 +746,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               startFromOrigin={startFromOrigin}
             />
           )}
-
-          {showDelivery ? (
-            <div className="code-composer-adapter__delivery" aria-label="Delivery target">
-              <label className="code-composer-adapter__field">
-                <span>Outcome</span>
-                <OctantSelectField
-                  aria-label="Delivery outcome"
-                  onValueChange={(value) => setOutcomeOverride(value as CodeDeliveryOutcomeKind)}
-                  options={CODE_DELIVERY_OUTCOME_ORDER.map((kind) => ({
-                    id: kind,
-                    label: CODE_DELIVERY_OUTCOME_LABELS[kind],
-                  }))}
-                  value={outcomeKind}
-                />
-              </label>
-              <label className="code-composer-adapter__field">
-                <span>Branch</span>
-                <OctantInput
-                  aria-label="Branch intent"
-                  onChange={(e) => setBranchIntent(e.target.value)}
-                  value={branchIntent}
-                />
-              </label>
-              <label className="code-composer-adapter__field">
-                <span>Remote</span>
-                <OctantInput
-                  aria-label="Remote name"
-                  onChange={(e) => setRemoteName(e.target.value)}
-                  value={remoteName}
-                />
-              </label>
-              <label className="code-composer-adapter__field">
-                <span>Base repository</span>
-                <OctantInput
-                  aria-label="Base repository"
-                  onChange={(e) => {
-                    setBaseRepositoryEdited(true);
-                    setBaseRepository(e.target.value);
-                  }}
-                  placeholder="owner/repository"
-                  value={baseRepository}
-                />
-              </label>
-              <label className="code-composer-adapter__field">
-                <span>Base branch</span>
-                <OctantInput
-                  aria-label="Base branch"
-                  onChange={(e) => setBaseBranch(e.target.value)}
-                  value={baseBranch}
-                />
-              </label>
-              <label className="code-composer-adapter__field">
-                <span>Permission duration</span>
-                <OctantSelectField
-                  aria-label="Permission persistence"
-                  onValueChange={(value) =>
-                    setPermissionPersistence(value as PermissionPersistence)
-                  }
-                  options={[
-                    { id: "current-session", label: "Current session" },
-                    { id: "project-default", label: "Project default" },
-                  ]}
-                  value={permissionPersistence}
-                />
-              </label>
-            </div>
-          ) : null}
 
           {props.errorMessage !== undefined ? (
             <p className="code-composer-adapter__error" role="alert">
