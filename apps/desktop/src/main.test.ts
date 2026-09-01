@@ -45,6 +45,8 @@ import {
   requestProjectWindowWhileRunning,
   resolveDesktopDataDirectory,
   resolveDesktopHostCapabilities,
+  resolveConfiguredServerPort,
+  resolveLocalWebAppUrl,
   resolveCodeFileHelperPath,
   resolveKeychainHelperPath,
   validateProjectWindowTarget,
@@ -88,6 +90,17 @@ describe("packaged desktop storage identity", () => {
   });
 });
 
+describe("canonical local host endpoint", () => {
+  it("uses the same stable port for Electron and browser clients by default", () => {
+    expect(resolveConfiguredServerPort({})).toBe(13_773);
+    expect(resolveConfiguredServerPort({ OCTANT_SERVER_PORT: "14000" })).toBe(14_000);
+  });
+
+  it("opens the browser at the canonical host without a launch-session URL", () => {
+    expect(resolveLocalWebAppUrl("http://127.0.0.1:13773/")).toBe("http://127.0.0.1:13773/");
+  });
+});
+
 describe("packaged desktop host capabilities", () => {
   it("reports vibrancy support only for the native macOS host", () => {
     expect(resolveDesktopHostCapabilities("darwin")).toEqual({
@@ -120,7 +133,7 @@ describe("development renderer startup", () => {
     expect(url.searchParams.get("existing")).toBe("keep");
     expect(url.searchParams.get("windowId")).toBe("window-a");
     expect(url.searchParams.get("serverUrl")).toBe("http://127.0.0.1:13773");
-    expect(url.searchParams.get("developmentWebBootstrap")).toBe("1");
+    expect(url.searchParams.has("developmentWebBootstrap")).toBe(false);
   });
 
   it("loads the packaged renderer with the server URL and no caller-selected window identity", () => {

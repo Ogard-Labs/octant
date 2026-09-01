@@ -1084,7 +1084,6 @@ export function prepareDevelopmentRendererUrl(
   const launchUrl = new URL(developmentUrl);
   launchUrl.searchParams.set("windowId", windowId);
   launchUrl.searchParams.set("serverUrl", serverUrl);
-  launchUrl.searchParams.set("developmentWebBootstrap", "1");
   return launchUrl.toString();
 }
 
@@ -1852,25 +1851,11 @@ async function openLocalWebApp(): Promise<void> {
   if (snapshot.url === undefined || snapshot.state === "stopped") {
     throw new Error("Octant local web app is unavailable while the host is stopped.");
   }
-  const windowId = randomUUID();
-  const capability = generateProjectBridgeToken(randomBytes);
-  const response = await fetch(new URL("/api/desktop/launch-sessions", snapshot.url), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-octant-desktop-secret": desktopBridgeSecret,
-    },
-    body: JSON.stringify({ windowId, capability }),
-  });
-  if (!response.ok) throw new Error("Octant could not authorize the local web app.");
-  const payload = (await response.json()) as { readonly launchToken?: unknown };
-  if (typeof payload.launchToken !== "string" || !BRIDGE_SECRET_PATTERN.test(payload.launchToken)) {
-    throw new Error("Octant received an invalid local web app launch receipt.");
-  }
-  const url = new URL(snapshot.url);
-  url.searchParams.set("serverUrl", snapshot.url);
-  url.hash = `launchToken=${payload.launchToken}`;
-  await shell.openExternal(url.toString());
+  await shell.openExternal(resolveLocalWebAppUrl(snapshot.url));
+}
+
+export function resolveLocalWebAppUrl(hostUrl: string): string {
+  return new URL(hostUrl).toString();
 }
 
 async function startHostFromMenu(): Promise<void> {
@@ -1942,9 +1927,11 @@ async function runMenuBarAction(
   }
 }
 
-function resolveConfiguredServerPort(): number | undefined {
-  const value = process.env.OCTANT_SERVER_PORT;
-  if (value === undefined) return undefined;
+export function resolveConfiguredServerPort(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): number {
+  const value = environment.OCTANT_SERVER_PORT;
+  if (value === undefined) return 13_773;
   const port = Number(value);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
     throw new Error("OCTANT_SERVER_PORT must be an integer between 1 and 65535");

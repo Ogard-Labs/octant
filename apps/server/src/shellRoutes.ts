@@ -177,8 +177,9 @@ export function isLoopbackHostname(hostname: string): boolean {
 
 /**
  * Packaged Electron file pages send Origin: null (opaque) or file://.
- * Development may pin the Vite origin. Tests omit `allowedHttpOrigin` and
- * keep loopback HTTP on any port.
+ * The local listener trusts canonical loopback HTTP clients independently of
+ * which loopback renderer Electron currently uses. `allowedHttpOrigin` only
+ * distinguishes whether the opaque packaged renderer is also admitted.
  */
 export function isAllowedRendererOrigin(
   origin: string,
@@ -198,9 +199,7 @@ export function isAllowedRendererOrigin(
       url.pathname === "/" &&
       url.search === "" &&
       url.hash === "";
-    if (!loopbackHttp) return false;
-    if (allowedHttpOrigin === undefined) return true;
-    return origin === allowedHttpOrigin;
+    return loopbackHttp;
   } catch {
     return false;
   }

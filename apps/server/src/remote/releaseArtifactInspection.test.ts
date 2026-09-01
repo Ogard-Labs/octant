@@ -4,13 +4,8 @@
 // spawn environment — not synthetic arrays or hand-written templates. It:
 //
 // - Builds the server bundle (tsdown) and reads the real emitted .mjs files.
-// - Proves the "development web bootstrap is unavailable in packaged runtime"
-//   guard is present in the built bundle.
-// - Proves development route path strings exist in the bundle (handlers are
-//   bundled) but are gated by the packaged-runtime config guard.
-// - Spawns the built artifact with OCTANT_PACKAGED_RUNTIME=1 and
-//   OCTANT_DEV_WEB_BOOTSTRAP=1 and proves the actual spawn environment
-//   rejects development bootstrap (non-zero exit).
+// - Proves the canonical local-session path is present and the retired
+//   development-only bootstrap path is absent.
 // - Injects sentinel secrets into the spawn environment and scans the real
 //   captured stdout/stderr plus the built bundle to prove secrets do not
 //   leak into release/spawn output.
@@ -118,26 +113,16 @@ describe("Release artifact inspection — actual built bundle", () => {
   const builtFiles = buildServerArtifact();
 
   if (builtFiles.length === 0) {
-    it.skip("built bundle contains the packaged-runtime dev bootstrap guard (skipped: build toolchain unavailable)", () => {});
-    it.skip("built bundle contains development route handlers (skipped: build toolchain unavailable)", () => {});
+    it.skip("built bundle contains only the canonical local bootstrap path (skipped: build toolchain unavailable)", () => {});
     it.skip("built bundle does not carry forbidden secret patterns (skipped: build toolchain unavailable)", () => {});
   } else {
     const bundle = readBuiltBundle(builtFiles);
 
-    it("actual built bundle contains the packaged-runtime dev bootstrap guard", () => {
-      // The guard string is emitted by parseServerLaunchConfig in the built
-      // bundle. Its presence proves the packaged-runtime rejection logic is
-      // compiled into the release artifact.
-      expect(bundle).toContain("development web bootstrap is unavailable in packaged runtime");
-    });
-
-    it("actual built bundle contains development route handler paths (gated)", () => {
-      // Development route handlers are bundled (they exist in the source) but
-      // are gated by the developmentWebBootstrap flag. Their presence in the
-      // bundle is expected; the spawn test below proves they are unreachable
-      // in packaged runtime.
-      expect(bundle).toContain("development-session");
+    it("actual built bundle contains only the canonical local bootstrap path", () => {
+      expect(bundle).toContain("local-session");
       expect(bundle).toContain("launch-session");
+      expect(bundle).not.toContain("development-session");
+      expect(bundle).not.toContain("development-bypass");
     });
 
     it("actual built bundle does not carry forbidden secret patterns", () => {
@@ -153,40 +138,9 @@ describe("Release artifact inspection — actual spawn environment", () => {
   const runtime = findRuntime();
 
   if (builtFiles.length === 0 || runtime === undefined) {
-    it.skip("spawn rejects dev bootstrap in packaged runtime (skipped: build/runtime unavailable)", () => {});
     it.skip("spawn does not leak sentinel secrets into stdout/stderr (skipped: build/runtime unavailable)", () => {});
   } else {
     const mainPath = join(distDir, "main.mjs");
-
-    it("actual spawn rejects OCTANT_DEV_WEB_BOOTSTRAP in packaged runtime with the guard-specific message", () => {
-      // Spawn the real built artifact with packaged runtime + dev bootstrap.
-      // The actual process environment must reject this combination with the
-      // exact guard message from parseServerLaunchConfig — not merely a
-      // non-zero exit from an unrelated native crash. The built entry
-      // validates launch config before loading native modules so the guard
-      // message is observable in stderr.
-      const dataDir = mkdtempSync(join(tmpdir(), "octant-469-spawn-"));
-      directories.push(dataDir);
-      const result = spawnSync(runtime, [mainPath], {
-        cwd: serverRoot,
-        env: {
-          OCTANT_PACKAGED_RUNTIME: "1",
-          OCTANT_DEV_WEB_BOOTSTRAP: "1",
-          OCTANT_DATA_DIR: dataDir,
-          HOME: process.env.HOME ?? homedir(),
-          PATH: process.env.PATH ?? "",
-        },
-        timeout: 15_000,
-        encoding: "utf8",
-      });
-      // The spawn must fail (non-zero exit).
-      expect(result.status).not.toBe(0);
-      const output = `${result.stdout}${result.stderr}`;
-      // The output must contain the exact guard message — proving the
-      // packaged-runtime dev-bootstrap guard executed in the real built
-      // artifact, not merely a crash before config parsing.
-      expect(output).toContain("development web bootstrap is unavailable in packaged runtime");
-    });
 
     it("actual spawn does not leak sentinel secrets into stdout/stderr", () => {
       // Inject sentinel secrets into the spawn environment at config
@@ -197,7 +151,7 @@ describe("Release artifact inspection — actual spawn environment", () => {
         cwd: serverRoot,
         env: {
           OCTANT_PACKAGED_RUNTIME: "1",
-          OCTANT_DEV_WEB_BOOTSTRAP: "1",
+          OCTANT_SERVER_PORT: "0",
           OCTANT_DATA_DIR: dataDir,
           OCTANT_DESKTOP_BRIDGE_SECRET: SENTINEL_DESKTOP_BRIDGE_SECRET,
           OCTANT_CREDENTIAL_BROKER_TOKEN: SENTINEL_CREDENTIAL_BROKER_TOKEN,
@@ -222,15 +176,15 @@ describe("Release artifact inspection — remote route policy excludes developme
   const origin = "https://192.0.2.10:9469";
   const policy = createRemoteRoutePolicy({ origin });
 
-  it("remote route policy never matches development bootstrap routes", () => {
-    const developmentRoutes = [
-      "/api/shell/development-session",
+  it("remote route policy never matches local-only bootstrap routes", () => {
+    const localOnlyRoutes = [
+      "/api/shell/local-session",
       "/api/desktop/bridge",
       "/api/desktop/bridge/exchange",
       "/api/launch-session",
       "/api/launch-session/exchange",
     ];
-    for (const path of developmentRoutes) {
+    for (const path of localOnlyRoutes) {
       const decision = policy.inspect(
         new Request(new URL(path, origin), {
           method: "GET",
@@ -253,32 +207,12 @@ describe("Release artifact inspection — remote route policy excludes developme
   });
 });
 
-describe("Release artifact inspection — config parser packaged-runtime guard", () => {
-  it("server config rejects OCTANT_DEV_WEB_BOOTSTRAP in packaged runtime", () => {
-    expect(() =>
-      parseServerLaunchConfig({
-        OCTANT_PACKAGED_RUNTIME: "1",
-        OCTANT_DEV_WEB_BOOTSTRAP: "1",
-      } as Record<string, string | undefined>),
-    ).toThrow("development web bootstrap is unavailable in packaged runtime");
-  });
-
-  it("server config accepts OCTANT_DEV_WEB_BOOTSTRAP only in development runtime", () => {
-    const config = parseServerLaunchConfig({
-      OCTANT_DEV_WEB_BOOTSTRAP: "1",
-    } as Record<string, string | undefined>);
-    expect(config.developmentWebBootstrap).toBe(true);
-  });
-
-  it("server config omits development bootstrap by default", () => {
-    const config = parseServerLaunchConfig({} as Record<string, string | undefined>);
-    expect(config.developmentWebBootstrap).toBeUndefined();
-  });
-
-  it("packaged runtime flag alone does not enable development bootstrap", () => {
+describe("Release artifact inspection — canonical host config", () => {
+  it("the retired development bootstrap flag cannot select another host mode", () => {
     const config = parseServerLaunchConfig({
       OCTANT_PACKAGED_RUNTIME: "1",
+      OCTANT_DEV_WEB_BOOTSTRAP: "1",
     } as Record<string, string | undefined>);
-    expect(config.developmentWebBootstrap).toBeUndefined();
+    expect(config).not.toHaveProperty("developmentWebBootstrap");
   });
 });

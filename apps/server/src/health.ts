@@ -6,7 +6,6 @@ export interface HostActivity {
 export function healthResponse(
   version: string,
   instanceId?: string,
-  developmentWebBootstrap?: true,
   activity?: HostActivity,
 ): Response {
   return Response.json({
@@ -15,7 +14,6 @@ export function healthResponse(
     storage: "ready",
     version,
     ...(instanceId === undefined ? {} : { instanceId }),
-    ...(developmentWebBootstrap === undefined ? {} : { developmentWebBootstrap }),
     ...(activity === undefined ? {} : activity),
   });
 }

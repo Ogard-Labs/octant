@@ -395,12 +395,10 @@ export function App(props: AppProps) {
       ? { serverUrl: launch.serverUrl }
       : {}),
     onExchanged: clearLaunchTokenFragment,
-    allowDevelopmentBootstrap: launch?.developmentWebBootstrap === true,
   });
 
-  // Remote browser entry: without a desktop launch token, a
-  // non-loopback origin is the pairing surface (typed code or fragment ticket).
-  // Localhost without launch still falls through to the desktop-session warning.
+  // A non-loopback browser remains a pairing surface. Loopback launches are
+  // resolved above and establish their process-local client context directly.
   if (injectedCapability === undefined && launch === undefined && typeof window !== "undefined") {
     const pairingTicket = readPairingFragment(window.location.href);
     const isRemote = isRemotePairingOrigin(window.location.href);

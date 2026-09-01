@@ -9,7 +9,7 @@ export interface LaunchSessionResult {
   readonly capability?: string;
   readonly windowId?: WindowId;
   readonly failureMessage?: string;
-  readonly authentication?: "launch-token" | "development-bypass";
+  readonly authentication?: "launch-token" | "local-session";
 }
 
 export interface UseLaunchSessionOptions {
@@ -18,7 +18,6 @@ export interface UseLaunchSessionOptions {
   readonly href?: string;
   readonly onExchanged?: () => void;
   readonly storage?: LaunchSessionStorage;
-  readonly allowDevelopmentBootstrap?: boolean;
 }
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
@@ -50,7 +49,7 @@ function readStoredAuthority(
   | {
       capability: string;
       windowId: WindowId;
-      authentication: "launch-token" | "development-bypass";
+      authentication: "launch-token" | "local-session";
     }
   | undefined {
   if (storage === undefined) return undefined;
@@ -70,7 +69,7 @@ function readStoredAuthority(
         capability,
         windowId: decodeWindowId(parsed.windowId),
         authentication:
-          parsed.authentication === "development-bypass" ? "development-bypass" : "launch-token",
+          parsed.authentication === "local-session" ? "local-session" : "launch-token",
       };
     } catch {
       return undefined;
@@ -85,7 +84,7 @@ function writeStoredAuthority(
   serverUrl: string,
   capability: string,
   windowId: WindowId,
-  authentication: "launch-token" | "development-bypass",
+  authentication: "launch-token" | "local-session",
 ): void {
   if (storage === undefined) return;
   try {
@@ -121,7 +120,7 @@ function exchangeLaunchToken(
   });
 }
 
-function exchangeDevelopmentSession(
+function exchangeLocalSession(
   fetch: typeof globalThis.fetch,
   serverUrl: string,
   previous?: {
@@ -129,14 +128,14 @@ function exchangeDevelopmentSession(
     readonly windowId: WindowId;
   },
 ): Promise<{ readonly status: number; readonly body: unknown }> {
-  const endpoint = new URL("/api/shell/development-session", serverUrl);
+  const endpoint = new URL("/api/shell/local-session", serverUrl);
   const body = JSON.stringify(
     previous === undefined
       ? {}
       : { windowId: String(previous.windowId), capability: previous.capability },
   );
   return sharedExchange(
-    `${endpoint.toString()}#development:${previous?.capability ?? "fresh"}`,
+    `${endpoint.toString()}#local:${previous?.capability ?? "fresh"}`,
     fetch,
     endpoint,
     { method: "POST", headers: { "content-type": "application/json" }, body },
@@ -193,76 +192,59 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
     }
     if (launchToken === undefined) {
       const stored = readStoredAuthority(storage, serverUrl);
-      // Development capabilities belong to one host process. Thread and
-      // Project history survives a dev-host restart, but the previous
-      // capability intentionally does not, so the token-free development URL
-      // must ask the current host for fresh window authority on every page
-      // load instead of restoring sessionStorage first.
-      if (options.allowDevelopmentBootstrap === true) {
-        const fetch = options.fetch ?? globalThis.fetch;
-        let cancelled = false;
-        setResult({ status: "loading" });
-        void (async () => {
-          try {
-            const reusable = stored?.authentication === "development-bypass" ? stored : undefined;
-            const response = await exchangeDevelopmentSession(fetch, serverUrl, reusable);
-            if (cancelled) return;
-            if (response.status !== 200) {
-              setResult({
-                status: "failed",
-                failureMessage:
-                  "Development authentication is unavailable. Restart with `octant web --dev`.",
-              });
-              return;
-            }
-            const body = response.body as {
-              windowId: string;
-              capability: string;
-              authentication?: string;
-            };
-            if (
-              cancelled ||
-              !isCanonicalLaunchSessionToken(body.capability) ||
-              body.authentication !== "development-bypass"
-            ) {
-              if (!cancelled) {
-                setResult({
-                  status: "failed",
-                  failureMessage: "Development authentication response is invalid.",
-                });
-              }
-              return;
-            }
-            const windowId = decodeWindowId(body.windowId);
-            writeStoredAuthority(
-              storage,
-              serverUrl,
-              body.capability,
-              windowId,
-              "development-bypass",
-            );
+      const fetch = options.fetch ?? globalThis.fetch;
+      let cancelled = false;
+      setResult({ status: "loading" });
+      void (async () => {
+        try {
+          const reusable = stored?.authentication === "local-session" ? stored : undefined;
+          const response = await exchangeLocalSession(fetch, serverUrl, reusable);
+          if (cancelled) return;
+          if (response.status !== 200) {
             setResult({
-              status: "ready",
-              capability: body.capability,
-              windowId,
-              authentication: "development-bypass",
+              status: "failed",
+              failureMessage: "Local Machine access is unavailable.",
             });
-          } catch {
+            return;
+          }
+          const body = response.body as {
+            windowId: string;
+            capability: string;
+            authentication?: string;
+          };
+          if (
+            cancelled ||
+            !isCanonicalLaunchSessionToken(body.capability) ||
+            body.authentication !== "local-session"
+          ) {
             if (!cancelled) {
               setResult({
                 status: "failed",
-                failureMessage: "Octant could not establish development authentication.",
+                failureMessage: "Local Machine response is invalid.",
               });
             }
+            return;
           }
-        })();
-        return () => {
-          cancelled = true;
-        };
-      }
-      if (stored !== undefined) setResult({ status: "ready", ...stored });
-      else setResult({ status: "idle" });
-      return;
+          const windowId = decodeWindowId(body.windowId);
+          writeStoredAuthority(storage, serverUrl, body.capability, windowId, "local-session");
+          setResult({
+            status: "ready",
+            capability: body.capability,
+            windowId,
+            authentication: "local-session",
+          });
+        } catch {
+          if (!cancelled) {
+            setResult({
+              status: "failed",
+              failureMessage: "Octant could not establish local Machine access.",
+            });
+          }
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
     const fetch = options.fetch ?? globalThis.fetch;
     let cancelled = false;
@@ -311,7 +293,7 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
     return () => {
       cancelled = true;
     };
-  }, [options.serverUrl, options.href, options.storage, options.allowDevelopmentBootstrap]);
+  }, [options.serverUrl, options.href, options.storage]);
 
   return result;
 }

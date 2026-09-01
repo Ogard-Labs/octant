@@ -1,6 +1,6 @@
 # 0032. A refusal a person can clear
 
-**Status:** Proposed
+**Status:** Deprecated
 
 ## Context
 
@@ -35,6 +35,14 @@ on a clock jump, and the blast radius is every capability the guard protects.
 
 ## Decision
 
+This proposal is not being implemented. Decision 0074 removes the persisted
+local-authority clock from local startup instead: the protected grants are
+process-local, expire against process-monotonic elapsed time, and disappear on
+restart. A local Machine therefore has no durable time posture to recover.
+
+The general rule below still applies to future fail-closed postures, but it no
+longer describes a local-authority-clock feature.
+
 - **A fail-closed authority refusal must name a recovery a person can perform.**
   A posture that no user action, restart, or elapsed time can clear is not an
   acceptable resting state. This binds every consumer of the local authority
@@ -54,17 +62,9 @@ on a clock jump, and the blast radius is every capability the guard protects.
 
 ## Consequences
 
-- Some surface must own the recovery act. A server-side operator command sits
-  closest to the existing `db:*` tooling and needs no window authority, which
-  matters because window authority is precisely what the latch withholds; an
-  in-app affordance would have to be reachable without it.
-- The recovery act is an authority boundary of its own and needs the evidence
-  0009 expects: who cleared it, when, against what mark, and what was
-  discarded.
-- Until this lands, a latched install past the admission window is recoverable
-  only by editing `local_authority_clock_guard` directly. That is a
-  maintainer's workaround, not a supported path, and it should not be
-  documented as one.
+- No local recovery surface is needed because 0074 removes the persisted
+  refusal. Existing `local_authority_clock_guard` rows are inert compatibility
+  data and require no manual database edit.
 - The same gap applies to every posture that persists a refusal across
   restarts. New ones inherit this rule rather than repeating the trap.
 

@@ -28,14 +28,6 @@ export function parseDesktopBridgeSecret(value: string | undefined): string | un
   return value;
 }
 
-export function parseDevelopmentWebBootstrap(value: string | undefined): true | undefined {
-  if (value === undefined) return undefined;
-  if (value !== "1") {
-    throw new Error("OCTANT development web bootstrap is invalid");
-  }
-  return true;
-}
-
 export function parseCodeFileHelperPath(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   if (!isAbsolute(value)) {
@@ -84,7 +76,6 @@ export interface ServerLaunchConfig {
   readonly port: number;
   readonly instanceId?: string;
   readonly desktopBridgeSecret?: string;
-  readonly developmentWebBootstrap?: true;
   readonly allowedRendererHttpOrigin?: string | null;
   readonly packagedProviderSmokeControl?: true;
   readonly hostServiceMode: Exclude<HostRuntimeServiceMode, "maintenance">;
@@ -122,11 +113,6 @@ export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): S
     trustedOnly: isPackagedRuntime,
   });
   const desktopBridgeSecret = parseDesktopBridgeSecret(environment.OCTANT_DESKTOP_BRIDGE_SECRET);
-  const developmentBootstrapValue = environment.OCTANT_DEV_WEB_BOOTSTRAP;
-  if (isPackagedRuntime && developmentBootstrapValue !== undefined) {
-    throw new Error("OCTANT development web bootstrap is unavailable in packaged runtime");
-  }
-  const developmentWebBootstrap = parseDevelopmentWebBootstrap(developmentBootstrapValue);
   const credentialBroker = parseCredentialBrokerConfig(
     environment.OCTANT_CREDENTIAL_BROKER_URL,
     environment.OCTANT_CREDENTIAL_BROKER_TOKEN,
@@ -150,7 +136,6 @@ export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): S
     ...(ghExecutable === undefined ? {} : { ghExecutable }),
     ...(instanceId === undefined ? {} : { instanceId }),
     ...(desktopBridgeSecret === undefined ? {} : { desktopBridgeSecret }),
-    ...(developmentWebBootstrap === undefined ? {} : { developmentWebBootstrap }),
     ...(allowedRendererHttpOrigin === undefined ? {} : { allowedRendererHttpOrigin }),
     ...(packagedProviderSmokeControl === "1"
       ? { packagedProviderSmokeControl: true as const }

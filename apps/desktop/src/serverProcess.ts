@@ -64,13 +64,8 @@ export function resolvePackagedServerPath(
 }
 
 export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
-  const inheritedEnv = options.packaged
-    ? Object.fromEntries(
-        Object.entries(options.env).filter(([name]) => name !== "OCTANT_DEV_WEB_BOOTSTRAP"),
-      )
-    : options.env;
   const env = {
-    ...inheritedEnv,
+    ...options.env,
     OCTANT_BROWSER_BROKER_TOKEN: options.browserBrokerToken,
     OCTANT_BROWSER_BROKER_URL: options.browserBrokerUrl,
     ...(options.codeFileHelperPath === undefined

@@ -32,35 +32,46 @@ afterEach(() => {
 });
 
 describe("useLaunchSession", () => {
-  it("is idle when no launch token is present in the URL fragment", () => {
-    const { result } = renderHook(() =>
-      useLaunchSession({ serverUrl, href: "http://127.0.0.1:13773/?serverUrl=..." }),
-    );
-    expect(result.current.status).toBe("idle");
-  });
-
-  it("bootstraps a development authority without a token when explicitly allowed", async () => {
+  it("bootstraps a local client directly from the canonical Machine URL", async () => {
     const fetchMock = mockFetch(
-      jsonResponse({ windowId, capability, authentication: "development-bypass" }),
+      jsonResponse({ windowId, capability, authentication: "local-session" }),
     );
     const { result } = renderHook(() =>
       useLaunchSession({
         serverUrl,
-        href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}&developmentWebBootstrap=1`,
-        allowDevelopmentBootstrap: true,
+        href: "http://127.0.0.1:13773/",
+        fetch: fetchMock,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.authentication).toBe("local-session");
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("/api/shell/local-session", serverUrl),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("uses the same local-session bootstrap from a Vite renderer", async () => {
+    const fetchMock = mockFetch(
+      jsonResponse({ windowId, capability, authentication: "local-session" }),
+    );
+    const { result } = renderHook(() =>
+      useLaunchSession({
+        serverUrl,
+        href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}`,
         fetch: fetchMock,
       }),
     );
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
-    expect(result.current.authentication).toBe("development-bypass");
+    expect(result.current.authentication).toBe("local-session");
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("/api/shell/development-session", serverUrl),
+      new URL("/api/shell/local-session", serverUrl),
       expect.objectContaining({ method: "POST" }),
     );
   });
 
-  it("shares development bootstrap across StrictMode effect replay", async () => {
+  it("shares local-session bootstrap across StrictMode effect replay", async () => {
     let resolveFetch!: (response: Response) => void;
     const fetchMock = vi.fn(
       () =>
@@ -72,27 +83,26 @@ describe("useLaunchSession", () => {
       () =>
         useLaunchSession({
           serverUrl,
-          href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}&developmentWebBootstrap=1`,
-          allowDevelopmentBootstrap: true,
+          href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}`,
           fetch: fetchMock,
         }),
       { wrapper: StrictMode },
     );
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    resolveFetch(jsonResponse({ windowId, capability, authentication: "development-bypass" }));
+    resolveFetch(jsonResponse({ windowId, capability, authentication: "local-session" }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("refreshes development authority after a host restart instead of restoring a stale session", async () => {
+  it("refreshes local client context after a host restart instead of restoring a stale session", async () => {
     const storage = createMemoryStorage();
     storage.setItem(
       `octant:launch-session:${serverUrl}`,
       JSON.stringify({
         capability,
         windowId,
-        authentication: "development-bypass",
+        authentication: "local-session",
       }),
     );
     const nextWindowId = "00000000-0000-4000-8000-000000000602";
@@ -101,15 +111,14 @@ describe("useLaunchSession", () => {
       jsonResponse({
         windowId: nextWindowId,
         capability: nextCapability,
-        authentication: "development-bypass",
+        authentication: "local-session",
       }),
     );
 
     const { result } = renderHook(() =>
       useLaunchSession({
         serverUrl,
-        href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}&developmentWebBootstrap=1`,
-        allowDevelopmentBootstrap: true,
+        href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}`,
         fetch: fetchMock,
         storage,
       }),
@@ -120,7 +129,7 @@ describe("useLaunchSession", () => {
     expect(result.current.windowId).toBe(nextWindowId);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("/api/shell/development-session", serverUrl),
+      new URL("/api/shell/local-session", serverUrl),
       expect.objectContaining({
         body: JSON.stringify({ windowId, capability }),
         method: "POST",
@@ -128,21 +137,20 @@ describe("useLaunchSession", () => {
     );
   });
 
-  it("keeps the same development window when the current host validates it", async () => {
+  it("keeps the same client context when the current host validates it", async () => {
     const storage = createMemoryStorage();
     storage.setItem(
       `octant:launch-session:${serverUrl}`,
-      JSON.stringify({ capability, windowId, authentication: "development-bypass" }),
+      JSON.stringify({ capability, windowId, authentication: "local-session" }),
     );
     const fetchMock = mockFetch(
-      jsonResponse({ windowId, capability, authentication: "development-bypass" }),
+      jsonResponse({ windowId, capability, authentication: "local-session" }),
     );
 
     const { result } = renderHook(() =>
       useLaunchSession({
         serverUrl,
-        href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}&developmentWebBootstrap=1`,
-        allowDevelopmentBootstrap: true,
+        href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}`,
         fetch: fetchMock,
         storage,
       }),
@@ -150,7 +158,7 @@ describe("useLaunchSession", () => {
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current).toMatchObject({
-      authentication: "development-bypass",
+      authentication: "local-session",
       capability,
       windowId,
     });
@@ -271,8 +279,10 @@ describe("useLaunchSession", () => {
     await waitFor(() => expect(result.current.status).toBe("failed"));
   });
 
-  it("ignores a malformed launch token fragment", () => {
-    const fetchMock = mockFetch(jsonResponse({ windowId, capability }));
+  it("falls back to local Machine bootstrap when a launch-token fragment is malformed", async () => {
+    const fetchMock = mockFetch(
+      jsonResponse({ windowId, capability, authentication: "local-session" }),
+    );
     const { result } = renderHook(() =>
       useLaunchSession({
         serverUrl,
@@ -280,14 +290,19 @@ describe("useLaunchSession", () => {
         fetch: fetchMock,
       }),
     );
-    expect(result.current.status).toBe("idle");
-    expect(fetchMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.authentication).toBe("local-session");
   });
 
-  it("restores the exchanged authority from sessionStorage on reload without a fragment", () => {
+  it("revalidates stored local client context on reload without a fragment", async () => {
     const storage = createMemoryStorage();
-    storage.setItem(`octant:launch-session:${serverUrl}`, JSON.stringify({ capability, windowId }));
-    const fetchMock = mockFetch(jsonResponse({ windowId, capability }));
+    storage.setItem(
+      `octant:launch-session:${serverUrl}`,
+      JSON.stringify({ capability, windowId, authentication: "local-session" }),
+    );
+    const fetchMock = mockFetch(
+      jsonResponse({ windowId, capability, authentication: "local-session" }),
+    );
     const { result } = renderHook(() =>
       useLaunchSession({
         serverUrl,
@@ -296,10 +311,10 @@ describe("useLaunchSession", () => {
         storage,
       }),
     );
-    expect(result.current.status).toBe("ready");
+    await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.capability).toBe(capability);
     expect(result.current.windowId).toBe(windowId);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("persists the exchanged authority to sessionStorage for reloads", async () => {

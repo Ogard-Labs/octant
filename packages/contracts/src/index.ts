@@ -55,7 +55,6 @@ export * from "./remoteAccess";
 export * from "./remoteRequestProof";
 export * from "./remotePushNotifications";
 export * from "./launchSession";
-export * from "./localAuthorityClock";
 export * from "./localServers";
 export * from "./modes";
 export * from "./multiModelPool";

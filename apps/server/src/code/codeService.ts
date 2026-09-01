@@ -334,6 +334,8 @@ export interface CodePersistencePort {
 }
 
 export interface CodeWindowAccessPort {
+  /** Machine-owned navigation metadata; never grants checkout or operation authority. */
+  readonly canBrowseProject: (projectId: ProjectId) => boolean;
   readonly canAccessProject: (
     authenticatedWindowId: WindowId,
     projectId: ProjectId,
@@ -824,7 +826,7 @@ export class CodeService {
   async #visibleThreads(authenticatedWindowId: WindowId): Promise<CodeThread[]> {
     const threads: CodeThread[] = [];
     for (const thread of this.#persistence.readCodeThreads()) {
-      if (await this.#access.canAccessProject(authenticatedWindowId, thread.projectId)) {
+      if (this.#access.canBrowseProject(thread.projectId)) {
         threads.push(this.#sessionAuthority.effectiveThread(authenticatedWindowId, thread));
       }
     }

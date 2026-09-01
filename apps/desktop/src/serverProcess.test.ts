@@ -323,14 +323,13 @@ describe("serverSpawnSpec", () => {
         instanceId: "managed-instance",
         packaged: false,
         execPath: "/Applications/Octant.app/Contents/MacOS/Octant",
-        env: { PATH: "/development/bin", OCTANT_DEV_WEB_BOOTSTRAP: "1" },
+        env: { PATH: "/development/bin" },
       }),
     ).toEqual({
       command: "bun",
       args: ["run", "--cwd", "/repo/apps/server", "start"],
       env: {
         PATH: "/development/bin",
-        OCTANT_DEV_WEB_BOOTSTRAP: "1",
         OCTANT_BROWSER_BROKER_TOKEN: "browser-token",
         OCTANT_BROWSER_BROKER_URL: "http://127.0.0.1:42000/",
         OCTANT_CODE_FILE_HELPER_PATH: "/repo/apps/desktop/dist/native/octant-code-file-helper",
@@ -390,7 +389,7 @@ describe("serverSpawnSpec", () => {
     });
   });
 
-  it("strips development bootstrap controls from the packaged server environment", () => {
+  it("marks the packaged server environment explicitly", () => {
     const spec = serverSpawnSpec({
       browserBrokerToken: "browser-token",
       browserBrokerUrl: "http://127.0.0.1:42000/",
@@ -404,14 +403,10 @@ describe("serverSpawnSpec", () => {
       instanceId: "managed-instance",
       packaged: true,
       execPath: "/Applications/Octant.app/Contents/MacOS/Octant",
-      env: {
-        PATH: "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin",
-        OCTANT_DEV_WEB_BOOTSTRAP: "1",
-      },
+      env: { PATH: "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin" },
     });
 
     const env = spec.env as NodeJS.ProcessEnv;
-    expect(env.OCTANT_DEV_WEB_BOOTSTRAP).toBeUndefined();
     expect(env.OCTANT_PACKAGED_RUNTIME).toBe("1");
   });
 

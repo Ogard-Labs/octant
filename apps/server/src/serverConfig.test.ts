@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   parseCredentialBrokerConfig,
   parseCodeFileHelperPath,
-  parseDevelopmentWebBootstrap,
   parseDesktopBridgeSecret,
   parseServerLaunchConfig,
   parseHostServiceMode,
@@ -19,19 +18,6 @@ afterEach(() => {
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
-});
-
-describe("parseDevelopmentWebBootstrap", () => {
-  it("enables only the explicit development value", () => {
-    expect(parseDevelopmentWebBootstrap(undefined)).toBeUndefined();
-    expect(parseDevelopmentWebBootstrap("1")).toBe(true);
-  });
-
-  it.each(["", "0", "true", "yes"])("rejects an ambiguous value: %s", (value) => {
-    expect(() => parseDevelopmentWebBootstrap(value)).toThrow(
-      "OCTANT development web bootstrap is invalid",
-    );
-  });
 });
 
 describe("parseCodeFileHelperPath", () => {
@@ -115,22 +101,13 @@ describe("parseServerLaunchConfig", () => {
     ).not.toHaveProperty("ghExecutable");
   });
 
-  it("fails closed when a packaged runtime receives the development bootstrap flag", () => {
-    expect(() =>
+  it("does not let the retired development bootstrap flag select a host mode", () => {
+    expect(
       parseServerLaunchConfig({
         OCTANT_PACKAGED_RUNTIME: "1",
         OCTANT_DEV_WEB_BOOTSTRAP: "1",
       }),
-    ).toThrow("development web bootstrap is unavailable in packaged runtime");
-  });
-
-  it("also treats the packaged Electron Node marker as a release boundary", () => {
-    expect(() =>
-      parseServerLaunchConfig({
-        ELECTRON_RUN_AS_NODE: "1",
-        OCTANT_DEV_WEB_BOOTSTRAP: "1",
-      }),
-    ).toThrow("development web bootstrap is unavailable in packaged runtime");
+    ).not.toHaveProperty("developmentWebBootstrap");
   });
 
   it("propagates the launch-scoped desktop bridge secret into server startup options", () => {

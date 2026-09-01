@@ -181,7 +181,7 @@ function harness(options: { readonly fetch?: "fetched" | "failed" | "interrupted
   };
   const codeService = new CodeService({
     persistence,
-    access: { canAccessProject: async () => true },
+    access: { canBrowseProject: () => true, canAccessProject: async () => true },
     checkouts: {
       observe: vi.fn(async () => ({
         bindingRevisionId,

@@ -39,7 +39,7 @@ distilled successor of the earlier long-form design specifications.
 | [0029](0029-artifact-storage-mirror.md)                       | The artifact storage mirror                                                                 | Accepted           |
 | [0030](0030-routines-that-run-themselves.md)                  | Routines that run themselves                                                                | Accepted           |
 | [0031](0031-hosts-as-environments.md)                         | Hosts as environments                                                                       | Accepted           |
-| [0032](0032-a-refusal-a-person-can-clear.md)                  | A refusal a person can clear                                                                | Proposed           |
+| [0032](0032-a-refusal-a-person-can-clear.md)                  | A refusal a person can clear                                                                | Deprecated         |
 | [0033](0033-first-run-asks-what-to-call-you.md)               | First run asks what to call you                                                             | Accepted           |
 | [0034](0034-signed-updates.md)                                | Signed, notarized, user-controlled updates                                                  | Proposed           |
 | [0035](0035-thread-retention-and-purge.md)                    | Thread retention and explicit purge                                                         | Accepted           |
@@ -81,6 +81,7 @@ distilled successor of the earlier long-form design specifications.
 | [0071](0071-one-navigation-and-surface-hierarchy.md)          | One navigation and surface hierarchy                                                        | Accepted           |
 | [0072](0072-settings-collections-stay-open.md)                | Settings collections stay open                                                              | Accepted           |
 | [0073](0073-one-surface-language.md)                          | One surface language across the renderer and the site                                       | Accepted           |
+| [0074](0074-one-machine-one-canonical-host.md)                | One Machine has one canonical host and store                                                | Accepted           |
 
 ## Adding an ADR
 

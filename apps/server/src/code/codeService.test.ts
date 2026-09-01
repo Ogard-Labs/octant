@@ -147,10 +147,10 @@ function agentProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
 }
 
 describe("CodeService reads", () => {
-  it("returns default settings and only window-authorized threads and checkouts", async () => {
+  it("returns Machine-owned thread navigation before the client selects a Project", async () => {
     const allowed = thread();
-    const hidden = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
-    const fixture = serviceFixture({ threads: [allowed, hidden] });
+    const otherProject = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({ threads: [allowed, otherProject] });
 
     await expect(fixture.service.bootstrap(ids.window)).resolves.toEqual({
       settings: {
@@ -159,19 +159,20 @@ describe("CodeService reads", () => {
         version: 0,
         updatedAt: now,
       },
-      threads: [allowed],
+      threads: [allowed, otherProject],
       checkouts: [checkout],
       activity: [],
-      runtime: [{ threadId: allowed.id, executing: false }],
+      runtime: [
+        { threadId: allowed.id, executing: false },
+        { threadId: otherProject.id, executing: false },
+      ],
     });
-    expect(fixture.access.canAccessProject).toHaveBeenCalledWith(ids.window, ids.project);
-    expect(fixture.access.canAccessProject).toHaveBeenCalledWith(
-      ids.window,
-      ids.unauthorizedProject,
-    );
+    expect(fixture.access.canBrowseProject).toHaveBeenCalledWith(ids.project);
+    expect(fixture.access.canBrowseProject).toHaveBeenCalledWith(ids.unauthorizedProject);
+    expect(fixture.access.canAccessProject).not.toHaveBeenCalled();
   });
 
-  it("returns activity only for threads the window may see", async () => {
+  it("returns activity for every thread in the Machine-owned navigation catalog", async () => {
     const allowed = thread();
     const hidden = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
     const fixture = serviceFixture({
@@ -184,9 +185,10 @@ describe("CodeService reads", () => {
 
     const result = await fixture.service.bootstrap(ids.window);
 
-    // The unauthorized thread's sequence would report that it is running, which
-    // is exactly as much as the window is not allowed to learn.
-    expect(result.activity).toEqual([{ threadId: allowed.id, lastSequence: 11 }]);
+    expect(result.activity).toEqual([
+      { threadId: allowed.id, lastSequence: 11 },
+      { threadId: hidden.id, lastSequence: 12 },
+    ]);
   });
 
   it("re-observes a waiting checkout during authenticated restart bootstrap", async () => {
@@ -267,7 +269,7 @@ describe("CodeService reads", () => {
     expect(result.checkouts).toEqual([checkout]);
   });
 
-  it("reads authorized threads and activity without observing checkouts", async () => {
+  it("reads the Machine thread catalog and activity without observing checkouts", async () => {
     const allowed = thread();
     const hidden = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
     const fixture = serviceFixture({
@@ -279,9 +281,15 @@ describe("CodeService reads", () => {
     });
 
     await expect(fixture.service.navigation(ids.window)).resolves.toEqual({
-      threads: [allowed],
-      activity: [{ threadId: allowed.id, lastSequence: 11 }],
-      runtime: [{ threadId: allowed.id, executing: false }],
+      threads: [allowed, hidden],
+      activity: [
+        { threadId: allowed.id, lastSequence: 11 },
+        { threadId: hidden.id, lastSequence: 12 },
+      ],
+      runtime: [
+        { threadId: allowed.id, executing: false },
+        { threadId: hidden.id, executing: false },
+      ],
     });
     expect(fixture.checkouts.observe).not.toHaveBeenCalled();
     expect(fixture.roots.resolve).not.toHaveBeenCalled();
@@ -3339,6 +3347,7 @@ function serviceFixture(
     },
   };
   const access = {
+    canBrowseProject: vi.fn(() => true),
     canAccessProject: vi.fn((_windowId, projectId) => projectId === ids.project),
   };
   const roots = {
