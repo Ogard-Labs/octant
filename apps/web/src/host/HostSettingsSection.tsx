@@ -18,7 +18,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
-import { SettingsFactList, SettingsPanel, SettingsState } from "../settings/primitives";
+import { SettingRow, SettingsFactList, SettingsPanel, SettingsState } from "../settings/primitives";
 import {
   AutomationNotificationSettings,
   type AutomationNotificationSettingsProps,
@@ -82,7 +82,6 @@ export function HostSettingsSection({
   automationNotifications,
   hostFederationLifecycle,
 }: HostSettingsSectionProps) {
-  const policyStateId = useId();
   const backupLabelId = useId();
   const [statusState, setStatusState] = useState<StatusState>({ kind: "loading" });
   const [dataMapState, setDataMapState] = useState<DataMapState>({ kind: "loading" });
@@ -212,38 +211,48 @@ export function HostSettingsSection({
 
   return (
     <section aria-label="Host" className="host-settings" id="settings-host">
-      <div className="host-settings__controls">
-        <OctantButton onClick={() => void refresh()} type="button" variant="secondary">
-          Refresh status
-        </OctantButton>
-      </div>
-
-      <SettingsPanel title="Identity" description="The host process serving this workspace.">
+      <section aria-label="Identity" className="settings-card-section settings-card-section--open">
+        <div className="settings-section-head">
+          <h2>Identity</h2>
+          <OctantButton onClick={() => void refresh()} size="sm" type="button" variant="secondary">
+            Refresh status
+          </OctantButton>
+        </div>
+        <p className="settings-section-note">The host process serving this workspace.</p>
         <SettingsFactList
           facts={[
-            { label: "Host", value: status.identity.hostId },
-            { label: "Instance", value: status.identity.instanceId },
+            { label: "Host", value: <Identifier>{status.identity.hostId}</Identifier> },
+            { label: "Instance", value: <Identifier>{status.identity.instanceId}</Identifier> },
             { label: "Owner mode", value: OWNER_MODE_LABELS[status.identity.serviceMode] },
-            { label: "Server version", value: status.versions.server },
-            { label: "Wire version", value: status.versions.wire },
+            { label: "Server version", value: <Identifier>{status.versions.server}</Identifier> },
+            { label: "Wire version", value: <Identifier>{status.versions.wire}</Identifier> },
           ]}
         />
-      </SettingsPanel>
+      </section>
 
-      <SettingsPanel title="Service policy" description="Controls automatic host startup.">
-        <div className="settings-panel__stack">
-          <p className="host-settings__note" id={policyStateId}>
-            {policy.kind === "known"
-              ? policy.enabled
-                ? `Automatic startup is enabled (updated ${policy.updatedAt}).`
-                : `Automatic startup is disabled (updated ${policy.updatedAt}).`
-              : `Startup policy is unavailable. ${policy.reason}`}
-          </p>
-          <div className="host-settings__controls">
+      <section
+        aria-label="Service policy"
+        className="settings-card-section settings-card-section--open"
+      >
+        <h2>Service policy</h2>
+        <div className="setgroup">
+          <SettingRow
+            description={
+              policy.kind === "known"
+                ? policy.enabled
+                  ? `Automatic startup is enabled (updated ${policy.updatedAt}).`
+                  : `Automatic startup is disabled (updated ${policy.updatedAt}).`
+                : `Startup policy is unavailable. ${policy.reason}`
+            }
+            label="Automatic startup"
+            scope="host"
+            settingId="host-automatic-startup"
+          >
             <OctantButton
-              aria-describedby={policyStateId}
+              aria-describedby="host-automatic-startup-description"
               disabled={lifecycleBusy || policyToggle.kind === "unavailable"}
               onClick={() => void runLifecycle(policyToggleAction)}
+              size="sm"
               type="button"
               variant="secondary"
             >
@@ -251,11 +260,13 @@ export function HostSettingsSection({
                 ? "Disable automatic startup"
                 : "Enable automatic startup"}
             </OctantButton>
-          </div>
+          </SettingRow>
         </div>
-      </SettingsPanel>
+      </section>
 
-      <SettingsPanel title="Readiness" description="Current storage and client health.">
+      <section aria-label="Readiness" className="settings-card-section settings-card-section--open">
+        <h2>Readiness</h2>
+        <p className="settings-section-note">Current storage and client health.</p>
         <SettingsFactList
           facts={[
             {
@@ -264,7 +275,11 @@ export function HostSettingsSection({
             },
             {
               label: "Replay (journal / projections)",
-              value: `${status.readiness.replay.journalHead} / ${status.readiness.replay.projections}`,
+              value: (
+                <Identifier>
+                  {`${status.readiness.replay.journalHead} / ${status.readiness.replay.projections}`}
+                </Identifier>
+              ),
             },
             { label: "Connected clients", value: status.readiness.clientsConnected },
             { label: "Uptime", value: formatUptime(status.readiness.uptimeSeconds) },
@@ -276,84 +291,107 @@ export function HostSettingsSection({
             },
           ]}
         />
-      </SettingsPanel>
+      </section>
 
-      <SettingsPanel title="Capabilities" description="Host services available to this app.">
-        <div className="settings-panel__stack">
-          {status.capabilities.length === 0 ? (
-            <SettingsState kind="empty">No platform capabilities reported.</SettingsState>
-          ) : (
-            <ul className="host-settings__capabilities">
-              {status.capabilities.map((capability) => (
-                <li key={capability}>{capability}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </SettingsPanel>
+      <section
+        aria-label="Capabilities"
+        className="settings-card-section settings-card-section--open"
+      >
+        <h2>Capabilities</h2>
+        <p className="settings-section-note">Host services available to this app.</p>
+        {status.capabilities.length === 0 ? (
+          <SettingsState kind="empty">No platform capabilities reported.</SettingsState>
+        ) : (
+          <ul className="host-settings__capabilities">
+            {status.capabilities.map((capability) => (
+              <li className="oct-meta--mono" key={capability}>
+                {capability}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
-      <SettingsPanel title="Lifecycle" description="Stop or restart the selected host process.">
-        <div className="settings-panel__stack">
-          <div className="host-settings__controls">
-            <OctantButton
-              disabled={lifecycleBusy || status.lifecycle.stop.kind === "unavailable"}
-              onClick={() => void runLifecycle("stop")}
-              type="button"
-              variant="secondary"
-            >
-              Stop host
-            </OctantButton>
-            <OctantButton
-              disabled={lifecycleBusy || status.lifecycle.restart.kind === "unavailable"}
-              onClick={() => void runLifecycle("restart")}
-              type="button"
-              variant="secondary"
-            >
-              Restart host
-            </OctantButton>
-          </div>
-          {status.lifecycle.stop.kind === "unavailable" ? (
-            <p className="host-settings__note">{status.lifecycle.stop.reason}</p>
-          ) : null}
-          {status.lifecycle.restart.kind === "unavailable" ? (
-            <p className="host-settings__note">{status.lifecycle.restart.reason}</p>
-          ) : null}
-          {lifecycleMessage === undefined ? null : lifecycleMessage.kind === "accepted" ? (
-            <SettingsState kind="success">{lifecycleMessage.text}</SettingsState>
-          ) : (
-            <SettingsState kind="error">{lifecycleMessage.text}</SettingsState>
-          )}
+      <section aria-label="Lifecycle" className="settings-card-section settings-card-section--open">
+        <h2>Lifecycle</h2>
+        <div className="setgroup">
+          <SettingRow
+            description="Stop or restart the selected host process."
+            label="Host process"
+            scope="host"
+            settingId="host-lifecycle"
+          >
+            <div className="host-settings__controls">
+              <OctantButton
+                disabled={lifecycleBusy || status.lifecycle.stop.kind === "unavailable"}
+                onClick={() => void runLifecycle("stop")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Stop host
+              </OctantButton>
+              <OctantButton
+                disabled={lifecycleBusy || status.lifecycle.restart.kind === "unavailable"}
+                onClick={() => void runLifecycle("restart")}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Restart host
+              </OctantButton>
+            </div>
+          </SettingRow>
         </div>
-      </SettingsPanel>
+        {status.lifecycle.stop.kind === "unavailable" ? (
+          <p className="settings-section-line">{status.lifecycle.stop.reason}</p>
+        ) : null}
+        {status.lifecycle.restart.kind === "unavailable" ? (
+          <p className="settings-section-line">{status.lifecycle.restart.reason}</p>
+        ) : null}
+        {lifecycleMessage === undefined ? null : lifecycleMessage.kind === "accepted" ? (
+          <SettingsState kind="success">{lifecycleMessage.text}</SettingsState>
+        ) : (
+          <SettingsState kind="error">{lifecycleMessage.text}</SettingsState>
+        )}
+      </section>
 
-      <SettingsPanel title="Backup" description="Create a named snapshot before risky changes.">
-        <div className="settings-panel__stack">
-          <div className="host-settings__field">
-            <label htmlFor={backupLabelId}>Backup label</label>
-            <OctantInput
-              id={backupLabelId}
-              maxLength={64}
-              onChange={(event) => setBackupLabel(event.target.value)}
-              placeholder="Optional label, e.g. pre-upgrade"
-              value={backupLabel}
-            />
-          </div>
-          <div className="host-settings__controls">
-            <OctantButton
-              disabled={backupState.kind === "pending" || !backupLabelValid}
-              onClick={() => void runBackup()}
-              type="button"
-              variant="secondary"
-            >
-              {backupState.kind === "pending" ? "Creating backup…" : "Create backup"}
-            </OctantButton>
-          </div>
-          {backupState.kind === "done" ? <BackupOutcomeView outcome={backupState.outcome} /> : null}
-          {backupState.kind === "error" ? (
-            <SettingsState kind="error">{backupState.message}</SettingsState>
-          ) : null}
+      <section aria-label="Backup" className="settings-card-section settings-card-section--open">
+        <h2>Backup</h2>
+        <div className="setgroup">
+          <SettingRow
+            description="Create a named snapshot before risky changes."
+            label="Snapshot"
+            scope="host"
+            settingId="host-backup"
+          >
+            <div className="host-settings__controls">
+              <OctantInput
+                aria-label="Backup label"
+                className="settings-view__text-input"
+                id={backupLabelId}
+                maxLength={64}
+                onChange={(event) => setBackupLabel(event.target.value)}
+                placeholder="Optional label, e.g. pre-upgrade"
+                value={backupLabel}
+              />
+              <OctantButton
+                disabled={backupState.kind === "pending" || !backupLabelValid}
+                onClick={() => void runBackup()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                {backupState.kind === "pending" ? "Creating backup…" : "Create backup"}
+              </OctantButton>
+            </div>
+          </SettingRow>
         </div>
-      </SettingsPanel>
+        {backupState.kind === "done" ? <BackupOutcomeView outcome={backupState.outcome} /> : null}
+        {backupState.kind === "error" ? (
+          <SettingsState kind="error">{backupState.message}</SettingsState>
+        ) : null}
+      </section>
 
       <SettingsPanel
         title="Recovery"
@@ -619,16 +657,21 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
   );
 }
 
+/** An id or version: the mono identifier role at the row's control edge. */
+function Identifier({ children }: { readonly children: string }) {
+  return <span className="oct-meta--mono">{children}</span>;
+}
+
 function BackupOutcomeView({ outcome }: { readonly outcome: HostBackupOutcome }) {
   if (outcome.kind === "failed") {
     return (
-      <p className="host-settings__note" role="alert">
+      <p className="settings-section-line" role="alert">
         The backup was not created ({outcome.code}). Check the host logs.
       </p>
     );
   }
   return (
-    <p aria-live="polite" className="host-settings__note">
+    <p aria-live="polite" className="settings-section-line">
       Backup {outcome.label} created — migration version {outcome.migrationVersion}, journal head{" "}
       {outcome.journalHead}, {outcome.byteLength.toLocaleString()} bytes.
     </p>

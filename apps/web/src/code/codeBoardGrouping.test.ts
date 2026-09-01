@@ -67,7 +67,7 @@ const projects: readonly CodeBoardProjectRef[] = [
 describe("codeBoardStatusLabel", () => {
   it("labels each status with human-readable text", () => {
     expect(codeBoardStatusLabel("ready")).toBe("Ready");
-    expect(codeBoardStatusLabel("in-progress")).toBe("In Progress");
+    expect(codeBoardStatusLabel("in-progress")).toBe("In progress");
     expect(codeBoardStatusLabel("waiting")).toBe("Waiting");
     expect(codeBoardStatusLabel("done")).toBe("Done");
   });
@@ -98,7 +98,7 @@ describe("groupCodeBoardCards by status", () => {
 
     expect(columns.map((column) => column.label)).toEqual([
       "Ready",
-      "In Progress",
+      "In progress",
       "Waiting",
       "Done",
     ]);

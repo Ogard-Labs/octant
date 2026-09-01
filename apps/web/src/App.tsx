@@ -644,6 +644,12 @@ function LaunchedShell(
   const [draftCreating, setDraftCreating] = useState(false);
   const [draftError, setDraftError] = useState<string>();
   const [draftResetRevision, setDraftResetRevision] = useState(0);
+  // The Project an unbound draft composer targets, per mode. The draft lives
+  // in local state and unmounts while Settings covers the workspace; this is
+  // what lets it come back with the same Project instead of "Choose a Project".
+  const [draftProjectSelection, setDraftProjectSelection] = useState<
+    Partial<Readonly<Record<OctantMode, ProjectId>>>
+  >({});
   const [draftPendingMessage, setDraftPendingMessage] = useState<string>();
   const [railPlaceholder, setRailPlaceholder] = useState<{
     readonly title: string;
@@ -2924,12 +2930,14 @@ function LaunchedShell(
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
     setDraftResetRevision((revision) => revision + 1);
+    setDraftProjectSelection(({ [mode]: _previous, ...rest }) => rest);
     void controller.openDraftThread(mode);
   }
 
   function createChat(prompt?: string) {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
+      setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
       void controller.openDraftThread("chat");
       return;
     }
@@ -4519,6 +4527,10 @@ function LaunchedShell(
                   <ComposerContextMeterShortcut />
                   <WorkspaceView
                     draftResetRevision={draftResetRevision}
+                    draftProjectSelection={draftProjectSelection}
+                    onDraftSelectProject={(mode, projectId) =>
+                      setDraftProjectSelection((current) => ({ ...current, [mode]: projectId }))
+                    }
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}

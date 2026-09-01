@@ -574,7 +574,11 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
 .setrow[data-setting-id="app-updates"],
-.setrow[data-setting-id="export-diagnostics"] {
+.setrow[data-setting-id="export-diagnostics"],
+.setrow[data-setting-id="chat-default-model"],
+.setrow[data-setting-id="chat-personality"],
+.setrow[data-setting-id="code-editor-arguments"],
+.setrow[data-setting-id="execution-context"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -585,7 +589,11 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
 .setrow[data-setting-id="app-updates"] > .setrow-control,
-.setrow[data-setting-id="export-diagnostics"] > .setrow-control {
+.setrow[data-setting-id="export-diagnostics"] > .setrow-control,
+.setrow[data-setting-id="chat-default-model"] > .setrow-control,
+.setrow[data-setting-id="chat-personality"] > .setrow-control,
+.setrow[data-setting-id="code-editor-arguments"] > .setrow-control,
+.setrow[data-setting-id="execution-context"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;
@@ -654,8 +662,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   color: var(--octant-text-muted);
   font-size: calc(10 * var(--oct-text-step));
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .settings-search-results__empty {
@@ -745,8 +753,95 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border-top: 1px solid var(--oct-hairline);
 }
 
+/* A section label may carry the actions that act on the whole collection
+   ("Check again", "Reorder providers", "Create profile"). They sit on the
+   label's line at the control edge; the head takes the label's padding so
+   the rule under the first row still lands where Appearance puts it. */
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  min-height: 40px;
+  padding: 6px 0 4px;
+}
+
+.settings-section-head__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+/* Same specificity trick as the open `> h2` rule below: the shared heading
+   rule declares the card padding later in the file, so the open head needs
+   both classes to win. */
+.settings-card-section.settings-card-section--open > .settings-section-head > h2 {
+  padding: 0;
+}
+
+/* One sentence under the label, in the detail role. It draws no rule; the
+   first row underneath owns the hairline. */
+.settings-card-section--open > .settings-section-note {
+  margin: 0;
+  padding: 0 0 8px;
+  max-width: 64ch;
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
+}
+
+/* Facts (identity, versions, readiness) are rows over hairlines like every
+   other row: label on the left, value at the control edge. */
+.settings-card-section--open > .settings-fact-list > .settings-fact-list__row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 44px;
+  padding: 10px 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-card-section--open
+  > .settings-fact-list
+  > .settings-fact-list__row
+  + .settings-fact-list__row {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-card-section--open > .settings-fact-list dt {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.settings-card-section--open > .settings-fact-list dd {
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+  text-align: end;
+}
+
+/* A status line in an open section is a sentence, not a boxed callout. */
+.settings-card-section--open .settings-state {
+  padding: 8px 0 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Quiet lines that follow the rows: an empty collection, a message after an
+   action, guidance that explains the rows above. */
+.settings-card-section--open > .settings-section-line {
+  margin: 0;
+  padding: 10px 0 0;
+  max-width: 68ch;
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
+}
+
 .settings-view__content-inner .provider-settings__intro h2,
 .settings-card-section > h2,
+.settings-card-section > .settings-section-head > h2,
 .settings-card-section > summary,
 .settings-card-section > legend {
   margin: 0;
@@ -754,7 +849,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   letter-spacing: -0.01em;
   line-height: 1.3;
   text-transform: none;
@@ -1592,43 +1687,16 @@ textarea.settings-view__text-input {
   }
 }
 
-/* Settings > Host: the operational host card. Stacked sections
-   with compact fact grids; controls stay native buttons for keyboard use. */
+/* Settings > Host: open sections for identity, policy, readiness, and
+   lifecycle; the recovery and retention objects keep the raised panel
+   because a restore or purge is a boundary worth drawing. Controls stay
+   native buttons for keyboard use. */
 .host-settings {
   display: flex;
   flex-direction: column;
   gap: 20px;
   font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-fg);
-}
-
-.host-settings__heading {
-  margin: 14px 0 2px;
-  font-size: calc(13 * var(--oct-text-step));
-  font-weight: var(--oct-weight-strong);
-  color: var(--oct-fg);
-}
-
-.host-settings__facts {
-  display: grid;
-  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
-  gap: 4px 18px;
-  margin: 0;
-}
-
-.host-settings__facts dt {
-  color: var(--oct-muted);
-  font-weight: 400;
-}
-
-.host-settings__facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.host-settings > .host-settings__controls:first-child {
-  justify-content: flex-end;
-  margin-bottom: -8px;
 }
 
 .host-settings__controls {
@@ -1646,9 +1714,20 @@ textarea.settings-view__text-input {
   line-height: 1.4;
 }
 
+/* Reported capability identifiers are rows over hairlines in the mono role. */
 .host-settings__capabilities {
+  display: grid;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
+  list-style: none;
+}
+
+.host-settings__capabilities > li {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .host-settings__field {
@@ -1662,20 +1741,8 @@ textarea.settings-view__text-input {
   font-size: calc(11 * var(--oct-text-step));
 }
 
-@media (max-width: 680px) {
-  .host-settings__facts {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
-  }
-
-  .host-settings__facts dd {
-    margin-bottom: 6px;
-  }
-}
-
-/* Settings > GitHub: compact host connection card. Facts and
-   capability rows wrap on narrow layouts; no animation is used, so Reduced
-   Motion needs no override. */
+/* Settings > GitHub: open sections for account, capabilities, and
+   connection; no animation is used, so Reduced Motion needs no override. */
 .github-settings,
 .linear-settings {
   display: flex;
@@ -1683,30 +1750,6 @@ textarea.settings-view__text-input {
   gap: 20px;
   font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-fg);
-}
-
-.github-settings__heading {
-  margin: 14px 0 2px;
-  font-size: calc(13 * var(--oct-text-step));
-  font-weight: var(--oct-weight-strong);
-  color: var(--oct-fg);
-}
-
-.github-settings__facts {
-  display: grid;
-  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
-  gap: 4px 18px;
-  margin: 0;
-}
-
-.github-settings__facts dt {
-  color: var(--oct-muted);
-  font-weight: 400;
-}
-
-.github-settings__facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 
 .github-settings__controls,
@@ -1732,18 +1775,35 @@ textarea.settings-view__text-input {
   gap: 8px;
 }
 
+/* Each GitHub capability is a row: what it is on the left, whether it is
+   available at the control edge, and the remediation under the label. */
 .github-settings__capabilities {
-  margin: 0;
-  padding-left: 18px;
   display: grid;
-  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.github-settings__capabilities li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
+.github-settings__capabilities > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: var(--oct-space-6);
+  min-height: 44px;
+  padding: 10px 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.github-settings__capabilities > li > .github-settings__note {
+  grid-column: 1;
+  margin-top: 2px;
+}
+
+.github-settings__capability-state {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .github-settings__capability-state--available {
@@ -1752,6 +1812,17 @@ textarea.settings-view__text-input {
 
 .github-settings__capability-state--unavailable {
   color: var(--oct-warn-fg);
+}
+
+@media (max-width: 720px) {
+  .github-settings__capabilities > li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .github-settings__capability-state {
+    grid-column: 1;
+    grid-row: auto;
+  }
 }
 
 .github-settings__device-flow {
@@ -1774,67 +1845,23 @@ textarea.settings-view__text-input {
 
 .github-settings__scopes {
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
+  list-style: none;
+  text-align: end;
 }
 
-.github-settings__diagnostics {
-  display: grid;
-  gap: 6px;
-  justify-items: start;
+/* The disclosure is the section's label row: one name for the group and
+   the control that opens it, not a heading repeated by a button. */
+.github-settings__diagnostics-trigger {
+  padding-inline: 0;
 }
 
-@media (max-width: 680px) {
-  .github-settings__facts {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
-  }
-
-  .github-settings__facts dd {
-    margin-bottom: 6px;
-  }
+.github-settings__diagnostics-trigger > svg {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
-/* Host and GitHub expose different operations, but their facts, sections, and
-   states use one Settings rhythm. */
-.host-settings,
-.github-settings {
-  gap: 20px;
-}
-
-.host-settings__heading,
-.github-settings__heading {
-  margin: 20px 0 8px;
-  padding-top: 20px;
-  color: var(--octant-text-primary);
-  border-top: 1px solid var(--octant-border);
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  text-transform: none;
-}
-
-.host-settings > .host-settings__controls:first-child + .host-settings__heading,
-.github-settings > .github-settings__controls:first-child + .github-settings__heading {
-  margin-top: 8px;
-  padding-top: 0;
-  border-top: 0;
-}
-
-.host-settings__facts,
-.github-settings__facts {
-  gap: 6px 20px;
-  padding: 2px 4px 8px;
-}
-
-.host-settings__facts dt,
-.github-settings__facts dt {
-  font-size: var(--oct-text-xs);
-}
-
-.host-settings__facts dd,
-.github-settings__facts dd {
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
+.github-settings__diagnostics-trigger[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
 }
 
 .host-data-map {
@@ -1971,13 +1998,13 @@ textarea.settings-view__text-input {
 }
 
 .open-in-settings > legend {
-  float: none;
+  float: left;
   width: 100%;
   padding: 20px 20px 0;
   color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   letter-spacing: -0.01em;
 }
 
@@ -2037,120 +2064,24 @@ textarea.settings-view__text-input {
 
 .code-settings {
   display: grid;
-  gap: 18px;
+  gap: var(--oct-space-6);
 }
 
-.code-settings__note {
-  margin: 0;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
-  line-height: 1.45;
+/* Chat and Code defaults read down the same control edge as Appearance: a
+   free-text field takes the shared column too, so a URL, a path, and a select
+   share one left edge. Stacked editors (the model picker, instructions, editor
+   arguments) opt out through the compound-editor rule above. */
+.chat-settings .setrow-control > .settings-view__text-input,
+.code-settings .setrow-control > .settings-view__text-input {
+  width: var(--oct-settings-control);
 }
 
-.code-settings__section {
-  display: grid;
-  gap: 0;
-  overflow: visible;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
+.chat-settings .setrow-control > textarea.settings-view__text-input,
+.code-settings .setrow-control > textarea.settings-view__text-input {
+  width: 100%;
 }
 
-.code-settings__section > h2 {
-  margin: 0;
-  padding: 10px 0 8px;
-  color: var(--octant-text-primary);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
-}
-
-.code-settings__group {
-  gap: 0;
-  border-top: 1px solid var(--oct-hairline);
-}
-
-.code-settings__field {
-  min-width: 0;
-  gap: 4px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-.code-settings__field--choice {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  column-gap: 20px;
-}
-
-.code-settings__field--choice > [data-slot="field-label"] {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.code-settings__field--choice > [data-slot="field-description"] {
-  grid-column: 1;
-  grid-row: 2;
-}
-
-.code-settings__field--choice > [data-slot="toggle-group"] {
-  grid-column: 2;
-  grid-row: 1 / -1;
-  align-self: center;
-}
-
-.code-settings__field--editor {
-  display: grid;
-  grid-template-columns: minmax(180px, 0.42fr) minmax(0, 1fr);
-  align-items: start;
-  column-gap: 20px;
-}
-
-.code-settings__field--editor > [data-slot="field-label"] {
-  grid-column: 1;
-}
-
-.code-settings__field--editor > [data-slot="input"],
-.code-settings__field--editor > [data-slot="textarea"],
-.code-settings__field--editor > [data-slot="field-description"] {
-  grid-column: 2;
-}
-
-.code-settings__actions {
-  display: flex;
-  min-height: 44px;
-  align-items: center;
-  gap: 12px;
-  padding-top: 12px;
-}
-
-.code-settings [data-slot="field-label"] {
-  font-size: var(--oct-text-sm);
-  font-weight: 500;
-}
-
-.code-settings [data-slot="field-description"] {
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-}
-
-@media (max-width: 720px) {
-  .code-settings__field--choice,
-  .code-settings__field--editor {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .code-settings__field--choice > [data-slot="toggle-group"],
-  .code-settings__field--editor > [data-slot="input"],
-  .code-settings__field--editor > [data-slot="textarea"],
-  .code-settings__field--editor > [data-slot="field-description"] {
-    grid-column: 1;
-    grid-row: auto;
-    justify-self: stretch;
-    margin-top: 8px;
-  }
+.chat-settings > .provider-settings__alert,
+.code-settings .settings-card-section--open > .provider-settings__alert {
+  margin-top: var(--oct-space-3);
 }

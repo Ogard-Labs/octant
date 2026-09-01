@@ -181,7 +181,7 @@ describe("CodeThreadBoard", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View" }));
     fireEvent.click(await screen.findByRole("checkbox", { name: "Show empty groups" }));
-    expect(screen.getByRole("region", { name: "In Progress (0)" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "In progress (0)" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Waiting (0)" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Ready (1)" })).toBeVisible();
 
@@ -415,21 +415,23 @@ describe("CodeThreadBoard", () => {
     expect(screen.getByText("2 active runs")).toBeVisible();
   });
 
-  it("uses the shared empty state without contradictory filter guidance", async () => {
+  it("keeps every column on an empty board with a quiet line instead of a raised card", async () => {
     const loadBoard = vi.fn(async () => view([]));
     render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
     const message = await screen.findByText("No Code threads yet");
     const empty = message.closest("[role='status']");
     expect(empty).not.toBeNull();
-    expect(empty).toHaveAttribute("data-slot", "empty-state");
+    expect(empty).not.toHaveAttribute("data-slot");
     expect(empty).toHaveTextContent("Create a Code thread to see it here.");
     expect(empty).not.toHaveTextContent("adjust the filters");
 
-    // An empty board has one useful message. Four empty lanes repeat the same
-    // information and turn the whole workspace into decorative rules.
-    for (const column of ["Ready (0)", "In Progress (0)", "Waiting (0)", "Done (0)"]) {
-      expect(screen.queryByRole("region", { name: column })).not.toBeInTheDocument();
+    // An empty board still shows its workflow, the same four columns the Work
+    // board shows, each saying quietly that it holds nothing.
+    for (const column of ["Ready (0)", "In progress (0)", "Waiting (0)", "Done (0)"]) {
+      const region = screen.getByRole("region", { name: column });
+      expect(region).toBeVisible();
+      expect(within(region).getByRole("status")).toHaveClass("surface-empty");
     }
   });
 
@@ -591,11 +593,11 @@ describe("CodeThreadBoard", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Code Thread Board is unavailable.");
   });
 
-  it("renders status columns at a fixed width so they do not stretch to fill the workspace", async () => {
-    expect(stylesCss).toMatch(/\.code-board\s+\.board-col\s*\{[^}]*max-width:\s*320px[^}]*\}/s);
-    expect(stylesCss).toMatch(/\.code-board\s+\.board-col\s*\{[^}]*min-width:\s*220px[^}]*\}/s);
-    expect(octantCss).toMatch(/\.board-col\s*\{[^}]*max-width:\s*320px[^}]*\}/s);
-    expect(octantCss).toMatch(/\.board-col\s*\{[^}]*min-width:\s*220px[^}]*\}/s);
+  it("lays the four status columns out as an equal-width grid that fits the board", async () => {
+    expect(octantCss).toMatch(
+      /\.board\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)[^}]*\}/s,
+    );
+    expect(octantCss).not.toMatch(/\.board-col\s*\{[^}]*max-width:\s*\d+px/s);
 
     const loadBoard = vi.fn(async () =>
       view([
@@ -615,7 +617,12 @@ describe("CodeThreadBoard", () => {
 
   it("keeps the board body horizontally scrollable instead of overflowing the page", async () => {
     expect(stylesCss).toMatch(/\.code-board__body\s*\{[^}]*overflow-x:\s*auto[^}]*\}/s);
-    expect(stylesCss).toMatch(/\.code-board \.board\s*\{[^}]*overflow:\s*visible[^}]*\}/s);
+    expect(stylesCss).not.toMatch(/\.code-board__body\s*\{[^}]*overflow-y:\s*hidden[^}]*\}/s);
+    expect(octantCss).toMatch(/\.board\s*\{[^}]*overflow:\s*visible[^}]*\}/s);
+    // Under ~1100px the columns keep a readable width and the body scrolls.
+    expect(octantCss).toMatch(
+      /@media \(max-width: 1100px\)\s*\{\s*\.board\s*\{[^}]*minmax\(240px, 1fr\)/s,
+    );
 
     const loadBoard = vi.fn(async () =>
       view([card({ id: "01", status: "ready", title: "Ready thread" })]),
@@ -650,14 +657,7 @@ describe("CodeThreadBoard", () => {
     expect(article.querySelector(".board-card-facts")).not.toBeNull();
   });
 
-  it("renders empty status columns at the same width as populated columns", async () => {
-    expect(octantCss).toMatch(
-      /\.board-col\[data-empty="true"\]\s*\{[^}]*max-width:\s*320px[^}]*\}/s,
-    );
-    expect(octantCss).toMatch(
-      /\.board-col\[data-empty="true"\]\s*\{[^}]*min-width:\s*220px[^}]*\}/s,
-    );
-
+  it("keeps an empty status column in the grid with a quiet empty line inside it", async () => {
     const loadBoard = vi.fn(async () =>
       view([card({ id: "01", status: "ready", title: "Ready thread" })]),
     );
@@ -670,6 +670,7 @@ describe("CodeThreadBoard", () => {
     expect(ready.className).toContain("board-col");
     expect(waiting.className).toContain("board-col");
     expect(waiting.getAttribute("data-empty")).toBe("true");
+    expect(within(waiting).getByRole("status")).toHaveClass("surface-empty");
   });
 
   it("renders the narrow view as a vertically stacked list without kanban columns", async () => {

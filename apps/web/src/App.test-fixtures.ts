@@ -1043,6 +1043,6 @@ export async function openSidebarProject(user: ReturnType<typeof userEvent.setup
  * that wants Settings opens their row first.
  */
 export async function openSettingsFromSidebar(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: "Set your name" }));
+  await user.click(await screen.findByRole("button", { name: "Account menu, Set your name" }));
   await user.click(await screen.findByRole("menuitem", { name: "Settings" }));
 }

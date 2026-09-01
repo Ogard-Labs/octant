@@ -1,6 +1,5 @@
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
-import { X } from "lucide-react";
-import { OctantButton } from "../ui/base/OctantButton";
+import { Surface } from "../surface/SurfaceHeader";
 import { ArtifactLibraryView } from "./ArtifactLibraryView";
 import { ArtifactMirrorSettings } from "./ArtifactMirrorSettings";
 import { useArtifactLibrary } from "./useArtifactLibrary";
@@ -34,19 +33,14 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
   });
 
   return (
-    <div className="artifact-library-surface">
-      <div className="artifact-library-surface__chrome">
-        <OctantButton onClick={props.onClose} size="sm" type="button" variant="ghost">
-          <X aria-hidden="true" size={12} strokeWidth={1.8} />
-          Close
-        </OctantButton>
-      </div>
+    <Surface ariaLabel="Artifact library">
       <ArtifactLibraryView
         busy={library.busy}
         filters={library.filters}
         listing={library.listing}
         {...(library.message === undefined ? {} : { message: library.message })}
         observedAt={String(library.listing?.generatedAt ?? "")}
+        onClose={props.onClose}
         onFiltersChange={library.setFilters}
         onOpen={props.onOpen}
         {...(props.onCreate === undefined ? {} : { onCreate: props.onCreate })}
@@ -58,6 +52,6 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         onChangeDestination={(destination) => void mirror.changeDestination(destination)}
         settings={mirror.settings}
       />
-    </div>
+    </Surface>
   );
 }

@@ -1,8 +1,10 @@
 /* Artifact library: a host-wide gallery of everything Canvas has produced.
-   Paint comes from the design system (octant.css `--oct-*` tokens and the
-   tab/select/input/check recipes); this sheet keeps layout and the card
-   gallery look. Sizes use rem/em so 200% zoom scales the whole page; the
-   grid reflows by available width rather than by a device breakpoint. */
+   The shell, header, toolbar, tabs, sections, and empty state come from the
+   surface language; paint from the design system (octant.css `--oct-*`
+   tokens and the select/input/check recipes). This sheet keeps the search
+   field, the card gallery look, and the mirror settings body. Sizes use
+   rem/em so 200% zoom scales the whole page; the grid reflows by available
+   width rather than by a device breakpoint. */
 
 .artifact-library-layer {
   position: absolute;
@@ -12,55 +14,18 @@
   background: var(--oct-bg);
 }
 
-.artifact-library-surface {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  background: var(--oct-bg);
-}
-
-.artifact-library-surface__chrome {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0.5rem 0.75rem 0;
-}
-
 .artifact-library {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  min-height: 0;
-  padding: 0.5rem 1.25rem 1.25rem;
-  overflow: auto;
-}
-
-.artifact-library__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.artifact-library__title {
-  margin: 0;
-  color: var(--oct-fg);
-  font-family: var(--oct-font-display);
-  font-size: 1rem;
-  font-weight: var(--oct-weight-strong);
-}
-
-.artifact-library__controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  min-width: 0;
+  margin-bottom: var(--oct-space-6);
 }
 
 .artifact-library__search {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  flex: 1 1 14rem;
   min-height: var(--oct-control-height-sm);
   padding: 0 0.5rem;
   border: 1px solid var(--oct-border);
@@ -87,10 +52,6 @@
   font-size: var(--oct-text-sm);
 }
 
-.artifact-library__tab {
-  cursor: pointer;
-}
-
 .artifact-library__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
@@ -101,30 +62,12 @@
 }
 
 .artifact-library__groups {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  display: grid;
+  min-width: 0;
 }
 
-.artifact-library__group-title {
-  margin: 0 0 0.5rem;
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: 0.6875rem;
-  font-weight: var(--oct-weight-display);
-  text-transform: uppercase;
-  letter-spacing: var(--oct-tracking-wide);
-}
-
-.artifact-library__message,
-.artifact-library__truncated {
-  margin: 0;
-  color: var(--oct-muted);
-  font-size: 0.75rem;
-}
-
-.artifact-library__empty {
-  margin: clamp(24px, 6vh, 56px) auto;
+.artifact-library__grid--grouped {
+  padding-top: 0.75rem;
 }
 
 .artifact-card {
@@ -215,44 +158,13 @@
 }
 
 .artifact-mirror {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: 520px;
-  margin: 1rem auto 0;
-  padding: 0.75rem;
-  background: var(--oct-surface-1);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
   font-size: 0.875rem;
 }
 
-.artifact-mirror__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.artifact-mirror__header > div,
 .artifact-mirror__body {
   display: grid;
   gap: 0.5rem;
-}
-
-.artifact-mirror__title {
-  margin: 0;
-  color: var(--oct-fg);
-  font-family: var(--oct-font-display);
-  font-size: 0.875rem;
-  font-weight: var(--oct-weight-strong);
-}
-
-.artifact-mirror__summary {
-  margin: 0.15rem 0 0;
-  color: var(--oct-muted);
-  font-size: 0.75rem;
+  padding-top: 0.75rem;
 }
 
 .artifact-mirror__note,

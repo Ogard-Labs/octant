@@ -1,3 +1,7 @@
+/* Agents Center: the shell, header, toolbar, and empty state come from the
+   surface language; this sheet keeps the list/detail split, the run rows,
+   and the detail pane. */
+
 .agents-center-layer {
   position: absolute;
   inset: 0;
@@ -6,42 +10,12 @@
   background: var(--oct-bg);
 }
 
-.agents-center {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  height: 100%;
-  min-height: 0;
-  padding: 1rem 1.25rem;
-  overflow: auto;
-  background: var(--oct-bg);
-}
-
-.agents-center__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.agents-center__title {
-  margin: 0;
-  font-family: var(--oct-font-display);
-  font-size: 1rem;
-  font-weight: var(--oct-weight-strong);
-}
-
-.agents-center__subtitle {
-  margin: 0.15rem 0 0;
-  color: var(--oct-muted);
-  font-size: 0.875rem;
-}
-
 .agents-center__notice {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  margin-bottom: 0.75rem;
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
@@ -50,55 +24,35 @@
 
 .agents-center__body {
   display: grid;
-  width: min(100%, 72rem);
   grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   min-height: 0;
-  flex: 1;
-  margin-inline: auto;
 }
 
 .agents-center__body[data-detail-open="true"] {
   grid-template-columns: minmax(18rem, 1.2fr) minmax(0, 1fr);
 }
 
-.agents-center__header,
-.agents-center > .agents-center__notice {
-  width: min(100%, 72rem);
-  margin-inline: auto;
-}
-
-.agents-center[data-narrow="true"] .agents-center__body {
+.agents-center__body[data-narrow="true"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
 .agents-center__list-pane,
 .agents-center__detail-pane {
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
-}
-
-.agents-center__list-pane > [data-slot="empty-state"] {
-  margin: 32px auto;
-}
-
-.agents-center__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 0.75rem;
 }
 
 .agents-center__search {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.4rem;
-  min-width: min(100%, 16rem);
+  color: var(--oct-muted);
 }
 
 .agents-center__search input {
   flex: 1;
+  min-width: 0;
 }
 
 .agents-center__rows {
@@ -139,10 +93,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-}
-
-.agents-center__empty {
-  margin: 1rem auto;
 }
 
 @media (max-width: 720px) {

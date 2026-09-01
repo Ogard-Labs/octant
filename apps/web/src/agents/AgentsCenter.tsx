@@ -3,9 +3,9 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ShellState } from "../shell/ShellState";
+import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantEmptyState } from "../ui/base/OctantEmptyState";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
@@ -59,22 +59,12 @@ export function AgentsCenter(props: AgentsCenterProps) {
   const hideListForNarrow = props.narrow === true && detailOpen;
 
   return (
-    <section
-      aria-label="Agents Center"
-      className="agents-center"
-      data-narrow={props.narrow === true}
-    >
-      <header className="agents-center__header">
-        <div>
-          <h2 className="agents-center__title">Agents</h2>
-          <p className="agents-center__subtitle">Child runs across Chat, Work, and Code.</p>
-        </div>
-        {props.onClose === undefined ? null : (
-          <OctantButton onClick={props.onClose} type="button" variant="secondary">
-            Back to workspace
-          </OctantButton>
-        )}
-      </header>
+    <Surface ariaLabel="Agents Center" className="agents-center">
+      <SurfaceHeader
+        subtitle="Child runs across Chat, Work, and Code."
+        title="Agents"
+        {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
+      />
 
       {controller.notice === undefined ? null : (
         <div className="agents-center__notice" role="status">
@@ -85,7 +75,11 @@ export function AgentsCenter(props: AgentsCenterProps) {
         </div>
       )}
 
-      <div className="agents-center__body" data-detail-open={detailOpen ? "true" : "false"}>
+      <div
+        className="agents-center__body"
+        data-detail-open={detailOpen ? "true" : "false"}
+        data-narrow={props.narrow === true}
+      >
         {hideListForNarrow ? null : (
           <div className="agents-center__list-pane">
             <AgentsCenterToolbar controller={controller} />
@@ -115,15 +109,15 @@ export function AgentsCenter(props: AgentsCenterProps) {
           </div>
         )}
       </div>
-    </section>
+    </Surface>
   );
 }
 
 function AgentsCenterToolbar(props: { readonly controller: AgentsCenterController }) {
   const { controller } = props;
   return (
-    <div aria-label="Agents Center controls" className="agents-center__toolbar" role="group">
-      <label className="agents-center__search">
+    <div aria-label="Agents Center controls" className="surface-toolbar" role="group">
+      <label className="surface-toolbar__search agents-center__search">
         <span className="sr-only">Search agent runs</span>
         <Search aria-hidden="true" size={14} strokeWidth={1.8} />
         <OctantInput
@@ -215,7 +209,7 @@ function AgentsCenterListBody(props: {
       controller.providerInstanceId !== undefined ||
       controller.parentThreadId !== undefined;
     return (
-      <OctantEmptyState
+      <SurfaceEmpty
         {...(hasActiveFilters
           ? {
               action: (
@@ -237,13 +231,11 @@ function AgentsCenterListBody(props: {
               ),
             }
           : {})}
-        className="agents-center__empty"
-        message={
+        detail={
           hasActiveFilters
             ? "Clear or adjust the active filters to see other runs."
             : "Child agents appear here after a thread starts one."
         }
-        role="status"
         title={hasActiveFilters ? "No agent runs match these filters" : "No agent runs yet"}
       />
     );

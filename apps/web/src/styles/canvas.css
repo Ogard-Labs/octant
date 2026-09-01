@@ -255,8 +255,8 @@
 .canvas-block__reference-kind {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 

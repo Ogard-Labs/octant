@@ -47,12 +47,16 @@ describe("WorkComposerAdapter", () => {
   it("tucks host and Project context behind the prompt instead of boxing it inside", () => {
     const { container } = render(<WorkComposerAdapter {...baseProps} />);
     const frame = container.querySelector(".composer");
-    const strip = container.querySelector(".work-composer-adapter__context-strip");
+    const tray = container.querySelector(".composer-tray");
 
     expect(frame).not.toBeNull();
-    expect(strip).not.toBeNull();
-    expect(frame?.contains(strip)).toBe(false);
-    expect(strip?.parentElement).toHaveClass("work-composer-adapter__composer");
+    expect(tray).not.toBeNull();
+    if (frame === null || tray === null) throw new Error("Composer stack is incomplete.");
+    expect(frame.contains(tray)).toBe(false);
+    expect(tray.parentElement).toHaveClass("composer-stack");
+    expect(tray.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tray.textContent).toContain("No folder");
+    expect(tray.querySelector(".host-selector--environment")).not.toBeNull();
   });
 
   it("renders disabled send button when empty", () => {
@@ -82,13 +86,12 @@ describe("WorkComposerAdapter", () => {
     expect(html).not.toContain("Base repository");
   });
 
-  it("has keyboard hint", () => {
+  it("does not repeat the keyboard hint under the composer", () => {
     const html = renderToStaticMarkup(<WorkComposerAdapter {...baseProps} />);
-    expect(html).toContain("Press Enter to start");
-    expect(html).toContain("Escape to close");
+    expect(html).not.toContain("Press Enter to start");
   });
 
-  it("renders the multi-model pool control slot in the context strip", () => {
+  it("renders the multi-model pool control slot in the composer bar", () => {
     const html = renderToStaticMarkup(
       <WorkComposerAdapter {...baseProps} poolControl={<span>Pool control slot</span>} />,
     );

@@ -118,7 +118,7 @@ describe("CodeProjectPullRequests", () => {
     });
 
     const title = await screen.findByText("No Code Projects yet");
-    expect(title.closest("[role='status']")).toHaveAttribute("data-slot", "empty-state");
+    expect(title.closest("[role='status']")).toHaveClass("surface-empty");
     expect(screen.getByText("Add a Code Project to see pull requests here.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Refresh all" })).toBeNull();
     expect(screen.queryByRole("searchbox", { name: "Search pull requests" })).toBeNull();
@@ -193,11 +193,12 @@ describe("CodeProjectPullRequests", () => {
     await waitFor(() =>
       expect(refresh).toHaveBeenCalledWith({ kind: "refresh-project", projectId: projectB }),
     );
-    const actions = document.querySelector(".code-project-pull-requests__actions");
-    expect(actions).not.toBeNull();
+    // The surface reads and refreshes pull requests; it never mutates one. A
+    // row's own name carries its review state ("Review approved"), so only a
+    // control that starts with a mutating verb counts.
     expect(
-      within(actions as HTMLElement).queryByRole("button", {
-        name: /merge|approve|comment|close|force-push/i,
+      within(screen.getByRole("region", { name: "Pull requests" })).queryByRole("button", {
+        name: /^(merge|approve|comment|close|force-push)\b/i,
       }),
     ).not.toBeInTheDocument();
   });

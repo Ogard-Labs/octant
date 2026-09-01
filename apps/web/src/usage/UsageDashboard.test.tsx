@@ -187,19 +187,29 @@ describe("UsageDashboard", () => {
     expect(screen.getByLabelText("Usage by provider")).toBeInTheDocument();
   });
 
-  it("shows the summary before a collapsed technical filter disclosure", async () => {
+  it("keeps filters collapsed in the toolbar above the summary", async () => {
     const user = userEvent.setup();
     render(<UsageDashboard client={createMockClient(seededResponse())} />);
 
     const summary = await screen.findByRole("group", { name: "Summary totals" });
     const filters = screen.getByRole("button", { name: "Filters" });
     expect(filters).toHaveAttribute("aria-expanded", "false");
+    expect(filters.closest(".surface-toolbar")).not.toBeNull();
     expect(
-      summary.compareDocumentPosition(filters) & Node.DOCUMENT_POSITION_FOLLOWING,
+      filters.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.getByLabelText("Filter by provider instance id")).not.toBeVisible();
     await user.click(filters);
     expect(screen.getByLabelText("Filter by provider instance id")).toBeVisible();
+  });
+
+  it("states when the figures were read as a sentence, not a stamp", async () => {
+    render(<UsageDashboard client={createMockClient(seededResponse())} />);
+
+    await screen.findByText("Total requests");
+    expect(screen.getByText(/^Queried \d{2}:\d{2} on \d{1,2} [A-Z][a-z]{2} \d{4}$/)).toHaveClass(
+      "oct-meta",
+    );
   });
 
   it("keeps latency behind Operational details after the primary totals", async () => {
@@ -255,7 +265,7 @@ describe("UsageDashboard", () => {
     const client = createMockClient(emptyResponse());
     render(<UsageDashboard client={client} />);
     const title = await screen.findByText("No usage recorded yet");
-    expect(title.closest("[role='status']")).toHaveAttribute("data-slot", "empty-state");
+    expect(title.closest("[role='status']")).toHaveClass("surface-empty");
     expect(
       screen.getByText("Usage appears after an agent completes a provider request."),
     ).toBeVisible();
@@ -300,7 +310,7 @@ describe("UsageDashboard", () => {
     });
     render(<UsageDashboard client={client} />);
     const summary = await screen.findByRole("group", { name: "Summary totals" });
-    expect(summary.querySelectorAll(".usage-dashboard__total-card")).toHaveLength(3);
+    expect(summary.querySelectorAll(".usage-total")).toHaveLength(3);
     expect(screen.getByRole("group", { name: "Operational metrics" })).not.toBeVisible();
     fireEvent.click(screen.getByText("Operational details"));
     expect(screen.getByRole("group", { name: "Operational metrics" })).toBeVisible();
@@ -401,26 +411,24 @@ describe("UsageDashboard", () => {
     expect(client.retain).toHaveBeenCalled();
   });
 
-  it("keeps usage export secondary and usage erasure destructive", async () => {
+  it("keeps usage export an ordinary button and usage erasure in danger text", async () => {
     const client = createMockClient(seededResponse());
     render(<UsageDashboard client={client} />);
     await screen.findByText("Total requests");
 
     expect(screen.getByRole("button", { name: /Export CSV/ })).toHaveAttribute(
       "data-variant",
-      "secondary",
+      "outline",
     );
     expect(screen.getByRole("button", { name: /Export JSON/ })).toHaveAttribute(
       "data-variant",
-      "secondary",
+      "outline",
     );
-    expect(screen.getByRole("button", { name: /Purge older than 30 days/ })).toHaveAttribute(
-      "data-variant",
-      "destructive-outline",
+    expect(screen.getByRole("button", { name: /Purge older than 30 days/ })).toHaveClass(
+      "usage-dashboard__danger",
     );
-    expect(screen.getByRole("button", { name: /Reset all usage/ })).toHaveAttribute(
-      "data-variant",
-      "destructive-outline",
+    expect(screen.getByRole("button", { name: /Reset all usage/ })).toHaveClass(
+      "usage-dashboard__danger",
     );
   });
 

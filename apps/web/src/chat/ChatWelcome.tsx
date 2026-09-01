@@ -92,12 +92,30 @@ export function ChatWelcome(props: ChatWelcomeProps) {
 
   return (
     <section aria-label="Chat welcome" className="draft-thread chat-welcome">
-      <div className="draft-thread__canvas">
-        <div className="draft-thread__welcome">
-          <h1 className="draft-thread__heading">{presentation.heading}</h1>
+      <div className="welcome">
+        <div className="welcome__heading">
+          <h1 className="oct-title oct-title--hero">{presentation.heading}</h1>
         </div>
 
-        <div className="draft-thread__composer">
+        <div className="composer-stack">
+          <div className="composer-tray" aria-label="Thread context">
+            <div className="composer-tray__leading">
+              <HostSelector
+                presentation="environment"
+                {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                {...(props.selectedHostId === undefined
+                  ? {}
+                  : { selectedHostId: props.selectedHostId })}
+                {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+                {...(props.lastSelectedHealthyHostId === undefined
+                  ? {}
+                  : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+                {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
+                requiredCapability="chat"
+              />
+            </div>
+          </div>
           <ThreadComposer
             input={
               <OctantTextarea
@@ -114,25 +132,9 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               />
             }
             row={{
-              ariaLabel: "Thread context",
               leading: (
                 <>
-                  <HostSelector
-                    presentation="environment"
-                    {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                    {...(props.selectedHostId === undefined
-                      ? {}
-                      : { selectedHostId: props.selectedHostId })}
-                    {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-                    {...(props.lastSelectedHealthyHostId === undefined
-                      ? {}
-                      : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-                    {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-                    {...(props.onSelectHost === undefined
-                      ? {}
-                      : { onSelectHost: props.onSelectHost })}
-                    requiredCapability="chat"
-                  />
+                  <span aria-hidden="true" className="composer-gap" />
                   <ComposerModelPicker
                     ariaLabel="Provider and model"
                     disabled={!ready || props.creating === true}
@@ -157,25 +159,22 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               },
             }}
           />
-          {statusMessage === undefined ? null : (
-            <p className="draft-thread__error" role="alert">
-              {statusMessage}
-            </p>
-          )}
-          {!ready && props.status === "disconnected" && props.onRetry !== undefined ? (
-            <OctantButton
-              className="chat-welcome__retry"
-              onClick={props.onRetry}
-              type="button"
-              variant="ghost"
-            >
-              Retry Chat
-            </OctantButton>
-          ) : null}
         </div>
-        <p className="draft-thread__hint">
-          Press Enter to start · Shift+Enter for a new line · Starts unfiled until you add a Project
-        </p>
+        {statusMessage === undefined ? null : (
+          <p className="draft-thread__error" role="alert">
+            {statusMessage}
+          </p>
+        )}
+        {!ready && props.status === "disconnected" && props.onRetry !== undefined ? (
+          <OctantButton
+            className="chat-welcome__retry"
+            onClick={props.onRetry}
+            type="button"
+            variant="ghost"
+          >
+            Retry Chat
+          </OctantButton>
+        ) : null}
         {(props.recentThreads?.length ?? 0) === 0 ? (
           <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
             {starterIdeas.map((idea) => {

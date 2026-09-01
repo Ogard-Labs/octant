@@ -1,11 +1,9 @@
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { OctantMode } from "@octant/contracts/modes";
-import { Archive, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantEmptyState } from "../ui/base/OctantEmptyState";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { IconButton } from "./IconButton";
 import { ShellState } from "./ShellState";
 
 export interface ArchivedThreadEntry {
@@ -95,32 +93,27 @@ export function ArchiveView(props: ArchiveViewProps) {
   );
 
   return (
-    <section aria-label="Archive" className="archive-view">
-      <header className="archive-view__header">
-        <div>
-          <h1>Archive</h1>
-          <p>Threads kept out of active navigation.</p>
-        </div>
-        <div className="archive-view__actions">
-          <label>
-            <span>Project</span>
-            <OctantSelectField
-              aria-label="Filter archive by Project"
-              onValueChange={(value) => setProjectFilter(value)}
-              options={[
-                { id: ALL_PROJECTS, label: "All Projects" },
-                { id: UNFILED, label: "Unfiled" },
-                ...props.projects.map((project) => ({
-                  id: project.id,
-                  label: project.name,
-                })),
-              ]}
-              value={projectFilter}
-            />
-          </label>
-          <IconButton icon={X} label="Close Archive" onClick={props.onClose} />
-        </div>
-      </header>
+    <Surface ariaLabel="Archive">
+      <SurfaceHeader
+        actions={
+          <OctantSelectField
+            aria-label="Filter archive by Project"
+            onValueChange={(value) => setProjectFilter(value)}
+            options={[
+              { id: ALL_PROJECTS, label: "All Projects" },
+              { id: UNFILED, label: "Unfiled" },
+              ...props.projects.map((project) => ({
+                id: project.id,
+                label: project.name,
+              })),
+            ]}
+            value={projectFilter}
+          />
+        }
+        onBack={props.onClose}
+        subtitle="Threads kept out of active navigation."
+        title="Archive"
+      />
 
       {chatArchive.kind === "loading" && props.entries.length === 0 ? (
         <ShellState
@@ -129,11 +122,8 @@ export function ArchiveView(props: ArchiveViewProps) {
           title="Loading Archive"
         />
       ) : entries.length === 0 ? (
-        <OctantEmptyState
-          className="archive-view__empty"
-          eyebrow="Archive"
-          icon={<Archive aria-hidden="true" size={16} strokeWidth={1.7} />}
-          message={
+        <SurfaceEmpty
+          detail={
             projectFilter === ALL_PROJECTS
               ? "Archived threads will appear here."
               : "No archived threads belong to this Project."
@@ -141,32 +131,34 @@ export function ArchiveView(props: ArchiveViewProps) {
           title="Nothing archived"
         />
       ) : (
-        <div className="archive-view__list" role="list">
+        <ul className="surface-list">
           {entries.map((entry) => (
-            <div key={`${entry.mode}:${entry.threadId}`} role="listitem">
+            <li className="surface-row" key={`${entry.mode}:${entry.threadId}`}>
               <OctantButton
                 className="archive-view__row"
                 onClick={() => props.onOpenThread(entry)}
                 type="button"
                 variant="ghost"
               >
-                <span className="archive-view__row-copy">
-                  <strong>{entry.title}</strong>
-                  <small>{projectNames.get(entry.projectId ?? "") ?? "Unfiled"}</small>
+                <span className="surface-row__copy">
+                  <span className="oct-row-label">{entry.title}</span>
+                  <span className="oct-meta">
+                    {projectNames.get(entry.projectId ?? "") ?? "Unfiled"}
+                  </span>
                 </span>
-                <span className="archive-view__mode">{modeLabel(entry.mode)}</span>
+                <span className="oct-meta">{modeLabel(entry.mode)}</span>
               </OctantButton>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
       {chatArchive.kind === "unavailable" ? (
-        <p className="archive-view__notice" role="status">
+        <p className="oct-meta" role="status">
           Chat archive is temporarily unavailable. Work and Code results are still shown.
         </p>
       ) : null}
-    </section>
+    </Surface>
   );
 }
 

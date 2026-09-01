@@ -150,7 +150,7 @@ describe("WorkThreadBoard", () => {
       screen
         .getAllByRole("region", { name: /\(\d+\)$/ })
         .map((column) => column.getAttribute("aria-label")),
-    ).toEqual(["Ready (1)", "In Progress (0)", "Waiting (0)", "Done (1)"]);
+    ).toEqual(["Ready (1)", "In progress (0)", "Waiting (0)", "Done (1)"]);
     expect(cardFor("Ready thread").getAttribute("draggable")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Ready thread" }));
     expect(onOpenThread).toHaveBeenCalledWith({
@@ -329,18 +329,20 @@ describe("WorkThreadBoard", () => {
     expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
   });
 
-  it("uses the shared empty state without contradictory filter guidance", async () => {
+  it("keeps every column on an empty board with a quiet line instead of a raised card", async () => {
     const loadBoard = vi.fn(async () => view([]));
     render(<WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
     const message = await screen.findByText("No Work threads yet");
     const empty = message.closest("[role='status']");
     expect(empty).not.toBeNull();
-    expect(empty).toHaveAttribute("data-slot", "empty-state");
+    expect(empty).not.toHaveAttribute("data-slot");
     expect(empty).toHaveTextContent("Create a Work thread to see it here.");
     expect(empty).not.toHaveTextContent("adjust the filters");
-    for (const column of ["Ready (0)", "In Progress (0)", "Waiting (0)", "Done (0)"]) {
-      expect(screen.getByRole("region", { name: column })).toBeVisible();
+    for (const column of ["Ready (0)", "In progress (0)", "Waiting (0)", "Done (0)"]) {
+      const region = screen.getByRole("region", { name: column });
+      expect(region).toBeVisible();
+      expect(within(region).getByRole("status")).toHaveClass("surface-empty");
     }
   });
 
@@ -353,11 +355,11 @@ describe("WorkThreadBoard", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Work Thread Board is unavailable.");
   });
 
-  it("renders status columns at a fixed width so they do not stretch to fill the workspace", async () => {
-    expect(stylesCss).toMatch(/\.code-board\s+\.board-col\s*\{[^}]*max-width:\s*320px[^}]*\}/s);
-    expect(stylesCss).toMatch(/\.code-board\s+\.board-col\s*\{[^}]*min-width:\s*220px[^}]*\}/s);
-    expect(octantCss).toMatch(/\.board-col\s*\{[^}]*max-width:\s*320px[^}]*\}/s);
-    expect(octantCss).toMatch(/\.board-col\s*\{[^}]*min-width:\s*220px[^}]*\}/s);
+  it("lays the four status columns out as an equal-width grid that fits the board", async () => {
+    expect(octantCss).toMatch(
+      /\.board\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)[^}]*\}/s,
+    );
+    expect(octantCss).not.toMatch(/\.board-col\s*\{[^}]*max-width:\s*\d+px/s);
 
     const loadBoard = vi.fn(async () =>
       view([
@@ -378,7 +380,11 @@ describe("WorkThreadBoard", () => {
   it("keeps the board body horizontally scrollable instead of overflowing the page", async () => {
     expect(stylesCss).toMatch(/\.code-board__body\s*\{[^}]*overflow-x:\s*auto[^}]*\}/s);
     expect(stylesCss).not.toMatch(/\.code-board__body\s*\{[^}]*overflow-y:\s*hidden[^}]*\}/s);
-    expect(stylesCss).toMatch(/\.code-board \.board\s*\{[^}]*overflow:\s*visible[^}]*\}/s);
+    expect(octantCss).toMatch(/\.board\s*\{[^}]*overflow:\s*visible[^}]*\}/s);
+    // Under ~1100px the columns keep a readable width and the body scrolls.
+    expect(octantCss).toMatch(
+      /@media \(max-width: 1100px\)\s*\{\s*\.board\s*\{[^}]*minmax\(240px, 1fr\)/s,
+    );
 
     const loadBoard = vi.fn(async () =>
       view([card({ id: "01", status: "ready", title: "Ready thread" })]),
@@ -418,14 +424,7 @@ describe("WorkThreadBoard", () => {
     expect(article.querySelector(".board-card-facts")).not.toBeNull();
   });
 
-  it("renders empty status columns at the same width as populated columns", async () => {
-    expect(octantCss).toMatch(
-      /\.board-col\[data-empty="true"\]\s*\{[^}]*max-width:\s*320px[^}]*\}/s,
-    );
-    expect(octantCss).toMatch(
-      /\.board-col\[data-empty="true"\]\s*\{[^}]*min-width:\s*220px[^}]*\}/s,
-    );
-
+  it("keeps an empty status column in the grid with a quiet empty line inside it", async () => {
     const loadBoard = vi.fn(async () =>
       view([card({ id: "01", status: "ready", title: "Ready thread" })]),
     );
@@ -436,6 +435,7 @@ describe("WorkThreadBoard", () => {
     expect(ready.className).toContain("board-col");
     expect(waiting.className).toContain("board-col");
     expect(waiting.getAttribute("data-empty")).toBe("true");
+    expect(within(waiting).getByRole("status")).toHaveClass("surface-empty");
   });
 
   it("renders the narrow view as a vertically stacked list without kanban columns", async () => {

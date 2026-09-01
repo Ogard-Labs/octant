@@ -25,13 +25,17 @@ describe("ChatSettingsView", () => {
     );
 
     expect(screen.getByRole("form", { name: "Chat defaults" })).toHaveAttribute("novalidate");
-    expect(screen.getByRole("form", { name: "Chat defaults" })).toHaveClass(
-      "provider-settings__form",
-      "setgroup",
-    );
+    // Every default is a setting row in the open Settings grammar, with the
+    // research default as a switch rather than a checkbox.
+    expect(screen.getByRole("form", { name: "Chat defaults" })).toHaveClass("setgroup");
     expect(screen.getByRole("form", { name: "Chat defaults" }).closest("section")).toHaveClass(
       "settings-card-section--open",
     );
+    expect(screen.getByRole("switch", { name: "Enable research by default" })).toBeVisible();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save Chat defaults" }).closest("[data-setting-id]"),
+    ).toHaveAttribute("data-setting-id", "chat-save");
     expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveTextContent(
       "Automatic",
     );

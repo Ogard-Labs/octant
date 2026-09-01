@@ -560,7 +560,6 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
     expect(stylesheet).not.toMatch(/(?<!m(?:in|ax)-)height:\s*(?!1px)\d+px/);
     // The full-surface layer scrolls instead of clipping at high zoom.
     expect(stylesheet).toMatch(/\.automation-center-layer\s*\{[^}]*overflow:\s*auto;/s);
-    expect(stylesheet).toMatch(/\.automation-center\s*\{[^}]*overflow:\s*auto;/s);
   });
 });
 
@@ -681,7 +680,7 @@ describe("AutomationCenter arranging", () => {
 
     expect(screen.queryByRole("list", { name: /Automations/ })).toBeNull();
     const empty = screen.getByRole("status");
-    expect(empty).toHaveAttribute("data-slot", "empty-state");
+    expect(empty).toHaveClass("surface-empty");
     expect(empty).toHaveTextContent("No automations match these filters");
     expect(screen.getByRole("button", { name: "Clear filters" })).toBeVisible();
   });

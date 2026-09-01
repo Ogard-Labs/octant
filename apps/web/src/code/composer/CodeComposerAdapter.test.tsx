@@ -37,7 +37,7 @@ describe("CodeComposerAdapter", () => {
   it("puts Project, branch, and Environment on an upper tray before the prompt", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
-    const dock = container.querySelector(".code-composer-adapter__dock");
+    const dock = container.querySelector(".composer-tray");
     expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
@@ -105,8 +105,8 @@ describe("CodeComposerAdapter", () => {
     const { container } = render(
       <CodeComposerAdapter {...rest} folderControl={<span>Choose a Project</span>} />,
     );
-    const leading = container.querySelector(".code-composer-adapter__dock-leading");
-    const trailing = container.querySelector(".code-composer-adapter__dock-trailing");
+    const leading = container.querySelector(".composer-tray__leading");
+    const trailing = container.querySelector(".composer-tray__trailing");
     expect(leading?.textContent).toContain("Choose a Project");
     expect(trailing?.textContent).not.toContain("Choose a Project");
   });
@@ -116,13 +116,13 @@ describe("CodeComposerAdapter", () => {
       <CodeComposerAdapter {...defaultProps} githubControl={<span>GitHub control slot</span>} />,
     );
     const frame = container.querySelector(".composer");
-    const dock = container.querySelector(".code-composer-adapter__dock");
+    const dock = container.querySelector(".composer-tray");
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
     expect(frame?.contains(dock)).toBe(false);
     expect(dock?.textContent).toContain("GitHub control slot");
     expect(dock?.textContent).toContain("development");
-    expect(container.querySelector(".code-composer-adapter__context-strip")).toBeNull();
+    expect(container.querySelector('[class*="context-strip"]')).toBeNull();
   });
 
   it("renders approval policy selector", () => {
@@ -182,7 +182,7 @@ describe("CodeComposerAdapter", () => {
     expect(html).not.toContain("Pool control slot");
   });
 
-  it("renders the GitHub repository control slot as a distinct context-strip selection", () => {
+  it("renders the GitHub repository control slot as a distinct tray selection", () => {
     const html = renderToStaticMarkup(
       <CodeComposerAdapter {...defaultProps} githubControl={<span>GitHub control slot</span>} />,
     );

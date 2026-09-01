@@ -1,7 +1,8 @@
-/* Usage dashboard: totals, quality coverage, and activity for one scope.
-   Paint comes from the design system (octant.css `--oct-*` tokens and the
-   input/select recipes); this sheet keeps layout and the border-style
-   encodings that keep measurement quality readable without colour. */
+/* Usage: totals, quality coverage, activity, and provider limits for one
+   scope, on the open surface grammar (surface.css). Paint comes from the
+   design system tokens and the input/select recipes; this sheet keeps
+   layout and the border-style encodings that keep measurement quality
+   readable without colour. No card, tile, or eyebrow lives here. */
 
 .usage-dashboard {
   display: grid;
@@ -11,22 +12,11 @@
   color: var(--oct-fg);
 }
 
-.usage-dashboard__header,
-.usage-dashboard__section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
+.usage-dashboard > .surface-toolbar {
+  margin-bottom: 0;
 }
 
-.usage-dashboard__header--embedded {
-  justify-content: flex-end;
-}
-
-.usage-dashboard__header h2,
-.usage-dashboard__section h3,
 .usage-dashboard__status,
-.usage-dashboard__empty,
 .usage-dashboard__footer,
 .usage-dashboard__action-message,
 .usage-dashboard__unavailable-note,
@@ -34,43 +24,14 @@
   margin: 0;
 }
 
-.usage-dashboard__header h2 {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
-}
-
-.usage-dashboard__filter-panel {
-  background: var(--oct-surface);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-.usage-dashboard__filter-panel > button {
-  width: 100%;
-  justify-content: flex-start;
-  padding-inline: var(--oct-space-4);
-}
-
 .usage-dashboard__filter-count {
-  display: inline-grid;
-  min-width: 20px;
-  height: 20px;
-  margin-inline-start: auto;
-  place-items: center;
+  min-width: 18px;
+  padding-inline: 5px;
   color: var(--oct-fg);
   background: var(--oct-selection);
-  border-radius: var(--oct-radius-pill);
-  font-size: var(--oct-text-xs);
+  border-radius: var(--oct-radius-sm);
   font-variant-numeric: tabular-nums;
-}
-
-.usage-dashboard__filter-panel > button > svg:last-child {
-  margin-inline-start: var(--oct-space-1);
+  text-align: center;
 }
 
 .usage-dashboard__filters {
@@ -78,7 +39,8 @@
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   min-width: 0;
-  padding: 0 var(--oct-space-3) var(--oct-space-3);
+  padding-bottom: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 .usage-dashboard__filters[hidden] {
@@ -90,7 +52,7 @@
   min-width: 0;
   gap: 4px;
   color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
 }
 
 /* The .input/.select recipes paint the filter controls; the dense filter
@@ -103,24 +65,45 @@
   font-size: var(--oct-text-sm);
 }
 
-.usage-dashboard__totals {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+/* ── Totals: one row of labelled numbers, not tiles ─────────────────── */
+
+.usage-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-3) var(--oct-space-8);
+  padding: var(--oct-space-1) 0;
 }
 
+.usage-total {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.usage-total__value {
+  overflow-wrap: anywhere;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.2;
+}
+
+/* ── Operational details: a disclosure that reads as a section ──────── */
+
 .usage-dashboard__operational-details {
-  border-top: 1px solid var(--oct-border);
+  display: grid;
+  gap: var(--oct-space-3);
 }
 
 .usage-dashboard__operational-details > summary {
   display: flex;
-  min-height: 36px;
   align-items: center;
-  color: var(--oct-muted);
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--oct-hairline);
   cursor: pointer;
-  font-size: var(--oct-text-sm);
-  font-weight: 500;
   list-style: none;
 }
 
@@ -140,55 +123,20 @@
 
 .usage-dashboard__operational-metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 var(--oct-space-5);
-  padding-bottom: var(--oct-space-3);
 }
 
 .usage-dashboard__operational-metric {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
-  padding: 8px 0;
-  border-top: 1px solid var(--oct-border-soft);
-  font-size: var(--oct-text-xs);
+  padding-block: 8px;
 }
 
-.usage-dashboard__operational-metric span {
-  color: var(--oct-muted);
-}
-
-.usage-dashboard__operational-metric strong {
+.usage-dashboard__metric-value {
   color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
   font-variant-numeric: tabular-nums;
-  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 560px) {
-  .usage-dashboard__operational-metrics {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.usage-dashboard__total-value {
-  overflow-wrap: anywhere;
-  color: var(--oct-fg);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-lg);
-  font-variant-numeric: tabular-nums;
-}
-
-.usage-dashboard__total-label,
-.usage-dashboard__footer {
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-}
+/* ── Quality and controls ───────────────────────────────────────────── */
 
 .usage-dashboard__quality,
 .usage-dashboard__controls {
@@ -199,17 +147,15 @@
 }
 
 /* Border STYLE, not colour, separates the measurement qualities, so the
-   pill stays bespoke instead of riding .badge (which has no border). */
+   badge stays bespoke instead of riding .badge (which has no border). */
 .usage-dashboard__quality-badge {
   display: inline-flex;
-  min-height: 24px;
+  min-height: 22px;
   align-items: center;
-  padding: 3px 9px;
+  padding: 2px 8px;
   color: var(--oct-muted);
-  background: var(--oct-surface-warm);
   border: 1px solid color-mix(in oklab, var(--oct-fg) 26%, transparent);
-  border-radius: var(--oct-radius-pill);
-  font-family: var(--oct-font-mono);
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
 }
@@ -249,7 +195,7 @@
 .usage-dashboard__action-message,
 .usage-dashboard__filter-error {
   color: var(--oct-warn-fg);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
 }
 
 .usage-dashboard__error {
@@ -263,12 +209,36 @@
   margin: 0;
 }
 
+/* ── Sections ───────────────────────────────────────────────────────── */
+
 .usage-dashboard__section {
   display: grid;
   min-width: 0;
   gap: 10px;
-  padding-top: var(--oct-space-3);
-  border-top: 1px solid var(--oct-border);
+  margin: 0;
+}
+
+.usage-dashboard__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: 4px 0 6px;
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+/* Latency is shared with the standalone Usage route and carries its own
+   heading; inside the dashboard it takes the section-label role. */
+.usage-dashboard__section > h3 {
+  margin: 0;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--oct-hairline);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.3;
 }
 
 .usage-latency {
@@ -286,7 +256,7 @@
 .usage-latency__measurements li {
   display: grid;
   gap: 2px;
-  padding: 6px;
+  padding: 6px 0;
 }
 
 .usage-latency__measurements span,
@@ -294,17 +264,8 @@
 .usage-latency__round-trip {
   margin: 0;
   color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
   font-variant-numeric: tabular-nums;
-}
-
-.usage-dashboard__section h3 {
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
 }
 
 .usage-dashboard__table {
@@ -313,7 +274,7 @@
   table-layout: fixed;
   border-collapse: collapse;
   color: var(--oct-fg-2);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
 }
 
 .usage-dashboard__table th,
@@ -326,19 +287,16 @@
 
 .usage-dashboard__table th {
   color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: calc(10 * var(--oct-text-step));
-  font-weight: 500;
-  letter-spacing: var(--oct-tracking-wordmark);
-  text-transform: uppercase;
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
 }
 
 .usage-dashboard__table tbody tr {
-  border-top: 1px solid var(--oct-border-soft);
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .usage-dashboard__table--narrow {
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .usage-dashboard__table--narrow th,
@@ -354,7 +312,7 @@
 .usage-dashboard__confirm p {
   margin: 0;
   color: var(--oct-fg);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
 }
 
 .usage-dashboard__confirm-actions {
@@ -367,24 +325,11 @@
   .usage-dashboard__filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .usage-dashboard__totals {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .usage-dashboard__total-card:last-child {
-    grid-column: 1 / -1;
-  }
 }
 
 @media (max-width: 420px) {
-  .usage-dashboard__filters,
-  .usage-dashboard__totals {
+  .usage-dashboard__filters {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .usage-dashboard__total-card:last-child {
-    grid-column: auto;
   }
 
   .usage-dashboard__section-header {
@@ -394,8 +339,6 @@
 }
 
 @media (prefers-contrast: more) {
-  .usage-dashboard__filters,
-  .usage-dashboard__total-card,
   .usage-dashboard__quality-badge,
   .usage-dashboard__unavailable-note,
   .usage-dashboard__error,
@@ -410,75 +353,35 @@
     transition: none !important;
   }
 }
-.provider-limits__header,
-.provider-limits__identity,
-.provider-limits__row {
-  display: flex;
-  align-items: center;
-}
 
-.provider-limits__header,
-.provider-limits__row {
-  justify-content: space-between;
-  gap: var(--oct-space-4);
-}
-
-.provider-limits__header h2,
-.provider-limits__identity h3,
-.provider-limits__header p,
-.provider-limits__identity p,
-.provider-limits__details p {
-  margin: 0;
-}
-
-.provider-limits__header h2 {
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-lg);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.provider-limits__identity h3 {
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-}
-
-.provider-limits__header p,
-.provider-limits__identity p,
-.provider-limits__state,
-.provider-limits__empty {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
-}
-
-.provider-limits__list,
-.provider-limits__details,
-.provider-limits__buckets {
-  display: grid;
-  gap: var(--oct-space-3);
-}
-
-.provider-limits__row {
-  padding-block: var(--oct-space-3);
-  border-top: 1px solid var(--oct-border);
-}
+/* ── Provider limits: rows over hairlines ───────────────────────────── */
 
 .provider-limits__identity {
+  display: inline-flex;
   min-width: 0;
+  align-items: center;
   gap: var(--oct-space-2);
 }
 
 .provider-limits__details {
-  min-width: min(100%, 360px);
+  display: grid;
+  min-width: min(100%, 320px);
+  gap: 6px;
+  justify-items: stretch;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
 }
 
-.provider-limits__empty {
+.provider-limits__details p,
+.provider-limits__state {
   margin: 0;
-  padding: var(--oct-space-3);
-  border: 1px dashed var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  text-align: center;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+}
+
+.provider-limits__buckets {
+  display: grid;
+  gap: 6px;
 }
 
 .provider-limits__bucket progress,
@@ -500,17 +403,34 @@
   display: grid;
   gap: 2px;
   margin: 0;
+}
+
+.provider-limits__warning p,
+p.provider-limits__warning {
   color: var(--oct-warn-fg);
 }
 
 @media (max-width: 680px) {
-  .provider-limits__header,
   .provider-limits__row {
-    align-items: stretch;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--oct-space-2);
+  }
+
+  .provider-limits__row > .surface-row__control {
+    justify-content: flex-start;
   }
 
   .provider-limits__details {
     min-width: 0;
   }
+}
+
+/* Destructive exports read as danger text, not as red pills. */
+.usage-dashboard__danger {
+  color: var(--oct-danger-fg);
+}
+
+/* The queried line closes the exports block before the next section label. */
+.usage-dashboard__footer {
+  margin-bottom: var(--oct-space-6);
 }

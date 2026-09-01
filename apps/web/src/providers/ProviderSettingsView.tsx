@@ -254,29 +254,29 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onSetEnabled={props.onSetEnabled}
         onVerifyFoundryTools={props.onVerifyFoundryTools}
       />
-      <section aria-label="Defaults" className="setgroup">
-        <div className="setgroup-head">
-          <span>Defaults</span>
-        </div>
-        <div className="setrow">
-          <span className="setrow-label">Permission persistence</span>
-          <p className="setrow-hint">
-            <span>How long a granted provider approval lasts.</span>
-          </p>
-          <div className="setrow-control">
-            <OctantSelectField
-              aria-label="Permission persistence"
-              className="settings-view__select window-no-drag"
-              disabled={props.busy}
-              onValueChange={(value) =>
-                void props.onPermissionPersistenceChange(value as PermissionPersistence)
-              }
-              options={[
-                { id: "current-session", label: "Current session only" },
-                { id: "project-default", label: "Remember for this Project" },
-              ]}
-              value={props.defaults.permissionPersistence}
-            />
+      <section aria-label="Defaults" className="settings-card-section settings-card-section--open">
+        <h2>Defaults</h2>
+        <div className="setgroup">
+          <div className="setrow">
+            <span className="setrow-label">Permission persistence</span>
+            <p className="setrow-hint">
+              <span>How long a granted provider approval lasts.</span>
+            </p>
+            <div className="setrow-control">
+              <OctantSelectField
+                aria-label="Permission persistence"
+                className="settings-view__select window-no-drag"
+                disabled={props.busy}
+                onValueChange={(value) =>
+                  void props.onPermissionPersistenceChange(value as PermissionPersistence)
+                }
+                options={[
+                  { id: "current-session", label: "Current session only" },
+                  { id: "project-default", label: "Remember for this Project" },
+                ]}
+                value={props.defaults.permissionPersistence}
+              />
+            </div>
           </div>
         </div>
       </section>

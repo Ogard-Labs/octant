@@ -120,10 +120,14 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
 
   return props.status !== "ready" ? null : (
     <>
-      <section aria-label="Providers" className="setgroup">
-        <div className="setgroup-head">
-          <span>Providers</span>
-          <span className="setgroup-gap" />
+      <section
+        aria-label="Providers"
+        className="settings-card-section settings-card-section--open provider-list"
+      >
+        {/* The pane is already titled "Providers"; this label names the list
+            against the detection section above it. */}
+        <div className="settings-section-head">
+          <h2>Configured providers</h2>
           {ordered.length < 2 ? null : (
             <OctantButton
               aria-pressed={reordering}
@@ -136,30 +140,23 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
             </OctantButton>
           )}
         </div>
-        <p className="setgroup-note">
+        <p className="settings-section-note">
           {reordering
             ? "Use the arrow controls to change the model-picker order."
             : "The first ready provider is the default for new threads."}
         </p>
         {ordered.length === 0 ? null : (
-          <div
+          <p
             aria-label="Provider readiness summary"
-            className="provider-settings__summary"
+            className="oct-meta provider-settings__summary"
             role="status"
           >
-            <span>
-              <strong>{readinessSummary.ready}</strong> ready
-            </span>
-            <span>
-              <strong>{readinessSummary.needsSetup}</strong> needs setup
-            </span>
-            <span>
-              <strong>{readinessSummary.off}</strong> off
-            </span>
-          </div>
+            {readinessSummary.ready} ready · {readinessSummary.needsSetup} needs setup ·{" "}
+            {readinessSummary.off} off
+          </p>
         )}
         {ordered.length === 0 ? (
-          <p className="provider-settings__empty">No providers configured.</p>
+          <p className="settings-section-line">No providers configured.</p>
         ) : (
           <div className="provlist">
             {ordered.map((instance, index) => (
@@ -209,7 +206,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           </div>
         )}
         {props.createForm === undefined ? null : (
-          <div className="setgroup-foot">{props.createForm}</div>
+          <div className="provider-settings__foot">{props.createForm}</div>
         )}
       </section>
       {ordered.length === 0 ? null : (
@@ -504,19 +501,22 @@ function ProviderRow(props: ProviderRowProps) {
         <ProviderGlyph displayName={name} driverKind={props.instance.driverKind} size={16} />
       </span>
       <span className="prov-main">
-        <span className="prov-name">{name}</span>
-        <span className="prov-meta">
+        <span className="prov-name oct-row-label">{name}</span>
+        <span className="prov-meta oct-meta oct-meta--mono">
           {label} {runtimeLabel}
         </span>
       </span>
-      <span className="prov-models">
+      <span className="prov-models oct-meta oct-meta--mono">
         {props.observed === undefined ||
         (props.observed.models.length === 0 && props.observed.readiness !== "ready")
           ? null
           : `${props.observed.models.length} ${props.observed.models.length === 1 ? "model" : "models"}`}
       </span>
       <span className="prov-status">
-        <span className={readinessBadgeClass(props.instance.enabled ? readiness : undefined)}>
+        <span
+          className="prov-state"
+          data-tone={readinessTone(props.instance.enabled ? readiness : undefined)}
+        >
           {!props.instance.enabled
             ? "Off"
             : readiness === undefined
@@ -1023,15 +1023,17 @@ function ProviderRow(props: ProviderRowProps) {
 }
 
 /**
- * The badge reports fact (reachable right now), never intent (the switch).
- * "checking" and "not checked" stay neutral because no reachability claim
- * has been established either way.
+ * The state text reports fact (reachable right now), never intent (the
+ * switch). "checking" and "not checked" stay neutral because no reachability
+ * claim has been established either way.
  */
-function readinessBadgeClass(readiness: ProviderObservedState["readiness"] | undefined): string {
-  if (readiness === "ready") return "badge badge-ok";
-  if (readiness === "degraded" || readiness === "unauthenticated") return "badge badge-warn";
-  if (readiness === "unavailable" || readiness === "incompatible") return "badge badge-danger";
-  return "badge";
+function readinessTone(
+  readiness: ProviderObservedState["readiness"] | undefined,
+): "ok" | "warn" | "danger" | "neutral" {
+  if (readiness === "ready") return "ok";
+  if (readiness === "degraded" || readiness === "unauthenticated") return "warn";
+  if (readiness === "unavailable" || readiness === "incompatible") return "danger";
+  return "neutral";
 }
 
 function isDisabledDiscoveryInstance(

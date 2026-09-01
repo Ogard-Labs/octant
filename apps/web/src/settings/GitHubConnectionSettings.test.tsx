@@ -246,18 +246,22 @@ describe("GitHubConnectionSettings", () => {
   });
 
   // Zoom / contrast / motion coverage is documented through the owned
-  // stylesheet because jsdom does not apply media queries: the fact grid
-  // collapses to one column in narrow layouts, values wrap for 200% zoom
-  // reflow, and the section declares no animation so reduced motion holds by
-  // construction.
+  // stylesheet because jsdom does not apply media queries: the shared fact
+  // rows and the capability rows collapse to one column in narrow layouts,
+  // values wrap for 200% zoom reflow, and the section declares no animation
+  // so reduced motion holds by construction.
   it("keeps the section readable in narrow layouts, at 200% zoom, and under motion settings", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+    const factStyles = styles.slice(styles.indexOf(".settings-fact-list"));
     const githubStyles = styles.slice(styles.indexOf(".github-settings"));
 
-    expect(githubStyles).toMatch(
-      /@media \(max-width: 680px\)[\s\S]*?\.github-settings__facts\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
+    expect(factStyles).toMatch(
+      /@media \(max-width: 720px\)[\s\S]*?\.settings-fact-list__row\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
     );
-    expect(githubStyles).toContain("overflow-wrap: anywhere");
+    expect(factStyles).toContain("overflow-wrap: anywhere");
+    expect(githubStyles).toMatch(
+      /@media \(max-width: 720px\)[\s\S]*?\.github-settings__capabilities > li\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
+    );
     expect(githubStyles).not.toContain("animation");
   });
 });

@@ -151,16 +151,63 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     }
   }
 
+  const projectControl =
+    props.folderControl !== undefined ? (
+      props.folderControl
+    ) : hasFolder && props.projectName !== undefined ? (
+      <span className="composer-tray__item" title={props.projectRoot}>
+        <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+        <span>{props.projectName}</span>
+      </span>
+    ) : (
+      <span className="composer-tray__item">
+        <AlertTriangle aria-hidden="true" size={12} strokeWidth={1.8} />
+        <span>No folder</span>
+        {props.onAttachFolder !== undefined ? (
+          <OctantButton
+            className="work-composer-adapter__attach-btn"
+            onClick={props.onAttachFolder}
+            type="button"
+            variant="ghost"
+          >
+            Attach folder
+          </OctantButton>
+        ) : null}
+      </span>
+    );
+  const environmentControl = (
+    <HostSelector
+      presentation="environment"
+      {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+      {...(props.selectedHostId === undefined ? {} : { selectedHostId: props.selectedHostId })}
+      {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+      {...(props.lastSelectedHealthyHostId === undefined
+        ? {}
+        : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+      {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+      {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
+      requiredCapability="work"
+    />
+  );
+
   return (
     <section aria-label="New Work thread" className="work-composer-adapter">
-      <div className="work-composer-adapter__canvas">
-        <div className="work-composer-adapter__welcome">
-          <h1 className="work-composer-adapter__heading">What are we working on?</h1>
+      <div className="welcome">
+        <div className="welcome__heading">
+          <h1 className="oct-title oct-title--hero">What are we working on?</h1>
         </div>
 
-        <div className="work-composer-adapter__composer">
+        <div className="composer-stack">
+          <div className="composer-tray" aria-label="Thread context">
+            <div className="composer-tray__leading">
+              {projectControl}
+              {environmentControl}
+            </div>
+            {props.createFromControl === undefined ? null : (
+              <div className="composer-tray__trailing">{props.createFromControl}</div>
+            )}
+          </div>
           <ThreadComposer
-            className="work-composer-adapter__card"
             chips={
               <>
                 <ThreadMentionChips
@@ -268,20 +315,19 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                       threadKind="work-thread"
                     />
                   )}
-                  <span className="work-composer-adapter__context-picker">
-                    <ComposerModelPicker
-                      ariaLabel="Provider and model"
-                      groups={props.providerGroups}
-                      menuSide="bottom"
-                      onSelect={props.onSelectProvider}
-                      {...(props.selectedModelId === undefined
-                        ? {}
-                        : { selectedModelId: props.selectedModelId })}
-                      {...(props.selectedProviderInstanceId === undefined
-                        ? {}
-                        : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                    />
-                  </span>
+                  <span aria-hidden="true" className="composer-gap" />
+                  <ComposerModelPicker
+                    ariaLabel="Provider and model"
+                    groups={props.providerGroups}
+                    menuSide="bottom"
+                    onSelect={props.onSelectProvider}
+                    {...(props.selectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.selectedModelId })}
+                    {...(props.selectedProviderInstanceId === undefined
+                      ? {}
+                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                  />
                   {props.poolControl}
                 </>
               ),
@@ -296,74 +342,30 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               },
             }}
           />
+        </div>
 
-          <div className="work-composer-adapter__context-strip" aria-label="Thread context">
-            <HostSelector
-              presentation="environment"
-              {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-              {...(props.selectedHostId === undefined
-                ? {}
-                : { selectedHostId: props.selectedHostId })}
-              {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-              {...(props.lastSelectedHealthyHostId === undefined
-                ? {}
-                : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-              {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-              {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
-              requiredCapability="work"
-            />
-            {props.folderControl}
-            {props.createFromControl}
-            {props.folderControl !== undefined ? null : hasFolder &&
-              props.projectName !== undefined ? (
-              <span className="work-composer-adapter__context-item" title={props.projectRoot}>
-                <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
-                <span>{props.projectName}</span>
-              </span>
-            ) : (
-              <span className="work-composer-adapter__context-item">
-                <AlertTriangle aria-hidden="true" size={12} strokeWidth={1.8} />
-                <span>No folder</span>
-                {props.onAttachFolder !== undefined ? (
-                  <OctantButton
-                    className="work-composer-adapter__attach-btn"
-                    onClick={props.onAttachFolder}
-                    type="button"
-                    variant="ghost"
-                  >
-                    Attach folder
-                  </OctantButton>
-                ) : null}
-              </span>
+        {props.errorMessage !== undefined ? (
+          <p className="work-composer-adapter__error" role="alert">
+            {props.errorMessage}
+          </p>
+        ) : null}
+        {props.creating ? (
+          <div>
+            <p aria-label="First-turn status" role="status">
+              {props.pendingMessage ?? "Starting the first turn…"}
+            </p>
+            {props.onCancelFirstTurn === undefined ? null : (
+              <OctantButton
+                onClick={props.onCancelFirstTurn}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Cancel first turn
+              </OctantButton>
             )}
           </div>
-
-          {props.errorMessage !== undefined ? (
-            <p className="work-composer-adapter__error" role="alert">
-              {props.errorMessage}
-            </p>
-          ) : null}
-          {props.creating ? (
-            <div>
-              <p aria-label="First-turn status" role="status">
-                {props.pendingMessage ?? "Starting the first turn…"}
-              </p>
-              {props.onCancelFirstTurn === undefined ? null : (
-                <OctantButton
-                  onClick={props.onCancelFirstTurn}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Cancel first turn
-                </OctantButton>
-              )}
-            </div>
-          ) : null}
-          <p className="work-composer-adapter__hint">
-            Press Enter to start · Shift+Enter for a new line · Escape to close
-          </p>
-        </div>
+        ) : null}
       </div>
     </section>
   );

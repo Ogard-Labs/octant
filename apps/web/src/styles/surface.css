@@ -1,0 +1,395 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Surface language: one page shell, one type hierarchy, one composer welcome.
+
+   Every list, board, reader, and preference page in the renderer is a
+   "surface". A surface has a header (title, one-line subtitle, actions),
+   an optional toolbar, and sections separated by hairlines. Nothing here
+   paints a control; adapters own controls (0046). This file owns the
+   hierarchy the marketing site and the app share (DESIGN.md "Language").
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Reading measure for list surfaces. Boards and canvases opt out with
+     `.surface--wide`. */
+  --oct-surface-measure: 880px;
+  --oct-surface-gutter: 24px;
+  /* The one size between metadata (11) and body (13). Row descriptions,
+     subtitles, and menu details use it; nothing uses 11.5 or 12.5. */
+  --oct-text-detail: calc(12 * var(--oct-text-step));
+}
+
+/* ── Type roles ─────────────────────────────────────────────────────────
+   Five roles cover every heading and label. Weight is 500 by default and
+   600 only for the page title; uppercase and letter-spaced eyebrows are
+   not part of the language. */
+
+.oct-title {
+  margin: 0;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.oct-title--hero {
+  font-size: clamp(24px, 2.5vw, 30px);
+  font-weight: var(--oct-weight-display);
+  line-height: 1.15;
+}
+
+.oct-subtitle {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.oct-section-label {
+  margin: 0;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.3;
+  text-transform: none;
+}
+
+.oct-row-label {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  line-height: 1.35;
+}
+
+.oct-row-detail {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+.oct-meta {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
+.oct-meta--mono {
+  font-family: var(--oct-font-mono);
+  letter-spacing: 0;
+}
+
+/* ── Page shell ───────────────────────────────────────────────────────── */
+
+.surface {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  flex: 1 1 auto;
+  flex-direction: column;
+  color: var(--oct-fg);
+  background: var(--octant-app-background);
+}
+
+.surface__inner {
+  width: min(100% - var(--oct-surface-gutter) * 2, var(--oct-surface-measure));
+  min-width: 0;
+  padding: 28px 0 64px;
+  margin: 0 auto;
+}
+
+.surface--wide > .surface__inner {
+  width: calc(100% - var(--oct-surface-gutter) * 2);
+  max-width: none;
+}
+
+.surface-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--oct-space-4);
+  margin: 0 0 var(--oct-space-5);
+}
+
+.surface-header__copy {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-1);
+}
+
+.surface-header__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding-top: 2px;
+}
+
+/* Filters, search, and view switches sit on one row under the header. The
+   search field takes the slack; everything else keeps its natural width. */
+.surface-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0 0 var(--oct-space-4);
+}
+
+.surface-toolbar__search {
+  flex: 1 1 240px;
+  min-width: 200px;
+}
+
+.surface-toolbar__spacer {
+  flex: 1 1 auto;
+}
+
+/* ── Sections and rows ─────────────────────────────────────────────────
+   The same hairline grammar Settings uses (0072): a label, a rule, rows. */
+
+.surface-section {
+  display: grid;
+  gap: 0;
+  margin: 0 0 var(--oct-space-6);
+}
+
+.surface-section > .oct-section-label {
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.surface-section__note {
+  margin: 8px 0 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+.surface-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.surface-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--oct-space-6);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.surface-row__copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.surface-row__control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}
+
+/* Empty states are quiet text, not a raised card. The card version read as
+   a dialog that had nothing to say. */
+.surface-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--oct-space-1);
+  padding: 48px 16px;
+  text-align: center;
+}
+
+.surface-empty > .oct-row-label {
+  color: var(--oct-fg);
+}
+
+/* ── Tabs ──────────────────────────────────────────────────────────────
+   Plain-text tabs carry a 2px underline on the active item so the current
+   view is visible without reading the content. */
+
+.surface-tabs {
+  display: inline-flex;
+  gap: var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.surface-tabs > [role="tab"],
+.surface-tabs > button {
+  height: 32px;
+  padding: 0 2px;
+  margin-bottom: -1px;
+  color: var(--oct-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+}
+
+.surface-tabs > [aria-selected="true"],
+.surface-tabs > [aria-current="page"],
+.surface-tabs > [data-active="true"] {
+  color: var(--oct-fg);
+  border-bottom-color: var(--oct-fg);
+}
+
+/* ── Welcome composer ──────────────────────────────────────────────────
+   Chat, Work, and Code start from the same geometry: one hero question, a
+   rear context tray, and the raised `.composer` in front. The tray is the
+   Code tray promoted to a shared recipe; the per-mode adapters only decide
+   which controls sit on it. */
+
+.welcome {
+  display: flex;
+  width: min(100% - 40px, 768px);
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-height: 100%;
+  padding-block: min(16vh, 148px) 48px;
+  margin: 0 auto;
+  gap: 18px;
+}
+
+.welcome__heading {
+  display: grid;
+  justify-items: center;
+  gap: var(--oct-space-2);
+  text-align: center;
+}
+
+.welcome__heading > .oct-title--hero {
+  max-width: 36ch;
+  margin: 0 auto;
+}
+
+.composer-stack {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.composer-stack > .composer {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  margin: 0;
+}
+
+.composer-stack > .composer > .composer-input {
+  min-height: 64px;
+}
+
+.composer-tray {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  width: calc(100% - 40px);
+  margin: 0 auto -18px;
+  padding: 8px 16px 22px;
+  color: var(--oct-meta);
+  background: var(--octant-workspace);
+  border-radius: var(--oct-radius-lg);
+  box-shadow: var(--octant-shadow-sm);
+}
+
+/* Anchored menus open from inside the tray. Raise it, and stop clipping its
+   cells, only while one is open so the resting depth order never changes. */
+.composer-tray:has([aria-expanded="true"]) {
+  z-index: 2;
+}
+
+.composer-tray__leading,
+.composer-tray__trailing {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-tray__leading {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.composer-tray__leading:has([aria-expanded="true"]) {
+  overflow: visible;
+}
+
+.composer-tray__trailing {
+  flex: 0 0 auto;
+}
+
+.composer-tray .host-selector__health {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Every tray control shares one quiet trigger: icon, label, chevron. */
+.composer-tray__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 7px;
+  color: var(--octant-text-secondary);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-display);
+  white-space: nowrap;
+}
+
+/* The shared row already carries a gap before send. A surface that places
+   its own gap ahead of the model and access controls makes that first gap
+   the only stretch, so the pickers sit beside send instead of centred. */
+.composer-row > .composer-gap ~ .composer-gap {
+  flex: 0 0 0;
+}
+
+.welcome__hint {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+  text-align: center;
+}
+
+@media (max-width: 920px) {
+  .composer-tray {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: end;
+  }
+
+  .composer-tray__leading {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .composer-tray__trailing {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}

@@ -1070,17 +1070,14 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   gap: 10px;
 }
 
-.draft-thread__welcome,
-.work-composer-adapter__welcome,
-.code-composer-adapter__welcome {
+.draft-thread__welcome {
   display: grid;
   justify-items: start;
   gap: 4px;
   margin-bottom: 14px;
 }
 
-.draft-thread:not(.agent-mode-welcome) .draft-thread__welcome,
-.work-composer-adapter__welcome {
+.draft-thread:not(.agent-mode-welcome) .draft-thread__welcome {
   justify-items: center;
   text-align: center;
 }
@@ -1090,20 +1087,17 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   color: var(--oct-accent-fg);
 }
 
-.draft-thread__eyebrow,
-.work-composer-adapter__eyebrow,
-.code-composer-adapter__eyebrow {
+.draft-thread__eyebrow {
   display: block;
   margin: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
-.draft-thread__heading,
-.work-composer-adapter__heading {
+.draft-thread__heading {
   margin: 0;
   color: var(--octant-text-primary);
   font-size: clamp(25px, 3vw, 31px);
@@ -1112,8 +1106,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   line-height: 1.1;
 }
 
-.draft-thread__description,
-.work-composer-adapter__description {
+.draft-thread__description {
   max-width: 58ch;
   margin: 2px 0 0;
   color: var(--octant-text-secondary);
@@ -1200,16 +1193,14 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   display: none;
 }
 
-.draft-thread__composer,
-.work-composer-adapter__composer {
+.draft-thread__composer {
   order: 2;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.draft-thread__context-strip,
-.work-composer-adapter__context-strip {
+.draft-thread__context-strip {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1310,8 +1301,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   font-size: calc(12 * var(--oct-text-step));
 }
 
-.draft-thread__context-item,
-.work-composer-adapter__context-item {
+.draft-thread__context-item {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1326,35 +1316,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   opacity: 0.7;
 }
 
-.draft-thread__context-picker,
-.work-composer-adapter__context-picker {
+.draft-thread__context-picker {
   margin-inline-start: auto;
-}
-
-.work-composer-adapter__context-strip {
-  position: relative;
-  z-index: 0;
-  width: calc(100% - 40px);
-  margin: -18px auto 0;
-  padding: 22px 16px 6px;
-  background: var(--octant-workspace);
-  border: 0;
-  border-radius: var(--oct-radius-lg);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-.work-composer-adapter__composer {
-  position: relative;
-  isolation: isolate;
-}
-
-.work-composer-adapter__composer > .work-composer-adapter__card {
-  position: relative;
-  z-index: 1;
-}
-
-.work-composer-adapter__composer-bar .work-composer-adapter__context-picker {
-  margin-inline-start: 0;
 }
 
 .work-composer-adapter__visually-hidden {
@@ -1398,10 +1361,6 @@ form > .work-composer-adapter__attachments {
 .work-composer-adapter__file-input,
 .work-composer-adapter__composer-bar input[type="file"] {
   display: none;
-}
-
-.work-composer-adapter__context-strip {
-  justify-content: flex-start;
 }
 
 .create-from-issue-control {
@@ -1468,7 +1427,7 @@ form > .work-composer-adapter__attachments {
     padding-block: 0;
   }
 
-  .draft-thread.chat-welcome .draft-thread__canvas {
+  .draft-thread.chat-welcome .welcome {
     box-sizing: border-box;
     width: calc(100% - 24px);
     justify-content: flex-start;
@@ -1503,7 +1462,6 @@ form > .work-composer-adapter__attachments {
   background: var(--octant-app-background);
 }
 
-.work-composer-adapter__canvas,
 .work-thread-workspace .draft-thread__canvas {
   box-sizing: border-box;
   display: flex;
@@ -1568,8 +1526,8 @@ form > .work-composer-adapter__attachments {
   color: var(--octant-text-muted);
   font-size: calc(9 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .work-thread-workspace__toolbar {
@@ -1637,139 +1595,9 @@ form > .work-composer-adapter__attachments {
   background: var(--octant-app-background);
 }
 
-.code-composer-adapter__canvas {
-  display: flex;
-  width: min(100% - 40px, 768px);
-  min-width: 0;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  min-height: 100%;
-  padding-block: min(16vh, 148px) 48px;
-  margin: 0 auto;
-  gap: 18px;
-}
-
-.code-composer-adapter__welcome {
-  justify-items: center;
-  text-align: center;
-  gap: 8px;
-}
-
-.code-composer-adapter__heading {
-  max-width: 36ch;
-  margin: 0;
-  color: var(--oct-fg);
-  font-size: clamp(24px, 2.5vw, 30px);
-  font-weight: 500;
-  letter-spacing: var(--oct-tracking-tight);
-  line-height: 1.15;
-  text-wrap: balance;
-}
-
-.code-composer-adapter__composer {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.code-composer-adapter__stack {
-  position: relative;
-  isolation: isolate;
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.code-composer-adapter__stack > .code-composer-adapter__card {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  margin: 0;
-}
-
-/* Layout only. The frame, 20px radius, and lift are `.composer` (0038).
-   Painting the prompt and the row as two hairline boxes is what left Code
-   welcome looking like the old flat chrome after the shared recipe shipped. */
-.code-composer-adapter__card {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  overflow: visible;
-}
-
-.code-composer-adapter__card > .composer-input {
-  min-height: 64px;
-}
-
-/* The create context is the rear sheet above the prompt. Project, branch,
-   and Environment remain visible before the person types, while the wider
-   front card overlaps only the tray's empty lower padding. */
-.code-composer-adapter__dock {
-  position: relative;
-  z-index: 0;
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  width: calc(100% - 40px);
-  margin: 0 auto -18px;
-  padding: 8px 16px 22px;
-  color: var(--oct-meta);
-  background: var(--octant-workspace);
-  border-radius: var(--oct-radius-lg);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-/* The Project picker is anchored inside the rear tray rather than portalled.
-   Raise the tray only while an anchored control is open so its menu can cross
-   the front card without changing the resting depth order. */
-.code-composer-adapter__dock:has([aria-expanded="true"]) {
-  z-index: 2;
-}
-
-html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
-  background: var(--octant-workspace);
-}
-
-.code-composer-adapter__dock-leading,
-.code-composer-adapter__dock-trailing {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
-
-.code-composer-adapter__dock-leading {
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-
-/* The Project menu is anchored inside this cell. Clipping the cell while the
-   menu is open hid the whole list behind the prompt card: only the search
-   field was visible and "Add local folder" could not be reached. */
-.code-composer-adapter__dock-leading:has([aria-expanded="true"]) {
-  overflow: visible;
-}
-
-.code-composer-adapter__dock-trailing {
-  flex: 0 0 auto;
-}
-
-.code-composer-adapter__dock .host-selector__health {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 /* Worktree source expands from the context bar, not from inside the raised
    composer. It stays unboxed so it does not read as a third card. */
-.code-composer-adapter__composer > .code-worktree-source {
+.code-composer-adapter .code-worktree-source {
   margin: 0;
   padding: 4px 2px 0;
   background: transparent;
@@ -1777,33 +1605,8 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
   border-radius: 0;
 }
 
-@media (max-width: 920px) {
-  .code-composer-adapter__dock {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    flex-wrap: wrap;
-    align-items: end;
-  }
-
-  .code-composer-adapter__dock-leading,
-  .code-composer-adapter__dock-trailing {
-    min-width: 0;
-  }
-
-  .code-composer-adapter__dock-leading {
-    flex-wrap: wrap;
-    overflow: visible;
-  }
-
-  .code-composer-adapter__dock-trailing {
-    justify-content: flex-start;
-    flex-wrap: wrap;
-  }
-}
-
 @media (max-width: 640px) {
-  .draft-thread__context-strip,
-  .work-composer-adapter__context-strip {
+  .draft-thread__context-strip {
     align-items: stretch;
   }
 
@@ -1822,16 +1625,6 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
   }
 }
 
-.code-composer-adapter__context-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--octant-text-muted);
-  font-size: 11.5px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
 .code-composer-adapter__context-picker {
   margin-inline-start: auto;
 }
@@ -1847,10 +1640,6 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
 /* Control sizing on the composer row belongs to the shared row, not to the
    surface that happens to host it (0038). Sizing icon buttons here is what
    left one row carrying three different control heights. */
-
-.code-composer-adapter__composer-bar .code-composer-adapter__context-item > svg {
-  display: none;
-}
 
 .code-composer-adapter__composer-bar .code-composer-adapter__policy-select {
   min-width: 0;

@@ -43,7 +43,14 @@ export function OpenInApplicationSettings(props: OpenInApplicationSettingsProps)
   }, [catalogue, props.applications]);
 
   if (listApplications === undefined) {
-    return <p className="open-in-settings__state">Available in the macOS desktop app.</p>;
+    return (
+      <div className="settings-card-section settings-card-section--open">
+        <h2>Open in applications</h2>
+        <p className="open-in-settings__state oct-row-detail">
+          Available in the macOS desktop app.
+        </p>
+      </div>
+    );
   }
   if (error !== undefined) {
     return (

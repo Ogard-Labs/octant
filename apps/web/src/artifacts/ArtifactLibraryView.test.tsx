@@ -171,7 +171,7 @@ describe("the artifact gallery", () => {
     });
 
     const title = screen.getByText("Nothing is shared right now.");
-    expect(title.closest("[role='status']")).toHaveAttribute("data-slot", "empty-state");
+    expect(title.closest("[role='status']")).toHaveClass("surface-empty");
     expect(screen.getByText("Artifacts you share will appear here.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "View all artifacts" }));
     expect(onFiltersChange).toHaveBeenLastCalledWith({ tab: "all", query: "" });

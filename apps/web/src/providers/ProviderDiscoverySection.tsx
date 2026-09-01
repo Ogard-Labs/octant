@@ -29,10 +29,12 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
   );
 
   return (
-    <section aria-label="Detected on this Mac" className="setgroup provider-discovery">
-      <div className="setgroup-head">
-        <span>Detected on this Mac</span>
-        <span className="setgroup-gap" />
+    <section
+      aria-label="Detected on this Mac"
+      className="settings-card-section settings-card-section--open provider-discovery"
+    >
+      <div className="settings-section-head">
+        <h2>Detected on this Mac</h2>
         <OctantButton
           size="sm"
           variant="outline"
@@ -44,19 +46,19 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         </OctantButton>
       </div>
 
-      <p className="setgroup-note">
+      <p className="settings-section-note">
         Octant scans installed runtimes and checks every enabled provider. Enable only the providers
         you want available.
       </p>
 
       {scanning && snapshot === undefined ? (
-        <p className="setgroup-note" role="status">
+        <p className="settings-section-line" role="status">
           Scanning for installed runtimes…
         </p>
       ) : null}
 
       {props.message === undefined ? null : (
-        <p className="setgroup-note" role="alert">
+        <p className="settings-section-line" role="alert">
           {props.message}{" "}
           <OctantButton
             size="sm"
@@ -71,7 +73,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       )}
 
       {snapshot !== undefined && snapshot.status === "cancelled" ? (
-        <p className="setgroup-note" role="status">
+        <p className="settings-section-line" role="status">
           Scan was cancelled.{" "}
           <OctantButton size="sm" variant="ghost" onClick={() => void props.onScan()} type="button">
             Retry
@@ -80,13 +82,13 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       ) : null}
 
       {snapshot !== undefined && snapshot.status === "partial" ? (
-        <p className="setgroup-note" role="status">
+        <p className="settings-section-line" role="status">
           {snapshot.message ?? "Scan completed partially."} Some results may be missing.
         </p>
       ) : null}
 
       {snapshot !== undefined && snapshot.status === "failed" ? (
-        <p className="setgroup-note" role="alert">
+        <p className="settings-section-line" role="alert">
           {snapshot.message ?? "Discovery scan failed."}{" "}
           <OctantButton size="sm" variant="ghost" onClick={() => void props.onScan()} type="button">
             Retry
@@ -95,20 +97,24 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       ) : null}
 
       {!scanning && detected.length === 0 && snapshot !== undefined ? (
-        <p className="setgroup-note">
-          Installed providers are already listed below. Use <strong>Add provider manually</strong>{" "}
-          only for a custom endpoint or unusual binary path.
+        <p className="settings-section-line">
+          Installed providers are already listed below. Use “Add provider manually” only for a
+          custom endpoint or unusual binary path.
         </p>
       ) : null}
 
-      {detected.map((candidate) => (
-        <DiscoveryRow
-          key={`${candidate.driverKind}-${candidate.binaryPath}`}
-          candidate={candidate}
-          connecting={props.connectingPaths.has(candidate.binaryPath)}
-          onConnect={props.onConnect}
-        />
-      ))}
+      {detected.length === 0 ? null : (
+        <div className="setgroup">
+          {detected.map((candidate) => (
+            <DiscoveryRow
+              key={`${candidate.driverKind}-${candidate.binaryPath}`}
+              candidate={candidate}
+              connecting={props.connectingPaths.has(candidate.binaryPath)}
+              onConnect={props.onConnect}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -128,19 +134,21 @@ function DiscoveryRow(props: DiscoveryRowProps) {
       <span className="setrow-label">
         {candidate.displayName}
         {candidate.version !== undefined ? (
-          <span className="provider-discovery__version">{candidate.version}</span>
+          <span className="oct-meta oct-meta--mono provider-discovery__version">
+            {candidate.version}
+          </span>
         ) : null}
       </span>
       <p className="setrow-hint">
-        <span>{candidate.pathSummary}</span>
+        <span className="oct-meta--mono">{candidate.pathSummary}</span>
         {candidate.readiness === "unauthenticated" && candidate.onboardingGuidance !== undefined ? (
           <span className="provider-discovery__guidance">{candidate.onboardingGuidance}</span>
         ) : null}
       </p>
       <div className="setrow-control row">
-        <ReadinessBadge readiness={candidate.readiness} />
+        <ReadinessText readiness={candidate.readiness} />
         {connected ? (
-          <span className="provider-discovery__connected" role="status">
+          <span className="oct-meta" role="status">
             Connected
           </span>
         ) : (
@@ -163,7 +171,11 @@ function DiscoveryRow(props: DiscoveryRowProps) {
   );
 }
 
-function ReadinessBadge(props: { readonly readiness: DiscoveryCandidate["readiness"] }) {
+/**
+ * Readiness is a fact about the runtime on disk, said in words rather than a
+ * pill: colour marks only the states that need attention.
+ */
+function ReadinessText(props: { readonly readiness: DiscoveryCandidate["readiness"] }) {
   const label =
     props.readiness === "ready"
       ? "Ready"
@@ -174,13 +186,17 @@ function ReadinessBadge(props: { readonly readiness: DiscoveryCandidate["readine
           : props.readiness === "unavailable"
             ? "Unavailable"
             : "Unknown";
-  const variant =
+  const tone =
     props.readiness === "ready"
-      ? "badge badge-ok"
+      ? "ok"
       : props.readiness === "unauthenticated"
-        ? "badge badge-warn"
+        ? "warn"
         : props.readiness === "incompatible" || props.readiness === "unavailable"
-          ? "badge badge-danger"
-          : "badge";
-  return <span className={variant}>{label}</span>;
+          ? "danger"
+          : "neutral";
+  return (
+    <span className="prov-state" data-tone={tone}>
+      {label}
+    </span>
+  );
 }

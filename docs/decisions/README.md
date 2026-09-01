@@ -80,6 +80,7 @@ distilled successor of the earlier long-form design specifications.
 | [0070](0070-setup-surfaces-compose-from-public-blocks.md)     | Renderer visual language matches public block catalogs                                      | Accepted           |
 | [0071](0071-one-navigation-and-surface-hierarchy.md)          | One navigation and surface hierarchy                                                        | Accepted           |
 | [0072](0072-settings-collections-stay-open.md)                | Settings collections stay open                                                              | Accepted           |
+| [0073](0073-one-surface-language.md)                          | One surface language across the renderer and the site                                       | Accepted           |
 
 ## Adding an ADR
 

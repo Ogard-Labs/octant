@@ -101,7 +101,10 @@ describe("ProviderSettingsView", () => {
     );
 
     expect(screen.getByRole("status", { name: "Provider readiness summary" })).toHaveTextContent(
-      "1 ready1 needs setup1 off",
+      "1 ready · 1 needs setup · 1 off",
+    );
+    expect(screen.getByRole("region", { name: "Providers" })).toHaveClass(
+      "settings-card-section--open",
     );
   });
 

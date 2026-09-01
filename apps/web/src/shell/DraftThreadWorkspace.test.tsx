@@ -770,7 +770,7 @@ describe("DraftThreadWorkspace", () => {
 
     const project = screen.getByRole("button", { name: "Project: Octant" });
     expect(screen.getByRole("heading", { level: 1 })).not.toContainElement(project);
-    expect(project.closest(".code-composer-adapter__dock")).not.toBeNull();
+    expect(project.closest(".composer-tray")).not.toBeNull();
 
     await user.click(project);
     await user.click(screen.getByRole("option", { name: "Add local folder…" }));

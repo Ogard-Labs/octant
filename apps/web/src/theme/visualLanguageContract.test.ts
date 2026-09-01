@@ -139,12 +139,18 @@ describe("the public-block visual language", () => {
     expect(emptyPicker).toMatch(/background:\s*transparent/);
   });
 
-  it("tucks a compact Code context tray above a compact composer", () => {
-    const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
-    const stack = shell.match(/\.code-composer-adapter__stack \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
-    const dock = shell.match(/\.code-composer-adapter__dock \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+  it("tucks the shared context tray above the composer on every welcome", () => {
+    const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
+    const stack = surface.match(/\.composer-stack \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+    const dock = surface.match(/\.composer-tray \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const prompt =
-      shell.match(/\.code-composer-adapter__card > \.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+      surface.match(/\.composer-stack > \.composer > \.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ??
+      "";
+    const welcomes = [
+      "chat/ChatWelcome.tsx",
+      "work/composer/WorkComposerAdapter.tsx",
+      "code/composer/CodeComposerAdapter.tsx",
+    ].map((path) => readFileSync(join(webRoot, path), "utf8"));
 
     expect(stack).toMatch(/position:\s*relative/);
     expect(stack).toMatch(/isolation:\s*isolate/);
@@ -157,6 +163,10 @@ describe("the public-block visual language", () => {
     expect(dock).not.toMatch(/border-radius:\s*0 0/);
     expect(dock).not.toMatch(/position:\s*absolute/);
     expect(prompt).toMatch(/min-height:\s*64px/);
+    for (const source of welcomes) {
+      expect(source).toContain("composer-tray");
+      expect(source).not.toContain("context-strip");
+    }
   });
 
   it("does not keep a native select recipe on the composer row", () => {
@@ -232,11 +242,17 @@ describe("the public-block visual language", () => {
     expect(settings).not.toMatch(
       /\.settings-theme-editor__disclosure,\n\.settings-theme-editor__accessibility \{\n(?:.*\n)*?background:\s*none/,
     );
+    // Chat and Code defaults are SettingRows in the open grammar; the
+    // bespoke field recipes that laid them out as a form are gone, and their
+    // free-text controls take the shared control column.
+    expect(settings).not.toMatch(/\.code-settings__field/);
+    expect(settings).not.toMatch(/\.code-settings__section/);
     expect(settings).toMatch(
-      /\.code-settings__section\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/,
+      /\.code-settings \.setrow-control > \.settings-view__text-input\s*\{[^}]*width:\s*var\(--oct-settings-control\)/,
     );
-    expect(settings).toMatch(/\.code-settings__field--choice\s*\{[^}]*display:\s*grid/);
-    expect(settings).toMatch(/\.code-settings__field--editor\s*\{[^}]*display:\s*grid/);
+    // Actions that act on a whole collection sit on the label line, not in a
+    // card header or a floating toolbar.
+    expect(settings).toMatch(/\.settings-section-head\s*\{[^}]*justify-content:\s*space-between/);
     expect(settings).not.toMatch(/\.octant-switch\s*\{/);
   });
 
@@ -256,5 +272,26 @@ describe("the public-block visual language", () => {
     expect(hiddenDesktopGroups).toMatch(/width:\s*1px/);
     expect(hiddenDesktopGroups).toMatch(/clip-path:\s*inset\(50%\)/);
     expect(hint).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
+  });
+
+  it("keeps Usage on the open grammar instead of stat cards", () => {
+    const usage = readFileSync(join(webRoot, "styles/usage.css"), "utf8");
+    const dashboard = readFileSync(join(webRoot, "usage/UsageDashboard.tsx"), "utf8");
+    const limits = readFileSync(join(webRoot, "usage/ProviderUsageLimitsPanel.tsx"), "utf8");
+
+    // Totals are labelled numbers, exports are ordinary buttons, and provider
+    // limits are rows over hairlines: no tile or card recipe carries a lift.
+    expect(usage).not.toMatch(
+      /\.usage-(?:stat-card|dashboard__total-card|total)[^{]*\{[^}]*box-shadow/,
+    );
+    expect(usage).not.toMatch(/text-transform:\s*uppercase/);
+    expect(usage).toMatch(/\.usage-total__value\s*\{[^}]*font-size:\s*var\(--oct-text-xl\)/);
+    expect(dashboard).not.toMatch(/text-transform:\s*uppercase|\buppercase\b/);
+    expect(dashboard).not.toContain("OctantCard");
+    expect(dashboard).toContain('className="surface-toolbar"');
+    expect(dashboard).toContain("<SurfaceSection");
+    expect(dashboard).toContain("<SurfaceEmpty");
+    expect(limits).not.toContain("OctantCard");
+    expect(limits).toContain('className="surface-row provider-limits__row"');
   });
 });

@@ -1,7 +1,7 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { Check, ChevronRight } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
-import { useRef } from "react";
+import { useId, useRef } from "react";
 import { cn } from "./utils";
 
 export function DropdownMenu(props: ComponentProps<typeof MenuPrimitive.Root>) {
@@ -219,6 +219,13 @@ export interface ShadcnDropdownMenuProps {
 
 export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
+  // An item's accessible name is its label alone; the description is exposed
+  // as a description. Naming from content ran the two together ("Work Work
+  // with local files and documents") and left the mode menu unnamed in the
+  // shell's accessibility tree.
+  const menuId = useId();
+  const labelId = (index: number) => `${menuId}-item-${index}-label`;
+  const descriptionId = (index: number) => `${menuId}-item-${index}-description`;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -237,8 +244,12 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
         >
           <DropdownMenuPopup className="window-no-drag" finalFocus={triggerRef}>
             {props.selectionMode === "action" ? (
-              props.items.map((item) => (
+              props.items.map((item, index) => (
                 <MenuPrimitive.Item
+                  aria-labelledby={labelId(index)}
+                  {...(item.description === undefined
+                    ? {}
+                    : { "aria-describedby": descriptionId(index) })}
                   className={cn(
                     "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
                   )}
@@ -251,9 +262,14 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                     {item.icon}
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate font-medium">{item.label}</span>
+                    <span className="truncate font-medium" id={labelId(index)}>
+                      {item.label}
+                    </span>
                     {item.description === undefined ? null : (
-                      <span className="truncate text-xs text-muted-foreground">
+                      <span
+                        className="truncate text-xs text-muted-foreground"
+                        id={descriptionId(index)}
+                      >
                         {item.description}
                       </span>
                     )}
@@ -272,8 +288,12 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                 }}
                 value={props.value}
               >
-                {props.items.map((item) => (
+                {props.items.map((item, index) => (
                   <MenuPrimitive.RadioItem
+                    aria-labelledby={labelId(index)}
+                    {...(item.description === undefined
+                      ? {}
+                      : { "aria-describedby": descriptionId(index) })}
                     className={cn(
                       "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
                     )}
@@ -293,9 +313,14 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                       {item.icon}
                     </span>
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate font-medium">{item.label}</span>
+                      <span className="truncate font-medium" id={labelId(index)}>
+                        {item.label}
+                      </span>
                       {item.description === undefined ? null : (
-                        <span className="truncate text-xs text-muted-foreground">
+                        <span
+                          className="truncate text-xs text-muted-foreground"
+                          id={descriptionId(index)}
+                        >
                           {item.description}
                         </span>
                       )}

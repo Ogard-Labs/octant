@@ -1,11 +1,12 @@
 /* Automation Center: one shared surface for Work and Code automations.
-   Paint comes from the design system (octant.css `--oct-*` tokens and the
-   btn/badge/segmented/menu/input recipes); this sheet keeps only layout
-   and the few automation-specific looks. Font sizes stay in rem — not the
-   px type-scale tokens — because 200% text zoom multiplies the root font
-   size and this surface promises to scale with it (the suite asserts it).
-   Motion is limited to color transitions and respects
-   prefers-reduced-motion. */
+   The shell, header, toolbar, sections, and empty state come from the
+   surface language; paint comes from the design system (octant.css
+   `--oct-*` tokens and the btn/badge/segmented/menu/input recipes). This
+   sheet keeps only layout and the few automation-specific looks. Font
+   sizes stay in rem or type tokens — never px — because 200% text zoom
+   multiplies the root font size and this surface promises to scale with it
+   (the suite asserts it). Motion is limited to color transitions and
+   respects prefers-reduced-motion. */
 
 .automation-center-layer {
   position: absolute;
@@ -15,42 +16,12 @@
   background: var(--oct-bg);
 }
 
-.automation-center {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  height: 100%;
-  min-height: 0;
-  padding: 1rem 1.25rem;
-  overflow: auto;
-  background: var(--oct-bg);
-}
-
-.automation-center__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.automation-center__title {
-  margin: 0;
-  font-family: var(--oct-font-display);
-  font-size: 1rem;
-  font-weight: var(--oct-weight-strong);
-}
-
-.automation-center__subtitle {
-  margin: 0.15rem 0 0;
-  color: var(--oct-muted);
-  font-size: 0.875rem;
-}
-
 .automation-center__notice {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  margin-bottom: 0.75rem;
   padding: 0.2rem 0;
   color: var(--oct-muted);
   border: 0;
@@ -58,31 +29,22 @@
   font-size: 0.75rem;
 }
 
-.automation-center__notice[data-delivery-enabled="false"] {
-  color: var(--oct-warn-fg);
+.automation-center__delivery {
+  margin: 0 0 1rem;
 }
 
 .automation-center__body {
   display: grid;
-  width: min(100%, 72rem);
   grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   min-height: 0;
-  flex: 1;
-  margin-inline: auto;
 }
 
 .automation-center__body[data-detail-open="true"] {
   grid-template-columns: minmax(18rem, 1.2fr) minmax(0, 1fr);
 }
 
-.automation-center__header,
-.automation-center > .automation-center__notice {
-  width: min(100%, 72rem);
-  margin-inline: auto;
-}
-
-.automation-center[data-narrow="true"] .automation-center__body {
+.automation-center__body[data-narrow="true"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -93,45 +55,15 @@
   gap: 0.75rem;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
 }
 
-.automation-center__list-pane > [data-slot="empty-state"] {
-  margin: 32px auto;
-}
-
-.automation-center__start {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.automation-center__start header,
-.automation-center__suggestions {
-  display: grid;
-  gap: 0.2rem;
-}
-
-.automation-center__start h3,
-.automation-center__start p,
-.automation-center__suggestions h3 {
-  margin: 0;
-}
-
-.automation-center__start h3,
-.automation-center__suggestions h3 {
-  font-size: 0.875rem;
-  font-weight: var(--oct-weight-strong);
-}
-
-.automation-center__start p {
-  color: var(--oct-muted);
-  font-size: 0.75rem;
-}
-
+/* The creation paths and suggestions are independently actionable objects,
+   so they keep their lift; the sections around them are open. */
 .automation-center__creation-paths {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.6rem;
+  margin-top: 0.75rem;
 }
 
 .automation-center__creation-path {
@@ -143,20 +75,21 @@
   gap: 0.65rem;
   padding: 0.85rem;
   color: var(--oct-fg-2);
-  border: 1px solid var(--oct-border);
+  border: 0;
   border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  box-shadow: var(--octant-shadow-sm);
   text-align: left;
   white-space: normal;
-}
-
-.automation-center__creation-path--featured {
-  background: color-mix(in oklab, var(--oct-accent-soft) 45%, var(--oct-surface));
-  border-color: color-mix(in oklab, var(--oct-accent-fg) 28%, var(--oct-border));
 }
 
 .automation-center__creation-path > svg {
   margin-top: 2px;
   color: var(--oct-muted);
+}
+
+.automation-center__creation-path--featured > svg {
+  color: var(--oct-accent-fg);
 }
 
 .automation-center__creation-path > span,
@@ -169,69 +102,49 @@
 .automation-center__creation-path strong,
 .automation-center__suggestion strong {
   color: var(--oct-fg);
-  font-size: 0.8125rem;
-  font-weight: 600;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
 }
 
 .automation-center__creation-path small,
 .automation-center__suggestion span {
   color: var(--oct-muted);
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-detail);
   font-weight: 400;
   line-height: 1.45;
-}
-
-.automation-center__suggestions {
-  gap: 0.65rem;
-  margin-top: 0.35rem;
 }
 
 .automation-center__suggestion-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.5rem;
+  margin-top: 0.75rem;
 }
 
 .automation-center__suggestion {
+  height: auto;
   min-height: 4.5rem;
   align-content: start;
   justify-content: stretch;
   padding: 0.7rem;
-  border: 1px solid var(--oct-border);
+  border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
+  box-shadow: var(--octant-shadow-sm);
   text-align: left;
   white-space: normal;
 }
 
-.automation-center__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .automation-center__search {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.35rem;
-  min-height: var(--oct-control-height-sm);
-  padding: 0 0.55rem;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
-  flex: 1;
-  min-width: 10rem;
+  color: var(--oct-muted);
 }
 
 .automation-center__search input {
   flex: 1;
   min-width: 0;
-  border: none;
-  background: transparent;
-  color: inherit;
-  font-size: 0.875rem;
-  outline: none;
 }
 
 /* The view and mode filters ride the .segmented/.segment recipe; the
@@ -411,10 +324,6 @@
 
 .automation-row__menu > * {
   justify-content: flex-start;
-}
-
-.automation-center__empty {
-  margin: 1rem auto;
 }
 
 .automation-detail {
@@ -654,8 +563,8 @@
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: var(--oct-tracking-wide);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .routine-calendar__grid {
@@ -762,11 +671,6 @@
 }
 
 .automation-center__group-heading {
-  margin: 0;
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: 0.6875rem;
-  font-weight: var(--oct-weight-display);
-  text-transform: uppercase;
-  letter-spacing: var(--oct-tracking-wide);
+  padding: 0.6rem 0 0.5rem;
+  border-bottom: 1px solid var(--oct-hairline);
 }

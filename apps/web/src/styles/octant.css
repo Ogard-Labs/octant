@@ -377,6 +377,7 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   font-synthesis: none;
+  font-optical-sizing: auto;
   overflow-x: hidden;
 }
 img,
@@ -532,8 +533,8 @@ h4 {
 .eyebrow {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wider);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-accent-fg);
   margin: 0 0 var(--oct-space-5);
 }
@@ -718,8 +719,8 @@ h4 {
   border-radius: var(--oct-radius-pill);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .tag {
   display: inline-flex;
@@ -1052,7 +1053,7 @@ input.switch:checked::after {
   font-family: var(--oct-font-mono);
   font-size: calc(12 * var(--oct-text-step));
   letter-spacing: var(--oct-tracking-wordmark);
-  text-transform: uppercase;
+  text-transform: none;
 }
 .ds-table tbody tr:hover {
   background: var(--oct-fg-soft);
@@ -1101,7 +1102,7 @@ input.switch:checked::after {
   color: var(--oct-muted);
   font-weight: 500;
   letter-spacing: var(--oct-tracking-wordmark);
-  text-transform: uppercase;
+  text-transform: none;
   text-align: left;
   white-space: nowrap;
 }
@@ -1434,8 +1435,8 @@ input.switch:checked::after {
   background: var(--oct-surface-warm);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-muted);
 }
 .runpanel-body {
@@ -1453,8 +1454,8 @@ input.switch:checked::after {
 }
 .runline .k {
   color: var(--oct-meta);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .runline .v {
   color: var(--oct-fg-2);
@@ -1490,8 +1491,8 @@ input.switch:checked::after {
   border-bottom: 1px solid var(--oct-border);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wider);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-fg-2);
 }
 .statuslist .dot {
@@ -1810,8 +1811,8 @@ input.switch:checked::after {
   padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-1);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .menu-item {
@@ -2240,8 +2241,8 @@ input.switch:checked::after {
   margin-bottom: var(--oct-space-1);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-muted);
 }
 .msg-role .time {
@@ -2523,8 +2524,8 @@ input.switch:checked::after {
   padding: var(--oct-space-1) var(--oct-space-2);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .dock-group > .dock-group-head .dock-gap {
@@ -2637,47 +2638,33 @@ input.switch:checked::after {
 }
 
 /* ─── kanban ──────────────────────────────────────────────────────────
-   Boards scroll horizontally at a fixed column width so the four status
-   columns keep their shape instead of stretching to fill the workspace.
-   Columns share the same min/max width whether empty or full, so a sparse
-   board does not accordion. */
+   The four status columns are open groups, not boxes: a section label over
+   a hairline, then cards. They share the board's width equally, empty or
+   full, so a sparse board never accordions. Under ~1100px four readable
+   columns no longer fit; the board keeps its column width and the scroll
+   container around it scrolls sideways, never the page. Project grouping
+   stacks full-width sections instead. */
 .board {
-  display: flex;
-  gap: var(--oct-space-3);
-  align-items: flex-start;
-  min-width: min-content;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  padding-bottom: var(--oct-space-2);
-  scrollbar-width: thin;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--oct-space-5);
+  align-items: start;
+  overflow: visible;
+}
+.board[data-grouping="project"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (max-width: 1100px) {
+  .board {
+    grid-template-columns: repeat(4, minmax(240px, 1fr));
+  }
 }
 .board-col {
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto;
-  width: clamp(220px, 22vw, 320px);
-  min-width: 220px;
-  max-width: 320px;
+  min-width: 0;
   min-height: 0;
   max-height: 100%;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
-  background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
-}
-.board-col[data-empty="true"] {
-  /* Empty groups keep the same width as populated columns so the grid does
-     not collapse or stretch; their body only needs room for the placeholder. */
-  flex: 0 0 auto;
-  width: clamp(220px, 22vw, 320px);
-  min-width: 220px;
-  max-width: 320px;
-}
-.board-col[data-empty="true"] .board-col-body {
-  min-height: 52px;
-}
-.board-col[data-empty="true"] .board-col-empty {
-  padding: var(--oct-space-3) var(--oct-space-2) var(--oct-space-4);
 }
 .board-col-head {
   display: flex;
@@ -2685,20 +2672,15 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   position: sticky;
   top: 0;
-  min-height: var(--oct-control-height-sm);
-  padding-inline: var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border);
-  background: var(--oct-surface-warm);
-  border-radius: var(--oct-radius-lg) var(--oct-radius-lg) 0 0;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--oct-hairline);
+  background: var(--octant-app-background);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
 }
 .board-col-head .count {
   margin-left: auto;
-  color: var(--oct-meta);
   font-variant-numeric: tabular-nums;
 }
 .board-col-body {
@@ -2709,17 +2691,13 @@ input.switch:checked::after {
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-2);
+  padding: var(--oct-space-2) 0;
   scrollbar-width: thin;
 }
-/* an empty column still shows, so the workflow stays legible, without
-   padding that makes four empty columns fill the window */
-.board-col-empty {
-  margin: 0;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  text-align: center;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+/* An empty column still shows so the workflow stays legible, but four quiet
+   lines must not fill the window. */
+.board-col .surface-empty {
+  padding: var(--oct-space-5) var(--oct-space-3);
 }
 
 /* ─── board card ──────────────────────────────────────────────────────
@@ -2960,8 +2938,8 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-pill);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  text-transform: uppercase;
-  letter-spacing: var(--oct-tracking-wide);
+  text-transform: none;
+  letter-spacing: 0;
 }
 .pr-state-open {
   background: var(--oct-success-soft);
@@ -3072,8 +3050,8 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
   font-size: calc(10 * var(--oct-text-step));
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .sev-high {
   background: var(--oct-danger-soft);
@@ -3224,8 +3202,8 @@ input.switch:checked::after {
   padding: var(--oct-space-2) var(--oct-space-3);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
   background: var(--oct-surface-warm);
   border-bottom: 1px solid var(--oct-border);
@@ -3500,9 +3478,9 @@ input.switch:checked::after {
   font-family: var(--oct-font-display);
   font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
   font-weight: 500;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   color: var(--oct-meta);
-  text-transform: uppercase;
+  text-transform: none;
   white-space: nowrap;
 }
 .sidebar-item {
@@ -3951,8 +3929,8 @@ input.switch:checked::after {
   background: var(--oct-surface-warm);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-muted);
   flex: 0 0 auto;
 }
@@ -4688,35 +4666,6 @@ html[data-octant-theme-mode="light"] .composer {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--oct-space-4);
 }
-.usage-totals {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--oct-space-3);
-}
-.usage-total {
-  flex: 1 1 128px;
-  padding: var(--oct-space-3);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
-}
-.usage-total .usage-label {
-  display: block;
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-  color: var(--oct-meta);
-}
-.usage-total .usage-value {
-  display: block;
-  margin-top: 2px;
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xl);
-  font-variant-numeric: tabular-nums;
-  color: var(--oct-fg);
-}
 
 /* ══════════════════════════════════════════════════════════════════════
    CANVAS
@@ -4824,8 +4773,8 @@ html[data-octant-theme-mode="light"] .composer {
   margin-bottom: var(--oct-space-1);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: transparent;
 }
 .cblock:hover .cblock-kind,
@@ -4887,8 +4836,8 @@ html[data-octant-theme-mode="light"] .composer {
   flex-basis: 100%;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .cmetric-value {
@@ -5082,8 +5031,8 @@ html[data-octant-theme-mode="light"] .composer {
 .csummary .csummary-kind {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .csummary .csummary-text {
@@ -5183,8 +5132,8 @@ html[data-octant-theme-mode="light"] .composer {
   margin-bottom: var(--oct-space-2);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .provenance-set ul {
@@ -5255,8 +5204,8 @@ html[data-octant-theme-mode="light"] .composer {
   cursor: grab;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .zen-el-head .icon {
@@ -5501,8 +5450,8 @@ html[data-octant-theme-mode="light"] .composer {
   background: var(--oct-bg);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .runtree-bucket:first-child {
@@ -5916,8 +5865,8 @@ html[data-octant-theme-mode="light"] .composer {
   margin-bottom: var(--oct-space-3);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .envrow {
@@ -6345,8 +6294,8 @@ html[data-octant-theme-mode="light"] .composer {
   margin-bottom: var(--oct-space-2);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .plan-head .plan-gap {
@@ -7069,8 +7018,8 @@ html[data-octant-theme-mode="light"] .composer {
   margin-bottom: var(--oct-space-2);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .goal-head .goal-gap {
@@ -7166,8 +7115,8 @@ html[data-octant-theme-mode="light"] .composer {
   gap: var(--oct-space-1);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .limit-value {
@@ -7310,8 +7259,8 @@ html[data-octant-theme-mode="light"] .composer {
   margin: 0 0 var(--oct-space-2);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
   font-weight: 400;
 }
@@ -7328,55 +7277,6 @@ html[data-octant-theme-mode="light"] .composer {
   border-bottom: 1px dotted var(--oct-border);
 }
 .keyrow .kbd {
-  flex: 0 0 auto;
-}
-
-/* ─── welcome ─────────────────────────────────────────────────────────
-   An empty thread is a prompt, not a void. The suggestions are the
-   product telling the user what it is for. */
-.welcome {
-  max-width: 46ch;
-  margin: auto;
-  padding-block: var(--oct-space-8);
-  text-align: center;
-}
-.welcome .icon-mark {
-  margin: 0 auto var(--oct-space-5);
-}
-.welcome h3 {
-  margin-bottom: var(--oct-space-2);
-}
-.welcome p {
-  margin: 0 0 var(--oct-space-6);
-  color: var(--oct-muted);
-}
-.welcome-suggest {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-2);
-  text-align: left;
-}
-.welcome-suggest button {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-3);
-  width: 100%;
-  padding: var(--oct-space-3);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
-  color: var(--oct-fg-2);
-  font-family: var(--oct-font-transcript);
-  font-size: var(--oct-text-sm);
-  text-align: left;
-}
-.welcome-suggest button:hover {
-  background: var(--oct-surface-warm);
-  color: var(--oct-fg);
-}
-.welcome-suggest .icon {
-  color: var(--oct-meta);
   flex: 0 0 auto;
 }
 
@@ -8276,8 +8176,8 @@ html[data-octant-theme-mode="light"] .composer {
 .mfield label {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 .mfield input {

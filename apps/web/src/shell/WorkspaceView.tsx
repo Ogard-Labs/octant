@@ -145,6 +145,13 @@ export interface WorkspaceViewProps {
   readonly drag: WorkspaceSurfaceDragHandle;
   /** Remounts an already-open draft when the global New thread action starts over. */
   readonly draftResetRevision?: number;
+  /**
+   * The Project each mode's unbound draft composer last targeted. The draft
+   * unmounts while Settings covers the workspace; without this the composer
+   * came back asking to choose a Project again.
+   */
+  readonly draftProjectSelection?: Partial<Readonly<Record<OctantMode, ProjectId>>>;
+  readonly onDraftSelectProject?: (mode: OctantMode, projectId: ProjectId) => void;
   readonly focusedPaneId?: PaneId;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedCreateHostId?: import("@octant/contracts/host").HostId;
@@ -872,6 +879,7 @@ function renderNonCodeTab(
 ): React.ReactNode {
   if (tab.kind === "draft-thread") {
     const recentThreads = draftRecentThreads(tab.mode, props);
+    const draftProjectId = tab.projectId ?? props.draftProjectSelection?.[tab.mode];
     return (
       <DraftThreadWorkspace
         key={`${String(tab.id)}:${String(tab.projectId ?? "unbound")}:${String(props.draftResetRevision ?? 0)}`}
@@ -913,7 +921,10 @@ function renderNonCodeTab(
         {...(props.linearPluginEnabled === undefined
           ? {}
           : { linearPluginEnabled: props.linearPluginEnabled })}
-        {...(tab.projectId === undefined ? {} : { projectId: tab.projectId })}
+        {...(draftProjectId === undefined ? {} : { projectId: draftProjectId })}
+        {...(props.onDraftSelectProject === undefined
+          ? {}
+          : { onSelectProject: (projectId) => props.onDraftSelectProject?.(tab.mode, projectId) })}
         {...(props.draftProjectName === undefined ? {} : { projectName: props.draftProjectName })}
         {...(props.draftProjectRoot === undefined ? {} : { projectRoot: props.draftProjectRoot })}
         {...(props.draftBranchName === undefined ? {} : { branchName: props.draftBranchName })}

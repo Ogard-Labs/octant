@@ -63,13 +63,22 @@ const secondaryIcons: Record<SidebarAppMenuDescriptorId, LucideIcon> = {
 export function SidebarProfile(props: SidebarProfileProps) {
   const openZen = props.onOpenZen;
   const name = props.profile.displayName ?? "";
+  const label = name === "" ? "Set your name" : name;
 
   return (
     <div className="sidebar-foot sidebar-profile">
       <OctantMenuRoot>
-        <OctantMenuTrigger className="sidebar-item window-no-drag justify-start">
+        {/*
+          The trigger says what it opens and who for. The label span alone is
+          not enough: the compact sidebar clips it, and the accessibility tree
+          has reported the row as an unnamed button.
+        */}
+        <OctantMenuTrigger
+          aria-label={`Account menu, ${label}`}
+          className="sidebar-item window-no-drag justify-start"
+        >
           <UserAvatar profile={props.profile} size={22} />
-          <span className="sidebar-label">{name === "" ? "Set your name" : name}</span>
+          <span className="sidebar-label">{label}</span>
           <ChevronUp aria-hidden="true" className="sidebar-profile__chevron" size={14} />
         </OctantMenuTrigger>
         <OctantMenuPortal>

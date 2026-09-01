@@ -1,3 +1,4 @@
+@import "@fontsource-variable/inter/opsz.css";
 @import "./styles/tailwind.css";
 /* Octant design system, then the adapter that repoints its colour and font
    tokens at the runtime theme. Import order is deliberate and load-bearing:
@@ -26,6 +27,7 @@
 @import "./styles/agents-center.css";
 @import "./styles/palette.css";
 @import "./styles/project-threads.css";
+@import "./styles/surface.css";
 
 :root {
   color-scheme: dark;
@@ -117,7 +119,8 @@
   --octant-palette-blue: #74b0f3;
   --octant-palette-purple: #ab98f2;
   --octant-palette-pink: #f4809a;
-  --octant-ui-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --octant-ui-font-family:
+    "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --octant-ui-font-size: 13px;
   --octant-ui-font-weight: 400;
   --octant-editor-font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
@@ -1095,8 +1098,8 @@ button:focus-visible {
   font-family: var(--oct-font-display);
   font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 /* The header's controls answer for the section the pointer is already on, so
@@ -2041,17 +2044,10 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   gap: 16px;
 }
 
-/* Discovery is a .setgroup of .setrow candidates (octant.css); only the
+/* Discovery is an open section of .setrow candidates (octant.css); only the
    pieces the system has no vocabulary for remain here. */
-.provider-discovery .setgroup-note:last-child {
-  padding-bottom: var(--oct-space-4);
-}
-
 .provider-discovery__version {
   margin-left: var(--oct-space-2);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  color: var(--oct-meta);
 }
 
 .provider-discovery__guidance {
@@ -2059,9 +2055,25 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin-top: 2px;
 }
 
-.provider-discovery__connected {
-  font-size: var(--oct-text-xs);
+/* Readiness in words. Colour marks only the states that need attention, so a
+   list of ready providers reads as quiet text rather than a row of pills. */
+.prov-state {
   color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.prov-state[data-tone="ok"] {
+  color: var(--oct-success-fg);
+}
+
+.prov-state[data-tone="warn"] {
+  color: var(--oct-warn-fg);
+}
+
+.prov-state[data-tone="danger"] {
+  color: var(--oct-danger-fg);
 }
 
 .provider-settings h2,
@@ -2092,8 +2104,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .provider-settings__intro p,
-.provider-settings__hint,
-.provider-settings__empty {
+.provider-settings__hint {
   margin-top: 4px;
   color: var(--octant-text-muted);
   font-size: calc(12 * var(--oct-text-step));
@@ -2178,8 +2189,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transform: rotate(180deg);
 }
 
-/* Sits inside the provider card's .setgroup-foot, which already carries
-   the horizontal padding. */
+/* Sits under the open provider list at the section edge. */
 .provider-settings__manual-body {
   display: grid;
   gap: 12px;
@@ -2208,32 +2218,27 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin: 0;
 }
 
-/* The provider list is a .setgroup of .provrow items (octant.css). The
+/* The provider list is an open section of .provrow items (octant.css). The
    rules below are the app-side residue that vocabulary does not cover. */
 
-/* Inside a .setgroup card the empty state needs the card's own padding. */
-.setgroup > .provider-settings__empty {
-  margin: 0;
-  padding: var(--oct-space-4);
-}
-
-.setgroup > .setgroup-note + .provlist {
-  margin-top: var(--oct-space-2);
+/* The shell is open (0072): rows over hairlines at the section edge. The
+   first row draws the rule under the label the way Appearance's first row
+   does; octant.css's card version cleared it. */
+.settings-card-section--open > .provlist > .provrow {
+  padding-inline: 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .provider-settings__summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--oct-space-2) var(--oct-space-4);
-  padding: 0 var(--oct-space-4) var(--oct-space-2);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+  margin: 0;
+  padding: 0 0 8px;
   font-variant-numeric: tabular-nums;
 }
 
-.provider-settings__summary strong {
-  color: var(--oct-fg);
-  font-weight: 600;
+/* The manual setup flow keeps its raised form; it just no longer sits in a
+   card footer. */
+.provider-settings__foot {
+  padding: 12px 0 0;
 }
 
 /* Reordering keeps the pre-port up/down mechanism; the grip column just
@@ -2271,15 +2276,17 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transform: rotate(180deg);
 }
 
-/* Expanded details bleed to the card edges so the divider reads as part of
-   the card, not a box floating inside the row. */
+/* A provider instance's expanded setup and auth panel is the one discrete
+   object in the list (0072): it takes the raised recipe under its open row. */
 .prov-details {
   display: grid;
   gap: 12px;
   grid-column: 1 / -1;
-  margin: var(--oct-space-3) calc(-1 * var(--oct-space-4)) calc(-1 * var(--oct-space-3));
-  border-top: 1px solid var(--oct-border-soft);
+  margin: var(--oct-space-3) 0 var(--oct-space-1);
   padding: var(--oct-space-4);
+  background: var(--octant-settings-card);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 @media (max-width: 560px) {
@@ -2351,8 +2358,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin-bottom: 8px;
   color: var(--octant-text-secondary);
   font-size: calc(11 * var(--oct-text-step));
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .provider-card__discovery ul {
@@ -2492,8 +2499,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   font-weight: 500;
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .project-dialog h1 {
@@ -2691,8 +2698,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(11 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .folder-picker__header h2 {
@@ -3102,8 +3109,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(9 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .project-memory-inspector__header h2 {
@@ -3362,8 +3369,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   background: var(--octant-surface-raised);
   color: var(--octant-text-muted);
   font-size: calc(9 * var(--oct-text-step));
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .thread-environment-summary__status--available {
@@ -3945,8 +3952,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .local-servers__row {
@@ -4089,8 +4096,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .memory-section > header > span {
@@ -4286,8 +4293,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .code-overview__card h2 {
@@ -4531,8 +4538,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .code-project-overview__scope-label {
@@ -4621,8 +4628,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .code-project-thread__more[open] summary {
@@ -4642,14 +4649,14 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   background: transparent;
 }
 
-.code-project-overview__quick-start .code-composer-adapter__canvas {
+.code-project-overview__quick-start .welcome {
   width: 100%;
   min-height: 0;
   padding: 0;
   gap: 12px;
 }
 
-.code-project-overview__quick-start .code-composer-adapter__welcome {
+.code-project-overview__quick-start .welcome__heading {
   display: none;
 }
 
@@ -6437,8 +6444,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .model-picker__readiness {
   margin-left: auto;
   font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
   padding: 0.1rem 0.4rem;
   border-radius: 0.4rem;
   border: 1px solid var(--octant-border, rgba(255, 255, 255, 0.12));
@@ -6465,8 +6472,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .model-picker__section-label {
   font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--octant-text-muted, rgba(255, 255, 255, 0.55));
 }
 
@@ -7075,8 +7082,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: block;
   margin-bottom: 0.25rem;
   font-size: 0.75rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--octant-muted, #94a3b8);
 }
 
@@ -7256,17 +7263,19 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   }
 }
 
-/* Code Thread Board.
-   Columns and cards come from the design system (.board, .board-col,
-   .board-card, .st, .fact in octant.css). Everything here is the app-specific
-   frame around them — header, toolbar, filter popovers — plus the two grouping
-   layouts and semantic markup (h2 headings, card lists, button titles) the
-   system board vocabulary does not carry. */
+/* Thread boards.
+   The page shell, header, and toolbar come from the surface language;
+   columns and cards from the design system (.board, .board-col, .board-card,
+   .st, .fact in octant.css). Everything here is the app-specific frame
+   around them — filter popovers — plus the two grouping layouts and
+   semantic markup (card lists, button titles) the system board vocabulary
+   does not carry. The .code-board__header rules stay for the issue
+   browsers, which still draw their own title band. */
 .code-board-layer {
   position: absolute;
   inset: 0;
   z-index: 5;
-  overflow: hidden;
+  overflow: auto;
   background: var(--oct-bg);
 }
 
@@ -7276,16 +7285,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   place-items: center;
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
-}
-
-.code-board {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  height: 100%;
-  min-height: 0;
-  padding: 0;
-  font-family: var(--oct-font-display);
 }
 
 .code-board__header {
@@ -7319,41 +7318,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: var(--oct-text-xs);
 }
 
-.code-board__toolbar {
-  /* Containing block for the board popovers. The board layer clips its own
-     overflow, so a popover anchored to a control that wrapped near either edge
-     would be cut off; anchoring to the toolbar keeps it inside at any width. */
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: min(calc(100% - 32px), 1120px);
-  padding: 8px;
-  margin: 0 auto 12px;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-.code-board__primary-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.code-board__primary-controls > * {
-  flex: 0 0 auto;
-}
-
-.code-board__primary-controls .code-board__search {
-  flex: 1 1 200px;
-  min-width: 160px;
-  max-width: 320px;
-}
-
-.code-board__toolbar fieldset {
+.code-board__status-filter {
   margin: 0;
   padding: 0;
   border: 0;
@@ -7361,10 +7326,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .code-board__search {
   display: flex;
-  flex: 0 1 240px;
   align-items: center;
   gap: 7px;
-  min-width: 160px;
   height: 30px;
   padding: 0 9px;
   border: 1px solid var(--oct-border);
@@ -7378,7 +7341,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   box-shadow: 0 0 0 1px var(--oct-accent-fg);
 }
 
-.code-board__toolbar .code-board__search input[type="search"] {
+.code-board__search input[type="search"] {
   width: 100%;
   min-width: 0;
   padding: 0;
@@ -7450,8 +7413,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin-bottom: 5px;
   font-size: 0.7rem;
   font-weight: 500;
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-muted);
 }
 
@@ -7607,30 +7570,20 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  margin: 0 0 var(--oct-space-3);
 }
 
 /*
- * The board body scrolls horizontally so the fixed-width status columns keep
- * their shape at every viewport and zoom level; vertical scrolling stays
+ * The four status columns share the board's width. Below the point where
+ * four readable columns no longer fit, the body scrolls sideways on its own
+ * so the page never grows a horizontal scrollbar; vertical scrolling stays
  * inside each column.
  */
 .code-board__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: var(--oct-space-2) var(--oct-space-4) var(--oct-space-6);
+  padding: 0 0 var(--oct-space-6);
   overflow-x: auto;
   overflow-y: auto;
   scrollbar-width: thin;
-}
-
-.code-board__body--empty {
-  display: grid;
-  place-items: start center;
-  padding-top: clamp(40px, 10vh, 112px);
-}
-
-.code-board__body[data-grouping="status"] {
-  display: block;
 }
 
 .code-board__body[data-grouping="project"] {
@@ -7638,74 +7591,15 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   overflow-y: auto;
 }
 
-/* The status board is a reading surface, not four large cards. Keep columns
-   flat and give empty groups a small dashed target instead of an empty well. */
-.code-board .board {
-  gap: var(--oct-space-3);
-  align-items: flex-start;
-  width: max-content;
-  min-width: 0;
-  margin: 0 auto;
-  overflow: visible;
-  padding: 0;
-}
-
-/* The status board body is a fixed-height flex item, so the row of columns
-   must fill it to keep vertical scrolling inside each column. */
-.code-board__body[data-grouping="status"] .board {
-  height: auto;
-}
-
 .code-board .board-col {
-  flex: 0 0 auto;
-  width: clamp(220px, 22vw, 320px);
-  min-width: 220px;
-  max-width: 320px;
-  min-height: 0;
   max-height: min(calc(100vh - 230px), 720px);
   overflow: hidden;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
-  background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-.code-board .board-col + .board-col {
-  padding-left: 0;
-}
-
-.code-board .board-col-head {
-  position: static;
-  z-index: 1;
-  min-height: 28px;
-  padding: 0 var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-lg) var(--oct-radius-lg) 0 0;
-  background: var(--oct-surface);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  font-weight: 600;
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-  color: var(--oct-meta);
 }
 
 .code-board .board-col-body {
   gap: var(--oct-space-2);
   max-height: 100%;
-  padding: var(--oct-space-2);
-}
-
-.code-board .board-col-empty {
-  display: grid;
-  min-height: 36px;
-  place-items: center;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  border: 1px dashed var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  text-align: center;
+  padding: var(--oct-space-2) 0;
 }
 
 .code-board .board-card {
@@ -7863,57 +7757,18 @@ ul.board-col-body {
   list-style: none;
 }
 
-/* the placeholder is a paragraph here and nothing resets paragraph margins
-   globally; the system padding is the whole intended spacing */
-p.board-col-empty {
-  margin: 0;
-}
-
-/* the column heading is an h2 for the document outline; it takes the
-   head's mono styling rather than heading styling */
+/* the column heading is an h2 for the document outline; a long Project
+   name truncates rather than wrapping the count onto a second line */
 .board-col-head h2 {
   flex: 1 1 auto;
   min-width: 0;
-  margin: 0;
   overflow: hidden;
-  font: inherit;
-  letter-spacing: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* A quiet placeholder is content-sized; it should not make an empty group
-   as tall as the busiest column. */
-.code-board__body[data-grouping="status"] .board-col[data-empty="true"] {
-  min-height: 0;
-}
-
-.code-board__body[data-grouping="status"] .board-col[data-empty="true"] .board-col-body {
-  min-height: 52px;
-}
-
 /* Project grouping stacks full-width sections that flow their cards in a
    grid; the recovery column follows the same shape in either grouping */
-.board[data-grouping="project"] {
-  flex-direction: column;
-  gap: var(--oct-space-5);
-  overflow-x: visible;
-}
-
-.board[data-grouping="project"] .board-col {
-  flex: 0 0 auto;
-  width: 100%;
-  min-width: auto;
-  max-width: none;
-  /* a project section is a full-width row of the stack, not a kanban
-     column, so the system column's growth ceiling does not apply */
-}
-
-.board[data-grouping="project"] .board-col + .board-col {
-  padding-left: 0;
-  border-left: 0;
-}
-
 .board[data-grouping="project"] .board-col-body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
@@ -7990,14 +7845,16 @@ p.board-col-empty {
   color: var(--oct-fg);
 }
 
-.code-board__empty {
-  margin: var(--oct-space-3) auto;
-}
-
-.code-board__refresh-status {
-  margin: 0 0 var(--oct-space-2);
+/* One line under the toolbar for refresh, error, and empty-board notices;
+   the columns underneath keep their shape either way. */
+.code-board__note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  margin: 0 0 var(--oct-space-3);
   color: var(--oct-muted);
-  font-size: 0.78rem;
+  font-size: var(--oct-text-detail);
 }
 
 .code-board__list {
@@ -8014,22 +7871,13 @@ p.board-col-empty {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
+  padding: 10px 0 8px;
   margin-bottom: var(--oct-space-2);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-  color: var(--oct-muted);
-}
-
-.code-board__list-head h2 {
-  margin: 0;
-  font: inherit;
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 .code-board__list-head .count {
   margin-left: auto;
-  color: var(--oct-meta);
 }
 
 .code-board__list .issuelist {
@@ -8059,16 +7907,8 @@ p.board-col-empty {
     padding: 14px 14px 8px;
   }
 
-  .code-board__toolbar {
-    padding: 8px 14px;
-  }
-
   .code-board__subtitle {
     display: none;
-  }
-
-  .code-board__primary-controls > * {
-    flex: 0 0 auto;
   }
 
   .code-board__grouping {
@@ -8095,21 +7935,17 @@ p.board-col-empty {
   }
 
   .code-board__body {
-    padding: var(--oct-space-2) 14px var(--oct-space-4);
     overflow-x: hidden;
     overflow-y: auto;
   }
 }
 
-/* When the user zooms in, the fixed column width may exceed the viewport.
-   Keep the board horizontally scrollable and shrink the minimum column width
-   so a single column is still usable. */
+/* When the user zooms in, the column width may exceed the viewport. Keep
+   the board horizontally scrollable and shrink the minimum column width so a
+   single column is still usable. */
 @media (max-width: 260px) {
-  .code-board .board-col,
-  .board-col {
-    width: 180px;
-    min-width: 180px;
-    max-width: 100%;
+  .board {
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
   }
 
   .code-board .board-card-facts .fact {
@@ -8125,144 +7961,30 @@ p.board-col-empty {
   background: var(--octant-workspace);
 }
 
-.archive-view {
-  display: grid;
-  width: min(calc(100% - 48px), 880px);
-  min-height: 100%;
-  align-content: start;
-  gap: var(--oct-space-5);
-  padding: 36px 0 72px;
-  margin: 0 auto;
-}
-
-.archive-view__header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--oct-space-4);
-}
-
-.archive-view__header h1,
-.archive-view__header p {
-  margin: 0;
-}
-
-.archive-view__header h1 {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-xl);
-  font-weight: 600;
-  letter-spacing: -0.025em;
-}
-
-.archive-view__header p,
-.archive-view__notice {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
-}
-
-.archive-view__header p {
-  margin-top: 5px;
-}
-
-.archive-view__actions {
-  display: flex;
-  align-items: end;
-  gap: var(--oct-space-2);
-}
-
-.archive-view__actions label {
-  display: grid;
-  gap: 4px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.archive-view__actions select {
-  min-width: 180px;
-}
-
-.archive-view__list {
-  overflow: hidden;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-}
-
-.archive-view__list > [role="listitem"] + [role="listitem"] {
-  border-top: 1px solid var(--oct-border);
-}
-
+/* Archive rows are the surface language's hairline rows; this only turns
+   the row's button into a full-width target with the mode at the edge. */
 .archive-view__row {
   display: grid;
   width: 100%;
-  min-height: 54px;
+  height: auto;
+  min-height: 0;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: stretch;
   gap: var(--oct-space-4);
-  padding: 9px 14px;
-  border-radius: 0;
+  padding: 0;
   text-align: left;
 }
 
-.archive-view__row-copy {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
+.archive-view__row:hover .oct-row-label,
+.archive-view__row:focus-visible .oct-row-label {
+  text-decoration: underline;
 }
 
-.archive-view__row-copy strong,
-.archive-view__row-copy small {
+.archive-view__row .oct-row-label,
+.archive-view__row .surface-row__copy > .oct-meta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.archive-view__row-copy strong {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: 500;
-}
-
-.archive-view__row-copy small,
-.archive-view__mode {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: 400;
-}
-
-.archive-view__mode {
-  min-width: 40px;
-  text-align: right;
-}
-
-.archive-view__empty {
-  max-width: none;
-}
-
-.archive-view__notice {
-  margin: 0;
-}
-
-@media (max-width: 680px) {
-  .archive-view {
-    width: min(calc(100% - 24px), 880px);
-    padding-top: 24px;
-  }
-
-  .archive-view__header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .archive-view__actions label {
-    flex: 1;
-  }
-
-  .archive-view__actions select {
-    width: 100%;
-    min-width: 0;
-  }
 }
 
 .keybinding-settings {
@@ -8475,30 +8197,13 @@ p.board-col-empty {
   margin: 0;
 }
 
+/* Pull requests: the shell, toolbar, and Project rows come from the surface
+   language; this sheet keeps the search field, the PR row anatomy, and the
+   status line the dock review tools share. */
 .code-project-pull-requests {
-  display: flex;
-  width: 100%;
-  flex-direction: column;
-  gap: 12px;
-  height: 100%;
-  min-height: 0;
-  padding: 0 16px 32px;
-  margin: 0 auto;
-  overflow: auto;
-}
-
-.code-project-pull-requests > .code-board__header {
-  width: min(100%, 840px);
-  margin-bottom: 0;
-  padding-bottom: 8px;
-  border-bottom: 0;
-}
-
-.code-project-pull-requests__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-2);
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-3);
 }
 
 .code-project-pull-requests__status {
@@ -8512,20 +8217,9 @@ p.board-col-empty {
   color: var(--oct-warning-text, var(--oct-muted));
 }
 
-.code-project-pull-requests__toolbar {
-  display: flex;
-  width: min(100%, 840px);
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
-  margin: 0 auto;
-}
-
 .code-project-pull-requests__search {
   position: relative;
   display: flex;
-  width: auto;
-  flex: 1 1 auto;
   align-items: center;
   color: var(--oct-muted);
 }
@@ -8558,33 +8252,15 @@ p.board-col-empty {
 
 .code-project-pull-requests__count {
   flex: 0 0 auto;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
 }
 
 .code-project-pull-requests__groups {
-  display: flex;
-  width: min(100%, 840px);
-  flex-direction: column;
-  gap: 16px;
+  display: grid;
   min-width: 0;
-  margin: 0 auto;
+  gap: var(--oct-space-2);
 }
 
-.code-project-pull-requests__setup-empty {
-  margin: clamp(32px, 8vh, 72px) auto;
-}
-
-.code-project-pull-requests__project {
-  overflow: hidden;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-.code-project-pull-requests__project-header,
 .code-project-pull-requests__title-line,
 .code-project-pull-requests__meta,
 .code-project-pull-requests__byline {
@@ -8594,61 +8270,10 @@ p.board-col-empty {
   gap: var(--oct-space-2) 10px;
 }
 
-.code-project-pull-requests__project-header {
-  min-height: 40px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 5px 8px 5px 12px;
-  border-bottom: 1px solid var(--oct-border-soft);
-}
-
-.code-project-pull-requests__project-heading {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: var(--oct-space-2);
-}
-
-.code-project-pull-requests__project-repository {
-  overflow: hidden;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-project-pull-requests__project h2,
-.code-project-pull-requests__repository h3,
-.code-project-pull-requests__title {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-}
-
-.code-project-pull-requests__project h2 {
-  font-weight: var(--oct-weight-strong);
-}
-
 .code-project-pull-requests__repository h3 {
-  padding: 7px 12px;
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  font-weight: 400;
-  background: transparent;
-  border-block: 1px solid var(--oct-border-soft);
-}
-
-.code-project-pull-requests__unconnected,
-.code-project-pull-requests__empty {
   margin: 0;
-  padding: 12px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.code-project-pull-requests__unconnected {
-  color: var(--oct-muted);
+  padding: 10px 0 4px;
+  font-weight: 400;
 }
 
 .code-project-pull-requests__list {
@@ -8718,7 +8343,9 @@ p.board-col-empty {
 }
 
 .code-project-pull-requests__title {
+  margin: 0;
   color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
   font-weight: 500;
 }
 
@@ -8736,19 +8363,6 @@ p.board-col-empty {
   font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.code-project-pull-requests[data-narrow="true"] {
-  padding-inline: var(--oct-space-3);
-}
-
-.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__toolbar {
-  align-items: stretch;
-  flex-direction: column;
-}
-
-.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__count {
-  align-self: flex-end;
 }
 
 .code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__row-content {

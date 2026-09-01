@@ -73,7 +73,7 @@ describe("AgentsCenter", () => {
   it("shows an empty state when no runs match the filters", async () => {
     render(<AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [] })) })} />);
     const title = await screen.findByText("No agent runs yet");
-    expect(title.closest("[role='status']")).toHaveAttribute("data-slot", "empty-state");
+    expect(title.closest("[role='status']")).toHaveClass("surface-empty");
     expect(screen.getByText("Child agents appear here after a thread starts one.")).toBeVisible();
   });
 

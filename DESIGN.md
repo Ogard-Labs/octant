@@ -34,6 +34,98 @@ low-frequency controls, oversized setup cards, pill-shaped everything, and
 invented data. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout.
 
+## Language
+
+This section is the part of the system that travels: the app, the docs site,
+and the marketing site use the same words, the same face, and the same
+hierarchy. Everything after it is renderer implementation.
+
+### Voice
+
+- **Crafted, not vibed.** Hierarchy comes from size and colour, not from
+  weight or capitals. One title per page. Section labels are sentence-case
+  and quiet. Nothing is uppercase except a monospace identifier that already
+  is. Nothing is bold except the page title.
+- **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
+  Product nouns keep their capital (Project, Chat, Work, Code, Environment).
+- **One sentence of help.** A subtitle or row description is one sentence
+  that says what the thing does. Longer explanations move to the docs.
+- **Vocabulary.** `Project`, `thread`, `checkout`, `worktree`, `base branch`,
+  `Environment`, `access` (Plan / Approval / Auto-accept edits / Full access),
+  `delivery` (Investigation / Local implementation / Pull request / Merged).
+  The word "target" does not appear in the interface.
+
+### Face
+
+Interface text is **Inter** (variable, optical sizes on) with the system face
+as fallback: `'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+system-ui, sans-serif`. Code, paths, branches, identifiers, and terminal text
+are the monospace stack. The app ships the Latin subset with the renderer, so
+the face is the same on macOS, Linux, and Windows and on the marketing site.
+Antialiased, `text-rendering: optimizeLegibility`, no synthetic bold.
+
+### Scale
+
+Eight sizes at the default 13px setting. Everything scales together with the
+Appearance interface size; nothing is authored at 11.5 or 12.5.
+
+| Role          | Size | Weight | Colour          | Where                                                     |
+| ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
+| Hero          | 28   | 500    | primary         | Welcome question only (`oct-title--hero`)                 |
+| Title         | 20   | 600    | primary         | One per page (`oct-title`)                                |
+| Section label | 13   | 500    | primary         | Group heading over a hairline (`oct-section-label`)       |
+| Row label     | 13   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
+| Body          | 13   | 400    | primary         | Transcript, paragraphs, controls                          |
+| Detail        | 12   | 400    | secondary       | Subtitle, row description, menu detail (`oct-row-detail`) |
+| Meta          | 11   | 400    | muted           | Timestamps, counts, hints (`oct-meta`)                    |
+| Identifier    | 12   | 400    | secondary, mono | Paths, branches, ids (`oct-meta--mono`)                   |
+
+Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
+`--oct-tracking-snug`; body and detail use none. Line heights: 1.2 title,
+1.35 label, 1.45 detail and body, 1.7 code.
+
+### Colour
+
+Neutral graphite, one accent, four statuses. Text is three greys (primary,
+secondary, muted) and never a fourth. Hairlines separate; fills select. See
+"Colour system" for the token table. On the marketing site the same three
+greys and the same hairline carry the hierarchy on a white or graphite ground.
+
+### Shapes and depth
+
+Radius is 10px for controls, 16px for cards and menus, 20px for the composer
+and dialogs. A surface is flat by default. Elevation means one of three
+things and nothing else: a raised discrete object (`--octant-shadow-sm`), the
+composer (`--octant-shadow-md`), or an overlay (`--octant-shadow-overlay`).
+Groups, lists, empty states, and headers are never cards.
+
+### Page shell
+
+Every list, board, reader, and preference page is a `Surface`:
+
+```
+Surface (reading measure 880px, or wide for boards)
+  SurfaceHeader   title · one-line subtitle · actions · Back to workspace
+  surface-toolbar search takes the slack · filters · view switch
+  SurfaceSection  section label over a hairline
+    surface-row   label + detail on the left, control on the right
+  SurfaceEmpty    a quiet line of text, not a card
+```
+
+Leaving a reader route is always the ghost "Back to workspace" control in the
+header. Settings is the same shell with a 680px measure and its own
+navigation rail. Rows in Settings are `SettingRow`; rows everywhere else are
+`surface-row`. Both draw the same hairline.
+
+### Welcome and composer
+
+Chat, Work, and Code open on the same screen: the hero question, a rear
+context tray, and the raised composer in front. The tray holds where the
+thread runs (Project, base branch, checkout, Environment, repository); the
+composer bar holds how it runs (attach and image on the left; model and
+access on the right, next to send). Nothing about delivery is asked up
+front; it is derived from the tray and shown on the thread once it exists.
+
 ## Source of truth and CSS layers
 
 There is one runtime theme authority and one owned control layer:
@@ -125,13 +217,13 @@ validated semantic roles; incomplete or low-contrast imports fall back safely.
 
 Typography has distinct jobs:
 
-| Job        | Default                                                                    | Usage                                                                              |
-| ---------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif` | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
-| Display    | inherits Interface                                                         | Wordmark, section headings, selected navigation labels                             |
-| Transcript | inherits Interface                                                         | Long-running conversation and composer; readable at 13–16px                        |
-| Editor     | `'JetBrains Mono', 'SF Mono', Menlo, monospace`                            | Code, diffs, paths, identifiers, aligned technical values                          |
-| Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                          | Terminal output and prompt glyphs                                                  |
+| Job        | Default                                                                                  | Usage                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Interface  | `'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif` | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Display    | inherits Interface                                                                       | Wordmark, section headings, selected navigation labels                             |
+| Transcript | inherits Interface                                                                       | Long-running conversation and composer; readable at 13–16px                        |
+| Editor     | `'JetBrains Mono', 'SF Mono', Menlo, monospace`                                          | Code, diffs, paths, identifiers, aligned technical values                          |
+| Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                                        | Terminal output and prompt glyphs                                                  |
 
 The persisted typography schema supports independent UI, editor, and terminal
 family, size, weight, line height, and ligatures. Families are sanitized: no
@@ -154,11 +246,16 @@ branches, identifiers, or serialized theme source.
 
 Static type tokens in `octant.css` are:
 
-- `--oct-text-xs: 11px`, `--oct-text-sm: 14px`, `--oct-text-base: 16px`.
-- `--oct-text-lg: 19px`, `--oct-text-xl: 22px`, `--oct-text-2xl: 26px`,
+- `--oct-text-xs: 11px`, `--oct-text-detail: 12px`, `--oct-text-sm: 13px`,
+  `--oct-text-base: 14px`, each multiplied by `--oct-text-step` so the
+  Appearance interface size moves the whole ladder.
+- `--oct-text-lg: 17px`, `--oct-text-xl: 20px`, `--oct-text-2xl: 26px`,
   `--oct-text-3xl: 36px`, `--oct-text-4xl: 72px`.
 - Body leading `1.5`, snug `1.3`, heading `1.14`, tight `1.1`, code `1.7`.
-- Strong labels use 600; display labels use 500. Avoid bolding whole paragraphs.
+- Only the page title uses 600; every other label uses 500. Avoid bolding
+  whole paragraphs. The type roles in `styles/surface.css` (`oct-title`,
+  `oct-section-label`, `oct-row-label`, `oct-row-detail`, `oct-meta`) are the
+  only heading and label recipes; feature CSS does not author a new size.
 - Mono metadata uses positive tracking (`--oct-tracking-wide`); display
   headings use restrained negative tracking.
 
@@ -205,9 +302,10 @@ The tray is slightly narrower and slides under the prompt by one corner radius,
 so the front card overlaps only its empty lower padding. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
-creating a second environment model. Repository, workspace, and delivery
-disclosure remain on that rear card after the three primary choices. Access is
-a titled menu on the prompt card, next to the model picker. The
+creating a second environment model. Repository and workspace remain on that rear card after the three primary
+choices; nothing about delivery is asked up front (see "Language"). Access is
+a titled menu on the prompt card, next to the model picker, and carries the
+"Remember for this Project" switch. The
 prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not

@@ -341,7 +341,7 @@ describe("ShellFrame", () => {
       /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s*\{[^}]*box-sizing:\s*border-box;[^}]*height:\s*auto;[^}]*overflow-y:\s*auto;/,
     );
     expect(shellStyles).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s+\.draft-thread__canvas\s*\{[^}]*box-sizing:\s*border-box;[^}]*justify-content:\s*flex-start;[^}]*padding:\s*12px;/,
+      /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s+\.welcome\s*\{[^}]*box-sizing:\s*border-box;[^}]*justify-content:\s*flex-start;[^}]*padding:\s*12px;/,
     );
   });
 });

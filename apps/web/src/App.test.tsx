@@ -290,7 +290,7 @@ describe("App", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
 
     // Skills and extensions have a real Settings section, so the entry opens it
@@ -328,7 +328,7 @@ describe("App", () => {
     expect(
       await screen.findByRole("banner", { name: "Workspace actions for Controller foundation" }),
     ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
 
     expect(await screen.findByRole("heading", { name: "Archive" })).toBeVisible();
@@ -1635,7 +1635,7 @@ describe("App", () => {
       await screen.findByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
     expect(screen.queryByRole("dialog", { name: "Navigator" })).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Set your name" }));
+    await user.click(await screen.findByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Navigator" }));
 
     const navigator = await screen.findByRole("dialog", { name: "Navigator" });
@@ -1654,7 +1654,7 @@ describe("App", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Navigator" })).toBeNull());
 
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Navigator" }));
     expect(await screen.findByRole("dialog", { name: "Navigator" })).toBeVisible();
     expect(screen.getByText("Answered: Stay on this thread")).toBeVisible();
@@ -2333,6 +2333,34 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
   });
 
+  it("keeps the draft composer's chosen Project after a visit to Settings", async () => {
+    const user = userEvent.setup();
+    const projectApi = projects({ ...projectBootstrap(), availability: [] });
+    render(
+      <App
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "New thread" }));
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    await user.click(await screen.findByRole("option", { name: /Octant/ }));
+    expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
+
+    await openSettingsFromSidebar(user);
+    await screen.findByRole("heading", { level: 1, name: "General" });
+    await user.click(screen.getByRole("button", { name: "Back to app" }));
+
+    expect(await screen.findByRole("button", { name: "Project: Octant" })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Project: Choose a Project" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("uses one narrow modal dock and restores focus through Escape dismissal", async () => {
     const user = userEvent.setup();
     const projectApi = projects();
@@ -2547,7 +2575,7 @@ describe("App", () => {
       />,
     );
 
-    await screen.findByRole("button", { name: "Set your name" });
+    await screen.findByRole("button", { name: "Account menu, Set your name" });
     await waitFor(() =>
       expect(document.querySelector(".shell")).toHaveClass("shell--material-translucent"),
     );
@@ -2959,18 +2987,18 @@ describe("App", () => {
     expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass(
       "shell-icon-button",
     );
-    expect(within(sidebar).getByRole("button", { name: "Set your name" })).toHaveClass(
-      "window-no-drag",
-    );
-    expect(within(sidebar).getByRole("button", { name: "Set your name" })).toHaveClass(
-      "sidebar-item",
-    );
+    expect(
+      within(sidebar).getByRole("button", { name: "Account menu, Set your name" }),
+    ).toHaveClass("window-no-drag");
+    expect(
+      within(sidebar).getByRole("button", { name: "Account menu, Set your name" }),
+    ).toHaveClass("sidebar-item");
     for (const button of within(sidebar).getAllByRole("button")) {
       expect(button).toHaveClass("window-no-drag");
     }
     expect(await screen.findByRole("button", { name: "Project actions for Octant" })).toBeVisible();
     expect(screen.getByRole("button", { name: "New thread" })).toBeVisible();
-    await user.click(within(sidebar).getByRole("button", { name: "Set your name" }));
+    await user.click(within(sidebar).getByRole("button", { name: "Account menu, Set your name" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Thread board" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();

@@ -74,37 +74,22 @@ describe("OctantMenu", () => {
     trigger.focus();
     await user.keyboard("{ArrowDown}");
     expect(trigger).toHaveAttribute("aria-expanded", "true");
-    await waitFor(() =>
-      expect(
-        screen.getByRole("menuitemradio", { name: /First.*First description/i }),
-      ).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: "First" })).toHaveFocus());
     await user.keyboard("{End}");
-    await waitFor(() =>
-      expect(
-        screen.getByRole("menuitemradio", { name: /Third.*Third description/i }),
-      ).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: "Third" })).toHaveFocus());
     await user.keyboard("{Home}");
-    await waitFor(() =>
-      expect(
-        screen.getByRole("menuitemradio", { name: /First.*First description/i }),
-      ).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: "First" })).toHaveFocus());
     await user.keyboard("{ArrowDown}{ArrowDown}");
-    await waitFor(() =>
-      expect(
-        screen.getByRole("menuitemradio", { name: /Third.*Third description/i }),
-      ).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: "Third" })).toHaveFocus());
     await user.keyboard(" ");
     expect(onValueChange).toHaveBeenCalledWith("third");
     await waitFor(() => expect(trigger).toHaveFocus());
 
     await user.keyboard("{Enter}");
-    expect(
-      screen.getByRole("menuitemradio", { name: /First.*First description/i }),
-    ).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemradio", { name: "First" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
     await user.keyboard("{Escape}");
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(trigger).toHaveAttribute("aria-expanded", "false");

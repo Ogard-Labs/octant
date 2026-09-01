@@ -128,6 +128,12 @@ export interface DraftThreadWorkspaceProps {
   readonly defaultPermissionPersistence?: PermissionPersistence;
   readonly onExecutionPolicyChange?: (executionPolicy: ProviderExecutionPolicy) => void;
   readonly onAttachFolder?: () => void;
+  /**
+   * Reports the Project the composer now targets. The draft is unmounted
+   * while Settings covers the workspace, so the shell keeps this choice and
+   * hands it back through `projectId` when the draft remounts.
+   */
+  readonly onSelectProject?: (projectId: ProjectId) => void;
   readonly onCreateProject?: (
     mode: OctantMode,
     name: string,
@@ -151,6 +157,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | undefined>(
     props.projectId,
   );
+  const selectProject = (projectId: ProjectId) => {
+    setSelectedProjectId(projectId);
+    props.onSelectProject?.(projectId);
+  };
   type CreateFromSelection =
     | {
         readonly kind: "github";
@@ -289,7 +299,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         }}
         onSelect={(entry) => {
           if (entry.kind === "saved-project") {
-            setSelectedProjectId(entry.projectId);
+            selectProject(entry.projectId);
             setSelectedProjectLabel(entry.displayName);
           }
         }}
@@ -344,7 +354,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(selectedProjectName === undefined ? {} : { fixedProjectName: selectedProjectName })}
         hostName={githubHostName}
         onProjectCreated={(projectId, name) => {
-          setSelectedProjectId(decodeProjectId(projectId));
+          selectProject(decodeProjectId(projectId));
           setSelectedProjectLabel(name);
         }}
       />
@@ -362,7 +372,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         onClose={() => setAddFolderOpen(false)}
         onCreate={props.onCreateProject}
         onCreated={(projectId, _mode, name) => {
-          setSelectedProjectId(projectId);
+          selectProject(projectId);
           setSelectedProjectLabel(name);
         }}
       />

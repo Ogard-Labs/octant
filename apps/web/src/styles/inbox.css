@@ -1,6 +1,6 @@
 /* The Inbox overlay: one cross-mode list of what is waiting on the user.
-   Rows are pointers into other surfaces, so the layout stays a single calm
-   column rather than a list/detail split. */
+   The shell, sections, and rows come from the surface language; this sheet
+   only turns a row's button or link into a full-width, multi-line target. */
 
 .inbox-layer {
   position: absolute;
@@ -10,100 +10,15 @@
   background: var(--oct-bg);
 }
 
-.inbox-view {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  font-family: var(--oct-font-display);
-  background: var(--oct-bg);
-}
-
-.inbox-view__header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
-  padding: 16px var(--oct-space-4) 10px;
-}
-
-.inbox-view__header-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.inbox-view__title {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-  color: var(--oct-fg);
-}
-
-.inbox-view__subtitle {
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.inbox-view__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-4);
-  min-height: 0;
-  flex: 1 1 auto;
-  overflow: auto;
-  padding: var(--oct-space-3) var(--oct-space-4) var(--oct-space-4);
-  border-top: 1px solid var(--oct-border);
-  max-width: 720px;
-  width: 100%;
-  margin-inline: auto;
-}
-
-.inbox-view__section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-2);
-}
-
-.inbox-view__section-title {
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.inbox-view__note {
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.inbox-view__list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 /* height/min-height beat the button recipe's fixed h-9, which would clip a
    multi-line row; the anchor rows share the class so both render alike. */
 .inbox-view__row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 2px;
+  display: block;
   width: 100%;
   height: auto;
   min-height: 0;
-  padding: var(--oct-space-2);
+  padding: 0;
   border: 0;
-  border-radius: var(--oct-radius-sm);
   background: none;
   color: inherit;
   font: inherit;
@@ -112,37 +27,25 @@
   cursor: pointer;
 }
 
-.inbox-view__row:hover {
-  background: var(--sidebar-accent);
+.inbox-view__row:hover .oct-row-label,
+.inbox-view__row:focus-visible .oct-row-label {
+  text-decoration: underline;
 }
 
-.inbox-view__row-title {
+.inbox-view__row .oct-row-label {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
-  color: var(--oct-fg);
-  font-size: var(--octant-ui-font-size);
   overflow-wrap: anywhere;
 }
 
 /* The unseen dot sits on the title line so a scanning eye catches it without
    the row shouting; opening the item clears it. */
-.inbox-view__row[data-unseen="true"] .inbox-view__row-title::after {
+.inbox-view__row[data-unseen="true"] .oct-row-label::after {
   content: "";
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--oct-accent);
   flex: none;
-}
-
-.inbox-view__row-meta {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.inbox-view__row-detail {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  overflow-wrap: anywhere;
 }

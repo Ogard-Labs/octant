@@ -651,7 +651,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         want available.
       </p>
       <OctantTabs defaultValue="installed">
-        <OctantTabsList>
+        <OctantTabsList className="surface-tabs">
           <OctantTabsTab value="installed">Installed</OctantTabsTab>
           <OctantTabsTab value="marketplace">Marketplace</OctantTabsTab>
         </OctantTabsList>

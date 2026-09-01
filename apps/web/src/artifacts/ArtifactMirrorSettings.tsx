@@ -4,6 +4,7 @@ import type {
 } from "@octant/contracts/artifact-mirror";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
+import { SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -53,30 +54,34 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
   const current = props.settings?.fallback.kind ?? "internal-only";
 
   return (
-    <section aria-label="Artifact files" className="artifact-mirror">
-      <header className="artifact-mirror__header">
-        <div>
-          <h3 className="artifact-mirror__title">File mirroring</h3>
-          <p className="artifact-mirror__summary">
+    <SurfaceSection className="artifact-mirror" label="File mirroring">
+      <div className="surface-row">
+        <div className="surface-row__copy">
+          <span className="oct-row-label">
             {TIERS.find((tier) => tier.kind === current)?.label}
-          </p>
+          </span>
+          <span className="oct-row-detail">
+            Artifacts stay versioned in Octant; a mirrored file is a copy for other tools.
+          </span>
         </div>
-        <OctantButton
-          aria-expanded={open}
-          aria-label={open ? "Hide file mirroring settings" : "Configure file mirroring"}
-          onClick={() => setOpen((currentOpen) => !currentOpen)}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          {open ? (
-            <ChevronUp aria-hidden="true" size={14} />
-          ) : (
-            <ChevronDown aria-hidden="true" size={14} />
-          )}
-          {open ? "Hide" : "Configure"}
-        </OctantButton>
-      </header>
+        <div className="surface-row__control">
+          <OctantButton
+            aria-expanded={open}
+            aria-label={open ? "Hide file mirroring settings" : "Configure file mirroring"}
+            onClick={() => setOpen((currentOpen) => !currentOpen)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {open ? (
+              <ChevronUp aria-hidden="true" size={14} />
+            ) : (
+              <ChevronDown aria-hidden="true" size={14} />
+            )}
+            {open ? "Hide" : "Configure"}
+          </OctantButton>
+        </div>
+      </div>
 
       {open ? (
         <div className="artifact-mirror__body">
@@ -168,6 +173,6 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
           </p>
         </div>
       ) : null}
-    </section>
+    </SurfaceSection>
   );
 }

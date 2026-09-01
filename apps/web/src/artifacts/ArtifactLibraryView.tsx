@@ -6,8 +6,8 @@ import type {
 } from "@octant/contracts/artifact-library";
 import type { OctantMode, ProjectId } from "@octant/contracts";
 import { Plus, Search } from "lucide-react";
+import { SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantEmptyState } from "../ui/base/OctantEmptyState";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
@@ -27,6 +27,8 @@ export interface ArtifactLibraryViewProps {
    * one, which hides the action rather than offering a dead gesture.
    */
   readonly onCreate?: () => void;
+  /** Leaves the library for the workspace; absent when it is not a route. */
+  readonly onClose?: () => void;
 }
 
 const TABS: ReadonlyArray<{ readonly id: ArtifactLibraryTab; readonly label: string }> = [
@@ -74,25 +76,30 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   };
 
   return (
-    <section aria-label="Artifact library" className="artifact-library">
-      <header className="artifact-library__header">
-        <h1 className="artifact-library__title">Artifacts</h1>
-        {props.onCreate === undefined ? null : (
-          <OctantButton
-            onClick={props.onCreate}
-            size="sm"
-            title="Artifacts are made in a thread. This starts one."
-            type="button"
-            variant="secondary"
-          >
-            <Plus aria-hidden="true" size={12} strokeWidth={1.8} />
-            New artifact
-          </OctantButton>
-        )}
-      </header>
+    <div className="artifact-library">
+      <SurfaceHeader
+        title="Artifacts"
+        {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
+        {...(props.onCreate === undefined
+          ? {}
+          : {
+              actions: (
+                <OctantButton
+                  onClick={props.onCreate}
+                  size="sm"
+                  title="Artifacts are made in a thread. This starts one."
+                  type="button"
+                  variant="secondary"
+                >
+                  <Plus aria-hidden="true" size={12} strokeWidth={1.8} />
+                  New artifact
+                </OctantButton>
+              ),
+            })}
+      />
 
-      <div className="artifact-library__controls">
-        <div className="artifact-library__search">
+      <div className="surface-toolbar">
+        <div className="surface-toolbar__search artifact-library__search">
           <Search aria-hidden="true" size={14} strokeWidth={1.8} />
           <label className="sr-only" htmlFor="artifact-library-search">
             Search artifacts
@@ -173,9 +180,9 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
         }}
         value={filters.tab}
       >
-        <OctantTabsList aria-label="Artifact groups" className="artifact-library__tabs">
+        <OctantTabsList aria-label="Artifact groups" className="surface-tabs">
           {TABS.map((tab) => (
-            <OctantTabsTab className="artifact-library__tab" key={tab.id} value={tab.id}>
+            <OctantTabsTab key={tab.id} value={tab.id}>
               {tab.label}
             </OctantTabsTab>
           ))}
@@ -183,7 +190,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       </OctantTabs>
 
       {props.message === undefined ? null : (
-        <p className="artifact-library__message" role="status">
+        <p className="oct-row-detail" role="status">
           {props.message}
         </p>
       )}
@@ -204,7 +211,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       )}
 
       {props.busy || entries.length > 0 ? null : (
-        <OctantEmptyState
+        <SurfaceEmpty
           {...(filters.tab === "shared" || hasActiveFilters
             ? {
                 action: (
@@ -219,15 +226,13 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
                 ),
               }
             : {})}
-          className="artifact-library__empty"
-          message={
+          detail={
             filters.tab === "shared"
               ? "Artifacts you share will appear here."
               : hasActiveFilters
                 ? "Clear or adjust the active filters to see other artifacts."
                 : "Create an artifact from a thread to see it here."
           }
-          role="status"
           title={
             filters.tab === "shared"
               ? "Nothing is shared right now."
@@ -239,12 +244,12 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       )}
 
       {listing?.truncated === true ? (
-        <p className="artifact-library__truncated" role="status">
+        <p className="oct-meta" role="status">
           Showing {String(entries.length)} of {String(listing.matchCount)}. Narrow the search to see
           the rest.
         </p>
       ) : null}
-    </section>
+    </div>
   );
 }
 
@@ -264,9 +269,8 @@ function ArtifactsByProject(props: {
       {[...grouped.entries()]
         .sort((left, right) => left[0].localeCompare(right[0], "en-US"))
         .map(([projectName, entries]) => (
-          <section aria-label={projectName} className="artifact-library__group" key={projectName}>
-            <h2 className="artifact-library__group-title">{projectName}</h2>
-            <ul className="artifact-library__grid">
+          <SurfaceSection key={projectName} label={projectName}>
+            <ul className="artifact-library__grid artifact-library__grid--grouped">
               {entries.map((entry) => (
                 <ArtifactCard
                   entry={entry}
@@ -276,7 +280,7 @@ function ArtifactsByProject(props: {
                 />
               ))}
             </ul>
-          </section>
+          </SurfaceSection>
         ))}
     </div>
   );

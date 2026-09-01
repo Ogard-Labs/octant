@@ -689,8 +689,11 @@ describe("SettingsView", () => {
     );
     expect(styles).toMatch(/\.settings-card-section--open\s*\{[\s\S]*box-shadow:\s*none/);
     expect(styles).toContain("border-radius: var(--oct-radius-md)");
+    // Code defaults are SettingRows in the shared open sections; there is no
+    // Code-only section recipe left to keep in step with them.
+    expect(styles).not.toMatch(/\.code-settings__section/);
     expect(styles).toMatch(
-      /\.code-settings__section\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/,
+      /\.settings-card-section--open > \.settings-fact-list > \.settings-fact-list__row\s*\{[^}]*border-top:\s*1px solid var\(--oct-hairline\)/,
     );
   });
 

@@ -24,63 +24,7 @@
   background: var(--octant-app-background);
 }
 
-/* Chat, Work, and Code share one welcome-prompt geometry. Transcript width is
-   a reading preference and must not make the new-thread card jump between
-   modes. */
-.chat-welcome .draft-thread__canvas {
-  width: min(100% - 40px, 768px);
-  gap: 18px;
-}
-
-.chat-welcome .draft-thread__welcome {
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-}
-
-/* The h1 element already wears the system display face; only the hero scale
-   and balance are this surface's own. */
-.chat-welcome .draft-thread__heading {
-  max-width: 22ch;
-  color: var(--oct-fg);
-  font-size: clamp(26px, 3vw, 34px);
-  font-weight: 600;
-  letter-spacing: var(--oct-tracking-tight);
-  line-height: 1.15;
-  text-wrap: balance;
-}
-
-.chat-welcome .draft-thread__description {
-  max-width: 52ch;
-  margin-top: 0;
-  color: var(--oct-muted);
-  font-size: calc(13 * var(--oct-text-step));
-  line-height: 1.55;
-  text-wrap: pretty;
-}
-
-/* The frame, focus accent, input, row, and send circle are the system's
-   `.composer` vocabulary; the welcome hero only asks for a taller first
-   message than the in-thread composer's single line. */
-.chat-welcome .composer-input {
-  min-height: 96px;
-}
-
-/* The hint sits below the card, like secondary context under the composer. */
-.chat-welcome .draft-thread__hint {
-  order: 2;
-  padding: 0;
-  margin-top: -8px;
-  border-top: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-  opacity: 0.7;
-  text-align: center;
-}
-
-.chat-welcome__suggestions,
-.code-composer-adapter__suggestions {
+.chat-welcome__suggestions {
   order: 3;
   display: flex;
   flex-wrap: wrap;
@@ -88,15 +32,13 @@
   gap: 8px;
 }
 
-.chat-welcome__suggestions button,
-.code-composer-adapter__suggestions button {
+.chat-welcome__suggestions button {
   color: var(--oct-muted);
   background: transparent;
   border-color: transparent;
 }
 
-.chat-welcome__suggestions button:hover:not(:disabled),
-.code-composer-adapter__suggestions button:hover:not(:disabled) {
+.chat-welcome__suggestions button:hover:not(:disabled) {
   color: var(--oct-fg);
   background: transparent;
 }
@@ -996,7 +938,7 @@
 }
 
 @media (max-width: 680px) {
-  .chat-welcome .draft-thread__canvas {
+  .chat-welcome .welcome {
     justify-content: center;
     padding: 28px 0;
   }

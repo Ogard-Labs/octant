@@ -15,7 +15,7 @@ specific reason. Cards cannot be dragged or moved; grouping is a pure
 projection over one ordered card set.
 
 - **Ready** — configured, queued, or idle with unmet delivery criteria.
-- **In Progress** — a provider turn, tool, or child run is actively executing.
+- **In progress** — a provider turn, tool, or child run is actively executing.
 - **Waiting** — needs approval or input, an interrupted turn, recovery, or
   stale or ambiguous delivery evidence. The specific reason stays on the card.
 - **Done** — the user-confirmed Work delivery target is objectively satisfied.
@@ -36,7 +36,7 @@ remembered per client device (not authoritative host state).
   meaningful activity; the Work Project appears as metadata. Empty columns
   stay narrow so they do not consume most of the window.
 - **Project** grouping shows one column per Work Project; cards keep a
-  text-and-icon status badge and sort **Waiting → In Progress → Ready →
+  text-and-icon status badge and sort **Waiting → In progress → Ready →
   Done**, then by most recent activity.
 - At a narrow width the same card set becomes a grouped list. Waiting
   reasons remain visible in both layouts.

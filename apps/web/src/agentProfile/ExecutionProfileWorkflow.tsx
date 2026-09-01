@@ -3,6 +3,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ProviderModelId } from "@octant/contracts/providers";
 import { ChevronDown, Pencil, Plus, RotateCcw, Trash2, UserRoundCog } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { SettingRow } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -26,75 +27,85 @@ export function ExecutionProfileWorkflow(props: {
   const controller = props.controller;
   const selectedName = controller.selectedProfile?.displayName ?? "No profile";
 
-  const body = (
-    <>
-      {props.variant === "composer" ? (
-        <div className="execution-profile-workflow__composer-actions">
-          <p>Choose provider, model, profile, and host placement for this draft.</p>
-          <OctantButton onClick={() => setEditing("create")} type="button" variant="ghost">
-            <Plus aria-hidden="true" size={12} />
-            Create profile
-          </OctantButton>
-        </div>
-      ) : null}
+  const picker = (
+    <ExecutionContextPicker
+      disabled={controller.busy || controller.status === "loading"}
+      entries={controller.entries}
+      onSelect={controller.selectEntry}
+      {...(controller.selectedEntry === undefined
+        ? {}
+        : { selectedEntry: controller.selectedEntry })}
+    />
+  );
 
-      <ExecutionContextPicker
-        disabled={controller.busy || controller.status === "loading"}
-        entries={controller.entries}
-        onSelect={controller.selectEntry}
-        {...(controller.selectedEntry === undefined
-          ? {}
-          : { selectedEntry: controller.selectedEntry })}
-      />
+  const alert =
+    controller.message === undefined ? null : (
+      <p className="execution-profile-workflow__alert" role="alert">
+        {controller.message}
+      </p>
+    );
 
-      {controller.message === undefined ? null : (
-        <p className="execution-profile-workflow__alert" role="alert">
-          {controller.message}
-        </p>
-      )}
-
-      <ResolutionReceipt controller={controller} />
-
-      <div className="execution-profile-workflow__profiles" aria-label="Saved profiles">
-        {controller.profiles.length === 0 ? (
-          <p className="execution-profile-workflow__empty">No saved profiles yet.</p>
-        ) : (
-          controller.profiles.map((profile) => (
-            <article className="execution-profile-workflow__profile" key={String(profile.id)}>
+  const profiles = (
+    <div className="execution-profile-workflow__profiles" aria-label="Saved profiles">
+      {controller.profiles.length === 0 ? (
+        <p className="execution-profile-workflow__empty oct-row-detail">No saved profiles yet.</p>
+      ) : (
+        controller.profiles.map((profile) => (
+          <article className="execution-profile-workflow__profile" key={String(profile.id)}>
+            <OctantButton
+              aria-pressed={String(controller.selectedProfile?.id) === String(profile.id)}
+              className="execution-profile-workflow__profile-select"
+              onClick={() => controller.selectProfile(profile.id)}
+              type="button"
+              variant="ghost"
+            >
+              <span className="oct-row-label">{profile.displayName}</span>
+              <span className="oct-row-detail">
+                {profile.description ?? `${profile.defaultExecutionPolicy} defaults`}
+              </span>
+            </OctantButton>
+            <span className="execution-profile-workflow__profile-actions">
               <OctantButton
-                aria-pressed={String(controller.selectedProfile?.id) === String(profile.id)}
-                className="execution-profile-workflow__profile-select"
-                onClick={() => controller.selectProfile(profile.id)}
+                aria-label={`Edit ${profile.displayName}`}
+                onClick={() => setEditing(profile)}
+                size="icon"
                 type="button"
                 variant="ghost"
               >
-                <strong>{profile.displayName}</strong>
-                <span>{profile.description ?? `${profile.defaultExecutionPolicy} defaults`}</span>
+                <Pencil aria-hidden="true" size={12} />
               </OctantButton>
-              <span className="execution-profile-workflow__profile-actions">
-                <OctantButton
-                  aria-label={`Edit ${profile.displayName}`}
-                  onClick={() => setEditing(profile)}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Pencil aria-hidden="true" size={12} />
-                </OctantButton>
-                <OctantButton
-                  aria-label={`Delete ${profile.displayName}`}
-                  onClick={() => setConfirmDelete(profile)}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Trash2 aria-hidden="true" size={12} />
-                </OctantButton>
-              </span>
-            </article>
-          ))
-        )}
+              <OctantButton
+                aria-label={`Delete ${profile.displayName}`}
+                onClick={() => setConfirmDelete(profile)}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Trash2 aria-hidden="true" size={12} />
+              </OctantButton>
+            </span>
+          </article>
+        ))
+      )}
+    </div>
+  );
+
+  const body = (
+    <>
+      <div className="execution-profile-workflow__composer-actions">
+        <p>Choose provider, model, profile, and host placement for this draft.</p>
+        <OctantButton onClick={() => setEditing("create")} type="button" variant="ghost">
+          <Plus aria-hidden="true" size={12} />
+          Create profile
+        </OctantButton>
       </div>
+
+      {picker}
+      {alert}
+
+      <ResolutionReceipt controller={controller} />
+
+      {profiles}
 
       <OctantButton
         className="execution-profile-workflow__reload"
@@ -106,6 +117,63 @@ export function ExecutionProfileWorkflow(props: {
         <RotateCcw aria-hidden="true" size={12} />
         Reload profiles
       </OctantButton>
+    </>
+  );
+
+  /*
+   * In Settings the same pieces are two open sections (0072): the context
+   * picker as a stacked row under its label, then the saved profiles as rows
+   * with Reload and Create on the label line. The page already titles itself
+   * "Profiles", so neither section repeats that word.
+   */
+  const settingsBody = (
+    <>
+      <div className="settings-card-section settings-card-section--open">
+        <h2>Execution context</h2>
+        <p className="settings-section-note">
+          Reusable behavior defaults are resolved by the server and never change Project, root,
+          worktree, host, extension trust, or authority.
+        </p>
+        <div className="setgroup">
+          <SettingRow
+            description="Search providers, models, and profiles, then choose what new drafts resolve against."
+            label="Provider, model, and profile"
+            scope="project"
+            settingId="execution-context"
+          >
+            {picker}
+          </SettingRow>
+        </div>
+        {alert}
+        <ResolutionReceipt controller={controller} quiet />
+      </div>
+      <div className="settings-card-section settings-card-section--open">
+        <div className="settings-section-head">
+          <h2>Saved profiles</h2>
+          <div className="settings-section-head__actions">
+            <OctantButton
+              disabled={controller.busy}
+              onClick={() => void controller.reload()}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <RotateCcw aria-hidden="true" size={12} />
+              Reload profiles
+            </OctantButton>
+            <OctantButton
+              onClick={() => setEditing("create")}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Plus aria-hidden="true" size={14} />
+              Create profile
+            </OctantButton>
+          </div>
+        </div>
+        {profiles}
+      </div>
     </>
   );
 
@@ -136,26 +204,7 @@ export function ExecutionProfileWorkflow(props: {
           {body}
         </OctantPopover>
       ) : (
-        <>
-          <header className="execution-profile-workflow__header">
-            {/*
-             * The settings page already titles this surface. Repeating the name
-             * here rendered the word "Profiles" twice down the same page.
-             */}
-            <div>
-              <p>
-                Reusable behavior defaults are resolved by the server and never change Project,
-                root, worktree, host, extension trust, or authority.
-              </p>
-            </div>
-            <OctantButton onClick={() => setEditing("create")} type="button" variant="outline">
-              <Plus aria-hidden="true" size={14} />
-              Create profile
-            </OctantButton>
-          </header>
-
-          {!open ? null : <div className="execution-profile-workflow__body">{body}</div>}
-        </>
+        settingsBody
       )}
 
       <ProfileForm
@@ -198,16 +247,26 @@ export function ExecutionProfileWorkflow(props: {
   );
 }
 
-function ResolutionReceipt(props: { readonly controller: ExecutionProfileController }) {
+function ResolutionReceipt(props: {
+  readonly controller: ExecutionProfileController;
+  /** In Settings the waiting state is a quiet line under the rows, not a box. */
+  readonly quiet?: boolean;
+}) {
   const receipt = props.controller.receipt;
   if (receipt === undefined) {
-    return (
+    const waiting =
+      props.controller.status === "loading"
+        ? "Loading profiles…"
+        : props.controller.status === "resolving"
+          ? "Resolving current provider, model, profile, and host facts…"
+          : "Select a profile to resolve its effective execution context.";
+    return props.quiet === true ? (
+      <p className="settings-section-line" role="status">
+        {waiting}
+      </p>
+    ) : (
       <div className="execution-profile-workflow__receipt" role="status">
-        {props.controller.status === "loading"
-          ? "Loading profiles…"
-          : props.controller.status === "resolving"
-            ? "Resolving current provider, model, profile, and host facts…"
-            : "Select a profile to resolve its effective execution context."}
+        {waiting}
       </div>
     );
   }

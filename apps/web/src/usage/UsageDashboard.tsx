@@ -11,7 +11,6 @@ import type { HostId } from "@octant/contracts/host";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import {
   AlertTriangle,
-  BarChart3,
   ChevronDown,
   ChevronUp,
   Download,
@@ -21,9 +20,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantCard } from "../ui/base/OctantCard";
-import { OctantEmptyState } from "../ui/base/OctantEmptyState";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -88,11 +86,26 @@ const CATEGORY_OPTIONS: ReadonlyArray<{
   { value: "reserves", label: "Reserves" },
 ];
 
+const FILTER_KEYS: ReadonlyArray<keyof UsageQueryFilter> = [
+  "providerInstanceId",
+  "modelId",
+  "hostId",
+  "mode",
+  "projectId",
+  "subjectAggregateId",
+  "requestShape",
+  "quality",
+  "category",
+  "from",
+  "to",
+];
+
 export function UsageDashboard(props: UsageDashboardProps) {
   const [status, setStatus] = useState<DashboardStatus>("loading");
   const [data, setData] = useState<UsageQueryResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>();
   const [filter, setFilter] = useState<UsageQueryFilter>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [activityView, setActivityView] = useState<ActivityView>("daily");
   const [confirmAction, setConfirmAction] = useState<
     | { readonly kind: "export"; readonly format: UsageExportFormat }
@@ -196,7 +209,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
   if (status === "loading") {
     return (
       <section aria-label="Usage dashboard" aria-busy="true" className="usage-dashboard">
-        <p className="usage-dashboard__status" role="status">
+        <p className="oct-row-detail usage-dashboard__status" role="status">
           Loading usage data…
         </p>
       </section>
@@ -209,7 +222,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
         <div className="usage-dashboard__error" role="alert">
           <AlertTriangle aria-hidden="true" size={16} />
           <p>{errorMessage}</p>
-          <OctantButton onClick={() => void load()} type="button">
+          <OctantButton onClick={() => void load()} size="sm" type="button">
             Retry
           </OctantButton>
         </div>
@@ -220,18 +233,39 @@ export function UsageDashboard(props: UsageDashboardProps) {
   if (data === null) return null;
 
   const isEmpty = data.records.length === 0;
+  const hasFilter = Object.keys(filter).length > 0;
+  const activeFilterCount = FILTER_KEYS.filter(
+    (key) => filter[key] !== undefined && filter[key] !== "",
+  ).length;
   const activitySeries = activitySeriesFor(data, activityView);
 
   return (
     <section aria-busy={refreshing} aria-label="Usage dashboard" className="usage-dashboard">
-      <header
-        className={`usage-dashboard__header${props.showHeading === false ? " usage-dashboard__header--embedded" : ""}`}
-      >
-        {props.showHeading === false ? null : (
-          <h2>
-            <BarChart3 aria-hidden="true" size={16} /> Usage
-          </h2>
-        )}
+      {props.showHeading === false ? null : (
+        <SurfaceHeader subtitle="Activity and usage across providers." title="Usage" />
+      )}
+
+      <div className="surface-toolbar">
+        <OctantButton
+          aria-controls="usage-dashboard-filters"
+          aria-expanded={filtersOpen}
+          onClick={() => setFiltersOpen((current) => !current)}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <Filter aria-hidden="true" size={14} />
+          <span>Filters</span>
+          {activeFilterCount === 0 ? null : (
+            <span className="oct-meta usage-dashboard__filter-count">{activeFilterCount}</span>
+          )}
+          {filtersOpen ? (
+            <ChevronUp aria-hidden="true" size={14} />
+          ) : (
+            <ChevronDown aria-hidden="true" size={14} />
+          )}
+        </OctantButton>
+        <span className="surface-toolbar__spacer" />
         <OctantButton
           aria-label="Refresh usage data"
           onClick={() => void load()}
@@ -241,10 +275,12 @@ export function UsageDashboard(props: UsageDashboardProps) {
         >
           <RefreshCw aria-hidden="true" size={14} />
         </OctantButton>
-      </header>
+      </div>
+
+      <UsageFilters filter={filter} onChange={setFilter} open={filtersOpen} />
 
       {refreshing ? (
-        <p className="usage-dashboard__status" role="status">
+        <p className="oct-row-detail usage-dashboard__status" role="status">
           Refreshing usage data…
         </p>
       ) : null}
@@ -252,7 +288,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
         <div className="usage-dashboard__error" role="alert">
           <AlertTriangle aria-hidden="true" size={16} />
           <p>{errorMessage}</p>
-          <OctantButton onClick={() => void load()} type="button">
+          <OctantButton onClick={() => void load()} size="sm" type="button">
             Retry
           </OctantButton>
         </div>
@@ -265,14 +301,114 @@ export function UsageDashboard(props: UsageDashboardProps) {
         </p>
       ) : null}
 
-      <div className="usage-dashboard__totals" role="group" aria-label="Summary totals">
-        <TotalsCard label="Total requests" value={data.totals.totalRequests} />
-        <TotalsCard label="Input tokens" value={data.totals.totalInputTokens} />
-        <TotalsCard label="Output tokens" value={data.totals.totalOutputTokens} />
+      <div className="usage-totals" role="group" aria-label="Summary totals">
+        <UsageTotal label="Total requests" value={data.totals.totalRequests} />
+        <UsageTotal label="Input tokens" value={data.totals.totalInputTokens} />
+        <UsageTotal label="Output tokens" value={data.totals.totalOutputTokens} />
       </div>
-      <UsageFilters filter={filter} onChange={setFilter} />
+
+      <div className="usage-dashboard__quality" role="group" aria-label="Data quality">
+        <QualityBadge count={data.totals.exactCount} label="Exact" quality="exact" />
+        <QualityBadge count={data.totals.estimatedCount} label="Estimated" quality="estimated" />
+        <QualityBadge count={data.totals.reconciledCount} label="Reconciled" quality="reconciled" />
+        <QualityBadge count={data.totals.staleCount} label="Stale" quality="stale" />
+        <QualityBadge
+          count={data.totals.unavailableCount}
+          label="Unavailable"
+          quality="unavailable"
+        />
+      </div>
+
+      {isEmpty ? (
+        <SurfaceEmpty
+          {...(hasFilter
+            ? {
+                action: (
+                  <OctantButton
+                    onClick={() => setFilter({})}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Clear filters
+                  </OctantButton>
+                ),
+              }
+            : {})}
+          detail={
+            hasFilter
+              ? "Clear or adjust the active filters to see other usage."
+              : "Usage appears after an agent completes a provider request."
+          }
+          title={hasFilter ? "No usage matches these filters" : "No usage recorded yet"}
+        />
+      ) : (
+        <>
+          <ActivitySection
+            view={activityView}
+            onViewChange={setActivityView}
+            series={activitySeries}
+            isNarrow={props.isNarrow ?? false}
+          />
+
+          {data.topConsumers.length > 0 ? (
+            <TopConsumersSection consumers={data.topConsumers} />
+          ) : null}
+
+          {data.byProvider.length > 0 ? (
+            <SurfaceSection className="usage-dashboard__section" label="By provider">
+              <table className="usage-dashboard__table" aria-label="Usage by provider">
+                <thead>
+                  <tr>
+                    <th scope="col">Provider</th>
+                    <th scope="col">Model</th>
+                    <th scope="col">Requests</th>
+                    <th scope="col">Input tokens</th>
+                    <th scope="col">Output tokens</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.byProvider.map((row) => (
+                    <tr key={`${row.providerInstanceId}/${row.modelId}`}>
+                      <td>{row.providerInstanceId}</td>
+                      <td>{row.modelId}</td>
+                      <td>{row.requestCount}</td>
+                      <td>{formatNumber(row.totalInputTokens)}</td>
+                      <td>{formatNumber(row.totalOutputTokens)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </SurfaceSection>
+          ) : null}
+
+          {data.byCategory.length > 0 ? (
+            <SurfaceSection className="usage-dashboard__section" label="By category">
+              <table className="usage-dashboard__table" aria-label="Usage by category">
+                <thead>
+                  <tr>
+                    <th scope="col">Category</th>
+                    <th scope="col">Planned tokens</th>
+                    <th scope="col">Entries</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.byCategory.map((row) => (
+                    <tr key={row.category}>
+                      <td>{row.category}</td>
+                      <td>{formatNumber(row.plannedTokens)}</td>
+                      <td>{row.entryCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </SurfaceSection>
+          ) : null}
+        </>
+      )}
+
       <details className="usage-dashboard__operational-details">
-        <summary>Operational details</summary>
+        <summary className="oct-section-label">Operational details</summary>
         <div
           aria-label="Operational metrics"
           className="usage-dashboard__operational-metrics"
@@ -300,114 +436,6 @@ export function UsageDashboard(props: UsageDashboardProps) {
         />
       </details>
 
-      <div className="usage-dashboard__quality" role="group" aria-label="Data quality">
-        <QualityBadge count={data.totals.exactCount} label="Exact" quality="exact" />
-        <QualityBadge count={data.totals.estimatedCount} label="Estimated" quality="estimated" />
-        <QualityBadge count={data.totals.reconciledCount} label="Reconciled" quality="reconciled" />
-        <QualityBadge count={data.totals.staleCount} label="Stale" quality="stale" />
-        <QualityBadge
-          count={data.totals.unavailableCount}
-          label="Unavailable"
-          quality="unavailable"
-        />
-      </div>
-
-      {isEmpty ? (
-        <OctantEmptyState
-          {...(Object.keys(filter).length === 0
-            ? {}
-            : {
-                action: (
-                  <OctantButton
-                    onClick={() => setFilter({})}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    Clear filters
-                  </OctantButton>
-                ),
-              })}
-          className="usage-dashboard__empty"
-          message={
-            Object.keys(filter).length === 0
-              ? "Usage appears after an agent completes a provider request."
-              : "Clear or adjust the active filters to see other usage."
-          }
-          role="status"
-          title={
-            Object.keys(filter).length === 0
-              ? "No usage recorded yet"
-              : "No usage matches these filters"
-          }
-        />
-      ) : (
-        <>
-          <ActivitySection
-            view={activityView}
-            onViewChange={setActivityView}
-            series={activitySeries}
-            isNarrow={props.isNarrow ?? false}
-          />
-
-          {data.topConsumers.length > 0 ? (
-            <TopConsumersSection consumers={data.topConsumers} />
-          ) : null}
-
-          {data.byProvider.length > 0 ? (
-            <div className="usage-dashboard__section">
-              <h3>By provider</h3>
-              <table className="usage-dashboard__table" aria-label="Usage by provider">
-                <thead>
-                  <tr>
-                    <th scope="col">Provider</th>
-                    <th scope="col">Model</th>
-                    <th scope="col">Requests</th>
-                    <th scope="col">Input tokens</th>
-                    <th scope="col">Output tokens</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.byProvider.map((row) => (
-                    <tr key={`${row.providerInstanceId}/${row.modelId}`}>
-                      <td>{row.providerInstanceId}</td>
-                      <td>{row.modelId}</td>
-                      <td>{row.requestCount}</td>
-                      <td>{formatNumber(row.totalInputTokens)}</td>
-                      <td>{formatNumber(row.totalOutputTokens)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-
-          {data.byCategory.length > 0 ? (
-            <div className="usage-dashboard__section">
-              <h3>By category</h3>
-              <table className="usage-dashboard__table" aria-label="Usage by category">
-                <thead>
-                  <tr>
-                    <th scope="col">Category</th>
-                    <th scope="col">Planned tokens</th>
-                    <th scope="col">Entries</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.byCategory.map((row) => (
-                    <tr key={row.category}>
-                      <td>{row.category}</td>
-                      <td>{formatNumber(row.plannedTokens)}</td>
-                      <td>{row.entryCount}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </>
-      )}
-
       <UsageControls
         onExportCsv={() => setConfirmAction({ kind: "export", format: "csv" })}
         onExportJson={() => setConfirmAction({ kind: "export", format: "json" })}
@@ -416,8 +444,8 @@ export function UsageDashboard(props: UsageDashboardProps) {
         {...(actionMessage ? { message: actionMessage } : {})}
       />
 
-      <p className="usage-dashboard__footer">
-        Queried at {new Date(data.queryAt).toLocaleString()}
+      <p className="oct-meta usage-dashboard__footer">
+        Queried {queriedAtLabel(data.queryAt)}
         {data.hasMore ? " · More data available" : ""}
       </p>
 
@@ -479,27 +507,36 @@ function shortDate(timestamp: string): string {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
+/** "21:36 on 1 Sep 2026" in the viewer's time zone: a sentence, not a stamp. */
+function queriedAtLabel(timestamp: string): string {
+  const at = new Date(timestamp);
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: VIEWING_TIME_ZONE,
+  }).format(at);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      timeZone: VIEWING_TIME_ZONE,
+    })
+      .formatToParts(at)
+      .map((part) => [part.type, part.value]),
+  );
+  return `${time} on ${parts.day} ${parts.month} ${parts.year}`;
+}
+
 interface UsageFiltersProps {
   readonly filter: UsageQueryFilter;
   readonly onChange: (filter: UsageQueryFilter) => void;
+  readonly open: boolean;
 }
 
-function UsageFilters({ filter, onChange }: UsageFiltersProps) {
-  const [open, setOpen] = useState(false);
+function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
   const [rangeError, setRangeError] = useState<string>();
-  const activeCount = [
-    filter.providerInstanceId,
-    filter.modelId,
-    filter.hostId,
-    filter.mode,
-    filter.projectId,
-    filter.subjectAggregateId,
-    filter.requestShape,
-    filter.quality,
-    filter.category,
-    filter.from,
-    filter.to,
-  ].filter((value) => value !== undefined && value !== "").length;
   const update = <K extends keyof UsageQueryFilter>(
     key: K,
     value: UsageQueryFilter[K] | undefined,
@@ -531,219 +568,199 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
     onChange(next);
   };
   return (
-    <section className="usage-dashboard__filter-panel" data-expanded={open ? "true" : "false"}>
-      <OctantButton
-        aria-controls="usage-dashboard-filters"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        type="button"
-        variant="ghost"
-      >
-        <Filter aria-hidden="true" size={14} />
-        <span>Filters</span>
-        {activeCount === 0 ? null : (
-          <span className="usage-dashboard__filter-count">{activeCount}</span>
-        )}
-        {open ? (
-          <ChevronUp aria-hidden="true" size={14} />
-        ) : (
-          <ChevronDown aria-hidden="true" size={14} />
-        )}
-      </OctantButton>
-      <div
-        aria-label="Usage filters"
-        className="usage-dashboard__filters"
-        hidden={!open}
-        id="usage-dashboard-filters"
-        role="group"
-      >
-        <label className="usage-dashboard__field">
-          <span>Provider</span>
-          <OctantInput
-            aria-label="Filter by provider instance id"
-            className="usage-dashboard__text-input input window-no-drag"
-            onChange={(event) =>
-              update(
-                "providerInstanceId",
-                event.currentTarget.value.trim() === ""
-                  ? undefined
-                  : (event.currentTarget.value.trim() as ProviderInstanceId),
-              )
+    <div
+      aria-label="Usage filters"
+      className="usage-dashboard__filters"
+      hidden={!open}
+      id="usage-dashboard-filters"
+      role="group"
+    >
+      <label className="usage-dashboard__field">
+        <span>Provider</span>
+        <OctantInput
+          aria-label="Filter by provider instance id"
+          className="usage-dashboard__text-input input window-no-drag"
+          onChange={(event) =>
+            update(
+              "providerInstanceId",
+              event.currentTarget.value.trim() === ""
+                ? undefined
+                : (event.currentTarget.value.trim() as ProviderInstanceId),
+            )
+          }
+          placeholder="provider instance id"
+          type="search"
+          value={filter.providerInstanceId ?? ""}
+        />
+      </label>
+      <label className="usage-dashboard__field">
+        <span>Model</span>
+        <OctantInput
+          aria-label="Filter by model id"
+          className="usage-dashboard__text-input input window-no-drag"
+          onChange={(event) =>
+            update(
+              "modelId",
+              event.currentTarget.value.trim() === ""
+                ? undefined
+                : (event.currentTarget.value.trim() as ProviderModelId),
+            )
+          }
+          placeholder="model id"
+          type="search"
+          value={filter.modelId ?? ""}
+        />
+      </label>
+      <label className="usage-dashboard__field">
+        <span>Host</span>
+        <OctantInput
+          aria-label="Filter by host id"
+          className="usage-dashboard__text-input input window-no-drag"
+          onChange={(event) =>
+            update(
+              "hostId",
+              event.currentTarget.value.trim() === ""
+                ? undefined
+                : (event.currentTarget.value.trim() as HostId),
+            )
+          }
+          placeholder="host id"
+          type="search"
+          value={filter.hostId ?? ""}
+        />
+      </label>
+      <label className="usage-dashboard__field">
+        <span>Mode</span>
+        <OctantSelectField
+          aria-label="Filter by mode"
+          className="usage-dashboard__select select window-no-drag"
+          onValueChange={(value) =>
+            update("mode", value === "" ? undefined : (value as UsageQueryFilter["mode"]))
+          }
+          options={MODE_OPTIONS.map((option) => ({
+            id: option.value,
+            label: option.label,
+          }))}
+          value={filter.mode ?? ""}
+        />
+      </label>
+      <label className="usage-dashboard__field">
+        <span>Project</span>
+        <OctantInput
+          aria-label="Filter by project id"
+          className="usage-dashboard__text-input input window-no-drag"
+          onChange={(event) =>
+            update(
+              "projectId",
+              event.currentTarget.value.trim() === ""
+                ? undefined
+                : event.currentTarget.value.trim(),
+            )
+          }
+          placeholder="project id"
+          type="search"
+          value={filter.projectId ?? ""}
+        />
+      </label>
+      <label className="usage-dashboard__field">
+        <span>Thread</span>
+        <OctantInput
+          aria-label="Filter by thread id"
+          className="usage-dashboard__text-input input window-no-drag"
+          onChange={(event) => {
+            const value = event.currentTarget.value.trim();
+            if (value === "") {
+              clear("subjectAggregateType", "subjectAggregateId");
+              return;
             }
-            placeholder="provider instance id"
-            type="search"
-            value={filter.providerInstanceId ?? ""}
-          />
-        </label>
-        <label className="usage-dashboard__field">
-          <span>Model</span>
-          <OctantInput
-            aria-label="Filter by model id"
-            className="usage-dashboard__text-input input window-no-drag"
-            onChange={(event) =>
-              update(
-                "modelId",
-                event.currentTarget.value.trim() === ""
-                  ? undefined
-                  : (event.currentTarget.value.trim() as ProviderModelId),
-              )
-            }
-            placeholder="model id"
-            type="search"
-            value={filter.modelId ?? ""}
-          />
-        </label>
-        <label className="usage-dashboard__field">
-          <span>Host</span>
-          <OctantInput
-            aria-label="Filter by host id"
-            className="usage-dashboard__text-input input window-no-drag"
-            onChange={(event) =>
-              update(
-                "hostId",
-                event.currentTarget.value.trim() === ""
-                  ? undefined
-                  : (event.currentTarget.value.trim() as HostId),
-              )
-            }
-            placeholder="host id"
-            type="search"
-            value={filter.hostId ?? ""}
-          />
-        </label>
-        <label className="usage-dashboard__field">
-          <span>Mode</span>
-          <OctantSelectField
-            aria-label="Filter by mode"
-            className="usage-dashboard__select select window-no-drag"
-            onValueChange={(value) =>
-              update("mode", value === "" ? undefined : (value as UsageQueryFilter["mode"]))
-            }
-            options={MODE_OPTIONS.map((option) => ({
+            onChange({
+              ...filter,
+              subjectAggregateType: "chat-thread",
+              subjectAggregateId: value,
+            });
+          }}
+          placeholder="thread id"
+          type="search"
+          value={filter.subjectAggregateId ?? ""}
+        />
+      </label>
+      <label className="usage-dashboard__field">
+        <span>Request shape</span>
+        <OctantInput
+          aria-label="Filter by request shape"
+          className="usage-dashboard__text-input input window-no-drag"
+          onChange={(event) =>
+            update(
+              "requestShape",
+              event.currentTarget.value.trim() === ""
+                ? undefined
+                : event.currentTarget.value.trim(),
+            )
+          }
+          placeholder="request shape"
+          type="search"
+          value={filter.requestShape ?? ""}
+        />
+      </label>
+      <label className="usage-dashboard__field">
+        <span>Quality</span>
+        <OctantSelectField
+          aria-label="Filter by measurement quality"
+          className="usage-dashboard__select select window-no-drag"
+          onValueChange={(value) =>
+            update("quality", value === "" ? undefined : (value as UsageQueryFilter["quality"]))
+          }
+          options={QUALITY_OPTIONS.map((option) => ({
+            id: option.value,
+            label: option.label,
+          }))}
+          value={filter.quality ?? ""}
+        />
+      </label>
+      <label className="usage-dashboard__field">
+        <span>Category</span>
+        <OctantSelectField
+          aria-label="Filter by context category"
+          className="usage-dashboard__select select window-no-drag"
+          onValueChange={(value) =>
+            update("category", value === "" ? undefined : (value as ContextEntryCategory))
+          }
+          options={[
+            { id: "", label: "All categories" },
+            ...CATEGORY_OPTIONS.map((option) => ({
               id: option.value,
               label: option.label,
-            }))}
-            value={filter.mode ?? ""}
-          />
-        </label>
-        <label className="usage-dashboard__field">
-          <span>Project</span>
-          <OctantInput
-            aria-label="Filter by project id"
-            className="usage-dashboard__text-input input window-no-drag"
-            onChange={(event) =>
-              update(
-                "projectId",
-                event.currentTarget.value.trim() === ""
-                  ? undefined
-                  : event.currentTarget.value.trim(),
-              )
-            }
-            placeholder="project id"
-            type="search"
-            value={filter.projectId ?? ""}
-          />
-        </label>
-        <label className="usage-dashboard__field">
-          <span>Thread</span>
-          <OctantInput
-            aria-label="Filter by thread id"
-            className="usage-dashboard__text-input input window-no-drag"
-            onChange={(event) => {
-              const value = event.currentTarget.value.trim();
-              if (value === "") {
-                clear("subjectAggregateType", "subjectAggregateId");
-                return;
-              }
-              onChange({
-                ...filter,
-                subjectAggregateType: "chat-thread",
-                subjectAggregateId: value,
-              });
-            }}
-            placeholder="thread id"
-            type="search"
-            value={filter.subjectAggregateId ?? ""}
-          />
-        </label>
-        <label className="usage-dashboard__field">
-          <span>Request shape</span>
-          <OctantInput
-            aria-label="Filter by request shape"
-            className="usage-dashboard__text-input input window-no-drag"
-            onChange={(event) =>
-              update(
-                "requestShape",
-                event.currentTarget.value.trim() === ""
-                  ? undefined
-                  : event.currentTarget.value.trim(),
-              )
-            }
-            placeholder="request shape"
-            type="search"
-            value={filter.requestShape ?? ""}
-          />
-        </label>
-        <label className="usage-dashboard__field">
-          <span>Quality</span>
-          <OctantSelectField
-            aria-label="Filter by measurement quality"
-            className="usage-dashboard__select select window-no-drag"
-            onValueChange={(value) =>
-              update("quality", value === "" ? undefined : (value as UsageQueryFilter["quality"]))
-            }
-            options={QUALITY_OPTIONS.map((option) => ({
-              id: option.value,
-              label: option.label,
-            }))}
-            value={filter.quality ?? ""}
-          />
-        </label>
-        <label className="usage-dashboard__field">
-          <span>Category</span>
-          <OctantSelectField
-            aria-label="Filter by context category"
-            className="usage-dashboard__select select window-no-drag"
-            onValueChange={(value) =>
-              update("category", value === "" ? undefined : (value as ContextEntryCategory))
-            }
-            options={[
-              { id: "", label: "All categories" },
-              ...CATEGORY_OPTIONS.map((option) => ({
-                id: option.value,
-                label: option.label,
-              })),
-            ]}
-            value={filter.category ?? ""}
-          />
-        </label>
-        <label className="usage-dashboard__field">
-          <span>From date</span>
-          <OctantInput
-            aria-label="Usage from date"
-            className="usage-dashboard__text-input input window-no-drag"
-            onChange={(event) => updateDate("from", event.currentTarget.value)}
-            type="date"
-            value={dateInputValue(filter.from)}
-          />
-        </label>
-        <label className="usage-dashboard__field">
-          <span>To date</span>
-          <OctantInput
-            aria-label="Usage to date"
-            className="usage-dashboard__text-input input window-no-drag"
-            onChange={(event) => updateDate("to", event.currentTarget.value)}
-            type="date"
-            value={dateInputValue(filter.to)}
-          />
-        </label>
-        {rangeError !== undefined ? (
-          <p className="usage-dashboard__filter-error" role="alert">
-            {rangeError}
-          </p>
-        ) : null}
-      </div>
-    </section>
+            })),
+          ]}
+          value={filter.category ?? ""}
+        />
+      </label>
+      <label className="usage-dashboard__field">
+        <span>From date</span>
+        <OctantInput
+          aria-label="Usage from date"
+          className="usage-dashboard__text-input input window-no-drag"
+          onChange={(event) => updateDate("from", event.currentTarget.value)}
+          type="date"
+          value={dateInputValue(filter.from)}
+        />
+      </label>
+      <label className="usage-dashboard__field">
+        <span>To date</span>
+        <OctantInput
+          aria-label="Usage to date"
+          className="usage-dashboard__text-input input window-no-drag"
+          onChange={(event) => updateDate("to", event.currentTarget.value)}
+          type="date"
+          value={dateInputValue(filter.to)}
+        />
+      </label>
+      {rangeError !== undefined ? (
+        <p className="usage-dashboard__filter-error" role="alert">
+          {rangeError}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -761,9 +778,9 @@ interface ActivitySectionProps {
 
 function ActivitySection({ view, onViewChange, series, isNarrow }: ActivitySectionProps) {
   return (
-    <div className="usage-dashboard__section">
+    <section aria-label="Activity" className="surface-section usage-dashboard__section">
       <div className="usage-dashboard__section-header">
-        <h3>Activity</h3>
+        <h2 className="oct-section-label">Activity</h2>
         <OctantToggleGroup<ActivityView>
           aria-label="Activity view"
           onValueChange={(value) => {
@@ -800,7 +817,7 @@ function ActivitySection({ view, onViewChange, series, isNarrow }: ActivitySecti
           ))}
         </tbody>
       </table>
-    </div>
+    </section>
   );
 }
 
@@ -810,8 +827,7 @@ function TopConsumersSection({
   readonly consumers: ReadonlyArray<UsageTopConsumer>;
 }) {
   return (
-    <div className="usage-dashboard__section">
-      <h3>Top consumers</h3>
+    <SurfaceSection className="usage-dashboard__section" label="Top consumers">
       <table className="usage-dashboard__table" aria-label="Top usage consumers">
         <thead>
           <tr>
@@ -834,7 +850,7 @@ function TopConsumersSection({
           ))}
         </tbody>
       </table>
-    </div>
+    </SurfaceSection>
   );
 }
 
@@ -849,16 +865,28 @@ interface UsageControlsProps {
 function UsageControls(props: UsageControlsProps) {
   return (
     <div className="usage-dashboard__controls" role="group" aria-label="Usage data controls">
-      <OctantButton onClick={props.onExportCsv} type="button" variant="secondary">
+      <OctantButton onClick={props.onExportCsv} size="sm" type="button" variant="outline">
         <Download aria-hidden="true" size={14} /> Export CSV
       </OctantButton>
-      <OctantButton onClick={props.onExportJson} type="button" variant="secondary">
+      <OctantButton onClick={props.onExportJson} size="sm" type="button" variant="outline">
         <Download aria-hidden="true" size={14} /> Export JSON
       </OctantButton>
-      <OctantButton onClick={props.onRetain} type="button" variant="destructive-outline">
+      <OctantButton
+        onClick={props.onRetain}
+        className="usage-dashboard__danger"
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
         <Eraser aria-hidden="true" size={14} /> Purge older than 30 days
       </OctantButton>
-      <OctantButton onClick={props.onReset} type="button" variant="destructive-outline">
+      <OctantButton
+        onClick={props.onReset}
+        className="usage-dashboard__danger"
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
         <Trash2 aria-hidden="true" size={14} /> Reset all usage
       </OctantButton>
       {props.message !== undefined ? (
@@ -885,7 +913,7 @@ function ConfirmDialog({ action, onCancel, onConfirm }: ConfirmDialogProps) {
     <div className="usage-dashboard__confirm" role="alertdialog" aria-label="Confirm usage action">
       <p>{message}</p>
       <div className="usage-dashboard__confirm-actions">
-        <OctantButton onClick={onCancel} type="button" variant="outline">
+        <OctantButton onClick={onCancel} size="sm" type="button" variant="outline">
           Cancel
         </OctantButton>
         {/*
@@ -897,6 +925,7 @@ function ConfirmDialog({ action, onCancel, onConfirm }: ConfirmDialogProps) {
         <OctantButton
           autoFocus
           onClick={onConfirm}
+          size="sm"
           type="button"
           variant={action.kind === "export" ? "default" : "destructive"}
         >
@@ -917,20 +946,14 @@ function confirmMessageFor(action: ConfirmDialogProps["action"]): string {
   return "Purge usage records older than 30 days? This removes durable usage records older than the retention threshold.";
 }
 
-function TotalsCard(props: {
-  readonly label: string;
-  readonly value: number | undefined;
-  readonly suffix?: string;
-}) {
+function UsageTotal(props: { readonly label: string; readonly value: number | undefined }) {
   return (
-    <OctantCard className="usage-dashboard__total-card grid min-w-0 gap-[3px] p-3">
-      <span className="usage-dashboard__total-value">
-        {props.value === undefined
-          ? "Unavailable"
-          : `${formatNumber(props.value)}${props.suffix ?? ""}`}
+    <div className="usage-total">
+      <span className="usage-total__value">
+        {props.value === undefined ? "Unavailable" : formatNumber(props.value)}
       </span>
-      <span className="usage-dashboard__total-label">{props.label}</span>
-    </OctantCard>
+      <span className="oct-meta">{props.label}</span>
+    </div>
   );
 }
 
@@ -940,13 +963,13 @@ function OperationalMetric(props: {
   readonly suffix?: string;
 }) {
   return (
-    <div className="usage-dashboard__operational-metric">
-      <span>{props.label}</span>
-      <strong>
+    <div className="surface-row usage-dashboard__operational-metric">
+      <span className="oct-row-label">{props.label}</span>
+      <span className="surface-row__control usage-dashboard__metric-value">
         {props.value === undefined
           ? "Unavailable"
           : `${formatNumber(props.value)}${props.suffix ?? ""}`}
-      </strong>
+      </span>
     </div>
   );
 }

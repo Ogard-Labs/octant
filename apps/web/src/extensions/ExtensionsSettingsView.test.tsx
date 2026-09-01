@@ -613,6 +613,26 @@ describe("ExtensionsSettingsView", () => {
     );
   });
 
+  it("marks the current view in the Installed / Marketplace tabs", async () => {
+    render(<ExtensionsSettingsView client={client()} scope={scope} />);
+    await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
+
+    expect(screen.getByRole("tablist")).toHaveClass("surface-tabs");
+    expect(screen.getByRole("tab", { name: /installed/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
+    expect(screen.getByRole("tab", { name: /marketplace/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: /installed/i })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
   it("searches the marketplace, inspects a package, then requires explicit confirmation before install", async () => {
     const c = client();
     render(<ExtensionsSettingsView client={c} scope={scope} />);

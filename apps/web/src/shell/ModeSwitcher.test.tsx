@@ -80,22 +80,24 @@ describe("ModeSwitcher", () => {
       expect.stringMatching(/Work.*Work with local files and documents/),
       expect.stringMatching(/Code.*Build, debug, and ship software/),
     ]);
-    expect(screen.getByRole("menuitemradio", { name: /Code.*software/i })).toHaveAttribute(
+    expect(screen.getByRole("menuitemradio", { name: "Code" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
+    // The name is the visible label alone; the one-line help is a description.
+    expect(screen.getByRole("menuitemradio", { name: "Work" })).toHaveAccessibleDescription(
+      "Work with local files and documents",
+    );
     expect(
-      screen
-        .getByRole("menuitemradio", { name: /Code.*software/i })
-        .querySelector(".octant-menu__indicator"),
+      screen.getByRole("menuitemradio", { name: "Code" }).querySelector(".octant-menu__indicator"),
     ).toBeVisible();
 
-    await user.click(screen.getByRole("menuitemradio", { name: /Code.*software/i }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Code" }));
     expect(onSelectMode).not.toHaveBeenCalled();
     await waitFor(() => expect(trigger).toHaveFocus());
 
     await user.keyboard("{Enter}");
-    await user.click(screen.getByRole("menuitemradio", { name: /Chat.*virtual context/i }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Chat" }));
     expect(onSelectMode).toHaveBeenCalledOnce();
     expect(onSelectMode).toHaveBeenCalledWith("chat");
     await waitFor(() => expect(trigger).toHaveFocus());
@@ -115,9 +117,9 @@ describe("ModeSwitcher", () => {
     const trigger = screen.getByRole("button", { name: "Workspace mode, Code" });
     trigger.focus();
     await user.keyboard("{Enter}");
-    expect(screen.queryByRole("menuitemradio", { name: /Chat/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitemradio", { name: /Work/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("menuitemradio", { name: /Code.*software/i })).toBeVisible();
+    expect(screen.queryByRole("menuitemradio", { name: "Chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "Work" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "Code" })).toBeVisible();
   });
 
   it("places optional chrome actions beside the mode switcher", () => {
