@@ -1,7 +1,6 @@
 import type { CodeSettings } from "@octant/contracts/code";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantCard, OctantCardContent } from "../ui/base/OctantCard";
 import {
   OctantField,
   OctantFieldDescription,
@@ -65,14 +64,15 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   }
 
   return (
-    <OctantCard aria-label="Code defaults" className="code-settings">
+    <section aria-label="Code defaults" className="code-settings">
       <h2 className="sr-only">Code defaults</h2>
-      <OctantCardContent>
-        <p className="code-settings__note">
-          These defaults apply only to new Code threads. Existing threads keep their access.
-        </p>
-        <OctantFieldGroup>
-          <OctantField>
+      <p className="code-settings__note">
+        These defaults apply only to new Code threads. Existing threads keep their access.
+      </p>
+      <section className="code-settings__section">
+        <h2>Thread defaults</h2>
+        <OctantFieldGroup className="code-settings__group">
+          <OctantField className="code-settings__field code-settings__field--choice">
             <OctantFieldLabel>Default Code access</OctantFieldLabel>
             <OctantFieldDescription>
               Choose the authority new Code threads request at creation.
@@ -94,7 +94,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               <OctantToggleGroupItem value="full-access">Full access</OctantToggleGroupItem>
             </OctantToggleGroup>
           </OctantField>
-          <OctantField>
+          <OctantField className="code-settings__field code-settings__field--choice">
             <OctantFieldLabel>Default approval persistence</OctantFieldLabel>
             <OctantFieldDescription>
               Decide whether approvals end with the session or follow the Project default.
@@ -111,7 +111,12 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               <OctantToggleGroupItem value="project-default">Project</OctantToggleGroupItem>
             </OctantToggleGroup>
           </OctantField>
-          <OctantField>
+        </OctantFieldGroup>
+      </section>
+      <section className="code-settings__section">
+        <h2>External editor</h2>
+        <OctantFieldGroup className="code-settings__group">
+          <OctantField className="code-settings__field code-settings__field--editor">
             <OctantFieldLabel htmlFor="code-editor-executable">
               External editor executable
             </OctantFieldLabel>
@@ -124,7 +129,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               value={executable}
             />
           </OctantField>
-          <OctantField>
+          <OctantField className="code-settings__field code-settings__field--editor">
             <OctantFieldLabel htmlFor="code-editor-arguments">
               External editor arguments
             </OctantFieldLabel>
@@ -139,7 +144,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               One argument per line. Available placeholders: {"{file}"}, {"{line}"}, {"{column}"}.
             </OctantFieldDescription>
           </OctantField>
-          <div className="flex items-center gap-3">
+          <div className="code-settings__actions">
             <OctantButton onClick={() => void save()} type="button" variant="secondary">
               Save Code defaults
             </OctantButton>
@@ -152,7 +157,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             )}
           </div>
         </OctantFieldGroup>
-      </OctantCardContent>
-    </OctantCard>
+      </section>
+    </section>
   );
 }

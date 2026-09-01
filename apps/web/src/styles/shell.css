@@ -1700,7 +1700,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-adapter__card > .composer-input {
-  min-height: 96px;
+  min-height: 64px;
 }
 
 /* The create context is the rear sheet above the prompt. Project, branch,
@@ -1715,8 +1715,8 @@ form > .work-composer-adapter__attachments {
   justify-content: space-between;
   gap: 8px 12px;
   width: calc(100% - 40px);
-  margin: 0 auto -24px;
-  padding: 10px 16px 30px;
+  margin: 0 auto -18px;
+  padding: 8px 16px 22px;
   color: var(--oct-meta);
   background: var(--octant-workspace);
   border-radius: var(--oct-radius-lg);

@@ -139,21 +139,24 @@ describe("the public-block visual language", () => {
     expect(emptyPicker).toMatch(/background:\s*transparent/);
   });
 
-  it("tucks the Code context tray above the composer as a second raised card", () => {
+  it("tucks a compact Code context tray above a compact composer", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const stack = shell.match(/\.code-composer-adapter__stack \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const dock = shell.match(/\.code-composer-adapter__dock \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+    const prompt =
+      shell.match(/\.code-composer-adapter__card > \.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
 
     expect(stack).toMatch(/position:\s*relative/);
     expect(stack).toMatch(/isolation:\s*isolate/);
     expect(stack).toMatch(/flex-direction:\s*column/);
-    expect(dock).toMatch(/margin:\s*0 auto -24px/);
+    expect(dock).toMatch(/margin:\s*0 auto -18px/);
     expect(dock).toMatch(/width:\s*calc\(100% - 40px\)/);
-    expect(dock).toMatch(/padding:\s*10px 16px 30px/);
+    expect(dock).toMatch(/padding:\s*8px 16px 22px/);
     expect(dock).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
     expect(dock).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
     expect(dock).not.toMatch(/border-radius:\s*0 0/);
     expect(dock).not.toMatch(/position:\s*absolute/);
+    expect(prompt).toMatch(/min-height:\s*64px/);
   });
 
   it("does not keep a native select recipe on the composer row", () => {
@@ -226,8 +229,10 @@ describe("the public-block visual language", () => {
       /\.settings-theme-editor__disclosure,\n\.settings-theme-editor__accessibility \{\n(?:.*\n)*?background:\s*none/,
     );
     expect(settings).toMatch(
-      /\.code-settings\s*\{[^}]*background:\s*var\(--octant-settings-card\)/,
+      /\.code-settings__section\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/,
     );
+    expect(settings).toMatch(/\.code-settings__field--choice\s*\{[^}]*display:\s*grid/);
+    expect(settings).toMatch(/\.code-settings__field--editor\s*\{[^}]*display:\s*grid/);
     expect(settings).not.toMatch(/\.octant-switch\s*\{/);
   });
 

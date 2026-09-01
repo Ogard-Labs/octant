@@ -70,7 +70,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
   return (
     <section
       aria-labelledby="chat-defaults-heading"
-      className="provider-settings settings-card-section"
+      className="provider-settings settings-card-section settings-card-section--open"
     >
       <div className="provider-settings__intro">
         <div>
@@ -89,6 +89,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       <form
         aria-label="Chat defaults"
         className="provider-settings__form setgroup"
+        noValidate
         onSubmit={async (event) => {
           event.preventDefault();
           const nextEndpointError = endpointValidationMessage(draft.searxngBaseUrl);

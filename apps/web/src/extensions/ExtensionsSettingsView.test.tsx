@@ -265,6 +265,22 @@ function client(
 }
 
 describe("ExtensionsSettingsView", () => {
+  it("uses open collection sections for installed packages and standalone skills", async () => {
+    const c = client({ snapshot: installedSnapshot({ activation: baseActivation() }) });
+    const { container } = render(<ExtensionsSettingsView client={c} scope={scope} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Extension packages" })).toBeVisible(),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Extension packages" }).closest("section"),
+    ).toHaveClass("extensions-settings__section");
+    expect(
+      screen.getByRole("heading", { name: "Standalone skills" }).closest("section"),
+    ).toHaveClass("extensions-settings__section");
+    expect(container.querySelector(".extensions-settings__section.setgroup")).toBeNull();
+  });
+
   it("loads installed packages and shows desired-vs-effective, provenance, and compatibility", async () => {
     const snapshot = installedSnapshot({
       activation: baseActivation({ trusted: true, pluginDesired: true, componentDesired: true }),

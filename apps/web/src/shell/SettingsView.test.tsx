@@ -687,7 +687,9 @@ describe("SettingsView", () => {
     );
     expect(styles).toMatch(/\.settings-card-section--open\s*\{[\s\S]*box-shadow:\s*none/);
     expect(styles).toContain("border-radius: var(--oct-radius-md)");
-    expect(styles).not.toMatch(/\.code-settings\s*\{[^}]*--octant-surface-muted/);
+    expect(styles).toMatch(
+      /\.code-settings__section\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/,
+    );
   });
 
   it("does not let the legacy 720px rail squeeze narrow Settings into a phantom column", () => {

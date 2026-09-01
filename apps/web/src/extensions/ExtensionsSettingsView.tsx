@@ -657,7 +657,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         </OctantTabsList>
 
         <OctantTabsPanel value="installed">
-          <section aria-labelledby="installed-extension-packages-heading" className="setgroup">
+          <section
+            aria-labelledby="installed-extension-packages-heading"
+            className="extensions-settings__section"
+          >
             <h3 className="setgroup-head" id="installed-extension-packages-heading">
               Extension packages
             </h3>
@@ -727,7 +730,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             </div>
           </section>
 
-          <section aria-labelledby="standalone-skill-registry-heading" className="setgroup">
+          <section
+            aria-labelledby="standalone-skill-registry-heading"
+            className="extensions-settings__section"
+          >
             <h3 className="setgroup-head" id="standalone-skill-registry-heading">
               Standalone skills
             </h3>
@@ -811,7 +817,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           </section>
 
           {snapshot.collisions.length > 0 ? (
-            <section aria-labelledby="standalone-skill-collisions-heading" className="setgroup">
+            <section
+              aria-labelledby="standalone-skill-collisions-heading"
+              className="extensions-settings__section extensions-settings__section--attention"
+            >
               <h3 className="setgroup-head" id="standalone-skill-collisions-heading">
                 Name collisions
               </h3>
@@ -840,7 +849,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               local; Inspect, Search skills, preview, and install will not contact registries.
             </p>
           ) : null}
-          <section aria-labelledby="extension-catalog-heading" className="setgroup">
+          <section
+            aria-labelledby="extension-catalog-heading"
+            className="extensions-settings__section"
+          >
             <h3 className="setgroup-head" id="extension-catalog-heading">
               Extension catalog
             </h3>
@@ -1146,7 +1158,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             </div>
           </section>
 
-          <section aria-labelledby="skill-marketplace-heading" className="setgroup">
+          <section
+            aria-labelledby="skill-marketplace-heading"
+            className="extensions-settings__section"
+          >
             <h3 className="setgroup-head" id="skill-marketplace-heading">
               Standalone skills
             </h3>

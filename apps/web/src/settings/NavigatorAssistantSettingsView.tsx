@@ -73,7 +73,7 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
           Navigator.
         </p>
       ) : null}
-      <div className="settings-card-section">
+      <div className="settings-card-section settings-card-section--open">
         <h2>Models</h2>
         <div className="setgroup">
           <SettingRow

@@ -16,12 +16,37 @@
   max-width: none;
 }
 
-/* One padded stack under each .setgroup-head; the design system's group
-   styles only the frame and head, not a card-list body. */
+.extensions-settings__section {
+  display: grid;
+  gap: 0;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.extensions-settings__section + .extensions-settings__section {
+  margin-top: var(--oct-space-6);
+}
+
+.extensions-settings__section > .setgroup-head {
+  min-height: auto;
+  padding: 10px 0 8px;
+  border-bottom: 0;
+}
+
+.extensions-settings__section--attention .extensions-settings__body {
+  color: var(--oct-warn-fg);
+}
+
+/* Collection shells stay open like Appearance. Individual install and review
+   objects can still establish their own elevation when they need it. */
 .extensions-settings__body {
   display: grid;
   gap: var(--oct-space-3);
-  padding: var(--oct-space-3);
+  padding: 12px 0 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .extensions-settings__cards {
@@ -33,7 +58,7 @@
 }
 
 .extensions-settings__cards .extcard {
-  padding: 10px 4px;
+  padding: 12px 0;
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--oct-border-soft);
@@ -41,12 +66,10 @@
   box-shadow: none;
 }
 
-.extensions-settings__cards > li.extcard:last-child {
-  border-bottom: 0;
-}
-
 .extensions-settings__state {
+  min-height: 40px;
   margin: 0;
+  padding: 10px 0 12px;
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
 }

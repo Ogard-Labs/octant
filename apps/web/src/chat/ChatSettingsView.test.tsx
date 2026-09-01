@@ -24,9 +24,13 @@ describe("ChatSettingsView", () => {
       />,
     );
 
+    expect(screen.getByRole("form", { name: "Chat defaults" })).toHaveAttribute("novalidate");
     expect(screen.getByRole("form", { name: "Chat defaults" })).toHaveClass(
       "provider-settings__form",
       "setgroup",
+    );
+    expect(screen.getByRole("form", { name: "Chat defaults" }).closest("section")).toHaveClass(
+      "settings-card-section--open",
     );
     expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveTextContent(
       "Automatic",

@@ -258,8 +258,8 @@ anchored to the navigation edge by a 32–56px workspace gutter instead of
 floating in the middle of wide windows. Navigation groups use quiet separators
 rather than competing labels. Routine related rows stay open on the application
 ground with hairline separators. Keybindings have their own destination and raw
-JSON stays behind an advanced disclosure. Profiles, providers, skills, visual
-theme choices, destructive groups, and other discrete objects use raised cards
+JSON stays behind an advanced disclosure. Profiles, provider instances, install
+reviews, visual theme choices, destructive groups, and other discrete objects use raised cards
 (`--octant-shadow-sm`). Labels and descriptions align left, controls align
 right, and compound editors may expand below. Essential labels and explanatory
 text are at least 12px at the default interface scale. Every control uses the
@@ -328,8 +328,9 @@ Waiting does not become a warning wall. Labels and facts use the selected
 interface typography. Thread listing, pull-request snapshot, and per-thread
 runtime reads overlap where independent.
 
-Usage totals and filters are raised cards. Provider create forms, extension
-cards, and artifact cards use the same raised recipe. The command palette
+Usage totals and filters are raised cards. Provider create forms, individual
+extension objects, and artifact cards use the same raised recipe; extension and
+skill collection shells remain open. The command palette
 groups results and shows a shortcut badge when a row maps to a user-bindable
 chord. Shared dialogs keep the 20px overlay radius and overlay shadow.
 

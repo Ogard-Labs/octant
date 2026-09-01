@@ -41,4 +41,15 @@ describe("CodeSettingsView", () => {
       },
     });
   });
+
+  it("presents routine defaults as open sections rather than one raised settings card", () => {
+    const { container } = render(
+      <CodeSettingsView onUpdate={async () => true} settings={settings as never} />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Thread defaults" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "External editor" })).toBeVisible();
+    expect(container.querySelector(".code-settings [data-slot='card']")).toBeNull();
+    expect(container.querySelectorAll(".code-settings__section")).toHaveLength(2);
+  });
 });
