@@ -1,8 +1,7 @@
 /* Residual rules for the Extensions/Skills settings surface. Cards, chips,
-   buttons, and group chrome come from octant.css (.extcard, .tag, .badge,
-   .btn, .setgroup); what remains here is the group body layout, the in-card
-   detail blocks, and the pre-install review panel the system has no
-   vocabulary for. */
+   and group chrome come from octant.css (.extcard, .tag, .badge, .setgroup);
+   what remains here is the group body layout, the in-card detail blocks,
+   and the pre-install review panel the system has no vocabulary for. */
 
 .extensions-settings__description {
   margin: 0 0 var(--oct-space-5);
@@ -17,12 +16,37 @@
   max-width: none;
 }
 
-/* One padded stack under each .setgroup-head; the design system's group
-   styles only the frame and head, not a card-list body. */
+.extensions-settings__section {
+  display: grid;
+  gap: 0;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.extensions-settings__section + .extensions-settings__section {
+  margin-top: var(--oct-space-6);
+}
+
+.extensions-settings__section > .setgroup-head {
+  min-height: auto;
+  padding: 10px 0 8px;
+  border-bottom: 0;
+}
+
+.extensions-settings__section--attention .extensions-settings__body {
+  color: var(--oct-warn-fg);
+}
+
+/* Collection shells stay open like Appearance. Individual install and review
+   objects can still establish their own elevation when they need it. */
 .extensions-settings__body {
   display: grid;
   gap: var(--oct-space-3);
-  padding: var(--oct-space-3);
+  padding: 12px 0 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .extensions-settings__cards {
@@ -34,21 +58,65 @@
 }
 
 .extensions-settings__cards .extcard {
-  padding: 12px 4px;
+  padding: 12px 0;
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--oct-border-soft);
   border-radius: 0;
-}
-
-.extensions-settings__cards > li.extcard:last-child {
-  border-bottom: 0;
+  box-shadow: none;
 }
 
 .extensions-settings__state {
+  min-height: 40px;
   margin: 0;
+  padding: 10px 0 12px;
   color: var(--oct-muted);
   font-size: var(--oct-text-sm);
+}
+
+.extensions-settings__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2) var(--oct-space-4);
+  padding: 0 4px var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.extensions-settings__installed-filter {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.extensions-settings__installed-filter > svg {
+  color: var(--oct-meta);
+}
+
+.extensions-settings__installed-filter-clear {
+  position: absolute;
+  right: 3px;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+}
+
+.extensions-settings__installed-filter input {
+  padding-right: 34px;
+}
+
+.extensions-settings__show-all {
+  justify-self: start;
+}
+
+.extensions-settings__state-label {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
 }
 
 .extensions-settings__search,
@@ -76,13 +144,28 @@
 }
 
 .extensions-settings__skill-id {
-  grid-column: 2 / -1;
+  display: block;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   overflow: hidden;
   color: var(--oct-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.extensions-settings__technical-details {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: var(--oct-space-3);
+  margin-top: var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  background: var(--oct-surface-warm);
+  border-radius: var(--oct-radius-sm);
+}
+
+.extensions-settings__technical-source {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .extensions-settings__components {
@@ -109,7 +192,7 @@
   background: var(--oct-surface-warm);
 }
 
-.extensions-settings__component > .btn {
+.extensions-settings__component > button {
   grid-column: 2;
   grid-row: 1 / -1;
 }
@@ -141,7 +224,7 @@
   margin-top: var(--oct-space-3);
 }
 
-.extensions-settings__preview > .btn {
+.extensions-settings__preview > button {
   justify-self: start;
 }
 
@@ -149,8 +232,8 @@
   margin: 0;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 
@@ -173,8 +256,8 @@
 .extensions-settings__compatibility dt {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-meta);
 }
 

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { HostSelector } from "./HostSelector";
 import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
@@ -28,6 +29,33 @@ const laptopStale = {
 };
 
 describe("HostSelector", () => {
+  it("presents the create destination as an Environment without changing host authority", async () => {
+    const user = userEvent.setup();
+    const onSelectHost = vi.fn();
+    render(
+      <HostSelector
+        hosts={[localHealthy, studioHealthy]}
+        onSelectHost={onSelectHost}
+        presentation="environment"
+        selectedHostId={LOCAL_HOST_ID}
+      />,
+    );
+
+    const environment = screen.getByRole("combobox", { name: "Environment" });
+    expect(environment).toHaveTextContent("This Mac");
+    expect(screen.getByTestId("host-selector")).toHaveClass("host-selector--environment");
+    await user.click(environment);
+    await user.click(await screen.findByRole("option", { name: /Studio/ }));
+    expect(onSelectHost).toHaveBeenCalledWith(STUDIO);
+  });
+
+  it("keeps a single Environment honest about its authoritative health", () => {
+    render(<HostSelector hosts={[localHealthy]} presentation="environment" />);
+
+    expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
+    expect(screen.getByTestId("host-selector")).toHaveClass("host-selector--environment");
+  });
+
   it("renders the default neutral host with a neutral dot when hosts are not loaded", () => {
     render(<HostSelector />);
     expect(screen.getByRole("status")).toBeInTheDocument();
@@ -113,7 +141,8 @@ describe("HostSelector", () => {
     expect(screen.getByText("Connected")).toBeInTheDocument();
   });
 
-  it("shows an interactive destination-host choice when multiple hosts are available", () => {
+  it("shows an interactive destination-host choice when multiple hosts are available", async () => {
+    const user = userEvent.setup();
     const onSelectHost = vi.fn();
     render(
       <HostSelector
@@ -126,19 +155,21 @@ describe("HostSelector", () => {
 
     const combobox = screen.getByRole("combobox", { name: /destination host/i });
     expect(combobox).toBeVisible();
-    expect(combobox).toHaveValue(String(STUDIO));
+    expect(combobox).toHaveTextContent(/Studio/);
 
-    const options = within(combobox).getAllByRole("option");
+    await user.click(combobox);
+    const options = await screen.findAllByRole("option");
     expect(options).toHaveLength(3);
-    expect(options[2]).toBeDisabled();
+    expect(options[2]).toHaveAttribute("aria-disabled", "true");
     expect(options[2]).toHaveTextContent(/Laptop/);
     expect(options[2]).toHaveTextContent(/Stale connection/);
 
-    fireEvent.change(combobox, { target: { value: String(LOCAL_HOST_ID) } });
+    await user.click(screen.getByRole("option", { name: /This Mac/ }));
     expect(onSelectHost).toHaveBeenCalledWith(LOCAL_HOST_ID);
   });
 
-  it("preselects the filtered host and keeps the selector changeable until create", () => {
+  it("preselects the filtered host and keeps the selector changeable until create", async () => {
+    const user = userEvent.setup();
     const onSelectHost = vi.fn();
     render(
       <HostSelector
@@ -148,8 +179,9 @@ describe("HostSelector", () => {
       />,
     );
     const combobox = screen.getByRole("combobox", { name: /destination host/i });
-    expect(combobox).toHaveValue(String(STUDIO));
-    fireEvent.change(combobox, { target: { value: String(LOCAL_HOST_ID) } });
+    expect(combobox).toHaveTextContent(/Studio/);
+    await user.click(combobox);
+    await user.click(await screen.findByRole("option", { name: /This Mac/ }));
     expect(onSelectHost).toHaveBeenCalledWith(LOCAL_HOST_ID);
   });
 

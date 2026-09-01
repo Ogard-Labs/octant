@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ProviderSettingsView, type ProviderSettingsViewProps } from "./ProviderSettingsView";
 import { useProviderController } from "./useProviderController";
 import type { OctantHostBridge } from "../shell/hostBridge";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-000000000092");
 
@@ -72,6 +73,41 @@ describe("ProviderSettingsView", () => {
     ).toBeTruthy();
   });
 
+  it("summarizes ready, setup-needed, and off providers before the list", () => {
+    const ready = provider();
+    const needsSetup = {
+      ...provider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000093"),
+      displayName: "Needs setup",
+    };
+    const off = {
+      ...provider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000094"),
+      displayName: "Off provider",
+      enabled: false,
+    };
+    const props = fixture();
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...props}
+        instances={[ready, needsSetup, off]}
+        observedByInstance={
+          new Map([
+            [ready.id, observation({ instanceId: ready.id, readiness: "ready" })],
+            [needsSetup.id, observation({ instanceId: needsSetup.id, readiness: "unavailable" })],
+          ])
+        }
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "Provider readiness summary" })).toHaveTextContent(
+      "1 ready · 1 needs setup · 1 off",
+    );
+    expect(screen.getByRole("region", { name: "Providers" })).toHaveClass(
+      "settings-card-section--open",
+    );
+  });
+
   it("keeps manual provider setup behind an advanced disclosure", async () => {
     const user = userEvent.setup();
     renderProviderSettings(<ProviderSettingsView {...fixture()} />);
@@ -109,7 +145,7 @@ describe("ProviderSettingsView", () => {
     const user = userEvent.setup();
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
-    expect(screen.getByLabelText("Provider type")).toHaveValue("opencode");
+    expect(screen.getByLabelText("Provider type")).toHaveTextContent("OpenCode CLI");
     await user.type(screen.getByLabelText("Provider name"), "OpenCode local");
     await user.type(screen.getByLabelText("OpenCode binary"), "/opt/homebrew/bin/opencode");
     await user.click(screen.getByRole("button", { name: "Add OpenCode" }));
@@ -143,7 +179,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "codex");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Codex CLI");
     await user.type(screen.getByLabelText("Provider name"), "Codex local");
     await user.type(screen.getByLabelText("Codex binary"), "/opt/homebrew/bin/codex");
     await user.click(screen.getByRole("button", { name: "Add Codex" }));
@@ -156,7 +192,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "kimi-code");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Kimi Code CLI");
     const form = screen.getByRole("form", { name: "Add provider" });
     await user.type(within(form).getByLabelText("Provider name"), "Kimi local");
     await user.type(within(form).getByLabelText("Kimi Code binary"), "/opt/homebrew/bin/kimi");
@@ -177,7 +213,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "devin");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Devin ACP");
     const form = screen.getByRole("form", { name: "Add provider" });
     await user.type(within(form).getByLabelText("Provider name"), "Devin local");
     await user.type(within(form).getByLabelText("Devin binary"), "/Users/example/.local/bin/devin");
@@ -197,7 +233,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "pi");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Pi RPC");
     const form = screen.getByRole("form", { name: "Add provider" });
     await user.type(within(form).getByLabelText("Provider name"), "Pi local");
     await user.type(within(form).getByLabelText("Pi binary"), "/opt/homebrew/bin/pi");
@@ -213,7 +249,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "oh-my-pi");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Oh My Pi");
     const form = screen.getByRole("form", { name: "Add provider" });
     await user.type(within(form).getByLabelText("Provider name"), "Oh My Pi local");
     await user.type(within(form).getByLabelText("Oh My Pi binary"), "/Users/example/.bun/bin/omp");
@@ -233,7 +269,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "kilo");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Kilo ACP");
     const form = screen.getByRole("form", { name: "Add provider" });
     await user.type(within(form).getByLabelText("Provider name"), "Kilo local");
     await user.type(within(form).getByLabelText("Kilo binary"), "/opt/homebrew/bin/kilo");
@@ -249,7 +285,11 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: ollamaProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "ollama");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "Ollama native HTTP",
+    );
     const create = screen.getByRole("form", { name: "Add Ollama provider" });
     await user.type(within(create).getByLabelText("Provider name"), "Ollama local");
     expect(within(create).queryByLabelText(/binary|api key|credential/i)).not.toBeInTheDocument();
@@ -293,11 +333,13 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: claudeProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "claude");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
     const create = screen.getByRole("form", { name: "Add Claude provider" });
     await user.type(within(create).getByLabelText("Provider name"), "Claude local");
     await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
-    expect(within(create).getByLabelText("Claude authentication")).toHaveValue("subscription");
+    expect(within(create).getByLabelText("Claude authentication")).toHaveTextContent(
+      "Claude subscription",
+    );
     expect(within(create).queryByLabelText("Anthropic API key")).not.toBeInTheDocument();
     await user.click(within(create).getByRole("button", { name: "Add Claude" }));
     expect(props.onCreateClaude).toHaveBeenLastCalledWith(
@@ -310,10 +352,14 @@ describe("ProviderSettingsView", () => {
       expect.objectContaining({ value: "" }),
     );
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "claude");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
     await user.type(within(create).getByLabelText("Provider name"), "Claude key");
     await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
-    await user.selectOptions(within(create).getByLabelText("Claude authentication"), "api-key");
+    await chooseSelectFieldOption(
+      user,
+      within(create).getByLabelText("Claude authentication"),
+      "Anthropic API key",
+    );
     const apiKey = within(create).getByLabelText("Anthropic API key");
     expect(apiKey).toHaveValue("");
     await user.type(apiKey, "private-value");
@@ -331,7 +377,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: vibeProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "mistral-vibe");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Mistral Vibe ACP");
     const create = screen.getByRole("form", { name: "Add Mistral Vibe provider" });
     await user.type(within(create).getByLabelText("Provider name"), "Mistral Vibe local");
     await user.type(
@@ -342,8 +388,8 @@ describe("ProviderSettingsView", () => {
       "placeholder",
       "/absolute/path/to/vibe-acp",
     );
-    expect(within(create).getByLabelText("Mistral Vibe authentication")).toHaveValue(
-      "subscription",
+    expect(within(create).getByLabelText("Mistral Vibe authentication")).toHaveTextContent(
+      "Mistral subscription",
     );
     await user.click(within(create).getByRole("button", { name: "Add Mistral Vibe" }));
     expect(props.onCreateMistralVibe).toHaveBeenCalledWith(
@@ -376,12 +422,16 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ credentialManagementAvailable: false });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "claude");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
     const create = screen.getByRole("form", { name: "Add Claude provider" });
     const submit = within(create).getByRole("button", { name: "Add Claude" });
     expect(submit).toBeEnabled();
 
-    await user.selectOptions(within(create).getByLabelText("Claude authentication"), "api-key");
+    await chooseSelectFieldOption(
+      user,
+      within(create).getByLabelText("Claude authentication"),
+      "Anthropic API key",
+    );
 
     expect(within(create).getByLabelText("Anthropic API key")).toBeDisabled();
     expect(submit).toBeDisabled();
@@ -402,11 +452,19 @@ describe("ProviderSettingsView", () => {
       await user.click(await screen.findByRole("button", { name: "Add provider manually" }));
       await screen.findByLabelText("Provider type");
 
-      await user.selectOptions(screen.getByLabelText("Provider type"), "claude");
+      await chooseSelectFieldOption(
+        user,
+        screen.getByLabelText("Provider type"),
+        "Claude Agent SDK",
+      );
       const create = screen.getByRole("form", { name: "Add Claude provider" });
       await user.type(within(create).getByLabelText("Provider name"), "Claude key");
       await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
-      await user.selectOptions(within(create).getByLabelText("Claude authentication"), "api-key");
+      await chooseSelectFieldOption(
+        user,
+        within(create).getByLabelText("Claude authentication"),
+        "Anthropic API key",
+      );
       const apiKey = within(create).getByLabelText("Anthropic API key");
       await user.type(apiKey, "private-value");
       await user.click(within(create).getByRole("button", { name: "Add Claude" }));
@@ -624,8 +682,8 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByText("Claude Agent SDK")).toBeVisible();
     expect(within(card).getAllByText(/official Claude Code/i)).toHaveLength(2);
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(/one-shot/i);
-    expect(within(card).getByLabelText("Claude authentication for Claude local")).toHaveValue(
-      "subscription",
+    expect(within(card).getByLabelText("Claude authentication for Claude local")).toHaveTextContent(
+      "Claude subscription",
     );
     expect(
       within(card).queryByLabelText("Anthropic API key for Claude local"),
@@ -656,9 +714,10 @@ describe("ProviderSettingsView", () => {
     const { rerender } = renderExpanded(<ProviderSettingsView {...props} />);
     let card = screen.getByRole("article", { name: "Claude local" });
 
-    await user.selectOptions(
+    await chooseSelectFieldOption(
+      user,
       within(card).getByLabelText("Claude authentication for Claude local"),
-      "api-key",
+      "Anthropic API key",
     );
     const apiKey = within(card).getByLabelText("Anthropic API key for Claude local");
     await user.type(apiKey, "private-value");
@@ -721,12 +780,20 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: httpProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "openai-compatible");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "OpenAI-compatible HTTP",
+    );
     const create = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
     await user.type(within(create).getByLabelText("Provider name"), "Secure gateway");
     await user.type(within(create).getByLabelText("API base URL"), "https://gateway.example/v1");
     await user.type(within(create).getByLabelText("API key"), "private-value");
-    await user.selectOptions(within(create).getByLabelText("Protocol preference"), "responses");
+    await chooseSelectFieldOption(
+      user,
+      within(create).getByLabelText("Protocol preference"),
+      "Responses",
+    );
     await user.type(within(create).getByLabelText("Manual model IDs"), "model-a, model-b\nmodel-a");
     await user.click(screen.getByRole("button", { name: "Add OpenAI-compatible provider" }));
 
@@ -751,7 +818,11 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: anthropicProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "anthropic-compatible");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "Anthropic-compatible HTTP",
+    );
     const create = screen.getByRole("form", { name: "Add Anthropic-compatible provider" });
     await user.type(within(create).getByLabelText("Provider name"), "Anthropic relay");
     await user.type(
@@ -760,7 +831,11 @@ describe("ProviderSettingsView", () => {
     );
     await user.type(within(create).getByLabelText("API key"), "anthropic-secret");
     await user.type(within(create).getByLabelText("Anthropic protocol version"), "2023-06-01");
-    await user.selectOptions(within(create).getByLabelText("Protocol preference"), "messages");
+    await chooseSelectFieldOption(
+      user,
+      within(create).getByLabelText("Protocol preference"),
+      "Messages",
+    );
     await user.type(within(create).getByLabelText("Manual model IDs"), "claude-3-5-sonnet");
     await user.click(screen.getByRole("button", { name: "Add Anthropic-compatible provider" }));
 
@@ -786,7 +861,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: foundryProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "azure-foundry");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Azure AI Foundry");
     const create = screen.getByRole("form", { name: "Add Azure AI Foundry provider" });
     await user.type(within(create).getByLabelText("Provider name"), "Foundry relay");
     await user.type(
@@ -794,7 +869,11 @@ describe("ProviderSettingsView", () => {
       "https://foundry.example.openai.azure.com/openai/v1/",
     );
     await user.type(within(create).getByLabelText("API key"), "foundry-secret");
-    await user.selectOptions(within(create).getByLabelText("Protocol preference"), "responses");
+    await chooseSelectFieldOption(
+      user,
+      within(create).getByLabelText("Protocol preference"),
+      "Responses",
+    );
     await user.type(within(create).getByLabelText("Deployment IDs"), "deployment-a");
     await user.click(screen.getByRole("button", { name: "Add Azure AI Foundry provider" }));
 
@@ -825,9 +904,10 @@ describe("ProviderSettingsView", () => {
       within(card).getByLabelText("Foundry OpenAI v1 base URL for Foundry relay"),
       "https://foundry.updated.openai.azure.com/openai/v1/",
     );
-    await user.selectOptions(
+    await chooseSelectFieldOption(
+      user,
       within(card).getByLabelText("Protocol preference for Foundry relay"),
-      "responses",
+      "Responses",
     );
     await user.clear(within(card).getByLabelText("Deployment IDs for Foundry relay"));
     await user.type(
@@ -862,14 +942,14 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: openAiImageProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "openai-image");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "OpenAI Image");
     const create = screen.getByRole("form", { name: "Add OpenAI image profile" });
     expect(within(create).queryByLabelText("API base URL")).not.toBeInTheDocument();
     expect(within(create).getByText(/Organization Verification/i)).toBeVisible();
     await user.type(within(create).getByLabelText("Provider name"), "Studio images");
     await user.type(within(create).getByLabelText("Model allowlist"), "gpt-image-2, gpt-image-1");
     await user.type(within(create).getByLabelText("Default model"), "gpt-image-2");
-    await user.selectOptions(within(create).getByLabelText("Quality"), "high");
+    await chooseSelectFieldOption(user, within(create).getByLabelText("Quality"), "high");
     await user.type(within(create).getByLabelText("API key"), "image-secret");
     await user.click(screen.getByRole("button", { name: "Add OpenAI image profile" }));
 
@@ -956,7 +1036,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: geminiImageProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "gemini-native-image");
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Gemini Image");
     const create = screen.getByRole("form", { name: "Add Gemini image profile" });
     expect(within(create).queryByLabelText("API base URL")).not.toBeInTheDocument();
     await user.type(within(create).getByLabelText("Provider name"), "Nano Banana");
@@ -965,7 +1045,7 @@ describe("ProviderSettingsView", () => {
       "gemini-3.1-flash-image, gemini-2.5-flash-image",
     );
     await user.type(within(create).getByLabelText("Default model"), "gemini-3.1-flash-image");
-    await user.selectOptions(within(create).getByLabelText("Aspect ratio"), "16:9");
+    await chooseSelectFieldOption(user, within(create).getByLabelText("Aspect ratio"), "16:9");
     await user.type(within(create).getByLabelText("API key"), "gemini-secret");
     await user.click(screen.getByRole("button", { name: "Add Gemini image profile" }));
 
@@ -990,30 +1070,50 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ instance: anthropicProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "anthropic-compatible");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "Anthropic-compatible HTTP",
+    );
     const anthropicCreate = screen.getByRole("form", { name: "Add Anthropic-compatible provider" });
-    await user.selectOptions(within(anthropicCreate).getByLabelText("Authentication"), "api-key");
+    await chooseSelectFieldOption(
+      user,
+      within(anthropicCreate).getByLabelText("Authentication"),
+      "API key (x-api-key header)",
+    );
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "openai-compatible");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "OpenAI-compatible HTTP",
+    );
     const openAiCreate = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
-    const auth = within(openAiCreate).getByLabelText("Authentication") as HTMLSelectElement;
-    expect(auth.value).toBe("bearer");
+    const auth = within(openAiCreate).getByLabelText("Authentication");
+    expect(auth).toHaveTextContent("Bearer API key");
   });
 
   it("clears and disables the create credential when authentication changes to none", async () => {
     const user = userEvent.setup();
     renderExpanded(<ProviderSettingsView {...fixture({ instance: httpProvider() })} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "openai-compatible");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "OpenAI-compatible HTTP",
+    );
     const create = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
     const authentication = within(create).getByLabelText("Authentication");
     const key = within(create).getByLabelText("API key");
     await user.type(key, "must-not-linger");
-    await user.selectOptions(authentication, "none");
+    await chooseSelectFieldOption(
+      user,
+      authentication,
+      "No authentication (trusted loopback only)",
+    );
     expect(key).toBeDisabled();
     expect(key).toHaveValue("");
 
-    await user.selectOptions(authentication, "bearer");
+    await chooseSelectFieldOption(user, authentication, "Bearer API key");
     expect(key).toBeEnabled();
     expect(key).toHaveValue("");
   });
@@ -1026,11 +1126,19 @@ describe("ProviderSettingsView", () => {
     });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "openai-compatible");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "OpenAI-compatible HTTP",
+    );
     const create = screen.getByRole("form", { name: "Add OpenAI-compatible provider" });
     await user.type(within(create).getByLabelText("Provider name"), "No-auth gateway");
     await user.type(within(create).getByLabelText("API base URL"), "http://127.0.0.1:11434/v1");
-    await user.selectOptions(within(create).getByLabelText("Authentication"), "none");
+    await chooseSelectFieldOption(
+      user,
+      within(create).getByLabelText("Authentication"),
+      "No authentication (trusted loopback only)",
+    );
     const key = within(create).getByLabelText("API key");
     (key as HTMLInputElement).value = "injected-secret";
     await user.click(screen.getByRole("button", { name: "Add OpenAI-compatible provider" }));
@@ -1049,7 +1157,7 @@ describe("ProviderSettingsView", () => {
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    expect(screen.getByLabelText("Provider type")).toHaveValue("opencode");
+    expect(screen.getByLabelText("Provider type")).toHaveTextContent("OpenCode CLI");
     await user.type(screen.getByLabelText("Provider name"), "OpenCode local");
     await user.type(screen.getByLabelText("OpenCode binary"), "/opt/homebrew/bin/opencode");
     await user.click(screen.getByRole("button", { name: "Add OpenCode" }));
@@ -1069,7 +1177,11 @@ describe("ProviderSettingsView", () => {
       />,
     );
 
-    await user.selectOptions(screen.getByLabelText("Provider type"), "openai-compatible");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "OpenAI-compatible HTTP",
+    );
     expect(screen.getAllByText(/remote endpoints require HTTPS/i).length).toBeGreaterThan(0);
     expect(
       screen.getAllByText(/manage credentials in the Octant host app/i).length,
@@ -1247,15 +1359,23 @@ describe("ProviderSettingsView", () => {
     const key = within(card).getByLabelText("API key for Private gateway");
 
     await user.type(key, "must-not-linger");
-    await user.selectOptions(authentication, "none");
+    await chooseSelectFieldOption(
+      user,
+      authentication,
+      "No authentication (trusted loopback only)",
+    );
     expect(key).toBeDisabled();
     expect(key).toHaveValue("");
 
-    await user.selectOptions(authentication, "bearer");
+    await chooseSelectFieldOption(user, authentication, "Bearer API key");
     expect(key).toBeEnabled();
     expect(key).toHaveValue("");
     await user.type(key, "stale-value");
-    await user.selectOptions(authentication, "none");
+    await chooseSelectFieldOption(
+      user,
+      authentication,
+      "No authentication (trusted loopback only)",
+    );
     key.setAttribute("value", "retained-value");
     (key as HTMLInputElement).value = "retained-value";
     await user.click(
@@ -1337,7 +1457,9 @@ describe("ProviderSettingsView", () => {
       />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("Stop active sessions");
-    expect(screen.getByLabelText("Permission persistence")).toHaveValue("current-session");
+    expect(screen.getByLabelText("Permission persistence")).toHaveTextContent(
+      "Current session only",
+    );
   });
 
   it("preserves draft edits within a version and resets them after authoritative recovery", async () => {
@@ -1391,6 +1513,8 @@ describe("ProviderSettingsView", () => {
       />,
     );
 
+    expect(screen.queryByRole("button", { name: "Move Second Provider up" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Reorder providers" }));
     expect(screen.getByRole("button", { name: "Move Second Provider up" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Move Second Provider down" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Move First Provider up" })).toBeDisabled();
@@ -1582,7 +1706,11 @@ describe("ProviderSettingsView", () => {
     expect(
       screen.queryByRole("heading", { name: "Amazon Bedrock Mantle setup" }),
     ).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("Provider type"), "openai-compatible");
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "OpenAI-compatible HTTP",
+    );
     expect(screen.getByRole("heading", { name: "Amazon Bedrock Mantle setup" })).toBeVisible();
     expect(screen.getByText(/mantle\.us-east-1\.amazonaws\.com\/v1/)).toBeVisible();
     expect(

@@ -1,5 +1,6 @@
 import type { CodeCheckoutId, CodeFileListingResult, CodeThreadId } from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CodeFileExplorerPanel } from "./CodeFileExplorerPanel";
 
@@ -139,8 +140,13 @@ describe("CodeFileExplorerPanel", () => {
       />,
     );
 
-    expect(await screen.findByRole("treeitem", { name: /src\/main\.ts/ })).toBeVisible();
-    expect(screen.getByRole("treeitem", { name: "src" })).toBeVisible();
+    const sourceDirectory = await screen.findByRole("treeitem", { name: "src" });
+    expect(sourceDirectory).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(sourceDirectory);
+
+    expect(screen.getByRole("treeitem", { name: /src\/main\.ts/ })).toBeVisible();
+    expect(sourceDirectory).toHaveAttribute("aria-expanded", "true");
   });
 
   it("keeps the host's read-only classification instead of re-deriving it", async () => {

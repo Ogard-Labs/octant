@@ -127,8 +127,8 @@
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .zen-timer[data-status="completed"] .zen-timer-status {

@@ -1,5 +1,5 @@
-import { BookOpen, Puzzle } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { BookOpen, ChevronDown, ChevronUp, Puzzle, Search, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
   ExtensionCatalogEntry,
@@ -20,7 +20,7 @@ import type {
 import type { ExtensionPackagePreview } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantTabs, OctantTabsList, OctantTabsPanel, OctantTabsTab } from "../ui/base/OctantTabs";
 
 /**
@@ -101,6 +101,11 @@ function standaloneSkillSourceLabel(skill: StandaloneSkillRecord): string {
   if (projectSource?.[1] === "working") return "Project skills · working directory";
   if (projectSource?.[2] !== undefined) return `Project skills · parent ${projectSource[2]}`;
   return "Agents skills directory";
+}
+
+function standaloneSkillSummarySourceLabel(skill: StandaloneSkillRecord): string {
+  if (skill.source.kind !== "agents-skills-directory") return sourceLabel(skill.source);
+  return String(skill.source.sourceRef) === "user-global" ? "User skill" : "Project skill";
 }
 
 function licenseLabel(license: ExtensionPackagePreview["review"]["license"]): string {
@@ -219,6 +224,7 @@ const DEFAULT_EXTENSION_SETTINGS_SCOPE: ExtensionActivationScope = {
 
 /** Command version shared by every desired-state mutation. */
 const COMMAND_VERSION = 1 as never;
+const INSTALLED_SKILL_PREVIEW_LIMIT = 12;
 
 export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const scope = props.scope ?? DEFAULT_EXTENSION_SETTINGS_SCOPE;
@@ -246,6 +252,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [inspectingSkillId, setInspectingSkillId] = useState<string | undefined>();
   const [installingSkill, setInstallingSkill] = useState(false);
   const [importingLocal, setImportingLocal] = useState(false);
+  const [installedSkillQuery, setInstalledSkillQuery] = useState("");
+  const [showAllInstalledSkills, setShowAllInstalledSkills] = useState(false);
+  const installedSkillSearch = useRef<HTMLInputElement>(null);
 
   const importLocalPlugin = useCallback(
     async (selection: Readonly<{ receiptId: string; displayName: string }>) => {
@@ -595,6 +604,35 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const catalogOffline = effective?.catalogStatus === "offline";
   const installedPackages = snapshot.packages.filter((pkg) => pkg.activation.installed);
   const standaloneSkills = snapshot.skills ?? [];
+  const normalizedInstalledSkillQuery = installedSkillQuery.trim().toLocaleLowerCase();
+  const filteredStandaloneSkills =
+    normalizedInstalledSkillQuery === ""
+      ? standaloneSkills
+      : standaloneSkills.filter((skill) =>
+          [
+            skill.displayName,
+            skill.skill.name,
+            skill.description ?? "",
+            standaloneSkillSummarySourceLabel(skill),
+          ].some((value) => value.toLocaleLowerCase().includes(normalizedInstalledSkillQuery)),
+        );
+  const visibleStandaloneSkills =
+    normalizedInstalledSkillQuery !== "" || showAllInstalledSkills
+      ? filteredStandaloneSkills
+      : filteredStandaloneSkills.slice(0, INSTALLED_SKILL_PREVIEW_LIMIT);
+  const standaloneSkillSummary = standaloneSkills.reduce(
+    (summary, skill) => {
+      if (skill.effectiveState.kind === "blocked" && skill.effectiveState.reason === "untrusted") {
+        summary.needsReview += 1;
+      } else if (skill.effectiveState.kind === "effective" && skill.skill.available) {
+        summary.available += 1;
+      } else {
+        summary.other += 1;
+      }
+      return summary;
+    },
+    { available: 0, needsReview: 0, other: 0 },
+  );
   const skillPreviewAction =
     skillPreview === undefined ? undefined : skillPackageAction(snapshot, skillPreview);
 
@@ -609,17 +647,20 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         <h2 id="extensions-settings-heading">Skills &amp; Extensions</h2>
       )}
       <p className="extensions-settings__description">
-        Installed plugins and skills contribute context or executable components only after explicit
-        trust, enablement, compatibility, and host/mode/Project/thread policy all resolve effective.
+        Skills extend what agents can do. Review the source, then trust and enable only what you
+        want available.
       </p>
       <OctantTabs defaultValue="installed">
-        <OctantTabsList>
+        <OctantTabsList className="surface-tabs">
           <OctantTabsTab value="installed">Installed</OctantTabsTab>
           <OctantTabsTab value="marketplace">Marketplace</OctantTabsTab>
         </OctantTabsList>
 
         <OctantTabsPanel value="installed">
-          <section aria-labelledby="installed-extension-packages-heading" className="setgroup">
+          <section
+            aria-labelledby="installed-extension-packages-heading"
+            className="extensions-settings__section"
+          >
             <h3 className="setgroup-head" id="installed-extension-packages-heading">
               Extension packages
             </h3>
@@ -689,7 +730,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             </div>
           </section>
 
-          <section aria-labelledby="standalone-skill-registry-heading" className="setgroup">
+          <section
+            aria-labelledby="standalone-skill-registry-heading"
+            className="extensions-settings__section"
+          >
             <h3 className="setgroup-head" id="standalone-skill-registry-heading">
               Standalone skills
             </h3>
@@ -699,17 +743,84 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   No standalone skills were discovered.
                 </p>
               ) : (
-                <ul className="extensions-settings__cards">
-                  {standaloneSkills.map((skill) => (
-                    <StandaloneSkillCard key={String(skill.skill.qualifiedId)} skill={skill} />
-                  ))}
-                </ul>
+                <>
+                  <div className="extensions-settings__installed-filter">
+                    <Search aria-hidden="true" size={14} strokeWidth={1.7} />
+                    <OctantInput
+                      aria-label="Filter installed skills"
+                      onChange={(event) => {
+                        setInstalledSkillQuery(event.currentTarget.value);
+                        setShowAllInstalledSkills(false);
+                      }}
+                      placeholder="Filter installed skills…"
+                      ref={installedSkillSearch}
+                      type="search"
+                      value={installedSkillQuery}
+                    />
+                    {installedSkillQuery === "" ? null : (
+                      <OctantIconButton
+                        className="extensions-settings__installed-filter-clear"
+                        label="Clear installed skill filter"
+                        onClick={() => {
+                          setInstalledSkillQuery("");
+                          setShowAllInstalledSkills(false);
+                          installedSkillSearch.current?.focus();
+                        }}
+                        type="button"
+                      >
+                        <X aria-hidden="true" size={14} strokeWidth={1.7} />
+                      </OctantIconButton>
+                    )}
+                  </div>
+                  <div
+                    aria-label="Standalone skill summary"
+                    className="extensions-settings__summary"
+                    role="status"
+                  >
+                    <span>{standaloneSkillSummary.available} available</span>
+                    <span>{standaloneSkillSummary.needsReview} need review</span>
+                    {standaloneSkillSummary.other === 0 ? null : (
+                      <span>{standaloneSkillSummary.other} need attention</span>
+                    )}
+                    <span>
+                      Showing {visibleStandaloneSkills.length} of {filteredStandaloneSkills.length}
+                    </span>
+                  </div>
+                  {visibleStandaloneSkills.length === 0 ? (
+                    <p className="extensions-settings__state" role="status">
+                      No installed skills match this filter.
+                    </p>
+                  ) : (
+                    <ul aria-label="Standalone skills" className="extensions-settings__cards">
+                      {visibleStandaloneSkills.map((skill) => (
+                        <StandaloneSkillCard key={String(skill.skill.qualifiedId)} skill={skill} />
+                      ))}
+                    </ul>
+                  )}
+                  {normalizedInstalledSkillQuery !== "" ||
+                  standaloneSkills.length <= INSTALLED_SKILL_PREVIEW_LIMIT ? null : (
+                    <OctantButton
+                      className="extensions-settings__show-all"
+                      onClick={() => setShowAllInstalledSkills((current) => !current)}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      {showAllInstalledSkills
+                        ? "Show fewer skills"
+                        : `Show all ${String(standaloneSkills.length)} skills`}
+                    </OctantButton>
+                  )}
+                </>
               )}
             </div>
           </section>
 
           {snapshot.collisions.length > 0 ? (
-            <section aria-labelledby="standalone-skill-collisions-heading" className="setgroup">
+            <section
+              aria-labelledby="standalone-skill-collisions-heading"
+              className="extensions-settings__section extensions-settings__section--attention"
+            >
               <h3 className="setgroup-head" id="standalone-skill-collisions-heading">
                 Name collisions
               </h3>
@@ -738,7 +849,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               local; Inspect, Search skills, preview, and install will not contact registries.
             </p>
           ) : null}
-          <section aria-labelledby="extension-catalog-heading" className="setgroup">
+          <section
+            aria-labelledby="extension-catalog-heading"
+            className="extensions-settings__section"
+          >
             <h3 className="setgroup-head" id="extension-catalog-heading">
               Extension catalog
             </h3>
@@ -753,7 +867,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   value={marketplaceQuery}
                 />
                 <OctantButton
-                  className="btn btn-secondary"
+                  variant="outline"
                   disabled={catalogOffline || marketplaceQuery.trim() === ""}
                   onClick={() => void runSearch()}
                   type="button"
@@ -764,7 +878,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               {props.pickLocalPluginFolder !== undefined ? (
                 <div className="extensions-settings__local-import">
                   <OctantButton
-                    className="btn btn-secondary"
+                    variant="outline"
                     disabled={importingLocal || installing}
                     onClick={() => {
                       void (async () => {
@@ -823,8 +937,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                         <span className="extcard-name">{entry.displayName}</span>
                         <span className="extcard-right">
                           <OctantButton
+                            size="sm"
+                            variant="outline"
                             aria-label={`Inspect ${entry.displayName}`}
-                            className="btn btn-secondary btn-sm"
                             disabled={
                               !marketplaceFetchesEnabled ||
                               inspectingEntryId === entryKey ||
@@ -937,8 +1052,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                               </ul>
                             ) : null}
                             <OctantButton
+                              variant="default"
                               aria-label="Confirm install"
-                              className="btn btn-primary"
                               disabled={installing}
                               onClick={() => void confirmInstall(preview.entry)}
                               type="button"
@@ -1029,8 +1144,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                       </ul>
                     ) : null}
                     <OctantButton
+                      variant="default"
                       aria-label="Confirm install"
-                      className="btn btn-primary"
                       disabled={installing}
                       onClick={() => void confirmInstall(localPreview.entry)}
                       type="button"
@@ -1043,7 +1158,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             </div>
           </section>
 
-          <section aria-labelledby="skill-marketplace-heading" className="setgroup">
+          <section
+            aria-labelledby="skill-marketplace-heading"
+            className="extensions-settings__section"
+          >
             <h3 className="setgroup-head" id="skill-marketplace-heading">
               Standalone skills
             </h3>
@@ -1063,7 +1181,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   value={skillQuery}
                 />
                 <OctantButton
-                  className="btn btn-secondary"
+                  variant="outline"
                   disabled={
                     !marketplaceFetchesEnabled ||
                     skillQuery.trim() === "" ||
@@ -1105,8 +1223,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                         <span className="extcard-name">{entry.displayName}</span>
                         <span className="extcard-right">
                           <OctantButton
+                            size="sm"
+                            variant="outline"
                             aria-label={`Preview ${entry.displayName}`}
-                            className="btn btn-secondary btn-sm"
                             disabled={
                               !marketplaceFetchesEnabled ||
                               inspectingSkillId === entryKey ||
@@ -1171,6 +1290,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                               </div>
                             </dl>
                             <OctantButton
+                              variant="default"
                               aria-label={
                                 skillPreviewAction === "current"
                                   ? "Skill already installed"
@@ -1178,7 +1298,6 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                     ? "Confirm skill update"
                                     : "Confirm skill install"
                               }
-                              className="btn btn-primary"
                               disabled={installingSkill || skillPreviewAction === "current"}
                               onClick={() => void confirmSkillInstall(skillPreview)}
                               type="button"
@@ -1213,6 +1332,10 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
 
 function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
   const skill = props.skill;
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const blocked = skill.effectiveState.kind === "blocked";
+  const summarizedUntrusted =
+    skill.effectiveState.kind === "blocked" && skill.effectiveState.reason === "untrusted";
   return (
     <li className="extcard">
       <span aria-hidden="true" className="icon-mark">
@@ -1220,38 +1343,69 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
       </span>
       <span className="extcard-name">{skill.displayName}</span>
       <span className="extcard-right">
-        <span className={skill.skill.available ? "badge" : "badge badge-warn"}>
-          {skill.skill.available ? "Available" : "Unavailable"}
-        </span>
+        {summarizedUntrusted ? (
+          <span className="extensions-settings__state-label">Needs review</span>
+        ) : (
+          <span
+            className={blocked || !skill.skill.available ? "badge badge-warn" : "badge badge-ok"}
+          >
+            {blocked
+              ? effectiveLabel(skill.effectiveState)
+              : skill.skill.available
+                ? "Available"
+                : "Unavailable"}
+          </span>
+        )}
+        <OctantButton
+          aria-expanded={detailsOpen}
+          aria-label={`${detailsOpen ? "Hide" : "Show"} details for ${skill.displayName}`}
+          onClick={() => setDetailsOpen((current) => !current)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {detailsOpen ? (
+            <ChevronUp aria-hidden="true" size={14} />
+          ) : (
+            <ChevronDown aria-hidden="true" size={14} />
+          )}
+          Details
+        </OctantButton>
       </span>
-      <span className="extcard-src">{standaloneSkillSourceLabel(skill)}</span>
-      {/* The qualified id carries a full content hash. It identifies the exact
-          package for a support question, so it stays reachable, but printing it
-          in full made every card lead with a line of hex. */}
-      <code className="extensions-settings__skill-id" title={String(skill.skill.qualifiedId)}>
-        {skill.skill.qualifiedId}
-      </code>
+      <span className="extcard-src">{standaloneSkillSummarySourceLabel(skill)}</span>
       {skill.description === undefined ? null : <p className="extcard-desc">{skill.description}</p>}
-      <dl className="extensions-settings__compatibility">
-        <div>
-          <dt>Review</dt>
-          <dd>{skill.reviewed ? "Reviewed" : "Review required"}</dd>
+      {detailsOpen ? (
+        <div className="extensions-settings__technical-details">
+          <span className="extensions-settings__technical-source">
+            {standaloneSkillSourceLabel(skill)}
+          </span>
+          {/* The qualified id carries a full content hash. It identifies the
+              exact package for support and remains available on demand. */}
+          <code className="extensions-settings__skill-id" title={String(skill.skill.qualifiedId)}>
+            {skill.skill.qualifiedId}
+          </code>
+          <dl className="extensions-settings__compatibility">
+            <div>
+              <dt>Review</dt>
+              <dd>{skill.reviewed ? "Reviewed" : "Review required"}</dd>
+            </div>
+            <div>
+              <dt>Requested</dt>
+              <dd>{skill.desiredEnabled ? "Enabled" : "Disabled"}</dd>
+            </div>
+            <div>
+              <dt>Effective state</dt>
+              <dd data-blocked={blocked ? "true" : "false"}>
+                {effectiveLabel(skill.effectiveState)}
+              </dd>
+            </div>
+            <div>
+              <dt>Content</dt>
+              <dd>{skillContentSize(skill.contentBytes)}</dd>
+            </div>
+          </dl>
         </div>
-        <div>
-          <dt>Desired</dt>
-          <dd>{skill.desiredEnabled ? "Enabled" : "Disabled"}</dd>
-        </div>
-        <div>
-          <dt>State</dt>
-          <dd data-blocked={skill.effectiveState.kind === "blocked" ? "true" : "false"}>
-            {effectiveLabel(skill.effectiveState)}
-          </dd>
-        </div>
-        <div>
-          <dt>Content</dt>
-          <dd>{skillContentSize(skill.contentBytes)}</dd>
-        </div>
-      </dl>
+      ) : null}
       {skill.skill.diagnostic === undefined ? null : (
         <p className="extensions-settings__failure" role="status">
           <span>{skill.skill.diagnostic.code}</span>
@@ -1295,8 +1449,9 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
       <span className="extcard-name">{pkg.displayName ?? pkg.slug ?? pkg.extensionId}</span>
       <span className="extcard-right">
         <OctantButton
+          size="sm"
+          variant="outline"
           aria-label={pkg.activation.trusted ? "Revoke trust" : "Trust source"}
-          className="btn btn-secondary btn-sm"
           disabled={props.busy}
           onClick={() => void props.onTrust(!pkg.activation.trusted)}
           type="button"
@@ -1306,8 +1461,9 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
         {/* Disabling revokes what the plugin was granted, so the control is a
             button that names the action, not a preference switch. */}
         <OctantButton
+          size="sm"
+          variant="outline"
           aria-label={pkg.activation.pluginDesired ? "Disable plugin" : "Enable plugin"}
-          className="btn btn-secondary btn-sm"
           disabled={pluginEnableDisabled}
           onClick={() => void props.onPluginDesired(!pkg.activation.pluginDesired)}
           type="button"
@@ -1315,8 +1471,9 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
           {pkg.activation.pluginDesired ? "Disable plugin" : "Enable plugin"}
         </OctantButton>
         <OctantButton
+          size="sm"
+          variant="outline"
           aria-label="Uninstall"
-          className="btn btn-secondary btn-sm"
           disabled={props.busy}
           onClick={() => void props.onUninstall()}
           type="button"
@@ -1369,12 +1526,13 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
                   {effectiveLabel(componentState.effectiveState)}
                 </p>
                 <OctantButton
+                  size="sm"
+                  variant="outline"
                   aria-label={
                     componentState.activation.componentDesired
                       ? "Disable component"
                       : "Enable component"
                   }
-                  className="btn btn-secondary btn-sm"
                   disabled={componentEnableDisabled}
                   onClick={() =>
                     void props.onComponentDesired(

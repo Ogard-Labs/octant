@@ -104,11 +104,10 @@ describe("WindowChrome", () => {
     expect(onNewThread).toHaveBeenCalledOnce();
   });
 
-  it("makes development authentication visibly distinct", () => {
+  it("keeps development authentication out of the working chrome", () => {
     render(
       <WindowChrome
         activeSurface="Chat"
-        developmentAuthentication
         dockAvailable={false}
         dockExpanded={false}
         dockLabel="Utility dock"
@@ -118,7 +117,7 @@ describe("WindowChrome", () => {
       />,
     );
 
-    expect(screen.getByText("Development authentication")).toBeVisible();
+    expect(screen.queryByText("Development authentication")).not.toBeInTheDocument();
   });
   it("uses neutral semantic roles for the shell palette", () => {
     const root = cssRule(":root");
@@ -209,7 +208,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".window-chrome__button")).toContain("height: 26px;");
     expect(cssRule(".window-chrome__button")).toContain("background: transparent;");
     // The hover fill is the design system's neutral soft ink (--oct-fg-soft),
-    // the same feedback .btn-icon gives, still no accent.
+    // the same feedback .shell-icon-button gives, still no accent.
     expect(cssRule(".window-chrome__button:hover")).toContain("background: var(--oct-fg-soft);");
     expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
       "background: var(--oct-fg-soft);",
@@ -268,7 +267,9 @@ describe("WindowChrome", () => {
     );
     const sectionLabel = cssRule(".project-section > .sidebar-section");
     expect(sectionLabel).toContain("font-family: var(--oct-font-display);");
-    expect(sectionLabel).toContain("letter-spacing: normal;");
+    // Sentence case: the section label reads "Projects", not a spaced-out
+    // "PROJECTS" kicker (DESIGN.md "Language").
+    expect(sectionLabel).toContain("letter-spacing: 0;");
     expect(sectionLabel).toContain("text-transform: none;");
     expect(sectionLabel).not.toContain("mono");
     expect(cssRule('.sidebar-navigation__thread-status[data-activity="unread"]')).toContain(
@@ -375,7 +376,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".environment-git-group dl")).toContain(
       "border: 1px solid var(--octant-border);",
     );
-    expect(cssRule(".environment-git-group dl")).toContain("border-radius: 8px;");
+    expect(cssRule(".environment-git-group dl")).toContain("border-radius: var(--oct-radius-sm);");
     expect(cssRule(".environment-git-group__row")).toContain("min-height: 30px;");
     expect(cssRule(".environment-git-group__row + .environment-git-group__row")).toContain(
       "border-top: 1px solid var(--octant-border);",
@@ -406,7 +407,7 @@ describe("WindowChrome", () => {
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
       "color: var(--oct-fg);",
     );
-    expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
+    expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).not.toContain(
       "border-color: var(--octant-border-strong);",
     );
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
@@ -428,6 +429,9 @@ describe("WindowChrome", () => {
   it("keeps the environment disclosure compact, neutral, and interface-typed", () => {
     expect(cssRule(".thread-environment-disclosure")).toContain(
       "width: min(320px, calc(100vw - 24px));",
+    );
+    expect(cssRule(".thread-environment-disclosure")).toContain(
+      "border-radius: var(--oct-radius-lg);",
     );
     expect(cssRule(".thread-environment-disclosure__header")).toContain("min-height: 44px;");
     expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");

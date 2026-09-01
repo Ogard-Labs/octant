@@ -14,7 +14,7 @@ import type { UsageDashboardClient } from "@octant/client-runtime";
 import { AlertTriangle, ArrowLeft, BarChart3, RefreshCw } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { UsageActivityHeatmap } from "./UsageActivityHeatmap";
 import { LatencyStatsSection } from "./LatencyStatsSection";
 import { useUsageDashboardController } from "./useUsageDashboardController";
@@ -254,30 +254,29 @@ function UsageWorkspaceFilters(props: UsageWorkspaceFiltersProps) {
     <div aria-label="Usage filters" className="usage-workspace__filters" role="group">
       <label className="usage-workspace__field">
         <span>Range</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Usage range"
-          onChange={(event) => props.onPresetChange(event.currentTarget.value as RangePreset)}
+          onValueChange={(value) => props.onPresetChange(value as RangePreset)}
+          options={RANGE_PRESETS.map((option) => ({
+            id: option.value,
+            label: option.label,
+          }))}
           value={props.preset}
-        >
-          {RANGE_PRESETS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
       </label>
       <label className="usage-workspace__field">
         <span>Mode</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Filter usage by mode"
-          onChange={(event) => update("mode", event.currentTarget.value)}
+          onValueChange={(value) => update("mode", value)}
+          options={[
+            { id: "", label: "All modes" },
+            { id: "chat", label: "Chat" },
+            { id: "work", label: "Work" },
+            { id: "code", label: "Code" },
+          ]}
           value={props.filter.mode ?? ""}
-        >
-          <option value="">All modes</option>
-          <option value="chat">Chat</option>
-          <option value="work">Work</option>
-          <option value="code">Code</option>
-        </OctantNativeSelect>
+        />
       </label>
       <label className="usage-workspace__field">
         <span>Provider</span>

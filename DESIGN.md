@@ -14,11 +14,16 @@ star is a quiet graphite workbench:
 
 - One active thread, board, Project overview, or Project-level list is the
   primary work surface.
+- The main title band is a Project/mode breadcrumb plus window-local thread
+  navigation. One unpinned conversation is the current preview; pinned
+  conversations remain within reach. Selecting one reopens it through the
+  authoritative shell command rather than keeping a hidden transcript alive.
 - Navigation is a compact Project and thread tree. Low-frequency actions live
   in the bottom-left identity menu or an accessible overflow menu.
 - The right dock and bottom panel are contextual working regions for the active
-  pane. An open region with no selected tool shows a compact launcher; it never
-  fabricates a tab or repeats another pane's content.
+  pane. A capable region with no selected tool shows a compact launcher; a pane
+  with no valid tool exposes no dock toggle. Neither region fabricates a tab or
+  repeats another pane's content.
 - Hierarchy comes from typography, spacing, hairline borders, and selection
   fills. Colour is scarce and semantic.
 - Controls are familiar, compact, keyboard reachable, and honest about
@@ -28,6 +33,98 @@ Avoid dashboard walls, decorative gradients, neon developer styling, permanent
 low-frequency controls, oversized setup cards, pill-shaped everything, and
 invented data. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout.
+
+## Language
+
+This section is the part of the system that travels: the app, the docs site,
+and the marketing site use the same words, the same face, and the same
+hierarchy. Everything after it is renderer implementation.
+
+### Voice
+
+- **Crafted, not vibed.** Hierarchy comes from size and colour, not from
+  weight or capitals. One title per page. Section labels are sentence-case
+  and quiet. Nothing is uppercase except a monospace identifier that already
+  is. Nothing is bold except the page title.
+- **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
+  Product nouns keep their capital (Project, Chat, Work, Code, Environment).
+- **One sentence of help.** A subtitle or row description is one sentence
+  that says what the thing does. Longer explanations move to the docs.
+- **Vocabulary.** `Project`, `thread`, `checkout`, `worktree`, `base branch`,
+  `Environment`, `access` (Plan / Approval / Auto-accept edits / Full access),
+  `delivery` (Investigation / Local implementation / Pull request / Merged).
+  The word "target" does not appear in the interface.
+
+### Face
+
+Interface text is **Inter** (variable, optical sizes on) with the system face
+as fallback: `'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+system-ui, sans-serif`. Code, paths, branches, identifiers, and terminal text
+are the monospace stack. The app ships the Latin subset with the renderer, so
+the face is the same on macOS, Linux, and Windows and on the marketing site.
+Antialiased, `text-rendering: optimizeLegibility`, no synthetic bold.
+
+### Scale
+
+Eight sizes at the default 13px setting. Everything scales together with the
+Appearance interface size; nothing is authored at 11.5 or 12.5.
+
+| Role          | Size | Weight | Colour          | Where                                                     |
+| ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
+| Hero          | 28   | 500    | primary         | Welcome question only (`oct-title--hero`)                 |
+| Title         | 20   | 600    | primary         | One per page (`oct-title`)                                |
+| Section label | 13   | 500    | primary         | Group heading over a hairline (`oct-section-label`)       |
+| Row label     | 13   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
+| Body          | 13   | 400    | primary         | Transcript, paragraphs, controls                          |
+| Detail        | 12   | 400    | secondary       | Subtitle, row description, menu detail (`oct-row-detail`) |
+| Meta          | 11   | 400    | muted           | Timestamps, counts, hints (`oct-meta`)                    |
+| Identifier    | 12   | 400    | secondary, mono | Paths, branches, ids (`oct-meta--mono`)                   |
+
+Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
+`--oct-tracking-snug`; body and detail use none. Line heights: 1.2 title,
+1.35 label, 1.45 detail and body, 1.7 code.
+
+### Colour
+
+Neutral graphite, one accent, four statuses. Text is three greys (primary,
+secondary, muted) and never a fourth. Hairlines separate; fills select. See
+"Colour system" for the token table. On the marketing site the same three
+greys and the same hairline carry the hierarchy on a white or graphite ground.
+
+### Shapes and depth
+
+Radius is 10px for controls, 16px for cards and menus, 20px for the composer
+and dialogs. A surface is flat by default. Elevation means one of three
+things and nothing else: a raised discrete object (`--octant-shadow-sm`), the
+composer (`--octant-shadow-md`), or an overlay (`--octant-shadow-overlay`).
+Groups, lists, empty states, and headers are never cards.
+
+### Page shell
+
+Every list, board, reader, and preference page is a `Surface`:
+
+```
+Surface (reading measure 880px, or wide for boards)
+  SurfaceHeader   title · one-line subtitle · actions · Back to workspace
+  surface-toolbar search takes the slack · filters · view switch
+  SurfaceSection  section label over a hairline
+    surface-row   label + detail on the left, control on the right
+  SurfaceEmpty    a quiet line of text, not a card
+```
+
+Leaving a reader route is always the ghost "Back to workspace" control in the
+header. Settings is the same shell with a 680px measure and its own
+navigation rail. Rows in Settings are `SettingRow`; rows everywhere else are
+`surface-row`. Both draw the same hairline.
+
+### Welcome and composer
+
+Chat, Work, and Code open on the same screen: the hero question, a rear
+context tray, and the raised composer in front. The tray holds where the
+thread runs (Project, base branch, checkout, Environment, repository); the
+composer bar holds how it runs (attach and image on the left; model and
+access on the right, next to send). Nothing about delivery is asked up
+front; it is derived from the tray and shown on the thread once it exists.
 
 ## Source of truth and CSS layers
 
@@ -120,13 +217,13 @@ validated semantic roles; incomplete or low-contrast imports fall back safely.
 
 Typography has distinct jobs:
 
-| Job        | Default                                                                    | Usage                                                                              |
-| ---------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif` | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
-| Display    | inherits Interface                                                         | Wordmark, section headings, selected navigation labels                             |
-| Transcript | inherits Interface                                                         | Long-running conversation and composer; readable at 13–16px                        |
-| Editor     | `'JetBrains Mono', 'SF Mono', Menlo, monospace`                            | Code, diffs, paths, identifiers, aligned technical values                          |
-| Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                          | Terminal output and prompt glyphs                                                  |
+| Job        | Default                                                                                  | Usage                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Interface  | `'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif` | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Display    | inherits Interface                                                                       | Wordmark, section headings, selected navigation labels                             |
+| Transcript | inherits Interface                                                                       | Long-running conversation and composer; readable at 13–16px                        |
+| Editor     | `'JetBrains Mono', 'SF Mono', Menlo, monospace`                                          | Code, diffs, paths, identifiers, aligned technical values                          |
+| Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                                        | Terminal output and prompt glyphs                                                  |
 
 The persisted typography schema supports independent UI, editor, and terminal
 family, size, weight, line height, and ligatures. Families are sanitized: no
@@ -149,26 +246,37 @@ branches, identifiers, or serialized theme source.
 
 Static type tokens in `octant.css` are:
 
-- `--oct-text-xs: 11px`, `--oct-text-sm: 14px`, `--oct-text-base: 16px`.
-- `--oct-text-lg: 19px`, `--oct-text-xl: 22px`, `--oct-text-2xl: 26px`,
+- `--oct-text-xs: 11px`, `--oct-text-detail: 12px`, `--oct-text-sm: 13px`,
+  `--oct-text-base: 14px`, each multiplied by `--oct-text-step` so the
+  Appearance interface size moves the whole ladder.
+- `--oct-text-lg: 17px`, `--oct-text-xl: 20px`, `--oct-text-2xl: 26px`,
   `--oct-text-3xl: 36px`, `--oct-text-4xl: 72px`.
 - Body leading `1.5`, snug `1.3`, heading `1.14`, tight `1.1`, code `1.7`.
-- Strong labels use 600; display labels use 500. Avoid bolding whole paragraphs.
+- Only the page title uses 600; every other label uses 500. Avoid bolding
+  whole paragraphs. The type roles in `styles/surface.css` (`oct-title`,
+  `oct-section-label`, `oct-row-label`, `oct-row-detail`, `oct-meta`) are the
+  only heading and label recipes; feature CSS does not author a new size.
 - Mono metadata uses positive tracking (`--oct-tracking-wide`); display
   headings use restrained negative tracking.
 
 Transcript settings are explicit and centered: Small is 13px, Medium 14px,
 Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. The default thread
 measure is 760px and the column uses `width: min(100% - 40px, measure)` with
-automatic horizontal margins. Canvas documents use a 62ch measure.
+automatic horizontal margins. Welcome composers share a 768px maximum so
+Chat, Work, and Code start from the same prompt geometry independently of the
+reading-width preference. Canvas documents use a 62ch measure.
 
 ## Spacing, shapes, and depth
 
 Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Use `gap-*`
 for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
-chains. The desktop radius scale is 8px compact control, 10px panel, 12px
-large panel, and 9999px only for a compact chip or meter. Composer radius is
-14px. Phone-only surfaces use the larger 22/26/30px mobile radii.
+chains. The desktop radius scale is 10px compact control, 16px panel and card, 20px
+composer and dialog, and 9999px only for compact chips, meters, or circular icon
+controls. Product
+chrome uses those tokens. Pixel radii of 1–4px remain only for chart bars,
+marks, and status dots. Leftover `.btn*` recipes are gone; adapters own
+button paint. Phone-only
+surfaces use the larger 22/26/30px mobile radii.
 
 Controls are 44px by default and 34px compact. Dense operating rails use a
 28px navigation row and a 30px terminal toolbar while retaining at least 24px
@@ -176,29 +284,57 @@ pointer targets. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace sidebar defaults to 232px, supports
 resizing, and may collapse completely while leaving Show sidebar and New thread
 in the native title rail. Settings uses a separate compact 248px navigation
-rail. The right dock defaults to 320px. The pane/title control rail is 34px in
-the native host and the status bar is 26px.
+rail. The right dock defaults to 320px when open. A fresh window starts with it
+closed; choosing a tool or restoring an explicit prior choice opens it. The
+pane/title control rail is 34px in the native host and the status bar is 26px.
 
-Panes are flat and separated by a one-pixel semantic border. Cards are for a
-discrete object or a grouped form, not for every row. Opaque shadcn popovers,
-menus, dialogs, Environment, and forms use the floating surface and overlay
-shadow. Frosted material is limited to native/optional sidebar translucency
-and the floating activity picture-in-picture; reduced transparency and
-unsupported `backdrop-filter` resolve to opaque surfaces.
+Navigation panes stay compact hairline rails. Routine form layouts stay open
+and unshadowed; setup objects, discrete settings objects, welcome composers,
+and cards use the raised card recipe (`OctantCard` / `--octant-shadow-sm`).
+Chat, Work, and Code welcome composers share the `.composer` frame (20px,
+`--octant-shadow-md`) and one first-read hierarchy: one question, then the
+composer. Starter actions appear only when recent work does not already give
+the person a next step. In light the card is workspace white on the
+`--octant-app-background` well, not the grey floating fill — that fill reads
+as a sunken field. Code welcome keeps one stable question while Project,
+base branch, and Environment sit on a second raised card above the composer.
+The tray is slightly narrower and slides under the prompt by one corner radius,
+so the front card overlaps only its empty lower padding. Environment is the
+create-facing presentation of Octant's authoritative host federation: its
+dropdown selects This computer, devbox, or another healthy capable host without
+creating a second environment model. Repository and workspace remain on that rear card after the three primary
+choices; nothing about delivery is asked up front (see "Language"). Access is
+a titled menu on the prompt card, next to the model picker, and carries the
+"Remember for this Project" switch. The
+prompt itself is frameless:
+`OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
+Composer-row selects drop the same field chrome. Feature CSS must not
+repaint those controls a third time. Opaque shadcn
+popovers, menus, dialogs, Environment, and forms use the floating surface and
+overlay shadow. Frosted material is limited to native/optional sidebar
+translucency and the floating activity picture-in-picture; reduced
+transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 
-Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-sm`,
-`--octant-shadow-md`, `--octant-shadow-lg`, `--octant-shadow-overlay`, and
-`--octant-shadow-pop`. Use the smallest level that establishes a genuine
-layer; ordinary in-flow content should have no shadow.
+Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
+`--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
+`--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level
+that establishes a genuine layer: navigation panes and open form layouts stay
+unshadowed; compact state and grouped cards use `--octant-shadow-sm`; composers
+use the catalog-calibrated `--octant-shadow-md`; focused or promoted raised
+objects may use `--octant-shadow-lg`; overlays use only their overlay or pop
+token. A shadow must explain depth, not decorate a flat row.
 
 ## Shell and layout
 
 The shell is a CSS grid: sidebar, central workspace, optional right dock, and a
 full-width status bar. A horizontal bottom panel is an optional sibling below
 the central workspace. The central pane remains the thread, board, Project
-overview, or Project-level list. The title bar contains the pane title and
-capability-gated toggles for Open in, Environment, bottom panel, and right
-dock. Zen remains in the bottom-left identity menu.
+overview, or Project-level list. An unsplit conversation uses the title band
+for the Project/mode breadcrumb and compact thread strip, so the transcript
+does not repeat a second title block. Split panes and utility surfaces retain
+their own pane headers and lifecycle controls. Capability-gated toggles for
+Open in, Environment, bottom panel, and right dock remain window chrome. Zen
+remains in the bottom-left identity menu.
 
 The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
 available as a labeled selector, compact list, or icon presentation according
@@ -214,14 +350,38 @@ Navigator, Agents, Providers, Usage, Plugins, Automations, Artifacts, and Zen
 entry points. Search is a compact in-place filter for the current mode's visible
 threads, with a command-style overlay available for broader actions.
 
-Settings is a dense operating surface rather than a dashboard. A compact 248px
-navigation rail and search remain fixed while one centered 760px reading column
-scrolls. Section labels sit outside quiet, flat row groups; labels and
-descriptions align left, controls align right, and compound editors may expand
-below without becoming nested cards. Every control uses the owned Octant/shadcn
-adapter, inherits the interface typography projection, and saves immediately.
+Settings is a grouped form page rather than a dashboard wall. A compact 248px
+navigation rail and search remain fixed while one 680px reading column scrolls,
+anchored to the navigation edge by a 32–56px workspace gutter instead of
+floating in the middle of wide windows. Navigation groups use quiet separators
+rather than competing labels. Routine related rows stay open on the application
+ground with hairline separators. Keybindings have their own destination and raw
+JSON stays behind an advanced disclosure. Profiles, provider instances, install
+reviews, visual theme choices, destructive groups, and other discrete objects use raised cards
+(`--octant-shadow-sm`). Labels and descriptions align left, controls align
+right, and compound editors may expand below. Essential labels and explanatory
+text are at least 12px at the default interface scale. Every control uses the
+owned Octant/shadcn adapter, inherits the interface typography projection, and
+saves immediately.
 Scope metadata remains available to assistive technology but does not compete
 with the setting label.
+
+Operational settings use progressive disclosure. Provider and skill lists lead
+with compact readiness counts. Provider rows show identity, one effective
+status, details, and enablement; ordering controls appear only in an explicit
+Reorder mode. Skill rows show the source class and one effective state;
+filesystem paths, qualified identifiers, hashes, requested/effective
+breakdowns, and content size live behind Details. Usage opens on requests,
+input, output, and measurement quality. Reasoning, cache, execution time, and
+latency live in one Operational details disclosure; technical filters stay
+collapsed and provider-capacity diagnostics follow the locally recorded
+dashboard.
+
+First run is a five-step wizard with a progress rail. Each step is pending,
+current, or completed: the current step is a filled card, completed steps show
+a check, and pending steps show their number. Mode choices on the readiness
+step use `OctantToggleGroup`. Answers still write through to the settings that
+own them.
 
 The right dock follows the active pane and never leaks another pane's content.
 On wide windows it may use at most 38 percent of the viewport, preserving a
@@ -237,7 +397,18 @@ where supported. Selecting a tool removes that presentation from the other
 region; Terminal immediately attaches or starts and preserves one server
 session when moved.
 
-Environment is a transient active-thread disclosure, at most 320px wide. Its
+Browser and Terminal are repeatable right-dock workspaces: Add tool creates a
+new tab identity, an isolated Browser context or Terminal session, and a stable
+numbered label when siblings are open. Files, Review, Agents, Canvas, Plan,
+Delivery, Simulator, and Side chat are singleton destinations. One instance
+still appears in only one region at a time.
+
+A welcome, Project, or other pane with neither a bound thread nor a valid
+launchable tool keeps the dock closed and omits its toggle. Restored presentation
+for another subject never makes unavailable chrome visible.
+
+Environment is a transient active-thread disclosure, at most 320px wide, with
+the 20px overlay radius. Its
 44px header, label/value repository rows, direct View changes action, and
 collapsed 44px detail rows form one compact operating list on an opaque floating
 surface. It summarizes Project, branch, clean/dirty state, working folder,
@@ -248,12 +419,18 @@ stack of cards and does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout. When the right dock
 is open, the disclosure shifts over the central pane and never covers the dock.
 
-The thread board is a flat operational reading surface with four fixed,
+The thread board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. Columns
-use hairline separation, compact one-line cards, and dashed empty states;
+and compact cards use the raised card recipe; empty columns stay dashed.
 Waiting does not become a warning wall. Labels and facts use the selected
 interface typography. Thread listing, pull-request snapshot, and per-thread
 runtime reads overlap where independent.
+
+Usage totals and filters are raised cards. Provider create forms, individual
+extension objects, and artifact cards use the same raised recipe; extension and
+skill collection shells remain open. The command palette
+groups results and shows a shortcut badge when a row maps to a user-bindable
+chord. Shared dialogs keep the 20px overlay radius and overlay shadow.
 
 The context meter is a circular composer control, not a dock tab. It opens an
 opaque popover with attributed context segments, used/maximum/free values,
@@ -269,8 +446,17 @@ assistant prose or display an empty plan form.
 
 Responsive breakpoints are 560px, 720px, and 920px. Below 920px the right dock
 is removed rather than squeezing the transcript unreadably. Below 720px split
-layouts stack; below 560px compact spacing and single-column forms apply. The
-mobile app has a separate design system under `apps/mobile/design-system`.
+layouts stack, the workspace navigation sidebar becomes a dismissible overlay,
+and Settings replaces its rail with a left drawer opened from the active page
+header. Below 560px compact spacing and single-column forms apply. The mobile
+app has a separate design system under `apps/mobile/design-system`.
+
+True page tabs, segmented choices, and pane identity are intentionally
+different. `OctantTabs` owns a flat rail with selected fill and keyboard tab
+semantics. `OctantToggleGroup` owns the enclosed track used for mutually
+exclusive values. The split-pane grip alone owns active-pane paint. Feature
+styles may size or scroll these primitives but may not restore a local tab
+track, underline recipe, or persistent active border.
 
 ## Component ownership and composition
 
@@ -282,21 +468,26 @@ Switch, Slider, Checkbox, ToggleGroup, Tabs, DropdownMenu, ContextMenu, Dialog,
 and Tooltip. Composition rules:
 
 - Buttons use `OctantButton` or `OctantIconButton`; variants are default,
-  destructive, outline, secondary, ghost, and link. Sizes are default, sm, lg,
-  and icon. Icon-only buttons always have an accessible label and tooltip/title.
+  destructive, destructive-outline, outline, secondary, ghost, and link.
+  Destructive-outline names a risky action on an ordinary page; the filled
+  destructive variant is reserved for the final confirmation. Sizes are
+  default, sm, lg, and icon. Icon-only buttons always have an accessible label
+  and tooltip/title.
 - Form layouts use `OctantFieldGroup` and `OctantField`; labels, descriptions,
   and errors remain associated with their controls. Invalid state uses
   `data-invalid` and `aria-invalid`.
 - Use `OctantSelectField`/Combobox for searchable or bounded choices, not a
   custom dropdown. Option sets of 2–7 choices use `OctantToggleGroup`.
 - Use complete Card composition (`Header`, `Title`, `Description`, `Content`,
-  `Footer`) for discrete objects. Use flat rows and `Separator` for lists.
+  `Footer`) for discrete objects and grouped forms. Use compact rows and
+  `Separator` for navigation lists.
 - Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
   titled for assistive technology. Use `OctantDialog` with a real label even
   when the title is visually hidden.
 - Use Badge for status labels, Alert for callouts, Empty for empty states,
-  Skeleton for loading, and `sonner` for toasts. Do not recreate these with
-  styled spans or animated divs.
+  Skeleton for loading, and the shared `.toast-stack` notification owner for
+  transient acknowledgements. Do not add another toast package or recreate
+  these with styled spans or animated divs.
 - Use `cn()` for conditional classes, semantic Tailwind tokens (`bg-primary`,
   `text-muted-foreground`, `border-border`), `size-*` for equal dimensions,
   and `truncate` for clipping. Feature classes position; recipe classes paint.
@@ -360,12 +551,18 @@ for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
 ## Accessibility and reliability
 
+- Every product-owned scroll surface inherits the global thin scrollbar
+  baseline: a tokenized visible thumb, transparent track, hover state, and
+  forced-colors fallback. Feature CSS may adjust gutter or density but does not
+  hide the scrollbar or introduce a second theme.
 - Normal text targets 4.5:1 contrast; large text 3:1; non-text UI marks 3:1.
 - Status, diff, provider, and activity states always include text, shape,
   pattern, or an accessible label in addition to colour.
 - Pointer targets are at least 24px on desktop and 44px on touch.
 - Keyboard users can reach every primary action, open/dismiss every overlay,
   navigate menus/selects, and recover focus after closing a popover or dialog.
+- Every app-owned form declares `noValidate`; Octant owns validation copy,
+  field association, focus, and recovery instead of browser-specific bubbles.
 - Loading, unavailable, stale, denied, empty, and error states keep stable
   geometry and explain the next action. Never turn a refused server command
   into a silent no-op.

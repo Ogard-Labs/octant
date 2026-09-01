@@ -27,6 +27,11 @@ interface FontOption {
 
 const UI_FONTS: ReadonlyArray<FontOption> = [
   {
+    label: "Octant interface",
+    family:
+      "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+  },
+  {
     label: "System interface",
     family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
   },

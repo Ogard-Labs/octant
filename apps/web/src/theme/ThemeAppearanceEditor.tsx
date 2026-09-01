@@ -5,7 +5,7 @@ import type { ThemeController } from "./useThemeController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { FontFamilyPicker } from "./FontFamilyPicker";
@@ -52,7 +52,10 @@ export function ThemeAppearanceEditor(props: {
           {theme.error}
         </p>
       ) : null}
-      <section aria-label="Theme" className="settings-card-section">
+      <section
+        aria-label="Theme"
+        className="settings-card-section settings-card-section--open settings-theme-editor__scheme-section"
+      >
         <h2>Color scheme</h2>
         <div className="setgroup">
           <div aria-label="Theme mode" className="settings-scheme" role="radiogroup">
@@ -99,61 +102,51 @@ export function ThemeAppearanceEditor(props: {
           </div>
           <label className="settings-view__field">
             <span>Light preset</span>
-            <OctantNativeSelect
+            <OctantSelectField
               aria-label="Light preset"
               className="settings-view__select"
-              onChange={(event) =>
-                void theme.applyPatch({ lightPresetId: event.currentTarget.value as never })
-              }
-              value={draft.lightPresetId ?? "system"}
-            >
-              {availablePresets
+              onValueChange={(value) => void theme.applyPatch({ lightPresetId: value as never })}
+              options={availablePresets
                 .filter((preset) => preset.supportedModes.includes("light"))
-                .map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.displayName}
-                  </option>
-                ))}
-            </OctantNativeSelect>
+                .map((preset) => ({ id: preset.id, label: preset.displayName }))}
+              value={draft.lightPresetId ?? "system"}
+            />
           </label>
           <label className="settings-view__field">
             <span>Dark preset</span>
-            <OctantNativeSelect
+            <OctantSelectField
               aria-label="Dark preset"
               className="settings-view__select"
-              onChange={(event) =>
-                void theme.applyPatch({ darkPresetId: event.currentTarget.value as never })
-              }
-              value={draft.darkPresetId ?? "system"}
-            >
-              {availablePresets
+              onValueChange={(value) => void theme.applyPatch({ darkPresetId: value as never })}
+              options={availablePresets
                 .filter((preset) => preset.supportedModes.includes("dark"))
-                .map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.displayName}
-                  </option>
-                ))}
-            </OctantNativeSelect>
+                .map((preset) => ({ id: preset.id, label: preset.displayName }))}
+              value={draft.darkPresetId ?? "system"}
+            />
           </label>
           <label className="settings-view__field">
             <span>Density</span>
-            <OctantNativeSelect
+            <OctantSelectField
               aria-label="Theme density"
               className="settings-view__select"
-              onChange={(event) =>
+              onValueChange={(value) =>
                 void theme.applyPatch({
-                  density: event.currentTarget.value as ThemeSettings["density"],
+                  density: value as ThemeSettings["density"],
                 })
               }
+              options={[
+                { id: "comfortable", label: "Comfortable" },
+                { id: "compact", label: "Compact" },
+              ]}
               value={draft.density}
-            >
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
-            </OctantNativeSelect>
+            />
           </label>
         </div>
       </section>
-      <details className="settings-card-section settings-theme-editor__disclosure" open>
+      <details
+        className="settings-card-section settings-card-section--open settings-theme-editor__disclosure"
+        open
+      >
         <summary>
           <span>Typography</span>
           <ChevronDown
@@ -188,7 +181,7 @@ export function ThemeAppearanceEditor(props: {
           />
         </div>
       </details>
-      <fieldset className="settings-card-section settings-theme-editor__accessibility">
+      <fieldset className="settings-card-section settings-card-section--open settings-theme-editor__accessibility">
         <legend>Accessibility</legend>
         <div className="setgroup">
           <SettingSwitch

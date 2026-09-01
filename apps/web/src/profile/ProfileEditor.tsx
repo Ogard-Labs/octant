@@ -270,7 +270,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
         </p>
       )}
 
-      <div className="profile-editor__field">
+      <div className="profile-editor__field profile-editor__field--name">
         <label className="profile-editor__label" htmlFor={nameId}>
           Name
         </label>
@@ -294,7 +294,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
         )}
       </div>
 
-      <div className="profile-editor__field">
+      <div className="profile-editor__field profile-editor__field--email">
         <label className="profile-editor__label" htmlFor={emailId}>
           Email <span className="profile-editor__hint">(optional)</span>
         </label>
@@ -312,14 +312,14 @@ export function ProfileEditor(props: ProfileEditorProps) {
         />
         <p className="profile-editor__hint" id={`${emailId}-hint`} role="status">
           {emailProblem ??
-            "Kept on this Mac. Choosing “Use Gravatar” sends a hash of it to gravatar.com once, to fetch that picture."}
+            "Kept on this Mac. Gravatar sends a one-time email hash to gravatar.com to fetch your picture."}
         </p>
       </div>
 
       {props.profile.avatar.kind === "image" ? null : (
         <fieldset
           aria-label="Avatar colour"
-          className="profile-editor__field"
+          className="profile-editor__field profile-editor__field--accent"
           disabled={props.disabled === true}
         >
           <legend className="profile-editor__label">Avatar colour</legend>

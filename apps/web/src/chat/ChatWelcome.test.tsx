@@ -10,6 +10,8 @@ describe("ChatWelcome", () => {
     render(<ChatWelcome onCreateChat={onCreateChat} />);
 
     expect(screen.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
+    expect(screen.queryByText("Octant Chat")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start a calm, focused conversation/)).not.toBeInTheDocument();
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship the preview");
     await user.click(screen.getByRole("button", { name: "Start chat" }));
     expect(onCreateChat).toHaveBeenCalledWith("Ship the preview");
@@ -25,6 +27,7 @@ describe("ChatWelcome", () => {
       />,
     );
 
+    expect(screen.queryByRole("group", { name: "Starter ideas" })).not.toBeInTheDocument();
     await user.click(screen.getByText("Latency telemetry"));
     expect(onOpen).toHaveBeenCalledTimes(1);
   });

@@ -42,16 +42,8 @@ import {
   type DraftIntentCard,
   type PickerGroup,
 } from "@octant/domain";
-import { Aperture, FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   CodeComposerAdapter,
   type CodeComposerSubmitInput,
@@ -88,12 +80,6 @@ export interface DraftThreadWorkspaceProps {
   readonly projectRoot?: string;
   readonly branchName?: string;
   readonly approvalLabel?: string;
-  /**
-   * The execution-profile control. Only Code binds a thread to a profile today,
-   * so only the Code composer mounts it; showing it where it decides nothing was
-   * the reason it read as an unexplained dropdown.
-   */
-  readonly executionProfile?: ReactNode;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedHostId?: HostId;
   readonly fixedHostId?: HostId;
@@ -142,6 +128,12 @@ export interface DraftThreadWorkspaceProps {
   readonly defaultPermissionPersistence?: PermissionPersistence;
   readonly onExecutionPolicyChange?: (executionPolicy: ProviderExecutionPolicy) => void;
   readonly onAttachFolder?: () => void;
+  /**
+   * Reports the Project the composer now targets. The draft is unmounted
+   * while Settings covers the workspace, so the shell keeps this choice and
+   * hands it back through `projectId` when the draft remounts.
+   */
+  readonly onSelectProject?: (projectId: ProjectId) => void;
   readonly onCreateProject?: (
     mode: OctantMode,
     name: string,
@@ -165,6 +157,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | undefined>(
     props.projectId,
   );
+  const selectProject = (projectId: ProjectId) => {
+    setSelectedProjectId(projectId);
+    props.onSelectProject?.(projectId);
+  };
   type CreateFromSelection =
     | {
         readonly kind: "github";
@@ -303,7 +299,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         }}
         onSelect={(entry) => {
           if (entry.kind === "saved-project") {
-            setSelectedProjectId(entry.projectId);
+            selectProject(entry.projectId);
             setSelectedProjectLabel(entry.displayName);
           }
         }}
@@ -358,7 +354,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(selectedProjectName === undefined ? {} : { fixedProjectName: selectedProjectName })}
         hostName={githubHostName}
         onProjectCreated={(projectId, name) => {
-          setSelectedProjectId(decodeProjectId(projectId));
+          selectProject(decodeProjectId(projectId));
           setSelectedProjectLabel(name);
         }}
       />
@@ -376,7 +372,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         onClose={() => setAddFolderOpen(false)}
         onCreate={props.onCreateProject}
         onCreated={(projectId, _mode, name) => {
-          setSelectedProjectId(projectId);
+          selectProject(projectId);
           setSelectedProjectLabel(name);
         }}
       />
@@ -421,9 +417,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.imageGeneration === undefined
             ? {}
             : { imageGeneration: props.imageGeneration })}
-          {...(props.executionProfile === undefined
-            ? {}
-            : { profileControl: props.executionProfile })}
           onCreateThread={(input) => {
             const submitted = {
               ...input,
@@ -558,31 +551,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     <section aria-label={`New ${presentation.eyebrow} thread`} className="draft-thread">
       <div className="draft-thread__canvas">
         <div className="draft-thread__welcome">
-          <Aperture
-            aria-hidden="true"
-            className="new-thread-welcome__mark"
-            size={24}
-            strokeWidth={1.4}
-          />
-          <p className="draft-thread__eyebrow">{presentation.eyebrow}</p>
           <h1 className="draft-thread__heading">{presentation.heading}</h1>
-          <p className="draft-thread__description">{presentation.description}</p>
-        </div>
-
-        <div className="draft-thread__intent-cards" role="list" aria-label="Suggested actions">
-          {presentation.intentCards.map((card) => (
-            <OctantButton
-              className="draft-thread__intent-card"
-              key={card.id}
-              onClick={() => applyIntentCard(card)}
-              role="listitem"
-              type="button"
-              variant="outline"
-            >
-              <span className="draft-thread__intent-label">{card.label}</span>
-              <span className="draft-thread__intent-description">{card.description}</span>
-            </OctantButton>
-          ))}
         </div>
 
         <div className="draft-thread__composer">
@@ -634,6 +603,24 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             Press Enter to start · Shift+Enter for a new line · Escape to close
           </p>
         </div>
+
+        {(props.recentThreads?.length ?? 0) === 0 ? (
+          <div className="draft-thread__intent-cards" role="group" aria-label="Suggested actions">
+            {presentation.intentCards.map((card) => (
+              <OctantButton
+                className="draft-thread__intent-card"
+                key={card.id}
+                onClick={() => applyIntentCard(card)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                <span className="draft-thread__intent-label">{card.label}</span>
+                <span className="draft-thread__intent-description">{card.description}</span>
+              </OctantButton>
+            ))}
+          </div>
+        ) : null}
 
         <RecentThreadList threads={props.recentThreads ?? []} />
       </div>
@@ -775,6 +762,7 @@ function DraftContextStrip(props: {
   return (
     <div className="draft-thread__context-strip" aria-label="Thread context">
       <HostSelector
+        presentation="environment"
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
         {...(props.selectedHostId === undefined ? {} : { selectedHostId: props.selectedHostId })}
         {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}

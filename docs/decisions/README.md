@@ -48,7 +48,7 @@ distilled successor of the earlier long-form design specifications.
 | [0038](0038-owned-design-system-stylesheet.md)                | The owned design system stylesheet                                                          | Superseded by 0046 |
 | [0039](0039-journal-compaction-of-superseded-observations.md) | Journal compaction of superseded checkout observations                                      | Accepted           |
 | [0040](0040-share-a-host-or-a-git-remote.md)                  | Collaboration: share a host or a git remote                                                 | Proposed           |
-| [0041](0041-panes-hold-one-surface.md)                        | Panes hold one surface; the sidebar is the only switcher                                    | Proposed           |
+| [0041](0041-panes-hold-one-surface.md)                        | Panes hold one authoritative surface; thread tabs are window-local navigation               | Proposed           |
 | [0042](0042-environment-is-a-transient-disclosure.md)         | Environment is a transient disclosure                                                       | Superseded by 0045 |
 | [0043](0043-simulator-follows-the-active-thread.md)           | Simulator follows the active thread in the right sidebar                                    | Accepted           |
 | [0044](0044-the-dock-hosts-live-thread-owned-tools.md)        | The dock hosts live thread-owned tools                                                      | Proposed           |
@@ -77,6 +77,10 @@ distilled successor of the earlier long-form design specifications.
 | [0067](0067-native-harness-turn-loop-and-supervision.md)      | Native harness turn loop, advisor, and follow-up suggestions                                | Proposed           |
 | [0068](0068-linux-plan-process-deny.md)                       | Linux Plan process denial uses seccomp                                                      | Accepted           |
 | [0069](0069-native-harness-context-overflow.md)               | Native harness context overflow: hard cutover, evidence notes, and journal lookup           | Proposed           |
+| [0070](0070-setup-surfaces-compose-from-public-blocks.md)     | Renderer visual language matches public block catalogs                                      | Accepted           |
+| [0071](0071-one-navigation-and-surface-hierarchy.md)          | One navigation and surface hierarchy                                                        | Accepted           |
+| [0072](0072-settings-collections-stay-open.md)                | Settings collections stay open                                                              | Accepted           |
+| [0073](0073-one-surface-language.md)                          | One surface language across the renderer and the site                                       | Accepted           |
 
 ## Adding an ADR
 

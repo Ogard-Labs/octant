@@ -58,6 +58,8 @@ export interface SplitWorkspaceProps {
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
   /** The same preference controls provider marks in navigation and pane tabs. */
   readonly showProviderIcons?: boolean;
+  /** The window-level thread strip owns the title band for an unsplit workspace. */
+  readonly showSinglePaneHeader?: boolean;
   readonly totalWorkspacePaneCount: number;
 }
 
@@ -273,6 +275,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     props.showProviderIcons === false || !("threadId" in surface)
       ? undefined
       : props.providerByThreadId?.get(String(surface.threadId));
+  const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
   return (
     <section
       aria-current={active ? "true" : undefined}
@@ -280,67 +283,67 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       className="workspace-pane"
       data-active={active ? "true" : "false"}
       data-focused={focused ? "true" : "false"}
+      data-header={showHeader ? "true" : "false"}
       data-workspace-can-split={canSplit ? "true" : "false"}
       data-workspace-pane-id={pane.paneId}
       onBeforeInputCapture={() => props.onActivatePane(pane.paneId)}
       onKeyDownCapture={() => props.onActivatePane(pane.paneId)}
       onPointerDownCapture={() => props.onActivatePane(pane.paneId)}
     >
-      {/* The header spans the window's title band, so the space the grip and
-          the launcher do not claim has to stay a native drag region: with the
-          grip stretched across it the window could not be moved at all. */}
-      <OctantContextMenuRoot onOpenChange={setMenuOpen}>
-        <OctantContextMenuTrigger
-          aria-expanded={menuOpen}
-          className="workspace-pane__header"
-          render={<div />}
-        >
-          <span
-            className="workspace-pane__grip window-no-drag"
-            onPointerCancel={props.drag.onPointerCancel}
-            onPointerDown={(event) =>
-              props.drag.onPointerDown(event, {
-                dragKey,
-                paneId: pane.paneId,
-                surface,
-                title: surface.title,
-              })
-            }
-            onPointerMove={props.drag.onPointerMove}
-            onPointerUp={props.drag.onPointerUp}
-            title="Drag to move or split"
+      {showHeader ? (
+        <OctantContextMenuRoot onOpenChange={setMenuOpen}>
+          <OctantContextMenuTrigger
+            aria-expanded={menuOpen}
+            className="workspace-pane__header"
+            render={<div />}
           >
-            <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
-            {provider === undefined ? null : (
-              <span
-                aria-hidden="true"
-                className="workspace-pane__provider"
-                title={provider.displayName}
-              >
-                <ProviderGlyph
-                  displayName={provider.displayName}
-                  driverKind={provider.driverKind}
-                  size={14}
-                />
-              </span>
-            )}
-            <span className="workspace-pane__title">{surface.title}</span>
-          </span>
-          <span
-            aria-hidden="true"
-            className="workspace-pane__window-drag-space window-drag-region"
+            <span
+              className="workspace-pane__grip window-no-drag"
+              onPointerCancel={props.drag.onPointerCancel}
+              onPointerDown={(event) =>
+                props.drag.onPointerDown(event, {
+                  dragKey,
+                  paneId: pane.paneId,
+                  surface,
+                  title: surface.title,
+                })
+              }
+              onPointerMove={props.drag.onPointerMove}
+              onPointerUp={props.drag.onPointerUp}
+              title="Drag to move or split"
+            >
+              <GripVertical aria-hidden="true" size={14} strokeWidth={1.8} />
+              {provider === undefined ? null : (
+                <span
+                  aria-hidden="true"
+                  className="workspace-pane__provider"
+                  title={provider.displayName}
+                >
+                  <ProviderGlyph
+                    displayName={provider.displayName}
+                    driverKind={provider.driverKind}
+                    size={14}
+                  />
+                </span>
+              )}
+              <span className="workspace-pane__title">{surface.title}</span>
+            </span>
+            <span
+              aria-hidden="true"
+              className="workspace-pane__window-drag-space window-drag-region"
+            />
+          </OctantContextMenuTrigger>
+          <PaneMenu
+            canSplit={canSplit}
+            focused={focused}
+            onClearFocus={props.onClearFocus}
+            onClose={() => props.onClosePane(pane.paneId)}
+            onFocus={() => props.onFocus(pane.paneId)}
+            onSplit={(orientation) => props.onSplitPane(pane.paneId, orientation, "after")}
+            surface={surface}
           />
-        </OctantContextMenuTrigger>
-        <PaneMenu
-          canSplit={canSplit}
-          focused={focused}
-          onClearFocus={props.onClearFocus}
-          onClose={() => props.onClosePane(pane.paneId)}
-          onFocus={() => props.onFocus(pane.paneId)}
-          onSplit={(orientation) => props.onSplitPane(pane.paneId, orientation, "after")}
-          surface={surface}
-        />
-      </OctantContextMenuRoot>
+        </OctantContextMenuRoot>
+      ) : null}
       <div className="workspace-pane__panel">{props.renderSurface(surface, pane.paneId)}</div>
       {props.drag.active === null ? null : (
         <WorkspaceDropOverlay

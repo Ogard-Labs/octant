@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { OctantButton } from "../ui/base/OctantButton";
 import { ContextInspector } from "./ContextInspector";
 import { contextFixture, contextStaleFixture } from "./contextFixtures";
 
@@ -101,9 +102,9 @@ describe("ContextInspector", () => {
     const onClose = vi.fn();
     render(
       <>
-        <button ref={opener} type="button">
+        <OctantButton ref={opener} type="button">
           Open inspector
-        </button>
+        </OctantButton>
         <ContextInspector
           busy={false}
           onClose={onClose}

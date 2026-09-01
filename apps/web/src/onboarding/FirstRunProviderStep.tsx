@@ -127,7 +127,7 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
           </p>
         )}
 
-        <div className="btn-group">
+        <div className="first-run__button-row">
           <OctantButton onClick={props.onOpenProviderSettings} ref={ref} type="button">
             Set up a provider
           </OctantButton>

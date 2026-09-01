@@ -2,6 +2,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { Check, CircleDashed } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { FirstRunHandoff, FirstRunHandoffSetupTarget } from "./firstRunHandoffModel";
 import type { WorkspaceChoices } from "./firstRunStepModel";
 
@@ -41,22 +42,29 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
       </p>
 
       {modes.length > 1 ? (
-        <div aria-label="First thread mode" className="setgroup" role="radiogroup">
+        <div className="setgroup">
           <div className="setgroup-head">Mode</div>
           <div className="first-run__choices">
-            {modes.map((mode) => (
-              <OctantButton
-                aria-checked={props.selectedMode === mode}
-                className="first-run__choice"
-                key={mode}
-                onClick={() => props.onSelectMode(mode)}
-                role="radio"
-                type="button"
-                variant="ghost"
-              >
-                {MODE_COPY[mode]}
-              </OctantButton>
-            ))}
+            <OctantToggleGroup<OctantMode>
+              aria-label="First thread mode"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) props.onSelectMode(selected);
+              }}
+              role="radiogroup"
+              value={[props.selectedMode]}
+            >
+              {modes.map((mode) => (
+                <OctantToggleGroupItem
+                  aria-checked={props.selectedMode === mode}
+                  key={mode}
+                  role="radio"
+                  value={mode}
+                >
+                  {MODE_COPY[mode]}
+                </OctantToggleGroupItem>
+              ))}
+            </OctantToggleGroup>
           </div>
         </div>
       ) : null}

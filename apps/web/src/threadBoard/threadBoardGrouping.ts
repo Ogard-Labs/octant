@@ -35,7 +35,7 @@ export interface GroupThreadBoardCardsOptions {
 
 const STATUS_LABELS: Record<ThreadBoardStatus, string> = {
   ready: "Ready",
-  "in-progress": "In Progress",
+  "in-progress": "In progress",
   waiting: "Waiting",
   done: "Done",
 };

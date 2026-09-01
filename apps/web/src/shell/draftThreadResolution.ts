@@ -45,7 +45,7 @@ export const UNRESOLVED_DRAFT_PROJECT_MESSAGE =
  * repository checkout. Say what to do instead of a generic preparation error.
  */
 export function checkoutNotPreparedMessage(projectName: string): string {
-  return `Code threads need a Git repository, and "${projectName}" could not be opened as one. Run git init in that folder and retry, or add the same folder as a Work Project to work there without Git.`;
+  return `"${projectName}" has no Git checkout. Choose another Project above, or run git init in that folder and retry.`;
 }
 
 export function resolveWorkProviderChoice(

@@ -7,9 +7,11 @@ import type {
   RightUtilityDockResolution,
   RightUtilityDockSurfaceDescriptor,
   RightUtilityDockSurfaceId,
+  RightUtilityDockTabDescriptor,
 } from "./rightUtilityDockModel";
 
 export interface RightUtilityDockProps {
+  readonly activeTabId?: string;
   readonly agents?: ReactNode;
   readonly browser?: ReactNode;
   readonly canvas?: ReactNode;
@@ -20,17 +22,18 @@ export interface RightUtilityDockProps {
   readonly isNarrow: boolean;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly onClose: () => void;
-  readonly onCloseTab: (surface: RightUtilityDockSurfaceId) => void;
+  readonly onCloseTab: (tabId: string) => void;
   readonly onCommitWidth: (width: number) => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly onPreviewWidth: (width: number) => void;
-  readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
+  readonly onSelectSurface: (tabId: string) => void;
   readonly open: boolean;
   readonly plan?: ReactNode;
   readonly resolution: RightUtilityDockResolution;
+  readonly renderTab?: (tab: RightUtilityDockTabDescriptor) => ReactNode;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
   readonly sideChat?: ReactNode;
-  readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+  readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor>;
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
   readonly width: number;
@@ -47,6 +50,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   const dismiss = props.isNarrow ? { closeButtonRef: closeButton, onClose: props.onClose } : {};
   const surface = (
     <RightUtilityDockSurface
+      {...(props.activeTabId === undefined ? {} : { activeTabId: props.activeTabId })}
       {...(props.agents === undefined ? {} : { agents: props.agents })}
       {...(props.browser === undefined ? {} : { browser: props.browser })}
       {...(props.canvas === undefined ? {} : { canvas: props.canvas })}
@@ -60,6 +64,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       onSelectSurface={props.onSelectSurface}
       {...(props.plan === undefined ? {} : { plan: props.plan })}
       resolution={props.resolution}
+      {...(props.renderTab === undefined ? {} : { renderTab: props.renderTab })}
       {...(props.sideChat === undefined ? {} : { sideChat: props.sideChat })}
       tabs={props.tabs}
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}

@@ -12,7 +12,7 @@ import { GitHubRepositoryPicker } from "../code/GitHubRepositoryPicker";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 
 /**
  * Host-scoped, read-only GitHub issue browser. Repository selection reuses
@@ -295,21 +295,19 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
               <div className="github-issue-browser__toolbar">
                 <label className="github-issue-browser__state">
                   <span>State</span>
-                  <OctantNativeSelect
+                  <OctantSelectField
                     aria-label="Issue state"
-                    onChange={(event) => {
-                      if (isIssueStateFilter(event.target.value)) {
-                        setStateFilter(event.target.value);
+                    onValueChange={(value) => {
+                      if (isIssueStateFilter(value)) {
+                        setStateFilter(value);
                       }
                     }}
+                    options={STATE_FILTERS.map((filter) => ({
+                      id: filter.value,
+                      label: filter.label,
+                    }))}
                     value={stateFilter}
-                  >
-                    {STATE_FILTERS.map((filter) => (
-                      <option key={filter.value} value={filter.value}>
-                        {filter.label}
-                      </option>
-                    ))}
-                  </OctantNativeSelect>
+                  />
                 </label>
                 <OctantInput
                   aria-label="Search GitHub issues"

@@ -59,14 +59,15 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
     <div className="code-file-explorer-panel">
       <div className="code-file-explorer-panel__toolbar">
         <OctantButton
+          aria-label="Refresh files"
           disabled={controller.status === "loading"}
           onClick={() => void controller.refresh()}
-          size="sm"
+          size="icon"
+          title="Refresh files"
           type="button"
           variant="ghost"
         >
           <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span>Refresh files</span>
         </OctantButton>
       </div>
 

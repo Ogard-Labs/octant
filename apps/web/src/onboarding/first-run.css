@@ -112,8 +112,8 @@
   list-style: none;
 }
 
-/* The rail stays flat. Hover may tint a row, but the persistent current state
-   uses type and the progress marker rather than turning a step into a card. */
+/* Layout only. Ghost and secondary variants own hover and the current-step
+   fill; this sheet must not repaint the adapter. */
 .first-run__rail-step {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -123,28 +123,10 @@
   inline-size: 100%;
   min-block-size: 3.25rem;
   block-size: auto;
+  height: auto;
   padding: var(--oct-space-2);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-display);
-  text-align: start;
   white-space: normal;
-  cursor: pointer;
-}
-
-.first-run__rail-step:hover {
-  background: var(--oct-fg-soft);
-  color: var(--oct-fg);
-}
-
-/* `aria-current` carries the semantic state; stronger type and one filled
-   marker carry the visual state without a selected-card callout. */
-.first-run__rail-step[aria-current="step"] {
-  background: transparent;
-  color: var(--oct-fg);
-  box-shadow: none;
+  text-align: start;
 }
 
 .first-run__rail-step[aria-current="step"] .first-run__rail-marker {
@@ -161,6 +143,8 @@
   block-size: 1.15rem;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
+  font-weight: 600;
 }
 
 /* Configured is also written into the marker (the check) and announced by the
@@ -257,34 +241,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--oct-space-2);
-}
-
-.first-run__choice {
-  min-height: var(--oct-control-height-sm);
-  padding-inline: var(--oct-space-4);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--radius-md);
-  background: var(--background);
-  color: var(--oct-fg);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  cursor: pointer;
-}
-
-.first-run__choice:hover {
-  background: var(--accent);
-  border-color: var(--input);
-}
-
-/*
- * The chosen option is carried by `aria-checked` in the markup as well as by
- * the accent here, so the choice is never communicated by appearance alone.
- */
-.first-run__choice[aria-checked="true"] {
-  border-color: var(--input);
-  background: var(--secondary);
-  box-shadow: var(--octant-shadow-sm);
-  font-weight: var(--oct-weight-strong);
 }
 
 .first-run__title {
@@ -420,8 +376,13 @@ button.first-run__fact-action {
   border-top: 1px solid var(--oct-border-soft);
 }
 
-/* `.btn-group` spaces and wraps the buttons; the footer right-aligns them. */
+.first-run__button-row,
 .first-run__buttons {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-3);
+}
+
+.first-run__buttons {
   justify-content: flex-end;
 }

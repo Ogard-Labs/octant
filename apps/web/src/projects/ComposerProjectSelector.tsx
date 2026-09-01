@@ -116,7 +116,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
   }, [open]);
 
   return (
-    <div className="composer-folder-selector" aria-label="Project selector">
+    <div className="composer-folder-selector">
       <OctantButton
         aria-controls={open ? listboxId : undefined}
         aria-expanded={open}

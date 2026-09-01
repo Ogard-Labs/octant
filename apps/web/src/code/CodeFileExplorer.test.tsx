@@ -89,6 +89,31 @@ describe("CodeFileExplorer", () => {
     expect(screen.getByRole("treeitem", { name: /src\/index\.ts/ })).toBeVisible();
     expect(screen.getByRole("treeitem", { name: /test\/index\.ts/ })).toBeVisible();
   });
+
+  it("collapses nested folders and expands them as a real repository tree", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeFileExplorer
+        entries={[
+          { kind: "directory", path: "src" as never },
+          { kind: "directory", path: "src/lib" as never },
+          file("src/lib/format.ts"),
+        ]}
+        onOpenFile={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("treeitem", { name: "src" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("treeitem", { name: "src/lib" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("treeitem", { name: "src" }));
+    expect(screen.getByRole("treeitem", { name: "src/lib" })).toBeVisible();
+    expect(screen.queryByRole("treeitem", { name: /format\.ts/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("treeitem", { name: "src/lib" }));
+    expect(screen.getByRole("treeitem", { name: /src\/lib\/format\.ts/ })).toBeVisible();
+    expect(screen.queryByText("Available")).not.toBeInTheDocument();
+  });
 });
 
 function entries(): ReadonlyArray<CodeFileExplorerEntry> {

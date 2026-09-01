@@ -26,7 +26,7 @@ import { ChevronDown } from "lucide-react";
 import { useRef, useState, type RefObject } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import {
   ClaudeCreateAuthenticationFields,
@@ -93,8 +93,9 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
   return (
     <section className="provider-settings__manual" data-expanded={manualOpen ? "true" : "false"}>
       <OctantButton
+        size="sm"
         aria-expanded={manualOpen}
-        className="btn btn-secondary btn-sm window-no-drag"
+        className="window-no-drag"
         onClick={() => setManualOpen((current) => !current)}
         type="button"
         variant="secondary"
@@ -134,6 +135,7 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                                 : "Add provider"
             }
             className={`provider-settings__create provider-settings__create--${providerType}`}
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
               const form = event.currentTarget;
@@ -255,32 +257,31 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
           >
             <label>
               <span>Provider type</span>
-              <OctantNativeSelect
+              <OctantSelectField
                 aria-label="Provider type"
                 className="settings-view__select window-no-drag"
                 disabled={props.busy || creating}
-                onChange={(event) =>
-                  setProviderType(event.currentTarget.value as typeof providerType)
-                }
+                onValueChange={(value) => setProviderType(value as typeof providerType)}
+                options={[
+                  { id: "opencode", label: "OpenCode CLI" },
+                  { id: "codex", label: "Codex CLI" },
+                  { id: "kimi-code", label: "Kimi Code CLI" },
+                  { id: "claude", label: "Claude Agent SDK" },
+                  { id: "devin", label: "Devin ACP" },
+                  { id: "kilo", label: "Kilo ACP" },
+                  { id: "pi", label: "Pi RPC" },
+                  { id: "oh-my-pi", label: "Oh My Pi" },
+                  { id: "ollama", label: "Ollama native HTTP" },
+                  { id: "mistral-vibe", label: "Mistral Vibe ACP" },
+                  { id: "grok", label: "Grok Build ACP" },
+                  { id: "openai-compatible", label: "OpenAI-compatible HTTP" },
+                  { id: "anthropic-compatible", label: "Anthropic-compatible HTTP" },
+                  { id: "azure-foundry", label: "Azure AI Foundry" },
+                  { id: "openai-image", label: "OpenAI Image" },
+                  { id: "gemini-native-image", label: "Gemini Image" },
+                ]}
                 value={providerType}
-              >
-                <option value="opencode">OpenCode CLI</option>
-                <option value="codex">Codex CLI</option>
-                <option value="kimi-code">Kimi Code CLI</option>
-                <option value="claude">Claude Agent SDK</option>
-                <option value="devin">Devin ACP</option>
-                <option value="kilo">Kilo ACP</option>
-                <option value="pi">Pi RPC</option>
-                <option value="oh-my-pi">Oh My Pi</option>
-                <option value="ollama">Ollama native HTTP</option>
-                <option value="mistral-vibe">Mistral Vibe ACP</option>
-                <option value="grok">Grok Build ACP</option>
-                <option value="openai-compatible">OpenAI-compatible HTTP</option>
-                <option value="anthropic-compatible">Anthropic-compatible HTTP</option>
-                <option value="azure-foundry">Azure AI Foundry</option>
-                <option value="openai-image">OpenAI Image</option>
-                <option value="gemini-native-image">Gemini Image</option>
-              </OctantNativeSelect>
+              />
             </label>
             <label>
               <span>Provider name</span>
@@ -366,15 +367,16 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                 </label>
                 <label>
                   <span>Protocol preference</span>
-                  <OctantNativeSelect
+                  <OctantSelectField
                     aria-label="Protocol preference"
                     className="settings-view__select window-no-drag"
                     defaultValue="auto"
                     name="protocol"
-                  >
-                    <option value="auto">Automatic</option>
-                    <option value="messages">Messages</option>
-                  </OctantNativeSelect>
+                    options={[
+                      { id: "auto", label: "Automatic" },
+                      { id: "messages", label: "Messages" },
+                    ]}
+                  />
                 </label>
                 <label className="provider-settings__models-field">
                   <span>Manual model IDs</span>
@@ -427,16 +429,17 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                 />
                 <label>
                   <span>Protocol preference</span>
-                  <OctantNativeSelect
+                  <OctantSelectField
                     aria-label="Protocol preference"
                     className="settings-view__select window-no-drag"
                     defaultValue="auto"
                     name="protocol"
-                  >
-                    <option value="auto">Automatic</option>
-                    <option value="responses">Responses</option>
-                    <option value="chat-completions">Chat Completions</option>
-                  </OctantNativeSelect>
+                    options={[
+                      { id: "auto", label: "Automatic" },
+                      { id: "responses", label: "Responses" },
+                      { id: "chat-completions", label: "Chat Completions" },
+                    ]}
+                  />
                 </label>
                 <label className="provider-settings__models-field">
                   <span>Deployment IDs</span>
@@ -497,16 +500,17 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                 />
                 <label>
                   <span>Protocol preference</span>
-                  <OctantNativeSelect
+                  <OctantSelectField
                     aria-label="Protocol preference"
                     className="settings-view__select window-no-drag"
                     defaultValue="auto"
                     name="protocol"
-                  >
-                    <option value="auto">Automatic</option>
-                    <option value="responses">Responses</option>
-                    <option value="chat-completions">Chat Completions</option>
-                  </OctantNativeSelect>
+                    options={[
+                      { id: "auto", label: "Automatic" },
+                      { id: "responses", label: "Responses" },
+                      { id: "chat-completions", label: "Chat Completions" },
+                    ]}
+                  />
                 </label>
                 <label className="provider-settings__models-field">
                   <span>Manual model IDs</span>
@@ -692,6 +696,7 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
   return (
     <form
       className="provider-card__edit provider-card__edit--claude"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration: ClaudeProviderConfiguration = {
@@ -732,22 +737,23 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
       </label>
       <label>
         <span>Authentication</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={`Claude authentication for ${props.instance.displayName}`}
           className="settings-view__select"
           name="authentication"
-          onChange={(event) => {
-            const next = event.currentTarget.value as ClaudeAuthentication;
+          onValueChange={(value) => {
+            const next = value as ClaudeAuthentication;
             if (next === "subscription" && credentialInput.current !== null) {
               credentialInput.current.value = "";
             }
             setAuthentication(next);
           }}
+          options={[
+            { id: "subscription", label: "Claude subscription" },
+            { id: "api-key", label: "Anthropic API key" },
+          ]}
           value={authentication}
-        >
-          <option value="subscription">Claude subscription</option>
-          <option value="api-key">Anthropic API key</option>
-        </OctantNativeSelect>
+        />
       </label>
       {authentication === "api-key" ? (
         <label>
@@ -783,6 +789,7 @@ export function DevinConfigurationForm(props: {
   return (
     <form
       className="provider-card__edit"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -818,6 +825,7 @@ export function PiConfigurationForm(props: {
   return (
     <form
       className="provider-card__edit"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -852,6 +860,7 @@ export function OhMyPiConfigurationForm(props: {
   return (
     <form
       className="provider-card__edit"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -887,6 +896,7 @@ export function KiloConfigurationForm(props: {
   return (
     <form
       className="provider-card__edit"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -921,6 +931,7 @@ export function OllamaConfigurationForm(props: {
   return (
     <form
       className="provider-card__edit"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void props.onChange(props.instance.id, {
@@ -970,6 +981,7 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
   return (
     <form
       className="provider-card__edit provider-card__edit--vibe"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration: MistralVibeProviderConfiguration = {
@@ -997,22 +1009,23 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
       </label>
       <label>
         <span>Authentication</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={`Mistral Vibe authentication for ${props.instance.displayName}`}
           className="settings-view__select"
-          onChange={(event) => {
-            const next = event.currentTarget.value as MistralVibeAuthentication;
+          onValueChange={(value) => {
+            const next = value as MistralVibeAuthentication;
             if (next === "subscription" && credentialInput.current !== null) {
               credentialInput.current.value = "";
             }
             setAttempt(undefined);
             setAuthentication(next);
           }}
+          options={[
+            { id: "subscription", label: "Mistral subscription" },
+            { id: "api-key", label: "Mistral API key" },
+          ]}
           value={authentication}
-        >
-          <option value="subscription">Mistral subscription</option>
-          <option value="api-key">Mistral API key</option>
-        </OctantNativeSelect>
+        />
       </label>
       {authentication === "api-key" ? (
         <label>
@@ -1084,6 +1097,7 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
   return (
     <form
       className="provider-card__edit provider-card__edit--grok"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration: GrokProviderConfiguration = {
@@ -1111,22 +1125,23 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
       </label>
       <label>
         <span>Authentication</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={`Grok Build authentication for ${props.instance.displayName}`}
           className="settings-view__select"
-          onChange={(event) => {
-            const next = event.currentTarget.value as GrokAuthentication;
+          onValueChange={(value) => {
+            const next = value as GrokAuthentication;
             if (next === "subscription" && credentialInput.current !== null) {
               credentialInput.current.value = "";
             }
             setAttempt(undefined);
             setAuthentication(next);
           }}
+          options={[
+            { id: "subscription", label: "xAI subscription" },
+            { id: "api-key", label: "xAI API key" },
+          ]}
           value={authentication}
-        >
-          <option value="subscription">xAI subscription</option>
-          <option value="api-key">xAI API key</option>
-        </OctantNativeSelect>
+        />
       </label>
       {authentication === "api-key" ? (
         <label>
@@ -1193,6 +1208,7 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
   return (
     <form
       className="provider-card__edit provider-card__edit--http"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration = configurationFrom(new FormData(event.currentTarget));
@@ -1238,16 +1254,17 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
       />
       <label>
         <span>Protocol preference</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={`Protocol preference for ${props.instance.displayName}`}
           className="settings-view__select"
           defaultValue={props.instance.configuration.protocol}
           name="protocol"
-        >
-          <option value="auto">Automatic</option>
-          <option value="responses">Responses</option>
-          <option value="chat-completions">Chat Completions</option>
-        </OctantNativeSelect>
+          options={[
+            { id: "auto", label: "Automatic" },
+            { id: "responses", label: "Responses" },
+            { id: "chat-completions", label: "Chat Completions" },
+          ]}
+        />
       </label>
       <label className="provider-settings__models-field">
         <span>Manual model IDs</span>
@@ -1306,6 +1323,7 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
   return (
     <form
       className="provider-card__edit provider-card__edit--http"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration = anthropicConfigurationFrom(new FormData(event.currentTarget));
@@ -1362,15 +1380,16 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
       </label>
       <label>
         <span>Protocol preference</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={`Protocol preference for ${props.instance.displayName}`}
           className="settings-view__select"
           defaultValue={props.instance.configuration.protocol}
           name="protocol"
-        >
-          <option value="auto">Automatic</option>
-          <option value="messages">Messages</option>
-        </OctantNativeSelect>
+          options={[
+            { id: "auto", label: "Automatic" },
+            { id: "messages", label: "Messages" },
+          ]}
+        />
       </label>
       <label className="provider-settings__models-field">
         <span>Manual model IDs</span>
@@ -1429,6 +1448,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
   return (
     <form
       className="provider-card__edit provider-card__edit--http"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration = foundryConfigurationFrom(new FormData(event.currentTarget));
@@ -1470,16 +1490,17 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
       />
       <label>
         <span>Protocol preference</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={`Protocol preference for ${props.instance.displayName}`}
           className="settings-view__select"
           defaultValue={props.instance.configuration.protocol}
           name="protocol"
-        >
-          <option value="auto">Automatic</option>
-          <option value="responses">Responses</option>
-          <option value="chat-completions">Chat Completions</option>
-        </OctantNativeSelect>
+          options={[
+            { id: "auto", label: "Automatic" },
+            { id: "responses", label: "Responses" },
+            { id: "chat-completions", label: "Chat Completions" },
+          ]}
+        />
       </label>
       <label className="provider-settings__models-field">
         <span>Deployment IDs</span>
@@ -1566,37 +1587,39 @@ function OpenAiImageFields(props: {
       </label>
       <label>
         <span>Quality</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={
             props.instance === undefined ? "Quality" : `Quality for ${props.instance.displayName}`
           }
           className="settings-view__select window-no-drag"
           defaultValue={configuration?.quality ?? ""}
           name="quality"
-        >
-          <option value="">Provider default</option>
-          <option value="auto">auto</option>
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
-        </OctantNativeSelect>
+          options={[
+            { id: "", label: "Provider default" },
+            { id: "auto", label: "auto" },
+            { id: "low", label: "low" },
+            { id: "medium", label: "medium" },
+            { id: "high", label: "high" },
+          ]}
+        />
       </label>
       <label>
         <span>Size</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={
             props.instance === undefined ? "Size" : `Size for ${props.instance.displayName}`
           }
           className="settings-view__select window-no-drag"
           defaultValue={configuration?.size ?? ""}
           name="size"
-        >
-          <option value="">Provider default</option>
-          <option value="auto">auto</option>
-          <option value="1024x1024">1024x1024</option>
-          <option value="1536x1024">1536x1024</option>
-          <option value="1024x1536">1024x1536</option>
-        </OctantNativeSelect>
+          options={[
+            { id: "", label: "Provider default" },
+            { id: "auto", label: "auto" },
+            { id: "1024x1024", label: "1024x1024" },
+            { id: "1536x1024", label: "1536x1024" },
+            { id: "1024x1536", label: "1024x1536" },
+          ]}
+        />
       </label>
       <label>
         <span>
@@ -1672,7 +1695,7 @@ function GeminiImageFields(props: {
       </label>
       <label>
         <span>Aspect ratio</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={
             props.instance === undefined
               ? "Aspect ratio"
@@ -1681,23 +1704,24 @@ function GeminiImageFields(props: {
           className="settings-view__select window-no-drag"
           defaultValue={configuration?.aspectRatio ?? ""}
           name="aspectRatio"
-        >
-          <option value="">Provider default</option>
-          <option value="1:1">1:1</option>
-          <option value="2:3">2:3</option>
-          <option value="3:2">3:2</option>
-          <option value="3:4">3:4</option>
-          <option value="4:3">4:3</option>
-          <option value="4:5">4:5</option>
-          <option value="5:4">5:4</option>
-          <option value="9:16">9:16</option>
-          <option value="16:9">16:9</option>
-          <option value="21:9">21:9</option>
-        </OctantNativeSelect>
+          options={[
+            { id: "", label: "Provider default" },
+            { id: "1:1", label: "1:1" },
+            { id: "2:3", label: "2:3" },
+            { id: "3:2", label: "3:2" },
+            { id: "3:4", label: "3:4" },
+            { id: "4:3", label: "4:3" },
+            { id: "4:5", label: "4:5" },
+            { id: "5:4", label: "5:4" },
+            { id: "9:16", label: "9:16" },
+            { id: "16:9", label: "16:9" },
+            { id: "21:9", label: "21:9" },
+          ]}
+        />
       </label>
       <label>
         <span>Resolution</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label={
             props.instance === undefined
               ? "Resolution"
@@ -1706,12 +1730,13 @@ function GeminiImageFields(props: {
           className="settings-view__select window-no-drag"
           defaultValue={configuration?.resolution ?? ""}
           name="resolution"
-        >
-          <option value="">Provider default</option>
-          <option value="1K">1K</option>
-          <option value="2K">2K</option>
-          <option value="4K">4K</option>
-        </OctantNativeSelect>
+          options={[
+            { id: "", label: "Provider default" },
+            { id: "1K", label: "1K" },
+            { id: "2K", label: "2K" },
+            { id: "4K", label: "4K" },
+          ]}
+        />
       </label>
       <label>
         <span>
@@ -1760,6 +1785,7 @@ export function OpenAiImageConfigurationForm(props: OpenAiImageConfigurationForm
   return (
     <form
       className="provider-card__edit provider-card__edit--image"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration = openAiImageConfigurationFrom(new FormData(event.currentTarget));
@@ -1824,6 +1850,7 @@ export function GeminiImageConfigurationForm(props: GeminiImageConfigurationForm
   return (
     <form
       className="provider-card__edit provider-card__edit--image"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration = geminiImageConfigurationFrom(new FormData(event.currentTarget));

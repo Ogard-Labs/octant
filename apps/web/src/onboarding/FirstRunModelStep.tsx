@@ -78,7 +78,7 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
       )}
 
       {chosen && props.onClear !== undefined ? (
-        <div className="btn-group">
+        <div className="first-run__button-row">
           <OctantButton onClick={props.onClear} type="button" variant="ghost">
             {props.clearLabel ?? "Clear selection"}
           </OctantButton>

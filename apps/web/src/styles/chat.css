@@ -2,7 +2,7 @@
  * Residual Chat styles. The transcript and composer adopt the design system's
  * chat vocabulary (`.thread-column`, `.turn-user`/`.bubble`, `.turn-agent`,
  * `.runstatus`, `.composer`, `.composer-input`, `.composer-chips`,
- * `.composer-row`, `.btn-send`, `.chip`) from styles/octant.css; the welcome
+ * `.composer-row`, `.chip`) from styles/octant.css; the welcome
  * screen rides the same composer vocabulary with hero-scale overrides. What remains here is
  * either a sub-surface that has not been ported (work shelf, workspace chrome)
  * or behavior the system has no vocabulary for (streaming state,
@@ -20,60 +20,8 @@
   background: var(--oct-bg);
 }
 
-/* The un-ported draft-thread base (shell.css) imports after the system sheet
-   and wins width ties against `.thread-column`, so the welcome hero restates
-   the shared measure through its token instead of wearing the class. The
-   literal goes when the draft-thread surface itself is ported. */
-.chat-welcome .draft-thread__canvas {
-  width: min(100% - 40px, var(--oct-thread-measure));
-  gap: 18px;
-}
-
-.chat-welcome .draft-thread__welcome {
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-}
-
-/* The h1 element already wears the system display face; only the hero scale
-   and balance are this surface's own. */
-.chat-welcome .draft-thread__heading {
-  max-width: 22ch;
-  color: var(--oct-fg);
-  font-size: clamp(26px, 3vw, 34px);
-  font-weight: 400;
-  letter-spacing: var(--oct-tracking-tight);
-  line-height: 1.15;
-  text-wrap: balance;
-}
-
-.chat-welcome .draft-thread__description {
-  max-width: 52ch;
-  margin-top: 0;
-  color: var(--oct-muted);
-  font-size: calc(13 * var(--oct-text-step));
-  line-height: 1.55;
-  text-wrap: pretty;
-}
-
-/* The frame, focus accent, input, row, and send circle are the system's
-   `.composer` vocabulary; the welcome hero only asks for a taller first
-   message than the in-thread composer's single line. */
-.chat-welcome .composer-input {
-  min-height: 96px;
-}
-
-/* The hint sits below the card, like secondary context under the composer. */
-.chat-welcome .draft-thread__hint {
-  order: 2;
-  padding: 0;
-  margin-top: -8px;
-  border-top: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-  opacity: 0.7;
-  text-align: center;
+.chat-welcome {
+  background: var(--octant-app-background);
 }
 
 .chat-welcome__suggestions {
@@ -81,25 +29,18 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
 }
 
-/* Starter categories are the system ghost button reshaped into a pill. */
 .chat-welcome__suggestions button {
-  min-height: 32px;
-  gap: 7px;
-  padding-inline: 11px;
   color: var(--oct-muted);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
-  font-size: var(--oct-text-xs);
-  font-weight: 500;
+  background: transparent;
+  border-color: transparent;
 }
 
 .chat-welcome__suggestions button:hover:not(:disabled) {
   color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  background: transparent;
 }
 
 .chat-welcome__retry {
@@ -121,30 +62,19 @@
   line-height: 1.5;
 }
 
-/* The measure is the shared `.thread-column`; this block only makes the
-   header stick and lays out its row. */
+/* The window thread strip owns title and Project context. This row therefore
+   carries only live run state and the overflow action instead of repeating a
+   second title/meta header above the transcript. */
 .chat-workspace__header {
-  position: sticky;
-  z-index: 2;
-  top: 0;
+  position: relative;
+  z-index: 3;
   display: flex;
-  min-height: 48px;
+  min-height: 36px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
-  padding: 16px 0 11px;
-  background: var(--oct-bg);
-  border-bottom: 1px solid var(--oct-border-soft);
-}
-
-.chat-workspace__header h1 {
-  max-width: 52rem;
-  margin: 0;
-  color: var(--oct-fg);
-  font-size: calc(13 * var(--oct-text-step));
-  font-weight: 500;
-  letter-spacing: -0.015em;
-  line-height: 1.3;
+  padding: 4px 20px 0;
+  background: transparent;
 }
 
 .chat-workspace__meta {
@@ -176,7 +106,7 @@
   color: var(--oct-danger-fg);
   background: color-mix(in srgb, var(--oct-danger-fg) 10%, var(--oct-bg));
   border: 1px solid color-mix(in srgb, var(--oct-danger-fg) 32%, var(--oct-border));
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font-size: calc(12 * var(--oct-text-step));
   line-height: 1.4;
 }
@@ -190,7 +120,7 @@
   padding: 10px 12px;
   margin: 0 auto 8px;
   border: 1px solid var(--oct-border);
-  border-radius: 10px;
+  border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
   box-shadow: var(--octant-shadow-sm);
 }
@@ -278,7 +208,7 @@
   color: var(--oct-warn-fg);
   background: var(--oct-warn-soft);
   border: 1px solid color-mix(in oklab, var(--oct-warn-fg) 32%, transparent);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font-size: calc(12 * var(--oct-text-step));
   line-height: 1.4;
 }
@@ -290,7 +220,7 @@
   margin: 0 0 20px;
   color: var(--oct-muted);
   background: var(--oct-surface-warm);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   line-height: 1.45;
 }
@@ -300,6 +230,19 @@
 .chat-transcript .turn-user {
   flex-direction: column;
   align-items: flex-end;
+  position: relative;
+  top: auto;
+  padding-block: var(--oct-space-2);
+  background: transparent;
+}
+
+.chat-transcript .turn-user .bubble {
+  width: auto;
+  max-width: min(78%, 620px);
+  padding: 10px 14px;
+  border: 1px solid var(--oct-border);
+  background: var(--oct-surface-warm);
+  box-shadow: var(--octant-shadow-hairline);
 }
 
 /* User messages are plain text, so hard newlines must survive rendering. */
@@ -577,7 +520,7 @@
   gap: 6px;
   padding: 0 6px;
   color: var(--oct-muted);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: calc(11 * var(--oct-text-step));
   text-align: left;
@@ -995,7 +938,7 @@
 }
 
 @media (max-width: 680px) {
-  .chat-welcome .draft-thread__canvas {
+  .chat-welcome .welcome {
     justify-content: center;
     padding: 28px 0;
   }

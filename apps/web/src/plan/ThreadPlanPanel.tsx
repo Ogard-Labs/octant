@@ -119,6 +119,7 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
       {!commandable || !writing ? null : (
         <form
           className="thread-plan__compose"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             const steps = parseSteps(stepText);

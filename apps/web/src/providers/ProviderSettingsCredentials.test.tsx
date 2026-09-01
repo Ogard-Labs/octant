@@ -9,6 +9,7 @@ import {
   transientCredential,
   useCredentialStatus,
 } from "./ProviderSettingsCredentials";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-000000000092");
 
@@ -58,12 +59,16 @@ describe("provider credential entry", () => {
     const key = screen.getByLabelText("API key");
 
     await user.type(key, "must-not-linger");
-    await user.selectOptions(authentication, "none");
+    await chooseSelectFieldOption(
+      user,
+      authentication,
+      "No authentication (trusted loopback only)",
+    );
     expect(key).toBeDisabled();
     expect(key).toHaveValue("");
     expect(document.body.textContent).not.toContain("must-not-linger");
 
-    await user.selectOptions(authentication, "bearer");
+    await chooseSelectFieldOption(user, authentication, "Bearer API key");
     expect(key).toBeEnabled();
     expect(key).toHaveValue("");
   });

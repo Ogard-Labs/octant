@@ -6,6 +6,7 @@ describe("octantSettingsRegistry", () => {
     expect(octantSettingsRegistry.sections.map((s) => s.id)).toEqual([
       "general",
       "appearance",
+      "keybindings",
       "chat",
       "code",
       "navigator-assistant",
@@ -78,6 +79,18 @@ describe("octantSettingsRegistry", () => {
       keywords:
         "marketplace fetches skills npm github registry catalog search inspect install privacy off",
     });
+  });
+
+  it("keeps keyboard shortcuts in their own Settings destination", () => {
+    const general = octantSettingsRegistry.sections.find((s) => s.id === "general");
+    const keybindings = octantSettingsRegistry.sections.find((s) => s.id === "keybindings");
+
+    expect(general?.settings.some((setting) => setting.id === "keybindings")).toBe(false);
+    expect(keybindings).toMatchObject({
+      label: "Keybindings",
+      scope: "app",
+    });
+    expect(keybindings?.settings.map((setting) => setting.id)).toEqual(["keybindings"]);
   });
 
   it("registers the Skills & Extensions section with marketplace/installed keywords", () => {

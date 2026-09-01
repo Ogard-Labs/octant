@@ -72,7 +72,9 @@ describe("AgentsCenter", () => {
 
   it("shows an empty state when no runs match the filters", async () => {
     render(<AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [] })) })} />);
-    expect(await screen.findByText("No agent runs match the current filters.")).toBeInTheDocument();
+    const title = await screen.findByText("No agent runs yet");
+    expect(title.closest("[role='status']")).toHaveClass("surface-empty");
+    expect(screen.getByText("Child agents appear here after a thread starts one.")).toBeVisible();
   });
 
   it("opens a parent thread without creating another hierarchy", async () => {
@@ -94,7 +96,8 @@ describe("AgentsCenter", () => {
     expect(await screen.findByText(summary.task)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "History" }));
-    expect(await screen.findByText("No agent runs match the current filters.")).toBeInTheDocument();
+    expect(await screen.findByText("No agent runs match these filters")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeVisible();
   });
 
   it("shows unavailable copy when the center query fails", async () => {

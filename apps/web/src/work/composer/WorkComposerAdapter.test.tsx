@@ -23,10 +23,10 @@ describe("WorkComposerAdapter", () => {
         projectRoot="/home/user/docs"
       />,
     );
-    expect(html).toContain("Octant Work");
     expect(html).toContain("What are we working on?");
     expect(html).toContain("My Docs");
-    expect(html).toContain("confined folder");
+    expect(html).not.toContain("Octant Work");
+    expect(html).not.toContain("confined folder");
   });
 
   it("renders the no-Project state with an attach folder action", () => {
@@ -35,13 +35,28 @@ describe("WorkComposerAdapter", () => {
     );
     expect(html).toContain("No folder");
     expect(html).toContain("Attach folder");
-    expect(html).toContain("Choose a Project");
+    expect(html).not.toContain("Choose a Project to work in");
   });
 
   it("renders the no-Project state without an attach action when none is provided", () => {
     const html = renderToStaticMarkup(<WorkComposerAdapter {...baseProps} />);
     expect(html).toContain("No folder");
     expect(html).not.toContain("Attach folder");
+  });
+
+  it("tucks host and Project context behind the prompt instead of boxing it inside", () => {
+    const { container } = render(<WorkComposerAdapter {...baseProps} />);
+    const frame = container.querySelector(".composer");
+    const tray = container.querySelector(".composer-tray");
+
+    expect(frame).not.toBeNull();
+    expect(tray).not.toBeNull();
+    if (frame === null || tray === null) throw new Error("Composer stack is incomplete.");
+    expect(frame.contains(tray)).toBe(false);
+    expect(tray.parentElement).toHaveClass("composer-stack");
+    expect(tray.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tray.textContent).toContain("No folder");
+    expect(tray.querySelector(".host-selector--environment")).not.toBeNull();
   });
 
   it("renders disabled send button when empty", () => {
@@ -71,13 +86,12 @@ describe("WorkComposerAdapter", () => {
     expect(html).not.toContain("Base repository");
   });
 
-  it("has keyboard hint", () => {
+  it("does not repeat the keyboard hint under the composer", () => {
     const html = renderToStaticMarkup(<WorkComposerAdapter {...baseProps} />);
-    expect(html).toContain("Press Enter to start");
-    expect(html).toContain("Escape to close");
+    expect(html).not.toContain("Press Enter to start");
   });
 
-  it("renders the multi-model pool control slot in the context strip", () => {
+  it("renders the multi-model pool control slot in the composer bar", () => {
     const html = renderToStaticMarkup(
       <WorkComposerAdapter {...baseProps} poolControl={<span>Pool control slot</span>} />,
     );

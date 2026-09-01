@@ -222,8 +222,9 @@ server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
 Thread utilities live in the Right Utility Dock outside the split tree. The
-top-right control reveals the dock. An empty dock shows a compact launcher; an
-open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
+top-right control reveals the dock only when the active pane has a bound thread
+or a valid launchable tool. An available empty dock shows a compact launcher;
+an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal, Tests,
 and iOS Simulator, as mode and capability allow. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
@@ -324,10 +325,18 @@ fourth authority mode.
 **Approved migration, not yet fully the renderer.** Proposed records
 [0041](decisions/0041-panes-hold-one-surface.md) and
 [0044](decisions/0044-the-dock-hosts-live-thread-owned-tools.md) are the agreed
-interaction model for remaining renderer work. Environment is already a compact
+interaction model for remaining renderer work.
+[0070](decisions/0070-setup-surfaces-compose-from-public-blocks.md)
+is the accepted visual language: raise grouped forms and setup objects, enlarge
+radii, and match public block composition on Octant-owned surfaces, without
+vendoring a catalog or replacing the shell. Environment is already a compact
 header summary with a transient disclosure whose open state is not persisted
 and may include a truthful child-run summary
 ([0045](decisions/0045-environment-summarizes-the-active-thread.md)).
+[0071](decisions/0071-one-navigation-and-surface-hierarchy.md) refines that
+language: true tabs stay flat, segmented values keep an enclosed track, active
+pane identity stays on the grip, routine Settings rows remain open while
+discrete objects are raised, and narrow Settings uses a drawer.
 The dock already hosts live thread-owned tool instances — Files, Browser,
 Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery,
 thread-level Agents, and Review — rather than a generic Thread accordion.
@@ -683,6 +692,11 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   run the script manually and source `session.env` the same way. Provider
   CLIs are ordinary host binaries: install one to a user-writable path such
   as `~/.local/bin` and point the provider instance at that absolute path.
+- `octant web --dev` owns a persistent development host profile. Its storage,
+  host discovery receipts, and bridge authority resolve from one development
+  data directory across launches; the renderer still requests a fresh window
+  capability for each browser session. This keeps browser QA history stable
+  without sharing production storage or persisting a window capability.
 - `bun run package:desktop` packages the peer Machine for the build host:
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with

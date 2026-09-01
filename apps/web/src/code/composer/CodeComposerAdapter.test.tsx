@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CodeComposerAdapter } from "./CodeComposerAdapter";
@@ -20,30 +21,114 @@ const defaultProps = {
 describe("CodeComposerAdapter", () => {
   it("renders composer with project and branch context", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toContain("Octant Code");
-    expect(html).toContain("What should we build?");
+    expect(html).toContain("What should we build");
     expect(html).toContain("My Repo");
     expect(html).toContain("development");
+  });
+
+  it("keeps the welcome prompt on the shared composer frame", () => {
+    render(<CodeComposerAdapter {...defaultProps} />);
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveAttribute(
+      "placeholder",
+      "Describe what to build, ask a follow-up, or attach an image…",
+    );
+  });
+
+  it("puts Project, branch, and Environment on an upper tray before the prompt", () => {
+    const { container } = render(<CodeComposerAdapter {...defaultProps} />);
+    const frame = container.querySelector(".composer");
+    const dock = container.querySelector(".composer-tray");
+    expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
+    expect(frame).not.toBeNull();
+    expect(dock).not.toBeNull();
+    if (frame === null || dock === null) throw new Error("Composer stack is incomplete.");
+    expect(dock.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(frame?.querySelector(".host-selector")).toBeNull();
+    expect(frame?.textContent).not.toContain("My Repo");
+    expect(dock?.textContent).toContain("My Repo");
+    expect(dock?.querySelector(".host-selector")).not.toBeNull();
+    expect(dock?.querySelector(".host-selector--environment")).not.toBeNull();
+    expect(dock?.textContent).toContain("Current checkout");
+    expect(dock?.textContent).toContain("development");
+    const text = dock?.textContent ?? "";
+    expect(text.indexOf("My Repo")).toBeLessThan(text.indexOf("development"));
+    expect(text.indexOf("development")).toBeLessThan(text.indexOf("This computer"));
+  });
+
+  it("derives the delivery target from the tray instead of asking for it again", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        baseRepository="acme/octant"
+        onCreateThread={onCreateThread}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Delivery target" })).not.toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
+      prompt: "Fix the login bug",
+      deliveryTarget: {
+        proposedBaseRepository: "acme/octant",
+        proposedBaseBranch: "development",
+        remoteName: "origin",
+        outcomeKind: expect.any(String),
+      },
+    });
+    expect(onCreateThread.mock.calls[0]?.[0].deliveryTarget.branchIntent).not.toBe("development");
+  });
+
+  it("remembers the access posture for the Project from the access menu", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
+
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(screen.getByRole("switch", { name: "Remember access for this Project" }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship it");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
+      permissionPersistence: "project-default",
+    });
+  });
+
+  it("puts the Project picker first on the upper tray when none is selected", () => {
+    const { projectId: _projectId, projectName: _projectName, ...rest } = defaultProps;
+    const { container } = render(
+      <CodeComposerAdapter {...rest} folderControl={<span>Choose a Project</span>} />,
+    );
+    const leading = container.querySelector(".composer-tray__leading");
+    const trailing = container.querySelector(".composer-tray__trailing");
+    expect(leading?.textContent).toContain("Choose a Project");
+    expect(trailing?.textContent).not.toContain("Choose a Project");
+  });
+
+  it("keeps repository context in the checkout bar", () => {
+    const { container } = render(
+      <CodeComposerAdapter {...defaultProps} githubControl={<span>GitHub control slot</span>} />,
+    );
+    const frame = container.querySelector(".composer");
+    const dock = container.querySelector(".composer-tray");
+    expect(frame).not.toBeNull();
+    expect(dock).not.toBeNull();
+    expect(frame?.contains(dock)).toBe(false);
+    expect(dock?.textContent).toContain("GitHub control slot");
+    expect(dock?.textContent).toContain("development");
+    expect(container.querySelector('[class*="context-strip"]')).toBeNull();
   });
 
   it("renders approval policy selector", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
     expect(html).toContain("Approval");
     expect(html).toContain("Access policy");
-  });
-
-  it("renders delivery disclosure toggle", () => {
-    const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toContain("Delivery target");
-    expect(html).toContain('aria-expanded="false"');
-  });
-
-  it("uses the server-observed GitHub repository as the delivery default", () => {
-    render(<CodeComposerAdapter {...defaultProps} baseRepository="acme/octant" />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Delivery target" }));
-
-    expect(screen.getByRole("textbox", { name: "Base repository" })).toHaveValue("acme/octant");
   });
 
   it("renders disabled send button when empty", () => {
@@ -69,6 +154,7 @@ describe("CodeComposerAdapter", () => {
     );
 
     expect(html).not.toContain("The selected Project is unavailable");
+    expect(html).not.toContain("Choose a Project to build in");
   });
 
   it("renders error message when provided", () => {
@@ -84,13 +170,7 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain("disabled");
   });
 
-  it("has keyboard hint", () => {
-    const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toContain("Press Enter to start");
-    expect(html).toContain("Escape to close");
-  });
-
-  it("renders the multi-model pool control slot in the context strip", () => {
+  it("renders the multi-model pool control slot in the composer bar", () => {
     const html = renderToStaticMarkup(
       <CodeComposerAdapter {...defaultProps} poolControl={<span>Pool control slot</span>} />,
     );
@@ -102,7 +182,7 @@ describe("CodeComposerAdapter", () => {
     expect(html).not.toContain("Pool control slot");
   });
 
-  it("renders the GitHub repository control slot as a distinct context-strip selection", () => {
+  it("renders the GitHub repository control slot as a distinct tray selection", () => {
     const html = renderToStaticMarkup(
       <CodeComposerAdapter {...defaultProps} githubControl={<span>GitHub control slot</span>} />,
     );
@@ -216,10 +296,12 @@ describe("CodeComposerAdapter interactions", () => {
       );
     });
     expect(onExecutionPolicyChange).toHaveBeenCalledWith("approval-gated");
-    const access = container.querySelector('select[aria-label="Access policy"]');
-    expect(access).not.toBeNull();
+    const access = screen.getByRole("button", { name: "Access policy" });
     await act(async () => {
-      fireEvent.change(access!, { target: { value: "plan" } });
+      fireEvent.click(access);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: /Plan/ }));
     });
     expect(onExecutionPolicyChange).toHaveBeenCalledWith("plan");
     root.unmount();

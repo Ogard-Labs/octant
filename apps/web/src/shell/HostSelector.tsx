@@ -7,9 +7,13 @@ import {
   type CreateHostViewScope,
 } from "@octant/domain";
 import { useEffect, useMemo, useState } from "react";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { Cloud } from "lucide-react";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 
 export interface HostSelectorProps {
+  /** Product wording for the destination choice. Host is the system term;
+   * Environment is the create-composer presentation people choose. */
+  readonly presentation?: "host" | "environment";
   /**
    * When set, an existing Project fixes host ownership. The selector remains
    * visible but does not offer an alternate destination.
@@ -122,6 +126,9 @@ export function HostSelector(props: HostSelectorProps) {
   const healthLabel = healthLabels[health];
   const fixed = props.fixedHostId !== undefined;
   const interactive = !fixed && hosts.length > 1;
+  const environment = props.presentation === "environment";
+  const accessibleLabel = environment ? "Environment" : "Destination host";
+  const className = `host-selector${interactive ? " host-selector--interactive" : ""}${environment ? " host-selector--environment" : ""}`;
 
   function handleChange(nextHostId: string) {
     const matched = hosts.find((host) => String(host.hostId) === nextHostId);
@@ -135,14 +142,23 @@ export function HostSelector(props: HostSelectorProps) {
   if (!interactive) {
     return (
       <span
-        aria-label={`Host: ${displayName} · ${healthLabel}`}
-        className="host-selector"
+        aria-label={`${environment ? "Environment" : "Host"}: ${displayName} · ${healthLabel}`}
+        className={className}
         data-host-health={health}
         data-host-id={props.fixedHostId ?? selectedHostId}
         data-testid="host-selector"
         role="status"
       >
-        <span aria-hidden="true" className={`host-selector__dot ${dotClass(health)}`} />
+        {environment ? (
+          <Cloud
+            aria-hidden="true"
+            className="host-selector__environment-icon"
+            size={14}
+            strokeWidth={1.7}
+          />
+        ) : (
+          <span aria-hidden="true" className={`host-selector__dot ${dotClass(health)}`} />
+        )}
         <span className="host-selector__name">{displayName}</span>
         <span className="host-selector__health">{healthLabel}</span>
       </span>
@@ -151,39 +167,47 @@ export function HostSelector(props: HostSelectorProps) {
 
   return (
     <span
-      className="host-selector host-selector--interactive"
+      className={className}
       data-host-health={health}
       data-host-id={selectedHostId}
       data-testid="host-selector"
     >
-      <span aria-hidden="true" className={`host-selector__dot ${dotClass(health)}`} />
+      {environment ? (
+        <Cloud
+          aria-hidden="true"
+          className="host-selector__environment-icon"
+          size={14}
+          strokeWidth={1.7}
+        />
+      ) : (
+        <span aria-hidden="true" className={`host-selector__dot ${dotClass(health)}`} />
+      )}
       <label className="host-selector__label">
-        <span className="host-selector__label-text">Destination host</span>
-        <OctantNativeSelect
-          aria-label="Destination host"
+        <span className="host-selector__label-text">{accessibleLabel}</span>
+        <OctantSelectField
+          aria-label={accessibleLabel}
           className="host-selector__select"
-          onChange={(event) => handleChange(event.target.value)}
-          value={String(selectedHostId)}
-        >
-          {options.map((option) => {
+          onValueChange={handleChange}
+          options={options.map((option) => {
             const optionHealth = healthLabels[option.host.health];
-            const suffix =
-              option.disabledReason !== undefined
+            const suffix = environment
+              ? option.disabledReason === undefined
+                ? ""
+                : ` — ${option.disabledReason}`
+              : option.disabledReason !== undefined
                 ? ` — ${option.disabledReason}`
                 : ` — ${optionHealth}`;
-            return (
-              <option
-                disabled={!option.selectable}
-                key={String(option.host.hostId)}
-                title={option.disabledReason}
-                value={String(option.host.hostId)}
-              >
-                {option.host.displayName}
-                {suffix}
-              </option>
-            );
+            return {
+              id: String(option.host.hostId),
+              label: `${option.host.displayName}${suffix}`,
+              ...(!option.selectable ? { disabled: true } : {}),
+              ...(option.disabledReason === undefined
+                ? {}
+                : { disabledReason: option.disabledReason }),
+            };
           })}
-        </OctantNativeSelect>
+          value={String(selectedHostId)}
+        />
       </label>
     </span>
   );

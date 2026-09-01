@@ -39,7 +39,7 @@ thread has a current plan artifact, instead of replacing the Work thread. The
 sidebar follows the pane that last received pointer or keyboard input and
 restores that thread's open tools and selected tool when you return to it.
 
-The sidebar **Thread board** is a server-derived view of Work threads as Ready, In Progress, Waiting, and Done. Status comes from turn, request, artifact, citation, child-run, recovery, and delivery evidence; a thread is Done only when its confirmed delivery target is objectively satisfied. Cards are not dragged between columns. Opening a card activates that Work Project and thread. Chat has no board.
+The sidebar **Thread board** is a server-derived view of Work threads as Ready, In progress, Waiting, and Done. Status comes from turn, request, artifact, citation, child-run, recovery, and delivery evidence; a thread is Done only when its confirmed delivery target is objectively satisfied. Cards are not dragged between columns. Opening a card activates that Work Project and thread. Chat has no board.
 
 Work does not expose Code Git/terminal authority. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 

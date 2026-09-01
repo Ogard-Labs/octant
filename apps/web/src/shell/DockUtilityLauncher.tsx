@@ -1,7 +1,6 @@
 import { Plus } from "lucide-react";
 import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { DockToolIcon } from "./dockToolIcons";
-import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
@@ -37,14 +36,20 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
 
   return (
     <span className="dock-utility-launcher">
-      <IconButton
+      <OctantButton
+        aria-label="Add tool"
         aria-controls={disclosureId}
         aria-expanded={open}
-        icon={Plus}
-        label="Add tool"
+        className="dock-utility-launcher__trigger"
         onClick={() => setOpen((current) => !current)}
         ref={trigger}
-      />
+        size="icon"
+        title="Add tool"
+        type="button"
+        variant="ghost"
+      >
+        <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
+      </OctantButton>
       {open ? (
         <span
           className="workspace-disclosure dock-utility-launcher__disclosure"

@@ -133,7 +133,7 @@ describe("ThreadComposer", () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn((event: { preventDefault: () => void }) => event.preventDefault());
     render(
-      <form onSubmit={onSubmit}>
+      <form noValidate onSubmit={onSubmit}>
         <ThreadComposer
           input={<textarea className="composer-input" />}
           row={{ actions: { kind: "send", send: { ariaLabel: "Start thread" } } }}

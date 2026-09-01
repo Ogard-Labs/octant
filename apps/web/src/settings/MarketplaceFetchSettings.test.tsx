@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MarketplaceFetchSettings } from "./MarketplaceFetchSettings";
+import { MarketplaceFetchDisclosure, MarketplaceFetchSettings } from "./MarketplaceFetchSettings";
 
 describe("MarketplaceFetchSettings", () => {
   it("turns marketplace fetches off in Settings", () => {
@@ -10,9 +10,12 @@ describe("MarketplaceFetchSettings", () => {
     expect(onEnabledChange).toHaveBeenCalledWith(false);
   });
 
-  it("keeps Search available in copy when the preference is on", () => {
-    render(<MarketplaceFetchSettings enabled onEnabledChange={vi.fn()} />);
-    expect(screen.getByText(/Opening the Marketplace tab does not fetch/i)).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Allow marketplace fetches" })).toBeChecked();
+  it("keeps network details collapsed until they are requested", () => {
+    render(<MarketplaceFetchDisclosure />);
+    const disclosure = screen.getByText("Network details").closest("details");
+    expect(disclosure).not.toHaveAttribute("open");
+    expect(screen.getByText(/Opening Marketplace never fetches/i)).not.toBeVisible();
+    fireEvent.click(screen.getByText("Network details"));
+    expect(screen.getByText(/Opening Marketplace never fetches/i)).toBeVisible();
   });
 });

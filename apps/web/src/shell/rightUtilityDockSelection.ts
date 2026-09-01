@@ -1,4 +1,5 @@
 import type { OctantMode } from "@octant/contracts/modes";
+import { decodeBrowserContextId, decodeWorkspaceTabId } from "@octant/contracts";
 import {
   RIGHT_UTILITY_DOCK_SURFACES,
   type RightUtilityDockSurfaceId,
@@ -6,9 +7,20 @@ import {
 
 export type ThreadUtilityDockKey = `${OctantMode}:${string}`;
 
+export interface ThreadUtilityDockTab {
+  /**
+   * A window-local presentation identity. Singleton tools use their surface id;
+   * repeatable Browser and Terminal tools use a UUID so their process/context
+   * state cannot collapse into the first tab.
+   */
+  readonly id: string;
+  readonly surface: RightUtilityDockSurfaceId;
+  readonly browserContextId?: string;
+}
+
 export interface ThreadUtilityDockState {
-  readonly tabs: ReadonlyArray<RightUtilityDockSurfaceId>;
-  readonly active?: RightUtilityDockSurfaceId;
+  readonly tabs: ReadonlyArray<ThreadUtilityDockTab>;
+  readonly active?: string;
 }
 
 export type ThreadUtilityDockStates = ReadonlyMap<ThreadUtilityDockKey, ThreadUtilityDockState>;
@@ -35,23 +47,33 @@ export function openThreadUtilityTab(
   return replace(states, key, openUtilityTabState(current, surface));
 }
 
-export function selectThreadUtilityTab(
+export function addThreadUtilityTab(
   states: ThreadUtilityDockStates,
   key: ThreadUtilityDockKey,
   surface: RightUtilityDockSurfaceId,
+  instanceId: string,
 ): ThreadUtilityDockStates {
   const current = threadUtilityDockState(states, key);
-  const next = selectUtilityTabState(current, surface);
+  return replace(states, key, addUtilityTabState(current, surface, instanceId));
+}
+
+export function selectThreadUtilityTab(
+  states: ThreadUtilityDockStates,
+  key: ThreadUtilityDockKey,
+  tabId: string,
+): ThreadUtilityDockStates {
+  const current = threadUtilityDockState(states, key);
+  const next = selectUtilityTabState(current, tabId);
   return next === current ? states : replace(states, key, next);
 }
 
 export function closeThreadUtilityTab(
   states: ThreadUtilityDockStates,
   key: ThreadUtilityDockKey,
-  surface: RightUtilityDockSurfaceId,
+  tabId: string,
 ): ThreadUtilityDockStates {
   const current = threadUtilityDockState(states, key);
-  const nextState = closeUtilityTabState(current, surface);
+  const nextState = closeUtilityTabState(current, tabId);
   if (nextState === current) return states;
   if (nextState.tabs.length === 0) {
     const next = new Map(states);
@@ -61,30 +83,58 @@ export function closeThreadUtilityTab(
   return replace(states, key, nextState);
 }
 
+export function updateThreadUtilityTabBrowserContext(
+  states: ThreadUtilityDockStates,
+  key: ThreadUtilityDockKey,
+  tabId: string,
+  browserContextId: string,
+): ThreadUtilityDockStates {
+  const current = threadUtilityDockState(states, key);
+  const next = updateUtilityTabBrowserContext(current, tabId, browserContextId);
+  return next === current ? states : replace(states, key, next);
+}
+
 export function openUtilityTabState(
   state: ThreadUtilityDockState,
   surface: RightUtilityDockSurfaceId,
 ): ThreadUtilityDockState {
-  const tabs = state.tabs.includes(surface) ? state.tabs : [...state.tabs, surface];
-  return { tabs, active: surface };
+  const existing = state.tabs.find((tab) => tab.surface === surface);
+  if (existing !== undefined) return { ...state, active: existing.id };
+  const tab = singletonUtilityTab(surface);
+  return { tabs: [...state.tabs, tab], active: tab.id };
+}
+
+export function addUtilityTabState(
+  state: ThreadUtilityDockState,
+  surface: RightUtilityDockSurfaceId,
+  instanceId: string,
+): ThreadUtilityDockState {
+  if (surface !== "browser" && surface !== "terminal") {
+    return openUtilityTabState(state, surface);
+  }
+  const tab = { id: instanceId, surface };
+  return {
+    tabs: [...state.tabs.filter((candidate) => candidate.id !== instanceId), tab],
+    active: tab.id,
+  };
 }
 
 export function selectUtilityTabState(
   state: ThreadUtilityDockState,
-  surface: RightUtilityDockSurfaceId,
+  tabId: string,
 ): ThreadUtilityDockState {
-  return state.tabs.includes(surface) ? { ...state, active: surface } : state;
+  return state.tabs.some((tab) => tab.id === tabId) ? { ...state, active: tabId } : state;
 }
 
 export function closeUtilityTabState(
   state: ThreadUtilityDockState,
-  surface: RightUtilityDockSurfaceId,
+  tabId: string,
 ): ThreadUtilityDockState {
-  const closedIndex = state.tabs.indexOf(surface);
+  const closedIndex = state.tabs.findIndex((tab) => tab.id === tabId);
   if (closedIndex < 0) return state;
-  const tabs = state.tabs.filter((candidate) => candidate !== surface);
+  const tabs = state.tabs.filter((candidate) => candidate.id !== tabId);
   const active =
-    state.active === surface ? tabs[Math.min(closedIndex, tabs.length - 1)] : state.active;
+    state.active === tabId ? tabs[Math.min(closedIndex, tabs.length - 1)]?.id : state.active;
   return { tabs, ...(active === undefined ? {} : { active }) };
 }
 
@@ -97,10 +147,12 @@ export function removeUtilityTabs(
   state: ThreadUtilityDockState,
   surfaces: ReadonlySet<RightUtilityDockSurfaceId>,
 ): ThreadUtilityDockState {
-  const tabs = state.tabs.filter((surface) => !surfaces.has(surface));
+  const tabs = state.tabs.filter((tab) => !surfaces.has(tab.surface));
   if (tabs.length === state.tabs.length) return state;
   const active =
-    state.active !== undefined && tabs.includes(state.active) ? state.active : tabs.at(-1);
+    state.active !== undefined && tabs.some((tab) => tab.id === state.active)
+      ? state.active
+      : tabs.at(-1)?.id;
   return { tabs, ...(active === undefined ? {} : { active }) };
 }
 
@@ -108,15 +160,39 @@ export function retainAvailableUtilityTabs(
   state: ThreadUtilityDockState,
   available: ReadonlySet<RightUtilityDockSurfaceId>,
 ): ThreadUtilityDockState {
-  const tabs = state.tabs.filter((surface) => available.has(surface));
+  const tabs = state.tabs.filter((tab) => available.has(tab.surface));
   if (tabs.length === state.tabs.length) {
-    if (state.active === undefined || available.has(state.active)) return state;
+    if (state.active === undefined || tabs.some((tab) => tab.id === state.active)) return state;
   }
   const active =
-    state.active !== undefined && tabs.includes(state.active)
+    state.active !== undefined && tabs.some((tab) => tab.id === state.active)
       ? state.active
-      : tabs[tabs.length - 1];
+      : tabs[tabs.length - 1]?.id;
   return { tabs, ...(active === undefined ? {} : { active }) };
+}
+
+export function updateUtilityTabBrowserContext(
+  state: ThreadUtilityDockState,
+  tabId: string,
+  browserContextId: string,
+): ThreadUtilityDockState {
+  let changed = false;
+  const tabs = state.tabs.map((tab) => {
+    if (
+      tab.id !== tabId ||
+      tab.surface !== "browser" ||
+      tab.browserContextId === browserContextId
+    ) {
+      return tab;
+    }
+    changed = true;
+    return { ...tab, browserContextId };
+  });
+  return changed ? { ...state, tabs } : state;
+}
+
+function singletonUtilityTab(surface: RightUtilityDockSurfaceId): ThreadUtilityDockTab {
+  return { id: surface, surface };
 }
 
 function replace(
@@ -150,13 +226,11 @@ export function readUtilityDockPresentation(
   scope: { readonly localStorage?: Storage },
   windowId: string,
   /**
-   * What an unset window shows. A wide window shows the dock, so the workspace
-   * arrives as sidebar, thread, and tools rather than a column in an empty
-   * pane. A narrow window presents the dock as a modal drawer, so defaulting it
-   * open there would cover the app on launch; those windows stay closed until
-   * asked.
+   * What an unset window shows. A new window starts with the workspace as the
+   * only primary region. Opening a tool or restoring an explicit prior choice
+   * reveals the dock; an empty third column is not useful state.
    */
-  defaultOpen = true,
+  defaultOpen = false,
 ): UtilityDockPresentation {
   return readDockPresentationRecord(scope, utilityDockStorageKey(windowId), true, defaultOpen);
 }
@@ -218,10 +292,8 @@ function readDockPresentationRecord(
   defaultOpen = false,
 ): UtilityDockPresentation {
   // A window that has never been told otherwise follows the caller's default.
-  // Starting hidden left the workspace as a narrow column in an empty window,
-  // with the dock's own region reading as page margin. An explicit close is
-  // still remembered. The bottom panel keeps starting closed (0044), which is
-  // why it reads this with readOpen false.
+  // The dock and bottom panel both start closed; a tool selection or an
+  // explicit restored preference is what earns another workspace region.
   const unset = { open: readOpen && defaultOpen, threads: new Map() };
   try {
     const raw = scope.localStorage?.getItem(storageKey);
@@ -257,10 +329,13 @@ function writeJson(
 
 function encodeDockStates(
   states: ThreadUtilityDockStates,
-): Record<string, { readonly tabs: ReadonlyArray<string>; readonly active?: string }> {
+): Record<
+  string,
+  { readonly tabs: ReadonlyArray<ThreadUtilityDockTab>; readonly active?: string }
+> {
   const encoded: Record<
     string,
-    { readonly tabs: ReadonlyArray<string>; readonly active?: string }
+    { readonly tabs: ReadonlyArray<ThreadUtilityDockTab>; readonly active?: string }
   > = {};
   for (const [key, state] of states) {
     if (state.tabs.length === 0) continue;
@@ -288,17 +363,48 @@ function decodeDockState(value: unknown): ThreadUtilityDockState | undefined {
   if (!isRecord(value)) return undefined;
   const candidate = value;
   if (!Array.isArray(candidate.tabs)) return undefined;
-  const tabs: RightUtilityDockSurfaceId[] = [];
+  const tabs: ThreadUtilityDockTab[] = [];
   for (const item of candidate.tabs) {
-    const surface = decodeDockSurfaceId(item);
-    if (surface !== undefined && !tabs.includes(surface)) tabs.push(surface);
+    const tab = decodeDockTab(item);
+    if (tab !== undefined && !tabs.some((candidate) => candidate.id === tab.id)) tabs.push(tab);
   }
-  const fallback = tabs[tabs.length - 1];
+  const fallback = tabs[tabs.length - 1]?.id;
   if (fallback === undefined) return undefined;
-  const activeCandidate = decodeDockSurfaceId(candidate.active);
+  const activeCandidate = typeof candidate.active === "string" ? candidate.active : undefined;
   const active =
-    activeCandidate !== undefined && tabs.includes(activeCandidate) ? activeCandidate : fallback;
+    activeCandidate !== undefined && tabs.some((tab) => tab.id === activeCandidate)
+      ? activeCandidate
+      : fallback;
   return { tabs, active };
+}
+
+function decodeDockTab(value: unknown): ThreadUtilityDockTab | undefined {
+  // v1 stored only surface ids. Preserve them as stable singleton identities.
+  const legacySurface = decodeDockSurfaceId(value);
+  if (legacySurface !== undefined) return singletonUtilityTab(legacySurface);
+  if (!isRecord(value) || typeof value.id !== "string") return undefined;
+  const surface = decodeDockSurfaceId(value.surface);
+  if (surface === undefined) return undefined;
+  if ((surface === "browser" || surface === "terminal") && value.id !== surface) {
+    try {
+      decodeWorkspaceTabId(value.id);
+    } catch {
+      return undefined;
+    }
+  }
+  let browserContextId: string | undefined;
+  if (surface === "browser" && typeof value.browserContextId === "string") {
+    try {
+      browserContextId = String(decodeBrowserContextId(value.browserContextId));
+    } catch {
+      browserContextId = undefined;
+    }
+  }
+  return {
+    id: value.id,
+    surface,
+    ...(browserContextId === undefined ? {} : { browserContextId }),
+  };
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

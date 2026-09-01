@@ -9,6 +9,14 @@ const now = "2026-08-15T08:00:00.000Z";
 const providerA = "10000000-0000-4000-8000-000000000001";
 
 describe("NavigatorAssistantSettingsView", () => {
+  it("uses the same open preference-section grammar as Appearance", () => {
+    render(<NavigatorAssistantSettingsView onSettingsChange={vi.fn()} settings={{}} />);
+
+    expect(
+      screen.getByRole("heading", { name: "Models" }).closest(".settings-card-section"),
+    ).toHaveClass("settings-card-section--open");
+  });
+
   it("persists the default model through one shell settings patch", async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn<(patch: Partial<ShellSettings>) => void>();

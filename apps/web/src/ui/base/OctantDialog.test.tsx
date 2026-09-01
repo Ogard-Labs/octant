@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { createRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { OctantDialog } from "./OctantDialog";
+import { OctantButton } from "./OctantButton";
 
 describe("OctantDialog", () => {
   it("provides one controlled modal with trapped focus, Escape dismissal, and opener restoration", async () => {
@@ -14,9 +15,9 @@ describe("OctantDialog", () => {
       const [open, setOpen] = useState(true);
       return (
         <>
-          <button ref={opener} type="button">
+          <OctantButton ref={opener} type="button">
             Open utility dock
-          </button>
+          </OctantButton>
           <OctantDialog
             label="Project memory"
             onClose={() => {
@@ -27,10 +28,10 @@ describe("OctantDialog", () => {
             initialFocus={initialFocus}
             restoreFocus={opener}
           >
-            <button ref={initialFocus} type="button">
+            <OctantButton ref={initialFocus} type="button">
               First dock action
-            </button>
-            <button type="button">Last dock action</button>
+            </OctantButton>
+            <OctantButton type="button">Last dock action</OctantButton>
           </OctantDialog>
         </>
       );
@@ -62,7 +63,7 @@ describe("OctantDialog", () => {
     const onClose = vi.fn();
     render(
       <OctantDialog label="Code environment" onClose={onClose} open>
-        <button type="button">Refresh environment</button>
+        <OctantButton type="button">Refresh environment</OctantButton>
       </OctantDialog>,
     );
 

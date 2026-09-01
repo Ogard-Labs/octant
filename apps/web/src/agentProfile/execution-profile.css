@@ -39,25 +39,34 @@
   width: min(400px, calc(100vw - 2 * var(--oct-space-4)));
 }
 
+/* In Settings the workflow is two open sections (0072) in the page's own
+   rhythm: the context picker stacked under its row label, saved profiles as
+   rows over hairlines, and the receipt as quiet text. */
 .execution-profile-workflow--settings {
-  margin-block-start: var(--oct-space-8);
-  padding-block-start: var(--oct-space-6);
-  border-top: 1px solid var(--oct-border);
+  display: grid;
+  gap: var(--oct-space-6);
 }
 
-/* Inline in Settings the body is a card in the page, not a floating panel:
-   same surface and border as the popover so the two placements read as the
-   same component, but flat — a drop shadow under a non-floating section
-   read as detached from the page. */
-.execution-profile-workflow--settings .execution-profile-workflow__body {
-  margin-block-start: var(--oct-space-4);
-  padding: var(--oct-space-4);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
+.execution-profile-workflow--settings .execution-profile-workflow__profiles {
+  gap: 0;
 }
 
-.execution-profile-workflow__header,
+.execution-profile-workflow--settings .execution-profile-workflow__profile {
+  padding: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--oct-hairline);
+  border-radius: 0;
+}
+
+.execution-profile-workflow--settings .execution-profile-workflow__empty {
+  padding: 10px 0 0;
+}
+
+.execution-profile-workflow--settings .execution-profile-workflow__receipt {
+  padding: 10px 0 0;
+  background: transparent;
+}
+
 .execution-profile-workflow__composer-actions,
 .execution-profile-workflow__profile,
 .execution-profile-workflow__form-actions,
@@ -68,24 +77,13 @@
   gap: var(--oct-space-3);
 }
 
-.execution-profile-workflow__header h2,
-.execution-profile-workflow__header p,
 .execution-profile-workflow__composer-actions p,
 .execution-profile-workflow__form h3,
 .execution-profile-workflow__form p {
   margin: 0;
 }
 
-.execution-profile-workflow__eyebrow {
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-}
-
 .execution-profile-workflow__composer-actions p,
-.execution-profile-workflow__header p,
 .execution-profile-workflow__empty,
 .execution-profile-workflow__receipt > p,
 .execution-profile-workflow__form-note {
@@ -232,11 +230,7 @@
   text-align: start;
 }
 
-.execution-profile-workflow__profile-select span {
-  color: var(--oct-muted);
-}
-
-.execution-profile-workflow__profile-select[aria-pressed="true"] strong::after {
+.execution-profile-workflow__profile-select[aria-pressed="true"] .oct-row-label::after {
   content: " · Selected";
   color: var(--oct-accent-fg);
   font-weight: var(--oct-weight-display);
@@ -275,7 +269,6 @@
 }
 
 @media (max-width: 680px) {
-  .execution-profile-workflow__header,
   .execution-profile-workflow__composer-actions {
     align-items: stretch;
     flex-direction: column;

@@ -49,20 +49,55 @@
 
 /* ── Global command palette ────────────────────────────────────────── */
 
+.command-palette {
+  --octant-dialog-width: 560px;
+
+  padding: 0;
+  overflow: hidden;
+}
+
 .command-palette__field {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--oct-border-soft);
 }
 
-.command-palette__scope,
-.command-palette__status {
+.command-palette__scope {
   display: flex;
   align-items: center;
   gap: 6px;
   margin: 0;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+}
+
+.command-palette__footer {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: 8px 14px;
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.command-palette__close-hint {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.command-palette__close-hint kbd {
+  min-height: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  font-family: var(--oct-font-mono);
 }
 
 /* Mono meta, matching the system's .menu-label treatment. */
@@ -74,15 +109,21 @@
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.command-palette__group {
+  display: grid;
+  gap: 2px;
 }
 
 .command-palette__results {
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-1);
-  max-height: 46vh;
+  max-height: min(54vh, 480px);
+  padding: 8px 12px 12px;
   overflow-y: auto;
 }
 
@@ -95,7 +136,7 @@
   padding-block: 0;
   padding-inline: var(--oct-space-3);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-sm);
   cursor: default;
 }
@@ -115,11 +156,19 @@
   font-size: var(--oct-text-xs);
 }
 
-.command-palette__result-hint {
+.command-palette__result-hint,
+.command-palette__shortcut {
   display: flex;
   align-items: center;
   gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
+}
+
+.command-palette__shortcut {
+  min-height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
 }

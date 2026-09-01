@@ -49,6 +49,11 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
         const count = props.counts?.[descriptor.id] ?? 0;
         return (
           <OctantButton
+            // The name is stated outright rather than computed from the label
+            // span: the compact sidebar clips that span to one pixel, and the
+            // shell's accessibility tree has reported these rows as unnamed
+            // buttons. The name always starts with the visible label.
+            aria-label={count > 0 ? `${descriptor.label}, ${count} waiting` : descriptor.label}
             className="sidebar-item window-no-drag justify-start"
             data-navigation-id={descriptor.id}
             key={descriptor.id}
@@ -57,7 +62,6 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
             onClick={() => action()}
             type="button"
             variant="ghost"
-            {...(count > 0 ? { "aria-label": `${descriptor.label}, ${count} waiting` } : {})}
           >
             <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
             <span className="sidebar-label">{descriptor.label}</span>

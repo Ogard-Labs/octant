@@ -42,6 +42,7 @@ export function ChatTurnEditor(props: ChatTurnEditorProps) {
     <form
       aria-label="Edit your message"
       className="chat-transcript__editor"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         if (!submittable) return;

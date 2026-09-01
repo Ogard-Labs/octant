@@ -29,6 +29,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { ListArrangementMenu } from "../shell/ListArrangementMenu";
+import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -237,24 +238,12 @@ export function AutomationCenter(props: AutomationCenterProps) {
   }
 
   return (
-    <section
-      aria-label="Automation Center"
-      className="automation-center"
-      data-narrow={props.narrow === true}
-    >
-      <header className="automation-center__header">
-        <div>
-          <h2 className="automation-center__title">Automations</h2>
-          <p className="automation-center__subtitle">
-            Recurring and event-driven Work and Code threads.
-          </p>
-        </div>
-        {props.onClose === undefined ? null : (
-          <OctantButton onClick={props.onClose} type="button" variant="secondary">
-            Back to workspace
-          </OctantButton>
-        )}
-      </header>
+    <Surface ariaLabel="Automation Center" className="automation-center">
+      <SurfaceHeader
+        subtitle="Recurring and event-driven Work and Code threads."
+        title="Automations"
+        {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
+      />
 
       {controller.notice === undefined ? null : (
         <div className="automation-center__notice" role="status">
@@ -267,7 +256,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
 
       {deliveryStatus === undefined ? null : (
         <p
-          className="automation-center__notice"
+          className="oct-meta automation-center__delivery"
           data-delivery-enabled={deliveryStatus.deliveryEnabled ? "true" : "false"}
           role="status"
         >
@@ -279,14 +268,17 @@ export function AutomationCenter(props: AutomationCenterProps) {
         </p>
       )}
 
-      <div className="automation-center__body" data-detail-open={detailOpen ? "true" : "false"}>
+      <div
+        className="automation-center__body"
+        data-detail-open={detailOpen ? "true" : "false"}
+        data-narrow={props.narrow === true}
+      >
         {hideListForNarrow ? null : (
           <div className="automation-center__list-pane">
-            <section aria-labelledby="automation-create-title" className="automation-center__start">
-              <header>
-                <h3 id="automation-create-title">Create an automation</h3>
-                <p>Describe a recurring task or configure its trigger and authority directly.</p>
-              </header>
+            <SurfaceSection
+              label="Create an automation"
+              note="Describe a recurring task or configure its trigger and authority directly."
+            >
               <div className="automation-center__creation-paths">
                 <OctantButton
                   className="automation-center__creation-path automation-center__creation-path--featured"
@@ -316,7 +308,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                   </span>
                 </OctantButton>
               </div>
-            </section>
+            </SurfaceSection>
 
             {describeRequest === undefined ? null : (
               <RoutineComposer
@@ -335,11 +327,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
             {controller.list.status === "ready" &&
             controller.list.items.length === 0 &&
             describeRequest === undefined ? (
-              <section
-                aria-labelledby="automation-suggestions-title"
-                className="automation-center__suggestions"
-              >
-                <h3 id="automation-suggestions-title">Suggested automations</h3>
+              <SurfaceSection label="Suggested automations">
                 <div className="automation-center__suggestion-grid">
                   {ROUTINE_REQUEST_SUGGESTIONS.map((suggestion) => (
                     <OctantButton
@@ -354,15 +342,11 @@ export function AutomationCenter(props: AutomationCenterProps) {
                     </OctantButton>
                   ))}
                 </div>
-              </section>
+              </SurfaceSection>
             ) : null}
             {controller.list.status === "ready" && controller.list.items.length === 0 ? null : (
-              <div
-                aria-label="Automation controls"
-                className="automation-center__toolbar"
-                role="group"
-              >
-                <label className="automation-center__search">
+              <div aria-label="Automation controls" className="surface-toolbar" role="group">
+                <label className="surface-toolbar__search automation-center__search">
                   <span className="sr-only">Search automations</span>
                   <Search aria-hidden="true" size={14} strokeWidth={1.8} />
                   <OctantInput
@@ -518,7 +502,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
           </div>
         )}
       </div>
-    </section>
+    </Surface>
   );
 }
 
@@ -574,10 +558,23 @@ function AutomationListBody(props: {
   });
   if (groups.length === 0) {
     return (
-      <div className="automation-center__empty empty" role="status">
-        <p>No automations match the current filters.</p>
-        <p>Nothing was deleted; adjust the filters or create a new automation.</p>
-      </div>
+      <SurfaceEmpty
+        action={
+          <OctantButton
+            onClick={() => {
+              controller.setFilter("all");
+              controller.setSearch("");
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Clear filters
+          </OctantButton>
+        }
+        detail="Clear or adjust the active filters to see other automations."
+        title="No automations match these filters"
+      />
     );
   }
   return (
@@ -585,7 +582,7 @@ function AutomationListBody(props: {
       {groups.map((group) => (
         <section className="automation-center__group" key={group.heading}>
           {group.heading === "" ? null : (
-            <h3 className="automation-center__group-heading">{group.heading}</h3>
+            <h3 className="oct-section-label automation-center__group-heading">{group.heading}</h3>
           )}
           <ul
             aria-label={group.heading === "" ? "Automations" : `Automations in ${group.heading}`}

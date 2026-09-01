@@ -167,6 +167,30 @@ describe("BrowserWorkspace", () => {
     expect(browser.inspectThread).not.toHaveBeenCalled();
   });
 
+  it("starts a repeated Browser tab fresh and reports the context it creates", async () => {
+    const browser = client();
+    const onContextCreated = vi.fn();
+    render(
+      <BrowserWorkspace
+        client={browser}
+        onContextCreated={onContextCreated}
+        startFresh
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000099" as any,
+          mode: "code",
+          title: "Browser 2",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+
+    await act(async () => undefined);
+    expect(browser.inspectThread).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+    await waitFor(() => expect(onContextCreated).toHaveBeenCalledWith(context.contextId));
+  });
+
   it("refreshes when an agent creates or changes the thread-owned Browser context", async () => {
     const browser = client();
     vi.mocked(browser.inspectThread)
@@ -240,6 +264,9 @@ describe("BrowserWorkspace", () => {
     fireEvent.change(screen.getByLabelText("Browser URL"), {
       target: { value: "https://example.com/start" },
     });
+    expect(screen.getByRole("textbox", { name: "Browser URL" }).closest("form")).toHaveAttribute(
+      "novalidate",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await waitFor(() => expect(browser.create).toHaveBeenCalledOnce());
     await waitFor(() => expect(browser.act).toHaveBeenCalledOnce());

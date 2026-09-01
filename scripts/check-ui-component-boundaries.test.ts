@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  findFormValidationOwnerViolations,
   findRawControlBoundaryViolations,
   findRawControlInventory,
   findUiComponentBoundaryViolations,
@@ -7,6 +8,22 @@ import {
 } from "./check-ui-component-boundaries";
 
 describe("UI component boundary check", () => {
+  it("requires production forms to declare app-owned validation", () => {
+    expect(
+      findFormValidationOwnerViolations({
+        "apps/web/src/projects/ProjectForm.tsx":
+          '<form className="project-form" onSubmit={submit}><OctantInput /></form>',
+        "apps/web/src/projects/ProjectForm.test.tsx": "<form><input required /></form>",
+        "apps/web/src/projects/ProjectCreateDialog.tsx":
+          "<form noValidate onSubmit={submit}><OctantInput /></form>",
+        "apps/web/src/composer/ThreadComposer.tsx":
+          "/** The enclosing <form> owns submission. */\nexport const ThreadComposer = () => null;",
+      }),
+    ).toEqual([
+      "apps/web/src/projects/ProjectForm.tsx:1 renders an app-owned form without noValidate.",
+    ]);
+  });
+
   it("keeps Base UI inside the owned UI layer", () => {
     expect(
       findUiComponentBoundaryViolations({

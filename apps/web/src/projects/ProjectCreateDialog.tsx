@@ -262,7 +262,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         </div>
         <p>
           {mode === "code"
-            ? "One folder, opened as a Git repository. Octant records the binding."
+            ? "One folder, bound as this Code Project. Git tools become available when the folder is a repository."
             : "One folder, bound as this Project's root. Octant records the binding."}
         </p>
         <form noValidate onSubmit={submit}>

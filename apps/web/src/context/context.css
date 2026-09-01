@@ -271,7 +271,7 @@
   padding: 2px 6px;
   color: var(--octant-text-secondary);
   border: 1px solid var(--octant-border);
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   cursor: pointer;
   font-size: calc(9 * var(--oct-text-step));
 }
@@ -336,7 +336,7 @@
   padding: 3px 8px;
   color: var(--octant-text-secondary);
   border: 1px solid var(--octant-border);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: calc(10 * var(--oct-text-step));
 }
@@ -382,7 +382,7 @@
   gap: 8px;
   padding: 8px;
   border: 1px solid var(--octant-border);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font-size: calc(10 * var(--oct-text-step));
 }
 
@@ -427,7 +427,7 @@
 .context-latest-sent__entries article {
   padding: 8px;
   border: 1px solid var(--octant-border);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .context-entry-card h4 {

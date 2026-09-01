@@ -6,9 +6,10 @@ import type {
 } from "@octant/contracts/artifact-library";
 import type { OctantMode, ProjectId } from "@octant/contracts";
 import { Plus, Search } from "lucide-react";
+import { SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
 import { ArtifactCard } from "./ArtifactCard";
 import type { ArtifactLibraryFilters } from "./useArtifactLibrary";
@@ -26,6 +27,8 @@ export interface ArtifactLibraryViewProps {
    * one, which hides the action rather than offering a dead gesture.
    */
   readonly onCreate?: () => void;
+  /** Leaves the library for the workspace; absent when it is not a route. */
+  readonly onClose?: () => void;
 }
 
 const TABS: ReadonlyArray<{ readonly id: ArtifactLibraryTab; readonly label: string }> = [
@@ -57,6 +60,11 @@ const MODES: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
 export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   const { filters, listing } = props;
   const entries = listing?.entries ?? [];
+  const hasActiveFilters =
+    filters.query.trim() !== "" ||
+    filters.kind !== undefined ||
+    filters.projectId !== undefined ||
+    filters.mode !== undefined;
   const change = (next: Partial<ArtifactLibraryFilters>) =>
     props.onFiltersChange({ ...filters, ...next });
   // Clearing a filter removes the key rather than setting it to undefined:
@@ -68,25 +76,30 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   };
 
   return (
-    <section aria-label="Artifact library" className="artifact-library">
-      <header className="artifact-library__header">
-        <h1 className="artifact-library__title">Artifacts</h1>
-        {props.onCreate === undefined ? null : (
-          <OctantButton
-            onClick={props.onCreate}
-            size="sm"
-            title="Artifacts are made in a thread. This starts one."
-            type="button"
-            variant="secondary"
-          >
-            <Plus aria-hidden="true" size={12} strokeWidth={1.8} />
-            New artifact
-          </OctantButton>
-        )}
-      </header>
+    <div className="artifact-library">
+      <SurfaceHeader
+        title="Artifacts"
+        {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
+        {...(props.onCreate === undefined
+          ? {}
+          : {
+              actions: (
+                <OctantButton
+                  onClick={props.onCreate}
+                  size="sm"
+                  title="Artifacts are made in a thread. This starts one."
+                  type="button"
+                  variant="secondary"
+                >
+                  <Plus aria-hidden="true" size={12} strokeWidth={1.8} />
+                  New artifact
+                </OctantButton>
+              ),
+            })}
+      />
 
-      <div className="artifact-library__controls">
-        <div className="artifact-library__search">
+      <div className="surface-toolbar">
+        <div className="surface-toolbar__search artifact-library__search">
           <Search aria-hidden="true" size={14} strokeWidth={1.8} />
           <label className="sr-only" htmlFor="artifact-library-search">
             Search artifacts
@@ -104,67 +117,59 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
         <label className="sr-only" htmlFor="artifact-library-kind">
           Filter by kind
         </label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="artifact-library__select select"
           id="artifact-library-kind"
-          onChange={(event) =>
-            event.target.value === ""
-              ? clear("kind")
-              : change({ kind: event.target.value as ArtifactKind })
+          onValueChange={(value) =>
+            value === "" ? clear("kind") : change({ kind: value as ArtifactKind })
           }
+          options={[
+            { id: "", label: "Any kind" },
+            ...KINDS.map((kind) => ({
+              id: kind,
+              label: `${kind[0]?.toUpperCase()}${kind.slice(1)}`,
+            })),
+          ]}
           value={filters.kind ?? ""}
-        >
-          <option value="">Any kind</option>
-          {KINDS.map((kind) => (
-            <option key={kind} value={kind}>
-              {kind[0]?.toUpperCase()}
-              {kind.slice(1)}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
 
         <label className="sr-only" htmlFor="artifact-library-project">
           Filter by Project
         </label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="artifact-library__select select"
           id="artifact-library-project"
-          onChange={(event) =>
-            event.target.value === ""
-              ? clear("projectId")
-              : change({ projectId: event.target.value as ProjectId })
+          onValueChange={(value) =>
+            value === "" ? clear("projectId") : change({ projectId: value as ProjectId })
           }
+          options={[
+            { id: "", label: "Any Project" },
+            ...(listing?.projects ?? []).map((project) => ({
+              id: String(project.projectId),
+              label: `${project.name} (${String(project.artifactCount)})`,
+            })),
+          ]}
           value={filters.projectId === undefined ? "" : String(filters.projectId)}
-        >
-          <option value="">Any Project</option>
-          {(listing?.projects ?? []).map((project) => (
-            <option key={String(project.projectId)} value={String(project.projectId)}>
-              {project.name} ({String(project.artifactCount)})
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
 
         <label className="sr-only" htmlFor="artifact-library-mode">
           Filter by mode
         </label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="artifact-library__select select"
           id="artifact-library-mode"
-          onChange={(event) =>
-            event.target.value === ""
-              ? clear("mode")
-              : change({ mode: event.target.value as OctantMode })
+          onValueChange={(value) =>
+            value === "" ? clear("mode") : change({ mode: value as OctantMode })
           }
+          options={[
+            { id: "", label: "Any mode" },
+            ...MODES.map((mode) => ({
+              id: mode,
+              label: `${mode[0]?.toUpperCase()}${mode.slice(1)}`,
+            })),
+          ]}
           value={filters.mode ?? ""}
-        >
-          <option value="">Any mode</option>
-          {MODES.map((mode) => (
-            <option key={mode} value={mode}>
-              {mode[0]?.toUpperCase()}
-              {mode.slice(1)}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
       </div>
 
       <OctantTabs
@@ -175,9 +180,9 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
         }}
         value={filters.tab}
       >
-        <OctantTabsList aria-label="Artifact groups" className="artifact-library__tabs tabs">
+        <OctantTabsList aria-label="Artifact groups" className="surface-tabs">
           {TABS.map((tab) => (
-            <OctantTabsTab className="artifact-library__tab tab" key={tab.id} value={tab.id}>
+            <OctantTabsTab key={tab.id} value={tab.id}>
               {tab.label}
             </OctantTabsTab>
           ))}
@@ -185,7 +190,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       </OctantTabs>
 
       {props.message === undefined ? null : (
-        <p className="artifact-library__message" role="status">
+        <p className="oct-row-detail" role="status">
           {props.message}
         </p>
       )}
@@ -206,20 +211,45 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
       )}
 
       {props.busy || entries.length > 0 ? null : (
-        <p className="artifact-library__empty" role="status">
-          {filters.tab === "shared"
-            ? "Nothing is shared right now."
-            : "No artifacts match what you are looking for."}
-        </p>
+        <SurfaceEmpty
+          {...(filters.tab === "shared" || hasActiveFilters
+            ? {
+                action: (
+                  <OctantButton
+                    onClick={() => props.onFiltersChange({ tab: "all", query: "" })}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {filters.tab === "shared" ? "View all artifacts" : "Clear filters"}
+                  </OctantButton>
+                ),
+              }
+            : {})}
+          detail={
+            filters.tab === "shared"
+              ? "Artifacts you share will appear here."
+              : hasActiveFilters
+                ? "Clear or adjust the active filters to see other artifacts."
+                : "Create an artifact from a thread to see it here."
+          }
+          title={
+            filters.tab === "shared"
+              ? "Nothing is shared right now."
+              : hasActiveFilters
+                ? "No artifacts match these filters"
+                : "No artifacts yet"
+          }
+        />
       )}
 
       {listing?.truncated === true ? (
-        <p className="artifact-library__truncated" role="status">
+        <p className="oct-meta" role="status">
           Showing {String(entries.length)} of {String(listing.matchCount)}. Narrow the search to see
           the rest.
         </p>
       ) : null}
-    </section>
+    </div>
   );
 }
 
@@ -239,9 +269,8 @@ function ArtifactsByProject(props: {
       {[...grouped.entries()]
         .sort((left, right) => left[0].localeCompare(right[0], "en-US"))
         .map(([projectName, entries]) => (
-          <section aria-label={projectName} className="artifact-library__group" key={projectName}>
-            <h2 className="artifact-library__group-title">{projectName}</h2>
-            <ul className="artifact-library__grid">
+          <SurfaceSection key={projectName} label={projectName}>
+            <ul className="artifact-library__grid artifact-library__grid--grouped">
               {entries.map((entry) => (
                 <ArtifactCard
                   entry={entry}
@@ -251,7 +280,7 @@ function ArtifactsByProject(props: {
                 />
               ))}
             </ul>
-          </section>
+          </SurfaceSection>
         ))}
     </div>
   );

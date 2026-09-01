@@ -65,6 +65,14 @@
   flex: 1 1 auto;
 }
 
+.right-utility-dock__tabs {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+}
+
 html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   min-height: 58px;
   padding-top: 24px;
@@ -213,7 +221,7 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   justify-content: stretch;
   gap: var(--oct-space-2);
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   text-align: left;
 }
 
@@ -265,6 +273,14 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   position: relative;
   display: inline-flex;
   flex: none;
+}
+
+.dock-utility-launcher__trigger {
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: var(--oct-text-xs);
 }
 
 .dock-utility-launcher__disclosure {
@@ -366,7 +382,7 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
 }
 
@@ -441,7 +457,7 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   background: var(--oct-bg);
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-lg);
-  box-shadow: var(--oct-elev-raised);
+  box-shadow: var(--octant-shadow-overlay);
   outline: 0;
   pointer-events: auto;
 }

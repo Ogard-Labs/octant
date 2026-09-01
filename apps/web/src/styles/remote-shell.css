@@ -32,8 +32,8 @@
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .remote-shell__input {
@@ -110,8 +110,8 @@
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-display);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .remote-shell__local-only {
@@ -184,8 +184,8 @@
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: calc(10 * var(--oct-text-step));
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .remote-shell__device-fact dd {

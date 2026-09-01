@@ -10,6 +10,7 @@ import type {
   RightUtilityDockResolution,
   RightUtilityDockSurfaceDescriptor,
   RightUtilityDockSurfaceId,
+  RightUtilityDockTabDescriptor,
 } from "./rightUtilityDockModel";
 
 function unavailableMessage(): string {
@@ -17,6 +18,7 @@ function unavailableMessage(): string {
 }
 
 export interface RightUtilityDockSurfaceProps {
+  readonly activeTabId?: string;
   readonly agents?: ReactNode;
   readonly browser?: ReactNode;
   readonly canvas?: ReactNode;
@@ -27,21 +29,26 @@ export interface RightUtilityDockSurfaceProps {
   readonly iosSimulator?: ReactNode;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly onClose?: () => void;
-  readonly onCloseTab: (surface: RightUtilityDockSurfaceId) => void;
+  readonly onCloseTab: (tabId: string) => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
-  readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
+  readonly onSelectSurface: (tabId: string) => void;
   readonly plan?: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly sideChat?: ReactNode;
-  readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+  readonly renderTab?: (tab: RightUtilityDockTabDescriptor) => ReactNode;
+  readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor>;
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
 }
 
 export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const activeSurface = props.resolution.kind === "closed" ? undefined : props.resolution.surface;
+  const activeTabId = props.activeTabId ?? activeSurface?.id;
   const remaining = props.launchableSurfaces.filter(
-    (surface) => !props.tabs.some((tab) => tab.id === surface.id),
+    (surface) =>
+      surface.id === "browser" ||
+      surface.id === "terminal" ||
+      !props.tabs.some((tab) => dockTabSurface(tab).id === surface.id),
   );
   const contents: Readonly<Record<RightUtilityDockSurfaceId, ReactNode | undefined>> = {
     agents: props.agents,
@@ -60,18 +67,20 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   return (
     <div className="right-utility-dock__surface" data-dock-surface={activeSurface?.id ?? "empty"}>
       <header className="dock-head right-utility-dock__toolbar">
-        {props.tabs.length === 0 ? (
-          <span aria-hidden="true" className="right-utility-dock__title-spacer" />
-        ) : (
-          <DockToolStrip
-            {...(activeSurface === undefined ? {} : { active: activeSurface.id })}
-            onClose={props.onCloseTab}
-            onSelect={props.onSelectSurface}
-            tabs={props.tabs}
-          />
-        )}
-        <div className="right-utility-dock__actions">
+        <div className="right-utility-dock__tabs">
+          {props.tabs.length === 0 ? (
+            <span aria-hidden="true" className="right-utility-dock__title-spacer" />
+          ) : (
+            <DockToolStrip
+              {...(activeTabId === undefined ? {} : { active: activeTabId })}
+              onClose={props.onCloseTab}
+              onSelect={props.onSelectSurface}
+              tabs={props.tabs}
+            />
+          )}
           <DockUtilityLauncher onOpen={props.onOpenTab} surfaces={remaining} />
+        </div>
+        <div className="right-utility-dock__actions">
           {props.onClose === undefined ? null : (
             <IconButton
               icon={X}
@@ -93,18 +102,27 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           />
         ) : (
           props.tabs.map((tab) => (
-            <div
-              hidden={tab.id !== activeSurface?.id}
-              key={tab.id}
-              className="right-utility-dock__tool"
-            >
-              {contents[tab.id]}
+            <div hidden={tab.id !== activeTabId} key={tab.id} className="right-utility-dock__tool">
+              {props.renderTab?.(dockTabDescriptor(tab)) ?? contents[dockTabSurface(tab).id]}
             </div>
           ))
         )}
       </div>
     </div>
   );
+}
+
+function dockTabSurface(
+  tab: RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor,
+): RightUtilityDockSurfaceDescriptor {
+  return "surface" in tab ? tab.surface : tab;
+}
+
+function dockTabDescriptor(
+  tab: RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor,
+): RightUtilityDockTabDescriptor {
+  if ("surface" in tab) return tab;
+  return { id: tab.id, label: tab.label, surface: tab };
 }
 
 function DockWorkMap(props: {

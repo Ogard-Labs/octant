@@ -8,8 +8,29 @@
   grid-template-columns: 248px minmax(0, 1fr);
   overflow: hidden;
   color: var(--octant-text-primary);
-  background: var(--octant-workspace);
+  background: var(--octant-app-background);
   font-family: var(--oct-font-display);
+  /* Light cards are workspace white; dark cards lift with the floating fill.
+     Using floating in light is the grey well. Using workspace in dark is
+     invisible against the same app ground. */
+  --octant-settings-card: var(--octant-workspace);
+  --oct-settings-gutter: clamp(32px, 4vw, 56px);
+  --oct-settings-reading-width: 680px;
+}
+
+html[data-octant-theme-mode="dark"] .settings-view,
+html[data-appearance="dark"] .settings-view,
+html[data-theme="dark"] .settings-view {
+  --octant-settings-card: var(--octant-floating);
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-octant-theme-mode="light"]):not([data-appearance="light"]):not(
+      [data-theme="light"]
+    )
+    .settings-view {
+    --octant-settings-card: var(--octant-floating);
+  }
 }
 
 .settings-view__sidebar {
@@ -67,14 +88,29 @@
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  padding: 8px 12px 24px;
+  padding: 8px 12px 12px;
+  overflow: hidden;
+}
+
+.settings-view__navigation-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.settings-view__sidebar-footer {
+  flex: 0 0 auto;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--octant-border-soft);
 }
 
 /* "Back to app" borrows the .setnav-item recipe; it only needs its slot. */
 .settings-view__back {
   min-height: 32px;
-  margin: 0 0 12px;
+  width: 100%;
+  margin: 0;
   padding-inline: 8px;
   color: var(--octant-text-secondary);
   font-size: var(--octant-ui-font-size);
@@ -86,24 +122,52 @@
   min-height: 0;
   grid-template-rows: 44px minmax(0, 1fr);
   overflow: hidden;
-  background: var(--octant-workspace);
+  background: var(--octant-app-background);
+}
+
+.settings-view--narrow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-view--narrow .settings-view__workspace {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .settings-view__workspace-titlebar {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--oct-settings-gutter);
   border-bottom: 1px solid var(--octant-border-soft);
+}
+
+.settings-view__breadcrumb {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.settings-view__breadcrumb strong {
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* .setpane-title/.setpane-note carry the type; the header only spaces the
    sections below it, and the note's own end margin must not stack on top. */
 .settings-view__header {
-  margin-bottom: 24px;
+  margin-bottom: 18px;
 }
 
 .settings-view__header .setpane-title,
 .settings-view__header h1 {
   color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xl);
+  font-size: var(--oct-text-lg);
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.2;
@@ -115,7 +179,7 @@
   margin-bottom: 0;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: calc(13 * var(--oct-text-step));
   line-height: 1.45;
 }
 
@@ -127,7 +191,7 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  margin: 0 0 20px;
+  margin: 0 0 12px;
   padding: 0;
   border: 0;
 }
@@ -154,11 +218,113 @@
 
 .settings-view__field--search .settings-view__text-input {
   min-height: 32px;
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-control);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
+  padding-right: 34px;
   padding-left: 27px;
+}
+
+.settings-view__field--search input[type="search"]::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.settings-view__search-clear {
+  position: absolute;
+  z-index: 1;
+  right: 3px;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+}
+
+.settings-view__mobile-header {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: 0 12px 12px;
+  background: var(--octant-app-background);
+  border-bottom: 1px solid var(--octant-border-soft);
+}
+
+.settings-view__mobile-titlebar {
+  display: grid;
+  min-width: 0;
+  min-height: 44px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
+  padding-left: 72px;
+}
+
+.settings-view__mobile-back,
+.settings-view__mobile-sections {
+  min-height: 32px;
+  padding-inline: var(--oct-space-2);
+  color: var(--octant-text-secondary);
+}
+
+.settings-view__mobile-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-view__mobile-search {
+  width: 100%;
+  margin: 0;
+}
+
+.octant-dialog__popup.settings-view__drawer {
+  position: fixed;
+  top: 8px;
+  bottom: 8px;
+  left: 8px;
+  width: min(320px, calc(100vw - 16px));
+  max-width: min(320px, calc(100vw - 16px));
+  height: auto;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-view__drawer-header {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: 8px 12px 8px 16px;
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.settings-view__drawer-header h2 {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.settings-view__drawer-body {
+  height: calc(100% - 52px);
+  padding: 12px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* The legacy compact `.setnav` recipe hides group labels below 720px. The
+   Settings drawer still needs those labels to preserve the desktop hierarchy. */
+.settings-view__drawer .setnav-section {
+  display: block;
 }
 
 /* The nav items are .setnav-item, but the column itself is the app's
@@ -168,13 +334,29 @@
    the grid gap does it instead. */
 .settings-navigation {
   display: grid;
-  gap: var(--oct-space-4);
+  gap: var(--oct-space-2);
   font-family: var(--oct-font-display);
 }
 
 .settings-navigation__group {
   display: grid;
-  gap: var(--oct-space-1);
+  gap: 0;
+}
+
+.settings-view__sidebar .settings-navigation__group + .settings-navigation__group {
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--octant-border-soft);
+}
+
+.settings-view__sidebar .settings-navigation .setnav-section {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .settings-navigation .setnav-section {
@@ -182,15 +364,15 @@
   padding: 4px 8px;
   color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .settings-navigation ul {
   display: grid;
-  gap: 1px;
+  gap: 2px;
   padding: 0;
   margin: 0;
   list-style: none;
@@ -202,7 +384,7 @@
 .settings-navigation .setnav-item,
 .settings-view__back {
   min-height: 32px;
-  border-radius: 7px;
+  border-radius: var(--oct-radius-sm);
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
@@ -226,17 +408,22 @@
   font-weight: 500;
 }
 
-/* --- Settings primitives: app-side residue over .setrow/.setgroup --- */
+/* --- Settings primitives: open routine groups, raised discrete objects --- */
 
 .settings-panel {
+  overflow: hidden;
   display: grid;
-  gap: 6px;
+  gap: 0;
+  background: var(--octant-settings-card);
+  border: 0;
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 .settings-panel__header {
   display: grid;
-  gap: 3px;
-  padding-inline: 2px;
+  gap: 4px;
+  padding: 20px 20px 0;
 }
 
 .settings-panel__header h2,
@@ -245,35 +432,38 @@
 }
 
 .settings-panel__header h2 {
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  text-transform: none;
 }
 
 .settings-panel__header p {
   max-width: 68ch;
   color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
 }
 
 .settings-panel__body {
   overflow: hidden;
-  background: var(--octant-surface-muted);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-md);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
-.settings-panel--danger .settings-panel__body {
-  border-color: color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
+.settings-panel--danger {
+  box-shadow:
+    var(--octant-shadow-sm),
+    inset 0 0 0 1px color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
 }
 
 .settings-panel__stack {
   display: grid;
-  gap: var(--oct-space-3);
-  padding: 12px 14px;
+  gap: var(--oct-space-4);
+  padding: 16px 20px 20px;
 }
 
 .settings-fact-list {
@@ -283,11 +473,11 @@
 
 .settings-fact-list__row {
   display: grid;
-  min-height: 38px;
+  min-height: 44px;
   grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
   align-items: center;
   gap: var(--oct-space-4);
-  padding: 8px 14px;
+  padding: 16px 20px;
 }
 
 .settings-fact-list__row + .settings-fact-list__row {
@@ -367,12 +557,12 @@
    first row's own border-top, so the note draws none of its own. */
 .setgroup-note {
   margin: 0;
-  padding: var(--oct-space-3) var(--oct-space-4) 0;
+  padding: 0 20px 12px;
   max-width: 64ch;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
 }
 
 /* Compound editors (multi-field controls) stack under their label instead of
@@ -384,8 +574,11 @@
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
 .setrow[data-setting-id="app-updates"],
-.setrow[data-setting-id="marketplace-fetches"],
-.setrow[data-setting-id="export-diagnostics"] {
+.setrow[data-setting-id="export-diagnostics"],
+.setrow[data-setting-id="chat-default-model"],
+.setrow[data-setting-id="chat-personality"],
+.setrow[data-setting-id="code-editor-arguments"],
+.setrow[data-setting-id="execution-context"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -396,8 +589,11 @@
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
 .setrow[data-setting-id="app-updates"] > .setrow-control,
-.setrow[data-setting-id="marketplace-fetches"] > .setrow-control,
-.setrow[data-setting-id="export-diagnostics"] > .setrow-control {
+.setrow[data-setting-id="export-diagnostics"] > .setrow-control,
+.setrow[data-setting-id="chat-default-model"] > .setrow-control,
+.setrow[data-setting-id="chat-personality"] > .setrow-control,
+.setrow[data-setting-id="code-editor-arguments"] > .setrow-control,
+.setrow[data-setting-id="execution-context"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;
@@ -466,8 +662,8 @@
   color: var(--octant-text-muted);
   font-size: calc(10 * var(--oct-text-step));
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .settings-search-results__empty {
@@ -494,14 +690,14 @@
   --oct-settings-control-height: 32px;
 }
 
-/* Settings is a pane in an application window, not an article on a page.
-   Centring a fixed column left a wide dead gutter down both sides and made
-   the pane read as a document; content now starts at the pane's edge and only
-   stops growing where a form row would get uncomfortably wide to scan. */
+/* One reading column. A 1080px edge-aligned pane stretched every row into
+   an ops console; form-layout cards need a measure a person can scan. */
 .settings-view__content-inner {
   width: 100%;
-  max-width: 1080px;
-  padding: 24px 32px 56px;
+  max-width: calc(
+    var(--oct-settings-reading-width) + var(--oct-settings-gutter) + var(--oct-settings-gutter)
+  );
+  padding: 28px var(--oct-settings-gutter) 64px;
   margin: 0;
 }
 
@@ -511,53 +707,161 @@
 }
 
 .settings-view__content-inner > section {
-  padding: 0 0 24px;
+  padding: 0;
   margin: 0 0 24px;
-}
-
-.settings-view__content-inner > section > h2 {
-  margin: 0 0 6px;
-  color: var(--octant-text-primary);
-  font-size: calc(13 * var(--oct-text-step));
-  font-weight: 600;
 }
 
 .settings-section-stack {
   display: grid;
-  gap: 20px;
+  gap: 16px;
 }
 
+/* A discrete object section is the card. Routine groups opt into the open
+   modifier below; neither treatment leaves a label floating above a second
+   grey well. */
 .settings-card-section {
   display: grid;
-  gap: 6px;
+  gap: 0;
+  overflow: hidden;
+  background: var(--octant-settings-card);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
-/* One section heading treatment for the whole surface. The Appearance blocks
-   reach it through `summary` and `legend` because a disclosure's heading is
-   also its trigger and a fieldset's heading must be its legend; before this
-   they each carried their own inline-card head, which is why Appearance and
-   General did not read as the same page. */
+.settings-card-section--open {
+  overflow: visible;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-card-section.settings-card-section--open > h2,
+.settings-card-section.settings-card-section--open > summary,
+.settings-card-section.settings-card-section--open > legend {
+  padding: 10px 0 8px;
+}
+
+.settings-card-section--open > .setgroup {
+  overflow: visible;
+}
+
+.settings-card-section--open > .setgroup > .setrow {
+  padding-inline: 0;
+}
+
+.settings-card-section--open > .setgroup > .setrow:first-child {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+/* A section label may carry the actions that act on the whole collection
+   ("Check again", "Reorder providers", "Create profile"). They sit on the
+   label's line at the control edge; the head takes the label's padding so
+   the rule under the first row still lands where Appearance puts it. */
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  min-height: 40px;
+  padding: 6px 0 4px;
+}
+
+.settings-section-head__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+/* Same specificity trick as the open `> h2` rule below: the shared heading
+   rule declares the card padding later in the file, so the open head needs
+   both classes to win. */
+.settings-card-section.settings-card-section--open > .settings-section-head > h2 {
+  padding: 0;
+}
+
+/* One sentence under the label, in the detail role. It draws no rule; the
+   first row underneath owns the hairline. */
+.settings-card-section--open > .settings-section-note {
+  margin: 0;
+  padding: 0 0 8px;
+  max-width: 64ch;
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
+}
+
+/* Facts (identity, versions, readiness) are rows over hairlines like every
+   other row: label on the left, value at the control edge. */
+.settings-card-section--open > .settings-fact-list > .settings-fact-list__row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 44px;
+  padding: 10px 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-card-section--open
+  > .settings-fact-list
+  > .settings-fact-list__row
+  + .settings-fact-list__row {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-card-section--open > .settings-fact-list dt {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.settings-card-section--open > .settings-fact-list dd {
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+  text-align: end;
+}
+
+/* A status line in an open section is a sentence, not a boxed callout. */
+.settings-card-section--open .settings-state {
+  padding: 8px 0 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+/* Quiet lines that follow the rows: an empty collection, a message after an
+   action, guidance that explains the rows above. */
+.settings-card-section--open > .settings-section-line {
+  margin: 0;
+  padding: 10px 0 0;
+  max-width: 68ch;
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
+}
+
 .settings-view__content-inner .provider-settings__intro h2,
 .settings-card-section > h2,
+.settings-card-section > .settings-section-head > h2,
 .settings-card-section > summary,
 .settings-card-section > legend {
   margin: 0;
-  padding-inline: 2px;
-  color: var(--octant-text-muted);
+  padding: 20px 20px 0;
+  color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  line-height: 1.25;
-  text-transform: uppercase;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  text-transform: none;
 }
 
-/* A legend is taken out of the fieldset's flow by default, so it has to be
-   placed back into the grid to sit above the group like every other heading. */
+/* A legend is drawn on the fieldset border by default. `float: none` is that
+   default, so it left the label sitting on the card edge; a floated legend is
+   no longer the rendered legend and lays out as an ordinary grid child. */
 .settings-card-section > legend {
-  float: none;
+  float: left;
   width: 100%;
-  padding-block: 0;
+  padding: 20px 20px 0;
 }
 
 .settings-card-section > summary {
@@ -582,16 +886,119 @@
   box-shadow: var(--oct-focus-ring);
 }
 
-/* A settings group is a raised object: it sits above the pane and carries its
-   edge as an inset ring, so the ring survives the group's own overflow
-   clipping and never reads darker than the surface it borders. */
-.settings-card-section > .setgroup,
+.settings-profile-disclosure > summary {
+  min-height: 52px;
+  padding: 12px 16px;
+}
+
+.settings-profile-disclosure__summary-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--oct-space-3);
+}
+
+.settings-profile-disclosure__summary-copy h2 {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.settings-profile-disclosure__summary-copy > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-profile-disclosure > summary > svg {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.settings-profile-disclosure[open] > summary > svg {
+  transform: rotate(180deg);
+}
+
+/* Collapsed, the summary is the section's only row, so it carries the same
+   hairline the first row of every other open group draws under its heading.
+   Open, that row's own top rule takes over. */
+.settings-profile-disclosure > summary {
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.settings-profile-disclosure[open] > .setgroup > .setrow:first-child {
+  border-top: 0;
+}
+
+/* Standalone groups are cards. A group already inside settings-card-section
+   must not grow a second well. */
 .setgroup {
   overflow: hidden;
   border: 0;
   border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--oct-elev-subtle);
+  background: var(--octant-settings-card);
+  box-shadow: var(--octant-shadow-sm);
+}
+
+.settings-card-section > .setgroup,
+.settings-card-section > .provider-settings__form,
+.settings-panel .setgroup {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-view .provider-settings {
+  gap: 20px;
+}
+
+.settings-view .provider-settings.settings-card-section {
+  gap: 0;
+}
+
+.settings-view .provider-settings.settings-card-section > .provider-settings__intro {
+  padding: 20px 20px 0;
+}
+
+.settings-view .provider-settings.settings-card-section > .provider-settings__hint,
+.settings-view .provider-settings.settings-card-section > .provider-settings__alert {
+  padding: 8px 20px 0;
+  margin: 0;
+}
+
+.settings-view .provider-settings.settings-card-section > .provider-settings__form {
+  padding: 8px 0 12px;
+}
+
+.settings-view .provider-settings.settings-card-section--open > .provider-settings__intro {
+  padding: 10px 0 0;
+}
+
+.settings-view .provider-settings.settings-card-section--open > .provider-settings__hint,
+.settings-view .provider-settings.settings-card-section--open > .provider-settings__alert {
+  padding-inline: 0;
+}
+
+.settings-view .provider-settings.settings-card-section--open > .provider-settings__form {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-view
+  .provider-settings.settings-card-section--open
+  > .provider-settings__form
+  > .settings-view__field,
+.settings-view
+  .provider-settings.settings-card-section--open
+  > .provider-settings__form
+  > .settings-view__toggle {
+  padding-inline: 0;
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 /* Rows inside a group are separated by the group's own hairline rather than a
@@ -607,8 +1014,8 @@
 }
 
 .setgroup-head {
-  min-height: 42px;
-  padding: 10px 16px;
+  min-height: 48px;
+  padding: 16px 20px 8px;
   color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
@@ -631,8 +1038,8 @@
 }
 
 .setrow {
-  column-gap: 20px;
-  padding: 10px 14px;
+  column-gap: 24px;
+  padding: 16px 20px;
   font-family: var(--oct-font-display);
 }
 
@@ -662,7 +1069,7 @@
   max-width: 62ch;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.4;
 }
 
@@ -683,7 +1090,6 @@
 .settings-view__text-input,
 .settings-view__textarea,
 .settings-view__action,
-.settings-view .octant-switch,
 .settings-view [role="combobox"] {
   font-family: var(--oct-font-display);
 }
@@ -709,7 +1115,7 @@
 .settings-view__select,
 .settings-view__text-input,
 .settings-view__textarea {
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
 }
 
@@ -788,18 +1194,18 @@ textarea.settings-view__text-input {
    the same rhythm between them rather than a tighter one of their own. */
 .settings-theme-editor {
   display: grid;
-  gap: 20px;
+  gap: 16px;
   padding: 0;
   margin: 0;
 }
 
-/* The blocks carry no chrome themselves — the group inside each one does, the
-   same way a `.settings-card-section` does elsewhere. */
+/* details/fieldset reset only. Card fill and shadow stay on
+   `.settings-card-section`; wiping the background here left Typography and
+   Accessibility as title-over-well again. */
 .settings-theme-editor__disclosure,
 .settings-theme-editor__accessibility {
   padding: 0;
   margin: 0;
-  background: none;
   border: 0;
 }
 
@@ -807,9 +1213,9 @@ textarea.settings-view__text-input {
 .settings-scheme {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-3);
   max-width: none;
-  padding: 12px 16px;
+  padding: 4px 0 16px;
 }
 
 /* A scheme card is a picture that can be chosen, not a one-line control, so it
@@ -855,15 +1261,15 @@ textarea.settings-view__text-input {
 .settings-scheme__preview {
   position: relative;
   display: flex;
-  height: 48px;
+  height: 88px;
   overflow: hidden;
 }
 
 .settings-scheme__preview-pane {
   display: flex;
   flex: 1 1 50%;
-  gap: 4px;
-  padding: 8px;
+  gap: 6px;
+  padding: 10px;
 }
 
 .settings-scheme__preview--light .settings-scheme__preview-pane--dark,
@@ -882,8 +1288,8 @@ textarea.settings-view__text-input {
 }
 
 .settings-scheme__preview-sidebar {
-  width: 22%;
-  border-radius: 3px;
+  width: 24%;
+  border-radius: 4px;
 }
 
 .settings-scheme__preview-pane--light .settings-scheme__preview-sidebar {
@@ -899,12 +1305,12 @@ textarea.settings-view__text-input {
   display: grid;
   flex: 1;
   align-content: start;
-  gap: 4px;
+  gap: 7px;
 }
 
 .settings-scheme__preview-content > span {
-  height: 4px;
-  border-radius: 2px;
+  height: 6px;
+  border-radius: 3px;
 }
 
 .settings-scheme__preview-pane--light .settings-scheme__preview-content > span {
@@ -923,14 +1329,14 @@ textarea.settings-view__text-input {
   position: absolute;
   right: 2px;
   bottom: 2px;
-  width: 8px !important;
-  height: 8px !important;
+  width: 10px !important;
+  height: 10px !important;
   border-radius: 50% !important;
   background: var(--oct-accent) !important;
 }
 
 .settings-scheme__label {
-  padding: 6px 0 7px;
+  padding: 8px 0 9px;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -945,9 +1351,45 @@ textarea.settings-view__text-input {
 /* A labelled control inside a group is a row of that group, so it takes the
    group's row metrics rather than the looser spacing it used when each block
    was its own card. */
+.setgroup > .settings-view__field,
+.setgroup > .settings-view__toggle,
+.provider-settings__form > .settings-view__field,
+.provider-settings__form > .settings-view__toggle {
+  padding: 16px 20px;
+}
+
 .settings-theme-editor .setgroup > .settings-view__field {
-  padding: 6px 16px;
+  padding: 16px 20px;
   border-top: 1px solid var(--oct-border-soft);
+}
+
+.settings-theme-editor__scheme-section .setgroup > .settings-view__field {
+  padding-inline: 0;
+}
+
+/* Profile is a discrete object, but it should not become the whole General
+   page. On a Settings-width column, name and email share one line while the
+   avatar actions and accent choice keep their natural width. */
+.settings-view .profile-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.settings-view .profile-editor__identity,
+.settings-view .profile-editor__notice,
+.settings-view .profile-editor__field--accent {
+  grid-column: 1 / -1;
+}
+
+.settings-view .profile-editor__field {
+  gap: 4px;
+}
+
+.settings-view .profile-editor__hint,
+.settings-view .profile-editor__notice {
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
 }
 
 .settings-theme-editor .setgroup > .settings-view__field:first-child {
@@ -965,7 +1407,7 @@ textarea.settings-view__text-input {
 }
 
 .settings-theme-editor__disclosure-body {
-  padding: 4px 16px 8px;
+  padding: 0 0 8px;
 }
 
 /* Unsaved-changes bar: note on the left, Apply/Cancel/Reset on the right.
@@ -978,7 +1420,7 @@ textarea.settings-view__text-input {
   padding: 8px 12px;
   background: var(--octant-surface-muted);
   border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-display);
 }
 
@@ -1014,10 +1456,11 @@ textarea.settings-view__text-input {
   border-top: 0;
 }
 
-/* Placed back into the grid: a legend floats out of the fieldset's flow by
-   default and cuts a notch through the group's own top rule. */
+/* Placed back into the grid: an unfloated legend is the fieldset's rendered
+   legend, which sits on the top rule and cuts a notch through it. Floating
+   it makes it an ordinary grid child. */
 .settings-view__theme-group legend {
-  float: none;
+  float: left;
   width: 100%;
   padding: 0 0 2px;
   color: var(--oct-fg-2);
@@ -1164,49 +1607,6 @@ textarea.settings-view__text-input {
   display: none;
 }
 
-/* The Base UI switch, drawn to the design system's input.switch metrics.
-   The component is a button with a thumb span, so input.switch's
-   pseudo-element recipe cannot apply directly; this mirrors it. */
-.octant-switch {
-  position: relative;
-  display: inline-flex;
-  width: 38px;
-  height: 22px;
-  flex: 0 0 auto;
-  align-items: center;
-  padding: 3px;
-  color: inherit;
-  background: var(--oct-border);
-  border: 0;
-  border-radius: var(--oct-radius-pill);
-  cursor: pointer;
-  transition: background var(--oct-motion-base) var(--oct-ease-standard);
-}
-
-.octant-switch[data-checked] {
-  background: var(--oct-accent);
-}
-
-.octant-switch[data-disabled] {
-  cursor: not-allowed;
-  opacity: var(--oct-disabled-opacity);
-}
-
-.octant-switch__thumb {
-  display: block;
-  width: 16px;
-  height: 16px;
-  background: var(--oct-fg);
-  border-radius: var(--oct-radius-pill);
-  transform: translateX(0);
-  transition: transform var(--oct-motion-base) var(--oct-ease-standard);
-}
-
-.octant-switch__thumb[data-checked] {
-  background: var(--oct-accent-on);
-  transform: translateX(16px);
-}
-
 .settings-view__actions {
   display: flex;
   flex-wrap: wrap;
@@ -1226,8 +1626,9 @@ textarea.settings-view__text-input {
 }
 
 @media (max-width: 720px) {
-  .settings-view {
+  .settings-view:not(.settings-view--narrow) {
     grid-template-columns: 216px minmax(0, 1fr);
+    --oct-settings-gutter: 28px;
   }
 
   .settings-view__sidebar-content {
@@ -1235,8 +1636,8 @@ textarea.settings-view__text-input {
   }
 
   .settings-view__content-inner {
-    width: min(calc(100% - 32px), 760px);
-    padding-top: 28px;
+    width: 100%;
+    padding-top: 24px;
   }
 }
 
@@ -1252,15 +1653,18 @@ textarea.settings-view__text-input {
   }
 
   .settings-view__content-inner {
-    width: min(calc(100% - 24px), 760px);
-    padding-top: 24px;
+    width: 100%;
+    padding: 22px 20px 48px;
   }
-}
 
-@media (prefers-reduced-motion: reduce) {
-  .octant-switch,
-  .octant-switch__thumb {
-    transition: none;
+  .settings-view .profile-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-view .profile-editor__identity,
+  .settings-view .profile-editor__notice,
+  .settings-view .profile-editor__field--accent {
+    grid-column: 1;
   }
 }
 
@@ -1281,51 +1685,18 @@ textarea.settings-view__text-input {
   .shell--material-translucent .settings-view__effective-note {
     display: block;
   }
-
-  /* The system switch is borderless; increased contrast draws the edge as an
-     inset ring instead of a border so the metrics stay identical. */
-  .octant-switch {
-    box-shadow: inset 0 0 0 1px var(--oct-fg);
-  }
 }
 
-/* Settings > Host: the operational host card. Stacked sections
-   with compact fact grids; controls stay native buttons for keyboard use. */
+/* Settings > Host: open sections for identity, policy, readiness, and
+   lifecycle; the recovery and retention objects keep the raised panel
+   because a restore or purge is a boundary worth drawing. Controls stay
+   native buttons for keyboard use. */
 .host-settings {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 20px;
   font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-fg);
-}
-
-.host-settings__heading {
-  margin: 14px 0 2px;
-  font-size: calc(13 * var(--oct-text-step));
-  font-weight: var(--oct-weight-strong);
-  color: var(--oct-fg);
-}
-
-.host-settings__facts {
-  display: grid;
-  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
-  gap: 4px 18px;
-  margin: 0;
-}
-
-.host-settings__facts dt {
-  color: var(--oct-muted);
-  font-weight: 400;
-}
-
-.host-settings__facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.host-settings > .host-settings__controls:first-child {
-  justify-content: flex-end;
-  margin-bottom: -8px;
 }
 
 .host-settings__controls {
@@ -1343,9 +1714,20 @@ textarea.settings-view__text-input {
   line-height: 1.4;
 }
 
+/* Reported capability identifiers are rows over hairlines in the mono role. */
 .host-settings__capabilities {
+  display: grid;
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
+  list-style: none;
+}
+
+.host-settings__capabilities > li {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .host-settings__field {
@@ -1359,51 +1741,15 @@ textarea.settings-view__text-input {
   font-size: calc(11 * var(--oct-text-step));
 }
 
-@media (max-width: 680px) {
-  .host-settings__facts {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
-  }
-
-  .host-settings__facts dd {
-    margin-bottom: 6px;
-  }
-}
-
-/* Settings > GitHub: compact host connection card. Facts and
-   capability rows wrap on narrow layouts; no animation is used, so Reduced
-   Motion needs no override. */
+/* Settings > GitHub: open sections for account, capabilities, and
+   connection; no animation is used, so Reduced Motion needs no override. */
 .github-settings,
 .linear-settings {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 20px;
   font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-fg);
-}
-
-.github-settings__heading {
-  margin: 14px 0 2px;
-  font-size: calc(13 * var(--oct-text-step));
-  font-weight: var(--oct-weight-strong);
-  color: var(--oct-fg);
-}
-
-.github-settings__facts {
-  display: grid;
-  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
-  gap: 4px 18px;
-  margin: 0;
-}
-
-.github-settings__facts dt {
-  color: var(--oct-muted);
-  font-weight: 400;
-}
-
-.github-settings__facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 
 .github-settings__controls,
@@ -1429,18 +1775,35 @@ textarea.settings-view__text-input {
   gap: 8px;
 }
 
+/* Each GitHub capability is a row: what it is on the left, whether it is
+   available at the control edge, and the remediation under the label. */
 .github-settings__capabilities {
-  margin: 0;
-  padding-left: 18px;
   display: grid;
-  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.github-settings__capabilities li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
+.github-settings__capabilities > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: var(--oct-space-6);
+  min-height: 44px;
+  padding: 10px 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.github-settings__capabilities > li > .github-settings__note {
+  grid-column: 1;
+  margin-top: 2px;
+}
+
+.github-settings__capability-state {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .github-settings__capability-state--available {
@@ -1449,6 +1812,17 @@ textarea.settings-view__text-input {
 
 .github-settings__capability-state--unavailable {
   color: var(--oct-warn-fg);
+}
+
+@media (max-width: 720px) {
+  .github-settings__capabilities > li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .github-settings__capability-state {
+    grid-column: 1;
+    grid-row: auto;
+  }
 }
 
 .github-settings__device-flow {
@@ -1471,73 +1845,29 @@ textarea.settings-view__text-input {
 
 .github-settings__scopes {
   margin: 0;
-  padding-left: 18px;
+  padding: 0;
+  list-style: none;
+  text-align: end;
 }
 
-.github-settings__diagnostics {
-  display: grid;
-  gap: 6px;
-  justify-items: start;
+/* The disclosure is the section's label row: one name for the group and
+   the control that opens it, not a heading repeated by a button. */
+.github-settings__diagnostics-trigger {
+  padding-inline: 0;
 }
 
-@media (max-width: 680px) {
-  .github-settings__facts {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
-  }
-
-  .github-settings__facts dd {
-    margin-bottom: 6px;
-  }
+.github-settings__diagnostics-trigger > svg {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
-/* Host and GitHub expose different operations, but their facts, sections, and
-   states use one Settings rhythm. */
-.host-settings,
-.github-settings {
-  gap: 20px;
-}
-
-.host-settings__heading,
-.github-settings__heading {
-  margin: 20px 0 8px;
-  padding-top: 20px;
-  color: var(--octant-text-secondary);
-  border-top: 1px solid var(--octant-border);
-  font-size: var(--oct-text-xs);
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.host-settings > .host-settings__controls:first-child + .host-settings__heading,
-.github-settings > .github-settings__controls:first-child + .github-settings__heading {
-  margin-top: 8px;
-  padding-top: 0;
-  border-top: 0;
-}
-
-.host-settings__facts,
-.github-settings__facts {
-  gap: 6px 20px;
-  padding: 2px 4px 8px;
-}
-
-.host-settings__facts dt,
-.github-settings__facts dt {
-  font-size: var(--oct-text-xs);
-}
-
-.host-settings__facts dd,
-.github-settings__facts dd {
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
+.github-settings__diagnostics-trigger[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
 }
 
 .host-data-map {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 20px;
 }
 
 .host-data-map__subheading {
@@ -1625,16 +1955,20 @@ textarea.settings-view__text-input {
   color: var(--oct-muted);
 }
 
-.marketplace-fetch-settings {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.marketplace-fetch-settings__details {
+  padding: 0 0 10px;
 }
 
-.marketplace-fetch-settings__automatic {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.marketplace-fetch-settings__details summary {
+  width: fit-content;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.marketplace-fetch-settings__details[open] summary {
+  margin-bottom: 8px;
 }
 
 .marketplace-fetch-settings__disclosure,
@@ -1655,26 +1989,36 @@ textarea.settings-view__text-input {
 
 .open-in-settings {
   min-width: 0;
-  padding: 0;
+  overflow: hidden;
+  padding: 0 0 8px;
   border: 0;
+  background: var(--octant-settings-card);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 .open-in-settings > legend {
-  padding: 0;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-strong);
+  float: left;
+  width: 100%;
+  padding: 20px 20px 0;
+  color: var(--octant-text-primary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: -0.01em;
 }
 
 .open-in-settings > p,
 .open-in-settings__state {
-  margin: var(--oct-space-2) 0 var(--oct-space-4);
+  margin: 0;
+  padding: 8px 20px 16px;
   color: var(--oct-muted);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
 }
 
 .open-in-settings__list {
-  border-block: 1px solid var(--oct-border);
+  border-block: 0;
 }
 
 .open-in-settings__row {
@@ -1683,7 +2027,8 @@ textarea.settings-view__text-input {
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border);
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 .open-in-settings__row:last-child {
@@ -1718,38 +2063,25 @@ textarea.settings-view__text-input {
 }
 
 .code-settings {
-  gap: 0;
-  padding-block: 0;
-  background: var(--octant-surface-muted);
-  border-color: var(--octant-border);
-  border-radius: var(--oct-radius-md);
-  box-shadow: none;
+  display: grid;
+  gap: var(--oct-space-6);
 }
 
-.code-settings > [data-slot="card-content"] {
-  padding: 16px;
+/* Chat and Code defaults read down the same control edge as Appearance: a
+   free-text field takes the shared column too, so a URL, a path, and a select
+   share one left edge. Stacked editors (the model picker, instructions, editor
+   arguments) opt out through the compound-editor rule above. */
+.chat-settings .setrow-control > .settings-view__text-input,
+.code-settings .setrow-control > .settings-view__text-input {
+  width: var(--oct-settings-control);
 }
 
-.code-settings__note {
-  margin: 0 0 16px;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
+.chat-settings .setrow-control > textarea.settings-view__text-input,
+.code-settings .setrow-control > textarea.settings-view__text-input {
+  width: 100%;
 }
 
-.code-settings [data-slot="field-group"] {
-  gap: 16px;
-}
-
-.code-settings [data-slot="field"] {
-  gap: 5px;
-}
-
-.code-settings [data-slot="field-label"] {
-  font-size: var(--oct-text-sm);
-  font-weight: 500;
-}
-
-.code-settings [data-slot="field-description"] {
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
+.chat-settings > .provider-settings__alert,
+.code-settings .settings-card-section--open > .provider-settings__alert {
+  margin-top: var(--oct-space-3);
 }

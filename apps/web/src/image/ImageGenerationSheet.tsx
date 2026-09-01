@@ -119,6 +119,7 @@ export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
     <OctantDialog label="Create image" onClose={props.onClose} open={props.open}>
       <form
         className="stack"
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
           void submit();

@@ -1,4 +1,4 @@
-import { Aperture, Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
+import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
@@ -92,20 +92,30 @@ export function ChatWelcome(props: ChatWelcomeProps) {
 
   return (
     <section aria-label="Chat welcome" className="draft-thread chat-welcome">
-      <div className="draft-thread__canvas">
-        <div className="draft-thread__welcome">
-          <Aperture
-            aria-hidden="true"
-            className="new-thread-welcome__mark"
-            size={24}
-            strokeWidth={1.4}
-          />
-          <p className="draft-thread__eyebrow">Octant Chat</p>
-          <h1 className="draft-thread__heading">{presentation.heading}</h1>
-          <p className="draft-thread__description">{presentation.description}</p>
+      <div className="welcome">
+        <div className="welcome__heading">
+          <h1 className="oct-title oct-title--hero">{presentation.heading}</h1>
         </div>
 
-        <div className="draft-thread__composer">
+        <div className="composer-stack">
+          <div className="composer-tray" aria-label="Thread context">
+            <div className="composer-tray__leading">
+              <HostSelector
+                presentation="environment"
+                {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                {...(props.selectedHostId === undefined
+                  ? {}
+                  : { selectedHostId: props.selectedHostId })}
+                {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+                {...(props.lastSelectedHealthyHostId === undefined
+                  ? {}
+                  : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+                {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
+                requiredCapability="chat"
+              />
+            </div>
+          </div>
           <ThreadComposer
             input={
               <OctantTextarea
@@ -122,24 +132,9 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               />
             }
             row={{
-              ariaLabel: "Thread context",
               leading: (
                 <>
-                  <HostSelector
-                    {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                    {...(props.selectedHostId === undefined
-                      ? {}
-                      : { selectedHostId: props.selectedHostId })}
-                    {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-                    {...(props.lastSelectedHealthyHostId === undefined
-                      ? {}
-                      : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-                    {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-                    {...(props.onSelectHost === undefined
-                      ? {}
-                      : { onSelectHost: props.onSelectHost })}
-                    requiredCapability="chat"
-                  />
+                  <span aria-hidden="true" className="composer-gap" />
                   <ComposerModelPicker
                     ariaLabel="Provider and model"
                     disabled={!ready || props.creating === true}
@@ -164,46 +159,45 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               },
             }}
           />
-          {statusMessage === undefined ? null : (
-            <p className="draft-thread__error" role="alert">
-              {statusMessage}
-            </p>
-          )}
-          {!ready && props.status === "disconnected" && props.onRetry !== undefined ? (
-            <OctantButton
-              className="chat-welcome__retry"
-              onClick={props.onRetry}
-              type="button"
-              variant="ghost"
-            >
-              Retry Chat
-            </OctantButton>
-          ) : null}
         </div>
-        <p className="draft-thread__hint">
-          Press Enter to start · Shift+Enter for a new line · Starts unfiled until you add a Project
-        </p>
-        <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
-          {starterIdeas.map((idea) => {
-            const Icon = idea.icon;
-            return (
-              <OctantButton
-                disabled={!ready || props.creating}
-                key={idea.label}
-                onClick={() => {
-                  setPrompt(idea.prompt);
-                  textareaRef.current?.focus();
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
-                {idea.label}
-              </OctantButton>
-            );
-          })}
-        </div>
+        {statusMessage === undefined ? null : (
+          <p className="draft-thread__error" role="alert">
+            {statusMessage}
+          </p>
+        )}
+        {!ready && props.status === "disconnected" && props.onRetry !== undefined ? (
+          <OctantButton
+            className="chat-welcome__retry"
+            onClick={props.onRetry}
+            type="button"
+            variant="ghost"
+          >
+            Retry Chat
+          </OctantButton>
+        ) : null}
+        {(props.recentThreads?.length ?? 0) === 0 ? (
+          <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
+            {starterIdeas.map((idea) => {
+              const Icon = idea.icon;
+              return (
+                <OctantButton
+                  disabled={!ready || props.creating}
+                  key={idea.label}
+                  onClick={() => {
+                    setPrompt(idea.prompt);
+                    textareaRef.current?.focus();
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
+                  {idea.label}
+                </OctantButton>
+              );
+            })}
+          </div>
+        ) : null}
         <RecentThreadList threads={props.recentThreads ?? []} />
       </div>
     </section>

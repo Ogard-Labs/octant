@@ -11,6 +11,7 @@ describe("SettingsNavigation", () => {
     const sections: SettingsNavigationItem[] = [
       { id: "general", label: "General" },
       { id: "appearance", label: "Appearance" },
+      { id: "keybindings", label: "Keybindings" },
       { id: "chat", label: "Chat" },
       { id: "providers", label: "Providers" },
     ];
@@ -23,6 +24,7 @@ describe("SettingsNavigation", () => {
     expect(buttons.map((button) => button.textContent)).toEqual([
       "General",
       "Appearance",
+      "Keybindings",
       "Chat",
       "Providers",
     ]);
@@ -49,6 +51,18 @@ describe("SettingsNavigation", () => {
   it("keeps every settings row aligned to the navigation edge", () => {
     expect(settingsStyles).toMatch(
       /\.settings-navigation \.setnav-item,\s*\.settings-view__back\s*\{[^}]*justify-content:\s*flex-start;/s,
+    );
+  });
+
+  it("uses the control radius on navigation rows and raises groups as cards", () => {
+    expect(settingsStyles).toMatch(
+      /\.settings-navigation \.setnav-item,\s*\.settings-view__back\s*\{[^}]*border-radius:\s*var\(--oct-radius-sm\);/s,
+    );
+    expect(settingsStyles).toMatch(
+      /\.setgroup\s*\{[^}]*border-radius:\s*var\(--oct-radius-md\);[^}]*box-shadow:\s*var\(--octant-shadow-sm\);/s,
+    );
+    expect(settingsStyles).toMatch(
+      /\.settings-panel\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\);/s,
     );
   });
 

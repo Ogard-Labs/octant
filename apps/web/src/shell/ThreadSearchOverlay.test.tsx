@@ -44,7 +44,7 @@ describe("ThreadSearchOverlay", () => {
     await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus());
     expect(screen.getByRole("dialog", { name: "Search Chat threads" })).toBeVisible();
     expect(
-      screen.getByText("Chat threads only. Project, Recents, and Unfiled are folder labels."),
+      screen.getByText("Searches Chat thread titles, messages, and archived history."),
     ).toBeVisible();
     expect(screen.getByRole("group", { name: "Threads" })).toBeVisible();
     expect(screen.getByText("Release checklist")).toBeVisible();

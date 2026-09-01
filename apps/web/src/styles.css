@@ -1,3 +1,4 @@
+@import "@fontsource-variable/inter/opsz.css";
 @import "./styles/tailwind.css";
 /* Octant design system, then the adapter that repoints its colour and font
    tokens at the runtime theme. Import order is deliberate and load-bearing:
@@ -26,6 +27,7 @@
 @import "./styles/agents-center.css";
 @import "./styles/palette.css";
 @import "./styles/project-threads.css";
+@import "./styles/surface.css";
 
 :root {
   color-scheme: dark;
@@ -37,6 +39,7 @@
   --octant-border: #2d2d2d;
   --octant-border-subtle: #2d2d2d;
   --octant-border-strong: #454545;
+  --octant-app-background: #101010;
   --octant-workspace: #171717;
   --octant-surface: #171717;
   --octant-surface-canvas: #171717;
@@ -69,21 +72,28 @@
   --octant-divider-strong: #6b6b6b;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
-  --octant-shadow-sm: 0 0 0 1px var(--octant-border-strong), 0 1px 2px rgb(0 0 0 / 30%);
+  --octant-shadow-xs: 0 0 0 1px var(--octant-border), 0 1px 2px rgb(0 0 0 / 24%);
+  --octant-shadow-sm:
+    0 0 0 1px var(--octant-border-strong), 0 1px 2px rgb(0 0 0 / 28%),
+    0 6px 18px -10px rgb(0 0 0 / 60%);
   --octant-shadow-md:
-    0 0 0 1px var(--octant-border), 0 1px 2px rgb(0 0 0 / 20%), 0 2px 6px rgb(0 0 0 / 20%);
-  --octant-shadow-lg: 0 0 0 1px var(--octant-border), 0 2px 10px rgb(0 0 0 / 22%);
-  --octant-shadow-overlay: 0 0 0 1px var(--octant-border-strong), 0 8px 28px rgb(0 0 0 / 34%);
-  --octant-shadow-pop: 0 8px 28px rgb(0 0 0 / 38%);
+    0 0 0 1px var(--octant-border), 0 4px 6px -4px rgb(0 0 0 / 36%),
+    0 10px 18px -8px rgb(0 0 0 / 60%);
+  --octant-shadow-lg:
+    0 0 0 1px var(--octant-border), 0 10px 18px -8px rgb(0 0 0 / 50%),
+    0 22px 46px -16px rgb(0 0 0 / 68%);
+  --octant-shadow-overlay:
+    0 0 0 1px var(--octant-border-strong), 0 18px 48px -16px rgb(0 0 0 / 72%);
+  --octant-shadow-pop: 0 18px 48px -16px rgb(0 0 0 / 78%);
   --octant-glass-blur: 24px;
   --octant-glass-saturate: 150%;
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 72%, transparent);
   --octant-glass-border: rgb(255 255 255 / 9%);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 7%);
-  --octant-radius-chip: 6px;
-  --octant-radius-control: 8px;
-  --octant-radius-panel: 10px;
-  --octant-radius-composer: 14px;
+  --octant-radius-chip: 9999px;
+  --octant-radius-control: 10px;
+  --octant-radius-panel: 16px;
+  --octant-radius-composer: 20px;
   --octant-radius-pill: 999px;
   --octant-space-1: 4px;
   --octant-space-2: 8px;
@@ -109,7 +119,8 @@
   --octant-palette-blue: #74b0f3;
   --octant-palette-purple: #ab98f2;
   --octant-palette-pink: #f4809a;
-  --octant-ui-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --octant-ui-font-family:
+    "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --octant-ui-font-size: 13px;
   --octant-ui-font-weight: 400;
   --octant-editor-font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
@@ -130,21 +141,63 @@
 }
 
 html[data-octant-theme-mode="light"] {
+  --octant-app-background: #f2f2f0;
   --octant-surface-inset: #f6f7f8;
   --octant-text-primary-high-contrast: #0e0f11;
   --octant-text-secondary-high-contrast: #45484e;
   --octant-text-muted-high-contrast: #63666c;
   --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 10%, transparent);
   --octant-scrim: rgb(15 17 19 / 45%);
-  --octant-shadow-sm: 0 0 0 1px var(--octant-border-strong), 0 1px 2px rgb(16 24 40 / 6%);
+  --octant-shadow-xs: 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 2px rgb(16 24 40 / 5%);
+  --octant-shadow-sm:
+    0 0 0 1px rgb(16 24 40 / 8%), 0 1px 2px rgb(16 24 40 / 7%), 0 6px 18px -10px rgb(16 24 40 / 16%);
   --octant-shadow-md:
-    0 0 0 1px var(--octant-border), 0 1px 2px rgb(16 24 40 / 4%), 0 2px 6px rgb(16 24 40 / 3%);
-  --octant-shadow-lg: 0 0 0 1px var(--octant-border), 0 2px 10px rgb(0 0 0 / 5%);
-  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 8px 28px rgb(0 0 0 / 7%);
-  --octant-shadow-pop: 0 8px 28px rgb(16 24 40 / 10%);
+    0 0 0 1px rgb(16 24 40 / 8%), 0 4px 6px -4px rgb(16 24 40 / 10%),
+    0 10px 15px -3px rgb(16 24 40 / 10%);
+  --octant-shadow-lg:
+    0 0 0 1px rgb(16 24 40 / 8%), 0 10px 15px -3px rgb(16 24 40 / 12%),
+    0 20px 38px -10px rgb(16 24 40 / 16%);
+  --octant-shadow-overlay: 0 0 0 1px var(--octant-border), 0 20px 50px -14px rgb(16 24 40 / 20%);
+  --octant-shadow-pop: 0 20px 50px -14px rgb(16 24 40 / 22%);
   --octant-glass-bg: color-mix(in srgb, var(--octant-floating) 60%, transparent);
   --octant-glass-border: color-mix(in srgb, var(--octant-border-strong) 72%, transparent);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 65%);
+}
+
+/* Every Octant-owned scroll surface inherits one quiet, visible scrollbar.
+   Feature panels may change geometry, but not silently fall back to browser
+   chrome or hide the only pointer affordance. */
+:where(*) {
+  scrollbar-color: var(--octant-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+:where(*)::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+:where(*)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:where(*)::-webkit-scrollbar-thumb {
+  background: var(--octant-border-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--octant-radius-pill);
+}
+
+:where(*)::-webkit-scrollbar-thumb:hover {
+  background: var(--octant-divider-strong);
+  background-clip: padding-box;
+}
+
+@media (forced-colors: active) {
+  :where(*) {
+    scrollbar-color: auto;
+    scrollbar-width: auto;
+  }
 }
 
 html[data-octant-native-host="true"],
@@ -185,7 +238,7 @@ html[data-octant-native-host="true"] body {
   display: grid;
   width: clamp(248px, 24vw, 312px);
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
   animation: thread-activity-pip-enter 160ms cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -196,7 +249,7 @@ html[data-octant-native-host="true"] body {
   align-items: center;
   gap: 7px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   box-shadow: var(--octant-shadow-lg);
   cursor: pointer;
   font: inherit;
@@ -222,7 +275,7 @@ html[data-octant-native-host="true"] body {
   color: var(--octant-text-primary);
   background: var(--octant-surface-raised);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 10px;
+  border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-lg);
 }
 
@@ -334,7 +387,7 @@ html[data-octant-native-host="true"] body {
   padding: 4px 7px;
   color: var(--octant-warning-text);
   background: var(--octant-warning-surface);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font-size: calc(10 * var(--oct-text-step));
 }
 
@@ -406,7 +459,7 @@ html[data-octant-native-host="true"] body {
 
   .thread-activity-pip {
     width: min(260px, calc(100% - 16px));
-    border-radius: 10px;
+    border-radius: var(--oct-radius-sm);
     box-shadow: none;
   }
 
@@ -453,7 +506,7 @@ html[data-octant-native-host="true"] body {
   color: var(--octant-text-primary);
   background: var(--octant-surface-raised);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 12px;
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
 }
 
@@ -567,7 +620,7 @@ button:focus-visible {
   color: var(--octant-text-primary);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: calc(11 * var(--oct-text-step));
   font-weight: 500;
@@ -603,7 +656,7 @@ button:focus-visible {
   color: var(--octant-text-primary);
   background: var(--octant-floating);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 7px;
+  border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-overlay);
   outline: 0;
 }
@@ -616,7 +669,7 @@ button:focus-visible {
   min-height: 42px;
   padding: 5px 7px;
   color: var(--octant-text-secondary);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   cursor: default;
   outline: 0;
   user-select: none;
@@ -676,7 +729,7 @@ button:focus-visible {
   color: var(--octant-text-primary);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   font-size: calc(12 * var(--oct-text-step));
   font-weight: 500;
   text-align: left;
@@ -740,7 +793,7 @@ button:focus-visible {
   width: 28px;
   min-height: 28px;
   color: var(--octant-text-muted);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .code-project-views__filter:hover,
@@ -802,7 +855,7 @@ button:focus-visible {
 .code-project-views__inline-button {
   width: 28px;
   min-height: 28px;
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
   transition:
     background 120ms ease,
@@ -1045,7 +1098,7 @@ button:focus-visible {
   font-family: var(--oct-font-display);
   font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
   font-weight: 500;
-  letter-spacing: normal;
+  letter-spacing: 0;
   text-transform: none;
 }
 
@@ -1074,8 +1127,8 @@ button:focus-visible {
   }
 }
 
-/* The system's .btn-icon recipe, compacted: a full 34px square would give the
-   quiet header back the item weight this port removes. */
+/* Compact header actions: a full 34px square would give the quiet header
+   back the item weight this port removes. */
 .project-section__add,
 .project-section__header .octant-menu__trigger {
   width: 24px;
@@ -1084,7 +1137,7 @@ button:focus-visible {
   justify-content: center;
   padding: 0;
   color: var(--oct-meta);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .project-section__add:hover,
@@ -1167,7 +1220,7 @@ button:focus-visible {
   min-height: 28px;
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: calc(10 * var(--oct-text-step));
 }
@@ -1262,7 +1315,7 @@ button:focus-visible {
   padding: 0;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   place-items: center;
   box-shadow: none;
 }
@@ -1335,9 +1388,138 @@ button:focus-visible {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   place-items: stretch;
   background: var(--octant-workspace);
+}
+
+.workspace-thread-tabs {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  gap: 4px;
+  margin-right: var(--octant-window-chrome-reserved-width, 148px);
+  padding: 3px 0 3px var(--oct-space-3);
+  border-bottom: 1px solid var(--octant-border);
+  background: color-mix(in srgb, var(--octant-workspace) 96%, var(--octant-control));
+}
+
+.shell--sidebar-collapsed .workspace-thread-tabs {
+  padding-left: var(--octant-window-chrome-leading-width, 148px);
+}
+
+.workspace-thread-tabs__context,
+.workspace-thread-tabs__surface {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.workspace-thread-tabs__context > span:first-of-type,
+.workspace-thread-tabs__surface {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-thread-tabs__context > svg {
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+
+.workspace-thread-tabs__separator {
+  color: var(--octant-border-strong);
+}
+
+.workspace-thread-tabs__list {
+  display: flex;
+  min-width: 0;
+  max-width: min(760px, 72%);
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.workspace-thread-tabs__list::-webkit-scrollbar {
+  display: none;
+}
+
+.workspace-thread-tabs__item {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--oct-radius-sm);
+  color: var(--octant-text-muted);
+  background: transparent;
+}
+
+.workspace-thread-tabs__item:hover {
+  color: var(--octant-text-primary);
+  background: var(--oct-fg-soft);
+}
+
+.workspace-thread-tabs__item[data-active="true"] {
+  color: var(--octant-text-primary);
+  background: var(--octant-control);
+  border-color: var(--octant-border);
+  box-shadow: var(--octant-shadow-xs);
+}
+
+.workspace-thread-tabs__select {
+  min-width: 0;
+  max-width: 30ch;
+  height: 27px;
+  padding: 0 7px;
+  color: inherit;
+  font-size: var(--oct-text-xs);
+}
+
+.workspace-thread-tabs__select > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-thread-tabs__pin,
+.workspace-thread-tabs__close {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  color: var(--octant-text-muted);
+  opacity: 0;
+}
+
+.workspace-thread-tabs__item:hover .workspace-thread-tabs__pin,
+.workspace-thread-tabs__item:hover .workspace-thread-tabs__close,
+.workspace-thread-tabs__item:focus-within .workspace-thread-tabs__pin,
+.workspace-thread-tabs__item:focus-within .workspace-thread-tabs__close,
+.workspace-thread-tabs__item[data-pinned="true"] .workspace-thread-tabs__pin {
+  opacity: 1;
+}
+
+.workspace-thread-tabs__item[data-pinned="true"] .workspace-thread-tabs__pin {
+  color: var(--octant-text-primary);
+}
+
+.workspace-thread-tabs__drag-space {
+  min-width: 12px;
+  align-self: stretch;
+  flex: 1 1 auto;
 }
 
 .workspace-cross-context-banner {
@@ -1353,7 +1535,7 @@ button:focus-visible {
   gap: 12px;
   padding: 6px 8px 6px 12px;
   border: 1px solid var(--octant-border);
-  border-radius: 7px;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-floating);
   box-shadow: none;
   color: var(--octant-text-secondary);
@@ -1480,6 +1662,10 @@ button:focus-visible {
   background: var(--octant-workspace);
 }
 
+.workspace-pane[data-header="false"] {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .workspace-pane[data-active="true"] .workspace-pane__header {
   box-shadow: none;
 }
@@ -1487,7 +1673,6 @@ button:focus-visible {
 .workspace-pane[data-active="true"] .workspace-pane__grip {
   color: var(--oct-fg);
   background: var(--octant-control);
-  border-color: var(--octant-border-strong);
 }
 
 /* The window controls sit in this same band. Keep the reserve a margin, not
@@ -1542,7 +1727,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--oct-meta);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: grab;
   font-family: var(--oct-font-display);
   font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
@@ -1558,6 +1743,14 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .workspace-pane__grip > svg {
   flex: 0 0 auto;
+  opacity: 0.45;
+  transition: opacity var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.workspace-pane__grip:hover > svg,
+.workspace-pane__grip:focus-within > svg,
+.workspace-pane[data-active="true"] .workspace-pane__grip > svg {
+  opacity: 0.82;
 }
 
 .workspace-pane__provider {
@@ -1591,7 +1784,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-primary);
   background: color-mix(in srgb, var(--octant-focus-ring) 13%, var(--octant-workspace));
   border: 1px solid color-mix(in srgb, var(--octant-focus-ring) 65%, var(--octant-border-strong));
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   pointer-events: none;
 }
 
@@ -1615,7 +1808,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding: 3px 7px;
   background: var(--octant-floating);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   font-size: calc(11 * var(--oct-text-step));
   font-weight: 600;
 }
@@ -1629,7 +1822,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-primary);
   background: var(--octant-floating);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-overlay);
   font-size: calc(11 * var(--oct-text-step));
   font-weight: 600;
@@ -1647,7 +1840,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding: 4px;
   background: var(--octant-floating);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 7px;
+  border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-overlay);
 }
 
@@ -1676,7 +1869,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   gap: 8px;
   padding: 0 8px;
   color: var(--octant-text-secondary);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: calc(11 * var(--oct-text-step));
   text-align: left;
@@ -1851,17 +2044,10 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   gap: 16px;
 }
 
-/* Discovery is a .setgroup of .setrow candidates (octant.css); only the
+/* Discovery is an open section of .setrow candidates (octant.css); only the
    pieces the system has no vocabulary for remain here. */
-.provider-discovery .setgroup-note:last-child {
-  padding-bottom: var(--oct-space-4);
-}
-
 .provider-discovery__version {
   margin-left: var(--oct-space-2);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  color: var(--oct-meta);
 }
 
 .provider-discovery__guidance {
@@ -1869,9 +2055,25 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin-top: 2px;
 }
 
-.provider-discovery__connected {
-  font-size: var(--oct-text-xs);
+/* Readiness in words. Colour marks only the states that need attention, so a
+   list of ready providers reads as quiet text rather than a row of pills. */
+.prov-state {
   color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.prov-state[data-tone="ok"] {
+  color: var(--oct-success-fg);
+}
+
+.prov-state[data-tone="warn"] {
+  color: var(--oct-warn-fg);
+}
+
+.prov-state[data-tone="danger"] {
+  color: var(--oct-danger-fg);
 }
 
 .provider-settings h2,
@@ -1902,8 +2104,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .provider-settings__intro p,
-.provider-settings__hint,
-.provider-settings__empty {
+.provider-settings__hint {
   margin-top: 4px;
   color: var(--octant-text-muted);
   font-size: calc(12 * var(--oct-text-step));
@@ -1952,7 +2153,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-secondary);
   background: var(--octant-control);
   border: 1px solid var(--octant-border);
-  border-radius: 7px;
+  border-radius: var(--oct-radius-sm);
   font-size: calc(12 * var(--oct-text-step));
   line-height: 1.45;
 }
@@ -1971,9 +2172,10 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   align-items: end;
   gap: 10px;
   padding: 14px;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 9px;
+  background: var(--octant-surface-raised);
+  border: 0;
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 .provider-settings__disclosure-icon,
@@ -1987,8 +2189,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transform: rotate(180deg);
 }
 
-/* Sits inside the provider card's .setgroup-foot, which already carries
-   the horizontal padding. */
+/* Sits under the open provider list at the section edge. */
 .provider-settings__manual-body {
   display: grid;
   gap: 12px;
@@ -2017,17 +2218,27 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin: 0;
 }
 
-/* The provider list is a .setgroup of .provrow items (octant.css). The
+/* The provider list is an open section of .provrow items (octant.css). The
    rules below are the app-side residue that vocabulary does not cover. */
 
-/* Inside a .setgroup card the empty state needs the card's own padding. */
-.setgroup > .provider-settings__empty {
-  margin: 0;
-  padding: var(--oct-space-4);
+/* The shell is open (0072): rows over hairlines at the section edge. The
+   first row draws the rule under the label the way Appearance's first row
+   does; octant.css's card version cleared it. */
+.settings-card-section--open > .provlist > .provrow {
+  padding-inline: 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
-.setgroup > .setgroup-note + .provlist {
-  margin-top: var(--oct-space-2);
+.provider-settings__summary {
+  margin: 0;
+  padding: 0 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The manual setup flow keeps its raised form; it just no longer sits in a
+   card footer. */
+.provider-settings__foot {
+  padding: 12px 0 0;
 }
 
 /* Reordering keeps the pre-port up/down mechanism; the grip column just
@@ -2065,15 +2276,17 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transform: rotate(180deg);
 }
 
-/* Expanded details bleed to the card edges so the divider reads as part of
-   the card, not a box floating inside the row. */
+/* A provider instance's expanded setup and auth panel is the one discrete
+   object in the list (0072): it takes the raised recipe under its open row. */
 .prov-details {
   display: grid;
   gap: 12px;
   grid-column: 1 / -1;
-  margin: var(--oct-space-3) calc(-1 * var(--oct-space-4)) calc(-1 * var(--oct-space-3));
-  border-top: 1px solid var(--oct-border-soft);
+  margin: var(--oct-space-3) 0 var(--oct-space-1);
   padding: var(--oct-space-4);
+  background: var(--octant-settings-card);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 @media (max-width: 560px) {
@@ -2101,32 +2314,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin-left: 8px;
   color: var(--octant-divider-strong);
   content: "·";
-}
-
-.provider-card__actions button,
-.provider-card__edit button {
-  min-height: 30px;
-  padding: 0 10px;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: calc(12 * var(--oct-text-step));
-}
-
-.provider-card__actions button:hover,
-.provider-card__edit button:hover {
-  background: var(--octant-control-hover);
-}
-
-.provider-card__actions button:disabled,
-.provider-card__edit button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.provider-card__actions .provider-card__danger {
-  color: var(--octant-danger-text);
 }
 
 .provider-card__edit {
@@ -2171,8 +2358,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin-bottom: 8px;
   color: var(--octant-text-secondary);
   font-size: calc(11 * var(--oct-text-step));
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .provider-card__discovery ul {
@@ -2213,6 +2400,60 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .workspace-pane__panel > [data-slot="empty-state"] {
   margin: clamp(36px, 8vh, 72px) clamp(28px, 6vw, 72px);
+}
+
+/* Recovery and connection states use the same raised-object language as the
+   composer and settings cards. The old compact status card used an all-caps
+   label and tight outlined controls, which made a temporary failure read like
+   a diagnostic widget rather than a calm route back into the workspace. */
+.shell-state {
+  width: min(100% - 40px, 560px);
+  max-width: 560px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 4px 14px;
+  padding: 22px 24px;
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-floating);
+  box-shadow: var(--octant-shadow-md);
+}
+
+.shell-state [data-slot="empty-state-media"] {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fg-soft);
+}
+
+.shell-state [data-slot="empty-state-eyebrow"] {
+  margin-bottom: 4px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.shell-state [data-slot="empty-state-title"] {
+  font-size: var(--oct-text-sm);
+  line-height: 1.35;
+}
+
+.shell-state [data-slot="empty-state-description"] {
+  max-width: 48ch;
+  margin-top: 4px;
+  font-size: var(--oct-text-sm);
+  line-height: 1.5;
+}
+
+.shell-state [data-slot="empty-state-actions"] {
+  margin-top: 8px;
+}
+
+.shell-state [data-slot="empty-state-actions"] button {
+  min-height: 32px;
+  padding-inline: 10px;
 }
 
 .shell-state__spinner {
@@ -2258,8 +2499,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   font-weight: 500;
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .project-dialog h1 {
@@ -2406,7 +2647,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 7px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: calc(11 * var(--oct-text-step));
   font-weight: 500;
@@ -2457,8 +2698,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(11 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .folder-picker__header h2 {
@@ -2488,7 +2729,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding: 0 10px;
   background: var(--octant-workspace);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .folder-picker__search svg {
@@ -2529,7 +2770,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-secondary);
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   font-size: calc(12 * var(--oct-text-step));
@@ -2560,7 +2801,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   overflow: auto;
   background: var(--octant-workspace);
   border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .folder-picker__item {
@@ -2570,7 +2811,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   gap: 8px;
   min-height: 36px;
   padding: 4px 6px 4px 4px;
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .folder-picker__item:hover {
@@ -2587,7 +2828,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   text-align: start;
@@ -2612,7 +2853,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-primary);
   background: var(--octant-control);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 7px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   font-size: calc(12 * var(--oct-text-step));
@@ -2650,7 +2891,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-primary);
   background: var(--octant-control);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
 }
@@ -2706,7 +2947,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding: 3px 5px;
   background: transparent;
   border-color: transparent;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   font-size: calc(14 * var(--oct-text-step));
   font-weight: 500;
   letter-spacing: -0.01em;
@@ -2868,8 +3109,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(9 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .project-memory-inspector__header h2 {
@@ -2893,7 +3134,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   width: 27px;
   height: 27px;
   color: var(--octant-text-muted);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   place-items: center;
 }
@@ -2919,7 +3160,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-secondary);
   background: var(--octant-control);
   border: 1px solid var(--octant-border);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font: inherit;
   font-size: calc(10 * var(--oct-text-step));
 }
@@ -2951,7 +3192,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-warning-text);
   background: var(--octant-warning-surface);
   border: 1px solid var(--octant-warning-border);
-  border-radius: 7px;
+  border-radius: var(--oct-radius-sm);
   font-size: calc(11 * var(--oct-text-step));
 }
 
@@ -2969,7 +3210,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   overflow: hidden;
   background: var(--octant-control);
   border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .environment-git-group__row {
@@ -3077,7 +3318,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding: 0;
   overflow: hidden;
   color: var(--oct-muted);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   border: 1px solid transparent;
 }
 
@@ -3128,8 +3369,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   background: var(--octant-surface-raised);
   color: var(--octant-text-muted);
   font-size: calc(9 * var(--oct-text-step));
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .thread-environment-summary__status--available {
@@ -3160,7 +3401,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--oct-fg);
   background: var(--octant-floating);
   border-color: var(--octant-border-strong);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-lg);
   box-shadow: var(--octant-shadow-overlay);
   font-family: var(--oct-font-display);
 }
@@ -3207,7 +3448,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   height: 26px;
   min-height: 26px;
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .thread-environment-disclosure__body {
@@ -3534,7 +3775,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   min-width: 0;
   flex: 1;
   border: 1px solid var(--octant-border-strong);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-surface-inset);
   color: var(--octant-text-primary);
   padding: 6px 8px;
@@ -3711,8 +3952,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .local-servers__row {
@@ -3720,7 +3961,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   gap: 6px;
   padding: 8px 10px;
   border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-control);
 }
 
@@ -3855,8 +4096,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .memory-section > header > span {
@@ -4034,8 +4275,9 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   min-width: 0;
   padding: 19px 20px;
   background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  border: 0;
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 .code-overview__card--delivery {
@@ -4043,8 +4285,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   grid-template-columns: minmax(0, 1fr) minmax(170px, 0.62fr);
   align-items: center;
   gap: 24px;
-  background: var(--octant-surface-raised);
-  border-color: var(--octant-border-strong);
 }
 
 .code-overview__eyebrow,
@@ -4053,8 +4293,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .code-overview__card h2 {
@@ -4104,7 +4344,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   overflow: hidden;
   background: var(--octant-border);
   border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .code-overview__signal {
@@ -4194,7 +4434,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-secondary);
   background: var(--octant-control);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
   font-size: calc(11 * var(--oct-text-step));
   font-weight: 600;
 }
@@ -4298,8 +4538,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .code-project-overview__scope-label {
@@ -4388,8 +4628,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .code-project-thread__more[open] summary {
@@ -4409,14 +4649,14 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   background: transparent;
 }
 
-.code-project-overview__quick-start .code-composer-adapter__canvas {
+.code-project-overview__quick-start .welcome {
   width: 100%;
   min-height: 0;
   padding: 0;
   gap: 12px;
 }
 
-.code-project-overview__quick-start .code-composer-adapter__welcome {
+.code-project-overview__quick-start .welcome__heading {
   display: none;
 }
 
@@ -4946,7 +5186,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   overflow: hidden;
   background: var(--octant-surface);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 14px;
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
 }
 
@@ -4985,13 +5225,14 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   height: 100%;
   padding: 8px 0;
   overflow-y: auto;
-  scrollbar-width: none;
+  scrollbar-color: var(--octant-border-strong) transparent;
+  scrollbar-width: thin;
   background: var(--octant-control);
   border-right: 1px solid var(--octant-border);
 }
 
 .composer-model-picker__rail::-webkit-scrollbar {
-  display: none;
+  width: 8px;
 }
 
 .composer-model-picker__rail-item {
@@ -5005,7 +5246,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-secondary);
   background: transparent;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
 }
 
@@ -5099,7 +5340,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   background: var(--octant-control);
   border: 1px solid var(--octant-border);
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
 }
 
 .composer-model-picker__search:focus-within {
@@ -5137,7 +5378,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 30px;
   align-items: center;
-  border-radius: 9px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .composer-model-picker__row:hover,
@@ -5161,7 +5402,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
-  border-radius: 9px 0 0 9px;
+  border-radius: var(--oct-radius-sm) 0 0 9px;
   cursor: pointer;
   font: inherit;
   font-size: 12.5px;
@@ -5218,7 +5459,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   opacity: 0.55;
 }
@@ -5253,7 +5494,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding: 0 10px;
   color: var(--octant-text-muted);
   border: 1px dashed var(--octant-border);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   font-size: calc(12 * var(--oct-text-step));
 }
 
@@ -5479,16 +5720,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   z-index: 2;
   flex: 0 0 auto;
   margin: 0 auto 12px;
-  border-radius: 10px;
-  box-shadow: none;
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease;
-}
-
-.code-thread-workspace__composer:focus-within {
-  border-color: var(--octant-border-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-fg) 5%, transparent);
 }
 
 .code-thread-workspace__composer .composer-input {
@@ -5591,7 +5822,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .code-thread-workspace__message .code-thread-workspace__attachment-thumb {
   width: 32px;
   height: 32px;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .code-thread-workspace__row {
@@ -5889,7 +6120,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   gap: 2px;
   padding: 6px 8px;
   border: 1px solid var(--octant-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .parallel-runs__entry-header {
@@ -5918,7 +6149,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin: 12px auto 0;
   padding: 12px;
   border: 1px solid var(--octant-border-subtle);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
   font-size: calc(12 * var(--oct-text-step));
 }
@@ -5952,7 +6183,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   width: 100%;
   padding: 8px;
   border: 1px solid var(--octant-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -5988,7 +6219,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .scaffolds__input {
   padding: 6px 8px;
   border: 1px solid var(--octant-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-surface-raised);
   color: var(--octant-text-primary);
   font: inherit;
@@ -6047,7 +6278,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   width: 100%;
   padding: 6px 8px;
   border: 1px solid var(--octant-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-surface-raised);
   color: var(--octant-text-primary);
   font: inherit;
@@ -6213,8 +6444,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .model-picker__readiness {
   margin-left: auto;
   font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
   padding: 0.1rem 0.4rem;
   border-radius: 0.4rem;
   border: 1px solid var(--octant-border, rgba(255, 255, 255, 0.12));
@@ -6241,8 +6472,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .model-picker__section-label {
   font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--octant-text-muted, rgba(255, 255, 255, 0.55));
 }
 
@@ -6397,7 +6628,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: grid;
   overflow: hidden;
   border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .agent-eligible-models__trigger {
@@ -6492,7 +6723,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   gap: 6px;
   padding: 4px 8px;
   border: 1px solid var(--octant-border);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: transparent;
   color: var(--octant-text-secondary);
   cursor: pointer;
@@ -6530,7 +6761,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   overflow: auto;
   padding: 10px;
   border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-surface-raised, rgba(30, 30, 30, 0.98));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
@@ -6549,7 +6780,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   align-items: center;
   gap: 4px 8px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .composer-pool-control__option-label {
@@ -6575,7 +6806,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   gap: 4px;
   padding: 6px;
   border: 1px solid var(--octant-border);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .composer-pool-control__disclosure {
@@ -6711,6 +6942,20 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   white-space: nowrap;
 }
 
+.host-selector__environment-icon {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+}
+
+.host-selector--environment .host-selector__health {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .host-selector--interactive {
   user-select: auto;
 }
@@ -6837,8 +7082,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: block;
   margin-bottom: 0.25rem;
   font-size: 0.75rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--octant-muted, #94a3b8);
 }
 
@@ -7018,17 +7263,19 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   }
 }
 
-/* Code Thread Board.
-   Columns and cards come from the design system (.board, .board-col,
-   .board-card, .st, .fact in octant.css). Everything here is the app-specific
-   frame around them — header, toolbar, filter popovers — plus the two grouping
-   layouts and semantic markup (h2 headings, card lists, button titles) the
-   system board vocabulary does not carry. */
+/* Thread boards.
+   The page shell, header, and toolbar come from the surface language;
+   columns and cards from the design system (.board, .board-col, .board-card,
+   .st, .fact in octant.css). Everything here is the app-specific frame
+   around them — filter popovers — plus the two grouping layouts and
+   semantic markup (card lists, button titles) the system board vocabulary
+   does not carry. The .code-board__header rules stay for the issue
+   browsers, which still draw their own title band. */
 .code-board-layer {
   position: absolute;
   inset: 0;
   z-index: 5;
-  overflow: hidden;
+  overflow: auto;
   background: var(--oct-bg);
 }
 
@@ -7040,22 +7287,14 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: var(--oct-text-sm);
 }
 
-.code-board {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  height: 100%;
-  min-height: 0;
-  padding: 0;
-  font-family: var(--oct-font-display);
-}
-
 .code-board__header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--oct-space-3);
-  padding: 16px var(--oct-space-4) 10px;
+  width: min(calc(100% - 32px), 1120px);
+  padding: 18px 0 10px;
+  margin: 0 auto;
 }
 
 .code-board__identity {
@@ -7079,37 +7318,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: var(--oct-text-xs);
 }
 
-.code-board__toolbar {
-  /* Containing block for the board popovers. The board layer clips its own
-     overflow, so a popover anchored to a control that wrapped near either edge
-     would be cut off; anchoring to the toolbar keeps it inside at any width. */
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px var(--oct-space-4);
-  border-bottom: 1px solid var(--oct-border);
-  background: var(--oct-surface);
-}
-
-.code-board__primary-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.code-board__primary-controls > * {
-  flex: 0 0 auto;
-}
-
-.code-board__primary-controls .code-board__search {
-  flex: 1 1 200px;
-  min-width: 160px;
-  max-width: 320px;
-}
-
-.code-board__toolbar fieldset {
+.code-board__status-filter {
   margin: 0;
   padding: 0;
   border: 0;
@@ -7117,10 +7326,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .code-board__search {
   display: flex;
-  flex: 0 1 240px;
   align-items: center;
   gap: 7px;
-  min-width: 160px;
   height: 30px;
   padding: 0 9px;
   border: 1px solid var(--oct-border);
@@ -7134,7 +7341,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   box-shadow: 0 0 0 1px var(--oct-accent-fg);
 }
 
-.code-board__toolbar .code-board__search input[type="search"] {
+.code-board__search input[type="search"] {
   width: 100%;
   min-width: 0;
   padding: 0;
@@ -7206,8 +7413,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin-bottom: 5px;
   font-size: 0.7rem;
   font-weight: 500;
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--oct-muted);
 }
 
@@ -7363,24 +7570,20 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  margin: 0 0 var(--oct-space-3);
 }
 
 /*
- * The board body scrolls horizontally so the fixed-width status columns keep
- * their shape at every viewport and zoom level; vertical scrolling stays
+ * The four status columns share the board's width. Below the point where
+ * four readable columns no longer fit, the body scrolls sideways on its own
+ * so the page never grows a horizontal scrollbar; vertical scrolling stays
  * inside each column.
  */
 .code-board__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: var(--oct-space-2) var(--oct-space-4) var(--oct-space-4);
+  padding: 0 0 var(--oct-space-6);
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
   scrollbar-width: thin;
-}
-
-.code-board__body[data-grouping="status"] {
-  display: block;
 }
 
 .code-board__body[data-grouping="project"] {
@@ -7388,87 +7591,24 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   overflow-y: auto;
 }
 
-/* The status board is a reading surface, not four large cards. Keep columns
-   flat and give empty groups a small dashed target instead of an empty well. */
-.code-board .board {
-  gap: 0;
-  align-items: stretch;
-  min-width: min-content;
-  overflow: visible;
-}
-
-/* The status board body is a fixed-height flex item, so the row of columns
-   must fill it to keep vertical scrolling inside each column. */
-.code-board__body[data-grouping="status"] .board {
-  height: 100%;
-}
-
 .code-board .board-col {
-  flex: 0 0 auto;
-  width: clamp(220px, 22vw, 320px);
-  min-width: 220px;
-  max-width: 320px;
-  min-height: 0;
-  max-height: 100%;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.code-board .board-col + .board-col {
-  padding-left: var(--oct-space-3);
-  border-left: 1px solid var(--oct-border-soft);
-}
-
-.code-board .board-col-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  min-height: 28px;
-  padding-inline: 0;
-  padding-bottom: var(--oct-space-1);
-  border-bottom: 1px solid var(--oct-border-soft);
-  border-radius: 0;
-  background: var(--oct-bg);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  font-weight: 600;
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-  color: var(--oct-meta);
+  max-height: min(calc(100vh - 230px), 720px);
+  overflow: hidden;
 }
 
 .code-board .board-col-body {
   gap: var(--oct-space-2);
   max-height: 100%;
-  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-2) 0;
-}
-
-.code-board .board-col-empty {
-  display: grid;
-  min-height: 36px;
-  place-items: center;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  border: 1px dashed var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  text-align: center;
+  padding: var(--oct-space-2) 0;
 }
 
 .code-board .board-card {
   padding: var(--oct-space-2) var(--oct-space-3);
-  border-color: var(--oct-border-soft);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
+  border: 1px solid var(--oct-border-soft);
   font-family: var(--oct-font-display);
-  transition:
-    border-color 120ms ease,
-    background 120ms ease;
 }
 
 .code-board .board-card:hover {
-  border-color: var(--oct-border);
   background: var(--oct-fg-soft);
 }
 
@@ -7617,57 +7757,18 @@ ul.board-col-body {
   list-style: none;
 }
 
-/* the placeholder is a paragraph here and nothing resets paragraph margins
-   globally; the system padding is the whole intended spacing */
-p.board-col-empty {
-  margin: 0;
-}
-
-/* the column heading is an h2 for the document outline; it takes the
-   head's mono styling rather than heading styling */
+/* the column heading is an h2 for the document outline; a long Project
+   name truncates rather than wrapping the count onto a second line */
 .board-col-head h2 {
   flex: 1 1 auto;
   min-width: 0;
-  margin: 0;
   overflow: hidden;
-  font: inherit;
-  letter-spacing: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* A quiet placeholder is content-sized; it should not make an empty group
-   as tall as the busiest column. */
-.code-board__body[data-grouping="status"] .board-col[data-empty="true"] {
-  min-height: 0;
-}
-
-.code-board__body[data-grouping="status"] .board-col[data-empty="true"] .board-col-body {
-  min-height: 52px;
-}
-
 /* Project grouping stacks full-width sections that flow their cards in a
    grid; the recovery column follows the same shape in either grouping */
-.board[data-grouping="project"] {
-  flex-direction: column;
-  gap: var(--oct-space-5);
-  overflow-x: visible;
-}
-
-.board[data-grouping="project"] .board-col {
-  flex: 0 0 auto;
-  width: 100%;
-  min-width: auto;
-  max-width: none;
-  /* a project section is a full-width row of the stack, not a kanban
-     column, so the system column's growth ceiling does not apply */
-}
-
-.board[data-grouping="project"] .board-col + .board-col {
-  padding-left: 0;
-  border-left: 0;
-}
-
 .board[data-grouping="project"] .board-col-body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
@@ -7708,7 +7809,7 @@ p.board-col-empty {
 .code-board__card-details summary {
   width: fit-content;
   padding: 2px 6px;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   font-size: 0.72rem;
   color: var(--oct-muted);
 }
@@ -7744,22 +7845,16 @@ p.board-col-empty {
   color: var(--oct-fg);
 }
 
-.code-board__empty {
-  display: grid;
-  gap: 6px;
-  max-width: 460px;
-  margin: var(--oct-space-3) auto;
-  padding: var(--oct-space-3);
-  color: var(--oct-fg-2);
-  text-align: center;
-  border: 1px dashed var(--oct-border);
-  border-radius: var(--oct-radius-lg);
-}
-
-.code-board__refresh-status {
-  margin: 0 0 var(--oct-space-2);
+/* One line under the toolbar for refresh, error, and empty-board notices;
+   the columns underneath keep their shape either way. */
+.code-board__note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  margin: 0 0 var(--oct-space-3);
   color: var(--oct-muted);
-  font-size: 0.78rem;
+  font-size: var(--oct-text-detail);
 }
 
 .code-board__list {
@@ -7776,22 +7871,13 @@ p.board-col-empty {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
+  padding: 10px 0 8px;
   margin-bottom: var(--oct-space-2);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-  color: var(--oct-muted);
-}
-
-.code-board__list-head h2 {
-  margin: 0;
-  font: inherit;
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 .code-board__list-head .count {
   margin-left: auto;
-  color: var(--oct-meta);
 }
 
 .code-board__list .issuelist {
@@ -7821,16 +7907,8 @@ p.board-col-empty {
     padding: 14px 14px 8px;
   }
 
-  .code-board__toolbar {
-    padding: 8px 14px;
-  }
-
   .code-board__subtitle {
     display: none;
-  }
-
-  .code-board__primary-controls > * {
-    flex: 0 0 auto;
   }
 
   .code-board__grouping {
@@ -7857,21 +7935,17 @@ p.board-col-empty {
   }
 
   .code-board__body {
-    padding: var(--oct-space-2) 14px var(--oct-space-4);
     overflow-x: hidden;
     overflow-y: auto;
   }
 }
 
-/* When the user zooms in, the fixed column width may exceed the viewport.
-   Keep the board horizontally scrollable and shrink the minimum column width
-   so a single column is still usable. */
+/* When the user zooms in, the column width may exceed the viewport. Keep
+   the board horizontally scrollable and shrink the minimum column width so a
+   single column is still usable. */
 @media (max-width: 260px) {
-  .code-board .board-col,
-  .board-col {
-    width: 180px;
-    min-width: 180px;
-    max-width: 100%;
+  .board {
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
   }
 
   .code-board .board-card-facts .fact {
@@ -7887,144 +7961,30 @@ p.board-col-empty {
   background: var(--octant-workspace);
 }
 
-.archive-view {
-  display: grid;
-  width: min(calc(100% - 48px), 880px);
-  min-height: 100%;
-  align-content: start;
-  gap: var(--oct-space-5);
-  padding: 36px 0 72px;
-  margin: 0 auto;
-}
-
-.archive-view__header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--oct-space-4);
-}
-
-.archive-view__header h1,
-.archive-view__header p {
-  margin: 0;
-}
-
-.archive-view__header h1 {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-xl);
-  font-weight: 600;
-  letter-spacing: -0.025em;
-}
-
-.archive-view__header p,
-.archive-view__notice {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
-}
-
-.archive-view__header p {
-  margin-top: 5px;
-}
-
-.archive-view__actions {
-  display: flex;
-  align-items: end;
-  gap: var(--oct-space-2);
-}
-
-.archive-view__actions label {
-  display: grid;
-  gap: 4px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.archive-view__actions select {
-  min-width: 180px;
-}
-
-.archive-view__list {
-  overflow: hidden;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-}
-
-.archive-view__list > [role="listitem"] + [role="listitem"] {
-  border-top: 1px solid var(--oct-border);
-}
-
+/* Archive rows are the surface language's hairline rows; this only turns
+   the row's button into a full-width target with the mode at the edge. */
 .archive-view__row {
   display: grid;
   width: 100%;
-  min-height: 54px;
+  height: auto;
+  min-height: 0;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: stretch;
   gap: var(--oct-space-4);
-  padding: 9px 14px;
-  border-radius: 0;
+  padding: 0;
   text-align: left;
 }
 
-.archive-view__row-copy {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
+.archive-view__row:hover .oct-row-label,
+.archive-view__row:focus-visible .oct-row-label {
+  text-decoration: underline;
 }
 
-.archive-view__row-copy strong,
-.archive-view__row-copy small {
+.archive-view__row .oct-row-label,
+.archive-view__row .surface-row__copy > .oct-meta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.archive-view__row-copy strong {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: 500;
-}
-
-.archive-view__row-copy small,
-.archive-view__mode {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: 400;
-}
-
-.archive-view__mode {
-  min-width: 40px;
-  text-align: right;
-}
-
-.archive-view__empty {
-  max-width: none;
-}
-
-.archive-view__notice {
-  margin: 0;
-}
-
-@media (max-width: 680px) {
-  .archive-view {
-    width: min(calc(100% - 24px), 880px);
-    padding-top: 24px;
-  }
-
-  .archive-view__header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .archive-view__actions label {
-    flex: 1;
-  }
-
-  .archive-view__actions select {
-    width: 100%;
-    min-width: 0;
-  }
 }
 
 .keybinding-settings {
@@ -8035,7 +7995,7 @@ p.board-col-empty {
 
 .keybinding-settings__list {
   display: grid;
-  gap: 6px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -8046,6 +8006,9 @@ p.board-col-empty {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  min-height: 48px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--octant-border-soft);
 }
 
 .keybinding-settings__action {
@@ -8077,6 +8040,40 @@ p.board-col-empty {
   gap: 8px;
 }
 
+.keybinding-settings__advanced {
+  margin-top: 4px;
+}
+
+.keybinding-settings__advanced > summary {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+}
+
+.keybinding-settings__advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.keybinding-settings__advanced > summary svg {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.keybinding-settings__advanced[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.keybinding-settings__advanced-body {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+}
+
 .environment-filter {
   position: relative;
   padding: 0 8px 6px;
@@ -8090,7 +8087,7 @@ p.board-col-empty {
   width: 100%;
   padding: 4px 8px;
   border: 1px solid var(--octant-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: transparent;
   color: var(--octant-text-muted);
   font: inherit;
@@ -8109,7 +8106,7 @@ p.board-col-empty {
   margin: 4px 0 0;
   padding: 6px;
   border: 1px solid var(--octant-border-subtle);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-surface-raised);
 }
 
@@ -8152,7 +8149,7 @@ p.board-col-empty {
   margin: 12px auto 0;
   padding: 12px;
   border: 1px solid var(--octant-border-subtle);
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
   font-size: calc(12 * var(--oct-text-step));
 }
@@ -8200,33 +8197,18 @@ p.board-col-empty {
   margin: 0;
 }
 
+/* Pull requests: the shell, toolbar, and Project rows come from the surface
+   language; this sheet keeps the search field, the PR row anatomy, and the
+   status line the dock review tools share. */
 .code-project-pull-requests {
-  display: flex;
-  width: min(100%, 1080px);
-  flex-direction: column;
-  gap: 12px;
-  height: 100%;
-  min-height: 0;
-  padding: 18px clamp(16px, 3vw, 32px) 32px;
-  margin: 0 auto;
-  overflow: auto;
-}
-
-.code-project-pull-requests > .code-board__header {
-  margin-bottom: 0;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--oct-border);
-}
-
-.code-project-pull-requests__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-2);
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-3);
 }
 
 .code-project-pull-requests__status {
-  margin: -4px 0 0;
+  width: min(100%, 840px);
+  margin: -4px auto 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
@@ -8235,18 +8217,9 @@ p.board-col-empty {
   color: var(--oct-warning-text, var(--oct-muted));
 }
 
-.code-project-pull-requests__toolbar {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
-}
-
 .code-project-pull-requests__search {
   position: relative;
   display: flex;
-  width: min(360px, 100%);
   align-items: center;
   color: var(--oct-muted);
 }
@@ -8279,29 +8252,15 @@ p.board-col-empty {
 
 .code-project-pull-requests__count {
   flex: 0 0 auto;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
 }
 
 .code-project-pull-requests__groups {
-  display: flex;
-  width: 100%;
-  flex-direction: column;
-  gap: 16px;
+  display: grid;
   min-width: 0;
+  gap: var(--oct-space-2);
 }
 
-.code-project-pull-requests__project {
-  overflow: hidden;
-  border: 0;
-  border-top: 1px solid var(--oct-border);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.code-project-pull-requests__project-header,
 .code-project-pull-requests__title-line,
 .code-project-pull-requests__meta,
 .code-project-pull-requests__byline {
@@ -8311,61 +8270,10 @@ p.board-col-empty {
   gap: var(--oct-space-2) 10px;
 }
 
-.code-project-pull-requests__project-header {
-  min-height: 34px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 4px;
-  border-bottom: 0;
-}
-
-.code-project-pull-requests__project-heading {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: var(--oct-space-2);
-}
-
-.code-project-pull-requests__project-repository {
-  overflow: hidden;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-project-pull-requests__project h2,
-.code-project-pull-requests__repository h3,
-.code-project-pull-requests__title {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-}
-
-.code-project-pull-requests__project h2 {
-  font-weight: var(--oct-weight-strong);
-}
-
 .code-project-pull-requests__repository h3 {
-  padding: 6px 8px;
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  font-weight: 400;
-  background: var(--oct-fg-soft);
-  border-block: 1px solid var(--oct-border-soft);
-}
-
-.code-project-pull-requests__unconnected,
-.code-project-pull-requests__empty {
   margin: 0;
-  padding: 7px 4px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.code-project-pull-requests__unconnected {
-  color: var(--oct-muted);
+  padding: 10px 0 4px;
+  font-weight: 400;
 }
 
 .code-project-pull-requests__list {
@@ -8435,7 +8343,9 @@ p.board-col-empty {
 }
 
 .code-project-pull-requests__title {
+  margin: 0;
   color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
   font-weight: 500;
 }
 
@@ -8453,19 +8363,6 @@ p.board-col-empty {
   font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.code-project-pull-requests[data-narrow="true"] {
-  padding-inline: var(--oct-space-3);
-}
-
-.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__toolbar {
-  align-items: stretch;
-  flex-direction: column;
-}
-
-.code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__count {
-  align-self: flex-end;
 }
 
 .code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__row-content {

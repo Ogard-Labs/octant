@@ -4,6 +4,7 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ThreadMentionClient } from "@octant/client-runtime";
 import type { SideChatSidecar, ThreadMentionCandidate } from "@octant/contracts";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { useThreadMentions } from "./useThreadMentions";
 
 const requestId = "00000000-0000-4000-8000-000000000001" as never;
@@ -48,7 +49,11 @@ function Harness(props: {
   });
   return (
     <div>
-      <textarea aria-label="draft" onChange={(e) => setDraft(e.target.value)} value={draft} />
+      <OctantTextarea
+        aria-label="draft"
+        onChange={(event) => setDraft(event.target.value)}
+        value={draft}
+      />
       <button onClick={() => mentions.composer?.onQueryChange("rel")} type="button">
         search
       </button>

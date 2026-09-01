@@ -197,7 +197,8 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   timestampFormat: "24h",
   typography: {
     ui: {
-      family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      family:
+        "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
       size: 13,
       weight: 400,
     },

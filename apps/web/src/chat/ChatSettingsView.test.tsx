@@ -3,6 +3,7 @@ import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { ChatSettingsView, type UpdateChatSettingsCommand } from "./ChatSettingsView";
 
 const now = "2026-07-20T08:00:00.000Z";
@@ -23,12 +24,20 @@ describe("ChatSettingsView", () => {
       />,
     );
 
-    expect(screen.getByRole("form", { name: "Chat defaults" })).toHaveClass(
-      "provider-settings__form",
-      "setgroup",
+    expect(screen.getByRole("form", { name: "Chat defaults" })).toHaveAttribute("novalidate");
+    // Every default is a setting row in the open Settings grammar, with the
+    // research default as a switch rather than a checkbox.
+    expect(screen.getByRole("form", { name: "Chat defaults" })).toHaveClass("setgroup");
+    expect(screen.getByRole("form", { name: "Chat defaults" }).closest("section")).toHaveClass(
+      "settings-card-section--open",
     );
-    expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveValue(
-      "automatic",
+    expect(screen.getByRole("switch", { name: "Enable research by default" })).toBeVisible();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save Chat defaults" }).closest("[data-setting-id]"),
+    ).toHaveAttribute("data-setting-id", "chat-save");
+    expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveTextContent(
+      "Automatic",
     );
     expect(
       screen.getByText(
@@ -38,9 +47,10 @@ describe("ChatSettingsView", () => {
 
     await user.click(screen.getByRole("option", { name: /Model B Plus/ }));
     await user.click(screen.getByLabelText("Enable research by default"));
-    await user.selectOptions(
+    await chooseSelectFieldOption(
+      user,
       screen.getByRole("combobox", { name: "Default research backend" }),
-      "searxng",
+      "SearXNG",
     );
     await user.type(screen.getByLabelText("SearXNG base URL"), "https://search.example/");
     await user.clear(screen.getByLabelText("Calm personality instructions"));

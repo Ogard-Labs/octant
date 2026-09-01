@@ -17,10 +17,30 @@ function settings(overrides: Partial<MirrorSettings> = {}): MirrorSettings {
 }
 
 describe("choosing whether artifacts become files", () => {
+  it("keeps mirroring secondary until the user opens it", async () => {
+    const user = userEvent.setup();
+    render(
+      <ArtifactMirrorSettings
+        busy={false}
+        onChangeAutoCommit={vi.fn()}
+        onChangeDestination={vi.fn()}
+        settings={settings()}
+      />,
+    );
+
+    const toggle = screen.getByRole("button", { name: "Configure file mirroring" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/deleting one does not delete the artifact/i)).toBeNull();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/deleting one does not delete the artifact/i)).toBeVisible();
+  });
+
   it("says the folder is a copy rather than the artifact", () => {
     render(
       <ArtifactMirrorSettings
         busy={false}
+        defaultOpen
         onChangeAutoCommit={vi.fn()}
         onChangeDestination={vi.fn()}
         settings={settings()}
@@ -34,6 +54,7 @@ describe("choosing whether artifacts become files", () => {
     const { rerender } = render(
       <ArtifactMirrorSettings
         busy={false}
+        defaultOpen
         onChangeAutoCommit={vi.fn()}
         onChangeDestination={vi.fn()}
         settings={settings()}
@@ -45,6 +66,7 @@ describe("choosing whether artifacts become files", () => {
     rerender(
       <ArtifactMirrorSettings
         busy={false}
+        defaultOpen
         onChangeAutoCommit={vi.fn()}
         onChangeDestination={vi.fn()}
         settings={settings({
@@ -61,6 +83,7 @@ describe("choosing whether artifacts become files", () => {
     render(
       <ArtifactMirrorSettings
         busy={false}
+        defaultOpen
         onChangeAutoCommit={onChangeAutoCommit}
         onChangeDestination={vi.fn()}
         settings={settings({

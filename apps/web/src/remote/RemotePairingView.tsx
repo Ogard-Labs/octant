@@ -156,6 +156,7 @@ function RemotePairingEntry(props: RemotePairingEntryProps) {
       <form
         ref={formRef}
         className="remote-pairing__form"
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
           setSubmitted(true);
@@ -225,6 +226,7 @@ function RemotePairingConfirm(props: RemotePairingConfirmProps) {
       </div>
       <form
         className="remote-pairing__form"
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
           props.onPair(deviceLabel.trim() || "Remote browser");

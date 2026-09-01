@@ -157,12 +157,6 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   pointer-events: none;
 }
 
-/* The badge recipe carries the warning palette and type; the chrome only
-   keeps the marker from flexing away in the 34px rail. */
-.window-chrome__development-auth {
-  flex: 0 0 auto;
-}
-
 .window-chrome__zen-recovery {
   display: flex;
   flex: 0 1 auto;
@@ -232,13 +226,12 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   background: var(--oct-fg-soft);
 }
 
-.window-chrome__development-auth,
 .window-chrome__zen-recovery {
   pointer-events: auto;
 }
 
-/* The btn-icon recipe owns the shape and states; this override keeps the
-   compact 26px square the 34px native titlebar row can actually hold. */
+/* Compact 26px square so the 34px native titlebar row can actually hold
+   the control. Paint stays on the owned icon-button recipe. */
 .window-chrome__button {
   display: grid;
   flex: 0 0 auto;
@@ -249,7 +242,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   color: var(--oct-muted);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
 }
 
@@ -300,7 +293,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   color: var(--oct-muted);
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   text-align: left;
 }
@@ -576,13 +569,13 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
      not three controls, so they sit at glyph spacing. At list spacing the row
      spent 46px before the first letter of the title. */
   gap: var(--oct-space-1);
-  min-height: 26px;
+  min-height: 28px;
   padding-block: 0;
-  padding-inline: 6px;
+  padding-inline: 8px;
   color: var(--oct-muted);
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
   cursor: pointer;
@@ -650,7 +643,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   width: 8px;
   height: 8px;
   border: 1.5px solid var(--octant-divider-strong);
-  border-radius: 999px;
+  border-radius: var(--oct-radius-pill);
 }
 
 .sidebar-navigation__thread-status[data-activity="idle"] {
@@ -829,7 +822,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   min-height: 24px;
   padding: 0;
   color: var(--oct-meta);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
 }
 
 .sidebar-navigation__thread-action:hover,
@@ -932,24 +925,28 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   .shell.shell-frame {
     --octant-window-chrome-reserved-width: 4px;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 34px auto minmax(0, 1fr);
+    grid-template-rows: 34px minmax(0, 1fr);
   }
 
   .shell-frame > .window-chrome {
     grid-column: 1;
     grid-row: 1;
-    /* In the stacked layout no workspace layer sits behind this row, and
-       under the native host an unpainted row shows the desktop through the
-       transparent frame. */
+    /* The narrow sidebar is an overlay drawer, so the chrome row must paint
+       its own ground instead of relying on the workspace underneath. */
     background: var(--oct-bg);
   }
 
   .shell-frame > .sidebar {
-    max-height: 38vh;
+    position: absolute;
+    z-index: 6;
+    inset: 34px auto 0 0;
+    width: min(var(--octant-sidebar-width, 232px), calc(100vw - 56px));
+    max-height: none;
     grid-column: 1;
     grid-row: 2;
-    border-right: 0;
-    border-bottom: 1px solid var(--octant-border-strong);
+    border-right: 1px solid var(--octant-border-strong);
+    border-bottom: 0;
+    box-shadow: var(--octant-shadow-overlay);
   }
 
   .sidebar__native-leading {
@@ -976,7 +973,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
   .shell-frame > .workspace-layer {
     grid-column: 1;
-    grid-row: 3;
+    grid-row: 2;
   }
 }
 
@@ -1063,7 +1060,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .draft-thread__canvas {
   box-sizing: border-box;
   display: flex;
-  width: min(100% - 48px, 720px);
+  width: min(100% - 48px, 768px);
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
@@ -1073,13 +1070,16 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   gap: 10px;
 }
 
-.draft-thread__welcome,
-.work-composer-adapter__welcome,
-.code-composer-adapter__welcome {
+.draft-thread__welcome {
   display: grid;
   justify-items: start;
   gap: 4px;
   margin-bottom: 14px;
+}
+
+.draft-thread:not(.agent-mode-welcome) .draft-thread__welcome {
+  justify-items: center;
+  text-align: center;
 }
 
 .new-thread-welcome__mark {
@@ -1087,20 +1087,17 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   color: var(--oct-accent-fg);
 }
 
-.draft-thread__eyebrow,
-.work-composer-adapter__eyebrow,
-.code-composer-adapter__eyebrow {
+.draft-thread__eyebrow {
   display: block;
   margin: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
-.draft-thread__heading,
-.work-composer-adapter__heading {
+.draft-thread__heading {
   margin: 0;
   color: var(--octant-text-primary);
   font-size: clamp(25px, 3vw, 31px);
@@ -1109,8 +1106,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   line-height: 1.1;
 }
 
-.draft-thread__description,
-.work-composer-adapter__description {
+.draft-thread__description {
   max-width: 58ch;
   margin: 2px 0 0;
   color: var(--octant-text-secondary);
@@ -1183,26 +1179,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   display: flex;
   width: auto;
   min-height: 32px;
-  padding: 5px 12px;
-  background: transparent;
-  border: 1px solid var(--octant-border);
-  border-radius: 999px;
-  cursor: pointer;
   text-align: start;
   white-space: normal;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
-}
-
-.draft-thread__intent-card:hover {
-  background: var(--oct-selection);
-  border-color: var(--octant-border-strong);
-}
-
-.draft-thread__intent-card:focus-visible {
-  outline: 2px solid var(--octant-focus);
-  outline-offset: 1px;
 }
 
 .draft-thread__intent-label {
@@ -1215,16 +1193,14 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   display: none;
 }
 
-.draft-thread__composer,
-.work-composer-adapter__composer {
+.draft-thread__composer {
   order: 2;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.draft-thread__context-strip,
-.work-composer-adapter__context-strip {
+.draft-thread__context-strip {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1263,8 +1239,10 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   overflow: auto;
   background: var(--octant-surface-raised, var(--octant-surface));
   border: 1px solid var(--octant-border-strong);
-  border-radius: 10px;
+  border-radius: var(--oct-radius-sm);
   box-shadow: var(--octant-shadow-overlay);
+  font-size: var(--oct-text-sm);
+  text-align: left;
 }
 
 .composer-folder-selector__search {
@@ -1323,8 +1301,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   font-size: calc(12 * var(--oct-text-step));
 }
 
-.draft-thread__context-item,
-.work-composer-adapter__context-item {
+.draft-thread__context-item {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1339,35 +1316,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   opacity: 0.7;
 }
 
-.draft-thread__context-picker,
-.work-composer-adapter__context-picker {
+.draft-thread__context-picker {
   margin-inline-start: auto;
-}
-
-.work-composer-adapter__context-strip {
-  padding: 8px 12px 8px 14px;
-  border-top: 1px solid var(--oct-border-soft);
-}
-
-.work-composer-adapter__composer-bar .work-composer-adapter__context-picker {
-  margin-inline-start: 0;
-}
-
-/* The shared provider/model picker keeps the quiet trigger the bar's other
-   controls wear; the menu opens downward because the draft composer sits
-   mid-screen rather than at the window's bottom edge. */
-.work-composer-adapter__composer-bar .composer-model-picker__trigger {
-  min-height: 28px;
-  padding: 0 7px;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-  font-size: var(--oct-text-xs);
-}
-
-.work-composer-adapter__composer-bar .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
 }
 
 .work-composer-adapter__visually-hidden {
@@ -1411,10 +1361,6 @@ form > .work-composer-adapter__attachments {
 .work-composer-adapter__file-input,
 .work-composer-adapter__composer-bar input[type="file"] {
   display: none;
-}
-
-.work-composer-adapter__context-strip {
-  justify-content: flex-start;
 }
 
 .create-from-issue-control {
@@ -1481,7 +1427,7 @@ form > .work-composer-adapter__attachments {
     padding-block: 0;
   }
 
-  .draft-thread.chat-welcome .draft-thread__canvas {
+  .draft-thread.chat-welcome .welcome {
     box-sizing: border-box;
     width: calc(100% - 24px);
     justify-content: flex-start;
@@ -1512,11 +1458,14 @@ form > .work-composer-adapter__attachments {
   background: var(--octant-workspace);
 }
 
-.work-composer-adapter__canvas,
+.work-composer-adapter {
+  background: var(--octant-app-background);
+}
+
 .work-thread-workspace .draft-thread__canvas {
   box-sizing: border-box;
   display: flex;
-  width: min(100% - 48px, 720px);
+  width: min(100% - 48px, 768px);
   flex-direction: column;
   align-items: stretch;
   min-height: 100%;
@@ -1577,8 +1526,8 @@ form > .work-composer-adapter__attachments {
   color: var(--octant-text-muted);
   font-size: calc(9 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .work-thread-workspace__toolbar {
@@ -1643,107 +1592,21 @@ form > .work-composer-adapter__attachments {
   flex: 1 1 auto;
   flex-direction: column;
   color: var(--octant-text-primary);
-  background: var(--octant-workspace);
+  background: var(--octant-app-background);
 }
 
-.code-composer-adapter__canvas {
-  display: flex;
-  width: min(100% - 48px, 680px);
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  min-height: 100%;
-  padding-block: min(16vh, 148px) 48px;
-  margin: 0 auto;
-  gap: 10px;
-}
-
-.code-composer-adapter__eyebrow {
-  display: block;
-}
-
-.code-composer-adapter__heading {
+/* Worktree source expands from the context bar, not from inside the raised
+   composer. It stays unboxed so it does not read as a third card. */
+.code-composer-adapter .code-worktree-source {
   margin: 0;
-  color: var(--octant-text-primary);
-  font-size: clamp(25px, 3vw, 31px);
-  font-weight: 500;
-  letter-spacing: -0.03em;
-  line-height: 1.2;
-  text-wrap: balance;
-}
-
-.code-composer-adapter__description {
-  max-width: 58ch;
-  margin: 2px 0 0;
-  color: var(--octant-text-secondary);
-  font-size: 13.5px;
-  line-height: 1.55;
-  text-wrap: pretty;
-}
-
-.code-composer-adapter__composer {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.code-composer-adapter__card {
-  display: flex;
-  flex-direction: column;
-  overflow: visible;
+  padding: 4px 2px 0;
   background: transparent;
   border: 0;
   border-radius: 0;
-  box-shadow: none;
-}
-
-.code-composer-adapter__card > .composer-input {
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-bottom: 0;
-  border-radius: 8px 8px 0 0;
-}
-
-.code-composer-adapter__card > .composer-row {
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: 0 0 8px 8px;
-}
-
-.code-composer-adapter__card:focus-within > .composer-input,
-.code-composer-adapter__card:focus-within > .composer-row {
-  border-color: var(--octant-border-strong);
-}
-
-.code-composer-adapter__context-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  order: -1;
-  gap: 5px 10px;
-  margin: 0 0 8px;
-  padding: 0 2px;
-  color: var(--oct-meta);
-  background: var(--octant-workspace);
-  border: 0;
-}
-
-/* Panels a strip control expands into are further rows of the same card, so
-   they drop the frame they wore as free-standing panels: a bordered box inside
-   a bordered card reads as two cards, not as one that grew a row. */
-.code-composer-adapter__card > .code-worktree-source,
-.code-composer-adapter__card > .code-composer-adapter__delivery {
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: 8px;
 }
 
 @media (max-width: 640px) {
-  .draft-thread__context-strip,
-  .work-composer-adapter__context-strip,
-  .code-composer-adapter__context-strip {
+  .draft-thread__context-strip {
     align-items: stretch;
   }
 
@@ -1762,16 +1625,6 @@ form > .work-composer-adapter__attachments {
   }
 }
 
-.code-composer-adapter__context-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--octant-text-muted);
-  font-size: 11.5px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
 .code-composer-adapter__context-picker {
   margin-inline-start: auto;
 }
@@ -1787,10 +1640,6 @@ form > .work-composer-adapter__attachments {
 /* Control sizing on the composer row belongs to the shared row, not to the
    surface that happens to host it (0038). Sizing icon buttons here is what
    left one row carrying three different control heights. */
-
-.code-composer-adapter__composer-bar .code-composer-adapter__context-item > svg {
-  display: none;
-}
 
 .code-composer-adapter__composer-bar .code-composer-adapter__policy-select {
   min-width: 0;
@@ -1816,7 +1665,7 @@ form > .work-composer-adapter__attachments {
   color: var(--octant-text-secondary);
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   font-size: 11.5px;
@@ -1856,7 +1705,7 @@ form > .work-composer-adapter__attachments {
   overflow: hidden;
   background: var(--octant-surface);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 12px;
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
 }
 
@@ -1864,7 +1713,7 @@ form > .work-composer-adapter__attachments {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: min(280px, 40vh);
+  max-height: min(180px, 30vh);
   padding: 6px;
   overflow: auto;
 }
@@ -1880,7 +1729,7 @@ form > .work-composer-adapter__attachments {
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
   font-size: calc(12 * var(--oct-text-step));
@@ -1928,87 +1777,138 @@ form > .work-composer-adapter__attachments {
   font-weight: 500;
 }
 
-.code-composer-adapter__composer-bar .code-composer-adapter__context-picker {
-  margin-inline-start: 0;
-}
-
-.code-composer-adapter__composer-bar .composer-model-picker__trigger {
-  min-height: 28px;
-  padding: 0 7px;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-  font-size: var(--oct-text-xs);
-}
-
-.code-composer-adapter__composer-bar .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
-/* The profile trigger is a peer of the model picker in this row, so it wears
-   the same quiet chrome rather than the outlined button it is elsewhere. */
-.code-composer-adapter__composer-bar .execution-profile-workflow__trigger {
-  min-height: 28px;
-  padding: 0 7px;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-  font-size: var(--oct-text-xs);
-}
-
-.code-composer-adapter__composer-bar .execution-profile-workflow__trigger:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
-/* Inside the card the strip is a row of it, so it starts on the same edge as
-   the prompt and the toolbar above it rather than centring against nothing. */
-.code-composer-adapter__context-strip {
-  justify-content: flex-start;
-}
-
-.code-composer-adapter__disclosure-toggle {
+.code-composer-choice__trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: min(16rem, 46vw);
+  min-height: 24px;
+  padding: 0 7px;
+  color: var(--octant-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.code-composer-choice__trigger:hover:not(:disabled) {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
+.code-composer-choice__trigger:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.code-composer-choice__trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.code-composer-adapter__composer-bar .code-composer-choice__trigger {
+  margin-inline-start: 4px;
+  padding-inline-start: 10px;
+  border-inline-start: 1px solid var(--octant-border);
+}
+
+.code-composer-choice__menu {
+  display: flex;
+  flex-direction: column;
+  width: min(300px, calc(100vw - 32px));
+  overflow: hidden;
+  background: var(--octant-surface);
+  border: 1px solid var(--octant-border-strong);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-overlay);
+}
+
+.code-composer-choice__caption {
+  margin: 0;
+  padding: 8px 12px 2px;
+  color: var(--octant-text-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+}
+
+.code-composer-choice__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+}
+
+/* The shared button recipe centres its content. Left unset, each option's copy
+   block floated to its own centre and the four labels landed at four
+   different x positions. */
+.code-composer-choice__option {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
   height: auto;
-  padding: 4px 2px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+  min-height: 36px;
+  padding: 7px 8px;
+  color: var(--octant-text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
-.code-composer-adapter__delivery {
+.code-composer-choice__option:hover {
+  background: var(--octant-control-hover);
+}
+
+.code-composer-choice__option[aria-selected="true"] {
+  background: var(--oct-selection);
+}
+
+.code-composer-choice__option-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--octant-text-muted);
+}
+
+.code-composer-choice__option-copy {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px 10px;
-  padding: 12px;
+  min-width: 0;
+  gap: 1px;
 }
 
-.code-composer-adapter__field {
-  display: grid;
-  gap: 3px;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+.code-composer-choice__option-label {
+  font-size: calc(13 * var(--oct-text-step));
+  font-weight: 500;
 }
 
-.code-composer-adapter__field:first-child,
-.code-composer-adapter__field:last-child {
-  grid-column: 1 / -1;
+.code-composer-choice__option-detail {
+  color: var(--octant-text-muted);
+  font-size: calc(11.5 * var(--oct-text-step));
+  line-height: 1.4;
 }
 
-.code-composer-adapter__field :is(input, select) {
-  min-height: 30px;
+.code-composer-choice__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  color: var(--octant-text-secondary);
+  border-top: 1px solid var(--octant-border);
+  font-size: 11.5px;
+  font-weight: 500;
 }
 
-@media (max-width: 620px) {
-  .code-composer-adapter__delivery {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .code-composer-adapter__field {
-    grid-column: 1;
-  }
+.code-composer-adapter__composer-bar .code-composer-adapter__context-picker {
+  margin-inline-start: 0;
 }
 
 .code-composer-adapter__error {
@@ -2019,9 +1919,12 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__hint {
   margin: 0;
-  padding: 0 2px;
-  color: var(--oct-meta);
+  padding: 0;
+  color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+  line-height: 1.4;
+  opacity: 0.7;
+  text-align: center;
 }
 
 /* Quiet worktree-source status line below the context strip. */
@@ -2143,7 +2046,7 @@ form > .work-composer-adapter__attachments {
   place-items: center;
   color: var(--oct-muted);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   background: transparent;
 }
 
@@ -2166,7 +2069,7 @@ form > .work-composer-adapter__attachments {
   height: 28px;
   padding: 0 9px;
   border: 1px solid var(--oct-border-soft);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-fg);
   background: var(--oct-bg);
 }

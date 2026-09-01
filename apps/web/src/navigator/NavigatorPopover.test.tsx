@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { OctantButton } from "../ui/base/OctantButton";
 import { NavigatorPopover } from "./NavigatorPopover";
 import { useNavigatorAssistant } from "./useNavigatorAssistant";
 
@@ -50,9 +51,9 @@ describe("NavigatorPopover", () => {
     const opener = createRef<HTMLButtonElement>();
     const { rerender } = render(
       <>
-        <button ref={opener} type="button">
+        <OctantButton ref={opener} type="button">
           Profile
-        </button>
+        </OctantButton>
         <Harness onClose={onClose} onOpenSettings={vi.fn()} open restoreFocus={opener} />
       </>,
     );
@@ -68,9 +69,9 @@ describe("NavigatorPopover", () => {
     expect(onClose).toHaveBeenCalledOnce();
     rerender(
       <>
-        <button ref={opener} type="button">
+        <OctantButton ref={opener} type="button">
           Profile
-        </button>
+        </OctantButton>
         <Harness onClose={onClose} onOpenSettings={vi.fn()} open={false} restoreFocus={opener} />
       </>,
     );

@@ -274,7 +274,7 @@ describe("ShellFrame", () => {
     expect(screen.queryByRole("separator", { name: "Resize navigation sidebar" })).toBeNull();
   });
 
-  it("contains wide and narrow layouts while allowing larger sidebar text to remain reachable", () => {
+  it("keeps the primary workspace full-height while the narrow sidebar becomes an overlay", () => {
     const shell = cssRule(".shell.shell-frame");
     const sidebarContent = cssRule(".shell-frame > .sidebar > .sidebar__content");
 
@@ -285,6 +285,12 @@ describe("ShellFrame", () => {
     expect(sidebarContent).toContain("scrollbar-gutter: stable;");
     expect(shellStyles).toMatch(
       /@media \(max-width: 680px\)[\s\S]*\.shell\.shell-frame\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\);/,
+    );
+    expect(shellStyles).toMatch(
+      /@media \(max-width: 680px\)[\s\S]*\.shell\.shell-frame\s*\{[\s\S]*grid-template-rows:\s*34px minmax\(0, 1fr\);/,
+    );
+    expect(shellStyles).toMatch(
+      /@media \(max-width: 680px\)[\s\S]*\.shell-frame > \.sidebar\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*34px auto 0 0;[^}]*box-shadow:\s*var\(--octant-shadow-overlay\);/,
     );
     expect(shellStyles).toMatch(
       /@media \(max-width: 680px\)[\s\S]*\.shell-frame > \.workspace-layer\s*\{[\s\S]*grid-column:\s*1;/,
@@ -311,7 +317,7 @@ describe("ShellFrame", () => {
     expect(workspace).toContain("grid-row: 1 / -1;");
     expect(trailing).toContain("pointer-events: auto;");
     expect(shellStyles).toMatch(
-      /@media \(max-width: 680px\)[\s\S]*\.shell-frame > \.workspace-layer\s*\{[\s\S]*grid-row:\s*3;/,
+      /@media \(max-width: 680px\)[\s\S]*\.shell-frame > \.workspace-layer\s*\{[\s\S]*grid-row:\s*2;/,
     );
   });
 
@@ -335,7 +341,7 @@ describe("ShellFrame", () => {
       /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s*\{[^}]*box-sizing:\s*border-box;[^}]*height:\s*auto;[^}]*overflow-y:\s*auto;/,
     );
     expect(shellStyles).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s+\.draft-thread__canvas\s*\{[^}]*box-sizing:\s*border-box;[^}]*justify-content:\s*flex-start;[^}]*padding:\s*12px;/,
+      /@media \(max-width: 640px\)[\s\S]*\.draft-thread\.chat-welcome\s+\.welcome\s*\{[^}]*box-sizing:\s*border-box;[^}]*justify-content:\s*flex-start;[^}]*padding:\s*12px;/,
     );
   });
 });

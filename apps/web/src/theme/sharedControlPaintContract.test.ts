@@ -16,31 +16,31 @@ function between(source: string, start: string, end: string): string {
 }
 
 describe("shared control paint ownership", () => {
-  it("lets shared recipes paint controls in the composer row", () => {
+  it("keeps composer-row controls quiet so the frame is the only field", () => {
     const controlRules = between(
       systemStyles,
       "/* One control size and one label size across the whole row.",
       "/* The frame's direct labels are its message fields;",
     );
 
-    expect(controlRules).not.toMatch(/\b(?:background|color|border|border-color|border-radius):/);
+    expect(controlRules).toMatch(/border-radius:\s*var\(--oct-radius-(?:sm|pill)\)/);
+    expect(controlRules).toMatch(/background:\s*transparent/);
+    expect(controlRules).not.toMatch(/rgb\(/);
   });
 
-  it("uses bridge aliases and semantic depth tokens for raised product surfaces", () => {
+  it("lifts the composer and Settings cards with Octant depth tokens", () => {
     const composerRules = between(
       systemStyles,
       "/* The composer is a raised object, not a field ruled onto the page:",
       ".composer-chips {",
     );
-    const settingsGroupRules = between(
-      settingsStyles,
-      ".settings-card-section > .setgroup,",
-      "/* Rows inside a group",
-    );
+    const settingsGroupRules = between(settingsStyles, ".setgroup {", "/* Rows inside a group");
 
-    expect(composerRules).not.toContain("--octant-");
+    expect(composerRules).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
+    expect(composerRules).toMatch(/--octant-(?:floating|workspace)/);
     expect(composerRules).not.toMatch(/rgb\(/);
-    expect(settingsGroupRules).not.toContain("--octant-");
+    expect(settingsGroupRules).toMatch(/--octant-settings-card/);
+    expect(settingsGroupRules).toMatch(/--octant-shadow-sm/);
     expect(settingsGroupRules).not.toMatch(/rgb\(/);
   });
 

@@ -536,11 +536,13 @@ const CanvasWorkspaceTab = Schema.Struct({
 }).annotations(strict);
 
 /**
- * The surface a pane shows. Still named `WorkspaceTab` because persisted state
- * addresses surfaces by this identity — `EnvironmentTabPresentation.tabId` and
- * every journaled layout carry `WorkspaceTabId`s — and renaming the wire name
- * would churn hundreds of call sites without changing any behavior. A pane
- * holds exactly one of these; there is no tab strip.
+ * The authoritative surface a pane shows. Still named `WorkspaceTab` because
+ * persisted state addresses surfaces by this identity —
+ * `EnvironmentTabPresentation.tabId` and every journaled layout carry
+ * `WorkspaceTabId`s — and renaming the wire name would churn hundreds of call
+ * sites without changing any behavior. A pane holds exactly one of these. A
+ * renderer may layer window-local thread navigation above the pane tree, but
+ * those entries are not hidden WorkspaceTabs and carry no authority.
  */
 export const WorkspaceTab = Schema.Union(
   WelcomeWorkspaceTab,
@@ -566,9 +568,10 @@ export const WorkspaceTab = Schema.Union(
 export type WorkspaceTab = typeof WorkspaceTab.Type;
 
 /**
- * A leaf of the split tree: one pane showing exactly one surface. There is no
- * tab strip and no hidden sibling surfaces — the sidebar is the only switcher,
- * so everything a pane holds is visible.
+ * A leaf of the split tree: one pane showing exactly one authoritative surface.
+ * There are no hidden sibling surfaces. A renderer-local thread strip may
+ * reopen recent conversations through the ordinary server command; it is not
+ * part of this persisted layout.
  */
 export interface WorkspacePane {
   readonly kind: "pane";

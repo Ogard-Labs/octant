@@ -42,7 +42,7 @@ export function createLaunchSessionRouteHandler(dependencies: LaunchSessionRoute
       return handleAdminCreate(request, url, dependencies, maxBody);
     }
     if (isDevelopmentRoute) {
-      return handleDevelopmentBootstrap(request, url, dependencies, now);
+      return handleDevelopmentBootstrap(request, url, dependencies, now, maxBody);
     }
     return handleRendererExchange(request, url, dependencies, now, maxBody);
   };
@@ -53,6 +53,7 @@ async function handleDevelopmentBootstrap(
   url: URL,
   dependencies: LaunchSessionRouteDependencies,
   now: () => number,
+  maxBody: number,
 ): Promise<Response> {
   const origin = request.headers.get("origin");
   if (dependencies.developmentWebBootstrap !== true) {
@@ -89,6 +90,41 @@ async function handleDevelopmentBootstrap(
       400,
     );
   }
+  const decoded = await readJson(request, maxBody);
+  if (decoded.kind === "too-large") {
+    return failureResponse(
+      { category: "invalid", message: "Request body is too large." },
+      origin,
+      413,
+    );
+  }
+  if (decoded.kind === "invalid") {
+    return failureResponse(
+      { category: "invalid", message: "Development web bootstrap request is invalid." },
+      origin,
+      400,
+    );
+  }
+  const previous = developmentAuthorityCandidate(decoded.value);
+  if (previous !== undefined) {
+    try {
+      const authenticatedWindowId = dependencies.windowAuthorityStore.authenticate(
+        previous.capability,
+        now(),
+      );
+      if (String(authenticatedWindowId) === String(previous.windowId)) {
+        dependencies.windowAuthorityStore.registerOrRefresh({ ...previous, now: now() });
+        return jsonResponse(
+          { ...previous, authentication: "development-bypass" as const },
+          200,
+          origin,
+        );
+      }
+    } catch {
+      // A restarted host owns no matching capability. Fall through and mint a
+      // fresh window while the durable development data remains unchanged.
+    }
+  }
   const generate = dependencies.generateDevelopmentAuthority ?? defaultDevelopmentAuthority;
   try {
     const authority = generate();
@@ -104,6 +140,21 @@ async function handleDevelopmentBootstrap(
       origin,
       503,
     );
+  }
+}
+
+function developmentAuthorityCandidate(
+  value: unknown,
+): { readonly windowId: WindowId; readonly capability: string } | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = value as { readonly windowId?: unknown; readonly capability?: unknown };
+  if (typeof candidate.windowId !== "string" || typeof candidate.capability !== "string") {
+    return undefined;
+  }
+  try {
+    return { windowId: decodeWindowId(candidate.windowId), capability: candidate.capability };
+  } catch {
+    return undefined;
   }
 }
 

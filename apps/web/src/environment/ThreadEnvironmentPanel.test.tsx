@@ -3,6 +3,7 @@ import { LOCAL_HOST_ID } from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { OctantButton } from "../ui/base/OctantButton";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 
 const identity = decodeEnvironmentCompactIdentity({
@@ -78,7 +79,7 @@ describe("the thread environment summary", () => {
     const onOpenChange = vi.fn();
     const { rerender } = render(
       <div>
-        <button type="button">Outside</button>
+        <OctantButton type="button">Outside</OctantButton>
         <ThreadEnvironmentPanel onOpenChange={onOpenChange} open summary={{ identity }}>
           <p>Checkout facts</p>
         </ThreadEnvironmentPanel>

@@ -1,15 +1,10 @@
 import type { CodeSettings } from "@octant/contracts/code";
 import { useState } from "react";
+import { SettingRow } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantCard, OctantCardContent } from "../ui/base/OctantCard";
-import {
-  OctantField,
-  OctantFieldDescription,
-  OctantFieldError,
-  OctantFieldGroup,
-  OctantFieldLabel,
-} from "../ui/base/OctantField";
+import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
@@ -23,6 +18,16 @@ export interface CodeSettingsViewProps {
   readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
   readonly settings: CodeSettings;
 }
+
+const ACCESS_OPTIONS: ReadonlyArray<{
+  readonly id: CodeSettings["defaultExecutionPolicy"];
+  readonly label: string;
+}> = [
+  { id: "approval-gated", label: "Approval" },
+  { id: "auto-accept-edits", label: "Auto-accept edits" },
+  { id: "plan", label: "Plan" },
+  { id: "full-access", label: "Full access" },
+];
 
 export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [executionPolicy, setExecutionPolicy] = useState(props.settings.defaultExecutionPolicy);
@@ -65,40 +70,37 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   }
 
   return (
-    <OctantCard aria-label="Code defaults" className="code-settings">
+    <section aria-label="Code defaults" className="code-settings">
       <h2 className="sr-only">Code defaults</h2>
-      <OctantCardContent>
-        <p className="code-settings__note">
+      <div className="settings-card-section settings-card-section--open">
+        <h2>Thread defaults</h2>
+        <p className="settings-section-note">
           These defaults apply only to new Code threads. Existing threads keep their access.
         </p>
-        <OctantFieldGroup>
-          <OctantField>
-            <OctantFieldLabel>Default Code access</OctantFieldLabel>
-            <OctantFieldDescription>
-              Choose the authority new Code threads request at creation.
-            </OctantFieldDescription>
-            <OctantToggleGroup<CodeSettings["defaultExecutionPolicy"]>
-              className="max-w-full flex-wrap"
+        <div className="setgroup">
+          <SettingRow
+            description="The authority a new Code thread requests at creation."
+            label="Default Code access"
+            scope="mode"
+            settingId="code-default-access"
+          >
+            <OctantSelectField
               aria-label="Default Code access"
+              className="settings-view__select window-no-drag"
               onValueChange={(value) => {
-                const selected = value[0];
-                if (selected !== undefined) setExecutionPolicy(selected);
+                const option = ACCESS_OPTIONS.find((candidate) => candidate.id === value);
+                if (option !== undefined) setExecutionPolicy(option.id);
               }}
-              value={[executionPolicy]}
-            >
-              <OctantToggleGroupItem value="approval-gated">Approval</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="auto-accept-edits">
-                Auto-accept edits
-              </OctantToggleGroupItem>
-              <OctantToggleGroupItem value="plan">Plan</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="full-access">Full access</OctantToggleGroupItem>
-            </OctantToggleGroup>
-          </OctantField>
-          <OctantField>
-            <OctantFieldLabel>Default approval persistence</OctantFieldLabel>
-            <OctantFieldDescription>
-              Decide whether approvals end with the session or follow the Project default.
-            </OctantFieldDescription>
+              options={ACCESS_OPTIONS}
+              value={executionPolicy}
+            />
+          </SettingRow>
+          <SettingRow
+            description="Whether approvals end with the session or follow the Project default."
+            label="Default approval persistence"
+            scope="mode"
+            settingId="code-approval-persistence"
+          >
             <OctantToggleGroup<CodeSettings["defaultPermissionPersistence"]>
               aria-label="Default approval persistence"
               onValueChange={(value) => {
@@ -110,49 +112,66 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               <OctantToggleGroupItem value="current-session">Session</OctantToggleGroupItem>
               <OctantToggleGroupItem value="project-default">Project</OctantToggleGroupItem>
             </OctantToggleGroup>
-          </OctantField>
-          <OctantField>
-            <OctantFieldLabel htmlFor="code-editor-executable">
-              External editor executable
-            </OctantFieldLabel>
+          </SettingRow>
+        </div>
+      </div>
+      <div className="settings-card-section settings-card-section--open">
+        <h2>External editor</h2>
+        <div className="setgroup">
+          <SettingRow
+            description="An absolute path to the editor Octant opens files in."
+            label="External editor executable"
+            scope="app"
+            settingId="code-editor-executable"
+          >
             <OctantInput
               aria-label="External editor executable"
+              className="settings-view__text-input"
               id="code-editor-executable"
               onChange={(event) => setExecutable(event.currentTarget.value)}
               placeholder="/usr/local/bin/code"
               type="text"
               value={executable}
             />
-          </OctantField>
-          <OctantField>
-            <OctantFieldLabel htmlFor="code-editor-arguments">
-              External editor arguments
-            </OctantFieldLabel>
+          </SettingRow>
+          <SettingRow
+            description={
+              <>
+                One argument per line. Available placeholders: {"{file}"}, {"{line}"}, {"{column}"}.
+              </>
+            }
+            label="External editor arguments"
+            scope="app"
+            settingId="code-editor-arguments"
+          >
             <OctantTextarea
               aria-label="External editor arguments"
+              className="settings-view__text-input"
               id="code-editor-arguments"
               onChange={(event) => setArgumentsText(event.currentTarget.value)}
               placeholder={"--goto\n{file}:{line}:{column}"}
               value={argumentsText}
             />
-            <OctantFieldDescription>
-              One argument per line. Available placeholders: {"{file}"}, {"{line}"}, {"{column}"}.
-            </OctantFieldDescription>
-          </OctantField>
-          <div className="flex items-center gap-3">
-            <OctantButton onClick={() => void save()} type="button" variant="secondary">
+          </SettingRow>
+          <SettingRow
+            description="Threads created after saving use these defaults."
+            label="Save"
+            scope="app"
+            settingId="code-save"
+          >
+            <OctantButton onClick={() => void save()} size="sm" type="button" variant="secondary">
               Save Code defaults
             </OctantButton>
-            {message === undefined ? null : message === "Code defaults saved." ? (
-              <p className="m-0 text-sm text-muted-foreground" role="status">
-                {message}
-              </p>
-            ) : (
-              <OctantFieldError>{message}</OctantFieldError>
-            )}
-          </div>
-        </OctantFieldGroup>
-      </OctantCardContent>
-    </OctantCard>
+          </SettingRow>
+        </div>
+        {message === undefined ? null : message === "Code defaults saved." ? (
+          <p className="settings-section-line" role="status">
+            {message}
+          </p>
+        ) : (
+          <OctantFieldError className="settings-section-line">{message}</OctantFieldError>
+        )}
+      </div>
+    </section>
   );
 }

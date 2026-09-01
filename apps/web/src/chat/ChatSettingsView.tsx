@@ -7,10 +7,11 @@ import type {
 import { buildModelPickerGroups } from "@octant/domain";
 import { useMemo, useState } from "react";
 import { ModelPicker } from "../providers/ModelPicker";
+import { SettingRow } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 export type UpdateChatSettingsCommand = Extract<
@@ -68,14 +69,12 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
   }
 
   return (
-    <section aria-labelledby="chat-defaults-heading" className="provider-settings">
-      <div className="provider-settings__intro">
-        <div>
-          <h2 id="chat-defaults-heading">Chat defaults</h2>
-          <p>Choose the defaults Octant uses when you start a new Chat thread.</p>
-        </div>
-      </div>
-      <p className="provider-settings__hint">
+    <section
+      aria-labelledby="chat-defaults-heading"
+      className="settings-card-section settings-card-section--open chat-settings"
+    >
+      <h2 id="chat-defaults-heading">Chat defaults</h2>
+      <p className="settings-section-note">
         These defaults apply only to new threads. Existing threads keep their explicit values.
       </p>
       {props.message === undefined ? null : (
@@ -85,7 +84,8 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       )}
       <form
         aria-label="Chat defaults"
-        className="provider-settings__form setgroup"
+        className="setgroup"
+        noValidate
         onSubmit={async (event) => {
           event.preventDefault();
           const nextEndpointError = endpointValidationMessage(draft.searxngBaseUrl);
@@ -129,8 +129,12 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           }
         }}
       >
-        <label className="settings-view__field settings-view__field--block">
-          <span>Default provider and model</span>
+        <SettingRow
+          description="The provider and model a new Chat thread starts with."
+          label="Default provider and model"
+          scope="host"
+          settingId="chat-default-model"
+        >
           <ModelPicker
             ariaLabel="Default Chat provider and model"
             groups={groups}
@@ -145,49 +149,57 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             selectedModelId={selectedModelId}
             selectedProviderInstanceId={selectedProviderInstanceId}
           />
-        </label>
-        <label className="settings-view__toggle">
-          <OctantCheckbox
-            aria-label="Enable research by default"
+        </SettingRow>
+        <SettingRow
+          description="New Chat threads start with research turned on."
+          label="Research by default"
+          scope="host"
+          settingId="chat-research-enabled"
+        >
+          <OctantSwitch
             checked={draft.defaultResearchEnabled}
-            className="settings-view__checkbox"
             disabled={busy}
-            onChange={(event) => {
-              const defaultResearchEnabled = event.currentTarget.checked;
-              setDraft((current) => ({
-                ...current,
-                defaultResearchEnabled,
-              }));
+            label="Enable research by default"
+            onCheckedChange={(defaultResearchEnabled) => {
+              setDraft((current) => ({ ...current, defaultResearchEnabled }));
             }}
           />
-          <span>Enable research by default</span>
-        </label>
-        <label className="settings-view__field">
-          <span>Default research backend</span>
-          <OctantNativeSelect
+        </SettingRow>
+        <SettingRow
+          description="Where research requests go when a thread does not choose."
+          label="Default research backend"
+          scope="host"
+          settingId="chat-research-backend"
+        >
+          <OctantSelectField
             aria-label="Default research backend"
-            className="settings-view__select"
+            className="settings-view__select window-no-drag"
             disabled={busy}
-            onChange={(event) => {
-              const defaultResearchRouting = event.currentTarget
-                .value as ChatSettings["defaultResearchRouting"];
+            onValueChange={(value) => {
+              const defaultResearchRouting = value as ChatSettings["defaultResearchRouting"];
               setDraft((current) => ({
                 ...current,
                 defaultResearchRouting,
               }));
             }}
+            options={[
+              { id: "automatic", label: "Automatic" },
+              { id: "searxng", label: "SearXNG" },
+              { id: "provider-native", label: "Provider-native" },
+            ]}
             value={draft.defaultResearchRouting}
-          >
-            <option value="automatic">Automatic</option>
-            <option value="searxng">SearXNG</option>
-            <option value="provider-native">Provider-native</option>
-          </OctantNativeSelect>
-        </label>
-        <label className="settings-view__field">
-          <span>SearXNG base URL</span>
+          />
+        </SettingRow>
+        <SettingRow
+          description="HTTPS, or HTTP on a loopback address."
+          label="SearXNG base URL"
+          scope="host"
+          settingId="chat-searxng-url"
+        >
           <OctantInput
             aria-describedby={endpointError === undefined ? undefined : "searxng-base-url-error"}
             aria-invalid={endpointError === undefined ? undefined : true}
+            aria-label="SearXNG base URL"
             className="settings-view__text-input"
             disabled={busy}
             onChange={(event) => setEndpoint(event.currentTarget.value)}
@@ -195,14 +207,18 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             type="url"
             value={draft.searxngBaseUrl}
           />
-        </label>
+        </SettingRow>
         {endpointError === undefined ? null : (
           <p className="provider-settings__alert" id="searxng-base-url-error" role="alert">
             {endpointError}
           </p>
         )}
-        <label className="settings-view__field">
-          <span>Calm personality instructions</span>
+        <SettingRow
+          description="How a new Chat thread carries itself before you say otherwise."
+          label="Calm personality instructions"
+          scope="host"
+          settingId="chat-personality"
+        >
           <OctantTextarea
             aria-label="Calm personality instructions"
             className="settings-view__text-input"
@@ -217,20 +233,22 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             rows={3}
             value={draft.defaultPersonalityInstructions}
           />
-        </label>
+        </SettingRow>
         {formError === undefined ? null : (
           <p className="provider-settings__alert" role="alert">
             {formError}
           </p>
         )}
-        <OctantButton
-          className="settings-view__action"
-          disabled={busy}
-          type="submit"
-          variant="secondary"
+        <SettingRow
+          description="Threads created after saving use these defaults."
+          label="Save"
+          scope="host"
+          settingId="chat-save"
         >
-          {saving ? "Saving Chat defaults…" : "Save Chat defaults"}
-        </OctantButton>
+          <OctantButton disabled={busy} size="sm" type="submit" variant="secondary">
+            {saving ? "Saving Chat defaults…" : "Save Chat defaults"}
+          </OctantButton>
+        </SettingRow>
       </form>
     </section>
   );

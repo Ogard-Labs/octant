@@ -11,6 +11,7 @@ import type {
 import type { PurgeThreadsOutcome } from "@octant/contracts/thread-retention";
 import { localHostDisplayName } from "@octant/client-runtime";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { HostSettingsSection } from "./HostSettingsSection";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
 
@@ -130,8 +131,16 @@ describe("HostSettingsSection", () => {
     expect(screen.getByText(/42 \/ 42/)).toBeInTheDocument();
     expect(screen.getByText("platform:systemd-user-units")).toBeInTheDocument();
     expect(screen.getByText("platform:keychain")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Identity" })).toHaveClass("settings-panel");
-    expect(screen.getByRole("region", { name: "Readiness" })).toHaveClass("settings-panel");
+    // Identity and readiness are routine facts, so they read as open
+    // sections; only recovery and retention keep the raised panel.
+    expect(screen.getByRole("region", { name: "Identity" })).toHaveClass(
+      "settings-card-section--open",
+    );
+    expect(screen.getByRole("region", { name: "Readiness" })).toHaveClass(
+      "settings-card-section--open",
+    );
+    expect(screen.getByRole("region", { name: "Identity" })).not.toHaveClass("settings-panel");
+    expect(screen.getByRole("region", { name: "Thread retention" })).toHaveClass("settings-panel");
   });
 
   it("keeps the section navigable by headings for assistive technology", async () => {
@@ -182,22 +191,34 @@ describe("HostSettingsSection", () => {
     expect(screen.getByText(/The service policy could not be read/)).toBeInTheDocument();
   });
 
-  it("ignores invalid thread retention scope and mode select values", async () => {
+  it("offers only the declared thread retention scopes and modes", async () => {
+    const user = userEvent.setup();
     render(<HostSettingsSection client={makeClient()} />);
     await screen.findByText("host-1");
 
-    const scope = screen.getByLabelText<HTMLSelectElement>("Scope");
-    scope.add(new Option("Invalid scope", "invalid-scope"));
-    fireEvent.change(scope, { target: { value: "invalid-scope" } });
-    fireEvent.change(screen.getByLabelText("Retention window"), { target: { value: "7" } });
-    expect(scope).toHaveValue("host");
+    const scope = screen.getByLabelText("Scope");
+    expect(scope).toHaveTextContent("This host");
+    await user.click(scope);
+    expect(await screen.findAllByRole("option")).toHaveLength(3);
+    expect(screen.getByRole("option", { name: "This host" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "One Project" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "One thread" })).toBeVisible();
+    await user.click(screen.getByRole("option", { name: "One thread" }));
 
-    fireEvent.change(scope, { target: { value: "thread" } });
-    const mode = screen.getByLabelText<HTMLSelectElement>("Mode");
-    mode.add(new Option("Invalid mode", "invalid-mode"));
-    fireEvent.change(mode, { target: { value: "invalid-mode" } });
-    fireEvent.change(screen.getByLabelText("Retention window"), { target: { value: "30" } });
-    expect(mode).toHaveValue("chat");
+    const mode = screen.getByLabelText("Mode");
+    expect(mode).toHaveTextContent("Chat");
+    await user.click(mode);
+    expect(await screen.findAllByRole("option")).toHaveLength(3);
+    expect(screen.getByRole("option", { name: "Chat" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Work" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Code" })).toBeVisible();
+    await user.click(screen.getByRole("option", { name: "Chat" }));
+
+    const window = screen.getByLabelText("Retention window");
+    await chooseSelectFieldOption(user, window, "7 days");
+    expect(window).toHaveTextContent("7 days");
+    await chooseSelectFieldOption(user, window, "30 days");
+    expect(window).toHaveTextContent("30 days");
   });
 
   it("sends a stop request and renders the accepted outcome", async () => {

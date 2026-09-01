@@ -119,6 +119,7 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
 
       {state.kind === "ready" || state.kind === "unconfigured" ? (
         <form
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             const next = prompt.trim();

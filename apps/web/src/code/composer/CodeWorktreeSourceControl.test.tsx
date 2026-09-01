@@ -5,6 +5,7 @@ import type {
   WorktreeRemoteFacts,
   WorktreeSourceResolution,
 } from "@octant/domain/code-worktree-source-policy";
+import { chooseSelectFieldOption } from "../../test/chooseSelectFieldOption.test-support";
 import { CodeWorktreeSourceControl } from "./CodeWorktreeSourceControl";
 
 const FULL_SHA = "a1b2c3d4e5f60718293a4b5c6d7e8f9011223344";
@@ -90,9 +91,9 @@ describe("CodeWorktreeSourceControl", () => {
       onSelectRemote,
       selectedRemote: "origin",
     });
-    const select = screen.getByLabelText("Remote") as HTMLSelectElement;
-    expect(select.value).toBe("origin");
-    await user.selectOptions(select, "upstream");
+    const remote = screen.getByLabelText("Remote");
+    expect(remote).toHaveTextContent("origin");
+    await chooseSelectFieldOption(user, remote, "upstream");
     expect(onSelectRemote).toHaveBeenLastCalledWith("upstream");
   });
 

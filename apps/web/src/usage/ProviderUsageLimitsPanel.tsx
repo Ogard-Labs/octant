@@ -8,8 +8,8 @@ import type {
   ProviderUsageLimitsSnapshot,
   ServiceLimitBucket,
 } from "@octant/contracts";
+import { SurfaceEmpty, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantCard } from "../ui/base/OctantCard";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 
 export function ProviderUsageLimitsPanel(props: {
@@ -48,56 +48,71 @@ export function ProviderUsageLimitsPanel(props: {
   }
 
   return (
-    <OctantCard aria-label="Provider usage limits" className="settings-card grid gap-4 p-4">
-      <header className="provider-limits__header">
-        <div>
-          <h2>Provider limits</h2>
-          <p>Live provider capacity is separate from Octant's local recorded usage.</p>
-        </div>
+    <SurfaceSection
+      className="provider-limits"
+      label="Provider limits"
+      note="Live provider capacity is separate from Octant's local recorded usage."
+    >
+      <div className="surface-toolbar">
+        {message === undefined ? null : (
+          <p className="oct-row-detail" role="status">
+            {message}
+          </p>
+        )}
+        {snapshot === undefined && message === undefined ? (
+          <p className="oct-row-detail" role="status">
+            Loading provider limits…
+          </p>
+        ) : null}
+        <span className="surface-toolbar__spacer" />
         <OctantButton
           aria-label="Refresh provider limits"
           disabled={busy}
           onClick={() => void refresh()}
+          size="sm"
           type="button"
-          variant="outline"
+          variant="ghost"
         >
           <RefreshCw aria-hidden="true" size={14} />
           Refresh
         </OctantButton>
-      </header>
-      {message === undefined ? null : <p role="status">{message}</p>}
-      {snapshot === undefined && message === undefined ? (
-        <p role="status">Loading provider limits…</p>
-      ) : null}
-      <div className="provider-limits__list">
-        {snapshot?.entries.length === 0 ? (
-          <p className="provider-limits__empty">No configured providers have reported limits.</p>
-        ) : null}
-        {snapshot?.entries.map((entry) => {
-          const instance = names.get(String(entry.providerInstanceId));
-          return (
-            <article className="provider-limits__row" key={String(entry.providerInstanceId)}>
-              <div className="provider-limits__identity">
-                {instance === undefined ? null : (
-                  <ProviderGlyph
-                    displayName={instance.displayName}
-                    driverKind={instance.driverKind}
-                    size={16}
-                  />
-                )}
-                <div>
-                  <h3>{instance?.displayName ?? "Provider"}</h3>
-                  <p>
-                    {entry.source === "provider-runtime" ? "Provider runtime" : "Local observer"}
-                  </p>
-                </div>
-              </div>
-              <EntryDetails entry={entry} />
-            </article>
-          );
-        })}
       </div>
-    </OctantCard>
+      {snapshot?.entries.length === 0 ? (
+        <SurfaceEmpty title="No configured providers have reported limits." />
+      ) : null}
+      {snapshot === undefined || snapshot.entries.length === 0 ? null : (
+        <ul className="surface-list">
+          {snapshot.entries.map((entry) => {
+            const instance = names.get(String(entry.providerInstanceId));
+            return (
+              <li
+                className="surface-row provider-limits__row"
+                key={String(entry.providerInstanceId)}
+              >
+                <div className="surface-row__copy">
+                  <span className="provider-limits__identity">
+                    {instance === undefined ? null : (
+                      <ProviderGlyph
+                        displayName={instance.displayName}
+                        driverKind={instance.driverKind}
+                        size={16}
+                      />
+                    )}
+                    <span className="oct-row-label">{instance?.displayName ?? "Provider"}</span>
+                  </span>
+                  <span className="oct-row-detail">
+                    {entry.source === "provider-runtime" ? "Provider runtime" : "Local observer"}
+                  </span>
+                </div>
+                <div className="surface-row__control">
+                  <EntryDetails entry={entry} />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </SurfaceSection>
   );
 }
 

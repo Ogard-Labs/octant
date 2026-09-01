@@ -30,6 +30,12 @@ export interface RightUtilityDockSurfaceDescriptor {
   readonly scope: RightUtilityDockSurfaceScope;
 }
 
+export interface RightUtilityDockTabDescriptor {
+  readonly id: string;
+  readonly label: string;
+  readonly surface: RightUtilityDockSurfaceDescriptor;
+}
+
 export type RightUtilityDockSurfaceAvailability =
   | "available"
   | "unknown"

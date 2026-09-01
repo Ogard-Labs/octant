@@ -1,7 +1,7 @@
 import { DEFAULT_THEME_SETTINGS, type ThemeTypography } from "@octant/contracts/theme";
 
 export const DEFAULT_UI_TYPOGRAPHY: UiTypographyProjection = {
-  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+  fontFamily: DEFAULT_THEME_SETTINGS.typography.ui.family,
   fontSize: 13,
   fontWeight: 400,
 };
@@ -42,6 +42,8 @@ export interface ResolvedTypographyProjection {
   readonly terminal: TerminalTypographyProjection;
 }
 
+const LEGACY_DEFAULT_UI_FAMILY =
+  "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 32;
 const MIN_LINE_HEIGHT = 1;
@@ -74,7 +76,16 @@ export function resolveTypographyProjection(
   const sourceTerminal = asRecord(source.terminal);
   const defaults = DEFAULT_THEME_SETTINGS.typography;
 
-  const uiFamily = resolveFamily(sourceUi.family, availableFonts, DEFAULT_UI_TYPOGRAPHY.fontFamily);
+  // Settings saved before the renderer shipped its own interface face hold
+  // the old system stack verbatim. That string meant "the default", so it
+  // keeps meaning the default instead of pinning those users to the old face.
+  const uiFamily = resolveFamily(
+    sourceUi.family === LEGACY_DEFAULT_UI_FAMILY
+      ? DEFAULT_UI_TYPOGRAPHY.fontFamily
+      : sourceUi.family,
+    availableFonts,
+    DEFAULT_UI_TYPOGRAPHY.fontFamily,
+  );
   const editorFamily = resolveFamily(
     sourceEditor.family,
     availableFonts,

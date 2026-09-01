@@ -138,7 +138,7 @@
   color: var(--oct-fg-2);
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
 }
 
@@ -191,16 +191,64 @@
   display: flex;
   height: 100%;
   flex-direction: column;
-  background: var(--oct-surface);
+  background: transparent;
+}
+
+.code-file-explorer-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.code-file-explorer-panel__toolbar {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 2px var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-file-explorer-panel__toolbar button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
 }
 
 .code-file-explorer__search {
-  display: grid;
-  gap: var(--oct-space-1);
-  padding: var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border);
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: var(--oct-space-2);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+}
+
+.code-file-explorer__search > svg {
+  position: absolute;
+  z-index: 1;
+  left: 17px;
+  pointer-events: none;
+}
+
+.code-file-explorer__search input {
+  height: 30px;
+  padding: 0 32px 0 30px;
+  border-color: var(--oct-border);
+  background: var(--oct-surface);
+}
+
+.code-file-explorer__search-clear {
+  position: absolute;
+  right: 11px;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
 }
 
 .code-file-explorer__status,
@@ -215,42 +263,64 @@
 .code-file-explorer__tree {
   min-height: 0;
   overflow: auto;
-  padding: var(--oct-space-2);
+  padding: 2px var(--oct-space-2) var(--oct-space-3);
 }
 
 /* Rows mirror the system's .tree-item metrics (26px, xs type, 5px radius,
    fg-soft states); the class itself stays off because a row is a two-column
    grid carrying an availability note the plain tree item has no slot for. */
 .code-file-explorer__entry {
-  display: grid;
+  display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 26px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 28px;
   align-items: center;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-1) var(--oct-space-2);
-  border-radius: 5px;
+  gap: 6px;
+  padding-block: 2px;
+  padding-inline-end: var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   text-align: left;
 }
 
 .code-file-explorer__entry span {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .code-file-explorer__entry small {
+  flex: 0 1 auto;
+  max-width: 42%;
+  overflow: hidden;
   color: var(--oct-meta);
   font-size: calc(10 * var(--oct-text-step));
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.code-file-explorer__entry--file {
+.code-file-explorer__entry > svg {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+}
+
+.code-file-explorer__chevron {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.code-file-explorer__entry--directory[aria-expanded="true"] .code-file-explorer__chevron {
+  transform: rotate(90deg);
+}
+
+.code-file-explorer__entry--file,
+.code-file-explorer__entry--directory {
   cursor: pointer;
 }
 
+.code-file-explorer__entry--directory:hover,
 .code-file-explorer__entry--file:hover,
 .code-file-explorer__entry--file[aria-selected="true"] {
   background: var(--oct-fg-soft);
@@ -297,8 +367,8 @@
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .code-editor-pane h1,
@@ -381,7 +451,7 @@
   padding: 5px var(--oct-space-2);
   background: transparent;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: var(--oct-text-xs);
   text-align: left;
@@ -461,7 +531,7 @@
 
 /* Layout only: the header's system buttons keep their width instead of
    shrinking against the ellipsised file name beside them. */
-.code-diff-pane__detail-header .btn {
+.code-diff-pane__detail-header button {
   flex: none;
 }
 
@@ -586,8 +656,8 @@
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .github-picker__option {
@@ -597,7 +667,7 @@
   justify-content: space-between;
   gap: var(--oct-space-1) var(--oct-space-3);
   padding: 5px var(--oct-space-2);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
 }
 

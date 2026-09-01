@@ -10,6 +10,7 @@ import type {
 import type {
   BrowserActionKind,
   BrowserActionRequest,
+  BrowserContextId,
   BrowserViewportPoint,
 } from "@octant/contracts/browser-automation";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
@@ -70,6 +71,10 @@ export interface BrowserWorkspaceProps {
     readonly threadId: string;
     readonly mode: "work" | "code";
   }) => void;
+  /** Reports the isolated context created by a repeatable dock tab. */
+  readonly onContextCreated?: (contextId: BrowserContextId) => void;
+  /** A newly added Browser tab must not attach to another tab's current context. */
+  readonly startFresh?: boolean;
 }
 
 export function BrowserWorkspace(props: BrowserWorkspaceProps) {
@@ -81,6 +86,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   );
   const [message, setMessage] = useState<string>();
   const [starting, setStarting] = useState(false);
+  const [ownedContextId, setOwnedContextId] = useState<BrowserContextId | undefined>(
+    props.tab.contextId,
+  );
   const [nativeSupported, setNativeSupported] = useState(false);
   const [remoteFocused, setRemoteFocused] = useState(false);
   // Pointing at the page is a separate gesture from using it: while it is on, a
@@ -155,6 +163,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
 
   useEffect(() => {
     if (props.tab.threadId === undefined) return;
+    const contextId = props.tab.contextId ?? ownedContextId;
+    if (props.startFresh === true && contextId === undefined) {
+      setStatus("ready");
+      return;
+    }
     const controller = new AbortController();
     let active = true;
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -166,10 +179,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         // other: asking for the thread's current context instead
         // would move this tab onto whatever was opened last.
         const next =
-          props.tab.contextId === undefined
+          contextId === undefined
             ? await props.client.inspectThread({ threadId: props.tab.threadId! }, controller.signal)
             : await props.client.inspect(
-                { contextId: props.tab.contextId, threadId: props.tab.threadId! },
+                { contextId, threadId: props.tab.threadId! },
                 controller.signal,
               );
         if (!active || controller.signal.aborted) return;
@@ -215,7 +228,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       controller.abort();
       if (refreshTimer !== undefined) clearTimeout(refreshTimer);
     };
-  }, [props.client, props.tab.contextId, props.tab.threadId]);
+  }, [ownedContextId, props.client, props.startFresh, props.tab.contextId, props.tab.threadId]);
 
   if (props.tab.threadId === undefined) {
     return (
@@ -275,6 +288,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           });
           update(navigated);
         }
+      }
+      if (props.startFresh === true && next.context !== undefined) {
+        setOwnedContextId(next.context.contextId);
+        props.onContextCreated?.(next.context.contextId);
       }
     } catch (error) {
       localFailure.current = true;
@@ -471,6 +488,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         </div>
         <form
           className="browser-workspace__omnibox"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             void navigate();

@@ -1,5 +1,5 @@
 import type { AutomationDefinitionDraft } from "@octant/contracts";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AutomationDefinitionEditor, utcInstantFromLocalInput } from "./AutomationDefinitionEditor";
@@ -47,6 +47,11 @@ function catalog(overrides: Partial<AutomationEditorCatalog> = {}): AutomationEd
   };
 }
 
+async function chooseLabeledOption(label: string, optionName: string): Promise<void> {
+  await userEvent.click(screen.getByLabelText(label));
+  await userEvent.click(await screen.findByRole("option", { name: optionName }));
+}
+
 function editorProps(overrides: Record<string, unknown> = {}) {
   return {
     catalog: catalog(),
@@ -84,20 +89,16 @@ describe("AutomationDefinitionEditor creation", () => {
       "Summarize the Project's open work.",
     );
     // The destination environment, named the way every other surface names it.
-    expect(screen.getByLabelText("Environment")).toHaveValue("local");
-    await userEvent.selectOptions(screen.getByLabelText("Project"), String(workDraft.projectId));
-    await userEvent.selectOptions(screen.getByLabelText("Execution profile"), [
-      String(workDraft.executionProfile.profileId),
-    ]);
-    await userEvent.selectOptions(screen.getByLabelText("Authority profile"), [
-      String(workDraft.authorityProfile.profileId),
-    ]);
+    expect(screen.getByLabelText("Environment")).toHaveTextContent("This Mac");
+    await chooseLabeledOption("Project", "Docs Project");
+    await chooseLabeledOption("Execution profile", "Work default");
+    await chooseLabeledOption("Authority profile", "Approval-gated Work");
     // The effective authority is summarized as named text, never a token dump.
     expect(
       screen.getByText("Approval-gated · filesystem, tools · this session only"),
     ).toBeVisible();
 
-    await userEvent.selectOptions(screen.getByLabelText("Schedule"), "once");
+    await chooseLabeledOption("Schedule", "Run once");
     fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
 
     await userEvent.type(
@@ -134,14 +135,10 @@ describe("AutomationDefinitionEditor creation", () => {
 
     await userEvent.type(screen.getByLabelText("Name"), "Weekly summary");
     await userEvent.type(screen.getByLabelText("Task for each run"), "Summarize open work.");
-    await userEvent.selectOptions(screen.getByLabelText("Project"), String(workDraft.projectId));
-    await userEvent.selectOptions(screen.getByLabelText("Execution profile"), [
-      String(workDraft.executionProfile.profileId),
-    ]);
-    await userEvent.selectOptions(screen.getByLabelText("Authority profile"), [
-      String(workDraft.authorityProfile.profileId),
-    ]);
-    await userEvent.selectOptions(screen.getByLabelText("Schedule"), "weekly-local");
+    await chooseLabeledOption("Project", "Docs Project");
+    await chooseLabeledOption("Execution profile", "Work default");
+    await chooseLabeledOption("Authority profile", "Approval-gated Work");
+    await chooseLabeledOption("Schedule", "Weekly on chosen days");
     await userEvent.click(screen.getByRole("checkbox", { name: "Mon" }));
     await userEvent.click(screen.getByRole("checkbox", { name: "Wed" }));
     fireEvent.change(screen.getByLabelText("Time of day"), { target: { value: "09:30" } });
@@ -169,14 +166,10 @@ describe("AutomationDefinitionEditor creation", () => {
 
     await userEvent.type(screen.getByLabelText("Name"), "Weekly summary");
     await userEvent.type(screen.getByLabelText("Task for each run"), "Summarize open work.");
-    await userEvent.selectOptions(screen.getByLabelText("Project"), String(workDraft.projectId));
-    await userEvent.selectOptions(screen.getByLabelText("Execution profile"), [
-      String(workDraft.executionProfile.profileId),
-    ]);
-    await userEvent.selectOptions(screen.getByLabelText("Authority profile"), [
-      String(workDraft.authorityProfile.profileId),
-    ]);
-    await userEvent.selectOptions(screen.getByLabelText("Schedule"), "once");
+    await chooseLabeledOption("Project", "Docs Project");
+    await chooseLabeledOption("Execution profile", "Work default");
+    await chooseLabeledOption("Authority profile", "Approval-gated Work");
+    await chooseLabeledOption("Schedule", "Run once");
     fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
     await userEvent.type(screen.getByLabelText("Delivery target"), "A weekly summary exists.");
     await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
@@ -186,7 +179,7 @@ describe("AutomationDefinitionEditor creation", () => {
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
 
-  it("never offers Full access profiles and names the boundary", () => {
+  it("never offers Full access profiles and names the boundary", async () => {
     const fullAccessExecution = {
       ...workDraft.executionProfile,
       profileId: AUTOMATION_UI_TEST_IDS.otherAutomation,
@@ -205,8 +198,9 @@ describe("AutomationDefinitionEditor creation", () => {
       />,
     );
 
-    const select = screen.getByLabelText("Execution profile");
-    expect(select).not.toHaveTextContent("Full access");
+    await userEvent.click(screen.getByLabelText("Execution profile"));
+    expect(await screen.findByRole("option", { name: "Work default" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Full access" })).not.toBeInTheDocument();
     expect(
       screen.getByText(
         "Full access profiles are not eligible for automations. Choose an approval-gated profile.",
@@ -217,15 +211,16 @@ describe("AutomationDefinitionEditor creation", () => {
   it("filters Projects by mode and resets stale selections when the mode changes", async () => {
     render(<AutomationDefinitionEditor {...editorProps()} />);
 
-    const projectSelect = screen.getByLabelText("Project");
-    expect(projectSelect).toHaveTextContent("Docs Project");
-    expect(projectSelect).not.toHaveTextContent("Repo Project");
-    await userEvent.selectOptions(projectSelect, String(workDraft.projectId));
+    await userEvent.click(screen.getByLabelText("Project"));
+    expect(await screen.findByRole("option", { name: "Docs Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Repo Project" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("option", { name: "Docs Project" }));
 
     await userEvent.click(screen.getByRole("button", { name: "Code" }));
-    expect(screen.getByLabelText("Project")).toHaveValue("");
-    expect(screen.getByLabelText("Project")).toHaveTextContent("Repo Project");
-    expect(screen.getByLabelText("Project")).not.toHaveTextContent("Docs Project");
+    expect(screen.getByLabelText("Project")).toHaveTextContent("Choose a Project");
+    await userEvent.click(screen.getByLabelText("Project"));
+    expect(await screen.findByRole("option", { name: "Repo Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Docs Project" })).not.toBeInTheDocument();
   });
 
   it("fails closed with named text when no Project or profile options exist", () => {
@@ -267,7 +262,7 @@ describe("AutomationDefinitionEditor editing", () => {
     expect(screen.getByLabelText("Task for each run")).toHaveValue(
       "Summarize the Project's open work.",
     );
-    expect(screen.getByLabelText("Project")).toHaveValue(String(definition.projectId));
+    expect(screen.getByLabelText("Project")).toHaveTextContent("Docs Project");
     expect(screen.getByLabelText("Delivery target")).toHaveValue(
       "A confirmed weekly summary document exists in the Project.",
     );
@@ -304,7 +299,7 @@ describe("AutomationDefinitionEditor editing", () => {
 });
 
 describe("choosing where a routine runs", () => {
-  it("calls this window's own host Local rather than by its machine name", () => {
+  it("calls this window's own host Local rather than by its machine name", async () => {
     render(
       <AutomationDefinitionEditor
         catalog={{
@@ -320,7 +315,8 @@ describe("choosing where a routine runs", () => {
       />,
     );
 
-    const options = within(screen.getByLabelText("Environment")).getAllByRole("option");
+    await userEvent.click(screen.getByLabelText("Environment"));
+    const options = await screen.findAllByRole("option");
 
     expect(options.map((option) => option.textContent)).toEqual(["Local", "Devbox"]);
   });

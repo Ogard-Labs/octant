@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
-import { ArrowLeft, Search } from "lucide-react";
+import { ArrowLeft, ChevronDown, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
   type SettingsDeepLink,
@@ -20,9 +20,10 @@ import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController } from "../providers/useDiscoveryController";
 import { ProviderSettingsView } from "../providers/ProviderSettingsView";
 import { ProviderDiscoverySection } from "../providers/ProviderDiscoverySection";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
+import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -75,7 +76,10 @@ import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
-import { MarketplaceFetchSettings } from "../settings/MarketplaceFetchSettings";
+import {
+  MarketplaceFetchDisclosure,
+  MarketplaceFetchSettings,
+} from "../settings/MarketplaceFetchSettings";
 import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings";
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import type { OctantHostBridge } from "./hostBridge";
@@ -138,8 +142,9 @@ const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Obj
 );
 
 const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>> = {
-  general: "Choose app-wide defaults, shortcuts, and update behavior.",
+  general: "Choose app-wide defaults, identity, updates, and network behavior.",
   appearance: "Choose how Octant looks. Use a built-in theme or make your own.",
+  keybindings: "Change the shortcuts that reach Octant's global surfaces.",
   chat: "Defaults for new Chat conversations.",
   work: "Defaults for Work threads.",
   code: "Defaults for Code threads and delivery.",
@@ -182,6 +187,10 @@ export function SettingsView(props: SettingsViewProps) {
     registry: octantSettingsRegistry,
     ...(props.initialDeepLink === undefined ? {} : { initialDeepLink: props.initialDeepLink }),
   });
+  const narrow = props.isNarrow === true;
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const navigationTrigger = useRef<HTMLButtonElement>(null);
+  const navigationClose = useRef<HTMLButtonElement>(null);
 
   // Apply a pending deep link requested from another app surface (e.g. an
   // empty state or provider error) once, then report it consumed.
@@ -215,52 +224,103 @@ export function SettingsView(props: SettingsViewProps) {
     route.applyDeepLink(link);
     props.onSearchChange("");
   };
+  const currentSectionLabel = hasQuery
+    ? "Search settings"
+    : (SECTION_LABELS[route.activeSection] ?? "Settings");
+  const navigation = (
+    <SettingsNavigation
+      activeSection={route.activeSection}
+      onSelect={(sectionId) => {
+        route.openSection(sectionId);
+        setNavigationOpen(false);
+      }}
+      sections={navItems}
+    />
+  );
 
   return (
-    <section aria-label="Settings" className="settings-view">
-      <aside aria-label="Settings sidebar" className="settings-view__sidebar">
-        <div className="settings-view__sidebar-titlebar window-drag-region">
-          <span aria-hidden="true" className="settings-view__traffic-light-space" />
-          <span className="settings-view__drag-space" />
-        </div>
-        <div className="settings-view__sidebar-content">
-          {props.onBack === undefined ? null : (
-            <OctantButton
-              className="setnav-item window-no-drag settings-view__back justify-start"
-              onClick={props.onBack}
-              type="button"
-              variant="ghost"
-            >
-              <ArrowLeft aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
-              <span>Back to app</span>
-            </OctantButton>
-          )}
-          <label className="settings-view__field settings-view__field--search">
-            <span className="settings-view__search-label">Search settings</span>
-            <Search aria-hidden="true" className="settings-view__search-icon" size={14} />
-            <OctantInput
-              aria-label="Search settings"
-              className="settings-view__text-input"
-              onChange={(event) => props.onSearchChange(event.currentTarget.value)}
-              placeholder="Search settings…"
-              type="search"
+    <section
+      aria-label="Settings"
+      className={narrow ? "settings-view settings-view--narrow" : "settings-view"}
+    >
+      {narrow ? null : (
+        <aside aria-label="Settings sidebar" className="settings-view__sidebar">
+          <div className="settings-view__sidebar-titlebar window-drag-region">
+            <span aria-hidden="true" className="settings-view__traffic-light-space" />
+            <span className="settings-view__drag-space" />
+          </div>
+          <div className="settings-view__sidebar-content">
+            <SettingsSearchField onChange={props.onSearchChange} value={props.search} />
+            <div className="settings-view__navigation-scroll">{navigation}</div>
+            {props.onBack === undefined ? null : (
+              <footer className="settings-view__sidebar-footer">
+                <OctantButton
+                  className="setnav-item window-no-drag settings-view__back justify-start"
+                  onClick={props.onBack}
+                  type="button"
+                  variant="ghost"
+                >
+                  <ArrowLeft aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+                  <span>Back to app</span>
+                </OctantButton>
+              </footer>
+            )}
+          </div>
+        </aside>
+      )}
+      <div className="settings-view__workspace">
+        {narrow ? (
+          <header className="settings-view__mobile-header">
+            <div className="settings-view__mobile-titlebar window-drag-region">
+              {props.onBack === undefined ? null : (
+                <OctantButton
+                  className="settings-view__mobile-back window-no-drag"
+                  onClick={props.onBack}
+                  type="button"
+                  variant="ghost"
+                >
+                  <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.5} />
+                  <span>Back to app</span>
+                </OctantButton>
+              )}
+              <span className="settings-view__mobile-title">{currentSectionLabel}</span>
+              <OctantButton
+                aria-expanded={navigationOpen}
+                aria-haspopup="dialog"
+                className="settings-view__mobile-sections window-no-drag"
+                onClick={() => setNavigationOpen(true)}
+                ref={navigationTrigger}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                <Menu aria-hidden="true" size={16} strokeWidth={1.5} />
+                <span>Settings sections</span>
+              </OctantButton>
+            </div>
+            <SettingsSearchField
+              className="settings-view__mobile-search"
+              onChange={props.onSearchChange}
               value={props.search}
             />
-          </label>
-          <SettingsNavigation
-            activeSection={route.activeSection}
-            onSelect={route.openSection}
-            sections={navItems}
-          />
-        </div>
-      </aside>
-      <div className="settings-view__workspace">
-        <div aria-hidden="true" className="settings-view__workspace-titlebar window-drag-region" />
+          </header>
+        ) : (
+          <div className="settings-view__workspace-titlebar window-drag-region">
+            <nav
+              aria-label="Settings breadcrumb"
+              className="settings-view__breadcrumb window-no-drag"
+            >
+              <span>Settings</span>
+              <span aria-hidden="true">/</span>
+              <strong>{currentSectionLabel}</strong>
+            </nav>
+          </div>
+        )}
         <main className="settings-view__content">
           <div className="settings-view__content-inner">
             <header className="settings-view__header">
               <h1 className="setpane-title" id="settings-heading">
-                {hasQuery ? "Search settings" : (SECTION_LABELS[route.activeSection] ?? "Settings")}
+                {currentSectionLabel}
               </h1>
               {!hasQuery && SECTION_DESCRIPTIONS[route.activeSection] !== undefined ? (
                 <p className="setpane-note">{SECTION_DESCRIPTIONS[route.activeSection]}</p>
@@ -291,7 +351,76 @@ export function SettingsView(props: SettingsViewProps) {
           </div>
         </main>
       </div>
+      {narrow && navigationOpen ? (
+        <OctantDialog
+          className="settings-view__drawer"
+          initialFocus={navigationClose}
+          label="Settings sections"
+          onClose={() => setNavigationOpen(false)}
+          open
+          restoreFocus={navigationTrigger}
+        >
+          <header className="settings-view__drawer-header">
+            <h2>Settings sections</h2>
+            <OctantIconButton
+              label="Close Settings sections"
+              onClick={() => setNavigationOpen(false)}
+              ref={navigationClose}
+              type="button"
+            >
+              <X aria-hidden="true" size={16} strokeWidth={1.5} />
+            </OctantIconButton>
+          </header>
+          <div className="settings-view__drawer-body">{navigation}</div>
+        </OctantDialog>
+      ) : null}
     </section>
+  );
+}
+
+function SettingsSearchField(props: {
+  readonly className?: string;
+  readonly onChange: (value: string) => void;
+  readonly value: string;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const inputId = useId();
+  return (
+    <div
+      className={
+        props.className === undefined
+          ? "settings-view__field settings-view__field--search"
+          : `settings-view__field settings-view__field--search ${props.className}`
+      }
+    >
+      <label className="settings-view__search-label" htmlFor={inputId}>
+        Search settings
+      </label>
+      <Search aria-hidden="true" className="settings-view__search-icon" size={14} />
+      <OctantInput
+        aria-label="Search settings"
+        className="settings-view__text-input"
+        id={inputId}
+        onChange={(event) => props.onChange(event.currentTarget.value)}
+        placeholder="Search settings…"
+        ref={input}
+        type="search"
+        value={props.value}
+      />
+      {props.value === "" ? null : (
+        <OctantIconButton
+          className="settings-view__search-clear"
+          label="Clear settings search"
+          onClick={() => {
+            props.onChange("");
+            input.current?.focus();
+          }}
+          type="button"
+        >
+          <X aria-hidden="true" size={14} strokeWidth={1.5} />
+        </OctantIconButton>
+      )}
+    </div>
   );
 }
 
@@ -331,6 +460,8 @@ function ActiveSectionContent({
           props={props}
         />
       );
+    case "keybindings":
+      return <KeybindingsSection focusedSetting={focusedSetting} />;
     case "chat":
       return props.chatController?.bootstrap !== undefined ? (
         <div id="settings-chat">
@@ -402,17 +533,17 @@ function ActiveSectionContent({
     case "usage":
       return props.usageClient !== undefined ? (
         <div className="settings-usage-stack" id="settings-usage">
+          <UsageDashboard
+            client={props.usageClient}
+            {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
+            showHeading={false}
+          />
           {props.providerUsageLimitsClient === undefined ? null : (
             <ProviderUsageLimitsPanel
               client={props.providerUsageLimitsClient}
               instances={props.providerController?.instances ?? []}
             />
           )}
-          <UsageDashboard
-            client={props.usageClient}
-            {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
-            showHeading={false}
-          />
         </div>
       ) : null;
     case "host":
@@ -570,25 +701,7 @@ interface SectionProps {
 function GeneralSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
-      <div className="settings-card-section">
-        <h2>Profile</h2>
-        <div className="setgroup">
-          <SettingRow
-            description="How you are shown inside Octant. There is no account behind this, and none of it is required."
-            focused={focusedSetting === settingId("user-profile")}
-            label="Your profile"
-            labelledBySection
-            scope="app"
-            settingId="user-profile"
-          >
-            <UserProfileSettingsView
-              onSettingsChange={props.onSettingsChange}
-              profile={props.settings.userProfile}
-            />
-          </SettingRow>
-        </div>
-      </div>
-      <div className="settings-card-section">
+      <div className="settings-card-section settings-card-section--open">
         <h2>Available modes</h2>
         <div className="setgroup">
           <SettingRow
@@ -619,22 +732,34 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </div>
-      <div className="settings-card-section">
-        <h2>Keyboard shortcuts</h2>
+      <details
+        className="settings-card-section settings-card-section--open settings-profile-disclosure"
+        open={focusedSetting === settingId("user-profile") ? true : undefined}
+      >
+        <summary>
+          <span className="settings-profile-disclosure__summary-copy">
+            <h2>Profile</h2>
+            <span>{props.settings.userProfile.displayName ?? "Not set"}</span>
+          </span>
+          <ChevronDown aria-hidden="true" size={16} strokeWidth={1.5} />
+        </summary>
         <div className="setgroup">
           <SettingRow
-            description="The chords that reach Octant's global surfaces on this machine."
-            focused={focusedSetting === settingId("keybindings")}
-            label="Shortcuts"
+            description="How you are shown inside Octant. There is no account behind this, and none of it is required."
+            focused={focusedSetting === settingId("user-profile")}
+            label="Your profile"
             labelledBySection
             scope="app"
-            settingId="keybindings"
+            settingId="user-profile"
           >
-            <KeybindingSettings />
+            <UserProfileSettingsView
+              onSettingsChange={props.onSettingsChange}
+              profile={props.settings.userProfile}
+            />
           </SettingRow>
         </div>
-      </div>
-      <div className="settings-card-section">
+      </details>
+      <div className="settings-card-section settings-card-section--open">
         <h2>Updates</h2>
         <div className="setgroup">
           <SettingRow
@@ -656,14 +781,13 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </div>
-      <div className="settings-card-section">
+      <div className="settings-card-section settings-card-section--open">
         <h2>Marketplace</h2>
         <div className="setgroup">
           <SettingRow
             description="Skill and extension catalog search contacts third-party registries only when you ask."
             focused={focusedSetting === settingId("marketplace-fetches")}
             label="Marketplace fetches"
-            labelledBySection
             scope="host"
             settingId="marketplace-fetches"
           >
@@ -673,6 +797,29 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
                 props.onSettingsChange({ marketplaceFetchesEnabled: enabled })
               }
             />
+          </SettingRow>
+        </div>
+        <MarketplaceFetchDisclosure />
+      </div>
+    </section>
+  );
+}
+
+function KeybindingsSection({ focusedSetting }: Pick<SectionProps, "focusedSetting">) {
+  return (
+    <section aria-label="Keybindings" className="settings-section-stack" id="settings-keybindings">
+      <div className="settings-card-section settings-card-section--open">
+        <h2>Keyboard shortcuts</h2>
+        <div className="setgroup">
+          <SettingRow
+            description="Click a shortcut, then press the replacement chord. Changes take effect immediately."
+            focused={focusedSetting === settingId("keybindings")}
+            label="Shortcuts"
+            labelledBySection
+            scope="app"
+            settingId="keybindings"
+          >
+            <KeybindingSettings />
           </SettingRow>
         </div>
       </div>
@@ -692,7 +839,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
       {props.themeController !== undefined ? (
         <ThemeAppearanceEditor controller={props.themeController} />
       ) : null}
-      <div className="settings-card-section">
+      <div className="settings-card-section settings-card-section--open">
         <h2>Workspace and reading</h2>
         <div className="setgroup">
           {isAvailable("sidebar-width") ? (
@@ -957,49 +1104,55 @@ function AdvancedSection({
   );
   return (
     <section aria-label="Advanced" id="settings-advanced">
-      <div className="setgroup">
-        <SettingRow
-          focused={focusedSetting === settingId("reset-layout")}
-          label="Reset active mode layout"
-          scope="app"
-          settingId="reset-layout"
-        >
-          <OctantButton
-            className="settings-view__action"
-            onClick={props.onResetLayout}
-            type="button"
-            variant="secondary"
-          >
-            Reset active mode layout
-          </OctantButton>
-        </SettingRow>
-        {resetBoundsAvailable ? (
+      <div className="settings-card-section settings-card-section--open">
+        <h2>Maintenance</h2>
+        <div className="setgroup">
           <SettingRow
-            focused={focusedSetting === settingId("reset-window-bounds")}
-            label="Reset native window bounds"
+            description="Restores the current mode's pane arrangement, sidebar, and dock to defaults. Threads and data are kept."
+            focused={focusedSetting === settingId("reset-layout")}
+            label="Reset active mode layout"
             scope="app"
-            settingId="reset-window-bounds"
+            settingId="reset-layout"
           >
             <OctantButton
               className="settings-view__action"
-              onClick={props.onResetNativeBounds}
+              onClick={props.onResetLayout}
               type="button"
               variant="secondary"
             >
-              Reset native window bounds
+              Reset active mode layout
             </OctantButton>
           </SettingRow>
-        ) : null}
-        {diagnosticsExportClient !== undefined ? (
-          <SettingRow
-            focused={focusedSetting === settingId("export-diagnostics")}
-            label="Export diagnostics"
-            scope="host"
-            settingId="export-diagnostics"
-          >
-            <DiagnosticsExportControl client={diagnosticsExportClient} />
-          </SettingRow>
-        ) : null}
+          {resetBoundsAvailable ? (
+            <SettingRow
+              description="Moves and resizes the native window to its default bounds. Workspace data is kept."
+              focused={focusedSetting === settingId("reset-window-bounds")}
+              label="Reset native window bounds"
+              scope="app"
+              settingId="reset-window-bounds"
+            >
+              <OctantButton
+                className="settings-view__action"
+                onClick={props.onResetNativeBounds}
+                type="button"
+                variant="secondary"
+              >
+                Reset native window bounds
+              </OctantButton>
+            </SettingRow>
+          ) : null}
+          {diagnosticsExportClient !== undefined ? (
+            <SettingRow
+              description="Creates a local support bundle from the selected host. Review it before sharing."
+              focused={focusedSetting === settingId("export-diagnostics")}
+              label="Export diagnostics"
+              scope="host"
+              settingId="export-diagnostics"
+            >
+              <DiagnosticsExportControl client={diagnosticsExportClient} />
+            </SettingRow>
+          ) : null}
+        </div>
       </div>
     </section>
   );
@@ -1028,11 +1181,10 @@ function SidebarBackgroundSettings({
     <div className="settings-view__setting">
       <label className="settings-view__field">
         <span>Background type</span>
-        <OctantNativeSelect
+        <OctantSelectField
           aria-label="Sidebar background type"
           className="settings-view__select"
-          onChange={(event) => {
-            const kind = event.currentTarget.value;
+          onValueChange={(kind) => {
             if (kind === "none") {
               setBackground({
                 kind: "none",
@@ -1062,12 +1214,13 @@ function SidebarBackgroundSettings({
               }
             }
           }}
+          options={[
+            { id: "none", label: "None" },
+            { id: "preset", label: "Preset" },
+            { id: "custom", label: "Custom" },
+          ]}
           value={background.kind === "custom" ? "custom" : background.kind}
-        >
-          <option value="none">None</option>
-          <option value="preset">Preset</option>
-          <option value="custom">Custom</option>
-        </OctantNativeSelect>
+        />
       </label>
       {background.kind === "preset" ? (
         <div className="settings-view__field" aria-label="Sidebar background presets">
@@ -1144,21 +1297,22 @@ function SidebarBackgroundSettings({
       {sidebarVibrancySupported ? (
         <label className="settings-view__field">
           <span>Vibrancy mode</span>
-          <OctantNativeSelect
+          <OctantSelectField
             aria-label="Sidebar vibrancy mode"
             className="settings-view__select"
-            onChange={(event) =>
+            onValueChange={(value) =>
               setBackground({
                 ...background,
-                vibrancyMode: event.currentTarget.value as SidebarVibrancyMode,
+                vibrancyMode: value as SidebarVibrancyMode,
               } as SidebarBackground)
             }
+            options={[
+              { id: "off", label: "Off" },
+              { id: "subtle", label: "Subtle" },
+              { id: "strong", label: "Strong" },
+            ]}
             value={vibrancyMode}
-          >
-            <option value="off">Off</option>
-            <option value="subtle">Subtle</option>
-            <option value="strong">Strong</option>
-          </OctantNativeSelect>
+          />
         </label>
       ) : null}
     </div>

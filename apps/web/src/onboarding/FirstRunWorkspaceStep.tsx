@@ -1,4 +1,4 @@
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { WorkspaceChoices } from "./firstRunStepModel";
@@ -98,17 +98,16 @@ export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
             Mode switcher
           </label>
           <div className="setrow-control">
-            <OctantNativeSelect
+            <OctantSelectField
               aria-label="Mode switcher"
               id="first-run-mode-switcher"
-              onChange={(event) =>
-                props.onSelectModeSwitcher(event.currentTarget.value as "buttons" | "dropdown")
-              }
+              onValueChange={(value) => props.onSelectModeSwitcher(value as "buttons" | "dropdown")}
+              options={[
+                { id: "buttons", label: "Compact buttons" },
+                { id: "dropdown", label: "Dropdown" },
+              ]}
               value={choices.modeSwitcher}
-            >
-              <option value="buttons">Compact buttons</option>
-              <option value="dropdown">Dropdown</option>
-            </OctantNativeSelect>
+            />
           </div>
         </div>
         <p className="first-run__caveat" role="note">

@@ -40,14 +40,10 @@ export function useThreadUtilityPresentation(
   windowId: string,
   scope: { readonly localStorage?: Storage } = globalThis,
   /**
-   * What an unset window shows. A wide window shows the dock, so the workspace
-   * arrives as sidebar, thread, and tools rather than a column in an empty
-   * pane; a narrow window keeps it closed, because there the dock is a modal
-   * drawer that would cover the app on launch. This is read live rather than
-   * frozen at mount: an embedded window can report a zero-width viewport on its
-   * first frame, and freezing that reading hid the dock for the whole session.
+   * What an unset window shows. A fresh window keeps the dock closed until a
+   * tool is selected. Persisted show/hide choices still win on later launches.
    */
-  defaultOpen = true,
+  defaultOpen = false,
 ): ThreadUtilityPresentation {
   const [chosenDockOpen, setChosenDockOpen] = useState(() => readUtilityDockOpen(scope, windowId));
   const dockVisible = chosenDockOpen ?? defaultOpen;

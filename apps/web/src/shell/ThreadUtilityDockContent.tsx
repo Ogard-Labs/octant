@@ -11,6 +11,7 @@ import type { ChatThreadId } from "@octant/contracts/chat";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import {
+  decodeBrowserContextId,
   decodeBrowserThreadId,
   decodeCodeThreadId,
   decodeMentionableThreadId,
@@ -69,6 +70,7 @@ export interface ThreadUtilityDockContentProps {
   readonly appleProjectPath?: string;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
+  readonly browserContextId?: string;
   readonly canvasClient?: CanvasClient;
   readonly chatClient: ChatClient;
   readonly chatReadCursorStore: ChatReadCursorStore;
@@ -76,6 +78,7 @@ export interface ThreadUtilityDockContentProps {
   readonly codeProviderGroups?: ReadonlyArray<PickerGroup>;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenFile: (relativePath: CodeRelativePath) => void;
+  readonly onBrowserContextCreated?: (contextId: string) => void;
   readonly onSidecarOpened: (sidecar: SideChatSidecar) => void;
   readonly planClient?: PlanClient;
   readonly providerController?: ProviderController;
@@ -84,6 +87,7 @@ export interface ThreadUtilityDockContentProps {
   readonly sidecarThreadId?: ChatThreadId;
   readonly subject: ThreadUtilityDockSubject;
   readonly surface: RightUtilityDockSurfaceId;
+  readonly utilityTabId?: string;
   readonly windowCapability?: string;
 }
 
@@ -136,16 +140,23 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
     }
     const tab: Extract<WorkspaceTab, { readonly kind: "browser" }> = {
       kind: "browser",
-      id: dockTabIds.browser,
+      id: workspaceDockTabId(props.utilityTabId, "browser"),
       mode: props.subject.mode,
       title: "Browser",
       threadId: decodeBrowserThreadId(props.subject.threadId),
+      ...(props.browserContextId === undefined
+        ? {}
+        : { contextId: decodeBrowserContextId(props.browserContextId) }),
     };
     return (
       <BrowserWorkspace
         client={props.browserAutomationClient}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+        {...(props.onBrowserContextCreated === undefined
+          ? {}
+          : { onContextCreated: props.onBrowserContextCreated })}
+        startFresh={props.utilityTabId !== undefined && props.utilityTabId !== "browser"}
         tab={tab}
         {...(props.windowCapability === undefined
           ? {}
@@ -259,7 +270,7 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
       "This thread has no discovered Xcode project or Apple toolchain connection.",
     );
   }
-  const tab = codeUtilityTab(props.surface, threadId, props.appleProjectPath);
+  const tab = codeUtilityTab(props.surface, threadId, props.appleProjectPath, props.utilityTabId);
   return (
     <Suspense
       fallback={
@@ -293,10 +304,17 @@ function codeUtilityTab(
   surface: "terminal" | "tests" | "ios-simulator",
   threadId: ReturnType<typeof decodeCodeThreadId>,
   appleProjectPath?: string,
+  utilityTabId?: string,
 ): Extract<WorkspaceTab, { readonly mode: "code" }> {
   const title = surfaceLabel(surface);
   if (surface === "terminal") {
-    return { kind: "code-terminal", id: dockTabIds.terminal, mode: "code", threadId, title };
+    return {
+      kind: "code-terminal",
+      id: workspaceDockTabId(utilityTabId, "terminal"),
+      mode: "code",
+      threadId,
+      title,
+    };
   }
   if (surface === "ios-simulator") {
     if (appleProjectPath === undefined) throw new Error("Expected an Apple project path.");
@@ -312,6 +330,16 @@ function codeUtilityTab(
     return tab;
   }
   return { kind: "code-test", id: dockTabIds.tests, mode: "code", threadId, title };
+}
+
+function workspaceDockTabId(
+  utilityTabId: string | undefined,
+  surface: "browser" | "terminal",
+): ReturnType<typeof decodeWorkspaceTabId> {
+  if (utilityTabId !== undefined && utilityTabId !== surface) {
+    return decodeWorkspaceTabId(utilityTabId);
+  }
+  return dockTabIds[surface];
 }
 
 function surfaceLabel(surface: "terminal" | "tests" | "ios-simulator"): string {

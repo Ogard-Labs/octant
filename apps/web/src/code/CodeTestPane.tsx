@@ -9,7 +9,7 @@ import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 
 type TestResult = Extract<CodeOperationResult, { readonly kind: "repository-test-state" }>;
 
@@ -114,16 +114,14 @@ export function CodeTestPane(props: CodeTestPaneProps) {
       {props.definitions.length > 1 ? (
         <label className="code-delivery-pane__field">
           Test definition
-          <OctantNativeSelect
+          <OctantSelectField
+            onValueChange={(value) => setSelectedId(value as never)}
+            options={props.definitions.map((definition) => ({
+              id: definition.id,
+              label: definition.name,
+            }))}
             value={selected?.id ?? ""}
-            onChange={(event) => setSelectedId(event.target.value as never)}
-          >
-            {props.definitions.map((definition) => (
-              <option key={definition.id} value={definition.id}>
-                {definition.name}
-              </option>
-            ))}
-          </OctantNativeSelect>
+          />
         </label>
       ) : null}
       {selected === undefined ? null : (

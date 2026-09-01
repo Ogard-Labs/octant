@@ -85,7 +85,7 @@ describe("ShellSidebar", () => {
     for (const label of ["New thread", "Thread board"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
     expect(actions["new-work-thread"]).toHaveBeenCalledOnce();
     expect(actions.plugins).toHaveBeenCalledOnce();
@@ -119,7 +119,7 @@ describe("ShellSidebar", () => {
     for (const label of ["New thread", "Thread board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
     expect(actions["new-code-thread"]).toHaveBeenCalledOnce();
     expect(actions.automations).not.toHaveBeenCalled();
@@ -281,12 +281,12 @@ describe("ShellSidebar", () => {
     // Explicit false overrides the production gate so the prop still controls
     // visibility even when AUTOMATION_CENTER_NAVIGATION_ENABLED is true.
     const gated = render(sidebar(false));
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     expect(screen.queryByRole("menuitem", { name: "Automations" })).not.toBeInTheDocument();
     gated.unmount();
 
     render(sidebar(true));
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Automations" }));
     expect(automations).toHaveBeenCalledOnce();
   });
@@ -345,7 +345,7 @@ describe("ShellSidebar", () => {
       const projects = screen.getByRole("navigation", { name: "Projects" });
       // The foot of the sidebar names the person, and their settings are one
       // of the places their own row leads to.
-      const profile = screen.getByRole("button", { name: "Set your name" });
+      const profile = screen.getByRole("button", { name: "Account menu, Set your name" });
 
       expect(modes.compareDocumentPosition(search)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(search.compareDocumentPosition(projects)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);

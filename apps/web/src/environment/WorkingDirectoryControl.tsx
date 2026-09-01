@@ -53,6 +53,7 @@ export function WorkingDirectoryControl(props: {
   return (
     <form
       className="working-directory-control"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         let workingDirectory: ThreadWorkingDirectory;

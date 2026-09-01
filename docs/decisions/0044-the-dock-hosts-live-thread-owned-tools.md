@@ -33,13 +33,22 @@ or Project-wide surfaces.
   tools, not threads, and shows only capabilities valid for that pane. Hiding
   a tool does not stop its server-owned process; close and stop keep their
   existing product meaning. Narrow windows keep the existing overlay drawer.
+- **Browser and Terminal are repeatable instances.** Add tool may create more
+  than one isolated Browser context or Terminal session for the same thread.
+  Each instance has its own tab and presentation identity. Files, Review,
+  Agents, Canvas, Plan, Delivery, Simulator, and Side chat remain singleton
+  destinations and focus their existing tab when selected again.
+- **Tooling opens on demand.** New windows start with both utility regions
+  closed, so an empty dock never narrows the primary workspace. Selecting a
+  tool opens its chosen region; an explicit per-window show or hide choice is
+  restored on later launches.
 - **Terminal-first bottom panel.** The pane title row may open a horizontal
   bottom panel below the central workspace and right dock. Terminal is its
   first supported tab; the strip remains tool-shaped so another horizontal
   tool can be added without inventing another panel model. New windows start
   closed. Open state and height are per-window presentation preferences, while
   authority and content still follow the active pane.
-- **One instance, one presentation.** A thread-owned tool appears in one shell
+- **One instance, one presentation.** Each thread-owned tool instance appears in one shell
   region at a time. Moving Terminal between the right dock and bottom panel
   remounts the same thread-owned tool over the same server session; it never
   duplicates, transfers, or rebinds a terminal to another thread.
@@ -85,6 +94,10 @@ a Project overview, or a Project-level list.
   session. Local checkout changes and
   merge-back run diffs open in Review beside the thread; the full-window Code
   diff surface is gone.
+- Browser and Terminal may have several independently closable right-dock
+  instances for one thread. Their tab identities and Browser context bindings
+  are restored as window presentation state; they do not widen thread or host
+  authority.
 - 0015 remains Accepted as the current implemented shell. This record, with
   0041 and 0042, is the approved migration of dock content, tool ownership,
   and placement. It does not change mode authority, journal ownership, or

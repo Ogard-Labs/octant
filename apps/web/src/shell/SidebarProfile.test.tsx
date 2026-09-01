@@ -18,7 +18,7 @@ describe("SidebarProfile", () => {
       />,
     );
 
-    const row = screen.getByRole("button", { name: "Set your name" });
+    const row = screen.getByRole("button", { name: "Account menu, Set your name" });
     expect(row).toHaveClass("sidebar-item");
     expect(container.querySelector(".sidebar-foot")).toContainElement(row);
 
@@ -28,11 +28,26 @@ describe("SidebarProfile", () => {
     expect(onOpenSettings.mock.calls[0]?.[0]).toBeUndefined();
   });
 
+  it("names the identity button after the account menu and the person, with the label visible", () => {
+    render(
+      <SidebarProfile
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        profile={{ ...profile, displayName: "Henrik" }}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: "Account menu, Henrik" });
+    const label = row.querySelector(".sidebar-label");
+    expect(label).toHaveTextContent("Henrik");
+    expect(label).not.toHaveAttribute("aria-hidden");
+  });
+
   it("centers the menu above the row instead of anchoring it to the content edge", async () => {
     const user = userEvent.setup();
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     const menu = await screen.findByRole("menu");
     expect(menu).toHaveAttribute("data-side", "top");
     expect(menu).toHaveAttribute("data-align", "center");
@@ -53,16 +68,16 @@ describe("SidebarProfile", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Henrik" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Henrik" }));
     await user.click(await screen.findByRole("menuitem", { name: "Usage" }));
     expect(onOpenSettings).toHaveBeenCalledWith({ section: "usage" });
 
-    await user.click(screen.getByRole("button", { name: "Henrik" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Henrik" }));
     await user.click(await screen.findByRole("menuitem", { name: "Navigator" }));
     expect(onOpenNavigator).toHaveBeenCalledOnce();
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: "Henrik" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Henrik" }));
     await user.click(await screen.findByRole("menuitem", { name: "Zen mode" }));
     expect(onOpenZen).toHaveBeenCalledOnce();
   });
@@ -79,7 +94,7 @@ describe("SidebarProfile", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Henrik" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Henrik" }));
     await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
     expect(onOpenArchive).toHaveBeenCalledOnce();
   });
@@ -105,7 +120,7 @@ describe("SidebarProfile", () => {
     );
 
     expect(screen.queryByRole("menuitem", { name: "Agents" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Henrik" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Henrik" }));
     expect(await screen.findByRole("group", { name: "Workspace" })).toBeVisible();
     for (const label of ["Agents", "Automations", "Artifacts", "Plugins"]) {
       expect(screen.getByRole("menuitem", { name: label })).toBeVisible();
@@ -118,7 +133,7 @@ describe("SidebarProfile", () => {
     const user = userEvent.setup();
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await screen.findByRole("menuitem", { name: "Settings" });
     expect(screen.queryByRole("menuitem", { name: "Navigator" })).not.toBeInTheDocument();
   });
@@ -127,7 +142,7 @@ describe("SidebarProfile", () => {
     const user = userEvent.setup();
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await screen.findByRole("menuitem", { name: "Settings" });
     expect(screen.queryByRole("menuitem", { name: "Zen mode" })).not.toBeInTheDocument();
   });
@@ -136,7 +151,7 @@ describe("SidebarProfile", () => {
     const user = userEvent.setup();
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
-    const row = screen.getByRole("button", { name: "Set your name" });
+    const row = screen.getByRole("button", { name: "Account menu, Set your name" });
     row.focus();
     await user.keyboard("{Enter}");
     await screen.findByRole("menuitem", { name: "Settings" });

@@ -9,7 +9,7 @@ import type {
 } from "@octant/contracts/projects";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { MemoryEntryDialog } from "./MemoryEntryDialog";
 import { MemoryTransferDialog } from "./MemoryTransferDialog";
 
@@ -119,18 +119,18 @@ export function ProjectMemoryInspector(props: ProjectMemoryInspectorProps) {
       <div className="project-memory-inspector__toolbar">
         <label>
           <span className="sr-only">Filter memory by kind</span>
-          <OctantNativeSelect
+          <OctantSelectField
             aria-label="Filter memory by kind"
-            onChange={(event) => setFilter(event.target.value as MemoryKind | "all")}
+            onValueChange={(value) => setFilter(value as MemoryKind | "all")}
+            options={[
+              { id: "all", label: "All kinds" },
+              ...kinds.map((kind) => ({
+                id: kind,
+                label: kindLabel(kind),
+              })),
+            ]}
             value={filter}
-          >
-            <option value="all">All kinds</option>
-            {kinds.map((kind) => (
-              <option key={kind} value={kind}>
-                {kindLabel(kind)}
-              </option>
-            ))}
-          </OctantNativeSelect>
+          />
         </label>
         {readOnly ? null : (
           <OctantButton

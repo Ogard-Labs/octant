@@ -52,11 +52,10 @@ export function CanvasThreadReferenceCardList(props: CanvasThreadReferenceCardLi
           <CardView card={card} />
           {props.onOpen ? (
             <OctantButton
-              className="btn btn-secondary btn-sm"
-              type="button"
-              onClick={() => props.onOpen?.(card)}
               size="sm"
-              variant="secondary"
+              type="button"
+              variant="outline"
+              onClick={() => props.onOpen?.(card)}
             >
               Open Canvas
             </OctantButton>

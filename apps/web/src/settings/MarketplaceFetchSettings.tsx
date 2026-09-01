@@ -14,18 +14,21 @@ export interface MarketplaceFetchSettingsProps {
  */
 export function MarketplaceFetchSettings(props: MarketplaceFetchSettingsProps) {
   return (
-    <div className="marketplace-fetch-settings">
-      <div className="marketplace-fetch-settings__automatic">
-        <OctantSwitch
-          checked={props.enabled}
-          label="Allow marketplace fetches"
-          onCheckedChange={props.onEnabledChange}
-        />
-      </div>
+    <OctantSwitch
+      checked={props.enabled}
+      label="Allow marketplace fetches"
+      onCheckedChange={props.onEnabledChange}
+    />
+  );
+}
+
+export function MarketplaceFetchDisclosure() {
+  return (
+    <details className="marketplace-fetch-settings__details">
+      <summary>Network details</summary>
       <p className="marketplace-fetch-settings__disclosure">
-        When on, Search skills contacts skills.sh and the npm registry with the text you typed, and
-        Inspect or install for catalog packages fetches from GitHub. Opening the Marketplace tab
-        does not fetch. Off means those requests are not made.
+        Search contacts skills.sh and the npm registry with the text you typed. Inspecting or
+        installing catalog packages fetches from GitHub. Opening Marketplace never fetches.
       </p>
       <ul className="marketplace-fetch-settings__list">
         <li>User-Agent is a fixed string with no app or runtime version.</li>
@@ -33,6 +36,6 @@ export function MarketplaceFetchSettings(props: MarketplaceFetchSettingsProps) {
           Local skills under .agents/skills/ and local plugin folders never contact a registry.
         </li>
       </ul>
-    </div>
+    </details>
   );
 }

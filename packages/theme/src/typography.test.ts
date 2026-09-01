@@ -98,3 +98,29 @@ describe("typography projections", () => {
     });
   });
 });
+
+describe("interface face migration", () => {
+  it("reads a saved pre-Inter system stack as the current default face", () => {
+    const legacy: ThemeTypography = {
+      ...DEFAULT_THEME_SETTINGS.typography,
+      ui: {
+        ...DEFAULT_THEME_SETTINGS.typography.ui,
+        family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      },
+    };
+
+    const projection = resolveTypographyProjection(legacy, []);
+
+    expect(projection.ui.fontFamily).toBe(DEFAULT_THEME_SETTINGS.typography.ui.family);
+    expect(projection.ui.fontFamily).toContain("Inter Variable");
+  });
+
+  it("keeps a deliberately chosen system stack", () => {
+    const chosen: ThemeTypography = {
+      ...DEFAULT_THEME_SETTINGS.typography,
+      ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, family: "'SF Pro Text', system-ui" },
+    };
+
+    expect(resolveTypographyProjection(chosen, []).ui.fontFamily).toBe("'SF Pro Text', system-ui");
+  });
+});

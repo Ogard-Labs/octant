@@ -49,6 +49,7 @@ export function ReviseCanvasDraft(props: ReviseCanvasDraftProps) {
     <form
       className="canvas-revise-form"
       data-testid="canvas-revise-form"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void handleSubmit();
@@ -67,7 +68,6 @@ export function ReviseCanvasDraft(props: ReviseCanvasDraftProps) {
         rows={3}
       />
       <OctantButton
-        className="btn btn-secondary btn-sm"
         type="submit"
         data-testid="canvas-revise-submit"
         disabled={submitting}

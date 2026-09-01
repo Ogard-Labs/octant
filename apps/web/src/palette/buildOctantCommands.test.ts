@@ -44,3 +44,24 @@ describe("the Apple workbench command", () => {
     );
   });
 });
+
+describe("the Zen command", () => {
+  it("toggles Zen through the same callback the identity menu uses", () => {
+    const onOpenZen = vi.fn();
+    const command = buildOctantCommands(sources({ onOpenZen })).find(
+      (candidate) => candidate.id === "workspace:zen-mode",
+    );
+
+    expect(command?.title).toBe("Toggle Zen mode");
+    expect(command?.group).toBe("Workspace");
+    if (command?.action.kind !== "run") throw new Error("expected a run command");
+    command.action.run();
+    expect(onOpenZen).toHaveBeenCalledOnce();
+  });
+
+  it("offers nothing when this window cannot enter Zen", () => {
+    expect(
+      buildOctantCommands(sources()).some((command) => command.id === "workspace:zen-mode"),
+    ).toBe(false);
+  });
+});

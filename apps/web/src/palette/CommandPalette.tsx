@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { CornerDownLeft, Search } from "lucide-react";
-import { matchKeybinding, resolveKeybindings, type OctantKeybindings } from "@octant/domain";
+import {
+  describeChord,
+  matchKeybinding,
+  resolveKeybindings,
+  type OctantKeybindings,
+} from "@octant/domain";
 import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
+import { keybindingActionForCommand } from "./commandKeybinding";
 import { useOctantCommands } from "./CommandRegistry";
 import { filterOctantCommands, groupOctantCommands, type OctantCommand } from "./commandModel";
 
@@ -49,6 +55,7 @@ export function isCommandPaletteEvent(
 export function CommandPalette() {
   const commands = useOctantCommands().filter((command) => command.action.kind === "run");
   const { keybindings } = useKeybindings();
+  const apple = isApplePlatform();
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -158,10 +165,12 @@ export function CommandPalette() {
           value={query}
         />
       </div>
-      <p className="command-palette__scope" role="note">
-        Commands this host offers right now. Each one runs through its ordinary authority check.
-      </p>
-      <p aria-atomic="true" aria-live="polite" className="command-palette__status" role="status">
+      <p
+        aria-atomic="true"
+        aria-live="polite"
+        className="command-palette__status sr-only"
+        role="status"
+      >
         {statusMessage}
       </p>
       <div
@@ -182,6 +191,9 @@ export function CommandPalette() {
             </p>
             {group.commands.map((command) => {
               const index = indexOfCommand.get(command.id) ?? -1;
+              const actionId = keybindingActionForCommand(command.id);
+              const chord = actionId === undefined ? undefined : keybindings.bindings.get(actionId);
+              const shortcut = chord === undefined ? undefined : describeChord(chord, apple);
               return (
                 <div
                   aria-selected={index === active}
@@ -197,6 +209,9 @@ export function CommandPalette() {
                   {command.detail === undefined ? null : (
                     <span className="command-palette__result-detail">{command.detail}</span>
                   )}
+                  {shortcut === undefined ? null : (
+                    <kbd className="command-palette__shortcut">{shortcut}</kbd>
+                  )}
                   {index === active ? (
                     <span className="command-palette__result-hint">
                       <CornerDownLeft aria-hidden="true" size={12} strokeWidth={1.8} />
@@ -209,6 +224,15 @@ export function CommandPalette() {
           </div>
         ))}
       </div>
+      <footer className="command-palette__footer">
+        <p className="command-palette__scope" role="note">
+          Host-offered commands. Every action still runs its normal authority check.
+        </p>
+        <span aria-hidden="true" className="command-palette__close-hint">
+          <kbd>Esc</kbd>
+          <span>Close</span>
+        </span>
+      </footer>
     </OctantDialog>
   );
 }

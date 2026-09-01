@@ -1,6 +1,8 @@
 import type { CodeBoardCard, CodeBoardView } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { CodeOverview } from "./CodeOverview";
 import type { CodeController } from "./useCodeController";
 
@@ -182,7 +184,7 @@ describe("CodeOverview", () => {
     expect(screen.getByText("Opened pull request · Pending")).toBeVisible();
     expect(screen.getByText("Reviewing the checkout")).toBeVisible();
     expect(screen.getByRole("region", { name: "Code quick start" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "Access policy" })).toHaveValue("approval-gated");
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Approval");
     expect(
       screen.getByText("Checkout and worktree are confirmed by the Code service before creation."),
     ).toBeVisible();
@@ -335,6 +337,7 @@ describe("CodeOverview", () => {
    * choice that quietly rewrites the Project.
    */
   it("records a new Project workspace habit through the journaled command path", async () => {
+    const user = userEvent.setup();
     const onChangeNewThreadWorkspace = vi.fn(async () => true);
     const value = controller();
     value.client = { queryBoard: vi.fn(async () => boardView([])) } as never;
@@ -351,16 +354,16 @@ describe("CodeOverview", () => {
     // A Project that never chose reads as the current checkout, and the
     // composer preselects the same habit rather than a second truth.
     const habit = await screen.findByRole("combobox", { name: "New threads start in" });
-    expect(habit).toHaveValue("current-checkout");
-    expect(screen.getByRole("combobox", { name: "Workspace" })).toHaveValue("current-checkout");
+    expect(habit).toHaveTextContent("This Project's current checkout");
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Current checkout");
 
-    fireEvent.change(habit, { target: { value: "managed-worktree" } });
+    await chooseSelectFieldOption(user, habit, "A managed worktree Octant creates");
     await waitFor(() =>
       expect(onChangeNewThreadWorkspace).toHaveBeenCalledWith(ids.project, "managed-worktree"),
     );
     // The control never moves ahead of the server: it still reads the old
     // projection until the accepted change comes back.
-    expect(habit).toHaveValue("current-checkout");
+    expect(habit).toHaveTextContent("This Project's current checkout");
 
     rerender(
       <CodeOverview
@@ -372,10 +375,10 @@ describe("CodeOverview", () => {
         projectId={ids.project as never}
       />,
     );
-    expect(screen.getByRole("combobox", { name: "New threads start in" })).toHaveValue(
-      "managed-worktree",
+    expect(screen.getByRole("combobox", { name: "New threads start in" })).toHaveTextContent(
+      "A managed worktree Octant creates",
     );
-    expect(screen.getByRole("combobox", { name: "Workspace" })).toHaveValue("managed-worktree");
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
   });
 
   it("keeps quick-start creation read-only until the ordinary callback is supplied", async () => {

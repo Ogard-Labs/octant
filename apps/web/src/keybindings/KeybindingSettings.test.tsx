@@ -21,6 +21,14 @@ function renderSettings(store: KeybindingStore) {
 }
 
 describe("KeybindingSettings", () => {
+  it("keeps raw JSON behind an advanced disclosure", () => {
+    renderSettings(memoryStore());
+
+    const disclosure = screen.getByText("Edit keybindings JSON").closest("details");
+    expect(disclosure).not.toHaveAttribute("open");
+    expect(screen.getByLabelText("Keybindings JSON")).not.toBeVisible();
+  });
+
   it("records a pressed chord and puts it in the saved document", async () => {
     const user = userEvent.setup();
     const store = memoryStore();
@@ -133,6 +141,7 @@ describe("KeybindingSettings", () => {
     const store = memoryStore();
     const { hook } = renderSettings(store);
 
+    await user.click(screen.getByText("Edit keybindings JSON"));
     fireEvent.change(screen.getByLabelText("Keybindings JSON"), { target: { value: "{oops" } });
     await user.click(screen.getByRole("button", { name: "Save JSON" }));
 

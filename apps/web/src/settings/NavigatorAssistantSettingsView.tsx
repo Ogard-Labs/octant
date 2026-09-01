@@ -73,88 +73,93 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
           Navigator.
         </p>
       ) : null}
-      <SettingRow
-        description="The model Navigator uses. Without one, Navigator stays unavailable rather than silently picking a model."
-        focused={props.focusedSetting === settingId("default-model")}
-        label="Default model"
-        scope="app"
-        settingId="default-model"
-      >
-        <ModelPicker
-          ariaLabel="Navigator default model"
-          groups={groups}
-          onSelect={(selection) =>
-            apply({
-              ...props.settings,
-              defaultProvider: selection as NavigatorAssistantModelRef,
-            })
-          }
-          selectedModelId={props.settings.defaultProvider?.modelId}
-          selectedProviderInstanceId={props.settings.defaultProvider?.providerInstanceId}
-        />
-        {props.settings.defaultProvider === undefined ? (
-          <p className="settings-view__effective-note" role="status">
-            Navigator is unavailable until a default model is chosen.
-          </p>
-        ) : (
-          <OctantButton
-            onClick={() => {
-              const { defaultProvider: _cleared, ...rest } = props.settings;
-              apply(rest);
-            }}
-            type="button"
-            variant="ghost"
+      <div className="settings-card-section settings-card-section--open">
+        <h2>Models</h2>
+        <div className="setgroup">
+          <SettingRow
+            description="The model Navigator uses. Without one, Navigator stays unavailable rather than silently picking a model."
+            focused={props.focusedSetting === settingId("default-model")}
+            label="Default model"
+            scope="app"
+            settingId="default-model"
           >
-            Clear default model
-          </OctantButton>
-        )}
-      </SettingRow>
-      <SettingRow
-        description="Used only when the default model cannot read images: it describes the image as text for the default model, and never becomes the conversation model."
-        focused={props.focusedSetting === settingId("vision-reviewer")}
-        label="Vision reviewer"
-        scope="app"
-        settingId="vision-reviewer"
-      >
-        <ModelPicker
-          ariaLabel="Navigator vision reviewer"
-          groups={groups}
-          onSelect={(selection) =>
-            apply({
-              ...props.settings,
-              visionReviewer: selection as NavigatorAssistantModelRef,
-            })
-          }
-          selectedModelId={props.settings.visionReviewer?.modelId}
-          selectedProviderInstanceId={props.settings.visionReviewer?.providerInstanceId}
-        />
-        {imageHandling === undefined ? null : (
-          <p className="settings-view__effective-note" role="status">
-            {imageHandling.kind === "send-to-primary"
-              ? "The default model reads images directly, so no reviewer is used."
-              : imageHandling.kind === "review-then-send"
-                ? "Images are described by the vision reviewer, then answered by the default model."
-                : imageHandling.reason}
-          </p>
-        )}
-        {props.settings.visionReviewer === undefined ? (
-          <p className="settings-view__effective-note" role="status">
-            No vision reviewer is configured. Images are refused when the default model cannot read
-            them.
-          </p>
-        ) : (
-          <OctantButton
-            onClick={() => {
-              const { visionReviewer: _cleared, ...rest } = props.settings;
-              apply(rest);
-            }}
-            type="button"
-            variant="ghost"
+            <ModelPicker
+              ariaLabel="Navigator default model"
+              groups={groups}
+              onSelect={(selection) =>
+                apply({
+                  ...props.settings,
+                  defaultProvider: selection as NavigatorAssistantModelRef,
+                })
+              }
+              selectedModelId={props.settings.defaultProvider?.modelId}
+              selectedProviderInstanceId={props.settings.defaultProvider?.providerInstanceId}
+            />
+            {props.settings.defaultProvider === undefined ? (
+              <p className="settings-view__effective-note" role="status">
+                Navigator is unavailable until a default model is chosen.
+              </p>
+            ) : (
+              <OctantButton
+                onClick={() => {
+                  const { defaultProvider: _cleared, ...rest } = props.settings;
+                  apply(rest);
+                }}
+                type="button"
+                variant="ghost"
+              >
+                Clear default model
+              </OctantButton>
+            )}
+          </SettingRow>
+          <SettingRow
+            description="Used only when the default model cannot read images: it describes the image as text for the default model, and never becomes the conversation model."
+            focused={props.focusedSetting === settingId("vision-reviewer")}
+            label="Vision reviewer"
+            scope="app"
+            settingId="vision-reviewer"
           >
-            Clear vision reviewer
-          </OctantButton>
-        )}
-      </SettingRow>
+            <ModelPicker
+              ariaLabel="Navigator vision reviewer"
+              groups={groups}
+              onSelect={(selection) =>
+                apply({
+                  ...props.settings,
+                  visionReviewer: selection as NavigatorAssistantModelRef,
+                })
+              }
+              selectedModelId={props.settings.visionReviewer?.modelId}
+              selectedProviderInstanceId={props.settings.visionReviewer?.providerInstanceId}
+            />
+            {imageHandling === undefined ? null : (
+              <p className="settings-view__effective-note" role="status">
+                {imageHandling.kind === "send-to-primary"
+                  ? "The default model reads images directly, so no reviewer is used."
+                  : imageHandling.kind === "review-then-send"
+                    ? "Images are described by the vision reviewer, then answered by the default model."
+                    : imageHandling.reason}
+              </p>
+            )}
+            {props.settings.visionReviewer === undefined ? (
+              <p className="settings-view__effective-note" role="status">
+                No vision reviewer is configured. Images are refused when the default model cannot
+                read them.
+              </p>
+            ) : (
+              <OctantButton
+                onClick={() => {
+                  const { visionReviewer: _cleared, ...rest } = props.settings;
+                  apply(rest);
+                }}
+                type="button"
+                variant="ghost"
+              >
+                Clear vision reviewer
+              </OctantButton>
+            )}
+          </SettingRow>
+        </div>
+      </div>
     </section>
   );
 }

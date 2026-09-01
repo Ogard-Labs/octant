@@ -96,30 +96,43 @@ function makeLinearClient(
 describe("DraftThreadWorkspace", () => {
   it("renders mode-specific welcome copy for chat", () => {
     render(<DraftThreadWorkspace {...baseProps} />);
-    expect(screen.getByText("Octant Chat")).toBeVisible();
     expect(screen.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
-    expect(screen.getByText(/Start a calm, focused conversation/)).toBeVisible();
+    expect(screen.queryByText("Octant Chat")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start a calm, focused conversation/)).not.toBeInTheDocument();
   });
 
   it("renders mode-specific welcome copy for code", () => {
     render(<DraftThreadWorkspace {...baseProps} mode="code" />);
-    expect(screen.getByText("Octant Code")).toBeVisible();
     expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
   });
 
   it("renders mode-specific welcome copy for work", () => {
     render(<DraftThreadWorkspace {...baseProps} mode="work" />);
-    expect(screen.getByText("Octant Work")).toBeVisible();
     expect(screen.getByRole("heading", { name: "What are we working on?" })).toBeVisible();
+    expect(screen.queryByText("Octant Work")).not.toBeInTheDocument();
   });
 
   it("renders intent cards for the active mode", () => {
-    render(<DraftThreadWorkspace {...baseProps} />);
-    expect(screen.getByRole("list", { name: "Suggested actions" })).toBeVisible();
+    const { container } = render(<DraftThreadWorkspace {...baseProps} />);
+    expect(screen.getByRole("group", { name: "Suggested actions" })).toBeVisible();
     expect(screen.getByText("Explain a concept")).toBeVisible();
     expect(screen.getByText("Draft text")).toBeVisible();
     expect(screen.getByText("Brainstorm ideas")).toBeVisible();
+    const composer = container.querySelector(".draft-thread__composer");
+    const suggestions = container.querySelector(".draft-thread__intent-cards");
+    expect(composer?.compareDocumentPosition(suggestions!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("hides starter actions when recent work already gives the screen a next step", () => {
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+      />,
+    );
+
+    expect(screen.queryByRole("group", { name: "Suggested actions" })).not.toBeInTheDocument();
   });
 
   it("offers the threads this mode already has and opens the one chosen", async () => {
@@ -221,10 +234,10 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByText("my-repo")).toBeVisible();
     // The branch context now lives on the branch selector trigger.
     expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("feature/test");
-    expect(screen.getByRole("combobox", { name: "Access policy" })).toHaveValue("approval-gated");
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Approval");
   });
 
-  it("shows the authoritative host health in the context strip", () => {
+  it("shows the authoritative Environment health in the context strip", () => {
     render(
       <DraftThreadWorkspace
         {...baseProps}
@@ -238,10 +251,10 @@ describe("DraftThreadWorkspace", () => {
         ]}
       />,
     );
-    expect(screen.getByRole("status", { name: "Host: This Mac · Connected" })).toBeVisible();
+    expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
     expect(
-      screen.getByRole("status", { name: "Host: This Mac · Connected" }).firstChild,
-    ).toHaveClass("host-selector__dot--healthy");
+      screen.getByRole("status", { name: "Environment: This Mac · Connected" }).firstChild,
+    ).toHaveClass("host-selector__environment-icon");
   });
 
   it.each(["code", "work"] as const)(
@@ -262,11 +275,13 @@ describe("DraftThreadWorkspace", () => {
         />,
       );
 
-      expect(screen.getByRole("status", { name: "Host: This Mac · Connected" })).toBeVisible();
+      expect(
+        screen.getByRole("status", { name: "Environment: This Mac · Connected" }),
+      ).toBeVisible();
     },
   );
 
-  it("keeps destination host choice visible and changeable for multi-host create", async () => {
+  it("keeps Environment choice visible and changeable for multi-host create", async () => {
     const user = userEvent.setup();
     const onSelectHost = vi.fn();
     const studio = "11111111-1111-4111-8111-111111111111" as never;
@@ -294,10 +309,11 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
 
-    const combobox = screen.getByRole("combobox", { name: /destination host/i });
-    expect(combobox).toHaveValue(String(studio));
+    const combobox = screen.getByRole("combobox", { name: "Environment" });
+    expect(combobox).toHaveTextContent(/Studio/);
     expect(screen.getByTestId("host-selector")).toHaveAttribute("data-host-id", String(studio));
-    await user.selectOptions(combobox, String(LOCAL_HOST_ID));
+    await user.click(combobox);
+    await user.click(await screen.findByRole("option", { name: /This Mac/ }));
     expect(onSelectHost).toHaveBeenCalledWith(LOCAL_HOST_ID);
   });
 
@@ -325,8 +341,8 @@ describe("DraftThreadWorkspace", () => {
         selectedHostId={LOCAL_HOST_ID}
       />,
     );
-    expect(screen.getByRole("status", { name: "Host: This Mac · Connected" })).toBeVisible();
-    expect(screen.queryByRole("combobox", { name: /destination host/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
+    expect(screen.queryByRole("combobox", { name: "Environment" })).not.toBeInTheDocument();
   });
 
   it("does not show branch for non-code modes", () => {
@@ -542,9 +558,10 @@ describe("DraftThreadWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: /Octant/ }));
-    const workspace = screen.getByRole("combobox", { name: "Workspace" });
-    expect(workspace).toHaveValue("managed-worktree");
-    await user.selectOptions(workspace, "current-checkout");
+    const workspace = screen.getByRole("button", { name: "Workspace" });
+    expect(workspace).toHaveTextContent("Managed worktree");
+    await user.click(workspace);
+    await user.click(screen.getByRole("option", { name: /Current checkout/ }));
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 
@@ -612,13 +629,8 @@ describe("DraftThreadWorkspace", () => {
 
     const prompt = screen.getByRole("textbox", { name: "First message" });
     await user.type(prompt, "Keep this exact prompt");
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Access policy" }),
-      "full-access",
-    );
-    await user.click(screen.getByRole("button", { name: "Delivery target" }));
-    await user.clear(screen.getByRole("textbox", { name: "Branch intent" }));
-    await user.type(screen.getByRole("textbox", { name: "Branch intent" }), "feature/keep-me");
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(screen.getByRole("option", { name: /Full access/ }));
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: "Add local folder…" }));
@@ -628,8 +640,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep this exact prompt",
     );
-    expect(screen.getByRole("combobox", { name: "Access policy" })).toHaveValue("full-access");
-    expect(screen.getByRole("textbox", { name: "Branch intent" })).toHaveValue("feature/keep-me");
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Full access");
     expect(screen.getByRole("button", { name: "Project: new-repository" })).toBeVisible();
   });
 
@@ -738,9 +749,32 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("status", { name: /Host: This computer/ })).toBeVisible();
+    expect(screen.getByRole("status", { name: /Environment: This computer/ })).toBeVisible();
     expect(screen.getByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
     expect(screen.getByRole("button", { name: "GitHub repository" })).toBeVisible();
+  });
+
+  it("keeps another folder reachable from the Project control after Code creation is refused", async () => {
+    const user = userEvent.setup();
+    const onCreateProject = vi.fn(async () => codeProjectId);
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        errorMessage="This Project folder has no Git checkout."
+        mode="code"
+        onCreateProject={onCreateProject}
+        projectId={codeProjectId}
+        projects={projects}
+      />,
+    );
+
+    const project = screen.getByRole("button", { name: "Project: Octant" });
+    expect(screen.getByRole("heading", { level: 1 })).not.toContainElement(project);
+    expect(project.closest(".composer-tray")).not.toBeNull();
+
+    await user.click(project);
+    await user.click(screen.getByRole("option", { name: "Add local folder…" }));
+    expect(screen.getByRole("dialog", { name: "Create Project" })).toBeVisible();
   });
 
   it("omits the GitHub repository selection when the GitHub clients are unavailable", () => {

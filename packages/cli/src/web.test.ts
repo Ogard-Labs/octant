@@ -131,6 +131,42 @@ describe("runWebCommand", () => {
     expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("Vite renderer"));
   });
 
+  it("starts a fresh dev host with persistent storage and the confined code-file helper", async () => {
+    const attachOrCreateHost = vi.fn(async () => ({
+      kind: "attached" as const,
+      url: new URL("http://127.0.0.1:13773"),
+      instanceId: "instance-1",
+      version: "0.0.0-dev",
+      developmentWebBootstrap: true,
+    }));
+
+    await runWebCommand(
+      baseOptions({
+        attachOrCreateHost,
+        dev: true,
+        resolveDevelopmentCodeFileHelperPath: () => "/repo/dist/octant-code-file-helper",
+        resolveDevelopmentDataDirectory: () =>
+          "/Users/test/Library/Application Support/Octant/Development",
+        servicePolicyStore: {
+          read: vi.fn(async () => ({
+            schemaVersion: 1 as const,
+            enabled: true,
+            updatedAt: "2026-09-01T12:00:00.000Z",
+          })),
+        },
+      }),
+    );
+
+    expect(attachOrCreateHost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environment: {
+          OCTANT_CODE_FILE_HELPER_PATH: "/repo/dist/octant-code-file-helper",
+          OCTANT_DATA_DIR: "/Users/test/Library/Application Support/Octant/Development",
+        },
+      }),
+    );
+  });
+
   it("fails closed when the host is disabled", async () => {
     const attachOrCreateHost = vi.fn(async () => ({
       kind: "disabled" as const,

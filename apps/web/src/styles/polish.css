@@ -19,12 +19,12 @@
 .settings-view__field--search .settings-view__text-input,
 .settings-view__field--search input {
   min-height: 34px;
-  border-radius: 8px;
+  border-radius: var(--oct-radius-sm);
   background: var(--octant-control);
 }
 
 .provider-card {
-  border-radius: 10px;
+  border-radius: var(--oct-radius-sm);
   transition:
     border-color 140ms ease,
     background-color 140ms ease;

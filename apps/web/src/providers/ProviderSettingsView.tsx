@@ -25,7 +25,7 @@ import type {
 } from "@octant/contracts";
 import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ProviderCreateForm } from "./ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "./ProviderSettingsList";
 import type { TransientProviderCredential } from "./useProviderController";
@@ -254,30 +254,29 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onSetEnabled={props.onSetEnabled}
         onVerifyFoundryTools={props.onVerifyFoundryTools}
       />
-      <section aria-label="Defaults" className="setgroup">
-        <div className="setgroup-head">
-          <span>Defaults</span>
-        </div>
-        <div className="setrow">
-          <span className="setrow-label">Permission persistence</span>
-          <p className="setrow-hint">
-            <span>How long a granted provider approval lasts.</span>
-          </p>
-          <div className="setrow-control">
-            <OctantNativeSelect
-              aria-label="Permission persistence"
-              className="settings-view__select window-no-drag"
-              disabled={props.busy}
-              onChange={(event) =>
-                void props.onPermissionPersistenceChange(
-                  event.currentTarget.value as PermissionPersistence,
-                )
-              }
-              value={props.defaults.permissionPersistence}
-            >
-              <option value="current-session">Current session only</option>
-              <option value="project-default">Remember for this Project</option>
-            </OctantNativeSelect>
+      <section aria-label="Defaults" className="settings-card-section settings-card-section--open">
+        <h2>Defaults</h2>
+        <div className="setgroup">
+          <div className="setrow">
+            <span className="setrow-label">Permission persistence</span>
+            <p className="setrow-hint">
+              <span>How long a granted provider approval lasts.</span>
+            </p>
+            <div className="setrow-control">
+              <OctantSelectField
+                aria-label="Permission persistence"
+                className="settings-view__select window-no-drag"
+                disabled={props.busy}
+                onValueChange={(value) =>
+                  void props.onPermissionPersistenceChange(value as PermissionPersistence)
+                }
+                options={[
+                  { id: "current-session", label: "Current session only" },
+                  { id: "project-default", label: "Remember for this Project" },
+                ]}
+                value={props.defaults.permissionPersistence}
+              />
+            </div>
           </div>
         </div>
       </section>

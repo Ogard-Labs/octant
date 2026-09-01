@@ -63,6 +63,16 @@ const codeTabs: ReadonlyArray<
 ];
 
 describe("WorkspaceView Code tab registration", () => {
+  it("uses the window thread strip instead of duplicating an unsplit pane header", async () => {
+    render(<WorkspaceView {...propsFor(codeTab("code-overview", "Planning"))} />);
+
+    expect(await screen.findByRole("tab", { name: "Planning" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByTitle("Drag to move or split")).not.toBeInTheDocument();
+  });
+
   it.each(codeTabs)(
     "routes %s through an explicit Code pane boundary",
     async (kind, title, deferredAdapter, expected) => {
@@ -822,40 +832,7 @@ describe("WorkspaceView cross-context banner", () => {
   });
 });
 
-describe("WorkspaceView execution profiles", () => {
-  it("mounts the isolated execution-profile control on a new-thread surface", () => {
-    const tab = {
-      id: ids.tab,
-      kind: "draft-thread",
-      mode: "code",
-      title: "New Code thread",
-    } as WorkspaceTab;
-    render(
-      <WorkspaceView
-        {...propsFor(tab)}
-        draftExecutionProfile={<div data-testid="execution-profile-mount">Profile control</div>}
-      />,
-    );
-    expect(screen.getByTestId("execution-profile-mount")).toBeVisible();
-    expect(screen.getByRole("region", { name: "New Code thread" })).toBeVisible();
-  });
-
-  it("leaves the execution-profile control off a draft whose mode it cannot bind", () => {
-    const tab = {
-      id: ids.tab,
-      kind: "draft-thread",
-      mode: "chat",
-      title: "New Chat thread",
-    } as WorkspaceTab;
-    render(
-      <WorkspaceView
-        {...propsFor(tab)}
-        draftExecutionProfile={<div data-testid="execution-profile-mount">Profile control</div>}
-      />,
-    );
-    expect(screen.queryByTestId("execution-profile-mount")).toBeNull();
-  });
-
+describe("WorkspaceView Code draft integrations", () => {
   it("threads the GitHub onboarding clients into the Code draft composer", () => {
     const tab = {
       id: ids.tab,

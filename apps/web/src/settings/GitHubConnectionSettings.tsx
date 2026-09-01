@@ -6,8 +6,9 @@ import type {
   GithubAuthenticationState,
   GithubCapabilityKind,
 } from "@octant/contracts";
+import { ChevronDown } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { SettingsFactList, SettingsPanel, SettingsState } from "./primitives";
+import { SettingRow, SettingsFactList, SettingsState } from "./primitives";
 
 /**
  * The compact Settings connection card for one host's
@@ -118,42 +119,50 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
 
   return (
     <section aria-label="GitHub" className="github-settings" id="settings-github">
-      <SettingsPanel title="Account" description="GitHub authentication on the selected host.">
+      <section aria-label="Account" className="settings-card-section settings-card-section--open">
+        <h2>Account</h2>
+        <p className="settings-section-note">GitHub authentication on the selected host.</p>
         <SettingsFactList
           facts={[
             { label: "State", value: STATE_LABELS[snapshot.state] },
-            ...(account === undefined ? [] : [{ label: "Account", value: account.login }]),
+            ...(account === undefined
+              ? []
+              : [
+                  {
+                    label: "Account",
+                    value: <span className="oct-meta--mono">{account.login}</span>,
+                  },
+                ]),
           ]}
         />
-        {snapshot.remediation === undefined && snapshot.interaction === undefined ? null : (
-          <div className="settings-panel__stack">
-            {snapshot.remediation === undefined ? null : (
-              <p className="github-settings__note">{snapshot.remediation}</p>
-            )}
-            {snapshot.interaction === undefined ? null : (
-              <div aria-live="polite" className="github-settings__device-flow">
-                <p className="github-settings__note">
-                  Enter this one-time code at{" "}
-                  <a href={snapshot.interaction.verificationUri} rel="noreferrer" target="_blank">
-                    github.com/login/device
-                  </a>
-                  , then refresh the status.
-                </p>
-                <code className="github-settings__device-code">
-                  {snapshot.interaction.userCode}
-                </code>
-              </div>
-            )}
+        {snapshot.remediation === undefined ? null : (
+          <p className="settings-section-line">{snapshot.remediation}</p>
+        )}
+        {snapshot.interaction === undefined ? null : (
+          <div aria-live="polite" className="github-settings__device-flow settings-section-line">
+            <p className="github-settings__note">
+              Enter this one-time code at{" "}
+              <a href={snapshot.interaction.verificationUri} rel="noreferrer" target="_blank">
+                github.com/login/device
+              </a>
+              , then refresh the status.
+            </p>
+            <code className="github-settings__device-code">{snapshot.interaction.userCode}</code>
           </div>
         )}
-      </SettingsPanel>
+      </section>
 
       {snapshot.capabilities.length === 0 ? null : (
-        <SettingsPanel title="Capabilities" description="GitHub data available to Octant.">
-          <ul className="github-settings__capabilities settings-panel__stack">
+        <section
+          aria-label="Capabilities"
+          className="settings-card-section settings-card-section--open"
+        >
+          <h2>Capabilities</h2>
+          <p className="settings-section-note">GitHub data available to Octant.</p>
+          <ul className="github-settings__capabilities">
             {snapshot.capabilities.map((capability) => (
               <li key={capability.kind}>
-                <span>{CAPABILITY_LABELS[capability.kind]}</span>
+                <span className="oct-row-label">{CAPABILITY_LABELS[capability.kind]}</span>
                 <span
                   className={
                     capability.available
@@ -169,121 +178,157 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
               </li>
             ))}
           </ul>
-        </SettingsPanel>
+        </section>
       )}
 
-      <SettingsPanel title="Connection" description="Refresh scopes or remove local credentials.">
-        <div className="github-settings__controls settings-panel__stack">
-          {snapshot.state === "unauthorized" ? (
-            <OctantButton
-              disabled={commandBusy}
-              onClick={() =>
-                void runCommand({ kind: "setup", confirmation: "confirm-github-setup" })
-              }
-              type="button"
-              variant="secondary"
-            >
-              Set up GitHub
-            </OctantButton>
-          ) : null}
-          <OctantButton
-            disabled={commandBusy}
-            onClick={() => void refresh()}
-            type="button"
-            variant="secondary"
+      <section
+        aria-label="Connection"
+        className="settings-card-section settings-card-section--open"
+      >
+        <h2>Connection</h2>
+        <div className="setgroup">
+          <SettingRow
+            description="Refresh scopes or remove local credentials."
+            label="Connection"
+            labelledBySection
+            scope="host"
+            settingId="github-connection"
           >
-            Refresh status
-          </OctantButton>
-          {connected ? (
-            <OctantButton
-              disabled={commandBusy}
-              onClick={() =>
-                void runCommand({
-                  kind: "refresh",
-                  confirmation: "confirm-github-refresh",
-                  scopes: ["read:project"],
-                })
-              }
-              type="button"
-              variant="secondary"
-            >
-              Enable Projects metadata
-            </OctantButton>
-          ) : null}
-          {connected ? (
-            logoutArmed ? (
+            <div className="github-settings__controls">
+              {snapshot.state === "unauthorized" ? (
+                <OctantButton
+                  disabled={commandBusy}
+                  onClick={() =>
+                    void runCommand({ kind: "setup", confirmation: "confirm-github-setup" })
+                  }
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Set up GitHub
+                </OctantButton>
+              ) : null}
               <OctantButton
                 disabled={commandBusy}
-                onClick={() =>
-                  void runCommand({ kind: "logout", confirmation: "confirm-github-local-logout" })
-                }
-                type="button"
-                variant="destructive"
-              >
-                Confirm local logout
-              </OctantButton>
-            ) : (
-              <OctantButton
-                disabled={commandBusy}
-                onClick={() => setLogoutArmed(true)}
+                onClick={() => void refresh()}
+                size="sm"
                 type="button"
                 variant="secondary"
               >
-                Log out on this host
+                Refresh status
               </OctantButton>
-            )
-          ) : null}
+              {connected ? (
+                <OctantButton
+                  disabled={commandBusy}
+                  onClick={() =>
+                    void runCommand({
+                      kind: "refresh",
+                      confirmation: "confirm-github-refresh",
+                      scopes: ["read:project"],
+                    })
+                  }
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Enable Projects metadata
+                </OctantButton>
+              ) : null}
+              {connected ? (
+                logoutArmed ? (
+                  <OctantButton
+                    disabled={commandBusy}
+                    onClick={() =>
+                      void runCommand({
+                        kind: "logout",
+                        confirmation: "confirm-github-local-logout",
+                      })
+                    }
+                    size="sm"
+                    type="button"
+                    variant="destructive"
+                  >
+                    Confirm local logout
+                  </OctantButton>
+                ) : (
+                  <OctantButton
+                    disabled={commandBusy}
+                    onClick={() => setLogoutArmed(true)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Log out on this host
+                  </OctantButton>
+                )
+              ) : null}
+            </div>
+          </SettingRow>
         </div>
         {commandError === undefined ? null : (
           <SettingsState kind="error">{commandError}</SettingsState>
         )}
-      </SettingsPanel>
+      </section>
 
-      <SettingsPanel title="Revoke access on GitHub">
-        <div className="settings-panel__stack">
-          <p className="github-settings__note">
-            Logging out removes the credential from this host only; it does not revoke Octant's
-            GitHub authorization. To revoke it, open your{" "}
-            <a href={GITHUB_APPLICATIONS_URL} rel="noreferrer" target="_blank">
-              GitHub application settings
-            </a>{" "}
-            and remove the GitHub CLI authorization.
-          </p>
-        </div>
-      </SettingsPanel>
+      <section
+        aria-label="Revoke access on GitHub"
+        className="settings-card-section settings-card-section--open"
+      >
+        <h2>Revoke access on GitHub</h2>
+        <p className="settings-section-line">
+          Logging out removes the credential from this host only; it does not revoke Octant's GitHub
+          authorization. To revoke it, open your{" "}
+          <a href={GITHUB_APPLICATIONS_URL} rel="noreferrer" target="_blank">
+            GitHub application settings
+          </a>{" "}
+          and remove the GitHub CLI authorization.
+        </p>
+      </section>
 
-      <SettingsPanel title="Advanced diagnostics">
-        <div className="github-settings__diagnostics settings-panel__stack">
+      {/* The disclosure is the section's label row: one name for the group
+          and the control that opens it, rather than a heading and a button
+          that both say "Advanced diagnostics". */}
+      <section
+        aria-label="Advanced diagnostics"
+        className="settings-card-section settings-card-section--open"
+      >
+        <div className="settings-section-head">
           <OctantButton
             aria-expanded={diagnosticsOpen}
+            className="github-settings__diagnostics-trigger"
             onClick={() => setDiagnosticsOpen((open) => !open)}
+            size="sm"
             type="button"
             variant="ghost"
           >
             Advanced diagnostics
+            <ChevronDown aria-hidden="true" size={14} strokeWidth={1.5} />
           </OctantButton>
-          {diagnosticsOpen ? (
-            <SettingsFactList
-              facts={[
-                { label: "Git protocol", value: account?.gitProtocol ?? "Unknown" },
-                {
-                  label: "Granted scopes",
-                  value:
-                    account === undefined || account.scopes.length === 0 ? (
-                      "None reported"
-                    ) : (
-                      <ul className="github-settings__scopes">
-                        {account.scopes.map((scope) => (
-                          <li key={scope}>{scope}</li>
-                        ))}
-                      </ul>
-                    ),
-                },
-              ]}
-            />
-          ) : null}
         </div>
-      </SettingsPanel>
+        {diagnosticsOpen ? (
+          <SettingsFactList
+            facts={[
+              {
+                label: "Git protocol",
+                value: <span className="oct-meta--mono">{account?.gitProtocol ?? "Unknown"}</span>,
+              },
+              {
+                label: "Granted scopes",
+                value:
+                  account === undefined || account.scopes.length === 0 ? (
+                    "None reported"
+                  ) : (
+                    <ul className="github-settings__scopes oct-meta--mono">
+                      {account.scopes.map((scope) => (
+                        <li key={scope}>{scope}</li>
+                      ))}
+                    </ul>
+                  ),
+              },
+            ]}
+          />
+        ) : null}
+      </section>
     </section>
   );
 }

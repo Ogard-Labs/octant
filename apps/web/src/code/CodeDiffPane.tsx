@@ -246,7 +246,8 @@ function AvailableDiff(
         <div className="code-diff-pane__warning" role="alert">
           <strong>{props.staleNotice.message}</strong>
           <OctantButton
-            className="btn btn-secondary btn-sm"
+            size="sm"
+            variant="outline"
             onClick={props.staleNotice.onRefresh}
             type="button"
           >
@@ -308,7 +309,8 @@ function AvailableDiff(
               )}
               {props.onOpenFile === undefined || selected.change === "deleted" ? null : (
                 <OctantButton
-                  className="btn btn-secondary btn-sm"
+                  size="sm"
+                  variant="outline"
                   onClick={() => props.onOpenFile?.(selected.path)}
                   type="button"
                 >
@@ -317,7 +319,8 @@ function AvailableDiff(
               )}
               {mayDiscard && trackedPath !== undefined ? (
                 <OctantButton
-                  className="btn btn-danger btn-sm"
+                  size="sm"
+                  variant="destructive"
                   disabled={discarding}
                   onClick={() => setConfirmingDiscard(selected.path)}
                   type="button"
@@ -338,7 +341,8 @@ function AvailableDiff(
                 </p>
                 <div className="code-diff-pane__confirm-actions">
                   <OctantButton
-                    className="btn btn-danger btn-sm"
+                    size="sm"
+                    variant="destructive"
                     disabled={discarding}
                     onClick={() => void discard(trackedPath)}
                     type="button"
@@ -346,7 +350,8 @@ function AvailableDiff(
                     Discard permanently
                   </OctantButton>
                   <OctantButton
-                    className="btn btn-secondary btn-sm"
+                    size="sm"
+                    variant="outline"
                     onClick={() => setConfirmingDiscard(undefined)}
                     type="button"
                   >

@@ -10,7 +10,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
@@ -422,23 +422,23 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           the filter and on a row.
         */}
         <label htmlFor={ids.host}>Environment</label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="select"
           id={ids.host}
-          onChange={(event) => setHostId(event.target.value)}
-          value={hostId}
-        >
-          {catalog.hosts.length === 0 ? <option value="">No environments available</option> : null}
-          {catalog.hosts.map((host) => (
-            <option key={String(host.hostId)} value={String(host.hostId)}>
-              {environmentLabel({
+          onValueChange={setHostId}
+          options={[
+            ...(catalog.hosts.length === 0 ? [{ id: "", label: "No environments available" }] : []),
+            ...catalog.hosts.map((host) => ({
+              id: String(host.hostId),
+              label: environmentLabel({
                 hostId: String(host.hostId),
                 hostDisplayName: host.label,
                 ...(props.localHostId === undefined ? {} : { localHostId: props.localHostId }),
-              })}
-            </option>
-          ))}
-        </OctantNativeSelect>
+              }),
+            })),
+          ]}
+          value={hostId}
+        />
       </div>
 
       <div className="automation-editor__field automation-editor__mode">
@@ -465,22 +465,22 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.project}>Project</label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="select"
           id={ids.project}
-          onChange={(event) => {
-            setProjectId(event.target.value);
+          onValueChange={(value) => {
+            setProjectId(value);
             setExecutionProfileId("");
           }}
+          options={[
+            { id: "", label: "Choose a Project" },
+            ...projectOptions.map((project) => ({
+              id: String(project.projectId),
+              label: project.name,
+            })),
+          ]}
           value={projectId}
-        >
-          <option value="">Choose a Project</option>
-          {projectOptions.map((project) => (
-            <option key={String(project.projectId)} value={String(project.projectId)}>
-              {project.name}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
         {projectOptions.length === 0 ? (
           <p className="automation-editor__note" role="status">
             No {automationModeLabel(mode)} Projects are available on this host.
@@ -490,19 +490,19 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.execution}>Execution profile</label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="select"
           id={ids.execution}
-          onChange={(event) => setExecutionProfileId(event.target.value)}
+          onValueChange={setExecutionProfileId}
+          options={[
+            { id: "", label: "Choose an execution profile" },
+            ...executionOptions.map((option) => ({
+              id: String(option.receipt.profileId),
+              label: option.label,
+            })),
+          ]}
           value={executionProfileId}
-        >
-          <option value="">Choose an execution profile</option>
-          {executionOptions.map((option) => (
-            <option key={String(option.receipt.profileId)} value={String(option.receipt.profileId)}>
-              {option.label}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
         {executionOptions.length === 0 ? (
           <p className="automation-editor__note" role="status">
             No eligible execution profiles are available for this selection.
@@ -512,19 +512,19 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.authority}>Authority profile</label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="select"
           id={ids.authority}
-          onChange={(event) => setAuthorityProfileId(event.target.value)}
+          onValueChange={setAuthorityProfileId}
+          options={[
+            { id: "", label: "Choose an authority profile" },
+            ...authorityOptions.map((option) => ({
+              id: String(option.receipt.profileId),
+              label: option.label,
+            })),
+          ]}
           value={authorityProfileId}
-        >
-          <option value="">Choose an authority profile</option>
-          {authorityOptions.map((option) => (
-            <option key={String(option.receipt.profileId)} value={String(option.receipt.profileId)}>
-              {option.label}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
         {selectedAuthority === undefined ? null : (
           <p className="automation-editor__note">
             {automationAuthoritySummary(selectedAuthority.receipt)}
@@ -542,21 +542,22 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.schedule}>Schedule</label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="select"
           id={ids.schedule}
-          onChange={(event) =>
+          onValueChange={(value) =>
             setTrigger((previous) => ({
               ...previous,
-              kind: event.target.value as TriggerFormState["kind"],
+              kind: value as TriggerFormState["kind"],
             }))
           }
+          options={[
+            { id: "once", label: "Run once" },
+            { id: "interval", label: "Repeat on an interval" },
+            { id: "weekly-local", label: "Weekly on chosen days" },
+          ]}
           value={trigger.kind}
-        >
-          <option value="once">Run once</option>
-          <option value="interval">Repeat on an interval</option>
-          <option value="weekly-local">Weekly on chosen days</option>
-        </OctantNativeSelect>
+        />
       </div>
 
       {trigger.kind === "once" ? (
@@ -662,15 +663,16 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.missed}>Missed runs</label>
-        <OctantNativeSelect
+        <OctantSelectField
           className="select"
           id={ids.missed}
-          onChange={(event) => setMissedRunPolicy(event.target.value as AutomationMissedRunPolicy)}
+          onValueChange={(value) => setMissedRunPolicy(value as AutomationMissedRunPolicy)}
+          options={[
+            { id: "skip", label: "Skip missed runs" },
+            { id: "run-once", label: "Run the newest missed occurrence once" },
+          ]}
           value={missedRunPolicy}
-        >
-          <option value="skip">Skip missed runs</option>
-          <option value="run-once">Run the newest missed occurrence once</option>
-        </OctantNativeSelect>
+        />
       </div>
 
       <div className="automation-editor__field">

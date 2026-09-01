@@ -97,6 +97,31 @@ describe("WorkspaceRailLayers", () => {
     expect(codeApi.refreshProjectPullRequests).not.toHaveBeenCalled();
   });
 
+  it("opens a new thread directly from a blocking workspace reader", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Pull requests" }));
+    expect(await screen.findByRole("region", { name: "Pull requests" })).toBeVisible();
+    expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
+
+    await user.click(screen.getByRole("button", { name: "New thread" }));
+
+    expect(await screen.findByRole("region", { name: "New Code thread" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Pull requests" })).not.toBeInTheDocument();
+    expect(document.querySelector(".workspace")).not.toHaveAttribute("hidden");
+  });
+
   it("opens the host-scoped GitHub issue browser from the gated Issues row", async () => {
     const user = userEvent.setup();
     vi.stubGlobal(
@@ -226,7 +251,7 @@ describe("WorkspaceRailLayers", () => {
     // probe would pass on the fallback before the chunk settled.
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     expect(await screen.findByRole("region", { name: "Code thread" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Automations" }));
 
     expect(await screen.findByRole("heading", { name: "Automations" })).toBeVisible();
@@ -236,7 +261,7 @@ describe("WorkspaceRailLayers", () => {
     await user.click(screen.getByRole("button", { name: "Back to workspace" }));
     expect(screen.queryByRole("heading", { name: "Automation Center" })).not.toBeInTheDocument();
     expect(document.querySelector(".workspace")).not.toHaveAttribute("hidden");
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Automations" }));
 
     await user.click(await screen.findByRole("button", { name: "Nightly build check" }));

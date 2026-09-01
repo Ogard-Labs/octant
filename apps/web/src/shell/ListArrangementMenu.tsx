@@ -7,7 +7,7 @@ import {
   type ListSort,
   type ListStatusFilter,
 } from "@octant/client-runtime/list-arrangement";
-import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 
 const STATUSES: ReadonlyArray<ListStatusFilter> = ["any", "active", "needs-attention", "finished"];
 const GROUPINGS: ReadonlyArray<ListGrouping> = ["none", "environment", "project"];
@@ -30,50 +30,47 @@ export function ListArrangementMenu(props: {
     <div aria-label="Arrange" className="list-arrangement" role="group">
       <label className="list-arrangement__field">
         <span className="sr-only">Status</span>
-        <OctantNativeSelect
-          onChange={(event) =>
-            props.onChange({ ...props.arrangement, status: event.target.value as ListStatusFilter })
+        <OctantSelectField
+          aria-label="Status"
+          onValueChange={(value) =>
+            props.onChange({ ...props.arrangement, status: value as ListStatusFilter })
           }
+          options={STATUSES.map((status) => ({
+            id: status,
+            label: LIST_STATUS_LABELS[status],
+          }))}
           value={props.arrangement.status}
-        >
-          {STATUSES.map((status) => (
-            <option key={status} value={status}>
-              {LIST_STATUS_LABELS[status]}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
       </label>
 
       <label className="list-arrangement__field">
         <span className="sr-only">Group</span>
-        <OctantNativeSelect
-          onChange={(event) =>
-            props.onChange({ ...props.arrangement, grouping: event.target.value as ListGrouping })
+        <OctantSelectField
+          aria-label="Group"
+          onValueChange={(value) =>
+            props.onChange({ ...props.arrangement, grouping: value as ListGrouping })
           }
+          options={GROUPINGS.map((grouping) => ({
+            id: grouping,
+            label: LIST_GROUPING_LABELS[grouping],
+          }))}
           value={props.arrangement.grouping}
-        >
-          {GROUPINGS.map((grouping) => (
-            <option key={grouping} value={grouping}>
-              {LIST_GROUPING_LABELS[grouping]}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
       </label>
 
       <label className="list-arrangement__field">
         <span className="sr-only">Sort</span>
-        <OctantNativeSelect
-          onChange={(event) =>
-            props.onChange({ ...props.arrangement, sort: event.target.value as ListSort })
+        <OctantSelectField
+          aria-label="Sort"
+          onValueChange={(value) =>
+            props.onChange({ ...props.arrangement, sort: value as ListSort })
           }
+          options={SORTS.map((sort) => ({
+            id: sort,
+            label: LIST_SORT_LABELS[sort],
+          }))}
           value={props.arrangement.sort}
-        >
-          {SORTS.map((sort) => (
-            <option key={sort} value={sort}>
-              {LIST_SORT_LABELS[sort]}
-            </option>
-          ))}
-        </OctantNativeSelect>
+        />
       </label>
     </div>
   );

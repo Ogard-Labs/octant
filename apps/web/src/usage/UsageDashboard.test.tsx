@@ -187,7 +187,33 @@ describe("UsageDashboard", () => {
     expect(screen.getByLabelText("Usage by provider")).toBeInTheDocument();
   });
 
-  it("renders host latency measurements after the totals", async () => {
+  it("keeps filters collapsed in the toolbar above the summary", async () => {
+    const user = userEvent.setup();
+    render(<UsageDashboard client={createMockClient(seededResponse())} />);
+
+    const summary = await screen.findByRole("group", { name: "Summary totals" });
+    const filters = screen.getByRole("button", { name: "Filters" });
+    expect(filters).toHaveAttribute("aria-expanded", "false");
+    expect(filters.closest(".surface-toolbar")).not.toBeNull();
+    expect(
+      filters.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getByLabelText("Filter by provider instance id")).not.toBeVisible();
+    await user.click(filters);
+    expect(screen.getByLabelText("Filter by provider instance id")).toBeVisible();
+  });
+
+  it("states when the figures were read as a sentence, not a stamp", async () => {
+    render(<UsageDashboard client={createMockClient(seededResponse())} />);
+
+    await screen.findByText("Total requests");
+    expect(screen.getByText(/^Queried \d{2}:\d{2} on \d{1,2} [A-Z][a-z]{2} \d{4}$/)).toHaveClass(
+      "oct-meta",
+    );
+  });
+
+  it("keeps latency behind Operational details after the primary totals", async () => {
+    const user = userEvent.setup();
     const response = {
       ...seededResponse(),
       latencyStats: {
@@ -206,7 +232,11 @@ describe("UsageDashboard", () => {
     const client = createMockClient(response);
     render(<UsageDashboard client={client} />);
 
-    const latency = await screen.findByRole("region", { name: "Latency" });
+    await screen.findByText("Total requests");
+    const latency = screen.getByRole("region", { name: "Latency" });
+    expect(latency).not.toBeVisible();
+    await user.click(screen.getByText("Operational details"));
+    expect(latency).toBeVisible();
     expect(within(latency).getByText("Provider runtime start")).toBeInTheDocument();
     expect(
       within(latency).getByText(/2 observations · p50 8 ms · p95 14 ms · max 14 ms/),
@@ -234,9 +264,11 @@ describe("UsageDashboard", () => {
   it("shows an empty state when no records match", async () => {
     const client = createMockClient(emptyResponse());
     render(<UsageDashboard client={client} />);
+    const title = await screen.findByText("No usage recorded yet");
+    expect(title.closest("[role='status']")).toHaveClass("surface-empty");
     expect(
-      await screen.findByText("No usage records match the selected filters."),
-    ).toBeInTheDocument();
+      screen.getByText("Usage appears after an agent completes a provider request."),
+    ).toBeVisible();
     expect(screen.queryByText("Unavailable: 0")).not.toBeInTheDocument();
   });
 
@@ -277,7 +309,12 @@ describe("UsageDashboard", () => {
       },
     });
     render(<UsageDashboard client={client} />);
-    expect(await screen.findByText("Reasoning tokens")).toBeInTheDocument();
+    const summary = await screen.findByRole("group", { name: "Summary totals" });
+    expect(summary.querySelectorAll(".usage-total")).toHaveLength(3);
+    expect(screen.getByRole("group", { name: "Operational metrics" })).not.toBeVisible();
+    fireEvent.click(screen.getByText("Operational details"));
+    expect(screen.getByRole("group", { name: "Operational metrics" })).toBeVisible();
+    expect(screen.getByText("Reasoning tokens")).toBeInTheDocument();
     expect(screen.getByText("12")).toBeInTheDocument();
     expect(screen.getByText("Cache read tokens")).toBeInTheDocument();
     expect(screen.getByText("Cache write tokens")).toBeInTheDocument();
@@ -301,7 +338,7 @@ describe("UsageDashboard", () => {
     expect(screen.getByText("thread-1")).toBeInTheDocument();
     expect(screen.getByText("Refreshing usage data…")).toBeInTheDocument();
     resolveNext?.(emptyResponse());
-    await waitFor(() => expect(screen.getByText("No usage records match the selected filters.")));
+    await waitFor(() => expect(screen.getByText("No usage matches these filters")));
   });
 
   it("does not let an older filter response overwrite the newest result", async () => {
@@ -319,10 +356,10 @@ describe("UsageDashboard", () => {
     fireEvent.change(provider, { target: { value: "provider-2" } });
     expect(resolvers).toHaveLength(2);
     resolvers[1]!(emptyResponse());
-    await waitFor(() => expect(screen.getByText("No usage records match the selected filters.")));
+    await waitFor(() => expect(screen.getByText("No usage matches these filters")));
     resolvers[0]!(seededResponse());
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(screen.getByText("No usage records match the selected filters.")).toBeInTheDocument();
+    expect(screen.getByText("No usage matches these filters")).toBeInTheDocument();
   });
 
   it("renders keyboard-usable custom date range controls", async () => {
@@ -374,26 +411,24 @@ describe("UsageDashboard", () => {
     expect(client.retain).toHaveBeenCalled();
   });
 
-  it("keeps usage export secondary and usage erasure destructive", async () => {
+  it("keeps usage export an ordinary button and usage erasure in danger text", async () => {
     const client = createMockClient(seededResponse());
     render(<UsageDashboard client={client} />);
     await screen.findByText("Total requests");
 
     expect(screen.getByRole("button", { name: /Export CSV/ })).toHaveAttribute(
       "data-variant",
-      "secondary",
+      "outline",
     );
     expect(screen.getByRole("button", { name: /Export JSON/ })).toHaveAttribute(
       "data-variant",
-      "secondary",
+      "outline",
     );
-    expect(screen.getByRole("button", { name: /Purge older than 30 days/ })).toHaveAttribute(
-      "data-variant",
-      "destructive",
+    expect(screen.getByRole("button", { name: /Purge older than 30 days/ })).toHaveClass(
+      "usage-dashboard__danger",
     );
-    expect(screen.getByRole("button", { name: /Reset all usage/ })).toHaveAttribute(
-      "data-variant",
-      "destructive",
+    expect(screen.getByRole("button", { name: /Reset all usage/ })).toHaveClass(
+      "usage-dashboard__danger",
     );
   });
 

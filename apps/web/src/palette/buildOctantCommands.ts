@@ -15,6 +15,8 @@ export interface OctantCommandSources {
   readonly onNewThread: () => void;
   readonly onOpenSearch: () => void;
   readonly onOpenSettings: () => void;
+  /** Opens Zen. Absent when this window cannot enter it. */
+  readonly onOpenZen?: () => void;
   readonly threads: ReadonlyArray<CommandThread>;
   readonly onOpenThread: (thread: CommandThread) => void;
   readonly projects: ReadonlyArray<CommandProject>;
@@ -180,6 +182,16 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
     keywords: ["preferences", "providers", "appearance"],
     action: { kind: "run", run: sources.onOpenSettings },
   });
+
+  if (sources.onOpenZen !== undefined) {
+    commands.push({
+      id: "workspace:zen-mode",
+      title: "Toggle Zen mode",
+      group: "Workspace",
+      keywords: ["focus", "zen"],
+      action: { kind: "run", run: sources.onOpenZen },
+    });
+  }
 
   return commands;
 }

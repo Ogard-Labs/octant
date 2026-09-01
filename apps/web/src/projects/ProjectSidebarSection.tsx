@@ -561,8 +561,6 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         <p className="project-nav__empty" role="status">
           {FILTERED_THREADS_EMPTY_MESSAGE}
         </p>
-      ) : visibleProjects.length === 0 && unfiled.length === 0 ? (
-        <p className="project-nav__empty">No Projects in this mode.</p>
       ) : null}
       {showFilteredThreadsEmpty ? null : nestThreads && activityView ? (
         <ActivityThreadList
@@ -602,7 +600,8 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           ) : null}
         </>
       )}
-      {currentFilters === undefined || currentFilters.lifecycle === "active" ? (
+      {(currentFilters === undefined || currentFilters.lifecycle === "active") &&
+      props.archivedProjects.length > 0 ? (
         <details className="project-archive">
           <summary>
             Archive <span>{props.archivedProjects.length}</span>

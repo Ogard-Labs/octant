@@ -14,6 +14,10 @@ function baseSettings(
   };
 }
 
+function posture() {
+  return screen.getByRole("combobox", { name: "Subagent creation" });
+}
+
 describe("AgentRunSettingsPanel", () => {
   it("loads and displays the current server-authoritative posture", async () => {
     const client = {
@@ -21,10 +25,8 @@ describe("AgentRunSettingsPanel", () => {
       update: vi.fn(),
     };
     render(<AgentRunSettingsPanel client={client} />);
-    const automatic = await screen.findByRole("radio", { name: /Automatic/ });
-    expect(automatic).toBeChecked();
-    expect(automatic).toHaveAttribute("data-slot", "toggle-group-item");
-    expect(screen.getByRole("radio", { name: /^Off/ })).not.toBeChecked();
+    await waitFor(() => expect(posture()).toHaveTextContent("Automatic"));
+    expect(screen.getByText(/without a separate confirmation step/)).toBeVisible();
   });
 
   it("updates the posture with the expected version and reflects the server's response", async () => {
@@ -35,12 +37,13 @@ describe("AgentRunSettingsPanel", () => {
       update,
     };
     render(<AgentRunSettingsPanel client={client} />);
-    await waitFor(() => expect(screen.getByRole("radio", { name: /Ask/ })).toBeChecked());
+    await waitFor(() => expect(posture()).toHaveTextContent("Ask"));
 
-    await user.click(screen.getByRole("radio", { name: /Automatic/ }));
+    await user.click(posture());
+    await user.click(await screen.findByRole("option", { name: "Automatic" }));
 
     expect(update).toHaveBeenCalledWith({ creationPosture: "automatic", expectedVersion: 1 });
-    await waitFor(() => expect(screen.getByRole("radio", { name: /Automatic/ })).toBeChecked());
+    await waitFor(() => expect(posture()).toHaveTextContent("Automatic"));
   });
 
   it("reloads the authoritative policy after a concurrent-change conflict", async () => {
@@ -54,11 +57,12 @@ describe("AgentRunSettingsPanel", () => {
       .mockRejectedValueOnce(new AgentRunSettingsClientFailure("conflict", "stale"));
     const client = { current, update };
     render(<AgentRunSettingsPanel client={client} />);
-    await waitFor(() => expect(screen.getByRole("radio", { name: /Ask/ })).toBeChecked());
+    await waitFor(() => expect(posture()).toHaveTextContent("Ask"));
 
-    await user.click(screen.getByRole("radio", { name: /Automatic/ }));
+    await user.click(posture());
+    await user.click(await screen.findByRole("option", { name: "Automatic" }));
 
-    await waitFor(() => expect(screen.getByRole("radio", { name: /^Off/ })).toBeChecked());
+    await waitFor(() => expect(posture()).toHaveTextContent("Off"));
     expect(screen.getByText(/changed elsewhere/i)).toBeInTheDocument();
   });
 

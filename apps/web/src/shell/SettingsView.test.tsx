@@ -165,13 +165,15 @@ describe("SettingsView", () => {
       agentRunSettingsClient,
       initialDeepLink: { section: "agents" },
     });
-    expect(await screen.findByRole("radio", { name: /Ask/ })).toBeChecked();
+    expect(await screen.findByRole("combobox", { name: "Subagent creation" })).toHaveTextContent(
+      "Ask",
+    );
     expect(screen.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "page");
   });
 
   it("does not render the Agents panel without an AgentRunSettingsClient", () => {
     renderSettings({ initialDeepLink: { section: "agents" } });
-    expect(screen.queryByRole("radio", { name: /Ask/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Subagent creation" })).not.toBeInTheDocument();
   });
 
   it("presents one section at a time, defaulting to General", () => {
@@ -185,6 +187,20 @@ describe("SettingsView", () => {
     expect(screen.getByRole("button", { name: "Appearance" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Appearance" })).not.toBeInTheDocument();
     expect(screen.queryByRole("slider", { name: "Sidebar width" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the active section in the Settings breadcrumb", () => {
+    renderSettings();
+
+    expect(screen.getByRole("navigation", { name: "Settings breadcrumb" })).toHaveTextContent(
+      /Settings\s*\/\s*General/,
+    );
+
+    navigateTo("Appearance");
+
+    expect(screen.getByRole("navigation", { name: "Settings breadcrumb" })).toHaveTextContent(
+      /Settings\s*\/\s*Appearance/,
+    );
   });
 
   it("returns to the app from the dedicated Settings sidebar", async () => {
@@ -208,6 +224,70 @@ describe("SettingsView", () => {
     );
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
+  });
+
+  it("keeps Profile collapsed in the same open form as the routine General groups", () => {
+    renderSettings();
+
+    expect(
+      screen.getByRole("heading", { name: "Profile" }).closest(".settings-card-section"),
+    ).toHaveClass("settings-card-section--open");
+    const profileDisclosure = screen.getByRole("heading", { name: "Profile" }).closest("details");
+    expect(profileDisclosure).not.toHaveAttribute("open");
+    expect(profileDisclosure).toHaveTextContent("Not set");
+    expect(
+      screen.getByRole("heading", { name: "Available modes" }).closest(".settings-card-section"),
+    ).toHaveClass("settings-card-section--open");
+    const modes = screen.getByRole("heading", { name: "Available modes" });
+    const profile = screen.getByRole("heading", { name: "Profile" });
+    expect(modes.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("moves keyboard shortcuts out of General into a dedicated section", () => {
+    renderSettings();
+
+    expect(screen.queryByRole("heading", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    navigateTo("Keybindings");
+
+    expect(screen.getByRole("heading", { level: 1, name: "Keybindings" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Change the chord for Open the command palette" }),
+    ).toBeVisible();
+  });
+
+  it("keeps the active Settings page first at narrow width and moves navigation into a drawer", async () => {
+    const user = userEvent.setup();
+    const onBack = vi.fn();
+    renderSettings({ isNarrow: true, onBack });
+
+    expect(screen.queryByRole("complementary", { name: "Settings sidebar" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "General" })).toBeVisible();
+    expect(screen.getByRole("searchbox", { name: "Search settings" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Back to app" })).toBeVisible();
+
+    const sections = screen.getByRole("button", { name: "Settings sections" });
+    await user.click(sections);
+    const drawer = screen.getByRole("dialog", { name: "Settings sections" });
+    expect(within(drawer).getByRole("navigation", { name: "Settings sections" })).toBeVisible();
+
+    await user.click(within(drawer).getByRole("button", { name: "Appearance" }));
+    expect(screen.queryByRole("dialog", { name: "Settings sections" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Appearance" })).toBeVisible();
+    await waitFor(() => expect(sections).toHaveFocus());
+
+    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("clears Settings search from an app-owned control and returns focus to the field", async () => {
+    const user = userEvent.setup();
+    const { onSearchChange } = renderSettingsWithSearch("mode", { isNarrow: true });
+
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    await user.click(screen.getByRole("button", { name: "Clear settings search" }));
+
+    expect(onSearchChange).toHaveBeenLastCalledWith("");
+    expect(search).toHaveFocus();
   });
 
   it("shows a scope indicator on each relevant control", () => {
@@ -356,8 +436,8 @@ describe("SettingsView", () => {
 
     navigateTo("Chat");
     expect(screen.getByRole("heading", { name: "Chat defaults" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveValue(
-      "automatic",
+    expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveTextContent(
+      "Automatic",
     );
     expect(screen.getByRole("alert")).toHaveTextContent("changed elsewhere");
   });
@@ -548,14 +628,17 @@ describe("SettingsView", () => {
     expect(styles).toContain("min-height: 28px");
   });
 
-  it("keeps Settings on the shared interface type scale in a pane-filling column", () => {
+  it("keeps Settings on the shared interface type scale in a navigation-anchored column", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(/\.settings-view\s*\{[\s\S]*font-family:\s*var\(--oct-font-display\);/);
-    // Settings reads as a pane, not a centred article: the column starts at the
-    // pane's edge and only stops growing where a form row gets hard to scan.
-    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*max-width:\s*1080px;/);
+    // The readable column stays bounded, but its left edge follows the
+    // navigator instead of floating in the middle of wide windows.
+    expect(styles).toMatch(/--oct-settings-reading-width:\s*680px;/);
     expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*margin:\s*0;/);
+    expect(styles).toMatch(
+      /\.settings-view__content-inner\s*\{[\s\S]*padding:\s*28px var\(--oct-settings-gutter\) 64px;/,
+    );
     expect(styles).toContain("font-family: var(--oct-font-display)");
     expect(styles).toContain("font-size: var(--octant-ui-font-size)");
     expect(styles).not.toContain("--octant-ui-font-family");
@@ -592,12 +675,40 @@ describe("SettingsView", () => {
     expect(styles).toMatch(/\.settings-scheme__card\s*\{[^}]*height:\s*auto;/);
   });
 
-  it("uses flat, dense setting groups instead of nested dashboard cards", () => {
+  it("keeps routine Settings groups open while discrete objects remain raised", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
-    expect(styles).toContain("background: var(--octant-surface-muted)");
+    expect(styles).toMatch(
+      /\.settings-view\s*\{[\s\S]*background:\s*var\(--octant-app-background\)/,
+    );
+    expect(styles).toMatch(
+      /\.settings-card-section\s*\{[\s\S]*background:\s*var\(--octant-settings-card\)/,
+    );
+    expect(styles).toMatch(
+      /\.settings-card-section\s*\{[\s\S]*box-shadow:\s*var\(--octant-shadow-sm\)/,
+    );
+    expect(styles).toMatch(/\.settings-card-section--open\s*\{[\s\S]*box-shadow:\s*none/);
     expect(styles).toContain("border-radius: var(--oct-radius-md)");
-    expect(styles).toContain("gap: var(--oct-space-1)");
+    // Code defaults are SettingRows in the shared open sections; there is no
+    // Code-only section recipe left to keep in step with them.
+    expect(styles).not.toMatch(/\.code-settings__section/);
+    expect(styles).toMatch(
+      /\.settings-card-section--open > \.settings-fact-list > \.settings-fact-list__row\s*\{[^}]*border-top:\s*1px solid var\(--oct-hairline\)/,
+    );
+  });
+
+  it("does not let the legacy 720px rail squeeze narrow Settings into a phantom column", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    expect(styles).toMatch(
+      /@media \(max-width: 720px\)[\s\S]*?\.settings-view:not\(\.settings-view--narrow\)\s*\{\s*grid-template-columns:\s*216px minmax\(0, 1fr\)/,
+    );
+  });
+
+  it("keeps sentence-case navigation groups visible inside the narrow drawer", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    expect(styles).toMatch(/\.settings-view__drawer \.setnav-section\s*\{[^}]*display:\s*block/);
   });
 
   it("keeps search and the existing mode-switcher mutation wired", async () => {
@@ -679,6 +790,9 @@ describe("SettingsView", () => {
     );
     expect(screen.getByRole("heading", { name: "Advanced" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveFocus();
+    expect(
+      screen.getByText(/Restores the current mode's pane arrangement.*Threads and data are kept/i),
+    ).toBeVisible();
     expect(onDeepLinkApplied).toHaveBeenCalledOnce();
   });
 
@@ -770,7 +884,12 @@ describe("SettingsView", () => {
       retain: vi.fn(),
     };
     renderSettings({ usageClient: usageClient as never, isNarrow: true });
-    navigateTo("Usage");
+    fireEvent.click(screen.getByRole("button", { name: "Settings sections" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Settings sections" })).getByRole("button", {
+        name: "Usage",
+      }),
+    );
     const table = await screen.findByRole("table", { name: "daily activity" });
     expect(table.className).toContain("usage-dashboard__table--narrow");
     expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);
@@ -806,6 +925,13 @@ describe("SettingsView", () => {
 
     expect(screen.getByRole("heading", { name: "Provider limits" })).toBeVisible();
     expect(await screen.findByText("No configured providers have reported limits.")).toBeVisible();
+    const dashboard = document.querySelector(".usage-dashboard");
+    const limits = screen.getByRole("heading", { name: "Provider limits" }).closest("section");
+    expect(dashboard).not.toBeNull();
+    expect(limits).not.toBeNull();
+    expect(
+      dashboard!.compareDocumentPosition(limits!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(providerUsageLimitsClient.list).toHaveBeenCalledOnce();
   });
 

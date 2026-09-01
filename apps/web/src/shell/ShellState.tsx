@@ -46,6 +46,7 @@ export function ShellState(props: ShellStateProps) {
   const StateIcon = stateIcons[props.state];
   return (
     <OctantEmptyStateRoot
+      className="shell-state"
       data-state={props.state}
       role={props.role ?? (props.state === "loading" ? "status" : undefined)}
     >

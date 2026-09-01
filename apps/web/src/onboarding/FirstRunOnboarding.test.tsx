@@ -807,12 +807,37 @@ describe("FirstRunOnboarding", () => {
     );
   });
 
+  it("marks the current setup step and leaves unanswered steps pending", async () => {
+    const user = userEvent.setup();
+    mount({ profile: namedProfile });
+
+    const profileStep = screen.getByRole("button", { name: /About you/ });
+    const workspaceStep = screen.getByRole("button", { name: /Workspace/ });
+    const navigatorStep = screen.getByRole("button", { name: /Navigator/ });
+    expect(profileStep).toHaveAttribute("data-progress", "current");
+    expect(workspaceStep).toHaveAttribute("data-progress", "pending");
+    expect(navigatorStep).toHaveAttribute("data-progress", "pending");
+    expect(profileStep).toHaveAttribute("aria-current", "step");
+    expect(profileStep.querySelector(".sr-only")).toBeNull();
+
+    await user.click(workspaceStep);
+
+    expect(profileStep).toHaveAttribute("data-progress", "completed");
+    expect(workspaceStep).toHaveAttribute("data-progress", "current");
+    expect(navigatorStep).toHaveAttribute("data-progress", "pending");
+    expect(workspaceStep).toHaveAttribute("aria-current", "step");
+    expect(profileStep).not.toHaveAttribute("aria-current");
+    expect(profileStep.querySelector(".sr-only")).toHaveTextContent("Configured");
+  });
+
   it("reports provider, Project, and default model separately on a clean host", async () => {
     const user = userEvent.setup();
     const props = mount();
 
     await openHandoff(user);
 
+    expect(screen.getByRole("radiogroup", { name: "First thread mode" })).toBeVisible();
+    expect(screen.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("No provider is ready yet")).toBeVisible();
     expect(screen.getByText("No Chat Project yet. A thread starts in a Project.")).toBeVisible();
     expect(screen.getByText("No model this host can use in Chat yet.")).toBeVisible();

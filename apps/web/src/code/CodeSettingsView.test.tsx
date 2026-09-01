@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { CodeSettingsView } from "./CodeSettingsView";
 
 const settings = {
@@ -16,14 +17,17 @@ describe("CodeSettingsView", () => {
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
 
     expect(screen.getByText(/apply only to new Code threads/i)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Approval" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+    expect(screen.getByRole("combobox", { name: "Default Code access" })).toHaveTextContent(
+      "Approval",
     );
     expect(screen.getByRole("button", { name: "Session" })).toHaveAttribute("aria-pressed", "true");
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Plan" }));
+    await chooseSelectFieldOption(
+      user,
+      screen.getByRole("combobox", { name: "Default Code access" }),
+      "Plan",
+    );
     await user.type(
       screen.getByRole("textbox", { name: "External editor executable" }),
       "/usr/local/bin/code",
@@ -40,5 +44,25 @@ describe("CodeSettingsView", () => {
         arguments: ["--goto", "{file}:{line}:{column}"],
       },
     });
+  });
+
+  it("presents routine defaults as open sections rather than one raised settings card", () => {
+    const { container } = render(
+      <CodeSettingsView onUpdate={async () => true} settings={settings as never} />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Thread defaults" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "External editor" })).toBeVisible();
+    expect(container.querySelector(".code-settings [data-slot='card']")).toBeNull();
+    expect(container.querySelectorAll(".code-settings .settings-card-section--open")).toHaveLength(
+      2,
+    );
+    // The four-way access choice is a select like the Agents posture; only
+    // the two-way persistence choice stays segmented.
+    expect(screen.getByRole("combobox", { name: "Default Code access" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Default approval persistence" })).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "External editor executable" }).closest(".setrow"),
+    ).not.toBeNull();
   });
 });
