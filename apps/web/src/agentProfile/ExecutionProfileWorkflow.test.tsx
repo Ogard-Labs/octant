@@ -2,6 +2,7 @@ import type { AgentProfile, ExecutionResolutionReceipt } from "@octant/contracts
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { OctantButton } from "../ui/base/OctantButton";
 import { ExecutionProfileWorkflow } from "./ExecutionProfileWorkflow";
 import type { ExecutionProfileController } from "./useExecutionProfileController";
 
@@ -114,7 +115,7 @@ describe("ExecutionProfileWorkflow", () => {
     const user = userEvent.setup();
     render(
       <div>
-        <button type="button">Outside</button>
+        <OctantButton type="button">Outside</OctantButton>
         <ExecutionProfileWorkflow controller={controller()} variant="composer" />
       </div>,
     );

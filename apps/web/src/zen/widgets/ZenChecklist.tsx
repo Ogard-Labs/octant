@@ -172,7 +172,7 @@ export function ZenChecklist(props: ZenChecklistProps) {
           </li>
         ))}
       </ul>
-      <form className="zen-checklist__add" onSubmit={submit}>
+      <form className="zen-checklist__add" noValidate onSubmit={submit}>
         <label>
           <span className="visually-hidden">New checklist item</span>
           <OctantInput

@@ -306,7 +306,7 @@ function ProfileForm(props: {
       onClose={props.onClose}
       open={props.open}
     >
-      <form onSubmit={(event) => void submit(event)}>
+      <form noValidate onSubmit={(event) => void submit(event)}>
         <h3>
           {props.mode === "create" ? "Create execution profile" : `Edit ${initial?.displayName}`}
         </h3>

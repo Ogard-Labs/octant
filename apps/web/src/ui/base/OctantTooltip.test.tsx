@@ -2,13 +2,14 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { OctantTooltip } from "./OctantTooltip";
+import { OctantButton } from "./OctantButton";
 
 describe("OctantTooltip", () => {
   it("describes an icon control on hover and closes when the control is used", async () => {
     const user = userEvent.setup();
     render(
       <OctantTooltip label="Toggle environment">
-        <button aria-label="Toggle environment" type="button" />
+        <OctantButton aria-label="Toggle environment" type="button" />
       </OctantTooltip>,
     );
 

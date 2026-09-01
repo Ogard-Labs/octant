@@ -135,6 +135,7 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                                 : "Add provider"
             }
             className={`provider-settings__create provider-settings__create--${providerType}`}
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
               const form = event.currentTarget;
@@ -695,6 +696,7 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
   return (
     <form
       className="provider-card__edit provider-card__edit--claude"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration: ClaudeProviderConfiguration = {
@@ -787,6 +789,7 @@ export function DevinConfigurationForm(props: {
   return (
     <form
       className="provider-card__edit"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -822,6 +825,7 @@ export function PiConfigurationForm(props: {
   return (
     <form
       className="provider-card__edit"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -856,6 +860,7 @@ export function OhMyPiConfigurationForm(props: {
   return (
     <form
       className="provider-card__edit"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -891,6 +896,7 @@ export function KiloConfigurationForm(props: {
   return (
     <form
       className="provider-card__edit"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -925,6 +931,7 @@ export function OllamaConfigurationForm(props: {
   return (
     <form
       className="provider-card__edit"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void props.onChange(props.instance.id, {
@@ -974,6 +981,7 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
   return (
     <form
       className="provider-card__edit provider-card__edit--vibe"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration: MistralVibeProviderConfiguration = {
@@ -1089,6 +1097,7 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
   return (
     <form
       className="provider-card__edit provider-card__edit--grok"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration: GrokProviderConfiguration = {
@@ -1199,6 +1208,7 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
   return (
     <form
       className="provider-card__edit provider-card__edit--http"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration = configurationFrom(new FormData(event.currentTarget));
@@ -1313,6 +1323,7 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
   return (
     <form
       className="provider-card__edit provider-card__edit--http"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration = anthropicConfigurationFrom(new FormData(event.currentTarget));
@@ -1437,6 +1448,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
   return (
     <form
       className="provider-card__edit provider-card__edit--http"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration = foundryConfigurationFrom(new FormData(event.currentTarget));
@@ -1773,6 +1785,7 @@ export function OpenAiImageConfigurationForm(props: OpenAiImageConfigurationForm
   return (
     <form
       className="provider-card__edit provider-card__edit--image"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration = openAiImageConfigurationFrom(new FormData(event.currentTarget));
@@ -1837,6 +1850,7 @@ export function GeminiImageConfigurationForm(props: GeminiImageConfigurationForm
   return (
     <form
       className="provider-card__edit provider-card__edit--image"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const configuration = geminiImageConfigurationFrom(new FormData(event.currentTarget));

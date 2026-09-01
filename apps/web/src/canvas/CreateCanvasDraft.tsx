@@ -71,6 +71,7 @@ export function CreateCanvasDraft({ context, onCreate }: CreateCanvasDraftProps)
     <form
       className="canvas-revise-form"
       data-testid="canvas-create-form"
+      noValidate
       onSubmit={(e) => {
         e.preventDefault();
         handleSubmit();

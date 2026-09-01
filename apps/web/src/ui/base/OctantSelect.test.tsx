@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { OctantSelectField } from "./OctantSelect";
+import { OctantButton } from "./OctantButton";
 
 describe("OctantSelectField", () => {
   it("chooses a labeled option and reports its id", async () => {
@@ -32,6 +33,7 @@ describe("OctantSelectField", () => {
     let submitted = "";
     render(
       <form
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
           submitted = String(new FormData(event.currentTarget).get("quality") ?? "missing");
@@ -46,7 +48,7 @@ describe("OctantSelectField", () => {
             { id: "high", label: "high" },
           ]}
         />
-        <button type="submit">Save</button>
+        <OctantButton type="submit">Save</OctantButton>
       </form>,
     );
 
@@ -63,7 +65,7 @@ describe("OctantSelectField", () => {
   it("restores the default option when the owning form resets", async () => {
     const user = userEvent.setup();
     render(
-      <form>
+      <form noValidate>
         <OctantSelectField
           aria-label="Protocol preference"
           defaultValue="auto"
@@ -73,7 +75,7 @@ describe("OctantSelectField", () => {
             { id: "responses", label: "Responses" },
           ]}
         />
-        <button type="reset">Reset</button>
+        <OctantButton type="reset">Reset</OctantButton>
       </form>,
     );
 

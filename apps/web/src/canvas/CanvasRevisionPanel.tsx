@@ -49,6 +49,7 @@ export function ReviseCanvasDraft(props: ReviseCanvasDraftProps) {
     <form
       className="canvas-revise-form"
       data-testid="canvas-revise-form"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void handleSubmit();

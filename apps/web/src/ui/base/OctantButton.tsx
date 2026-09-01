@@ -1,5 +1,5 @@
 import { forwardRef, type ComponentProps, type ReactNode } from "react";
-import { Button, type ButtonProps } from "../shadcn/button";
+import { Button as ShadcnButton, type ButtonProps } from "../shadcn/button";
 import { cn } from "../shadcn/utils";
 
 export type OctantButtonProps = ButtonProps;
@@ -9,10 +9,10 @@ export const OctantButton = forwardRef<HTMLButtonElement, OctantButtonProps>(fun
   { className, ...props },
   ref,
 ) {
-  return <Button className={cn("window-no-drag", className)} ref={ref} {...props} />;
+  return <ShadcnButton className={cn("window-no-drag", className)} ref={ref} {...props} />;
 });
 
-export type OctantIconButtonProps = Omit<ComponentProps<typeof Button>, "children"> & {
+export type OctantIconButtonProps = Omit<ComponentProps<typeof ShadcnButton>, "children"> & {
   readonly label: string;
   readonly children: ReactNode;
 };
@@ -21,7 +21,7 @@ export type OctantIconButtonProps = Omit<ComponentProps<typeof Button>, "childre
 export const OctantIconButton = forwardRef<HTMLButtonElement, OctantIconButtonProps>(
   function OctantIconButton({ className, label, title = label, children, ...props }, ref) {
     return (
-      <Button
+      <ShadcnButton
         aria-label={label}
         className={cn("shell-icon-button", "window-no-drag", className)}
         ref={ref}
@@ -31,7 +31,7 @@ export const OctantIconButton = forwardRef<HTMLButtonElement, OctantIconButtonPr
         {...props}
       >
         {children}
-      </Button>
+      </ShadcnButton>
     );
   },
 );

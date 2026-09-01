@@ -73,6 +73,7 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
           {revising ? (
             <form
               className="thread-goal__revise"
+              noValidate
               onSubmit={(event) => {
                 event.preventDefault();
                 const trimmed = revision.trim();
@@ -115,6 +116,7 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
       {goal === null || goal.status === "complete" ? (
         <form
           className="thread-goal__create"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             const trimmed = objective.trim();

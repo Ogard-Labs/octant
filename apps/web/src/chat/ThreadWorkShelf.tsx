@@ -131,6 +131,7 @@ export function ThreadWorkShelf(props: ThreadWorkShelfProps) {
                 {editingItemId === item.id ? (
                   <form
                     aria-label={`Edit ${item.title}`}
+                    noValidate
                     onSubmit={(event) => {
                       event.preventDefault();
                       saveEdit(item);

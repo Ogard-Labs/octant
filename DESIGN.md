@@ -463,6 +463,8 @@ for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 - Pointer targets are at least 24px on desktop and 44px on touch.
 - Keyboard users can reach every primary action, open/dismiss every overlay,
   navigate menus/selects, and recover focus after closing a popover or dialog.
+- Every app-owned form declares `noValidate`; Octant owns validation copy,
+  field association, focus, and recovery instead of browser-specific bubbles.
 - Loading, unavailable, stale, denied, empty, and error states keep stable
   geometry and explain the next action. Never turn a refused server command
   into a silent no-op.

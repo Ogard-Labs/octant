@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Select,
+  Select as AuthoredSelect,
   SelectItem,
   SelectPopup,
   SelectPortal,
@@ -11,7 +11,7 @@ import {
 import { cn } from "../shadcn/utils";
 
 export {
-  Select as OctantSelectRoot,
+  AuthoredSelect as OctantSelectRoot,
   SelectItem as OctantSelectItem,
   SelectPopup as OctantSelectPopup,
   SelectPortal as OctantSelectPortal,
@@ -80,7 +80,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
 
   return (
     <span className="contents" ref={rootRef}>
-      <Select
+      <AuthoredSelect
         disabled={props.disabled}
         onValueChange={(value) => {
           if (typeof value !== "string") return;
@@ -114,7 +114,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
             </SelectPopup>
           </SelectPositioner>
         </SelectPortal>
-      </Select>
+      </AuthoredSelect>
       {props.name === undefined ? null : (
         <input name={props.name} type="hidden" value={selectedId} />
       )}

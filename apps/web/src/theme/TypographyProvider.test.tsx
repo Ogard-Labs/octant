@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
+import { OctantButton } from "../ui/base/OctantButton";
 import { ThemeTypographyProvider } from "./TypographyProvider";
 
 const typographyBridge = readFileSync(
@@ -30,14 +31,14 @@ describe("ThemeTypographyProvider", () => {
     render(
       <ThemeTypographyProvider availableFonts={["Inter"]} typography={typography}>
         <aside className="sidebar" aria-label="Main navigation">
-          <button className="sidebar-item" type="button">
+          <OctantButton className="sidebar-item" type="button">
             New thread
-          </button>
+          </OctantButton>
         </aside>
         <aside className="settings-view__sidebar" aria-label="Settings navigation">
-          <button className="setnav-item" type="button">
+          <OctantButton className="setnav-item" type="button">
             Appearance
-          </button>
+          </OctantButton>
         </aside>
       </ThemeTypographyProvider>,
     );

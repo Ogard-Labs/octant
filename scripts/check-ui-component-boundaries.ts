@@ -7,6 +7,7 @@ const BASE_UI_IMPORT = /from\s+["']@base-ui\/react(?:\/[^"']+)?["']/;
 const SHADCN_IMPORT = /from\s+["'][^"']*ui\/shadcn(?:\/[^"']+)?["']/;
 const RAW_CONTROL_OPENING_TAG = /<\s*(button|select|textarea|input|dialog)(?=\s|>)/g;
 const RAW_CONTROL_EXCEPTION = /\{?\/\*\s*ui-boundary-exception:\s*([a-z-]+)\s*\*\/\}?\s*$/i;
+const FORM_OPEN = /<form\b/g;
 const OCTANT_INPUT_OPEN = /<OctantInput\b/g;
 const OCTANT_INPUT_CHOICE_TYPE =
   /\btype\s*=\s*(?:["'](checkbox|radio)["']|\{\s*["'](checkbox|radio)["']\s*\})/;
@@ -102,10 +103,15 @@ export function findRawControlBoundaryViolations(
     );
 }
 
-function octantInputOpeningTag(source: string, start: number): string | undefined {
+function maskComments(source: string): string {
+  const preserveLines = (value: string): string => value.replace(/[^\n]/g, " ");
+  return source.replace(/\/\*[\s\S]*?\*\//g, preserveLines).replace(/\/\/[^\n]*/g, preserveLines);
+}
+
+function jsxOpeningTag(source: string, start: number, tagName: string): string | undefined {
   let quote: '"' | "'" | "`" | undefined;
   let braces = 0;
-  for (let i = start + "<OctantInput".length; i < source.length; i += 1) {
+  for (let i = start + tagName.length + 1; i < source.length; i += 1) {
     const ch = source[i];
     if (ch === undefined) break;
     if (quote !== undefined) {
@@ -135,6 +141,32 @@ function octantInputOpeningTag(source: string, start: number): string | undefine
   return undefined;
 }
 
+/** Product forms own their validation copy and recovery instead of delegating
+ * to browser-specific bubbles. Test fixtures remain outside the product gate. */
+export function findFormValidationOwnerViolations(
+  files: Readonly<Record<string, string>>,
+): ReadonlyArray<string> {
+  const violations: string[] = [];
+  for (const [file, source] of Object.entries(files).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    const normalized = file.split(sep).join("/");
+    if (!normalized.startsWith(`${WEB_SOURCE}/`) || normalized.includes(".test.")) continue;
+    const searchable = maskComments(source);
+    FORM_OPEN.lastIndex = 0;
+    for (const match of searchable.matchAll(FORM_OPEN)) {
+      const openIndex = match.index ?? 0;
+      const tag = jsxOpeningTag(searchable, openIndex, "form");
+      if (tag === undefined || /\bnovalidate\b/i.test(tag)) continue;
+      const line = source.slice(0, openIndex).split("\n").length;
+      violations.push(
+        `${normalized}:${String(line)} renders an app-owned form without noValidate.`,
+      );
+    }
+  }
+  return violations;
+}
+
 /**
  * Checkbox and radio choices have owned recipes. Using the text-input adapter
  * for those types is the same leak as a raw control: the wrong primitive paints
@@ -158,7 +190,7 @@ export function findWrongAdapterBoundaryViolations(
     OCTANT_INPUT_OPEN.lastIndex = 0;
     for (const match of source.matchAll(OCTANT_INPUT_OPEN)) {
       const openIndex = match.index ?? 0;
-      const tag = octantInputOpeningTag(source, openIndex);
+      const tag = jsxOpeningTag(source, openIndex, "OctantInput");
       if (tag === undefined) continue;
       const typeMatch = OCTANT_INPUT_CHOICE_TYPE.exec(tag);
       if (typeMatch === null) continue;
@@ -197,6 +229,7 @@ async function main(): Promise<void> {
   const ordinary = rawControls.filter((finding) => finding.category === "ordinary");
   const exceptions = rawControls.filter((finding) => finding.category !== "ordinary");
   const adapterViolations = findWrongAdapterBoundaryViolations(files);
+  const formViolations = findFormValidationOwnerViolations(files);
   const violations = [
     ...importViolations,
     ...ordinary.map(
@@ -204,6 +237,7 @@ async function main(): Promise<void> {
         `${finding.file}:${String(finding.line)} renders raw <${finding.tag}>; import the corresponding Octant adapter.`,
     ),
     ...adapterViolations,
+    ...formViolations,
   ];
   if (violations.length > 0) {
     for (const violation of violations) console.error(violation);

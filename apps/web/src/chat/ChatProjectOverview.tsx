@@ -135,7 +135,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
         {!createAvailable ? (
           <p role="status">Chat thread creation is unavailable for this Project.</p>
         ) : null}
-        <form onSubmit={(event) => void submit(event)}>
+        <form noValidate onSubmit={(event) => void submit(event)}>
           <label className="sr-only" htmlFor={inputId}>
             Start a new Chat thread
           </label>
