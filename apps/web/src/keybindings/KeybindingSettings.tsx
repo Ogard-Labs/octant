@@ -7,6 +7,7 @@ import {
   type OctantKeybindingActionId,
 } from "@octant/domain";
 import { useState, type KeyboardEvent } from "react";
+import { ChevronDown } from "lucide-react";
 import { isApplePlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -122,41 +123,49 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
           default.
         </p>
       )}
-      <label className="keybinding-settings__json">
-        Keybindings JSON
-        <OctantTextarea
-          onChange={(event) => setDraft(event.target.value)}
-          rows={8}
-          value={draft ?? controller.document}
-        />
-      </label>
-      <div className="keybinding-settings__actions">
-        <OctantButton
-          disabled={draft === undefined}
-          onClick={() => {
-            if (draft === undefined) return;
-            const failure = controller.saveDocument(draft);
-            setDraftError(failure);
-            if (failure === undefined) setDraft(undefined);
-          }}
-          size="sm"
-          variant="secondary"
-        >
-          Save JSON
-        </OctantButton>
-        <OctantButton
-          onClick={() => {
-            controller.resetAll();
-            setDraft(undefined);
-            setDraftError(undefined);
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          Reset all to defaults
-        </OctantButton>
-      </div>
-      {draftError === undefined ? null : <p role="alert">{draftError}</p>}
+      <details className="keybinding-settings__advanced">
+        <summary>
+          <span>Edit keybindings JSON</span>
+          <ChevronDown aria-hidden="true" size={16} strokeWidth={1.5} />
+        </summary>
+        <div className="keybinding-settings__advanced-body">
+          <label className="keybinding-settings__json">
+            Keybindings JSON
+            <OctantTextarea
+              onChange={(event) => setDraft(event.target.value)}
+              rows={8}
+              value={draft ?? controller.document}
+            />
+          </label>
+          <div className="keybinding-settings__actions">
+            <OctantButton
+              disabled={draft === undefined}
+              onClick={() => {
+                if (draft === undefined) return;
+                const failure = controller.saveDocument(draft);
+                setDraftError(failure);
+                if (failure === undefined) setDraft(undefined);
+              }}
+              size="sm"
+              variant="secondary"
+            >
+              Save JSON
+            </OctantButton>
+            <OctantButton
+              onClick={() => {
+                controller.resetAll();
+                setDraft(undefined);
+                setDraftError(undefined);
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              Reset all to defaults
+            </OctantButton>
+          </div>
+          {draftError === undefined ? null : <p role="alert">{draftError}</p>}
+        </div>
+      </details>
     </div>
   );
 }

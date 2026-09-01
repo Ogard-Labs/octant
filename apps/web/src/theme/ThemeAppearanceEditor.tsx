@@ -52,7 +52,10 @@ export function ThemeAppearanceEditor(props: {
           {theme.error}
         </p>
       ) : null}
-      <section aria-label="Theme" className="settings-card-section">
+      <section
+        aria-label="Theme"
+        className="settings-card-section settings-card-section--open settings-theme-editor__scheme-section"
+      >
         <h2>Color scheme</h2>
         <div className="setgroup">
           <div aria-label="Theme mode" className="settings-scheme" role="radiogroup">
@@ -140,7 +143,10 @@ export function ThemeAppearanceEditor(props: {
           </label>
         </div>
       </section>
-      <details className="settings-card-section settings-theme-editor__disclosure" open>
+      <details
+        className="settings-card-section settings-card-section--open settings-theme-editor__disclosure"
+        open
+      >
         <summary>
           <span>Typography</span>
           <ChevronDown
@@ -175,7 +181,7 @@ export function ThemeAppearanceEditor(props: {
           />
         </div>
       </details>
-      <fieldset className="settings-card-section settings-theme-editor__accessibility">
+      <fieldset className="settings-card-section settings-card-section--open settings-theme-editor__accessibility">
         <legend>Accessibility</legend>
         <div className="setgroup">
           <SettingSwitch

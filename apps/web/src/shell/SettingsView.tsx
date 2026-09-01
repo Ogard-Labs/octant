@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
-import { ArrowLeft, Menu, Search, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
   type SettingsDeepLink,
@@ -76,7 +76,10 @@ import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
-import { MarketplaceFetchSettings } from "../settings/MarketplaceFetchSettings";
+import {
+  MarketplaceFetchDisclosure,
+  MarketplaceFetchSettings,
+} from "../settings/MarketplaceFetchSettings";
 import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings";
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import type { OctantHostBridge } from "./hostBridge";
@@ -139,8 +142,9 @@ const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Obj
 );
 
 const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>> = {
-  general: "Choose app-wide defaults, shortcuts, and update behavior.",
+  general: "Choose app-wide defaults, identity, updates, and network behavior.",
   appearance: "Choose how Octant looks. Use a built-in theme or make your own.",
+  keybindings: "Change the shortcuts that reach Octant's global surfaces.",
   chat: "Defaults for new Chat conversations.",
   work: "Defaults for Work threads.",
   code: "Defaults for Code threads and delivery.",
@@ -246,19 +250,21 @@ export function SettingsView(props: SettingsViewProps) {
             <span className="settings-view__drag-space" />
           </div>
           <div className="settings-view__sidebar-content">
-            {props.onBack === undefined ? null : (
-              <OctantButton
-                className="setnav-item window-no-drag settings-view__back justify-start"
-                onClick={props.onBack}
-                type="button"
-                variant="ghost"
-              >
-                <ArrowLeft aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
-                <span>Back to app</span>
-              </OctantButton>
-            )}
             <SettingsSearchField onChange={props.onSearchChange} value={props.search} />
-            {navigation}
+            <div className="settings-view__navigation-scroll">{navigation}</div>
+            {props.onBack === undefined ? null : (
+              <footer className="settings-view__sidebar-footer">
+                <OctantButton
+                  className="setnav-item window-no-drag settings-view__back justify-start"
+                  onClick={props.onBack}
+                  type="button"
+                  variant="ghost"
+                >
+                  <ArrowLeft aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+                  <span>Back to app</span>
+                </OctantButton>
+              </footer>
+            )}
           </div>
         </aside>
       )}
@@ -454,6 +460,8 @@ function ActiveSectionContent({
           props={props}
         />
       );
+    case "keybindings":
+      return <KeybindingsSection focusedSetting={focusedSetting} />;
     case "chat":
       return props.chatController?.bootstrap !== undefined ? (
         <div id="settings-chat">
@@ -693,24 +701,6 @@ interface SectionProps {
 function GeneralSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
-      <div className="settings-card-section">
-        <h2>Profile</h2>
-        <div className="setgroup">
-          <SettingRow
-            description="How you are shown inside Octant. There is no account behind this, and none of it is required."
-            focused={focusedSetting === settingId("user-profile")}
-            label="Your profile"
-            labelledBySection
-            scope="app"
-            settingId="user-profile"
-          >
-            <UserProfileSettingsView
-              onSettingsChange={props.onSettingsChange}
-              profile={props.settings.userProfile}
-            />
-          </SettingRow>
-        </div>
-      </div>
       <div className="settings-card-section settings-card-section--open">
         <h2>Available modes</h2>
         <div className="setgroup">
@@ -742,21 +732,33 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </div>
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Keyboard shortcuts</h2>
+      <details
+        className="settings-card-section settings-profile-disclosure"
+        open={focusedSetting === settingId("user-profile") ? true : undefined}
+      >
+        <summary>
+          <span className="settings-profile-disclosure__summary-copy">
+            <h2>Profile</h2>
+            <span>{props.settings.userProfile.displayName ?? "Not set"}</span>
+          </span>
+          <ChevronDown aria-hidden="true" size={16} strokeWidth={1.5} />
+        </summary>
         <div className="setgroup">
           <SettingRow
-            description="The chords that reach Octant's global surfaces on this machine."
-            focused={focusedSetting === settingId("keybindings")}
-            label="Shortcuts"
+            description="How you are shown inside Octant. There is no account behind this, and none of it is required."
+            focused={focusedSetting === settingId("user-profile")}
+            label="Your profile"
             labelledBySection
             scope="app"
-            settingId="keybindings"
+            settingId="user-profile"
           >
-            <KeybindingSettings />
+            <UserProfileSettingsView
+              onSettingsChange={props.onSettingsChange}
+              profile={props.settings.userProfile}
+            />
           </SettingRow>
         </div>
-      </div>
+      </details>
       <div className="settings-card-section settings-card-section--open">
         <h2>Updates</h2>
         <div className="setgroup">
@@ -786,7 +788,6 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             description="Skill and extension catalog search contacts third-party registries only when you ask."
             focused={focusedSetting === settingId("marketplace-fetches")}
             label="Marketplace fetches"
-            labelledBySection
             scope="host"
             settingId="marketplace-fetches"
           >
@@ -796,6 +797,29 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
                 props.onSettingsChange({ marketplaceFetchesEnabled: enabled })
               }
             />
+          </SettingRow>
+        </div>
+        <MarketplaceFetchDisclosure />
+      </div>
+    </section>
+  );
+}
+
+function KeybindingsSection({ focusedSetting }: Pick<SectionProps, "focusedSetting">) {
+  return (
+    <section aria-label="Keybindings" className="settings-section-stack" id="settings-keybindings">
+      <div className="settings-card-section settings-card-section--open">
+        <h2>Keyboard shortcuts</h2>
+        <div className="setgroup">
+          <SettingRow
+            description="Click a shortcut, then press the replacement chord. Changes take effect immediately."
+            focused={focusedSetting === settingId("keybindings")}
+            label="Shortcuts"
+            labelledBySection
+            scope="app"
+            settingId="keybindings"
+          >
+            <KeybindingSettings />
           </SettingRow>
         </div>
       </div>

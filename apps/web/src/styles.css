@@ -8259,7 +8259,7 @@ p.board-col-empty {
 
 .keybinding-settings__list {
   display: grid;
-  gap: 6px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -8270,6 +8270,9 @@ p.board-col-empty {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  min-height: 48px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--octant-border-soft);
 }
 
 .keybinding-settings__action {
@@ -8299,6 +8302,40 @@ p.board-col-empty {
 .keybinding-settings__actions {
   display: flex;
   gap: 8px;
+}
+
+.keybinding-settings__advanced {
+  margin-top: 4px;
+}
+
+.keybinding-settings__advanced > summary {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+}
+
+.keybinding-settings__advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.keybinding-settings__advanced > summary svg {
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.keybinding-settings__advanced[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.keybinding-settings__advanced-body {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
 }
 
 .environment-filter {

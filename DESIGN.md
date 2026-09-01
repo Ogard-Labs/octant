@@ -251,15 +251,18 @@ entry points. Search is a compact in-place filter for the current mode's visible
 threads, with a command-style overlay available for broader actions.
 
 Settings is a grouped form page rather than a dashboard wall. A compact 248px
-navigation rail and search remain fixed while one centered 760px reading column
-scrolls. Navigation rows use the 10px control radius and sentence-case group
-labels. Routine related rows stay open on the application ground with hairline
-separators. Profiles, providers, skills, theme previews, destructive groups,
-and other discrete objects use raised cards (`--octant-shadow-sm`). Labels and
-descriptions align left, controls align right, and compound editors may expand
-below. Essential labels and explanatory text are at least 12px at the default
-interface scale. Every control uses the owned Octant/shadcn adapter, inherits
-the interface typography projection, and saves immediately.
+navigation rail and search remain fixed while one 680px reading column scrolls,
+anchored to the navigation edge by a 32–56px workspace gutter instead of
+floating in the middle of wide windows. Navigation groups use quiet separators
+rather than competing labels. Routine related rows stay open on the application
+ground with hairline separators. Keybindings have their own destination and raw
+JSON stays behind an advanced disclosure. Profiles, providers, skills, visual
+theme choices, destructive groups, and other discrete objects use raised cards
+(`--octant-shadow-sm`). Labels and descriptions align left, controls align
+right, and compound editors may expand below. Essential labels and explanatory
+text are at least 12px at the default interface scale. Every control uses the
+owned Octant/shadcn adapter, inherits the interface typography projection, and
+saves immediately.
 Scope metadata remains available to assistive technology but does not compete
 with the setting label.
 

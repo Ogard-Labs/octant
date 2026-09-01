@@ -230,12 +230,27 @@ describe("SettingsView", () => {
     expect(
       screen.getByRole("heading", { name: "Profile" }).closest(".settings-card-section"),
     ).not.toHaveClass("settings-card-section--open");
+    const profileDisclosure = screen.getByRole("heading", { name: "Profile" }).closest("details");
+    expect(profileDisclosure).not.toHaveAttribute("open");
+    expect(profileDisclosure).toHaveTextContent("Not set");
     expect(
       screen.getByRole("heading", { name: "Available modes" }).closest(".settings-card-section"),
     ).toHaveClass("settings-card-section--open");
+    const modes = screen.getByRole("heading", { name: "Available modes" });
+    const profile = screen.getByRole("heading", { name: "Profile" });
+    expect(modes.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("moves keyboard shortcuts out of General into a dedicated section", () => {
+    renderSettings();
+
+    expect(screen.queryByRole("heading", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    navigateTo("Keybindings");
+
+    expect(screen.getByRole("heading", { level: 1, name: "Keybindings" })).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Keyboard shortcuts" }).closest(".settings-card-section"),
-    ).toHaveClass("settings-card-section--open");
+      screen.getByRole("button", { name: "Change the chord for Open the command palette" }),
+    ).toBeVisible();
   });
 
   it("keeps the active Settings page first at narrow width and moves navigation into a drawer", async () => {
@@ -611,14 +626,17 @@ describe("SettingsView", () => {
     expect(styles).toContain("min-height: 28px");
   });
 
-  it("keeps Settings on the shared interface type scale in a pane-filling column", () => {
+  it("keeps Settings on the shared interface type scale in a navigation-anchored column", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(/\.settings-view\s*\{[\s\S]*font-family:\s*var\(--oct-font-display\);/);
-    // Form-layout cards need a reading measure. A 1080px edge-aligned pane
-    // stretched every row into the old ops console.
-    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*max-width:\s*760px;/);
-    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*margin:\s*0 auto;/);
+    // The readable column stays bounded, but its left edge follows the
+    // navigator instead of floating in the middle of wide windows.
+    expect(styles).toMatch(/--oct-settings-reading-width:\s*680px;/);
+    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*margin:\s*0;/);
+    expect(styles).toMatch(
+      /\.settings-view__content-inner\s*\{[\s\S]*padding:\s*28px var\(--oct-settings-gutter\) 64px;/,
+    );
     expect(styles).toContain("font-family: var(--oct-font-display)");
     expect(styles).toContain("font-size: var(--octant-ui-font-size)");
     expect(styles).not.toContain("--octant-ui-font-family");

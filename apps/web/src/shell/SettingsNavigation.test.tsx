@@ -11,6 +11,7 @@ describe("SettingsNavigation", () => {
     const sections: SettingsNavigationItem[] = [
       { id: "general", label: "General" },
       { id: "appearance", label: "Appearance" },
+      { id: "keybindings", label: "Keybindings" },
       { id: "chat", label: "Chat" },
       { id: "providers", label: "Providers" },
     ];
@@ -23,6 +24,7 @@ describe("SettingsNavigation", () => {
     expect(buttons.map((button) => button.textContent)).toEqual([
       "General",
       "Appearance",
+      "Keybindings",
       "Chat",
       "Providers",
     ]);

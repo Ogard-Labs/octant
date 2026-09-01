@@ -12,6 +12,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const SETTINGS_SECTION_IDS = [
   "general",
   "appearance",
+  "keybindings",
   "chat",
   "work",
   "code",

@@ -180,7 +180,7 @@ describe("ProfileEditor", () => {
   it("says that choosing Gravatar contacts gravatar.com", () => {
     render(<Harness />);
 
-    expect(screen.getByText(/sends a hash of it to gravatar.com once/)).toBeVisible();
+    expect(screen.getByText(/sends a one-time email hash to gravatar.com/)).toBeVisible();
   });
 
   it("imports a Gravatar and records where the picture came from", async () => {

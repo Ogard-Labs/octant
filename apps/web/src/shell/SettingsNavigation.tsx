@@ -6,6 +6,7 @@ import {
   Code2,
   Compass,
   FolderGit2,
+  Keyboard,
   ListTodo,
   MessageCircle,
   Palette,
@@ -40,6 +41,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
 > = {
   general: { group: "Personal", icon: Settings2 },
   appearance: { group: "Personal", icon: Palette },
+  keybindings: { group: "Personal", icon: Keyboard },
   chat: { group: "Modes", icon: MessageCircle },
   work: { group: "Modes", icon: Bot },
   code: { group: "Modes", icon: Code2 },

@@ -211,7 +211,8 @@ describe("the public-block visual language", () => {
     expect(settings).toMatch(
       /\.settings-view\s*\{[^}]*background:\s*var\(--octant-app-background\)/,
     );
-    expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*max-width:\s*760px/);
+    expect(settings).toMatch(/--oct-settings-reading-width:\s*680px/);
+    expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*margin:\s*0/);
     expect(settings).toMatch(
       /\.settings-card-section\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\)/,
     );
@@ -233,12 +234,18 @@ describe("the public-block visual language", () => {
   it("keeps Settings navigation and explanatory text readable without shouting", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
     const navigation =
-      settings.match(/\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
+      settings.match(/(?:^|\n)\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
+    const hiddenDesktopGroups =
+      settings.match(
+        /\.settings-view__sidebar \.settings-navigation \.setnav-section\s*\{[^}]+\}/,
+      )?.[0] ?? "";
     const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
 
     expect(navigation).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
     expect(navigation).toMatch(/text-transform:\s*none/);
     expect(navigation).toMatch(/letter-spacing:\s*normal/);
+    expect(hiddenDesktopGroups).toMatch(/width:\s*1px/);
+    expect(hiddenDesktopGroups).toMatch(/clip-path:\s*inset\(50%\)/);
     expect(hint).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
   });
 });

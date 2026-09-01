@@ -14,6 +14,8 @@
      Using floating in light is the grey well. Using workspace in dark is
      invisible against the same app ground. */
   --octant-settings-card: var(--octant-workspace);
+  --oct-settings-gutter: clamp(32px, 4vw, 56px);
+  --oct-settings-reading-width: 680px;
 }
 
 html[data-octant-theme-mode="dark"] .settings-view,
@@ -86,14 +88,29 @@ html[data-theme="dark"] .settings-view {
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  padding: 8px 12px 24px;
+  padding: 8px 12px 12px;
+  overflow: hidden;
+}
+
+.settings-view__navigation-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.settings-view__sidebar-footer {
+  flex: 0 0 auto;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--octant-border-soft);
 }
 
 /* "Back to app" borrows the .setnav-item recipe; it only needs its slot. */
 .settings-view__back {
   min-height: 32px;
-  margin: 0 0 12px;
+  width: 100%;
+  margin: 0;
   padding-inline: 8px;
   color: var(--octant-text-secondary);
   font-size: var(--octant-ui-font-size);
@@ -119,7 +136,7 @@ html[data-theme="dark"] .settings-view {
 .settings-view__workspace-titlebar {
   display: flex;
   align-items: center;
-  padding: 0 20px;
+  padding: 0 var(--oct-settings-gutter);
   border-bottom: 1px solid var(--octant-border-soft);
 }
 
@@ -143,14 +160,14 @@ html[data-theme="dark"] .settings-view {
 /* .setpane-title/.setpane-note carry the type; the header only spaces the
    sections below it, and the note's own end margin must not stack on top. */
 .settings-view__header {
-  margin-bottom: 24px;
+  margin-bottom: 18px;
 }
 
 .settings-view__header .setpane-title,
 .settings-view__header h1 {
   color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xl);
+  font-size: var(--oct-text-lg);
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.2;
@@ -162,7 +179,7 @@ html[data-theme="dark"] .settings-view {
   margin-bottom: 0;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: calc(13 * var(--oct-text-step));
   line-height: 1.45;
 }
 
@@ -174,7 +191,7 @@ html[data-theme="dark"] .settings-view {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  margin: 0 0 20px;
+  margin: 0 0 12px;
   padding: 0;
   border: 0;
 }
@@ -317,13 +334,29 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    the grid gap does it instead. */
 .settings-navigation {
   display: grid;
-  gap: var(--oct-space-4);
+  gap: var(--oct-space-2);
   font-family: var(--oct-font-display);
 }
 
 .settings-navigation__group {
   display: grid;
-  gap: var(--oct-space-1);
+  gap: 0;
+}
+
+.settings-view__sidebar .settings-navigation__group + .settings-navigation__group {
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--octant-border-soft);
+}
+
+.settings-view__sidebar .settings-navigation .setnav-section {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .settings-navigation .setnav-section {
@@ -339,7 +372,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-navigation ul {
   display: grid;
-  gap: 1px;
+  gap: 2px;
   padding: 0;
   margin: 0;
   list-style: none;
@@ -541,7 +574,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
 .setrow[data-setting-id="app-updates"],
-.setrow[data-setting-id="marketplace-fetches"],
 .setrow[data-setting-id="export-diagnostics"] {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -553,7 +585,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
 .setrow[data-setting-id="app-updates"] > .setrow-control,
-.setrow[data-setting-id="marketplace-fetches"] > .setrow-control,
 .setrow[data-setting-id="export-diagnostics"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
@@ -655,9 +686,11 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    an ops console; form-layout cards need a measure a person can scan. */
 .settings-view__content-inner {
   width: 100%;
-  max-width: 760px;
-  padding: 32px 24px 64px;
-  margin: 0 auto;
+  max-width: calc(
+    var(--oct-settings-reading-width) + var(--oct-settings-gutter) + var(--oct-settings-gutter)
+  );
+  padding: 28px var(--oct-settings-gutter) 64px;
+  margin: 0;
 }
 
 .settings-view__content-inner > section,
@@ -672,7 +705,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-section-stack {
   display: grid;
-  gap: 20px;
+  gap: 16px;
 }
 
 /* A discrete object section is the card. Routine groups opt into the open
@@ -694,10 +727,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   box-shadow: none;
 }
 
-.settings-card-section--open > h2,
-.settings-card-section--open > summary,
-.settings-card-section--open > legend {
-  padding: 12px 0 8px;
+.settings-card-section.settings-card-section--open > h2,
+.settings-card-section.settings-card-section--open > summary,
+.settings-card-section.settings-card-section--open > legend {
+  padding: 10px 0 8px;
 }
 
 .settings-card-section--open > .setgroup {
@@ -755,6 +788,49 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border-radius: var(--oct-radius-sm);
   outline: none;
   box-shadow: var(--oct-focus-ring);
+}
+
+.settings-profile-disclosure > summary {
+  min-height: 52px;
+  padding: 12px 16px;
+}
+
+.settings-profile-disclosure__summary-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--oct-space-3);
+}
+
+.settings-profile-disclosure__summary-copy h2 {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.settings-profile-disclosure__summary-copy > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-profile-disclosure > summary > svg {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.settings-profile-disclosure[open] > summary > svg {
+  transform: rotate(180deg);
+}
+
+.settings-profile-disclosure[open] > summary {
+  border-bottom: 1px solid var(--octant-border-soft);
 }
 
 /* Standalone groups are cards. A group already inside settings-card-section
@@ -990,7 +1066,7 @@ textarea.settings-view__text-input {
    the same rhythm between them rather than a tighter one of their own. */
 .settings-theme-editor {
   display: grid;
-  gap: 20px;
+  gap: 16px;
   padding: 0;
   margin: 0;
 }
@@ -1009,9 +1085,9 @@ textarea.settings-view__text-input {
 .settings-scheme {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-3);
   max-width: none;
-  padding: 12px 16px;
+  padding: 4px 0 16px;
 }
 
 /* A scheme card is a picture that can be chosen, not a one-line control, so it
@@ -1057,15 +1133,15 @@ textarea.settings-view__text-input {
 .settings-scheme__preview {
   position: relative;
   display: flex;
-  height: 48px;
+  height: 88px;
   overflow: hidden;
 }
 
 .settings-scheme__preview-pane {
   display: flex;
   flex: 1 1 50%;
-  gap: 4px;
-  padding: 8px;
+  gap: 6px;
+  padding: 10px;
 }
 
 .settings-scheme__preview--light .settings-scheme__preview-pane--dark,
@@ -1084,8 +1160,8 @@ textarea.settings-view__text-input {
 }
 
 .settings-scheme__preview-sidebar {
-  width: 22%;
-  border-radius: 3px;
+  width: 24%;
+  border-radius: 4px;
 }
 
 .settings-scheme__preview-pane--light .settings-scheme__preview-sidebar {
@@ -1101,12 +1177,12 @@ textarea.settings-view__text-input {
   display: grid;
   flex: 1;
   align-content: start;
-  gap: 4px;
+  gap: 7px;
 }
 
 .settings-scheme__preview-content > span {
-  height: 4px;
-  border-radius: 2px;
+  height: 6px;
+  border-radius: 3px;
 }
 
 .settings-scheme__preview-pane--light .settings-scheme__preview-content > span {
@@ -1125,14 +1201,14 @@ textarea.settings-view__text-input {
   position: absolute;
   right: 2px;
   bottom: 2px;
-  width: 8px !important;
-  height: 8px !important;
+  width: 10px !important;
+  height: 10px !important;
   border-radius: 50% !important;
   background: var(--oct-accent) !important;
 }
 
 .settings-scheme__label {
-  padding: 6px 0 7px;
+  padding: 8px 0 9px;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -1157,6 +1233,35 @@ textarea.settings-view__text-input {
 .settings-theme-editor .setgroup > .settings-view__field {
   padding: 16px 20px;
   border-top: 1px solid var(--oct-border-soft);
+}
+
+.settings-theme-editor__scheme-section .setgroup > .settings-view__field {
+  padding-inline: 0;
+}
+
+/* Profile is a discrete object, but it should not become the whole General
+   page. On a Settings-width column, name and email share one line while the
+   avatar actions and accent choice keep their natural width. */
+.settings-view .profile-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.settings-view .profile-editor__identity,
+.settings-view .profile-editor__notice,
+.settings-view .profile-editor__field--accent {
+  grid-column: 1 / -1;
+}
+
+.settings-view .profile-editor__field {
+  gap: 4px;
+}
+
+.settings-view .profile-editor__hint,
+.settings-view .profile-editor__notice {
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
 }
 
 .settings-theme-editor .setgroup > .settings-view__field:first-child {
@@ -1394,6 +1499,7 @@ textarea.settings-view__text-input {
 @media (max-width: 720px) {
   .settings-view:not(.settings-view--narrow) {
     grid-template-columns: 216px minmax(0, 1fr);
+    --oct-settings-gutter: 28px;
   }
 
   .settings-view__sidebar-content {
@@ -1401,8 +1507,8 @@ textarea.settings-view__text-input {
   }
 
   .settings-view__content-inner {
-    width: min(calc(100% - 32px), 760px);
-    padding-top: 28px;
+    width: 100%;
+    padding-top: 24px;
   }
 }
 
@@ -1418,8 +1524,18 @@ textarea.settings-view__text-input {
   }
 
   .settings-view__content-inner {
-    width: min(calc(100% - 24px), 760px);
-    padding-top: 24px;
+    width: 100%;
+    padding: 22px 20px 48px;
+  }
+
+  .settings-view .profile-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-view .profile-editor__identity,
+  .settings-view .profile-editor__notice,
+  .settings-view .profile-editor__field--accent {
+    grid-column: 1;
   }
 }
 
@@ -1778,16 +1894,20 @@ textarea.settings-view__text-input {
   color: var(--oct-muted);
 }
 
-.marketplace-fetch-settings {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.marketplace-fetch-settings__details {
+  padding: 0 0 10px;
 }
 
-.marketplace-fetch-settings__automatic {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.marketplace-fetch-settings__details summary {
+  width: fit-content;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.marketplace-fetch-settings__details[open] summary {
+  margin-bottom: 8px;
 }
 
 .marketplace-fetch-settings__disclosure,

@@ -13,6 +13,7 @@ describe("SettingsSectionId", () => {
     expect(SETTINGS_SECTION_IDS).toEqual([
       "general",
       "appearance",
+      "keybindings",
       "chat",
       "work",
       "code",
