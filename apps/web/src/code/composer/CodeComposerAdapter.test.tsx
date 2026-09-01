@@ -34,18 +34,25 @@ describe("CodeComposerAdapter", () => {
     );
   });
 
-  it("names the Project in the heading and tucks host, checkout, and branch on a second card", () => {
+  it("puts Project, branch, and Environment on an upper tray before the prompt", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".code-composer-adapter__dock");
-    expect(screen.getByRole("heading", { name: /What should we build in My Repo/ })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
+    if (frame === null || dock === null) throw new Error("Composer stack is incomplete.");
+    expect(dock.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(frame?.querySelector(".host-selector")).toBeNull();
     expect(frame?.textContent).not.toContain("My Repo");
+    expect(dock?.textContent).toContain("My Repo");
     expect(dock?.querySelector(".host-selector")).not.toBeNull();
+    expect(dock?.querySelector(".host-selector--environment")).not.toBeNull();
     expect(dock?.textContent).toContain("Current checkout");
     expect(dock?.textContent).toContain("development");
+    const text = dock?.textContent ?? "";
+    expect(text.indexOf("My Repo")).toBeLessThan(text.indexOf("development"));
+    expect(text.indexOf("development")).toBeLessThan(text.indexOf("This computer"));
   });
 
   it("keeps delivery settings in an anchored popover instead of expanding the composer", async () => {
@@ -65,15 +72,15 @@ describe("CodeComposerAdapter", () => {
     ).toBeNull();
   });
 
-  it("puts the Project picker on the trailing edge of the checkout card when none is selected", () => {
+  it("puts the Project picker first on the upper tray when none is selected", () => {
     const { projectId: _projectId, projectName: _projectName, ...rest } = defaultProps;
     const { container } = render(
       <CodeComposerAdapter {...rest} folderControl={<span>Choose a Project</span>} />,
     );
     const leading = container.querySelector(".code-composer-adapter__dock-leading");
     const trailing = container.querySelector(".code-composer-adapter__dock-trailing");
-    expect(leading?.textContent).not.toContain("Choose a Project");
-    expect(trailing?.textContent).toContain("Choose a Project");
+    expect(leading?.textContent).toContain("Choose a Project");
+    expect(trailing?.textContent).not.toContain("Choose a Project");
   });
 
   it("keeps repository and delivery context in the checkout bar", () => {

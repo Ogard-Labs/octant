@@ -118,6 +118,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               leading: (
                 <>
                   <HostSelector
+                    presentation="environment"
                     {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
                     {...(props.selectedHostId === undefined
                       ? {}

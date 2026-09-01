@@ -6935,6 +6935,20 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   white-space: nowrap;
 }
 
+.host-selector__environment-icon {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+}
+
+.host-selector--environment .host-selector__health {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .host-selector--interactive {
   user-select: auto;
 }

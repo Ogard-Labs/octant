@@ -139,7 +139,7 @@ describe("the public-block visual language", () => {
     expect(emptyPicker).toMatch(/background:\s*transparent/);
   });
 
-  it("tucks the Code checkout card behind the composer as a second raised card", () => {
+  it("tucks the Code context tray above the composer as a second raised card", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const stack = shell.match(/\.code-composer-adapter__stack \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const dock = shell.match(/\.code-composer-adapter__dock \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
@@ -147,9 +147,9 @@ describe("the public-block visual language", () => {
     expect(stack).toMatch(/position:\s*relative/);
     expect(stack).toMatch(/isolation:\s*isolate/);
     expect(stack).toMatch(/flex-direction:\s*column/);
-    expect(dock).toMatch(/margin:\s*-26px auto 0/);
+    expect(dock).toMatch(/margin:\s*0 auto -24px/);
     expect(dock).toMatch(/width:\s*calc\(100% - 40px\)/);
-    expect(dock).toMatch(/padding:\s*22px 16px 6px/);
+    expect(dock).toMatch(/padding:\s*10px 16px 30px/);
     expect(dock).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
     expect(dock).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
     expect(dock).not.toMatch(/border-radius:\s*0 0/);

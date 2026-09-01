@@ -752,6 +752,7 @@ function DraftContextStrip(props: {
   return (
     <div className="draft-thread__context-strip" aria-label="Thread context">
       <HostSelector
+        presentation="environment"
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
         {...(props.selectedHostId === undefined ? {} : { selectedHostId: props.selectedHostId })}
         {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}

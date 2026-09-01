@@ -199,13 +199,15 @@ Chat, Work, and Code welcome composers share the `.composer` frame (20px,
 composer. Starter actions appear only when recent work does not already give
 the person a next step. In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
-as a sunken field. Code welcome names the Project in the heading. Checkout and branch sit
-on a second raised card stacked behind the composer: slightly narrower,
-slid under the prompt by one corner radius so the front card's bottom
-corners hang over the checkout row. A wider back sheet reads as a tray.
-Host, repository, workspace, the searchable ref list, branch, and delivery
-disclosure live on that back card, not in the prompt toolbar or a third strip
-below it. Access is a titled menu on the card, next to the model picker. The
+as a sunken field. Code welcome keeps one stable question while Project,
+base branch, and Environment sit on a second raised card above the composer.
+The tray is slightly narrower and slides under the prompt by one corner radius,
+so the front card overlaps only its empty lower padding. Environment is the
+create-facing presentation of Octant's authoritative host federation: its
+dropdown selects This computer, devbox, or another healthy capable host without
+creating a second environment model. Repository, workspace, and delivery
+disclosure remain on that rear card after the three primary choices. Access is
+a titled menu on the prompt card, next to the model picker. The
 prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not

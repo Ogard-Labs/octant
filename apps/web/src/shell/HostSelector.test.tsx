@@ -29,6 +29,33 @@ const laptopStale = {
 };
 
 describe("HostSelector", () => {
+  it("presents the create destination as an Environment without changing host authority", async () => {
+    const user = userEvent.setup();
+    const onSelectHost = vi.fn();
+    render(
+      <HostSelector
+        hosts={[localHealthy, studioHealthy]}
+        onSelectHost={onSelectHost}
+        presentation="environment"
+        selectedHostId={LOCAL_HOST_ID}
+      />,
+    );
+
+    const environment = screen.getByRole("combobox", { name: "Environment" });
+    expect(environment).toHaveTextContent("This Mac");
+    expect(screen.getByTestId("host-selector")).toHaveClass("host-selector--environment");
+    await user.click(environment);
+    await user.click(await screen.findByRole("option", { name: /Studio/ }));
+    expect(onSelectHost).toHaveBeenCalledWith(STUDIO);
+  });
+
+  it("keeps a single Environment honest about its authoritative health", () => {
+    render(<HostSelector hosts={[localHealthy]} presentation="environment" />);
+
+    expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
+    expect(screen.getByTestId("host-selector")).toHaveClass("host-selector--environment");
+  });
+
   it("renders the default neutral host with a neutral dot when hosts are not loaded", () => {
     render(<HostSelector />);
     expect(screen.getByRole("status")).toBeInTheDocument();

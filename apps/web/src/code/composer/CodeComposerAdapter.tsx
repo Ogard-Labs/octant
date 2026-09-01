@@ -24,7 +24,7 @@ import {
   suggestCodeDeliveryOutcome,
 } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { ChevronDown, ChevronUp, FolderOpen, Paperclip } from "lucide-react";
+import { ChevronDown, ChevronUp, FolderOpen, GitBranch, Paperclip } from "lucide-react";
 import type { ImageGenerationProfileView, ImageGenerationScopeId } from "@octant/contracts";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { ImageGenerationAction } from "../../image/ImageGenerationAction";
@@ -402,22 +402,145 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   }
 
   const hasProject = props.projectId !== undefined;
-  const headingProject = hasProject ? (props.folderControl ?? props.projectName) : undefined;
+  const projectControl =
+    props.folderControl ??
+    (props.projectName === undefined ? null : (
+      <span className="code-composer-adapter__context-item" title={props.projectRoot}>
+        <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+        <span>{props.projectName}</span>
+      </span>
+    ));
+  const branchControl = hasProject ? (
+    <CodeBranchSelector
+      key={String(props.projectId)}
+      branch={baseBranch.trim() || "development"}
+      loading={refsLoading}
+      onOpen={loadWorktreeRefs}
+      onSelectRef={handleSelectRef}
+      onStartFromOriginChange={setStartFromOriginOverride}
+      remoteName={resolvedWorktreeRemote}
+      startFromOrigin={startFromOrigin}
+      startFromOriginAvailable={
+        preferredRemote.status === "selected" || worktreeRemote !== undefined
+      }
+      {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
+      {...(props.creating === true ? { disabled: true } : {})}
+    />
+  ) : (
+    <span className="code-composer-adapter__context-item">
+      <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+      <span>{props.branchName ?? "Default branch"}</span>
+    </span>
+  );
+  const environmentControl = (
+    <HostSelector
+      presentation="environment"
+      {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+      {...(props.selectedHostId === undefined ? {} : { selectedHostId: props.selectedHostId })}
+      {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+      {...(props.lastSelectedHealthyHostId === undefined
+        ? {}
+        : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+      {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+      {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
+      requiredCapability="code"
+    />
+  );
+  const deliveryControl = (
+    <OctantPopover
+      align="end"
+      className="code-composer-adapter__delivery"
+      onOpenChange={setShowDelivery}
+      open={showDelivery}
+      side="bottom"
+      sideOffset={8}
+      titledBy="code-delivery-target-heading"
+      trigger={
+        <>
+          {showDelivery ? (
+            <ChevronUp aria-hidden="true" size={12} />
+          ) : (
+            <ChevronDown aria-hidden="true" size={12} />
+          )}
+          <span>Delivery target</span>
+        </>
+      }
+      triggerClassName="code-composer-adapter__disclosure-toggle"
+      triggerLabel="Delivery target"
+      triggerVariant="ghost"
+    >
+      <header className="code-composer-adapter__delivery-header">
+        <h2 id="code-delivery-target-heading">Delivery target</h2>
+        <p>Confirm what this thread should deliver and where it should land.</p>
+      </header>
+      <label className="code-composer-adapter__field">
+        <span>Outcome</span>
+        <OctantSelectField
+          aria-label="Delivery outcome"
+          onValueChange={(value) => setOutcomeOverride(value as CodeDeliveryOutcomeKind)}
+          options={CODE_DELIVERY_OUTCOME_ORDER.map((kind) => ({
+            id: kind,
+            label: CODE_DELIVERY_OUTCOME_LABELS[kind],
+          }))}
+          value={outcomeKind}
+        />
+      </label>
+      <label className="code-composer-adapter__field">
+        <span>Branch</span>
+        <OctantInput
+          aria-label="Branch intent"
+          onChange={(e) => setBranchIntent(e.target.value)}
+          value={branchIntent}
+        />
+      </label>
+      <label className="code-composer-adapter__field">
+        <span>Remote</span>
+        <OctantInput
+          aria-label="Remote name"
+          onChange={(e) => setRemoteName(e.target.value)}
+          value={remoteName}
+        />
+      </label>
+      <label className="code-composer-adapter__field">
+        <span>Base repository</span>
+        <OctantInput
+          aria-label="Base repository"
+          onChange={(e) => {
+            setBaseRepositoryEdited(true);
+            setBaseRepository(e.target.value);
+          }}
+          placeholder="owner/repository"
+          value={baseRepository}
+        />
+      </label>
+      <label className="code-composer-adapter__field">
+        <span>Base branch</span>
+        <OctantInput
+          aria-label="Base branch"
+          onChange={(e) => setBaseBranch(e.target.value)}
+          value={baseBranch}
+        />
+      </label>
+      <label className="code-composer-adapter__field">
+        <span>Permission duration</span>
+        <OctantSelectField
+          aria-label="Permission persistence"
+          onValueChange={(value) => setPermissionPersistence(value as PermissionPersistence)}
+          options={[
+            { id: "current-session", label: "Current session" },
+            { id: "project-default", label: "Project default" },
+          ]}
+          value={permissionPersistence}
+        />
+      </label>
+    </OctantPopover>
+  );
 
   return (
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="code-composer-adapter__canvas">
         <div className="code-composer-adapter__welcome">
-          <h1 className="code-composer-adapter__heading">
-            What should we build
-            {headingProject === undefined ? null : (
-              <>
-                {" "}
-                in <span className="code-composer-adapter__project">{headingProject}</span>
-              </>
-            )}
-            ?
-          </h1>
+          <h1 className="code-composer-adapter__heading">What should we build?</h1>
           {props.projectAvailable === false &&
           props.projectId !== undefined &&
           props.errorMessage === undefined ? (
@@ -427,6 +550,26 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
         <div className="code-composer-adapter__composer">
           <div className="code-composer-adapter__stack">
+            <div className="code-composer-adapter__dock" aria-label="Thread context">
+              <div className="code-composer-adapter__dock-leading">
+                {projectControl}
+                {branchControl}
+                {environmentControl}
+              </div>
+              <div className="code-composer-adapter__dock-trailing">
+                {hasProject ? (
+                  <CodeWorkspaceSelector
+                    onChange={setWorkspaceOverride}
+                    value={workspace}
+                    {...(props.creating === true ? { disabled: true } : {})}
+                  />
+                ) : null}
+                {props.githubControl}
+                {props.createFromControl}
+                {deliveryControl}
+              </div>
+            </div>
+
             <ThreadComposer
               className="code-composer-adapter__card"
               chips={
@@ -568,163 +711,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 },
               }}
             />
-
-            <div className="code-composer-adapter__dock" aria-label="Thread context">
-              <div className="code-composer-adapter__dock-leading">
-                <HostSelector
-                  {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                  {...(props.selectedHostId === undefined
-                    ? {}
-                    : { selectedHostId: props.selectedHostId })}
-                  {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-                  {...(props.lastSelectedHealthyHostId === undefined
-                    ? {}
-                    : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-                  {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-                  {...(props.onSelectHost === undefined
-                    ? {}
-                    : { onSelectHost: props.onSelectHost })}
-                  requiredCapability="code"
-                />
-                {props.githubControl}
-                {props.createFromControl}
-                {hasProject ? (
-                  <CodeWorkspaceSelector
-                    onChange={setWorkspaceOverride}
-                    value={workspace}
-                    {...(props.creating === true ? { disabled: true } : {})}
-                  />
-                ) : null}
-              </div>
-              <div className="code-composer-adapter__dock-trailing">
-                {hasProject ? (
-                  <CodeBranchSelector
-                    key={String(props.projectId)}
-                    branch={baseBranch.trim() || "development"}
-                    loading={refsLoading}
-                    onOpen={loadWorktreeRefs}
-                    onSelectRef={handleSelectRef}
-                    onStartFromOriginChange={setStartFromOriginOverride}
-                    remoteName={resolvedWorktreeRemote}
-                    startFromOrigin={startFromOrigin}
-                    startFromOriginAvailable={
-                      preferredRemote.status === "selected" || worktreeRemote !== undefined
-                    }
-                    {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
-                    {...(props.creating === true ? { disabled: true } : {})}
-                  />
-                ) : (
-                  <>
-                    {props.folderControl}
-                    {props.folderControl === undefined && props.projectName !== undefined ? (
-                      <span
-                        className="code-composer-adapter__context-item"
-                        title={props.projectRoot}
-                      >
-                        <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
-                        <span>{props.projectName}</span>
-                      </span>
-                    ) : null}
-                    {props.branchName !== undefined ? (
-                      <span className="code-composer-adapter__context-item">
-                        <span>{props.branchName}</span>
-                      </span>
-                    ) : null}
-                  </>
-                )}
-                <OctantPopover
-                  align="end"
-                  className="code-composer-adapter__delivery"
-                  onOpenChange={setShowDelivery}
-                  open={showDelivery}
-                  side="bottom"
-                  sideOffset={8}
-                  titledBy="code-delivery-target-heading"
-                  trigger={
-                    <>
-                      {showDelivery ? (
-                        <ChevronUp aria-hidden="true" size={12} />
-                      ) : (
-                        <ChevronDown aria-hidden="true" size={12} />
-                      )}
-                      <span>Delivery target</span>
-                    </>
-                  }
-                  triggerClassName="code-composer-adapter__disclosure-toggle"
-                  triggerLabel="Delivery target"
-                  triggerVariant="ghost"
-                >
-                  <header className="code-composer-adapter__delivery-header">
-                    <h2 id="code-delivery-target-heading">Delivery target</h2>
-                    <p>Confirm what this thread should deliver and where it should land.</p>
-                  </header>
-                  <label className="code-composer-adapter__field">
-                    <span>Outcome</span>
-                    <OctantSelectField
-                      aria-label="Delivery outcome"
-                      onValueChange={(value) =>
-                        setOutcomeOverride(value as CodeDeliveryOutcomeKind)
-                      }
-                      options={CODE_DELIVERY_OUTCOME_ORDER.map((kind) => ({
-                        id: kind,
-                        label: CODE_DELIVERY_OUTCOME_LABELS[kind],
-                      }))}
-                      value={outcomeKind}
-                    />
-                  </label>
-                  <label className="code-composer-adapter__field">
-                    <span>Branch</span>
-                    <OctantInput
-                      aria-label="Branch intent"
-                      onChange={(e) => setBranchIntent(e.target.value)}
-                      value={branchIntent}
-                    />
-                  </label>
-                  <label className="code-composer-adapter__field">
-                    <span>Remote</span>
-                    <OctantInput
-                      aria-label="Remote name"
-                      onChange={(e) => setRemoteName(e.target.value)}
-                      value={remoteName}
-                    />
-                  </label>
-                  <label className="code-composer-adapter__field">
-                    <span>Base repository</span>
-                    <OctantInput
-                      aria-label="Base repository"
-                      onChange={(e) => {
-                        setBaseRepositoryEdited(true);
-                        setBaseRepository(e.target.value);
-                      }}
-                      placeholder="owner/repository"
-                      value={baseRepository}
-                    />
-                  </label>
-                  <label className="code-composer-adapter__field">
-                    <span>Base branch</span>
-                    <OctantInput
-                      aria-label="Base branch"
-                      onChange={(e) => setBaseBranch(e.target.value)}
-                      value={baseBranch}
-                    />
-                  </label>
-                  <label className="code-composer-adapter__field">
-                    <span>Permission duration</span>
-                    <OctantSelectField
-                      aria-label="Permission persistence"
-                      onValueChange={(value) =>
-                        setPermissionPersistence(value as PermissionPersistence)
-                      }
-                      options={[
-                        { id: "current-session", label: "Current session" },
-                        { id: "project-default", label: "Project default" },
-                      ]}
-                      value={permissionPersistence}
-                    />
-                  </label>
-                </OctantPopover>
-              </div>
-            </div>
           </div>
 
           {/* Start from origin only decides where a new worktree branches from.

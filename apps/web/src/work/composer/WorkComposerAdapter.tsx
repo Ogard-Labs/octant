@@ -299,6 +299,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
 
           <div className="work-composer-adapter__context-strip" aria-label="Thread context">
             <HostSelector
+              presentation="environment"
               {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
               {...(props.selectedHostId === undefined
                 ? {}

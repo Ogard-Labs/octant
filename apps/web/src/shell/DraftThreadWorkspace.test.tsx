@@ -237,7 +237,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Approval");
   });
 
-  it("shows the authoritative host health in the context strip", () => {
+  it("shows the authoritative Environment health in the context strip", () => {
     render(
       <DraftThreadWorkspace
         {...baseProps}
@@ -251,10 +251,10 @@ describe("DraftThreadWorkspace", () => {
         ]}
       />,
     );
-    expect(screen.getByRole("status", { name: "Host: This Mac · Connected" })).toBeVisible();
+    expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
     expect(
-      screen.getByRole("status", { name: "Host: This Mac · Connected" }).firstChild,
-    ).toHaveClass("host-selector__dot--healthy");
+      screen.getByRole("status", { name: "Environment: This Mac · Connected" }).firstChild,
+    ).toHaveClass("host-selector__environment-icon");
   });
 
   it.each(["code", "work"] as const)(
@@ -275,11 +275,13 @@ describe("DraftThreadWorkspace", () => {
         />,
       );
 
-      expect(screen.getByRole("status", { name: "Host: This Mac · Connected" })).toBeVisible();
+      expect(
+        screen.getByRole("status", { name: "Environment: This Mac · Connected" }),
+      ).toBeVisible();
     },
   );
 
-  it("keeps destination host choice visible and changeable for multi-host create", async () => {
+  it("keeps Environment choice visible and changeable for multi-host create", async () => {
     const user = userEvent.setup();
     const onSelectHost = vi.fn();
     const studio = "11111111-1111-4111-8111-111111111111" as never;
@@ -307,7 +309,7 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
 
-    const combobox = screen.getByRole("combobox", { name: /destination host/i });
+    const combobox = screen.getByRole("combobox", { name: "Environment" });
     expect(combobox).toHaveTextContent(/Studio/);
     expect(screen.getByTestId("host-selector")).toHaveAttribute("data-host-id", String(studio));
     await user.click(combobox);
@@ -339,8 +341,8 @@ describe("DraftThreadWorkspace", () => {
         selectedHostId={LOCAL_HOST_ID}
       />,
     );
-    expect(screen.getByRole("status", { name: "Host: This Mac · Connected" })).toBeVisible();
-    expect(screen.queryByRole("combobox", { name: /destination host/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
+    expect(screen.queryByRole("combobox", { name: "Environment" })).not.toBeInTheDocument();
   });
 
   it("does not show branch for non-code modes", () => {
@@ -752,7 +754,7 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("status", { name: /Host: This computer/ })).toBeVisible();
+    expect(screen.getByRole("status", { name: /Environment: This computer/ })).toBeVisible();
     expect(screen.getByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
     expect(screen.getByRole("button", { name: "GitHub repository" })).toBeVisible();
   });
@@ -772,7 +774,8 @@ describe("DraftThreadWorkspace", () => {
     );
 
     const project = screen.getByRole("button", { name: "Project: Octant" });
-    expect(screen.getByRole("heading", { level: 1 })).toContainElement(project);
+    expect(screen.getByRole("heading", { level: 1 })).not.toContainElement(project);
+    expect(project.closest(".code-composer-adapter__dock")).not.toBeNull();
 
     await user.click(project);
     await user.click(screen.getByRole("option", { name: "Add local folder…" }));

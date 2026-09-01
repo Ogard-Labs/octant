@@ -1640,6 +1640,7 @@ form > .work-composer-adapter__attachments {
 .code-composer-adapter__canvas {
   display: flex;
   width: min(100% - 40px, 768px);
+  min-width: 0;
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
@@ -1666,36 +1667,9 @@ form > .work-composer-adapter__attachments {
   text-wrap: balance;
 }
 
-.code-composer-adapter__welcome .composer-folder-selector {
-  display: inline-flex;
-  vertical-align: baseline;
-}
-
-.code-composer-adapter__project {
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.16em;
-}
-
-.code-composer-adapter__welcome .composer-folder-selector__trigger {
-  height: auto;
-  padding: 0;
-  color: inherit;
-  font-size: inherit;
-  font-weight: inherit;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.16em;
-}
-
-.code-composer-adapter__welcome .composer-folder-selector__trigger svg {
-  display: none;
-}
-
 .code-composer-adapter__composer {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 8px;
 }
@@ -1704,6 +1678,7 @@ form > .work-composer-adapter__attachments {
   position: relative;
   isolation: isolate;
   display: flex;
+  min-width: 0;
   flex-direction: column;
 }
 
@@ -1719,6 +1694,7 @@ form > .work-composer-adapter__attachments {
    welcome looking like the old flat chrome after the shared recipe shipped. */
 .code-composer-adapter__card {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   overflow: visible;
 }
@@ -1727,10 +1703,9 @@ form > .work-composer-adapter__attachments {
   min-height: 96px;
 }
 
-/* A second sheet, not a tray and not a footer. Wider-than-prompt
-   shoulders read as a pedestal; the same width hid the prompt's bottom
-   corners in the peek. Inset and tucked by one corner radius so the
-   front card hangs over a narrower card. */
+/* The create context is the rear sheet above the prompt. Project, branch,
+   and Environment remain visible before the person types, while the wider
+   front card overlaps only the tray's empty lower padding. */
 .code-composer-adapter__dock {
   position: relative;
   z-index: 0;
@@ -1740,12 +1715,19 @@ form > .work-composer-adapter__attachments {
   justify-content: space-between;
   gap: 8px 12px;
   width: calc(100% - 40px);
-  margin: -26px auto 0;
-  padding: 22px 16px 6px;
+  margin: 0 auto -24px;
+  padding: 10px 16px 30px;
   color: var(--oct-meta);
   background: var(--octant-workspace);
   border-radius: var(--oct-radius-lg);
   box-shadow: var(--octant-shadow-sm);
+}
+
+/* The Project picker is anchored inside the rear tray rather than portalled.
+   Raise the tray only while an anchored control is open so its menu can cross
+   the front card without changing the resting depth order. */
+.code-composer-adapter__dock:has([aria-expanded="true"]) {
+  z-index: 2;
 }
 
 html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
@@ -1788,16 +1770,31 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
   border-radius: 0;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 920px) {
   .code-composer-adapter__dock {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     flex-wrap: wrap;
+    align-items: end;
   }
 
   .code-composer-adapter__dock-leading,
   .code-composer-adapter__dock-trailing {
-    flex: 1 1 100%;
+    min-width: 0;
   }
 
+  .code-composer-adapter__dock-leading {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .code-composer-adapter__dock-trailing {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 640px) {
   .draft-thread__context-strip,
   .work-composer-adapter__context-strip {
     align-items: stretch;
