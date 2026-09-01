@@ -1086,6 +1086,12 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   margin-bottom: 14px;
 }
 
+.draft-thread:not(.agent-mode-welcome) .draft-thread__welcome,
+.work-composer-adapter__welcome {
+  justify-items: center;
+  text-align: center;
+}
+
 .new-thread-welcome__mark {
   margin-bottom: 4px;
   color: var(--oct-accent-fg);
@@ -1187,26 +1193,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   display: flex;
   width: auto;
   min-height: 32px;
-  padding: 5px 12px;
-  background: transparent;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-pill);
-  cursor: pointer;
   text-align: start;
   white-space: normal;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
-}
-
-.draft-thread__intent-card:hover {
-  background: var(--oct-selection);
-  border-color: var(--octant-border-strong);
-}
-
-.draft-thread__intent-card:focus-visible {
-  outline: 2px solid var(--octant-focus);
-  outline-offset: 1px;
 }
 
 .draft-thread__intent-label {
@@ -1704,15 +1692,6 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__welcome .composer-folder-selector__trigger svg {
   display: none;
-}
-
-.code-composer-adapter__description {
-  max-width: 52ch;
-  margin: 0;
-  color: var(--oct-muted);
-  font-size: calc(13 * var(--oct-text-step));
-  line-height: 1.55;
-  text-wrap: pretty;
 }
 
 .code-composer-adapter__composer {

@@ -23,10 +23,10 @@ describe("WorkComposerAdapter", () => {
         projectRoot="/home/user/docs"
       />,
     );
-    expect(html).toContain("Octant Work");
     expect(html).toContain("What are we working on?");
     expect(html).toContain("My Docs");
-    expect(html).toContain("confined folder");
+    expect(html).not.toContain("Octant Work");
+    expect(html).not.toContain("confined folder");
   });
 
   it("renders the no-Project state with an attach folder action", () => {
@@ -35,7 +35,7 @@ describe("WorkComposerAdapter", () => {
     );
     expect(html).toContain("No folder");
     expect(html).toContain("Attach folder");
-    expect(html).toContain("Choose a Project");
+    expect(html).not.toContain("Choose a Project to work in");
   });
 
   it("renders the no-Project state without an attach action when none is provided", () => {

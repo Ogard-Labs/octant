@@ -17,8 +17,9 @@ star is a quiet graphite workbench:
 - Navigation is a compact Project and thread tree. Low-frequency actions live
   in the bottom-left identity menu or an accessible overflow menu.
 - The right dock and bottom panel are contextual working regions for the active
-  pane. An open region with no selected tool shows a compact launcher; it never
-  fabricates a tab or repeats another pane's content.
+  pane. A capable region with no selected tool shows a compact launcher; a pane
+  with no valid tool exposes no dock toggle. Neither region fabricates a tab or
+  repeats another pane's content.
 - Hierarchy comes from typography, spacing, hairline borders, and selection
   fills. Colour is scarce and semantic.
 - Controls are familiar, compact, keyboard reachable, and honest about
@@ -186,10 +187,13 @@ rail. The right dock defaults to 320px when open. A fresh window starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is 34px in the native host and the status bar is 26px.
 
-Navigation panes stay compact hairline rails. Grouped forms, setup objects,
-welcome composers, and cards use the raised card recipe (`OctantCard` /
-`--octant-shadow-sm`). Chat, Work, and Code welcome composers share the `.composer` frame (20px,
-`--octant-shadow-md`). In light the card is workspace white on the
+Navigation panes stay compact hairline rails. Routine form layouts stay open
+and unshadowed; setup objects, discrete settings objects, welcome composers,
+and cards use the raised card recipe (`OctantCard` / `--octant-shadow-sm`).
+Chat, Work, and Code welcome composers share the `.composer` frame (20px,
+`--octant-shadow-md`) and one first-read hierarchy: one question, then the
+composer. Starter actions appear only when recent work does not already give
+the person a next step. In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
 as a sunken field. Code welcome names the Project in the heading. Checkout and branch sit
 on a second raised card stacked behind the composer: slightly narrower,
@@ -241,22 +245,27 @@ threads, with a command-style overlay available for broader actions.
 
 Settings is a grouped form page rather than a dashboard wall. A compact 248px
 navigation rail and search remain fixed while one centered 760px reading column
-scrolls. Navigation rows use the 10px control radius. Related rows sit in
-raised cards (`--octant-shadow-sm`) with a title and short description;
-section panels use the same card recipe. Labels and descriptions align left,
-controls align right, and compound editors may expand below. Every control uses
-the owned Octant/shadcn adapter, inherits the interface typography projection,
-and saves immediately.
+scrolls. Navigation rows use the 10px control radius and sentence-case group
+labels. Routine related rows stay open on the application ground with hairline
+separators. Profiles, providers, skills, theme previews, destructive groups,
+and other discrete objects use raised cards (`--octant-shadow-sm`). Labels and
+descriptions align left, controls align right, and compound editors may expand
+below. Essential labels and explanatory text are at least 12px at the default
+interface scale. Every control uses the owned Octant/shadcn adapter, inherits
+the interface typography projection, and saves immediately.
 Scope metadata remains available to assistive technology but does not compete
 with the setting label.
 
-Operational settings use progressive disclosure. Provider rows show identity,
-one effective status, details, and enablement; ordering controls appear only in
-an explicit Reorder mode. Skill rows show the source class and one effective
-state; filesystem paths, qualified identifiers, hashes, requested/effective
-breakdowns, and content size live behind Details. Usage opens on totals and
-measurement quality, with technical filters collapsed and provider-capacity
-diagnostics after the locally recorded dashboard.
+Operational settings use progressive disclosure. Provider and skill lists lead
+with compact readiness counts. Provider rows show identity, one effective
+status, details, and enablement; ordering controls appear only in an explicit
+Reorder mode. Skill rows show the source class and one effective state;
+filesystem paths, qualified identifiers, hashes, requested/effective
+breakdowns, and content size live behind Details. Usage opens on requests,
+input, output, and measurement quality. Reasoning, cache, execution time, and
+latency live in one Operational details disclosure; technical filters stay
+collapsed and provider-capacity diagnostics follow the locally recorded
+dashboard.
 
 First run is a five-step wizard with a progress rail. Each step is pending,
 current, or completed: the current step is a filled card, completed steps show
@@ -277,6 +286,10 @@ tool-tab and Add tool model for Review, Terminal, Browser, Files, and Side chat
 where supported. Selecting a tool removes that presentation from the other
 region; Terminal immediately attaches or starts and preserves one server
 session when moved.
+
+A welcome, Project, or other pane with neither a bound thread nor a valid
+launchable tool keeps the dock closed and omits its toggle. Restored presentation
+for another subject never makes unavailable chrome visible.
 
 Environment is a transient active-thread disclosure, at most 320px wide, with
 the 20px overlay radius. Its
@@ -316,10 +329,17 @@ assistant prose or display an empty plan form.
 
 Responsive breakpoints are 560px, 720px, and 920px. Below 920px the right dock
 is removed rather than squeezing the transcript unreadably. Below 720px split
-layouts stack and the navigation sidebar becomes a dismissible overlay instead
-of consuming a second vertical row above the workspace. Below 560px compact
-spacing and single-column forms apply. The mobile app has a separate design
-system under `apps/mobile/design-system`.
+layouts stack, the workspace navigation sidebar becomes a dismissible overlay,
+and Settings replaces its rail with a left drawer opened from the active page
+header. Below 560px compact spacing and single-column forms apply. The mobile
+app has a separate design system under `apps/mobile/design-system`.
+
+True page tabs, segmented choices, and pane identity are intentionally
+different. `OctantTabs` owns a flat rail with selected fill and keyboard tab
+semantics. `OctantToggleGroup` owns the enclosed track used for mutually
+exclusive values. The split-pane grip alone owns active-pane paint. Feature
+styles may size or scroll these primitives but may not restore a local tab
+track, underline recipe, or persistent active border.
 
 ## Component ownership and composition
 

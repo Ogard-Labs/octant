@@ -42,7 +42,7 @@ import {
   type DraftIntentCard,
   type PickerGroup,
 } from "@octant/domain";
-import { Aperture, FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
+import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -558,31 +558,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     <section aria-label={`New ${presentation.eyebrow} thread`} className="draft-thread">
       <div className="draft-thread__canvas">
         <div className="draft-thread__welcome">
-          <Aperture
-            aria-hidden="true"
-            className="new-thread-welcome__mark"
-            size={24}
-            strokeWidth={1.4}
-          />
-          <p className="draft-thread__eyebrow">{presentation.eyebrow}</p>
           <h1 className="draft-thread__heading">{presentation.heading}</h1>
-          <p className="draft-thread__description">{presentation.description}</p>
-        </div>
-
-        <div className="draft-thread__intent-cards" role="list" aria-label="Suggested actions">
-          {presentation.intentCards.map((card) => (
-            <OctantButton
-              className="draft-thread__intent-card"
-              key={card.id}
-              onClick={() => applyIntentCard(card)}
-              role="listitem"
-              type="button"
-              variant="outline"
-            >
-              <span className="draft-thread__intent-label">{card.label}</span>
-              <span className="draft-thread__intent-description">{card.description}</span>
-            </OctantButton>
-          ))}
         </div>
 
         <div className="draft-thread__composer">
@@ -634,6 +610,24 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             Press Enter to start · Shift+Enter for a new line · Escape to close
           </p>
         </div>
+
+        {(props.recentThreads?.length ?? 0) === 0 ? (
+          <div className="draft-thread__intent-cards" role="group" aria-label="Suggested actions">
+            {presentation.intentCards.map((card) => (
+              <OctantButton
+                className="draft-thread__intent-card"
+                key={card.id}
+                onClick={() => applyIntentCard(card)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                <span className="draft-thread__intent-label">{card.label}</span>
+                <span className="draft-thread__intent-description">{card.description}</span>
+              </OctantButton>
+            ))}
+          </div>
+        ) : null}
 
         <RecentThreadList threads={props.recentThreads ?? []} />
       </div>

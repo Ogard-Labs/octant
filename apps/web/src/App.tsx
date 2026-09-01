@@ -1621,7 +1621,12 @@ function LaunchedShell(
       }),
     [displayedDockState.tabs],
   );
-  const dockOpen = dockVisible;
+  const dockAvailable =
+    dockThreadId !== undefined ||
+    projectPullRequestReviewOpen ||
+    dockTabs.length > 0 ||
+    launchableDockSurfaces.length > 0;
+  const dockOpen = dockVisible && dockAvailable;
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -3950,7 +3955,7 @@ function LaunchedShell(
             {...(props.developmentAuthentication === undefined
               ? {}
               : { developmentAuthentication: props.developmentAuthentication })}
-            dockAvailable
+            dockAvailable={dockAvailable}
             dockExpanded={dockOpen}
             dockLabel="Right sidebar"
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -4799,7 +4804,7 @@ function LaunchedShell(
               onPreviewWidth={setPreviewContextWidth}
               onOpenTab={(surface) => openDockTab(surface)}
               onSelectSurface={selectDockTab}
-              open={dockVisible}
+              open={dockOpen}
               plan={
                 bottomPanelOpen && activeBottomSurface?.id === "plan"
                   ? undefined

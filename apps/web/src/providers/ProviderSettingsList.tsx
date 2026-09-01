@@ -93,6 +93,21 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     const remaining = props.instances.filter((instance) => !explicitSet.has(instance.id));
     return [...orderedInstances, ...remaining];
   }, [props.instances, props.defaults.providerOrder]);
+  const readinessSummary = useMemo(() => {
+    let ready = 0;
+    let needsSetup = 0;
+    let off = 0;
+    for (const instance of ordered) {
+      if (!instance.enabled) {
+        off += 1;
+      } else if (props.observedByInstance.get(instance.id)?.readiness === "ready") {
+        ready += 1;
+      } else {
+        needsSetup += 1;
+      }
+    }
+    return { ready, needsSetup, off };
+  }, [ordered, props.observedByInstance]);
 
   function move(index: number, direction: -1 | 1) {
     const next = index + direction;
@@ -126,6 +141,23 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
             ? "Use the arrow controls to change the model-picker order."
             : "The first ready provider is the default for new threads."}
         </p>
+        {ordered.length === 0 ? null : (
+          <div
+            aria-label="Provider readiness summary"
+            className="provider-settings__summary"
+            role="status"
+          >
+            <span>
+              <strong>{readinessSummary.ready}</strong> ready
+            </span>
+            <span>
+              <strong>{readinessSummary.needsSetup}</strong> needs setup
+            </span>
+            <span>
+              <strong>{readinessSummary.off}</strong> off
+            </span>
+          </div>
+        )}
         {ordered.length === 0 ? (
           <p className="provider-settings__empty">No providers configured.</p>
         ) : (

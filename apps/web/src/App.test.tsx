@@ -2194,8 +2194,7 @@ describe("App", () => {
     expect(within(dock).queryByRole("button", { name: "Publish" })).not.toBeInTheDocument();
   });
 
-  it("keeps the right sidebar closed after restart until the user opens it", async () => {
-    const user = userEvent.setup();
+  it("keeps the right sidebar unavailable for a restored Project overview", async () => {
     const initial = codeShellBootstrap().workspace;
     const code = initial.layouts.code;
     if (code.kind !== "pane") throw new Error("Default Code layout must be a pane.");
@@ -2234,15 +2233,14 @@ describe("App", () => {
       />,
     );
 
+    expect(
+      await screen.findByRole("banner", { name: "Workspace actions for Octant" }),
+    ).toBeVisible();
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
-    await showRightUtilityDock(user);
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByText("Current work")).toBeVisible();
-    expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
-    expect(within(dock).queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
   });
 
-  it("keeps Project context and the Right Utility Dock on the active split group", async () => {
+  it("keeps Project context on the active split group without offering thread tools", async () => {
     const initial = codeShellBootstrap().workspace;
     const code = initial.layouts.code;
     if (code.kind !== "pane") throw new Error("Default Code layout must be a pane.");
@@ -2306,8 +2304,10 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: /Right sidebar/ })).toBeVisible();
-    expect(screen.getByRole("banner", { name: "Workspace actions for Octant" })).toBeVisible();
+    expect(
+      await screen.findByRole("banner", { name: "Workspace actions for Octant" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
   });
 
   it("uses one narrow modal dock and restores focus through Escape dismissal", async () => {
@@ -2320,15 +2320,11 @@ describe("App", () => {
         launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
         projectClient={projectApi}
         projectWindowCapability={projectWindowCapability}
-        shellClient={client()}
+        shellClient={client(codeShellBootstrap())}
       />,
     );
 
-    await openSidebarProject(user, "Octant");
-    const overview = (await screen.findByDisplayValue("Octant")).closest(".project-overview");
-    if (!(overview instanceof HTMLElement)) throw new Error("Expected Octant Overview.");
-    expect(await within(overview).findByRole("heading", { name: "Memory" })).toBeVisible();
-    expect(screen.queryByRole("dialog", { name: "Project memory" })).toBeNull();
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
 
     const overflow = screen.getByRole("button", { name: "More window actions" });
     await user.click(overflow);
@@ -2358,10 +2354,9 @@ describe("App", () => {
 
     expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     await openSidebarProject(user, "Octant");
-    expect(screen.getByRole("button", { name: /Right sidebar/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open Code environment" })).toBeNull();
-    await showRightUtilityDock(user);
-    expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Code environment" })).toBeNull();
   });
 
@@ -2469,7 +2464,7 @@ describe("App", () => {
 
     expect((await screen.findAllByRole("banner"))[0]).toHaveClass("window-chrome--material-opaque");
     expect(document.querySelector(".shell")).toHaveClass("shell--material-opaque");
-    expect(screen.getByRole("button", { name: /Right sidebar/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
     expect(document.querySelector(".window-chrome__identity")).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Workspace pane: Welcome to Chat" })).toBeVisible();
@@ -3593,7 +3588,7 @@ describe("App", () => {
     );
   });
 
-  it("clears the previous thread's dock tool before a pane with no thread loads", async () => {
+  it("closes the previous thread's dock before a pane with no thread loads", async () => {
     const user = userEvent.setup();
     const initial = codeShellBootstrap();
     const firstPane = initial.workspace.layouts.code;
@@ -3663,13 +3658,14 @@ describe("App", () => {
 
     fireEvent.pointerDown(screen.getByRole("region", { name: "Workspace pane: Octant" }));
 
-    expect(await within(dock).findByText("Current work")).toBeVisible();
-    expect(within(dock).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull(),
+    );
     expect(screen.getByRole("region", { name: "Workspace pane: Octant" })).toHaveAttribute(
       "aria-current",
       "true",
     );
-    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
   });
 
   it("opens Review beside the active Code thread from View changes", async () => {

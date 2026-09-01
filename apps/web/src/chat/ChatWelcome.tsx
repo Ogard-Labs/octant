@@ -1,4 +1,4 @@
-import { Aperture, Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
+import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
@@ -94,15 +94,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     <section aria-label="Chat welcome" className="draft-thread chat-welcome">
       <div className="draft-thread__canvas">
         <div className="draft-thread__welcome">
-          <Aperture
-            aria-hidden="true"
-            className="new-thread-welcome__mark"
-            size={24}
-            strokeWidth={1.4}
-          />
-          <p className="draft-thread__eyebrow">Octant Chat</p>
           <h1 className="draft-thread__heading">{presentation.heading}</h1>
-          <p className="draft-thread__description">{presentation.description}</p>
         </div>
 
         <div className="draft-thread__composer">
@@ -183,27 +175,29 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         <p className="draft-thread__hint">
           Press Enter to start · Shift+Enter for a new line · Starts unfiled until you add a Project
         </p>
-        <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
-          {starterIdeas.map((idea) => {
-            const Icon = idea.icon;
-            return (
-              <OctantButton
-                disabled={!ready || props.creating}
-                key={idea.label}
-                onClick={() => {
-                  setPrompt(idea.prompt);
-                  textareaRef.current?.focus();
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
-                {idea.label}
-              </OctantButton>
-            );
-          })}
-        </div>
+        {(props.recentThreads?.length ?? 0) === 0 ? (
+          <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
+            {starterIdeas.map((idea) => {
+              const Icon = idea.icon;
+              return (
+                <OctantButton
+                  disabled={!ready || props.creating}
+                  key={idea.label}
+                  onClick={() => {
+                    setPrompt(idea.prompt);
+                    textareaRef.current?.focus();
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
+                  {idea.label}
+                </OctantButton>
+              );
+            })}
+          </div>
+        ) : null}
         <RecentThreadList threads={props.recentThreads ?? []} />
       </div>
     </section>

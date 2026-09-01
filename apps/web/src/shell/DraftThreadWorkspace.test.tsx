@@ -96,9 +96,9 @@ function makeLinearClient(
 describe("DraftThreadWorkspace", () => {
   it("renders mode-specific welcome copy for chat", () => {
     render(<DraftThreadWorkspace {...baseProps} />);
-    expect(screen.getByText("Octant Chat")).toBeVisible();
     expect(screen.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
-    expect(screen.getByText(/Start a calm, focused conversation/)).toBeVisible();
+    expect(screen.queryByText("Octant Chat")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start a calm, focused conversation/)).not.toBeInTheDocument();
   });
 
   it("renders mode-specific welcome copy for code", () => {
@@ -109,16 +109,30 @@ describe("DraftThreadWorkspace", () => {
 
   it("renders mode-specific welcome copy for work", () => {
     render(<DraftThreadWorkspace {...baseProps} mode="work" />);
-    expect(screen.getByText("Octant Work")).toBeVisible();
     expect(screen.getByRole("heading", { name: "What are we working on?" })).toBeVisible();
+    expect(screen.queryByText("Octant Work")).not.toBeInTheDocument();
   });
 
   it("renders intent cards for the active mode", () => {
-    render(<DraftThreadWorkspace {...baseProps} />);
-    expect(screen.getByRole("list", { name: "Suggested actions" })).toBeVisible();
+    const { container } = render(<DraftThreadWorkspace {...baseProps} />);
+    expect(screen.getByRole("group", { name: "Suggested actions" })).toBeVisible();
     expect(screen.getByText("Explain a concept")).toBeVisible();
     expect(screen.getByText("Draft text")).toBeVisible();
     expect(screen.getByText("Brainstorm ideas")).toBeVisible();
+    const composer = container.querySelector(".draft-thread__composer");
+    const suggestions = container.querySelector(".draft-thread__intent-cards");
+    expect(composer?.compareDocumentPosition(suggestions!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("hides starter actions when recent work already gives the screen a next step", () => {
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+      />,
+    );
+
+    expect(screen.queryByRole("group", { name: "Suggested actions" })).not.toBeInTheDocument();
   });
 
   it("offers the threads this mode already has and opens the one chosen", async () => {

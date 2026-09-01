@@ -269,21 +269,36 @@ export function UsageDashboard(props: UsageDashboardProps) {
         <TotalsCard label="Total requests" value={data.totals.totalRequests} />
         <TotalsCard label="Input tokens" value={data.totals.totalInputTokens} />
         <TotalsCard label="Output tokens" value={data.totals.totalOutputTokens} />
-        <TotalsCard label="Reasoning tokens" value={data.totals.totalReasoningTokens} />
-        <TotalsCard label="Cache read tokens" value={data.totals.totalCacheReadInputTokens} />
-        <TotalsCard label="Cache write tokens" value={data.totals.totalCacheWriteInputTokens} />
-        <TotalsCard
-          label="Provider execution time"
-          value={data.totals.totalProviderExecutionDurationMs}
-          suffix=" ms"
-        />
       </div>
       <UsageFilters filter={filter} onChange={setFilter} />
-      <LatencyStatsSection
-        className="usage-dashboard__section"
-        connectionLatencyMs={connectionLatencyMs}
-        latencyStats={data.latencyStats}
-      />
+      <details className="usage-dashboard__operational-details">
+        <summary>Operational details</summary>
+        <div
+          aria-label="Operational metrics"
+          className="usage-dashboard__operational-metrics"
+          role="group"
+        >
+          <OperationalMetric label="Reasoning tokens" value={data.totals.totalReasoningTokens} />
+          <OperationalMetric
+            label="Cache read tokens"
+            value={data.totals.totalCacheReadInputTokens}
+          />
+          <OperationalMetric
+            label="Cache write tokens"
+            value={data.totals.totalCacheWriteInputTokens}
+          />
+          <OperationalMetric
+            label="Provider execution time"
+            suffix=" ms"
+            value={data.totals.totalProviderExecutionDurationMs}
+          />
+        </div>
+        <LatencyStatsSection
+          className="usage-dashboard__section"
+          connectionLatencyMs={connectionLatencyMs}
+          latencyStats={data.latencyStats}
+        />
+      </details>
 
       <div className="usage-dashboard__quality" role="group" aria-label="Data quality">
         <QualityBadge count={data.totals.exactCount} label="Exact" quality="exact" />
@@ -916,6 +931,23 @@ function TotalsCard(props: {
       </span>
       <span className="usage-dashboard__total-label">{props.label}</span>
     </OctantCard>
+  );
+}
+
+function OperationalMetric(props: {
+  readonly label: string;
+  readonly value: number | undefined;
+  readonly suffix?: string;
+}) {
+  return (
+    <div className="usage-dashboard__operational-metric">
+      <span>{props.label}</span>
+      <strong>
+        {props.value === undefined
+          ? "Unavailable"
+          : `${formatNumber(props.value)}${props.suffix ?? ""}`}
+      </strong>
+    </div>
   );
 }
 

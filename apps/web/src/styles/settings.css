@@ -108,6 +108,14 @@ html[data-theme="dark"] .settings-view {
   background: var(--octant-app-background);
 }
 
+.settings-view--narrow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-view--narrow .settings-view__workspace {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .settings-view__workspace-titlebar {
   border-bottom: 1px solid var(--octant-border-soft);
 }
@@ -177,7 +185,109 @@ html[data-theme="dark"] .settings-view {
   background: var(--octant-control);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
+  padding-right: 34px;
   padding-left: 27px;
+}
+
+.settings-view__field--search input[type="search"]::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.settings-view__search-clear {
+  position: absolute;
+  z-index: 1;
+  right: 3px;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+}
+
+.settings-view__mobile-header {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: 0 12px 12px;
+  background: var(--octant-app-background);
+  border-bottom: 1px solid var(--octant-border-soft);
+}
+
+.settings-view__mobile-titlebar {
+  display: grid;
+  min-width: 0;
+  min-height: 44px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
+  padding-left: 72px;
+}
+
+.settings-view__mobile-back,
+.settings-view__mobile-sections {
+  min-height: 32px;
+  padding-inline: var(--oct-space-2);
+  color: var(--octant-text-secondary);
+}
+
+.settings-view__mobile-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-view__mobile-search {
+  width: 100%;
+  margin: 0;
+}
+
+.octant-dialog__popup.settings-view__drawer {
+  position: fixed;
+  top: 8px;
+  bottom: 8px;
+  left: 8px;
+  width: min(320px, calc(100vw - 16px));
+  max-width: min(320px, calc(100vw - 16px));
+  height: auto;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-view__drawer-header {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: 8px 12px 8px 16px;
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.settings-view__drawer-header h2 {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.settings-view__drawer-body {
+  height: calc(100% - 52px);
+  padding: 12px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* The legacy compact `.setnav` recipe hides group labels below 720px. The
+   Settings drawer still needs those labels to preserve the desktop hierarchy. */
+.settings-view__drawer .setnav-section {
+  display: block;
 }
 
 /* The nav items are .setnav-item, but the column itself is the app's
@@ -201,10 +311,10 @@ html[data-theme="dark"] .settings-view {
   padding: 4px 8px;
   color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .settings-navigation ul {
@@ -245,7 +355,7 @@ html[data-theme="dark"] .settings-view {
   font-weight: 500;
 }
 
-/* --- Settings primitives: one raised card per group --- */
+/* --- Settings primitives: open routine groups, raised discrete objects --- */
 
 .settings-panel {
   overflow: hidden;
@@ -545,8 +655,9 @@ html[data-theme="dark"] .settings-view {
   gap: 20px;
 }
 
-/* The section is the card. Title sits on it, not as a tiny uppercase label
-   floating above a second grey well. */
+/* A discrete object section is the card. Routine groups opt into the open
+   modifier below; neither treatment leaves a label floating above a second
+   grey well. */
 .settings-card-section {
   display: grid;
   gap: 0;
@@ -554,6 +665,31 @@ html[data-theme="dark"] .settings-view {
   background: var(--octant-settings-card);
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-sm);
+}
+
+.settings-card-section--open {
+  overflow: visible;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-card-section--open > h2,
+.settings-card-section--open > summary,
+.settings-card-section--open > legend {
+  padding: 12px 0 8px;
+}
+
+.settings-card-section--open > .setgroup {
+  overflow: visible;
+}
+
+.settings-card-section--open > .setgroup > .setrow {
+  padding-inline: 0;
+}
+
+.settings-card-section--open > .setgroup > .setrow:first-child {
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .settings-view__content-inner .provider-settings__intro h2,
@@ -709,7 +845,7 @@ html[data-theme="dark"] .settings-view {
   max-width: 62ch;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.4;
 }
 
@@ -1236,7 +1372,7 @@ textarea.settings-view__text-input {
 }
 
 @media (max-width: 720px) {
-  .settings-view {
+  .settings-view:not(.settings-view--narrow) {
     grid-template-columns: 216px minmax(0, 1fr);
   }
 

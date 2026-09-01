@@ -169,6 +169,34 @@ describe("the public-block visual language", () => {
     expect(trigger).toMatch(/padding-inline:\s*var\(--oct-space-1\)/);
   });
 
+  it("keeps true tabs, segmented choices, and pane identity visually distinct", () => {
+    const tabs = readFileSync(join(webRoot, "ui/shadcn/tabs.tsx"), "utf8");
+    const toggles = readFileSync(join(webRoot, "ui/shadcn/toggle-group.tsx"), "utf8");
+    const shell = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const activePane =
+      shell.match(
+        /\.workspace-pane\[data-active="true"\] \.workspace-pane__grip\s*\{[^}]+\}/,
+      )?.[0] ?? "";
+
+    expect(tabs).toContain("inline-flex h-8 w-fit items-center gap-1 text-muted-foreground");
+    expect(tabs).not.toContain("rounded-lg bg-muted p-[3px]");
+    expect(tabs).toContain("data-selected:bg-muted");
+    expect(tabs).not.toContain("data-selected:shadow-sm");
+    expect(toggles).toContain("rounded-lg bg-muted p-[3px]");
+    expect(activePane).toMatch(/background:\s*var\(--octant-control\)/);
+    expect(activePane).not.toMatch(/border-color:\s*var\(--octant-border-strong\)/);
+  });
+
+  it("retires the legacy underline tab paint from feature surfaces", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const artifacts = readFileSync(join(webRoot, "artifacts/ArtifactLibraryView.tsx"), "utf8");
+
+    expect(system).not.toMatch(/^\.tabs\s*\{/m);
+    expect(system).not.toMatch(/^\.tab\s*\{/m);
+    expect(artifacts).not.toContain('className="artifact-library__tabs tabs"');
+    expect(artifacts).not.toContain('className="artifact-library__tab tab"');
+  });
+
   it("aligns Appearance subgroups to the Settings card content inset", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
     const themeGroup = settings.match(/\.settings-view__theme-group \{[^}]+\}/)?.[0] ?? "";
@@ -177,7 +205,7 @@ describe("the public-block visual language", () => {
     expect(themeGroup).not.toMatch(/padding:\s*12px 0 8px/);
   });
 
-  it("reads Settings as form-layout cards on the app ground", () => {
+  it("uses open Settings groups for routine controls and raised cards for discrete objects", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
 
     expect(settings).toMatch(
@@ -186,6 +214,9 @@ describe("the public-block visual language", () => {
     expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*max-width:\s*760px/);
     expect(settings).toMatch(
       /\.settings-card-section\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\)/,
+    );
+    expect(settings).toMatch(
+      /\.settings-card-section--open\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/,
     );
     expect(settings).toMatch(
       /\.settings-card-section\s*>\s*h2,[\s\S]*?\.settings-card-section\s*>\s*legend\s*\{[\s\S]*?text-transform:\s*none/,
@@ -197,5 +228,17 @@ describe("the public-block visual language", () => {
       /\.code-settings\s*\{[^}]*background:\s*var\(--octant-settings-card\)/,
     );
     expect(settings).not.toMatch(/\.octant-switch\s*\{/);
+  });
+
+  it("keeps Settings navigation and explanatory text readable without shouting", () => {
+    const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
+    const navigation =
+      settings.match(/\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
+    const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
+
+    expect(navigation).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
+    expect(navigation).toMatch(/text-transform:\s*none/);
+    expect(navigation).toMatch(/letter-spacing:\s*normal/);
+    expect(hint).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
   });
 });

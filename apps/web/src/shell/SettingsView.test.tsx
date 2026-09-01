@@ -210,6 +210,55 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
   });
 
+  it("keeps Profile raised while routine General groups use the open form treatment", () => {
+    renderSettings();
+
+    expect(
+      screen.getByRole("heading", { name: "Profile" }).closest(".settings-card-section"),
+    ).not.toHaveClass("settings-card-section--open");
+    expect(
+      screen.getByRole("heading", { name: "Available modes" }).closest(".settings-card-section"),
+    ).toHaveClass("settings-card-section--open");
+    expect(
+      screen.getByRole("heading", { name: "Keyboard shortcuts" }).closest(".settings-card-section"),
+    ).toHaveClass("settings-card-section--open");
+  });
+
+  it("keeps the active Settings page first at narrow width and moves navigation into a drawer", async () => {
+    const user = userEvent.setup();
+    const onBack = vi.fn();
+    renderSettings({ isNarrow: true, onBack });
+
+    expect(screen.queryByRole("complementary", { name: "Settings sidebar" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "General" })).toBeVisible();
+    expect(screen.getByRole("searchbox", { name: "Search settings" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Back to app" })).toBeVisible();
+
+    const sections = screen.getByRole("button", { name: "Settings sections" });
+    await user.click(sections);
+    const drawer = screen.getByRole("dialog", { name: "Settings sections" });
+    expect(within(drawer).getByRole("navigation", { name: "Settings sections" })).toBeVisible();
+
+    await user.click(within(drawer).getByRole("button", { name: "Appearance" }));
+    expect(screen.queryByRole("dialog", { name: "Settings sections" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Appearance" })).toBeVisible();
+    await waitFor(() => expect(sections).toHaveFocus());
+
+    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("clears Settings search from an app-owned control and returns focus to the field", async () => {
+    const user = userEvent.setup();
+    const { onSearchChange } = renderSettingsWithSearch("mode", { isNarrow: true });
+
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    await user.click(screen.getByRole("button", { name: "Clear settings search" }));
+
+    expect(onSearchChange).toHaveBeenLastCalledWith("");
+    expect(search).toHaveFocus();
+  });
+
   it("shows a scope indicator on each relevant control", () => {
     renderSettings();
 
@@ -592,7 +641,7 @@ describe("SettingsView", () => {
     expect(styles).toMatch(/\.settings-scheme__card\s*\{[^}]*height:\s*auto;/);
   });
 
-  it("reads Settings groups as raised form-layout cards on the app ground", () => {
+  it("keeps routine Settings groups open while discrete objects remain raised", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(
@@ -604,8 +653,23 @@ describe("SettingsView", () => {
     expect(styles).toMatch(
       /\.settings-card-section\s*\{[\s\S]*box-shadow:\s*var\(--octant-shadow-sm\)/,
     );
+    expect(styles).toMatch(/\.settings-card-section--open\s*\{[\s\S]*box-shadow:\s*none/);
     expect(styles).toContain("border-radius: var(--oct-radius-md)");
     expect(styles).not.toMatch(/\.code-settings\s*\{[^}]*--octant-surface-muted/);
+  });
+
+  it("does not let the legacy 720px rail squeeze narrow Settings into a phantom column", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    expect(styles).toMatch(
+      /@media \(max-width: 720px\)[\s\S]*?\.settings-view:not\(\.settings-view--narrow\)\s*\{\s*grid-template-columns:\s*216px minmax\(0, 1fr\)/,
+    );
+  });
+
+  it("keeps sentence-case navigation groups visible inside the narrow drawer", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    expect(styles).toMatch(/\.settings-view__drawer \.setnav-section\s*\{[^}]*display:\s*block/);
   });
 
   it("keeps search and the existing mode-switcher mutation wired", async () => {
@@ -781,7 +845,12 @@ describe("SettingsView", () => {
       retain: vi.fn(),
     };
     renderSettings({ usageClient: usageClient as never, isNarrow: true });
-    navigateTo("Usage");
+    fireEvent.click(screen.getByRole("button", { name: "Settings sections" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Settings sections" })).getByRole("button", {
+        name: "Usage",
+      }),
+    );
     const table = await screen.findByRole("table", { name: "daily activity" });
     expect(table.className).toContain("usage-dashboard__table--narrow");
     expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);

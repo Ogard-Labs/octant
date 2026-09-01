@@ -78,6 +78,7 @@ distilled successor of the earlier long-form design specifications.
 | [0068](0068-linux-plan-process-deny.md)                       | Linux Plan process denial uses seccomp                                                      | Accepted           |
 | [0069](0069-native-harness-context-overflow.md)               | Native harness context overflow: hard cutover, evidence notes, and journal lookup           | Proposed           |
 | [0070](0070-setup-surfaces-compose-from-public-blocks.md)     | Renderer visual language matches public block catalogs                                      | Accepted           |
+| [0071](0071-one-navigation-and-surface-hierarchy.md)          | One navigation and surface hierarchy                                                        | Accepted           |
 
 ## Adding an ADR
 

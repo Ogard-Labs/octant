@@ -600,6 +600,19 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const catalogOffline = effective?.catalogStatus === "offline";
   const installedPackages = snapshot.packages.filter((pkg) => pkg.activation.installed);
   const standaloneSkills = snapshot.skills ?? [];
+  const standaloneSkillSummary = standaloneSkills.reduce(
+    (summary, skill) => {
+      if (skill.effectiveState.kind === "blocked" && skill.effectiveState.reason === "untrusted") {
+        summary.needsReview += 1;
+      } else if (skill.effectiveState.kind === "effective" && skill.skill.available) {
+        summary.available += 1;
+      } else {
+        summary.other += 1;
+      }
+      return summary;
+    },
+    { available: 0, needsReview: 0, other: 0 },
+  );
   const skillPreviewAction =
     skillPreview === undefined ? undefined : skillPackageAction(snapshot, skillPreview);
 
@@ -704,11 +717,24 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   No standalone skills were discovered.
                 </p>
               ) : (
-                <ul className="extensions-settings__cards">
-                  {standaloneSkills.map((skill) => (
-                    <StandaloneSkillCard key={String(skill.skill.qualifiedId)} skill={skill} />
-                  ))}
-                </ul>
+                <>
+                  <div
+                    aria-label="Standalone skill summary"
+                    className="extensions-settings__summary"
+                    role="status"
+                  >
+                    <span>{standaloneSkillSummary.available} available</span>
+                    <span>{standaloneSkillSummary.needsReview} need review</span>
+                    {standaloneSkillSummary.other === 0 ? null : (
+                      <span>{standaloneSkillSummary.other} need attention</span>
+                    )}
+                  </div>
+                  <ul className="extensions-settings__cards">
+                    {standaloneSkills.map((skill) => (
+                      <StandaloneSkillCard key={String(skill.skill.qualifiedId)} skill={skill} />
+                    ))}
+                  </ul>
+                </>
               )}
             </div>
           </section>
@@ -1222,6 +1248,8 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
   const skill = props.skill;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const blocked = skill.effectiveState.kind === "blocked";
+  const summarizedUntrusted =
+    skill.effectiveState.kind === "blocked" && skill.effectiveState.reason === "untrusted";
   return (
     <li className="extcard">
       <span aria-hidden="true" className="icon-mark">
@@ -1229,13 +1257,19 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
       </span>
       <span className="extcard-name">{skill.displayName}</span>
       <span className="extcard-right">
-        <span className={blocked || !skill.skill.available ? "badge badge-warn" : "badge badge-ok"}>
-          {blocked
-            ? effectiveLabel(skill.effectiveState)
-            : skill.skill.available
-              ? "Available"
-              : "Unavailable"}
-        </span>
+        {summarizedUntrusted ? (
+          <span className="extensions-settings__state-label">Needs review</span>
+        ) : (
+          <span
+            className={blocked || !skill.skill.available ? "badge badge-warn" : "badge badge-ok"}
+          >
+            {blocked
+              ? effectiveLabel(skill.effectiveState)
+              : skill.skill.available
+                ? "Available"
+                : "Unavailable"}
+          </span>
+        )}
         <OctantButton
           aria-expanded={detailsOpen}
           aria-label={`${detailsOpen ? "Hide" : "Show"} details for ${skill.displayName}`}

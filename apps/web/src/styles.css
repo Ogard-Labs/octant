@@ -1537,7 +1537,6 @@ button:focus-visible {
 .workspace-pane[data-active="true"] .workspace-pane__grip {
   color: var(--oct-fg);
   background: var(--octant-control);
-  border-color: var(--octant-border-strong);
 }
 
 /* The window controls sit in this same band. Keep the reserve a margin, not
@@ -1608,6 +1607,14 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .workspace-pane__grip > svg {
   flex: 0 0 auto;
+  opacity: 0.45;
+  transition: opacity var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.workspace-pane__grip:hover > svg,
+.workspace-pane__grip:focus-within > svg,
+.workspace-pane[data-active="true"] .workspace-pane__grip > svg {
+  opacity: 0.82;
 }
 
 .workspace-pane__provider {
@@ -2079,6 +2086,21 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .setgroup > .setgroup-note + .provlist {
   margin-top: var(--oct-space-2);
+}
+
+.provider-settings__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2) var(--oct-space-4);
+  padding: 0 var(--oct-space-4) var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.provider-settings__summary strong {
+  color: var(--oct-fg);
+  font-weight: 600;
 }
 
 /* Reordering keeps the pre-port up/down mechanism; the grip column just

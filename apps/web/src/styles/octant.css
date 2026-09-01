@@ -1367,32 +1367,6 @@ input.switch:checked::after {
   color: var(--oct-fg-2);
 }
 
-/* ─── tabs ──────────────────────────────────────────────────────────── */
-.tabs {
-  display: flex;
-  gap: var(--oct-space-5);
-  border-bottom: 1px solid var(--oct-border);
-}
-.tab {
-  padding: var(--oct-space-3) 0;
-  margin-bottom: -1px;
-  border-bottom: 1px solid transparent;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  background: none;
-  border-top: 0;
-  border-inline: 0;
-  transition: color var(--oct-motion-fast) var(--oct-ease-standard);
-}
-.tab:hover {
-  color: var(--oct-fg);
-}
-.tab[aria-selected="true"] {
-  color: var(--oct-fg);
-  border-bottom-color: var(--oct-accent-fg);
-}
-
 /* ─── segmented control ─────────────────────────────────────────────── */
 .segmented {
   display: inline-flex;

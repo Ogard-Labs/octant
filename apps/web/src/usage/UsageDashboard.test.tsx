@@ -202,7 +202,8 @@ describe("UsageDashboard", () => {
     expect(screen.getByLabelText("Filter by provider instance id")).toBeVisible();
   });
 
-  it("renders host latency measurements after the totals", async () => {
+  it("keeps latency behind Operational details after the primary totals", async () => {
+    const user = userEvent.setup();
     const response = {
       ...seededResponse(),
       latencyStats: {
@@ -221,7 +222,11 @@ describe("UsageDashboard", () => {
     const client = createMockClient(response);
     render(<UsageDashboard client={client} />);
 
-    const latency = await screen.findByRole("region", { name: "Latency" });
+    await screen.findByText("Total requests");
+    const latency = screen.getByRole("region", { name: "Latency" });
+    expect(latency).not.toBeVisible();
+    await user.click(screen.getByText("Operational details"));
+    expect(latency).toBeVisible();
     expect(within(latency).getByText("Provider runtime start")).toBeInTheDocument();
     expect(
       within(latency).getByText(/2 observations · p50 8 ms · p95 14 ms · max 14 ms/),
@@ -294,7 +299,12 @@ describe("UsageDashboard", () => {
       },
     });
     render(<UsageDashboard client={client} />);
-    expect(await screen.findByText("Reasoning tokens")).toBeInTheDocument();
+    const summary = await screen.findByRole("group", { name: "Summary totals" });
+    expect(summary.querySelectorAll(".usage-dashboard__total-card")).toHaveLength(3);
+    expect(screen.getByRole("group", { name: "Operational metrics" })).not.toBeVisible();
+    fireEvent.click(screen.getByText("Operational details"));
+    expect(screen.getByRole("group", { name: "Operational metrics" })).toBeVisible();
+    expect(screen.getByText("Reasoning tokens")).toBeInTheDocument();
     expect(screen.getByText("12")).toBeInTheDocument();
     expect(screen.getByText("Cache read tokens")).toBeInTheDocument();
     expect(screen.getByText("Cache write tokens")).toBeInTheDocument();

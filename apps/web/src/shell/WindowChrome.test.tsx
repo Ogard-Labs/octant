@@ -406,7 +406,7 @@ describe("WindowChrome", () => {
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
       "color: var(--oct-fg);",
     );
-    expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
+    expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).not.toContain(
       "border-color: var(--octant-border-strong);",
     );
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(

@@ -73,6 +73,38 @@ describe("ProviderSettingsView", () => {
     ).toBeTruthy();
   });
 
+  it("summarizes ready, setup-needed, and off providers before the list", () => {
+    const ready = provider();
+    const needsSetup = {
+      ...provider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000093"),
+      displayName: "Needs setup",
+    };
+    const off = {
+      ...provider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000094"),
+      displayName: "Off provider",
+      enabled: false,
+    };
+    const props = fixture();
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...props}
+        instances={[ready, needsSetup, off]}
+        observedByInstance={
+          new Map([
+            [ready.id, observation({ instanceId: ready.id, readiness: "ready" })],
+            [needsSetup.id, observation({ instanceId: needsSetup.id, readiness: "unavailable" })],
+          ])
+        }
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "Provider readiness summary" })).toHaveTextContent(
+      "1 ready1 needs setup1 off",
+    );
+  });
+
   it("keeps manual provider setup behind an advanced disclosure", async () => {
     const user = userEvent.setup();
     renderProviderSettings(<ProviderSettingsView {...fixture()} />);

@@ -222,8 +222,9 @@ server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
 Thread utilities live in the Right Utility Dock outside the split tree. The
-top-right control reveals the dock. An empty dock shows a compact launcher; an
-open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
+top-right control reveals the dock only when the active pane has a bound thread
+or a valid launchable tool. An available empty dock shows a compact launcher;
+an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal, Tests,
 and iOS Simulator, as mode and capability allow. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
@@ -332,6 +333,10 @@ vendoring a catalog or replacing the shell. Environment is already a compact
 header summary with a transient disclosure whose open state is not persisted
 and may include a truthful child-run summary
 ([0045](decisions/0045-environment-summarizes-the-active-thread.md)).
+[0071](decisions/0071-one-navigation-and-surface-hierarchy.md) refines that
+language: true tabs stay flat, segmented values keep an enclosed track, active
+pane identity stays on the grip, routine Settings rows remain open while
+discrete objects are raised, and narrow Settings uses a drawer.
 The dock already hosts live thread-owned tool instances — Files, Browser,
 Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery,
 thread-level Agents, and Review — rather than a generic Thread accordion.

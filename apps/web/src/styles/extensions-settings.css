@@ -50,6 +50,22 @@
   font-size: var(--oct-text-sm);
 }
 
+.extensions-settings__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2) var(--oct-space-4);
+  padding: 0 4px var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.extensions-settings__state-label {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
 .extensions-settings__search,
 .extensions-settings__local-import {
   display: flex;

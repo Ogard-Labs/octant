@@ -116,6 +116,7 @@ describe("CodeComposerAdapter", () => {
     );
 
     expect(html).not.toContain("The selected Project is unavailable");
+    expect(html).not.toContain("Choose a Project to build in");
   });
 
   it("renders error message when provided", () => {

@@ -427,12 +427,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             )}
             ?
           </h1>
-          {hasProject ? null : (
-            <p className="code-composer-adapter__description">
-              Choose a Project to build in. Its repository is the checkout this thread works
-              against.
-            </p>
-          )}
           {props.projectAvailable === false &&
           props.projectId !== undefined &&
           props.errorMessage === undefined ? (

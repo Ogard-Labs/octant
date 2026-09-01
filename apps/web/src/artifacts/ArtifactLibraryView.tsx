@@ -173,9 +173,9 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
         }}
         value={filters.tab}
       >
-        <OctantTabsList aria-label="Artifact groups" className="artifact-library__tabs tabs">
+        <OctantTabsList aria-label="Artifact groups" className="artifact-library__tabs">
           {TABS.map((tab) => (
-            <OctantTabsTab className="artifact-library__tab tab" key={tab.id} value={tab.id}>
+            <OctantTabsTab className="artifact-library__tab" key={tab.id} value={tab.id}>
               {tab.label}
             </OctantTabsTab>
           ))}
