@@ -760,10 +760,11 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   text-transform: none;
 }
 
-/* A legend is taken out of the fieldset's flow by default, so it has to be
-   placed back into the grid to sit above the group like every other heading. */
+/* A legend is drawn on the fieldset border by default. `float: none` is that
+   default, so it left the label sitting on the card edge; a floated legend is
+   no longer the rendered legend and lays out as an ordinary grid child. */
 .settings-card-section > legend {
-  float: none;
+  float: left;
   width: 100%;
   padding: 20px 20px 0;
 }
@@ -829,8 +830,15 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   transform: rotate(180deg);
 }
 
-.settings-profile-disclosure[open] > summary {
-  border-bottom: 1px solid var(--octant-border-soft);
+/* Collapsed, the summary is the section's only row, so it carries the same
+   hairline the first row of every other open group draws under its heading.
+   Open, that row's own top rule takes over. */
+.settings-profile-disclosure > summary {
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.settings-profile-disclosure[open] > .setgroup > .setrow:first-child {
+  border-top: 0;
 }
 
 /* Standalone groups are cards. A group already inside settings-card-section
@@ -1340,7 +1348,7 @@ textarea.settings-view__text-input {
 .settings-view__theme-group {
   display: grid;
   gap: 4px;
-  padding: 12px 20px 8px;
+  padding: 12px 0 8px;
   margin: 0;
   border: 0;
   border-top: 1px solid var(--oct-border-soft);
@@ -1353,10 +1361,11 @@ textarea.settings-view__text-input {
   border-top: 0;
 }
 
-/* Placed back into the grid: a legend floats out of the fieldset's flow by
-   default and cuts a notch through the group's own top rule. */
+/* Placed back into the grid: an unfloated legend is the fieldset's rendered
+   legend, which sits on the top rule and cuts a notch through it. Floating
+   it makes it an ordinary grid child. */
 .settings-view__theme-group legend {
-  float: none;
+  float: left;
   width: 100%;
   padding: 0 0 2px;
   color: var(--oct-fg-2);

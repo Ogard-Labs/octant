@@ -165,13 +165,15 @@ describe("SettingsView", () => {
       agentRunSettingsClient,
       initialDeepLink: { section: "agents" },
     });
-    expect(await screen.findByRole("radio", { name: /Ask/ })).toBeChecked();
+    expect(await screen.findByRole("combobox", { name: "Subagent creation" })).toHaveTextContent(
+      "Ask",
+    );
     expect(screen.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "page");
   });
 
   it("does not render the Agents panel without an AgentRunSettingsClient", () => {
     renderSettings({ initialDeepLink: { section: "agents" } });
-    expect(screen.queryByRole("radio", { name: /Ask/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Subagent creation" })).not.toBeInTheDocument();
   });
 
   it("presents one section at a time, defaulting to General", () => {
@@ -224,12 +226,12 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
   });
 
-  it("keeps Profile raised while routine General groups use the open form treatment", () => {
+  it("keeps Profile collapsed in the same open form as the routine General groups", () => {
     renderSettings();
 
     expect(
       screen.getByRole("heading", { name: "Profile" }).closest(".settings-card-section"),
-    ).not.toHaveClass("settings-card-section--open");
+    ).toHaveClass("settings-card-section--open");
     const profileDisclosure = screen.getByRole("heading", { name: "Profile" }).closest("details");
     expect(profileDisclosure).not.toHaveAttribute("open");
     expect(profileDisclosure).toHaveTextContent("Not set");

@@ -1747,6 +1747,13 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
   overflow: hidden;
 }
 
+/* The Project menu is anchored inside this cell. Clipping the cell while the
+   menu is open hid the whole list behind the prompt card: only the search
+   field was visible and "Add local folder" could not be reached. */
+.code-composer-adapter__dock-leading:has([aria-expanded="true"]) {
+  overflow: visible;
+}
+
 .code-composer-adapter__dock-trailing {
   flex: 0 0 auto;
 }
@@ -2046,11 +2053,16 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
   padding: 6px;
 }
 
+/* The shared button recipe centres its content. Left unset, each option's copy
+   block floated to its own centre and the four labels landed at four
+   different x positions. */
 .code-composer-choice__option {
   display: flex;
   align-items: flex-start;
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
+  height: auto;
   min-height: 36px;
   padding: 7px 8px;
   color: var(--octant-text-primary);
@@ -2094,78 +2106,20 @@ html[data-octant-theme-mode="light"] .code-composer-adapter__dock {
   line-height: 1.4;
 }
 
+.code-composer-choice__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  color: var(--octant-text-secondary);
+  border-top: 1px solid var(--octant-border);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
 .code-composer-adapter__composer-bar .code-composer-adapter__context-picker {
   margin-inline-start: 0;
-}
-
-.code-composer-adapter__disclosure-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  min-height: 24px;
-  padding: 0 2px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.code-composer-adapter__delivery {
-  display: grid;
-  width: min(420px, calc(100vw - 32px));
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px 10px;
-  padding: 12px;
-}
-
-.code-composer-adapter__delivery-header {
-  display: grid;
-  grid-column: 1 / -1;
-  gap: 3px;
-  padding: 2px 2px 8px;
-  border-bottom: 1px solid var(--oct-border);
-}
-
-.code-composer-adapter__delivery-header h2,
-.code-composer-adapter__delivery-header p {
-  margin: 0;
-}
-
-.code-composer-adapter__delivery-header h2 {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-}
-
-.code-composer-adapter__delivery-header p {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-}
-
-.code-composer-adapter__field {
-  display: grid;
-  gap: 3px;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-}
-
-.code-composer-adapter__field:first-child,
-.code-composer-adapter__field:last-child {
-  grid-column: 1 / -1;
-}
-
-.code-composer-adapter__field :is(input, select) {
-  min-height: 30px;
-}
-
-@media (max-width: 620px) {
-  .code-composer-adapter__delivery {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .code-composer-adapter__field {
-    grid-column: 1;
-  }
 }
 
 .code-composer-adapter__error {

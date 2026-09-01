@@ -5,7 +5,8 @@ import {
   AgentRunSettingsClientFailure,
   type AgentRunSettingsClient,
 } from "@octant/client-runtime/agent-run-settings-client";
-import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { SettingRow } from "../settings/primitives";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import "./agent-hierarchy.css";
 
 const POSTURES: ReadonlyArray<{
@@ -103,44 +104,40 @@ export function AgentRunSettingsPanel(props: { readonly client: AgentRunSettings
     );
   }
 
+  const current =
+    POSTURES.find((posture) => posture.value === settings?.creationPosture) ?? POSTURES[1];
+
   return (
     <section aria-label="Agents" className="agent-run-settings-panel">
-      <fieldset className="settings-card-section">
-        <legend>Subagent creation posture</legend>
+      <div className="settings-card-section settings-card-section--open">
+        <h2>Subagents</h2>
+        <div className="setgroup">
+          <SettingRow
+            description={current?.description}
+            label="Subagent creation"
+            scope="app"
+            settingId="subagent-creation-posture"
+          >
+            <OctantSelectField
+              aria-label="Subagent creation"
+              disabled={saving}
+              onValueChange={(value) => {
+                const posture = POSTURES.find((entry) => entry.value === value);
+                if (posture !== undefined && posture.value !== settings?.creationPosture) {
+                  void choose(posture.value);
+                }
+              }}
+              options={POSTURES.map((posture) => ({ id: posture.value, label: posture.label }))}
+              value={current?.value ?? "ask"}
+            />
+          </SettingRow>
+        </div>
         {message === undefined ? null : (
           <p className="agent-run-settings-panel__message" role="status">
             {message}
           </p>
         )}
-        <OctantToggleGroup<AgentRunCreationPosture>
-          aria-label="Subagent creation posture"
-          className="grid w-full grid-cols-1 gap-2"
-          onValueChange={(value) => {
-            const posture = value[0];
-            if (posture !== undefined && posture !== settings?.creationPosture) {
-              void choose(posture);
-            }
-          }}
-          role="radiogroup"
-          value={settings === undefined ? [] : [settings.creationPosture]}
-        >
-          {POSTURES.map((posture) => (
-            <OctantToggleGroupItem
-              aria-checked={settings?.creationPosture === posture.value}
-              className="h-auto min-h-0 w-full items-start justify-start whitespace-normal px-3 py-2.5 text-left"
-              disabled={saving}
-              key={posture.value}
-              role="radio"
-              value={posture.value}
-            >
-              <span className="flex flex-col items-start gap-0.5">
-                <strong>{posture.label}</strong>
-                <span className="text-xs font-normal opacity-80">{posture.description}</span>
-              </span>
-            </OctantToggleGroupItem>
-          ))}
-        </OctantToggleGroup>
-      </fieldset>
+      </div>
     </section>
   );
 }

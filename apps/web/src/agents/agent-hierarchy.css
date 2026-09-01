@@ -209,32 +209,6 @@
   gap: 0.75rem;
 }
 
-.agent-run-settings-panel fieldset {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0 0 12px;
-  border: 0;
-}
-
-.agent-run-settings-panel [role="radiogroup"] {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0 12px 8px;
-}
-
-.agent-run-settings-panel legend {
-  float: none;
-  width: 100%;
-  margin-bottom: 0;
-  padding: 20px 20px 8px;
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-}
-
 .agent-run-settings-panel__message,
 .agent-run-settings-panel__error {
   font-size: 0.8125rem;

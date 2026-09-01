@@ -631,9 +631,6 @@ describe("DraftThreadWorkspace", () => {
     await user.type(prompt, "Keep this exact prompt");
     await user.click(screen.getByRole("button", { name: "Access policy" }));
     await user.click(screen.getByRole("option", { name: /Full access/ }));
-    await user.click(screen.getByRole("button", { name: "Delivery target" }));
-    await user.clear(screen.getByRole("textbox", { name: "Branch intent" }));
-    await user.type(screen.getByRole("textbox", { name: "Branch intent" }), "feature/keep-me");
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: "Add local folder…" }));
@@ -644,8 +641,6 @@ describe("DraftThreadWorkspace", () => {
       "Keep this exact prompt",
     );
     expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Full access");
-    await user.click(screen.getByRole("button", { name: "Delivery target" }));
-    expect(screen.getByRole("textbox", { name: "Branch intent" })).toHaveValue("feature/keep-me");
     expect(screen.getByRole("button", { name: "Project: new-repository" })).toBeVisible();
   });
 

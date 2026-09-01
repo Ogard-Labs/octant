@@ -19,12 +19,9 @@ import {
   type WorktreeRemoteFacts,
   type WorktreeSourceResolution,
 } from "@octant/domain/code-worktree-source-policy";
-import {
-  CODE_DELIVERY_OUTCOME_ORDER,
-  suggestCodeDeliveryOutcome,
-} from "@octant/domain/delivery-target-policy";
+import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { ChevronDown, ChevronUp, FolderOpen, GitBranch, Paperclip } from "lucide-react";
+import { FolderOpen, GitBranch, Paperclip } from "lucide-react";
 import type { ImageGenerationProfileView, ImageGenerationScopeId } from "@octant/contracts";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { ImageGenerationAction } from "../../image/ImageGenerationAction";
@@ -42,9 +39,6 @@ import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
-import { OctantInput } from "../../ui/base/OctantInput";
-import { OctantPopover } from "../../ui/base/OctantPopover";
-import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
 import { CodeComposerAccessMenu } from "./CodeComposerAccessMenu";
@@ -200,7 +194,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [permissionPersistence, setPermissionPersistence] = useState(
     props.defaultPermissionPersistence,
   );
-  const [showDelivery, setShowDelivery] = useState(false);
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique
   // `octant/<short-id>` default once from a stable short id.
@@ -210,21 +203,17 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       : "new",
   );
   const initialBaseBranch = props.baseBranch ?? props.branchName ?? "development";
-  const [branchIntent, setBranchIntent] = useState(
-    defaultDeliveryBranchIntent(initialBaseBranch, shortId),
-  );
-  const [remoteName, setRemoteName] = useState(props.remoteName ?? "origin");
-  const defaultBaseRepository =
+  // The delivery target is derived from the tray, not typed into a form: the
+  // base branch is the branch picker, the base repository is the connected
+  // GitHub repository (or the local Project), and the remote is the one the
+  // worktree starts from. A separate "Delivery target" form asked the person
+  // to restate choices the tray already showed.
+  const baseRepository =
     props.baseRepository ??
     (props.projectName === undefined || props.projectName.trim() === ""
-      ? ""
+      ? "local/repository"
       : `local/${props.projectName}`);
-  const [baseRepository, setBaseRepository] = useState(defaultBaseRepository);
-  const [baseRepositoryEdited, setBaseRepositoryEdited] = useState(false);
   const [baseBranch, setBaseBranch] = useState(initialBaseBranch);
-  // The delivery outcome is suggested from the prompt and confirmed by the
-  // user. Until the user overrides it, it tracks the live prompt suggestion.
-  const [outcomeOverride, setOutcomeOverride] = useState<CodeDeliveryOutcomeKind>();
   // F4: remote facts are server-authoritative. When the server has not
   // provided them, fail closed with no remotes so Start from origin is
   // disabled rather than fabricated.
@@ -248,7 +237,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     worktreeRemote ??
     (preferredRemote.status === "selected"
       ? preferredRemote.remoteName
-      : remoteName.trim() || "origin");
+      : (props.remoteName ?? "origin"));
   const previewExecute = useCallback(
     async (command: CodeCommand, signal?: AbortSignal) =>
       props.execute === undefined ? undefined : props.execute(command, signal),
@@ -262,8 +251,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     remoteName: resolvedWorktreeRemote,
     enabled: props.projectId !== undefined && props.execute !== undefined,
   });
-  const suggestedOutcome = useMemo(() => suggestCodeDeliveryOutcome(prompt), [prompt]);
-  const outcomeKind = outcomeOverride ?? suggestedOutcome;
+  // The delivery outcome follows the prompt; the thread board and overview
+  // show it once the thread exists.
+  const outcomeKind: CodeDeliveryOutcomeKind = useMemo(
+    () => suggestCodeDeliveryOutcome(prompt),
+    [prompt],
+  );
   const trimmed = prompt.trim();
   // A Code thread belongs to a Project (decision 0037), so the first turn
   // cannot start until one is chosen.
@@ -283,11 +276,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     setWorktreeRefs(undefined);
     setRefsLoading(false);
     setWorkspaceOverride(undefined);
-    setBaseRepositoryEdited(false);
   }, [projectId]);
-  useEffect(() => {
-    if (!baseRepositoryEdited) setBaseRepository(defaultBaseRepository);
-  }, [baseRepositoryEdited, defaultBaseRepository]);
   const loadWorktreeRefs = useCallback(() => {
     if (projectId === undefined || execute === undefined) return;
     const requestedProjectId = projectId;
@@ -331,13 +320,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           executionPolicy,
           permissionPersistence,
           deliveryTarget: {
-            branchIntent: branchIntent.trim() || defaultDeliveryBranchIntent(baseBranch, shortId),
-            remoteName: remoteName.trim() || "origin",
-            proposedBaseRepository:
-              baseRepository.trim() ||
-              (props.projectName === undefined || props.projectName.trim() === ""
-                ? "local/repository"
-                : `local/${props.projectName}`),
+            branchIntent: defaultDeliveryBranchIntent(baseBranch.trim() || "development", shortId),
+            remoteName: resolvedWorktreeRemote,
+            proposedBaseRepository: baseRepository,
             proposedBaseBranch: baseBranch.trim() || "development",
             outcomeKind,
           },
@@ -361,14 +346,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     executionPolicy,
     permissionPersistence,
     workspace,
-    branchIntent,
-    remoteName,
     baseRepository,
     baseBranch,
     shortId,
     outcomeKind,
     startFromOrigin,
-    preferredRemote,
     resolvedWorktreeRemote,
     images,
     threadMentions,
@@ -446,96 +428,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       requiredCapability="code"
     />
   );
-  const deliveryControl = (
-    <OctantPopover
-      align="end"
-      className="code-composer-adapter__delivery"
-      onOpenChange={setShowDelivery}
-      open={showDelivery}
-      side="bottom"
-      sideOffset={8}
-      titledBy="code-delivery-target-heading"
-      trigger={
-        <>
-          {showDelivery ? (
-            <ChevronUp aria-hidden="true" size={12} />
-          ) : (
-            <ChevronDown aria-hidden="true" size={12} />
-          )}
-          <span>Delivery target</span>
-        </>
-      }
-      triggerClassName="code-composer-adapter__disclosure-toggle"
-      triggerLabel="Delivery target"
-      triggerVariant="ghost"
-    >
-      <header className="code-composer-adapter__delivery-header">
-        <h2 id="code-delivery-target-heading">Delivery target</h2>
-        <p>Confirm what this thread should deliver and where it should land.</p>
-      </header>
-      <label className="code-composer-adapter__field">
-        <span>Outcome</span>
-        <OctantSelectField
-          aria-label="Delivery outcome"
-          onValueChange={(value) => setOutcomeOverride(value as CodeDeliveryOutcomeKind)}
-          options={CODE_DELIVERY_OUTCOME_ORDER.map((kind) => ({
-            id: kind,
-            label: CODE_DELIVERY_OUTCOME_LABELS[kind],
-          }))}
-          value={outcomeKind}
-        />
-      </label>
-      <label className="code-composer-adapter__field">
-        <span>Branch</span>
-        <OctantInput
-          aria-label="Branch intent"
-          onChange={(e) => setBranchIntent(e.target.value)}
-          value={branchIntent}
-        />
-      </label>
-      <label className="code-composer-adapter__field">
-        <span>Remote</span>
-        <OctantInput
-          aria-label="Remote name"
-          onChange={(e) => setRemoteName(e.target.value)}
-          value={remoteName}
-        />
-      </label>
-      <label className="code-composer-adapter__field">
-        <span>Base repository</span>
-        <OctantInput
-          aria-label="Base repository"
-          onChange={(e) => {
-            setBaseRepositoryEdited(true);
-            setBaseRepository(e.target.value);
-          }}
-          placeholder="owner/repository"
-          value={baseRepository}
-        />
-      </label>
-      <label className="code-composer-adapter__field">
-        <span>Base branch</span>
-        <OctantInput
-          aria-label="Base branch"
-          onChange={(e) => setBaseBranch(e.target.value)}
-          value={baseBranch}
-        />
-      </label>
-      <label className="code-composer-adapter__field">
-        <span>Permission duration</span>
-        <OctantSelectField
-          aria-label="Permission persistence"
-          onValueChange={(value) => setPermissionPersistence(value as PermissionPersistence)}
-          options={[
-            { id: "current-session", label: "Current session" },
-            { id: "project-default", label: "Project default" },
-          ]}
-          value={permissionPersistence}
-        />
-      </label>
-    </OctantPopover>
-  );
-
   return (
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="code-composer-adapter__canvas">
@@ -566,7 +458,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 ) : null}
                 {props.githubControl}
                 {props.createFromControl}
-                {deliveryControl}
               </div>
             </div>
 
@@ -624,26 +515,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 className: "code-composer-adapter__composer-bar",
                 leading: (
                   <>
-                    <span className="code-composer-adapter__context-picker">
-                      <ComposerModelPicker
-                        ariaLabel="Provider and model"
-                        groups={props.providerGroups}
-                        menuSide="bottom"
-                        onSelect={props.onSelectProvider}
-                        {...(props.selectedModelId === undefined
-                          ? {}
-                          : { selectedModelId: props.selectedModelId })}
-                        {...(props.selectedProviderInstanceId === undefined
-                          ? {}
-                          : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                      />
-                    </span>
-                    {props.poolControl}
-                    <CodeComposerAccessMenu
-                      onChange={setExecutionPolicy}
-                      value={executionPolicy}
-                      {...(props.creating === true ? { disabled: true } : {})}
-                    />
                     <label>
                       <span className="work-composer-adapter__visually-hidden">Add attachment</span>
                       {/* ui-boundary-exception: native-file-input */}
@@ -698,6 +569,29 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                         threadKind="code-thread"
                       />
                     )}
+                    <span aria-hidden="true" className="composer-gap" />
+                    <span className="code-composer-adapter__context-picker">
+                      <ComposerModelPicker
+                        ariaLabel="Provider and model"
+                        groups={props.providerGroups}
+                        menuSide="bottom"
+                        onSelect={props.onSelectProvider}
+                        {...(props.selectedModelId === undefined
+                          ? {}
+                          : { selectedModelId: props.selectedModelId })}
+                        {...(props.selectedProviderInstanceId === undefined
+                          ? {}
+                          : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                      />
+                    </span>
+                    {props.poolControl}
+                    <CodeComposerAccessMenu
+                      onChange={setExecutionPolicy}
+                      onPersistenceChange={setPermissionPersistence}
+                      persistence={permissionPersistence}
+                      value={executionPolicy}
+                      {...(props.creating === true ? { disabled: true } : {})}
+                    />
                   </>
                 ),
                 actions: {

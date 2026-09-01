@@ -733,7 +733,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         </div>
       </div>
       <details
-        className="settings-card-section settings-profile-disclosure"
+        className="settings-card-section settings-card-section--open settings-profile-disclosure"
         open={focusedSetting === settingId("user-profile") ? true : undefined}
       >
         <summary>

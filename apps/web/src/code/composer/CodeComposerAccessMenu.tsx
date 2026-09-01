@@ -1,8 +1,9 @@
-import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import type { PermissionPersistence, ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { ChevronDown, Lock } from "lucide-react";
 import { useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantPopover } from "../../ui/base/OctantPopover";
+import { OctantSwitch } from "../../ui/base/OctantSwitch";
 
 export const CODE_COMPOSER_ACCESS_OPTIONS: ReadonlyArray<{
   readonly id: ProviderExecutionPolicy;
@@ -35,6 +36,13 @@ export interface CodeComposerAccessMenuProps {
   readonly disabled?: boolean;
   readonly onChange: (executionPolicy: ProviderExecutionPolicy) => void;
   readonly value: ProviderExecutionPolicy;
+  /**
+   * How long the chosen posture is remembered. Shown with the posture because
+   * "remember Full access for this Project" is a decision about the posture,
+   * not about where the thread delivers.
+   */
+  readonly persistence?: PermissionPersistence;
+  readonly onPersistenceChange?: (persistence: PermissionPersistence) => void;
 }
 
 /** New-thread access posture. The in-thread picker still owns raise-grant. */
@@ -82,6 +90,19 @@ export function CodeComposerAccessMenu(props: CodeComposerAccessMenuProps) {
           </OctantButton>
         ))}
       </div>
+      {props.persistence === undefined || props.onPersistenceChange === undefined ? null : (
+        <div className="code-composer-choice__footer">
+          <span>Remember for this Project</span>
+          <OctantSwitch
+            checked={props.persistence === "project-default"}
+            {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
+            label="Remember access for this Project"
+            onCheckedChange={(checked) =>
+              props.onPersistenceChange?.(checked ? "project-default" : "current-session")
+            }
+          />
+        </div>
+      )}
     </OctantPopover>
   );
 }

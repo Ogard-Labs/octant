@@ -17,4 +17,23 @@ describe("CodeComposerAccessMenu", () => {
 
     expect(onChange).toHaveBeenCalledWith("full-access");
   });
+
+  it("lets the posture be remembered for the Project from the same menu", () => {
+    const onPersistenceChange = vi.fn();
+    render(
+      <CodeComposerAccessMenu
+        onChange={() => {}}
+        onPersistenceChange={onPersistenceChange}
+        persistence="current-session"
+        value="full-access"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Access policy" }));
+    const remember = screen.getByRole("switch", { name: "Remember access for this Project" });
+    expect(remember).not.toBeChecked();
+    fireEvent.click(remember);
+
+    expect(onPersistenceChange).toHaveBeenCalledWith("project-default");
+  });
 });

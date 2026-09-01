@@ -200,12 +200,16 @@ describe("the public-block visual language", () => {
     expect(artifacts).not.toContain('className="artifact-library__tab tab"');
   });
 
-  it("aligns Appearance subgroups to the Settings card content inset", () => {
+  it("aligns Appearance subgroups to the open section edge like every other row", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
     const themeGroup = settings.match(/\.settings-view__theme-group \{[^}]+\}/)?.[0] ?? "";
+    const legend = settings.match(/\.settings-view__theme-group legend \{[^}]+\}/)?.[0] ?? "";
 
-    expect(themeGroup).toMatch(/padding:\s*12px 20px 8px/);
-    expect(themeGroup).not.toMatch(/padding:\s*12px 0 8px/);
+    expect(themeGroup).toMatch(/padding:\s*12px 0 8px/);
+    expect(themeGroup).not.toMatch(/padding:\s*12px 20px 8px/);
+    // An unfloated legend is the fieldset's rendered legend and notches the
+    // group's top rule; the subgroup label has to lay out as an ordinary child.
+    expect(legend).toMatch(/float:\s*left/);
   });
 
   it("uses open Settings groups for routine controls and raised cards for discrete objects", () => {

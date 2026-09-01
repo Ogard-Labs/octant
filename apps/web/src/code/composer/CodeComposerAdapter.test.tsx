@@ -55,21 +55,49 @@ describe("CodeComposerAdapter", () => {
     expect(text.indexOf("development")).toBeLessThan(text.indexOf("This computer"));
   });
 
-  it("keeps delivery settings in an anchored popover instead of expanding the composer", async () => {
+  it("derives the delivery target from the tray instead of asking for it again", async () => {
     const user = userEvent.setup();
-    const { container } = render(<CodeComposerAdapter {...defaultProps} />);
-
-    await user.click(screen.getByRole("button", { name: "Delivery target" }));
-
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Delivery target" })).toBeVisible(),
+    const onCreateThread = vi.fn();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        baseRepository="acme/octant"
+        onCreateThread={onCreateThread}
+      />,
     );
-    expect(screen.getByRole("textbox", { name: "Branch intent" })).toBeVisible();
-    expect(
-      container.querySelector(
-        ".code-composer-adapter__composer > .code-composer-adapter__delivery",
-      ),
-    ).toBeNull();
+
+    expect(screen.queryByRole("button", { name: "Delivery target" })).not.toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
+      prompt: "Fix the login bug",
+      deliveryTarget: {
+        proposedBaseRepository: "acme/octant",
+        proposedBaseBranch: "development",
+        remoteName: "origin",
+        outcomeKind: expect.any(String),
+      },
+    });
+    expect(onCreateThread.mock.calls[0]?.[0].deliveryTarget.branchIntent).not.toBe("development");
+  });
+
+  it("remembers the access posture for the Project from the access menu", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
+
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(screen.getByRole("switch", { name: "Remember access for this Project" }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship it");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
+      permissionPersistence: "project-default",
+    });
   });
 
   it("puts the Project picker first on the upper tray when none is selected", () => {
@@ -83,7 +111,7 @@ describe("CodeComposerAdapter", () => {
     expect(trailing?.textContent).not.toContain("Choose a Project");
   });
 
-  it("keeps repository and delivery context in the checkout bar", () => {
+  it("keeps repository context in the checkout bar", () => {
     const { container } = render(
       <CodeComposerAdapter {...defaultProps} githubControl={<span>GitHub control slot</span>} />,
     );
@@ -94,7 +122,6 @@ describe("CodeComposerAdapter", () => {
     expect(frame?.contains(dock)).toBe(false);
     expect(dock?.textContent).toContain("GitHub control slot");
     expect(dock?.textContent).toContain("development");
-    expect(dock?.textContent).toContain("Delivery target");
     expect(container.querySelector(".code-composer-adapter__context-strip")).toBeNull();
   });
 
@@ -102,20 +129,6 @@ describe("CodeComposerAdapter", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
     expect(html).toContain("Approval");
     expect(html).toContain("Access policy");
-  });
-
-  it("renders delivery disclosure toggle", () => {
-    const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toContain("Delivery target");
-    expect(html).toContain('aria-expanded="false"');
-  });
-
-  it("uses the server-observed GitHub repository as the delivery default", () => {
-    render(<CodeComposerAdapter {...defaultProps} baseRepository="acme/octant" />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Delivery target" }));
-
-    expect(screen.getByRole("textbox", { name: "Base repository" })).toHaveValue("acme/octant");
   });
 
   it("renders disabled send button when empty", () => {
