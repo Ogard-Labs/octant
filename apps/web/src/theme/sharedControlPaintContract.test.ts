@@ -37,7 +37,7 @@ describe("shared control paint ownership", () => {
     const settingsGroupRules = between(settingsStyles, ".setgroup {", "/* Rows inside a group");
 
     expect(composerRules).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
-    expect(composerRules).toMatch(/--octant-(?:floating|workspace)/);
+    expect(composerRules).toMatch(/--octant-(?:card|floating|workspace)/);
     expect(composerRules).not.toMatch(/rgb\(/);
     expect(settingsGroupRules).toMatch(/--octant-settings-card/);
     expect(settingsGroupRules).toMatch(/--octant-shadow-sm/);

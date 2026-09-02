@@ -10,7 +10,7 @@
   --radius: 0.625rem;
   --background: var(--octant-workspace);
   --foreground: var(--octant-text-primary);
-  --card: var(--octant-surface-raised);
+  --card: var(--octant-card);
   --card-foreground: var(--octant-text-primary);
   --popover: var(--octant-floating);
   --popover-foreground: var(--octant-text-primary);
@@ -24,7 +24,7 @@
   --accent-foreground: var(--octant-text-primary);
   --destructive: var(--octant-danger-text);
   --border: var(--octant-border);
-  --input: var(--octant-border);
+  --input: var(--octant-border-strong);
   --ring: var(--octant-focus-ring);
   --sidebar: var(--octant-sidebar-opaque);
   --sidebar-foreground: var(--octant-text-primary);
@@ -43,7 +43,7 @@ html[data-appearance="light"] :root,
   color-scheme: light;
   --background: var(--octant-workspace);
   --foreground: var(--octant-text-primary);
-  --card: var(--octant-surface-raised);
+  --card: var(--octant-card);
   --card-foreground: var(--octant-text-primary);
   --popover: var(--octant-floating);
   --popover-foreground: var(--octant-text-primary);
@@ -57,7 +57,7 @@ html[data-appearance="light"] :root,
   --accent-foreground: var(--octant-text-primary);
   --destructive: var(--octant-danger-text);
   --border: var(--octant-border);
-  --input: var(--octant-border);
+  --input: var(--octant-border-strong);
   --ring: var(--octant-focus-ring);
   --sidebar: var(--octant-sidebar-opaque);
   --sidebar-foreground: var(--octant-text-primary);

@@ -23,12 +23,14 @@ export interface ThemeTokenRoleDefinition {
 }
 
 export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
-  // The default palette is a neutral graphite workspace: soft black grounds,
-  // quiet grey hierarchy, and monochrome primary actions. The hex values flatten
-  // the system sheet's light-dark() pairs and
-  // translucent inks (apps/web/src/styles/octant.css) onto the surface
-  // each role actually renders over, because preset tokens are opaque
-  // six-digit hex by contract.
+  // The default palette is a neutral graphite workspace: a near-black page
+  // with a slightly lighter reading surface in dark, a white reading surface
+  // on a quiet grey well in light, and one scarce accent. Every step of the
+  // ladder is a deliberate, visible move: the earlier defaults sat two or
+  // three hex points apart and the sidebar, page, cards, and hairlines read
+  // as one flat plate in both modes. The renderer fallback in
+  // apps/web/src/styles.css mirrors these values exactly so the first paint
+  // and the applied theme are the same picture.
   {
     // The application background is the well every other surface sits in. It
     // has to be a visible step below the workspace, or panels, cards, and the
@@ -36,8 +38,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     id: "app-background",
     displayName: "Application background",
     category: "foundation",
-    defaultLight: "#f2f2f0",
-    defaultDark: "#101010",
+    defaultLight: "#f6f6f5",
+    defaultDark: "#151515",
   },
   {
     id: "chrome",
@@ -45,8 +47,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "foundation",
     contrastTarget: "app-background",
     contrastLevel: "ui",
-    defaultLight: "#fafafa",
-    defaultDark: "#181818",
+    defaultLight: "#f6f6f5",
+    defaultDark: "#151515",
   },
   {
     id: "sidebar",
@@ -54,15 +56,15 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "foundation",
     contrastTarget: "app-background",
     contrastLevel: "ui",
-    defaultLight: "#f0f0f0",
-    defaultDark: "#202020",
+    defaultLight: "#ebebea",
+    defaultDark: "#101010",
   },
   {
     id: "workspace",
     displayName: "Workspace surface",
     category: "surface",
     defaultLight: "#ffffff",
-    defaultDark: "#171717",
+    defaultDark: "#1a1a1a",
   },
   {
     // Raised surfaces move one neutral step away from the workspace. Static
@@ -70,8 +72,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     id: "floating",
     displayName: "Floating surface",
     category: "surface",
-    defaultLight: "#f7f7f7",
-    defaultDark: "#1e1e1e",
+    defaultLight: "#fdfdfc",
+    defaultDark: "#232323",
   },
   {
     id: "scrim",
@@ -86,8 +88,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#efefef",
-    defaultDark: "#292929",
+    defaultLight: "#ebebea",
+    defaultDark: "#2b2b2b",
   },
   {
     id: "control-hover",
@@ -95,8 +97,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e7e7e7",
-    defaultDark: "#303030",
+    defaultLight: "#e1e1df",
+    defaultDark: "#333333",
   },
   {
     id: "control-pressed",
@@ -104,20 +106,21 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#dedede",
-    defaultDark: "#383838",
+    defaultLight: "#d6d6d4",
+    defaultDark: "#3b3b3b",
   },
   {
-    // The design system's border is translucent ink (13-14% of the text
-    // colour); flattened over the workspace so a hairline never shifts
-    // when a surface behind it changes.
+    // Hairlines have to register on the surface they separate: the light
+    // value measures about 1.5:1 on the white workspace and the dark value
+    // about 1.3:1 on the reading surface, which is the point where a
+    // separator is visible without reading as a rule.
     id: "border",
     displayName: "Border",
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#dedede",
-    defaultDark: "#2d2d2d",
+    defaultLight: "#d2d2d0",
+    defaultDark: "#303030",
   },
   {
     id: "border-strong",
@@ -125,8 +128,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#c5c5c5",
-    defaultDark: "#454545",
+    defaultLight: "#a9a9a7",
+    defaultDark: "#4d4d4d",
   },
   {
     id: "divider-strong",
@@ -134,8 +137,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#8a8a8a",
-    defaultDark: "#6b6b6b",
+    defaultLight: "#6f6f6d",
+    defaultDark: "#808080",
   },
   {
     id: "text-primary",
@@ -143,20 +146,19 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#202020",
-    defaultDark: "#f2f2f2",
+    defaultLight: "#1b1b1b",
+    defaultDark: "#f0f0f0",
   },
   {
-    // A step darker than the flattened 68% ink the system sheet uses:
-    // that value measured 4.5:1 on the workspace but only 4.2:1 on the
-    // darker light-mode card this text also sits on.
+    // Secondary copy sits on the workspace, the sidebar, and the control
+    // fill; it clears 4.5:1 on all three in both modes.
     id: "text-secondary",
     displayName: "Secondary text",
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#5f5f5f",
-    defaultDark: "#b5b5b5",
+    defaultLight: "#4f4f4f",
+    defaultDark: "#a9a9a9",
   },
   {
     id: "text-muted",
@@ -164,7 +166,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "large-text",
-    defaultLight: "#707070",
+    defaultLight: "#6b6b6b",
     defaultDark: "#8a8a8a",
   },
   {
@@ -192,8 +194,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "focus",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e7e7e7",
-    defaultDark: "#303030",
+    defaultLight: "#e1e1df",
+    defaultDark: "#2c2c2c",
   },
   {
     // Primary action fill. One scarce hue, per 0016: it marks focus, the

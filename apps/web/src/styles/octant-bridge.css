@@ -125,7 +125,9 @@
      ground colour separating the outer ring from the control. Only the
      colours come from the app. */
   --oct-focus-ring: 0 0 0 2px var(--octant-workspace), 0 0 0 4px var(--octant-focus-ring);
-  --oct-scrim: var(--octant-scrim);
+  /* The theme role is an opaque hex by contract, so the wash is mixed here:
+     applying it directly painted a solid black sheet behind every dialog. */
+  --oct-scrim: color-mix(in srgb, var(--octant-scrim) 62%, transparent);
 
   /* Chart chrome, derived so it tracks the theme. The grid stays
      fainter than border-soft: a gridline is a reading aid and must
@@ -141,6 +143,10 @@
   --oct-font-body: var(--octant-ui-font-family);
   --oct-font-transcript: var(--octant-ui-font-family);
   --oct-font-mono: var(--octant-editor-font-family);
+}
+
+html[data-octant-theme-mode="light"] {
+  --oct-scrim: color-mix(in srgb, var(--octant-scrim) 38%, transparent);
 }
 
 /* ── Deliberately not mapped ───────────────────────────────────────────
