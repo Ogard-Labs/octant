@@ -15,6 +15,7 @@ import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 
 export interface CodeProjectPullRequestsProps {
   readonly load: (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView>;
@@ -48,6 +49,7 @@ type WorkspaceState =
 export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState>({ status: "loading" });
   const [search, setSearch] = useState("");
+  const searchInput = useRef<HTMLInputElement>(null);
   const loadRef = useRef(props.load);
   useEffect(() => {
     loadRef.current = props.load;
@@ -108,7 +110,11 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const hasProjects = view !== undefined && view.projects.length > 0;
 
   return (
-    <Surface ariaLabel="Pull requests">
+    <Surface
+      ariaLabel="Pull requests"
+      className="code-project-pull-requests-surface"
+      measure="wide"
+    >
       <SurfaceHeader
         subtitle="Active open and draft pull requests from connected Code Projects."
         title="Pull requests"
@@ -128,6 +134,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 aria-label="Search pull requests"
                 onChange={(event) => setSearch(event.currentTarget.value)}
                 placeholder="Search pull requests"
+                ref={searchInput}
                 type="search"
                 value={search}
               />
@@ -135,7 +142,10 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 <OctantButton
                   aria-label="Clear pull-request search"
                   className="code-project-pull-requests__search-clear"
-                  onClick={() => setSearch("")}
+                  onClick={() => {
+                    setSearch("");
+                    searchInput.current?.focus();
+                  }}
                   type="button"
                   variant="ghost"
                 >
@@ -153,12 +163,12 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
               aria-label="Refresh all"
               disabled={workspace.status === "loading" || workspace.status === "refreshing"}
               onClick={() => void runRefresh({ kind: "refresh-all" })}
-              size="icon"
               title="Refresh all pull requests"
               type="button"
               variant="ghost"
             >
               <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+              Refresh all
             </OctantButton>
           </div>
         )}
@@ -275,7 +285,7 @@ function ProjectGroup(props: {
       aria-label={`Project ${props.project.projectName}`}
       className="surface-section code-project-pull-requests__project"
     >
-      <div className="surface-row">
+      <div className="code-project-pull-requests__project-header">
         <div className="surface-row__copy">
           <h2 className="oct-section-label">{props.project.projectName}</h2>
           {props.project.kind === "connected" ? (
@@ -284,32 +294,30 @@ function ProjectGroup(props: {
             </span>
           ) : null}
         </div>
-        <div className="surface-row__control">
+        <div className="code-project-pull-requests__project-actions">
           {backgroundRefresh === undefined ? null : (
-            <OctantButton
-              aria-label={`Background refresh for ${props.project.projectName}`}
-              aria-pressed={backgroundRefreshEnabled}
-              onClick={() =>
-                void backgroundRefresh.setEnabled(
-                  props.project.projectId,
-                  !backgroundRefreshEnabled,
-                )
-              }
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              {backgroundRefreshEnabled ? "Background refresh on" : "Background refresh off"}
-            </OctantButton>
+            <div className="code-project-pull-requests__auto-refresh">
+              <span>Auto-refresh</span>
+              <OctantSwitch
+                checked={backgroundRefreshEnabled}
+                disabled={props.busy}
+                label={`Auto-refresh ${props.project.projectName} pull requests`}
+                onCheckedChange={(enabled) =>
+                  void backgroundRefresh.setEnabled(props.project.projectId, enabled)
+                }
+              />
+            </div>
           )}
           <OctantButton
+            aria-label={`Refresh ${props.project.projectName}`}
             disabled={props.busy}
             onClick={props.onRefresh}
-            size="sm"
+            size="icon"
+            title={`Refresh ${props.project.projectName}`}
             type="button"
             variant="ghost"
           >
-            Refresh {props.project.projectName}
+            <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
           </OctantButton>
         </div>
       </div>
@@ -331,9 +339,6 @@ function ProjectGroup(props: {
             className="code-project-pull-requests__repository"
             key={`${group.owner}/${group.name}`}
           >
-            <h3 className="oct-meta oct-meta--mono">
-              {group.owner}/{group.name}
-            </h3>
             <ul className="code-project-pull-requests__list">
               {group.rows.map((row) => {
                 const rowKey = pullRequestRowKey(row);
@@ -345,6 +350,7 @@ function ProjectGroup(props: {
                       className="code-project-pull-requests__row"
                       onClick={() => props.onSelectRow?.(row)}
                       type="button"
+                      variant="ghost"
                     >
                       <GitPullRequest
                         aria-hidden="true"
@@ -357,13 +363,14 @@ function ProjectGroup(props: {
                           <span className="code-project-pull-requests__title">{row.title}</span>
                           <span className="code-project-pull-requests__number">#{row.number}</span>
                         </div>
-                        <div className="code-project-pull-requests__byline">
+                        <div className="code-project-pull-requests__details">
                           <span>{row.author}</span>
                           <span aria-hidden="true">·</span>
                           <time dateTime={row.updatedAt}>{formatUpdatedAt(row.updatedAt)}</time>
-                        </div>
-                        <div className="code-project-pull-requests__branch">
-                          {row.headBranch} → {row.baseBranch}
+                          <span aria-hidden="true">·</span>
+                          <span className="code-project-pull-requests__branch">
+                            {row.headBranch} → {row.baseBranch}
+                          </span>
                         </div>
                         <div className="code-project-pull-requests__meta">
                           {row.draft ? <StatusChip label="Draft" status="neutral" /> : null}
@@ -452,10 +459,10 @@ function backgroundRefreshCopy(
 ): string | undefined {
   if (state === undefined) return undefined;
   if (state.state === "unavailable") {
-    return "Background refresh is unavailable: the GitHub CLI is missing or not authenticated.";
+    return "Auto-refresh is unavailable: the GitHub CLI is missing or not authenticated.";
   }
   if (state.state === "backing-off") {
-    return "Background refresh is backing off after a failed observation.";
+    return "Auto-refresh is backing off after a failed observation.";
   }
   return undefined;
 }

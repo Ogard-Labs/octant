@@ -1,8 +1,12 @@
 import { decodeProjectId, decodeWindowId, type CodeProjectPullRequestRow } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import type { CodeProjectLinkedThreadFact } from "@octant/domain/code-project-pull-request-policy";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CacheStatsProjection, type CacheStatsRecorder } from "../cacheStatsProjection";
+import { CodeProjectPullRequestSnapshotStore } from "./codeProjectPullRequestSnapshotStore";
 import {
   CodeProjectPullRequestService,
   type CodeProjectPullRequestAuthorizedProject,
@@ -88,6 +92,7 @@ function serviceFixture(options: {
   }>;
   readonly clock?: () => string;
   readonly cacheStats?: CacheStatsRecorder;
+  readonly snapshotStore?: CodeProjectPullRequestSnapshotStore;
   readonly onSnapshotRefreshed?: (rows: ReadonlyArray<CodeProjectPullRequestRow>) => void;
 }) {
   const listActive = vi.fn(
@@ -148,6 +153,7 @@ function serviceFixture(options: {
     },
     clock: options.clock ?? (() => now),
     ...(options.cacheStats === undefined ? {} : { cacheStats: options.cacheStats }),
+    ...(options.snapshotStore === undefined ? {} : { snapshotStore: options.snapshotStore }),
     ...(options.onSnapshotRefreshed === undefined
       ? {}
       : { onSnapshotRefreshed: options.onSnapshotRefreshed }),
@@ -175,6 +181,30 @@ describe("CodeProjectPullRequestService", () => {
     expect(view.freshness).toEqual({ status: "empty" });
     expect(listActive).not.toHaveBeenCalled();
     expect(journal.append).not.toHaveBeenCalled();
+  });
+
+  it("restores a successful snapshot after restart without contacting GitHub", async () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-pull-requests-"));
+    const path = join(root, "snapshot.json");
+    try {
+      const first = serviceFixture({
+        snapshotStore: new CodeProjectPullRequestSnapshotStore(path),
+      });
+      await first.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+
+      const restarted = serviceFixture({
+        snapshotStore: new CodeProjectPullRequestSnapshotStore(path),
+        list: async () => {
+          throw new Error("A cached query must not contact GitHub.");
+        },
+      });
+      const view = await restarted.service.query(windowId, { version: 1 });
+      expect(view.rows[0]).toMatchObject({ number: 12, title: "List active pull requests" });
+      expect(view.freshness).toEqual({ status: "fresh", lastSuccessfulRefreshAt: now });
+      expect(restarted.listActive).not.toHaveBeenCalled();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("resolves HTTPS, SCP-style, and ssh GitHub remotes and leaves other remotes unconnected", async () => {
@@ -1139,6 +1169,48 @@ describe("CodeProjectPullRequestService", () => {
     expect(JSON.stringify(view)).not.toContain("octocat");
     expect(JSON.stringify(view)).not.toContain("feature/manual-refresh");
     expect(view.freshness).toEqual({ status: "stale", staleReason: "disconnected" });
+  });
+
+  it("refuses to commit a refresh whose GitHub read finished after authority was revoked", async () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-pull-requests-"));
+    const path = join(root, "snapshot.json");
+    try {
+      const store = new CodeProjectPullRequestSnapshotStore(path);
+      let releaseList = (): void => {};
+      const listReached = new Promise<void>((resolve) => {
+        releaseList = resolve;
+      });
+      let allowList = (): void => {};
+      const listDeferred = new Promise<void>((resolve) => {
+        allowList = resolve;
+      });
+      const { service } = serviceFixture({
+        snapshotStore: store,
+        list: async () => {
+          releaseList();
+          await listDeferred;
+          return { status: "ok", rows: [ghRow()] } satisfies GhActivePullRequestListResult;
+        },
+      });
+
+      const refreshing = service.refresh(
+        windowId,
+        { kind: "refresh-all" },
+        new AbortController().signal,
+      );
+      await listReached;
+      service.revokeGithub();
+      allowList();
+      const view = await refreshing;
+
+      expect(view.rows).toEqual([]);
+      expect(JSON.stringify(view)).not.toContain("List active pull requests");
+      expect(view.freshness).toEqual({ status: "stale", staleReason: "disconnected" });
+      expect(store.load()).toBeUndefined();
+      expect(await service.query(windowId, { version: 1 })).toMatchObject({ rows: [] });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("drops a Project's cached rows once that Project is no longer authorized", async () => {

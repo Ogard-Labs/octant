@@ -66,6 +66,8 @@ export interface CodeThreadEnvironmentProps {
   readonly openInApplications?: ReadonlyArray<OpenInApplicationId>;
   readonly agentRunClient?: AgentRunClient;
   readonly onOpenAgents?: () => void;
+  readonly environmentOpen?: boolean;
+  readonly onOpenEnvironment?: (opener: HTMLElement) => void;
 }
 
 /**
@@ -73,6 +75,9 @@ export interface CodeThreadEnvironmentProps {
  * disclosure for checkout facts, local servers, and the working folder.
  */
 export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
+  const [localEnvironmentOpen, setLocalEnvironmentOpen] = useState(false);
+  const environmentOpen = props.environmentOpen ?? localEnvironmentOpen;
+  const openEnvironment = props.onOpenEnvironment ?? (() => setLocalEnvironmentOpen(true));
   const controller = useCodeEnvironmentController({
     ...(props.projectClient === undefined ? {} : { client: props.projectClient }),
     enabled: props.project !== undefined && props.observe !== false,
@@ -100,11 +105,10 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       : { label: "New thread in this Project", onClick: () => onNewThreadInProject(project.id) };
   const observed = controller.observation;
   const readyObservation = observed?.status === "ready" ? observed : undefined;
-  const [disclosureOpen, setDisclosureOpen] = useState(false);
   const localServersAvailable = localServersSection?.available === true;
   const localServers = useLocalServersController({
     enabled: localServersAvailable,
-    poll: localServersAvailable && disclosureOpen,
+    poll: localServersAvailable && environmentOpen,
     ...(props.localServerClient === undefined ? {} : { client: props.localServerClient }),
     threadId: props.tab.threadId,
     ...(props.project === undefined ? {} : { projectId: props.project.id }),
@@ -128,8 +132,9 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       />
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
-        onOpenChange={setDisclosureOpen}
-        open={disclosureOpen}
+        inlineFallback={props.environmentOpen === undefined}
+        onOpen={openEnvironment}
+        open={environmentOpen}
         summary={{
           identity: projection.identity,
           ...(readyObservation === undefined
@@ -156,10 +161,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         {props.onOpenChanges === undefined || readyObservation === undefined ? null : (
           <OctantButton
             className="environment-group__action window-no-drag"
-            onClick={() => {
-              setDisclosureOpen(false);
-              props.onOpenChanges?.();
-            }}
+            onClick={() => props.onOpenChanges?.()}
             type="button"
             variant="ghost"
           >
@@ -202,7 +204,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           <EnvironmentGroup title="Pull requests">
             <EnvironmentPullRequests
               client={props.githubClient}
-              enabled={disclosureOpen}
+              enabled={environmentOpen}
               repository={props.pullRequestRepository}
             />
           </EnvironmentGroup>

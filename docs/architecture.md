@@ -242,8 +242,9 @@ and screenshot, with XCTest-less host injection behind that channel only,
 computer-use-style actor attribution, and the same remote/headless fail-closed
 attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](decisions/0062-simulator-frame-input-transport.md)).
-At narrow widths the dock becomes an overlay drawer. Environment belongs to a thread as a compact header
-summary with a transient disclosure whose open state is renderer-only. It may
+At narrow widths the dock becomes an overlay drawer. Environment belongs to a
+thread as a context-aware dock tab opened from the title-bar shortcut or Add
+tool. It may
 summarize the active thread's server-authored child AgentRuns, including their
 lifecycle, resolved model, and retained final result; full AgentRun control
 stays in the Agents dock. Environment may show a compact read-only preview of
@@ -257,7 +258,7 @@ Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
 Chat has no board. Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
-Projects. The list is a cached read of an in-memory snapshot: opening it,
+Projects. The list is a cached read of a private host-local snapshot: opening it,
 navigating, and ordinary board queries do not call GitHub. GitHub is reached
 only by an explicit Refresh all or per-Project refresh, or — for Projects that
 opted in — by a bounded background refresh cadence, all through the installed
@@ -269,10 +270,11 @@ when `gh` is missing or unauthenticated. Independent repository reads run
 concurrently, results reconcile in stable Project order, and every refresh path
 remains within preview bounds. The journal never stores that cache and never
 sees a per-poll event; it stores only the user's opt-in toggle and exact PR
-identities already produced by Code operations, so a restart can show an
-identity as stale and unknown until the next explicit or background refresh
-(see
-[decisions/0064-pull-request-observation-cadence.md](decisions/0064-pull-request-observation-cadence.md)).
+identities already produced by Code operations. The bounded list cache survives
+host restart and is cleared when GitHub authority is revoked (see
+[decisions/0064-pull-request-observation-cadence.md](decisions/0064-pull-request-observation-cadence.md)
+and
+[decisions/0076-pull-request-snapshot-survives-restart.md](decisions/0076-pull-request-snapshot-survives-restart.md)).
 
 **GitHub issue browser.** The first-party GitHub plugin contributes a second
 `sidebar.destination` (`github-issues`) that opens a host-scoped, read-only
@@ -332,10 +334,10 @@ interaction model for remaining renderer work.
 [0070](decisions/0070-setup-surfaces-compose-from-public-blocks.md)
 is the accepted visual language: raise grouped forms and setup objects, enlarge
 radii, and match public block composition on Octant-owned surfaces, without
-vendoring a catalog or replacing the shell. Environment is already a compact
-header summary with a transient disclosure whose open state is not persisted
-and may include a truthful child-run summary
-([0045](decisions/0045-environment-summarizes-the-active-thread.md)).
+vendoring a catalog or replacing the shell. Environment is a context-aware
+thread-owned dock tab and may include a truthful child-run summary
+([0045](decisions/0045-environment-summarizes-the-active-thread.md),
+[0077](decisions/0077-environment-is-a-dock-tool.md)).
 [0071](decisions/0071-one-navigation-and-surface-hierarchy.md) refines that
 language: true tabs stay flat, segmented values keep an enclosed track, active
 pane identity stays on the grip, routine Settings rows remain open while

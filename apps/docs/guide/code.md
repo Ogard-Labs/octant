@@ -119,12 +119,12 @@ Images stay readable in the transcript after a restart. Removing a chip before s
 
 ## Thread environment
 
-Each Code thread tab owns a compact Environment summary in the thread header.
-It shows repository identity, branch, clean or dirty state, the current working
-folder, and how many local servers are running. Opening the summary shows a
-temporary disclosure with checkout facts, grouped local servers, and **Change
-working folder**. Escape, a click outside, or activating another pane closes
-it. Open or closed is not remembered.
+Each Code thread owns an Environment tab in the right dock. It shows repository
+identity, branch, clean or dirty state, the current working folder, and how many
+local servers are running. Open it from the title-bar shortcut or **Add tool**;
+the tab contains checkout facts, grouped local servers, and **Change working
+folder**. Switching the active pane shows that pane's Environment instead of
+leaving the previous thread's facts in place.
 
 Local servers are compact rows grouped by process and port, with this checkout
 separated from other classified leftovers. **Open** stays on a usable listener.

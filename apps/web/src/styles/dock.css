@@ -88,7 +88,7 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
 
 .dock-tool-strip {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   gap: 2px;
 }
@@ -97,17 +97,22 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   display: inline-flex;
   flex: none;
   min-width: 0;
-  max-width: 7.5rem;
+  max-width: 8.5rem;
   align-items: center;
   overflow: hidden;
   color: var(--oct-meta);
   border-radius: var(--oct-radius-sm);
+  border: 1px solid transparent;
 }
 
 .dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]),
 .dock-tool-strip__tab:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
+}
+
+.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) {
+  border-color: var(--oct-hairline);
 }
 
 .dock-tool-strip__select {
@@ -273,6 +278,7 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   position: relative;
   display: inline-flex;
   flex: none;
+  margin-left: 2px;
 }
 
 .dock-utility-launcher__trigger {

@@ -1,5 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { RIGHT_UTILITY_DOCK_SURFACES } from "./rightUtilityDockModel";
 import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
@@ -7,6 +9,7 @@ import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
 const browser = surface("browser");
 const terminal = surface("terminal");
 const files = surface("files");
+const dockStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/dock.css"), "utf8");
 
 function surface(id: "browser" | "terminal" | "files") {
   const found = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === id);
@@ -15,6 +18,15 @@ function surface(id: "browser" | "terminal" | "files") {
 }
 
 describe("the right sidebar surface", () => {
+  it("keeps Add tool beside the visible tabs and gives multiple tabs a selected edge", () => {
+    expect(ruleBody(dockStylesheet, ".dock-tool-strip")).toMatch(/flex:\s*0\s+1\s+auto/);
+    expect(
+      ruleBody(
+        dockStylesheet,
+        '.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"])',
+      ),
+    ).toMatch(/border-color:\s*var\(--oct-hairline\)/);
+  });
   it("shows the active thread work map with no tool open", async () => {
     const user = userEvent.setup();
     const onOpenTab = vi.fn();
@@ -116,3 +128,9 @@ describe("the right sidebar surface", () => {
     ).toBeVisible();
   });
 });
+
+function ruleBody(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, "s"));
+  return match?.[1] ?? "";
+}

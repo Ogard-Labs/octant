@@ -1,9 +1,8 @@
 import type { EnvironmentCompactIdentity } from "@octant/contracts";
-import { SlidersHorizontal, X } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { SlidersHorizontal } from "lucide-react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { OctantButton } from "../ui/base/OctantButton";
-import { OctantPopover } from "../ui/base/OctantPopover";
+import { IconButton } from "../shell/IconButton";
 
 export interface ThreadEnvironmentSummaryFacts {
   readonly identity: EnvironmentCompactIdentity;
@@ -16,30 +15,17 @@ export interface ThreadEnvironmentSummaryFacts {
 export interface ThreadEnvironmentPanelProps {
   readonly summary: ThreadEnvironmentSummaryFacts;
   readonly open: boolean;
-  readonly onOpenChange: (open: boolean) => void;
-  /**
-   * False when another pane is in front. The disclosure is renderer state, so
-   * activating a different pane must close it rather than leave a stale overlay.
-   */
+  readonly onOpen: (opener: HTMLElement) => void;
   readonly active?: boolean;
+  readonly inlineFallback?: boolean;
   readonly children?: ReactNode;
 }
 
-/**
- * Compact thread-header Environment summary with a transient disclosure.
- * Open or closed is renderer state: it is not persisted and is not a journaled
- * preference. Escape, an outside pointer, or losing the pane closes it.
- */
+/** Routes the active pane's authoritative Environment into the right dock. */
 export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
-  const onOpenChangeRef = useRef(props.onOpenChange);
-  onOpenChangeRef.current = props.onOpenChange;
-  const panelTitleId = useId();
   const summaryId = useId();
-  const [toolbarHost, setToolbarHost] = useState<Element | null>(() =>
-    typeof document === "undefined"
-      ? null
-      : document.querySelector("[data-octant-environment-action]"),
-  );
+  const [toolbarHost, setToolbarHost] = useState<Element | null>(null);
+  const [dockHost, setDockHost] = useState<Element | null>(null);
   const active = props.active !== false;
   const facts = summaryFacts(props.summary);
   const summary = `${props.summary.identity.label} · ${facts.join(" · ")}`;
@@ -49,50 +35,44 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   }, []);
 
   useEffect(() => {
-    if (active || !props.open) return;
-    onOpenChangeRef.current(false);
+    setDockHost(
+      active && props.open ? document.querySelector("[data-octant-environment-dock]") : null,
+    );
   }, [active, props.open]);
 
-  const environment = (
+  const trigger = (
     <div className="thread-environment-summary">
       <span className="sr-only" id={summaryId}>
         {summary}
       </span>
-      <OctantPopover
-        align="end"
-        className="thread-environment-disclosure window-no-drag"
-        onOpenChange={props.onOpenChange}
-        open={props.open}
-        side="bottom"
-        titledBy={panelTitleId}
-        trigger={<SlidersHorizontal aria-hidden="true" size={16} strokeWidth={1.7} />}
-        triggerClassName="thread-environment-summary__button"
-        triggerDataAttributes={{ "data-environment-status": props.summary.identity.status }}
-        triggerDescribedBy={summaryId}
-        triggerLabel="Toggle environment"
-        triggerTooltip="Toggle environment"
-        triggerVariant="ghost"
-      >
-        <header className="thread-environment-disclosure__header">
-          <div className="thread-environment-disclosure__heading">
-            <h2 id={panelTitleId}>Environment</h2>
-            <span>{props.summary.identity.label}</span>
-          </div>
-          <OctantButton
-            aria-label="Close environment"
-            className="thread-environment-disclosure__close"
-            onClick={() => props.onOpenChange(false)}
-            type="button"
-            variant="ghost"
-          >
-            <X aria-hidden="true" size={16} strokeWidth={1.7} />
-          </OctantButton>
-        </header>
-        <div className="thread-environment-disclosure__body">{props.children}</div>
-      </OctantPopover>
+      <IconButton
+        aria-describedby={summaryId}
+        aria-pressed={props.open}
+        className="thread-environment-summary__button"
+        data-environment-status={props.summary.identity.status}
+        icon={SlidersHorizontal}
+        label="Open Environment"
+        onClick={(event) => props.onOpen(event.currentTarget)}
+      />
     </div>
   );
-  return toolbarHost === null ? environment : createPortal(environment, toolbarHost);
+  const content = (
+    <section aria-label="Environment details" className="thread-environment-dock">
+      <header className="thread-environment-dock__header">
+        <h2>Environment</h2>
+        <span>{props.summary.identity.label}</span>
+      </header>
+      <div className="thread-environment-dock__body">{props.children}</div>
+    </section>
+  );
+
+  return (
+    <>
+      {active ? (toolbarHost === null ? trigger : createPortal(trigger, toolbarHost)) : null}
+      {dockHost === null && active && props.open && props.inlineFallback === true ? content : null}
+      {dockHost === null ? null : createPortal(content, dockHost)}
+    </>
+  );
 }
 
 function summaryFacts(summary: ThreadEnvironmentSummaryFacts): ReadonlyArray<string> {
@@ -101,9 +81,8 @@ function summaryFacts(summary: ThreadEnvironmentSummaryFacts): ReadonlyArray<str
   else facts.push(summary.identity.detail);
   if (summary.changes !== undefined) facts.push(summary.changes === "dirty" ? "Dirty" : "Clean");
   if (summary.workingLocation !== undefined) facts.push(summary.workingLocation);
-  if (summary.runningServerCount !== undefined) {
+  if (summary.runningServerCount !== undefined)
     facts.push(runningServerLabel(summary.runningServerCount));
-  }
   return facts;
 }
 

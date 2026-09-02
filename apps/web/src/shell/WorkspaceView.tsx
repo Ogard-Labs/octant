@@ -238,6 +238,8 @@ export interface WorkspaceViewProps {
     readonly mode: "work" | "code";
   }) => void;
   readonly onOpenAgents?: () => void;
+  readonly environmentDockOpen?: boolean;
+  readonly onOpenEnvironment?: (opener: HTMLElement) => void;
   readonly onOpenSurface?: (
     surface: WorkspaceSurfaceDescriptor["kind"],
     paneId: PaneId,
@@ -785,6 +787,12 @@ function renderCodeTab(
         <CodeThreadEnvironment
           active={paneIsActive(props, paneId)}
           observe={codeController.conversationHistory === "loaded"}
+          {...(props.environmentDockOpen === undefined
+            ? {}
+            : { environmentOpen: props.environmentDockOpen })}
+          {...(props.onOpenEnvironment === undefined
+            ? {}
+            : { onOpenEnvironment: props.onOpenEnvironment })}
           {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
           {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -1033,6 +1041,12 @@ function renderNonCodeTab(
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
         active={paneIsActive(props, paneId)}
+        {...(props.environmentDockOpen === undefined
+          ? {}
+          : { environmentOpen: props.environmentDockOpen })}
+        {...(props.onOpenEnvironment === undefined
+          ? {}
+          : { onOpenEnvironment: props.onOpenEnvironment })}
         key={tab.threadId}
         onClearCanvasSelections={canvasContext.clearCanvasSelections}
         onRemoveCanvasSelection={canvasContext.onRemoveCanvasSelection}
@@ -1087,6 +1101,12 @@ function renderNonCodeTab(
         {({ displayReady, onDisplayReadyChange }) => (
           <WorkThreadEnvironment
             active={paneIsActive(props, paneId)}
+            {...(props.environmentDockOpen === undefined
+              ? {}
+              : { environmentOpen: props.environmentDockOpen })}
+            {...(props.onOpenEnvironment === undefined
+              ? {}
+              : { onOpenEnvironment: props.onOpenEnvironment })}
             {...(!displayReady || props.agentRunClient === undefined
               ? {}
               : { agentRunClient: props.agentRunClient })}
@@ -1760,6 +1780,8 @@ function ChatThreadWorkspace(props: {
   readonly threadId: Extract<WorkspaceTab, { kind: "chat-thread" }>["threadId"];
   readonly childRunStatus?: ReactNode;
   readonly onOpenAgents?: () => void;
+  readonly environmentOpen?: boolean;
+  readonly onOpenEnvironment?: (opener: HTMLElement) => void;
   readonly revealTurnId?: import("@octant/contracts/chat").ChatTurnId;
 }) {
   const controller = useChatController({
@@ -1788,6 +1810,10 @@ function ChatThreadWorkspace(props: {
       {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
       {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
       controller={controller}
+      {...(props.environmentOpen === undefined ? {} : { environmentOpen: props.environmentOpen })}
+      {...(props.onOpenEnvironment === undefined
+        ? {}
+        : { onOpenEnvironment: props.onOpenEnvironment })}
       projects={props.projects}
       tab={props.tab}
     >

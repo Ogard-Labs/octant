@@ -121,14 +121,14 @@ describe("the Chat thread environment summary", () => {
       </>,
     );
 
-    const triggers = screen.getAllByRole("button", { name: "Toggle environment" });
+    const triggers = screen.getAllByRole("button", { name: "Open Environment" });
     expect(triggers).toHaveLength(2);
     const first = triggers[0];
     expect(first).toBeInstanceOf(HTMLButtonElement);
     if (!(first instanceof HTMLButtonElement)) return;
     fireEvent.click(first);
     await waitFor(() =>
-      expect(screen.getAllByRole("dialog", { name: "Environment" })).toHaveLength(1),
+      expect(screen.getAllByRole("region", { name: "Environment details" })).toHaveLength(1),
     );
     expect(screen.getByText("1 attachment")).toBeVisible();
     expect(screen.getByText("First view")).toBeVisible();
@@ -142,11 +142,13 @@ describe("the Chat thread environment summary", () => {
       </ChatThreadEnvironment>,
     );
 
-    const environment = screen.getByRole("button", { name: "Toggle environment" });
+    const environment = screen.getByRole("button", { name: "Open Environment" });
     expect(environment).toHaveAttribute("data-environment-status", "unavailable");
     expect(screen.getByText("Chat · Project unavailable")).toHaveClass("sr-only");
     fireEvent.click(environment);
-    await waitFor(() => expect(screen.getByRole("dialog", { name: "Environment" })).toBeVisible());
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: "Environment details" })).toBeVisible(),
+    );
     expect(screen.getByText("Authoritative Chat context is unavailable.")).toBeVisible();
     expect(screen.queryByText("Unavailable for unfiled Chat")).not.toBeInTheDocument();
     expect(screen.queryByText("1 attachment")).not.toBeInTheDocument();

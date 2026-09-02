@@ -79,10 +79,12 @@ async function openEnvironment(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
   });
-  fireEvent.click(await screen.findByRole("button", { name: "Toggle environment" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open Environment" }));
   // A fireEvent-driven open doesn't yield to the animation frame that settles
   // the popup's enter transition, so wait for it before callers act inside.
-  await waitFor(() => expect(screen.getByRole("dialog", { name: "Environment" })).toBeVisible());
+  await waitFor(() =>
+    expect(screen.getByRole("region", { name: "Environment details" })).toBeVisible(),
+  );
 }
 
 describe("CodeThreadEnvironment", () => {
@@ -135,7 +137,7 @@ describe("CodeThreadEnvironment", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(screen.getByRole("button", { name: "Toggle environment" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open Environment" })).toBeVisible();
     expect(screen.getByText(/Octant · feature\/issue-204 · Dirty · \./)).toHaveClass("sr-only");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
@@ -251,7 +253,7 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    expect(screen.getByRole("button", { name: "Toggle environment" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Open Environment" })).toHaveAttribute(
       "data-environment-status",
       "unavailable",
     );
@@ -269,7 +271,7 @@ describe("CodeThreadEnvironment", () => {
       </CodeThreadEnvironment>,
     );
     await openEnvironment();
-    expect(screen.getByRole("dialog", { name: "Environment" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Environment details" })).toBeVisible();
 
     rerender(
       <CodeThreadEnvironment
@@ -281,7 +283,7 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Environment details" })).not.toBeInTheDocument();
   });
 
   it("submits a bounded relative working directory through the focused Change working folder flow", async () => {

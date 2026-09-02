@@ -83,6 +83,8 @@ distilled successor of the earlier long-form design specifications.
 | [0073](0073-one-surface-language.md)                              | One surface language across the renderer and the site                                       | Accepted           |
 | [0074](0074-one-machine-one-canonical-host.md)                    | One Machine has one canonical host and store                                                | Accepted           |
 | [0075](0075-thread-reads-are-snapshot-first-and-change-driven.md) | Thread reads are snapshot-first and change-driven                                           | Accepted           |
+| [0076](0076-pull-request-snapshot-survives-restart.md)            | The pull-request snapshot survives host restart                                             | Accepted           |
+| [0077](0077-environment-is-a-dock-tool.md)                        | Environment is a context-aware dock tool                                                    | Accepted           |
 
 ## Adding an ADR
 

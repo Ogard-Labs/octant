@@ -217,7 +217,7 @@ async function closePaneShowing(title: string): Promise<void> {
 
 async function expandLocalServers(): Promise<void> {
   fireEvent.click(
-    await screen.findByRole("button", { name: "Toggle environment" }, { timeout: 5_000 }),
+    await screen.findByRole("button", { name: "Open Environment" }, { timeout: 5_000 }),
   );
   fireEvent.click(await screen.findByRole("button", { name: /^Local servers/ }));
 }
@@ -1486,10 +1486,10 @@ describe("WorkspaceView Work thread tab", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Draft brief" })).toBeVisible();
-    const environment = await screen.findByRole("button", { name: "Toggle environment" });
+    const environment = await screen.findByRole("button", { name: "Open Environment" });
     expect(environment).toBeVisible();
     expect(screen.getByText(/Knowledge Base · work-root/)).toHaveClass("sr-only");
-    expect(screen.queryByRole("dialog", { name: "Environment" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Environment details" })).not.toBeInTheDocument();
     const composer = screen.getByRole("textbox", { name: "Work prompt" });
     await userEvent.type(composer, "Ship the preview");
     await userEvent.click(screen.getByRole("button", { name: "Create artifact" }));
@@ -1948,10 +1948,10 @@ describe("WorkspaceView Chat thread Environment", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Toggle environment" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Open Environment" })).toBeVisible();
     expect(screen.getByText(/Planning · Virtual Project/)).toHaveClass("sr-only");
-    fireEvent.click(screen.getByRole("button", { name: "Toggle environment" }));
-    expect(await screen.findByRole("dialog", { name: "Environment" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Open Environment" }));
+    expect(await screen.findByRole("region", { name: "Environment details" })).toBeVisible();
     expect(screen.getAllByText("Attachments").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Sources").length).toBeGreaterThan(0);
     expect(screen.queryByText("Git")).not.toBeInTheDocument();

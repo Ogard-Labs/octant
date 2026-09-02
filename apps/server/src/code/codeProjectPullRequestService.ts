@@ -41,6 +41,10 @@ import type {
   GhPullRequestReviewResult,
 } from "./ghPullRequestPort";
 import { mapConcurrentOrdered } from "./boundedReads";
+import type {
+  CodeProjectPullRequestSnapshotStore,
+  StoredCodeProjectPullRequestSnapshot,
+} from "./codeProjectPullRequestSnapshotStore";
 
 const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 const GITHUB_READ_CONCURRENCY = 4;
@@ -133,11 +137,11 @@ export type CodeProjectPullRequestCadenceObservation =
   | { readonly status: "unauthorized" };
 
 /**
- * In-memory Project-scoped pull-request snapshot. Manual refresh — or, for
+ * Private Project-scoped pull-request snapshot. Manual refresh — or, for
  * Projects that opted in, the bounded background cadence driving
  * `observeForCadence` — reconstructs the bounded open, draft, merged, and
- * closed history after a process restart. The journal never sees list or
- * detail rows, however often either refresh path runs.
+ * closed history and stores the bounded list cache outside the journal. Detail
+ * rows remain process-local; the journal never sees either observation path.
  */
 export class CodeProjectPullRequestService {
   readonly #projects: CodeProjectPullRequestProjectSource;
@@ -147,6 +151,7 @@ export class CodeProjectPullRequestService {
   readonly #threads: CodeProjectLinkedThreadSource;
   readonly #clock: () => string;
   readonly #cacheStats: CacheStatsRecorder | undefined;
+  readonly #snapshotStore: CodeProjectPullRequestSnapshotStore | undefined;
   readonly #onSnapshotRefreshed:
     | ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void)
     | undefined;
@@ -159,6 +164,12 @@ export class CodeProjectPullRequestService {
   /** Tail of the serialized refresh chain; see `#refreshCore`. */
   #refreshQueue: Promise<unknown> = Promise.resolve();
   #githubRevoked = false;
+  /**
+   * Bumped by every revocation. A refresh captures it before its GitHub reads
+   * and refuses to commit if it changed, so a revocation that lands while
+   * reads are in flight cannot be undone by the resuming refresh.
+   */
+  #revocationGeneration = 0;
 
   constructor(options: {
     readonly projects: CodeProjectPullRequestProjectSource;
@@ -168,6 +179,7 @@ export class CodeProjectPullRequestService {
     readonly threads: CodeProjectLinkedThreadSource;
     readonly clock?: () => string;
     readonly cacheStats?: CacheStatsRecorder;
+    readonly snapshotStore?: CodeProjectPullRequestSnapshotStore;
     /**
      * Observes every replacement of the row snapshot, however a refresh was
      * initiated. This is the seam that turns snapshot facts (for example a
@@ -183,15 +195,20 @@ export class CodeProjectPullRequestService {
     this.#threads = options.threads;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#cacheStats = options.cacheStats;
+    this.#snapshotStore = options.snapshotStore;
     this.#onSnapshotRefreshed = options.onSnapshotRefreshed;
+    const restored = this.#snapshotStore?.load();
+    if (restored !== undefined) this.#restoreSnapshot(restored);
   }
 
   revokeGithub(): void {
     this.#githubRevoked = true;
+    this.#revocationGeneration += 1;
     this.#cache = undefined;
     this.#detailCache.clear();
     this.#detailFreshness.clear();
     this.#freshness = { status: "stale", staleReason: "disconnected" };
+    this.#snapshotStore?.clear();
   }
 
   /**
@@ -222,7 +239,7 @@ export class CodeProjectPullRequestService {
 
   /**
    * Read-only board join snapshot. Never reaches GitHub; it combines the
-   * process-local refresh cache with bounded exact identities recovered by the
+   * private refresh cache with bounded exact identities recovered by the
    * thread source from the operation journal.
    */
   async boardSnapshot(windowId: WindowId): Promise<{
@@ -408,6 +425,7 @@ export class CodeProjectPullRequestService {
     readonly outcome: CodeProjectPullRequestCadenceObservation;
   }> {
     const projects = await this.#resolveProjects(windowId);
+    const revocationGeneration = this.#revocationGeneration;
     const selected =
       command.kind === "refresh-all"
         ? projects
@@ -462,6 +480,9 @@ export class CodeProjectPullRequestService {
       }),
     ]);
     const knownIdentityRefreshFailed = new Set<string>();
+    if (this.#revocationGeneration !== revocationGeneration) {
+      return this.#refusedAfterRevocation(projects);
+    }
 
     // Inspect results in the policy's repository order so a concurrent
     // refresh has the same deterministic first-error semantics as the old
@@ -586,6 +607,9 @@ export class CodeProjectPullRequestService {
       }
     }
 
+    if (this.#revocationGeneration !== revocationGeneration) {
+      return this.#refusedAfterRevocation(projects);
+    }
     this.#githubRevoked = false;
     // Known-identity recovery that left rows stale is not a completed list
     // refresh; lastRefreshAt stays at the last fully fresh list.
@@ -624,6 +648,7 @@ export class CodeProjectPullRequestService {
       knownIdentityRefreshFailed.size > 0
         ? { status: "stale", staleReason: "refresh-failed", lastSuccessfulRefreshAt: now }
         : { status: "fresh", lastSuccessfulRefreshAt: now };
+    this.#persistSnapshot();
     // Fires for every path that replaces the snapshot — explicit refresh and
     // cadence observation alike — so downstream observers (for example the
     // failing-checks follow-ups) see cadence-driven facts too.
@@ -650,6 +675,21 @@ export class CodeProjectPullRequestService {
           ? { status: "empty" }
           : { status: "fresh" };
     return { view, outcome };
+  }
+
+  /**
+   * GitHub access was revoked while this refresh was reading. Its rows describe
+   * access the user no longer has, so they are dropped rather than committed:
+   * the revoked state, the emptied cache, and the cleared snapshot all stand.
+   */
+  #refusedAfterRevocation(projects: ReadonlyArray<CodeProjectPullRequestConnection>): {
+    readonly view: CodeProjectPullRequestView;
+    readonly outcome: CodeProjectPullRequestCadenceObservation;
+  } {
+    return {
+      view: this.#staleView({ projects, reason: "disconnected" }),
+      outcome: { status: "unauthorized" },
+    };
   }
 
   /**
@@ -980,6 +1020,34 @@ export class CodeProjectPullRequestService {
       return undefined;
     }
     return project;
+  }
+
+  #restoreSnapshot(snapshot: StoredCodeProjectPullRequestSnapshot): void {
+    this.#cache = {
+      rows: snapshot.rows,
+      lastSuccessfulRefreshAt: decodeUtcTimestamp(snapshot.lastSuccessfulRefreshAt),
+      repositoriesTruncated: snapshot.repositoriesTruncated,
+      pullRequestsTruncated: snapshot.pullRequestsTruncated,
+    };
+    this.#freshness = snapshot.freshness;
+    for (const entry of snapshot.projectFreshness) {
+      this.#projectFreshness.set(entry.key, entry.freshness);
+    }
+  }
+
+  #persistSnapshot(): void {
+    if (this.#cache === undefined || this.#snapshotStore === undefined) return;
+    this.#snapshotStore.save({
+      rows: this.#cache.rows,
+      lastSuccessfulRefreshAt: this.#cache.lastSuccessfulRefreshAt,
+      repositoriesTruncated: this.#cache.repositoriesTruncated,
+      pullRequestsTruncated: this.#cache.pullRequestsTruncated,
+      freshness: this.#freshness,
+      projectFreshness: [...this.#projectFreshness].map(([key, freshness]) => ({
+        key,
+        freshness,
+      })),
+    });
   }
 
   #detailQueryFreshness(query: CodeProjectPullRequestDetailQuery): CodeProjectPullRequestFreshness {

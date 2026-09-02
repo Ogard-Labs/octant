@@ -73,7 +73,7 @@ function threadClient(result: "ready" | "failed" = "ready"): WorkThreadClient {
 }
 
 async function openEnvironment(): Promise<void> {
-  fireEvent.click(await screen.findByRole("button", { name: "Toggle environment" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open Environment" }));
 }
 
 describe("WorkThreadEnvironment", () => {
@@ -89,7 +89,7 @@ describe("WorkThreadEnvironment", () => {
     );
 
     expect(screen.getByTestId("work-workspace-content")).toBeVisible();
-    expect(await screen.findByRole("button", { name: "Toggle environment" })).toHaveAttribute(
+    expect(await screen.findByRole("button", { name: "Open Environment" })).toHaveAttribute(
       "data-environment-status",
       "available",
     );
@@ -108,7 +108,7 @@ describe("WorkThreadEnvironment", () => {
       </WorkThreadEnvironment>,
     );
 
-    expect(await screen.findByRole("button", { name: "Toggle environment" })).toHaveAttribute(
+    expect(await screen.findByRole("button", { name: "Open Environment" })).toHaveAttribute(
       "data-environment-status",
       "unavailable",
     );

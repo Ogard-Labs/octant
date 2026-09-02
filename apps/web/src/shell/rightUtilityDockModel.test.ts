@@ -25,6 +25,12 @@ describe("resolving what the right utility dock shows", () => {
   it("publishes only the live thread-owned surfaces in stable order", () => {
     expect(RIGHT_UTILITY_DOCK_SURFACES).toEqual([
       {
+        id: "environment",
+        label: "Environment",
+        modes: ["chat", "work", "code"],
+        scope: "thread",
+      },
+      {
         id: "side-chat",
         label: "Side Chat",
         modes: ["chat", "work", "code"],

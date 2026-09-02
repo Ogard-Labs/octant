@@ -64,7 +64,7 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_PROJECTS = 1_000;
 export const MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS = 32;
 
 /**
- * Cached read of the in-memory Project-scoped active pull-request projection.
+ * Cached read of the host-local Project-scoped active pull-request projection.
  * There is no refresh flag: GitHub is reached only by an explicit refresh
  * command or, for Projects that opted in, the bounded background refresh
  * cadence.
@@ -200,8 +200,8 @@ export const CodeProjectPullRequestRow = Schema.Struct({
 export type CodeProjectPullRequestRow = typeof CodeProjectPullRequestRow.Type;
 
 /**
- * Current authorized active-row projection. The internal process-local cache
- * may also contain bounded merged and closed rows for board summaries.
+ * Current authorized active-row projection. The private bounded cache may also
+ * contain merged and closed rows for board summaries.
  */
 export const CodeProjectPullRequestView = Schema.Struct({
   version: Schema.Literal(1),
