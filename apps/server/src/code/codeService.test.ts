@@ -208,6 +208,20 @@ describe("CodeService reads", () => {
     expect(result.checkouts).toContainEqual(checkout);
   });
 
+  it("leaves a waiting checkout alone for a Project the window may only browse", async () => {
+    const waiting = decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" });
+    const browseOnly = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({ threads: [browseOnly], checkout: waiting });
+
+    const result = await fixture.service.bootstrap(ids.window);
+
+    expect(result.threads).toEqual([browseOnly]);
+    expect(fixture.checkouts.observe).not.toHaveBeenCalled();
+    expect(fixture.roots.resolve).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(result.checkouts).toContainEqual(waiting);
+  });
+
   it("refuses a thread whose Project now binds a different checkout, instead of waiting on it", async () => {
     const waiting = decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" });
     // The Project was rebound, so observing it derives a checkout id from the

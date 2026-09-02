@@ -171,7 +171,9 @@ bun run dev
 `bun run dev` starts the Vite renderer for `apps/web` with hot reload and
 launches Electron against it. Electron attaches to the canonical host or starts
 it from source when absent: renderer edits hot-reload, server edits take effect
-on the next app relaunch, and `apps/desktop/src` edits are rebuilt automatically
+on the next app relaunch when Electron started the host — an already-running
+host that Electron attached to must be restarted separately — and
+`apps/desktop/src` edits are rebuilt automatically
 the next time you start `bun run dev`.
 
 To run the host without Electron and attach a browser client:

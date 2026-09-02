@@ -15,7 +15,7 @@ export function launchFromLocation(href: string): ShellLaunch | undefined {
       serverUrl === null &&
       !launchTokenFragment &&
       url.protocol === "http:" &&
-      (url.hostname === "127.0.0.1" || url.hostname === "localhost");
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]");
     if (serverUrl === null && !launchTokenFragment && !directCanonicalHost) return undefined;
     const resolvedServerUrl =
       serverUrl === null ? `${url.origin}${url.pathname === "/" ? "" : url.pathname}` : serverUrl;

@@ -194,7 +194,7 @@ export function isAllowedRendererOrigin(
     const loopbackHttp =
       origin === url.origin &&
       url.protocol === "http:" &&
-      (url.hostname === "127.0.0.1" || url.hostname === "localhost") &&
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]") &&
       url.username === "" &&
       url.password === "" &&
       url.pathname === "/" &&
