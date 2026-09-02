@@ -1,6 +1,6 @@
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ComputerUseLifecycleSurface } from "./ComputerUseLifecycleSurface";
 import { samePollingData } from "../polling/samePollingData";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
@@ -11,6 +11,7 @@ export function ComputerUseActivitySurface(props: {
   readonly pollIntervalMs?: number;
 }) {
   const [sessions, setSessions] = useState<ReadonlyArray<ComputerUseSessionView>>([]);
+  const firstSchedule = useRef(true);
   const backgroundSessions = sessions.filter((session) => {
     const threadId = String(session.threadId);
     const excludedSessionIds = props.excludedSessions?.get(threadId);
@@ -35,9 +36,9 @@ export function ComputerUseActivitySurface(props: {
         inFlight = false;
       }
     };
-    const stop = scheduleVisibleInterval(() => void load(), pollIntervalMs, {
-      runImmediately: true,
-    });
+    const runImmediately = firstSchedule.current;
+    firstSchedule.current = false;
+    const stop = scheduleVisibleInterval(() => void load(), pollIntervalMs, { runImmediately });
     return () => {
       active = false;
       stop();

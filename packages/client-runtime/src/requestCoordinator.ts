@@ -22,6 +22,12 @@ interface BufferedResponse {
   readonly statusText: string;
 }
 
+interface SharedRead {
+  readonly controller: AbortController;
+  readonly response: Promise<BufferedResponse>;
+  participants: number;
+}
+
 const COORDINATED_POST_READ_PATHS = new Set([
   "/api/code/board",
   "/api/code/evidence/batch",
@@ -55,7 +61,7 @@ export function createRequestCoordinator(
   }
   const foreground: ScheduledRead[] = [];
   const background: ScheduledRead[] = [];
-  const inflight = new Map<string, Promise<BufferedResponse>>();
+  const inflight = new Map<string, SharedRead>();
   let active = 0;
   let activeBackground = 0;
   let renewal: Promise<void> | undefined;
@@ -118,18 +124,32 @@ export function createRequestCoordinator(
     }
     const priority = isBackgroundRead(url) ? "background" : "foreground";
     const key = readKey(method, input, init);
+    const signal = requestSignal(input, init);
+    if (signal?.aborted === true) throw abortError();
     let shared = inflight.get(key);
     if (shared === undefined) {
-      shared = schedule(input, withoutSignal(init), priority).then(bufferResponse);
+      const controller = new AbortController();
+      const scheduled = detachCallerSignal(input, init, controller.signal);
+      const response = schedule(scheduled.input, scheduled.init, priority).then(bufferResponse);
+      shared = { controller, participants: 0, response };
       inflight.set(key, shared);
-      void shared
+      void response
         .finally(() => {
           if (inflight.get(key) === shared) inflight.delete(key);
         })
         .catch(() => undefined);
     }
-    const response = await waitForCaller(shared, init?.signal);
-    return responseFromBuffer(response);
+    shared.participants += 1;
+    try {
+      const response = await waitForCaller(shared.response, signal);
+      return responseFromBuffer(response);
+    } finally {
+      shared.participants -= 1;
+      if (shared.participants === 0 && inflight.get(key) === shared) {
+        inflight.delete(key);
+        shared.controller.abort();
+      }
+    }
   };
 }
 
@@ -186,6 +206,24 @@ function withoutSignal(init: RequestInit | undefined): RequestInit | undefined {
   if (init === undefined || init.signal === undefined || init.signal === null) return init;
   const { signal: _signal, ...rest } = init;
   return rest;
+}
+
+function requestSignal(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+): AbortSignal | null | undefined {
+  return init?.signal ?? (input instanceof Request ? input.signal : undefined);
+}
+
+function detachCallerSignal(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  signal: AbortSignal,
+): { readonly input: RequestInfo | URL; readonly init: RequestInit } {
+  return {
+    input: input instanceof Request ? new Request(input, { signal }) : input,
+    init: { ...withoutSignal(init), signal },
+  };
 }
 
 function isLongLivedRead(url: URL): boolean {

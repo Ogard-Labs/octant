@@ -115,6 +115,64 @@ describe("createRequestCoordinator", () => {
     ]);
   });
 
+  it("does not start a queued read after its only caller aborts", async () => {
+    const active = deferred<Response>();
+    const fetch = vi.fn((input: RequestInfo | URL) =>
+      String(input).endsWith("/first")
+        ? active.promise
+        : Promise.resolve(new Response("unexpected")),
+    );
+    const coordinated = createRequestCoordinator({
+      fetch: fetch as typeof globalThis.fetch,
+      maxConcurrent: 1,
+    });
+    const controller = new AbortController();
+
+    const first = coordinated("http://127.0.0.1/api/code/first");
+    const queued = coordinated("http://127.0.0.1/api/code/second", {
+      signal: controller.signal,
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+    controller.abort();
+    await expect(queued).rejects.toMatchObject({ name: "AbortError" });
+
+    active.resolve(new Response("first"));
+    await first;
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a shared Request read alive while another caller still needs it", async () => {
+    const release = deferred<Response>();
+    const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+      return new Promise<Response>((resolve, reject) => {
+        const abort = () => reject(new DOMException("The request was aborted.", "AbortError"));
+        if (signal?.aborted === true) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+        release.promise.then((response) => {
+          signal?.removeEventListener("abort", abort);
+          resolve(response);
+        }, reject);
+      });
+    });
+    const coordinated = createRequestCoordinator({ fetch: fetch as typeof globalThis.fetch });
+    const controller = new AbortController();
+    const url = "http://127.0.0.1/api/code/navigation";
+
+    const cancelled = coordinated(new Request(url, { signal: controller.signal }));
+    const remaining = coordinated(url);
+    expect(fetch).toHaveBeenCalledOnce();
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+
+    release.resolve(Response.json({ value: 1 }));
+    await expect((await remaining).json()).resolves.toEqual({ value: 1 });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("coalesces unauthorized renewal without replaying mutations", async () => {
     const renew = deferred<void>();
     const onUnauthorized = vi.fn(() => renew.promise);
