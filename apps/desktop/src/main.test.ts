@@ -45,7 +45,7 @@ import {
   createProjectWindowPreparationCleanup,
   refreshProjectWindowAuthoritiesAfterHostRestart,
   requestProjectWindowWhileRunning,
-  restartDesktopHostWithFreshWindowAuthorities,
+  restartDesktopHostAndRefreshWindowAuthorities,
   resolveDesktopDataDirectory,
   resolveDesktopHostCapabilities,
   resolveConfiguredServerPort,
@@ -466,7 +466,7 @@ describe("Project window authority production lifecycle", () => {
     };
 
     await expect(
-      restartDesktopHostWithFreshWindowAuthorities({
+      restartDesktopHostAndRefreshWindowAuthorities({
         restart: async () => {
           order.push("restart");
           return host;
@@ -475,8 +475,23 @@ describe("Project window authority production lifecycle", () => {
           order.push(`refresh:${replacement.instanceId}`);
         },
       }),
-    ).resolves.toBe(host);
+    ).resolves.toEqual({ host, windowAuthorities: "ready" });
     expect(order).toEqual(["restart", "refresh:replacement-instance"]);
+  });
+
+  it("returns a healthy replacement host separately when window authority refresh needs retry", async () => {
+    const host = {
+      url: "http://127.0.0.1:13773/",
+      instanceId: "replacement-instance",
+      ownership: "desktop-owned" as const,
+    };
+
+    await expect(
+      restartDesktopHostAndRefreshWindowAuthorities({
+        restart: vi.fn().mockResolvedValue(host),
+        refreshWindowAuthorities: vi.fn().mockRejectedValue(new Error("window closed")),
+      }),
+    ).resolves.toEqual({ host, windowAuthorities: "attention-required" });
   });
 
   it("awaits registration before construction and renderer load", async () => {

@@ -1484,20 +1484,32 @@ export async function refreshProjectWindowAuthoritiesAfterHostRestart(
   await Promise.all(windows.map((window) => window.refreshAuthorityAfterHostRestart(host)));
 }
 
-export async function restartDesktopHostWithFreshWindowAuthorities(options: {
+export async function restartDesktopHostAndRefreshWindowAuthorities(options: {
   readonly restart: () => Promise<LocalHostDescriptor>;
   readonly refreshWindowAuthorities: (host: LocalHostDescriptor) => Promise<void>;
-}): Promise<LocalHostDescriptor> {
+}): Promise<{
+  readonly host: LocalHostDescriptor;
+  readonly windowAuthorities: "ready" | "attention-required";
+}> {
   const host = await options.restart();
-  await options.refreshWindowAuthorities(host);
-  return host;
+  try {
+    await options.refreshWindowAuthorities(host);
+    return Object.freeze({ host, windowAuthorities: "ready" });
+  } catch {
+    return Object.freeze({ host, windowAuthorities: "attention-required" });
+  }
 }
 
 async function restartDesktopHost(): Promise<LocalHostDescriptor> {
-  return await restartDesktopHostWithFreshWindowAuthorities({
+  const outcome = await restartDesktopHostAndRefreshWindowAuthorities({
     restart: () => hostLifecycle.restart(),
     refreshWindowAuthorities: refreshDesktopWindowAuthorities,
   });
+  if (outcome.windowAuthorities === "attention-required") {
+    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    updateHostTray();
+  }
+  return outcome.host;
 }
 
 const desktopBackendSupervisor = createDesktopBackendSupervisor({
@@ -2435,6 +2447,10 @@ function installIpcHandlers(): void {
     else window.maximize();
   });
   ipcMain.handle(IPC_CHANNELS.close, (event) => ownedWindow(event).close());
+  ipcMain.handle(
+    IPC_CHANNELS.projectWindowCapability,
+    (event) => ownedTopLevelWindowContext(event).capability,
+  );
   ipcMain.handle(IPC_CHANNELS.openInNewWindow, async (event, value: unknown) => {
     ownedWindowContext(event);
     await openSecondaryProjectWindow(validateProjectWindowTarget(value));

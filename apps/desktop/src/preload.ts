@@ -588,13 +588,29 @@ export function createHostBridge(
     },
     projectWindowCapability,
     subscribeProjectWindowCapability: (listener: (capability: string) => void) => {
-      const receive: MaterialListener = (_event, value) => {
-        if (typeof value === "string" && PROJECT_WINDOW_CAPABILITY_PATTERN.test(value)) {
-          listener(value);
+      let active = true;
+      let observedCapability = projectWindowCapability;
+      const publish = (value: unknown): void => {
+        if (
+          !active ||
+          typeof value !== "string" ||
+          !PROJECT_WINDOW_CAPABILITY_PATTERN.test(value) ||
+          value === observedCapability
+        ) {
+          return;
         }
+        observedCapability = value;
+        listener(value);
+      };
+      const receive: MaterialListener = (_event, value) => {
+        publish(value);
       };
       ipc.on(IPC_CHANNELS.projectWindowCapability, receive);
-      return () => ipc.removeListener(IPC_CHANNELS.projectWindowCapability, receive);
+      void ipc.invoke(IPC_CHANNELS.projectWindowCapability).then(publish, () => undefined);
+      return () => {
+        active = false;
+        ipc.removeListener(IPC_CHANNELS.projectWindowCapability, receive);
+      };
     },
     ...(windowId === undefined ? {} : { windowId }),
     providerCredentialStatus: async (providerInstanceId: string) => {
