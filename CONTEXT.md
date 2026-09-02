@@ -7,8 +7,9 @@ their work, and the isolated places where that work executes.
 
 **Device**:
 A phone, browser, laptop, or desktop app used to control one Machine. Device
-type, renderer mode, and development tooling never select a different Machine
-or authoritative store.
+type, renderer mode, and development tooling use the canonical Machine and
+authoritative store by default; an explicitly named isolated data directory is
+the documented exception.
 _Avoid_: Host, environment
 
 **Machine**:

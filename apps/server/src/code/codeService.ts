@@ -718,6 +718,12 @@ export class CodeService {
         recoveredCheckouts.set(String(persisted.id), persisted);
         continue;
       }
+      // Browsing is navigation metadata only. The thread list is filtered by
+      // `canBrowseProject`, but recovery walks the filesystem through
+      // `#roots.resolve` / `#checkouts.observe` and journals what it observes,
+      // which is checkout authority. A window that is not bound to the Project
+      // leaves the persisted Waiting answer alone.
+      if (!(await this.#access.canAccessProject(authenticatedWindowId, thread.projectId))) continue;
       try {
         let recovered: CodeCheckoutIdentity | undefined;
         if (persisted.kind === "managed-worktree") {

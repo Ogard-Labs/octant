@@ -147,7 +147,7 @@ describe("shell routes", () => {
     "http://localhost:5173#renderer",
     "HTTP://LOCALHOST:5173",
     "http://127.0.0.1:80",
-    "http://[::1]:5173",
+    "http://[::1]:5173/",
     "not an origin",
   ])("rejects and does not echo noncanonical renderer origin %s", async (origin) => {
     const authority = new WindowAuthorityStore();
@@ -437,6 +437,7 @@ describe("isAllowedRendererOrigin", () => {
     expect(isAllowedRendererOrigin("null")).toBe(true);
     expect(isAllowedRendererOrigin("http://127.0.0.1:9999")).toBe(true);
     expect(isAllowedRendererOrigin("http://localhost:5173")).toBe(true);
+    expect(isAllowedRendererOrigin("http://[::1]:5173")).toBe(true);
   });
 
   it("keeps every loopback client while distinguishing the opaque renderer", () => {

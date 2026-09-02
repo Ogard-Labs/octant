@@ -16,6 +16,9 @@ describe("launchFromLocation", () => {
     expect(launchFromLocation("http://127.0.0.1:13773/")).toEqual({
       serverUrl: "http://127.0.0.1:13773/",
     });
+    expect(launchFromLocation("http://[::1]:13773/")).toEqual({
+      serverUrl: "http://[::1]:13773/",
+    });
   });
 
   it("prefers an explicit serverUrl query param over the origin", () => {
