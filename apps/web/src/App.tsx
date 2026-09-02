@@ -124,6 +124,7 @@ import { loadPluginSidebarDestinationAction } from "./shell/pluginSidebarDestina
 import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDestinationRegistry";
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
+import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
 import { buildInboxAttentionItems, inboxThreadProjectId } from "./inbox/inboxModel";
 import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
@@ -388,8 +389,9 @@ export interface AppProps {
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() => launchFromLocation(window.location.href));
   const launch = props.launch ?? locationLaunch;
-  const injectedCapability =
+  const initialInjectedCapability =
     props.projectWindowCapability ?? props.hostBridge?.projectWindowCapability;
+  const injectedCapability = useDesktopWindowAuthority(initialInjectedCapability, props.hostBridge);
   const hostWindowId = windowIdFromHostBridge(props.hostBridge);
   const launchSession = useLaunchSession({
     ...(injectedCapability === undefined && launch !== undefined

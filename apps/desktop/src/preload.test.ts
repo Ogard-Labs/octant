@@ -127,6 +127,7 @@ describe("desktop preload bridge", () => {
       "subscribeBrowserSurfaceState",
       "subscribeCodeDeepLinks",
       "subscribeOpenSettings",
+      "subscribeProjectWindowCapability",
       "subscribeResolvedMaterial",
       "subscribeResolvedSidebarVibrancy",
       "subscribeStartNewAgent",
@@ -566,6 +567,34 @@ describe("desktop preload bridge", () => {
     unsubscribe();
     expect(ipc.removeListener).toHaveBeenCalledWith(
       IPC_CHANNELS.resolvedSidebarVibrancy,
+      registered,
+    );
+  });
+
+  it("relays only a valid replacement Project window capability", () => {
+    let registered: ((event: unknown, capability: unknown) => void) | undefined;
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(),
+      on: vi.fn((_channel, listener) => {
+        registered = listener;
+      }),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(
+      ipc,
+      projectWindowCapability,
+    ).subscribeProjectWindowCapability(listener);
+
+    registered?.({}, "short");
+    registered?.({}, { capability: "D".repeat(43) });
+    registered?.({}, "D".repeat(43));
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenCalledWith("D".repeat(43));
+    unsubscribe();
+    expect(ipc.removeListener).toHaveBeenCalledWith(
+      IPC_CHANNELS.projectWindowCapability,
       registered,
     );
   });

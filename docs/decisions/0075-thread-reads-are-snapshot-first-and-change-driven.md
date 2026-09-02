@@ -34,7 +34,9 @@ snapshot and cursor contract rather than treating a stream as durable state.
 - The shared client transport bounds concurrent reads, prioritizes foreground
   thread data, coalesces identical in-flight reads, and cancels obsolete caller
   work. It may renew local client context after an unauthorized response, but
-  it never automatically replays a mutation.
+  it never automatically replays a mutation. Electron publishes a newly
+  registered window capability when its host instance changes so surviving
+  renderers rebuild these clients before their snapshot retry.
 - A browser tab carries a tab-stable client-context marker. A new tab that
   inherits a copy of `sessionStorage` mints its own presentation context rather
   than reusing the opener's window identity; both still read the same Machine.

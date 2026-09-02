@@ -116,7 +116,10 @@ ordinary browsers, and Vite therefore read the same Machine-owned Projects,
 threads, settings, and journal. The context id scopes window-local presentation
 and guards against accidental cross-window commands, but it is not a separate
 Machine or durable authentication epoch. The packaged renderer additionally
-proves its native renderer identity for desktop-only integration. The loopback
+proves its native renderer identity for desktop-only integration. When the host
+instance changes, Electron re-registers every live Project window, replaces the
+main-process authority and renderer identity, and publishes the new capability
+so the renderer rebuilds its clients before snapshot recovery. The loopback
 transport still validates the actual Host header, rejects non-loopback origins,
 and removes process-local registration when its owning client closes. Loopback
 renderer ports share the local-user trust class; the listener never reflects a

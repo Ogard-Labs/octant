@@ -32,6 +32,11 @@ make its local product unavailable.
   visibly named as isolated.
 - Process-local approvals and grants use process-monotonic elapsed time. A host
   restart discards them; no persisted local-authority epoch may block startup.
+- After a host-instance replacement, Electron re-registers every live Project
+  window and publishes its fresh process-local capability through the validated
+  preload bridge. Automatic, menu-triggered, and separately managed host
+  replacement use the same refresh path; a restart is not recovered while a
+  surviving window still holds only its discarded grant.
 - Shared product state is Machine-owned and live across Electron, browsers, and
   other authenticated Devices. Window bounds, panes, focus, scroll positions,
   and unsaved drafts remain client-context state.

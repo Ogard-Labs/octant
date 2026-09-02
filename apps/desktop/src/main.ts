@@ -167,6 +167,7 @@ const IPC_CHANNELS = {
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
   hostCapabilities: "octant:window:host-capabilities",
+  projectWindowCapability: "octant:window:project-capability",
   maximizeOrRestore: "octant:window:maximize-or-restore",
   minimize: "octant:window:minimize",
   openCodeExternalEditor: "octant:code:open-external-editor",
@@ -271,6 +272,8 @@ export function createDesktopWindowContextRegistry<
     throw new Error("Octant rejected an unauthorized native window request.");
   };
   return Object.freeze({
+    active: (): ReadonlyArray<Readonly<TContext & { readonly window: TWindow }>> =>
+      Object.freeze([...contexts.values()].filter(({ window }) => !window.isDestroyed())),
     hasWindowId: (windowId: string): boolean =>
       [...contexts.values()].some(
         (context) => context.windowId === windowId && !context.window.isDestroyed(),
@@ -282,6 +285,17 @@ export function createDesktopWindowContextRegistry<
     remove: (window: TWindow): void => {
       const context = contexts.get(window.id);
       if (context?.window === window) contexts.delete(window.id);
+    },
+    replaceCapability: (
+      window: TWindow,
+      capability: string,
+    ): Readonly<TContext & { readonly window: TWindow }> | undefined => {
+      if (window.isDestroyed()) return undefined;
+      const context = contexts.get(window.id);
+      if (context === undefined || context.window !== window) return undefined;
+      const replacement = Object.freeze({ ...context, capability, window });
+      contexts.set(window.id, replacement);
+      return replacement;
     },
     resolve: (window: TWindow | null): Readonly<TContext & { readonly window: TWindow }> => {
       if (window === null || window.isDestroyed()) return unauthorized();
@@ -646,7 +660,7 @@ interface ProjectWindowSession<TWindow> {
 }
 
 interface TrackedProjectWindowAuthority {
-  readonly authority: ProjectWindowAuthority;
+  authority: ProjectWindowAuthority;
   revocation?: Promise<void>;
 }
 
@@ -806,6 +820,37 @@ export function createProjectWindowAuthorityLifecycle() {
     return operation;
   };
 
+  const refreshAfterHostRestart = (
+    register: () => Promise<ProjectWindowAuthority>,
+  ): Promise<ProjectWindowAuthority | undefined> => {
+    if (shuttingDown) {
+      return Promise.reject(new Error("Octant Project window lifecycle is unavailable."));
+    }
+    const operation = pendingOpen.then(async () => {
+      await pendingRevocation;
+      const tracked = active;
+      if (tracked === undefined) return undefined;
+      let replacement: ProjectWindowAuthority;
+      try {
+        replacement = await register();
+      } catch (cause) {
+        if (namesItsCause(cause)) throw cause;
+        throw new Error("Octant could not refresh its Project window authority.");
+      }
+      if (active !== tracked || tracked.revocation !== undefined) {
+        await replacement.revoke().catch(() => undefined);
+        return undefined;
+      }
+      tracked.authority = replacement;
+      return replacement;
+    });
+    pendingOpen = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  };
+
   const shutdown = (stopServer: () => Promise<void>): Promise<void> => {
     if (shutdownPromise !== undefined) return shutdownPromise;
     shuttingDown = true;
@@ -821,6 +866,7 @@ export function createProjectWindowAuthorityLifecycle() {
 
   return Object.freeze({
     open,
+    refreshAfterHostRestart,
     shutdown,
   });
 }
@@ -926,13 +972,78 @@ interface DesktopWindowContext extends DesktopWindowIdentity {
   readonly picker: ReturnType<typeof createProjectRootPicker>;
   readonly localPluginFolderPicker: ReturnType<typeof createLocalPluginFolderPicker>;
   readonly presentationController: WindowPresentationController;
+  readonly refreshAuthorityAfterHostRestart: (host: LocalHostDescriptor) => Promise<void>;
 }
 const desktopWindows = createDesktopWindowContextRegistry<BrowserWindow, DesktopWindowContext>();
+let desktopWindowAuthorityInstanceId: string | undefined;
+let desktopWindowAuthorityRefresh:
+  | { readonly instanceId: string; readonly operation: Promise<void> }
+  | undefined;
 const secondaryWindowLifecycles = new Set<
   ReturnType<typeof createProjectWindowAuthorityLifecycle>
 >();
 const trustedRendererRequests = createTrustedRendererRequestRegistry();
 let trustedRendererRequestHeadersInstalled = false;
+
+async function refreshDesktopProjectWindowAuthorityAfterHostRestart(options: {
+  readonly host: LocalHostDescriptor;
+  readonly lifecycle: ReturnType<typeof createProjectWindowAuthorityLifecycle>;
+  readonly primary: boolean;
+  readonly window: BrowserWindow;
+  readonly windowId: string;
+}): Promise<void> {
+  const authority = await options.lifecycle.refreshAfterHostRestart(() =>
+    createProjectWindowAuthority({
+      desktopBridgeSecret,
+      serverUrl: options.host.url,
+      windowId: options.windowId,
+    }),
+  );
+  if (authority === undefined) return;
+  if (authority.rendererIdentity === undefined) {
+    throw new Error("Octant could not refresh its Project window authority.");
+  }
+  const context = desktopWindows.replaceCapability(options.window, authority.capability);
+  if (
+    context === undefined ||
+    options.window.isDestroyed() ||
+    options.window.webContents.isDestroyed()
+  ) {
+    return;
+  }
+  if (options.primary) stableWindowCapability = authority.capability;
+  registerTrustedRendererRequestContext(options.window, {
+    serverUrl: options.host.url,
+    rendererIdentity: authority.rendererIdentity,
+    ...(process.env.OCTANT_WEB_URL === undefined
+      ? {}
+      : { developmentUrl: process.env.OCTANT_WEB_URL }),
+  });
+  options.window.webContents.send(IPC_CHANNELS.projectWindowCapability, authority.capability);
+}
+
+async function refreshDesktopWindowAuthorities(host: LocalHostDescriptor): Promise<void> {
+  if (desktopWindowAuthorityInstanceId === host.instanceId) return;
+  const pending = desktopWindowAuthorityRefresh;
+  if (pending !== undefined) {
+    if (pending.instanceId === host.instanceId) return pending.operation;
+    await pending.operation.catch(() => undefined);
+    return await refreshDesktopWindowAuthorities(host);
+  }
+  const started = refreshProjectWindowAuthoritiesAfterHostRestart(
+    host,
+    desktopWindows.active(),
+  ).then(() => {
+    desktopWindowAuthorityInstanceId = host.instanceId;
+  });
+  const observed = started.finally(() => {
+    if (desktopWindowAuthorityRefresh?.operation === observed) {
+      desktopWindowAuthorityRefresh = undefined;
+    }
+  });
+  desktopWindowAuthorityRefresh = { instanceId: host.instanceId, operation: observed };
+  return await observed;
+}
 
 function installTrustedRendererRequestHeaders(): void {
   if (trustedRendererRequestHeadersInstalled) return;
@@ -1336,9 +1447,62 @@ const hostLifecycle = createHostLifecycleController({
   stop: stopDesktopOwnedHost,
 });
 
+interface RestartRecoverableProjectWindow {
+  readonly refreshAuthorityAfterHostRestart: (host: LocalHostDescriptor) => Promise<void>;
+}
+
+export function createProjectWindowAuthorityRefresh(
+  initialInstanceId: string,
+  refresh: (host: LocalHostDescriptor) => Promise<void>,
+): (host: LocalHostDescriptor) => Promise<void> {
+  let authorityInstanceId = initialInstanceId;
+  let pending: { readonly instanceId: string; readonly operation: Promise<void> } | undefined;
+  const run = async (host: LocalHostDescriptor): Promise<void> => {
+    if (authorityInstanceId === host.instanceId) return;
+    const activeRefresh = pending;
+    if (activeRefresh !== undefined) {
+      if (activeRefresh.instanceId === host.instanceId) return activeRefresh.operation;
+      await activeRefresh.operation.catch(() => undefined);
+      return await run(host);
+    }
+    const started = refresh(host).then(() => {
+      authorityInstanceId = host.instanceId;
+    });
+    const observed = started.finally(() => {
+      if (pending?.operation === observed) pending = undefined;
+    });
+    pending = { instanceId: host.instanceId, operation: observed };
+    return await observed;
+  };
+  return run;
+}
+
+export async function refreshProjectWindowAuthoritiesAfterHostRestart(
+  host: LocalHostDescriptor,
+  windows: ReadonlyArray<RestartRecoverableProjectWindow>,
+): Promise<void> {
+  await Promise.all(windows.map((window) => window.refreshAuthorityAfterHostRestart(host)));
+}
+
+export async function restartDesktopHostWithFreshWindowAuthorities(options: {
+  readonly restart: () => Promise<LocalHostDescriptor>;
+  readonly refreshWindowAuthorities: (host: LocalHostDescriptor) => Promise<void>;
+}): Promise<LocalHostDescriptor> {
+  const host = await options.restart();
+  await options.refreshWindowAuthorities(host);
+  return host;
+}
+
+async function restartDesktopHost(): Promise<LocalHostDescriptor> {
+  return await restartDesktopHostWithFreshWindowAuthorities({
+    restart: () => hostLifecycle.restart(),
+    refreshWindowAuthorities: refreshDesktopWindowAuthorities,
+  });
+}
+
 const desktopBackendSupervisor = createDesktopBackendSupervisor({
   restart: async () => {
-    await hostLifecycle.restart();
+    await restartDesktopHost();
     return server;
   },
   reportFatal: (error) => {
@@ -1496,6 +1660,17 @@ async function createWindow(): Promise<void> {
         picker: projectRootPicker,
         localPluginFolderPicker,
         presentationController: controller,
+        refreshAuthorityAfterHostRestart: createProjectWindowAuthorityRefresh(
+          host.instanceId,
+          (replacementHost) =>
+            refreshDesktopProjectWindowAuthorityAfterHostRestart({
+              host: replacementHost,
+              lifecycle: projectWindowLifecycle,
+              primary: true,
+              window,
+              windowId: state.windowId,
+            }),
+        ),
       });
       installRendererNavigationGuards(
         rendererNavigationWebContents(window),
@@ -1579,7 +1754,8 @@ async function createWindow(): Promise<void> {
 
 async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<void> {
   const serverUrl = activeServerUrl;
-  if (serverUrl === undefined || serverInstanceId === undefined) {
+  const initialAuthorityInstanceId = serverInstanceId;
+  if (serverUrl === undefined || initialAuthorityInstanceId === undefined) {
     throw new Error("Octant Project window handoff is unavailable.");
   }
   const windowId = randomUUID();
@@ -1709,6 +1885,17 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           picker,
           localPluginFolderPicker,
           presentationController: controller,
+          refreshAuthorityAfterHostRestart: createProjectWindowAuthorityRefresh(
+            initialAuthorityInstanceId,
+            (replacementHost) =>
+              refreshDesktopProjectWindowAuthorityAfterHostRestart({
+                host: replacementHost,
+                lifecycle,
+                primary: false,
+                window,
+                windowId,
+              }),
+          ),
         });
         installRendererNavigationGuards(
           rendererNavigationWebContents(window),
@@ -1839,6 +2026,26 @@ async function refreshHostActivity(): Promise<void> {
     updateHostTray();
     return;
   }
+  if (
+    snapshot.url === undefined ||
+    snapshot.instanceId === undefined ||
+    snapshot.ownership === undefined
+  ) {
+    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    updateHostTray();
+    return;
+  }
+  try {
+    await refreshDesktopWindowAuthorities({
+      url: snapshot.url,
+      instanceId: snapshot.instanceId,
+      ownership: snapshot.ownership,
+    });
+  } catch {
+    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    updateHostTray();
+    return;
+  }
   hostLifecycle.setActivity({
     activeAgentCount: probe.activeAgentCount ?? 0,
     attentionRequired: probe.attentionRequired ?? false,
@@ -1879,7 +2086,7 @@ async function stopHostFromMenu(): Promise<void> {
 }
 
 async function restartHostFromMenu(): Promise<void> {
-  const host = await hostLifecycle.restart();
+  const host = await restartDesktopHost();
   activeServerUrl = host.url;
   serverInstanceId = host.instanceId;
   await writeBridgeSecretFile(desktopHostRuntimePaths, desktopBridgeSecret);

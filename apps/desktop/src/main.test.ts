@@ -35,6 +35,7 @@ import {
   shutdownManagedServerResources,
   startManagedServerResources,
   createMainBrowserWindowOptions,
+  createProjectWindowAuthorityRefresh,
   createTrustedRendererRequestRegistry,
   decorateTrustedRendererHeaders,
   prepareDevelopmentRendererUrl,
@@ -42,7 +43,9 @@ import {
   createDesktopWindowContextRegistry,
   createProjectWindowAuthorityLifecycle,
   createProjectWindowPreparationCleanup,
+  refreshProjectWindowAuthoritiesAfterHostRestart,
   requestProjectWindowWhileRunning,
+  restartDesktopHostWithFreshWindowAuthorities,
   resolveDesktopDataDirectory,
   resolveDesktopHostCapabilities,
   resolveConfiguredServerPort,
@@ -389,9 +392,93 @@ describe("desktop Project window ownership", () => {
       "Octant rejected an unauthorized native window request.",
     );
   });
+
+  it("replaces authority only for the exact live window after a host restart", () => {
+    const registry = createDesktopWindowContextRegistry<{
+      readonly id: number;
+      readonly isDestroyed: () => boolean;
+    }>();
+    let secondaryDestroyed = false;
+    const primary = { id: 1, isDestroyed: () => false };
+    const secondary = { id: 2, isDestroyed: () => secondaryDestroyed };
+    registry.register(primary, { windowId: "window-a", capability: "A".repeat(43) });
+    registry.register(secondary, { windowId: "window-b", capability: "B".repeat(43) });
+
+    expect(registry.active().map(({ windowId }) => windowId)).toEqual(["window-a", "window-b"]);
+    expect(registry.replaceCapability(primary, "C".repeat(43))).toMatchObject({
+      window: primary,
+      windowId: "window-a",
+      capability: "C".repeat(43),
+    });
+    expect(registry.resolve(primary).capability).toBe("C".repeat(43));
+
+    secondaryDestroyed = true;
+    expect(registry.active().map(({ windowId }) => windowId)).toEqual(["window-a"]);
+    expect(registry.replaceCapability(secondary, "D".repeat(43))).toBeUndefined();
+  });
 });
 
 describe("Project window authority production lifecycle", () => {
+  it("coalesces one authority refresh per replacement host instance", async () => {
+    const refreshing = deferred();
+    const refresh = vi.fn(async () => refreshing.promise);
+    const replace = createProjectWindowAuthorityRefresh("initial-instance", refresh);
+    const host = {
+      url: "http://127.0.0.1:13773/",
+      instanceId: "replacement-instance",
+      ownership: "desktop-owned" as const,
+    };
+
+    const first = replace(host);
+    const second = replace(host);
+    expect(refresh).toHaveBeenCalledOnce();
+    refreshing.resolve();
+    await Promise.all([first, second]);
+    await replace(host);
+
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes every live Project window after the replacement host starts", async () => {
+    const host = {
+      url: "http://127.0.0.1:13773/",
+      instanceId: "replacement-instance",
+      ownership: "desktop-owned" as const,
+    };
+    const primary = vi.fn().mockResolvedValue(undefined);
+    const secondary = vi.fn().mockResolvedValue(undefined);
+
+    await refreshProjectWindowAuthoritiesAfterHostRestart(host, [
+      { refreshAuthorityAfterHostRestart: primary },
+      { refreshAuthorityAfterHostRestart: secondary },
+    ]);
+
+    expect(primary).toHaveBeenCalledWith(host);
+    expect(secondary).toHaveBeenCalledWith(host);
+  });
+
+  it("does not complete a desktop host restart before live window authorities are fresh", async () => {
+    const order: string[] = [];
+    const host = {
+      url: "http://127.0.0.1:13773/",
+      instanceId: "replacement-instance",
+      ownership: "desktop-owned" as const,
+    };
+
+    await expect(
+      restartDesktopHostWithFreshWindowAuthorities({
+        restart: async () => {
+          order.push("restart");
+          return host;
+        },
+        refreshWindowAuthorities: async (replacement) => {
+          order.push(`refresh:${replacement.instanceId}`);
+        },
+      }),
+    ).resolves.toBe(host);
+    expect(order).toEqual(["restart", "refresh:replacement-instance"]);
+  });
+
   it("awaits registration before construction and renderer load", async () => {
     const order: string[] = [];
     const registered = deferred();
@@ -490,6 +577,29 @@ describe("Project window authority production lifecycle", () => {
     await second;
     expect(register).toHaveBeenCalledTimes(2);
     expect(constructed).toEqual(["A".repeat(43), "B".repeat(43)]);
+  });
+
+  it("replaces stale authority after a host restart and revokes the replacement on close", async () => {
+    const firstRevoke = vi.fn().mockResolvedValue(undefined);
+    const replacementRevoke = vi.fn().mockResolvedValue(undefined);
+    const lifecycle = createProjectWindowAuthorityLifecycle();
+    const opened = await lifecycle.open({
+      register: async () => ({ capability: "A".repeat(43), revoke: firstRevoke }),
+      construct: () => ({}),
+      prepare: vi.fn(),
+      load: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await expect(
+      lifecycle.refreshAfterHostRestart(async () => ({
+        capability: "B".repeat(43),
+        revoke: replacementRevoke,
+      })),
+    ).resolves.toMatchObject({ capability: "B".repeat(43) });
+    await opened.close();
+
+    expect(firstRevoke).not.toHaveBeenCalled();
+    expect(replacementRevoke).toHaveBeenCalledOnce();
   });
 
   it("revokes once before server stop during quit", async () => {
