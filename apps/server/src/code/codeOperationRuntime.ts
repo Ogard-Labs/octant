@@ -686,24 +686,19 @@ export function createCodeOperationRuntime(
         }
         return { bytes, digest, byteLength: bytes.byteLength };
       } catch (error) {
-        const category =
-          error instanceof CodeOperationServiceError ? error.category : ("unavailable" as const);
-        throw Object.assign(new Error("Code operation evidence is unavailable."), {
-          failure: {
-            category,
-            message:
-              category === "unauthorized"
-                ? "Code operation evidence is unauthorized."
-                : "Code operation evidence is unavailable.",
-          },
-        });
+        throw codeEvidenceReadFailure(error);
       }
     },
-    readEvidenceBatch: async (windowId, input) =>
-      decodeCodeEvidenceBatchResponse({
-        threadId: input.threadId,
-        items: await service.readEvidenceBatch(windowId, input.threadId, input.items),
-      }),
+    readEvidenceBatch: async (windowId, input) => {
+      try {
+        return decodeCodeEvidenceBatchResponse({
+          threadId: input.threadId,
+          items: await service.readEvidenceBatch(windowId, input.threadId, input.items),
+        });
+      } catch (error) {
+        throw codeEvidenceReadFailure(error);
+      }
+    },
     close: async () => {
       const tests = [...activeTests.values()];
       for (const test of tests) test.controller.abort();
@@ -718,6 +713,20 @@ export function createCodeOperationRuntime(
       ]);
     },
   };
+}
+
+function codeEvidenceReadFailure(error: unknown): Error {
+  const category =
+    error instanceof CodeOperationServiceError ? error.category : ("unavailable" as const);
+  return Object.assign(new Error("Code operation evidence is unavailable."), {
+    failure: {
+      category,
+      message:
+        category === "unauthorized"
+          ? "Code operation evidence is unauthorized."
+          : "Code operation evidence is unavailable.",
+    },
+  });
 }
 
 interface ApprovalContext {

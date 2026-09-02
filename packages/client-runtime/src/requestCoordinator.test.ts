@@ -39,10 +39,13 @@ describe("createRequestCoordinator", () => {
     const first = coordinated("http://127.0.0.1/api/code/navigation");
     const second = coordinated("http://127.0.0.1/api/code/navigation");
     expect(fetch).toHaveBeenCalledOnce();
-    release.resolve(Response.json({ value: 1 }));
+    const response = Response.json({ value: 1 });
+    const bodyRead = vi.spyOn(response, "arrayBuffer");
+    release.resolve(response);
 
     await expect((await first).json()).resolves.toEqual({ value: 1 });
     await expect((await second).json()).resolves.toEqual({ value: 1 });
+    expect(bodyRead).toHaveBeenCalledOnce();
   });
 
   it("coalesces identical conversation evidence batches as foreground reads", async () => {

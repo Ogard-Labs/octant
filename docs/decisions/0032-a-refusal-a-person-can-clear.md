@@ -73,3 +73,4 @@ longer describes a local-authority-clock feature.
 - 0009 — sandbox confinement, approvals, and Plan mode: the fail-closed
   requirement this record does not weaken.
 - 0002 — durable event journal: where a recovery act is recorded.
+- 0074 — one canonical Machine host: supersedes the local clock-recovery proposal.

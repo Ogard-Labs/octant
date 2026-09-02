@@ -3,6 +3,7 @@ import {
   decodeCodeThread,
   decodeCodeThreadId,
   decodeCodeOperationId,
+  MAX_CODE_EVIDENCE_BATCH_ITEMS,
   decodeWindowId,
   type CodeEventFrame,
   type CodeOperationEventFrame,
@@ -360,6 +361,54 @@ describe("Code routes", () => {
       threadId,
       items: [{ operationId, contentId }],
     });
+  });
+
+  it("chunks operation stream enrichment within the evidence batch contract", async () => {
+    const frames = Array.from({ length: 65 }, (_, index) => {
+      const frameContentId = `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+      return {
+        threadId,
+        operationId,
+        cursor: index + 1,
+        occurredAt: now,
+        event: {
+          kind: "provider-content" as const,
+          channel: "message" as const,
+          content: { contentId: frameContentId, digest, byteLength: 1 },
+        },
+      };
+    });
+    const subscribeOperation = vi.fn(async function* () {
+      yield* frames;
+    });
+    const readOperationContents = vi.fn(
+      async (
+        _windowId: unknown,
+        input: {
+          readonly items: ReadonlyArray<{
+            readonly operationId: string;
+            readonly contentId: string;
+          }>;
+        },
+      ) => {
+        expect(input.items.length).toBeLessThanOrEqual(MAX_CODE_EVIDENCE_BATCH_ITEMS);
+        return {
+          threadId,
+          items: input.items.map((item) => ({ ...item, text: "x" })),
+        };
+      },
+    );
+    const route = routeFixture({ subscribeOperation, readOperationContents });
+
+    const response = await route(
+      request(`/api/code/threads/${threadId}/operations/${operationId}/events?afterCursor=0`),
+    );
+    const lines = (await response?.text())?.trim().split("\n") ?? [];
+
+    expect(response?.status).toBe(200);
+    expect(readOperationContents).toHaveBeenCalledTimes(2);
+    expect(lines).toHaveLength(65);
+    expect(lines.every((line) => JSON.parse(line).displayText === "x")).toBe(true);
   });
 
   it("reads a versioned paginated conversation through authenticated thread authority", async () => {

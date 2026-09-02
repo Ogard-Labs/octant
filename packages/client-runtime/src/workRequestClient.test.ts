@@ -56,6 +56,19 @@ describe("createWorkRequestClient", () => {
     );
   });
 
+  it("preserves caller cancellation when a list request is aborted", async () => {
+    const fetch = vi.fn(async () => {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    });
+    const client = createWorkRequestClient({ baseUrl, fetch, windowCapability: capability });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(client.list(projectId, threadId, controller.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+  });
+
   it("executes resolve/cancel commands", async () => {
     const result: WorkRequestCommandResult = {
       kind: "work-request-resolved",

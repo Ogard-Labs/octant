@@ -108,6 +108,7 @@ describe("WorkTurnService", () => {
         run: async (input) => {
           input.onDelta?.("Partial reply");
           await gate.promise;
+          input.onDelta?.("Late reply");
           if (input.signal.aborted) return { kind: "cancelled" };
           return { kind: "completed", response: "Partial reply" };
         },
@@ -125,6 +126,27 @@ describe("WorkTurnService", () => {
     await fixture.waitForIdle();
     const transcript = await fixture.service.transcript(ids.window, ids.thread);
     expect(transcript.turns[0]?.status).toBe("cancelled");
+    expect(transcript.liveCursor).toBe(2);
+  });
+
+  it("does not publish a provider delta after a turn settled", async () => {
+    let publishLateDelta: ((response: string) => void) | undefined;
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          publishLateDelta = input.onDelta;
+          return { kind: "completed", response: "Complete" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    const settled = await fixture.service.transcript(ids.window, ids.thread);
+
+    publishLateDelta?.("Late reply");
+    const afterLateDelta = await fixture.service.transcript(ids.window, ids.thread);
+
+    expect(afterLateDelta.liveCursor).toBe(settled.liveCursor);
   });
 
   it("sends a staged image to the provider and refuses a text-only model", async () => {

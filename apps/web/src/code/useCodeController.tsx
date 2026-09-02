@@ -2429,7 +2429,8 @@ async function readConversationText(
   signal?: AbortSignal,
 ): Promise<string | undefined> {
   if (evidence !== undefined) {
-    return evidence.get(`${String(operationId)}:${String(contentId)}`);
+    const text = evidence.get(`${String(operationId)}:${String(contentId)}`);
+    if (text !== undefined) return text;
   }
   return readOperationText(client, threadId, operationId, contentId, signal);
 }

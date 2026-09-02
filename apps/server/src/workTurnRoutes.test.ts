@@ -102,6 +102,18 @@ describe("Work turn live stream route", () => {
     await expect(response?.text()).resolves.toContain('"text":"Immediate text"');
     expect(subscribe).toHaveBeenCalledWith(windowId, threadId, 4, expect.any(AbortSignal));
   });
+
+  it("rejects a stream query that omits the afterSequence key", async () => {
+    const subscribe = vi.fn(async function* () {});
+    const route = routeFixture({ subscribe });
+
+    const response = await route(
+      request(`/api/work/turns/stream/${threadId}?unexpected=4`, { method: "GET" }),
+    );
+
+    expect(response?.status).toBe(400);
+    expect(subscribe).not.toHaveBeenCalled();
+  });
 });
 
 function request(path: string, init: RequestInit = {}): Request {

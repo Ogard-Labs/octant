@@ -1901,6 +1901,31 @@ describe("useCodeController", () => {
     expect(operationContent).toHaveBeenCalledOnce();
   });
 
+  it("falls back when a batch response omits one requested evidence item", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000035";
+    const promptId = "60000000-0000-4000-8000-000000000035";
+    const operationContent = vi.fn(async () => new TextEncoder().encode("Recovered missing item"));
+    const client = fakeClient({
+      conversation: vi.fn(async () => ({
+        version: 3 as const,
+        threadId: ids.thread,
+        turns: [conversationTurn(operationId, promptId)],
+        nextCursor: 1,
+        hasMore: false,
+      })) as never,
+      operationContents: vi.fn(async () => ({ threadId: ids.thread, items: [] })),
+      operationContent,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.conversation[0]?.text).toBe("Recovered missing item"),
+    );
+    expect(operationContent).toHaveBeenCalledOnce();
+  });
+
   it("replays the steps a reopened turn recorded, not just its message", async () => {
     const promptId = "60000000-0000-4000-8000-000000000012";
     const replyId = "60000000-0000-4000-8000-000000000013";

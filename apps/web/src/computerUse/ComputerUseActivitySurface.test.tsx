@@ -80,6 +80,28 @@ describe("ComputerUseActivitySurface", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("backs off when every active session is already represented by the visible thread", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = clientWith([view]);
+      render(
+        <ComputerUseActivitySurface
+          client={client}
+          excludedSessions={new Map([[String(view.threadId), new Set([String(view.sessionId)])]])}
+        />,
+      );
+      await act(async () => {});
+      expect(client.list).toHaveBeenCalledOnce();
+
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(client.list).toHaveBeenCalledOnce();
+      await act(async () => vi.advanceTimersByTimeAsync(4_000));
+      expect(client.list).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps an unrepresented active session visible when one thread owns multiple sessions", async () => {
     const second = decodeComputerUseSessionView({
       ...view,

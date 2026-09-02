@@ -755,6 +755,8 @@ describe("CodeOperationRuntime", () => {
       ],
     });
     if (result.kind !== "git-observed") throw new Error("Expected Git evidence.");
+    const readEvidenceBatch = fixture.runtime.readEvidenceBatch;
+    if (readEvidenceBatch === undefined) throw new Error("Expected batch evidence reads.");
     await expect(
       fixture.runtime.readEvidence(windowId, threadId, operationId(31), result.diff.contentId),
     ).resolves.toMatchObject({
@@ -768,9 +770,27 @@ describe("CodeOperationRuntime", () => {
       fixture.runtime.readEvidence(windowId, threadId, operationId(31), result.diff.contentId),
     ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
 
+    fixture.access.mockResolvedValueOnce(false);
+    await expect(
+      readEvidenceBatch(windowId, {
+        threadId,
+        items: [{ operationId: operationId(31), contentId: result.diff.contentId }],
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+
     fixture.evidenceValues.set(result.diff.contentId, "tampered");
     await expect(
       fixture.runtime.readEvidence(windowId, threadId, operationId(31), result.diff.contentId),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    fixture.evidenceValues.set(
+      result.diff.contentId,
+      "x".repeat(MAX_CODE_OPERATION_TEXT_BYTES + 1),
+    );
+    await expect(
+      readEvidenceBatch(windowId, {
+        threadId,
+        items: [{ operationId: operationId(31), contentId: result.diff.contentId }],
+      }),
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
     fixture.close();
   });

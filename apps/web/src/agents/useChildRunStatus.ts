@@ -21,6 +21,8 @@ export interface ChildRunStatusOptions {
   readonly windowCapability?: string;
   readonly parentThreadId?: AgentRunParentThreadId;
   readonly refreshMs?: number;
+  /** Pause new reads while retaining already-known safety controls. */
+  readonly enabled?: boolean;
 }
 
 /**
@@ -136,7 +138,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
       : undefined;
 
   useEffect(() => {
-    if (client === undefined || parentThreadId === undefined) return;
+    if (client === undefined || parentThreadId === undefined || options.enabled === false) return;
     let cancelled = false;
     let inFlight = false;
     const load = async () => {
@@ -183,7 +185,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
       cancelled = true;
       stop();
     };
-  }, [client, parentThreadId, refreshMs, refreshToken]);
+  }, [client, options.enabled, parentThreadId, refreshMs, refreshToken]);
 
   const summary = useMemo(
     () => (entries.length === 0 ? EMPTY_SUMMARY : buildChildRunStatusSummary(entries)),

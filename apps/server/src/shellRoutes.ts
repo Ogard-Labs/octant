@@ -12,8 +12,9 @@ export interface ShellRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
   /**
-   * HTTP origin the renderer is allowed to present. `null` is packaged
-   * (`file://` only). Omitted keeps loopback-any-port for tests.
+   * Whether the opaque packaged renderer is admitted: `null` or omission
+   * admits it, while a development renderer URL excludes it. Canonical
+   * loopback HTTP origins are always admitted independently of this value.
    */
   readonly allowedRendererHttpOrigin?: string | null;
 }

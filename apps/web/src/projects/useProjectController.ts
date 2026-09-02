@@ -83,9 +83,11 @@ export function useProjectController(options: ProjectControllerOptions) {
   const memoryOwnerProjectId = useRef<ProjectId | undefined>(undefined);
 
   const load = useCallback(
-    async (reason: "bootstrap" | "retry" | "refresh" | "conflict" = "retry") => {
+    async (reason: "bootstrap" | "retry" | "refresh" | "conflict" | "revision" = "retry") => {
       const request = ++generation.current;
-      setStatus(reason === "conflict" ? "conflict-reload" : "loading");
+      if (reason !== "revision") {
+        setStatus(reason === "conflict" ? "conflict-reload" : "loading");
+      }
       setErrorMessage(undefined);
       try {
         const bootstrap = await fallbackClient.bootstrap();
@@ -99,6 +101,10 @@ export function useProjectController(options: ProjectControllerOptions) {
         }
       } catch (error) {
         if (!mounted.current || request !== generation.current) return;
+        if (reason === "revision") {
+          setErrorMessage(failureMessage(error));
+          return;
+        }
         setStatus("disconnected");
         setErrorMessage(failureMessage(error));
       }
@@ -119,7 +125,7 @@ export function useProjectController(options: ProjectControllerOptions) {
 
   useEffect(() => {
     if (options.changeRevision === undefined || options.changeRevision <= 0) return;
-    void load("bootstrap");
+    void load("revision");
   }, [load, options.changeRevision]);
 
   const loadMemory = useCallback(

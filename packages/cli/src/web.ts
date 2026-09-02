@@ -48,7 +48,8 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
   const stderr = options.stderr ?? process.stderr;
   const attach = options.attachOrCreateHost ?? attachOrCreateHost;
   const generateBridgeSecret = options.generateBridgeSecret ?? defaultGenerateCapability;
-  const developmentDataDirectory = options.bridgeSecretInput?.env.OCTANT_DATA_DIR;
+  const developmentDataDirectory =
+    options.bridgeSecretInput?.env.OCTANT_DATA_DIR ?? process.env.OCTANT_DATA_DIR;
   const bridgeSecretInput =
     options.bridgeSecretInput ?? defaultBridgeSecretInput(developmentDataDirectory);
 

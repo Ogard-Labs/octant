@@ -6,6 +6,14 @@ const threadId = decodeWorkThreadId("10000000-0000-4000-8000-000000000101");
 const requestId = decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
 
 describe("WorkTurnLiveStore", () => {
+  it("rejects replay bounds that could loop forever or grow without limit", () => {
+    for (const maxFramesPerThread of [0, -1, 1.5, Number.POSITIVE_INFINITY]) {
+      expect(() => new WorkTurnLiveStore({ maxFramesPerThread })).toThrow(
+        "Work turn replay frame bound must be a positive safe integer.",
+      );
+    }
+  });
+
   it("publishes cursor-ordered response deltas without polling", async () => {
     const store = new WorkTurnLiveStore();
     const controller = new AbortController();

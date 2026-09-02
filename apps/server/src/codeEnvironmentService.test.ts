@@ -169,6 +169,48 @@ describe("CodeEnvironmentService", () => {
     expect(git.observe).toHaveBeenCalledOnce();
   });
 
+  it("keeps a slow Git observation coalesced after the completed-result TTL would have elapsed", async () => {
+    let now = 0;
+    const pending = deferred<{
+      readonly status: "ready";
+      readonly repositoryRoot: string;
+      readonly worktreeRoot: string;
+      readonly branch: { readonly kind: "named"; readonly name: string };
+      readonly changes: "clean";
+    }>();
+    const git = { observe: vi.fn(() => pending.promise) };
+    const code = {
+      readThread: vi.fn(() => ({
+        id: codeThreadId,
+        projectId: codeProjectId,
+        checkoutId: codeCheckoutId,
+      })),
+      readCheckout: vi.fn(() => ({
+        id: codeCheckoutId,
+        kind: "managed-worktree",
+        availability: "available",
+      })),
+      resolveCheckoutRoot: vi.fn().mockResolvedValue("/repo/slow"),
+    };
+    const service = serviceFixture(git, code, { cacheMs: 5, now: () => now });
+
+    const first = service.observeThread(windowId, codeProjectId, codeThreadId);
+    await vi.waitFor(() => expect(git.observe).toHaveBeenCalledOnce());
+    now = 10;
+    const second = service.observeThread(windowId, codeProjectId, codeThreadId);
+    expect(git.observe).toHaveBeenCalledOnce();
+    pending.resolve({
+      status: "ready",
+      repositoryRoot: "/repo",
+      worktreeRoot: "/repo/slow",
+      branch: { kind: "named", name: "feature/slow" },
+      changes: "clean",
+    });
+
+    await Promise.all([first, second]);
+    expect(git.observe).toHaveBeenCalledOnce();
+  });
+
   it("does not let one canceled caller poison a shared Git observation", async () => {
     const pending = deferred<{
       readonly status: "ready";
@@ -327,7 +369,11 @@ function serviceFixture(
     readonly readCheckout: ReturnType<typeof vi.fn>;
     readonly resolveCheckoutRoot: ReturnType<typeof vi.fn>;
   },
-  cache?: { readonly maxCachedRoots?: number },
+  cache?: {
+    readonly cacheMs?: number;
+    readonly maxCachedRoots?: number;
+    readonly now?: () => number;
+  },
 ) {
   return new CodeEnvironmentService({
     projects: { bootstrap: vi.fn().mockResolvedValue(bootstrapFixture()) },
@@ -335,6 +381,8 @@ function serviceFixture(
     clock: () => observedAt,
     ...(code === undefined ? {} : { code: code as never }),
     ...(cache?.maxCachedRoots === undefined ? {} : { maxCachedRoots: cache.maxCachedRoots }),
+    ...(cache?.cacheMs === undefined ? {} : { cacheMs: cache.cacheMs }),
+    ...(cache?.now === undefined ? {} : { now: cache.now }),
   });
 }
 

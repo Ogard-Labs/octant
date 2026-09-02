@@ -42,6 +42,9 @@ snapshot and cursor contract rather than treating a stream as durable state.
   the primary transcript or an explicit opening. Recent Git observations are
   coalesced briefly, explicit refresh bypasses that cache, and independent Git
   facts are observed concurrently.
+- Safety-critical child-run stop and acknowledgement controls may retain state
+  already read for an open thread while its transcript reconnects. They do not
+  start a new child-run read before the transcript is display-ready.
 - Long Work and Code transcripts are windowed. Idle activity polling backs off
   and hidden documents do not poll.
 - The host records separate latency classes for navigation, thread snapshots,

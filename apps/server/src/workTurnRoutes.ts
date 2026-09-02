@@ -220,6 +220,7 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
         const threadId = decodeWorkThreadId(decodeURIComponent(encodedThreadId));
         const afterSequence = Number(url.searchParams.get("afterSequence"));
         if (
+          !url.searchParams.has("afterSequence") ||
           url.searchParams.size !== 1 ||
           !Number.isSafeInteger(afterSequence) ||
           afterSequence < 0

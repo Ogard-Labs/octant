@@ -15,6 +15,13 @@ interface ScheduledRead {
   readonly reject: (error: unknown) => void;
 }
 
+interface BufferedResponse {
+  readonly body: ArrayBuffer;
+  readonly headers: Headers;
+  readonly status: number;
+  readonly statusText: string;
+}
+
 const COORDINATED_POST_READ_PATHS = new Set([
   "/api/code/board",
   "/api/code/evidence/batch",
@@ -48,7 +55,7 @@ export function createRequestCoordinator(
   }
   const foreground: ScheduledRead[] = [];
   const background: ScheduledRead[] = [];
-  const inflight = new Map<string, Promise<Response>>();
+  const inflight = new Map<string, Promise<BufferedResponse>>();
   let active = 0;
   let activeBackground = 0;
   let renewal: Promise<void> | undefined;
@@ -113,7 +120,7 @@ export function createRequestCoordinator(
     const key = readKey(method, input, init);
     let shared = inflight.get(key);
     if (shared === undefined) {
-      shared = schedule(input, withoutSignal(init), priority);
+      shared = schedule(input, withoutSignal(init), priority).then(bufferResponse);
       inflight.set(key, shared);
       void shared
         .finally(() => {
@@ -122,8 +129,26 @@ export function createRequestCoordinator(
         .catch(() => undefined);
     }
     const response = await waitForCaller(shared, init?.signal);
-    return response.clone();
+    return responseFromBuffer(response);
   };
+}
+
+async function bufferResponse(response: Response): Promise<BufferedResponse> {
+  return {
+    body: await response.arrayBuffer(),
+    headers: new Headers(response.headers),
+    status: response.status,
+    statusText: response.statusText,
+  };
+}
+
+function responseFromBuffer(response: BufferedResponse): Response {
+  const body = response.body.byteLength === 0 ? null : response.body.slice(0);
+  return new Response(body, {
+    headers: new Headers(response.headers),
+    status: response.status,
+    statusText: response.statusText,
+  });
 }
 
 function callUnauthorized(callback: () => Promise<void>): Promise<void> {
@@ -186,10 +211,10 @@ function isBackgroundRead(url: URL): boolean {
   );
 }
 
-async function waitForCaller(
-  response: Promise<Response>,
+async function waitForCaller<T>(
+  response: Promise<T>,
   signal: AbortSignal | null | undefined,
-): Promise<Response> {
+): Promise<T> {
   if (signal === undefined || signal === null) return response;
   if (signal.aborted) throw abortError();
   return new Promise((resolve, reject) => {

@@ -84,7 +84,8 @@ async function request<T>(
   let response: Response;
   try {
     response = await fetch(url, init);
-  } catch {
+  } catch (error) {
+    if (init.signal?.aborted === true || isAbortError(error)) throw error;
     throw unavailable("Octant Work request service is unavailable.");
   }
   let body: unknown;
@@ -106,6 +107,10 @@ async function request<T>(
   } catch {
     throw malformedResponse();
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function validateLoopbackBaseUrl(baseUrl: string): void {

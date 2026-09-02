@@ -135,14 +135,18 @@ export function useWorkThreadNavigation(
     )
       return;
     let cancelled = false;
+    const request = ++requestGeneration.current;
     void clientRef.current
       .navigation()
       .then((next) => {
-        if (!cancelled && mounted.current) setBootstrap(next);
+        if (!cancelled && mounted.current && request === requestGeneration.current) {
+          setBootstrap(next);
+        }
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
+      if (request === requestGeneration.current) requestGeneration.current += 1;
     };
   }, [options.changeRevision]);
 

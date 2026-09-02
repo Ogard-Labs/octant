@@ -179,10 +179,9 @@ describe("Release artifact inspection — remote route policy excludes developme
   it("remote route policy never matches local-only bootstrap routes", () => {
     const localOnlyRoutes = [
       "/api/shell/local-session",
+      "/api/shell/launch-session",
       "/api/desktop/bridge",
       "/api/desktop/bridge/exchange",
-      "/api/launch-session",
-      "/api/launch-session/exchange",
     ];
     for (const path of localOnlyRoutes) {
       const decision = policy.inspect(

@@ -655,7 +655,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             composerDraft.clear();
           }
         }
-        setTurns((current) => [...current, started.turn]);
+        setTurns((current) =>
+          current.some((turn) => String(turn.requestId) === String(started.turn.requestId))
+            ? current
+            : [...current, started.turn],
+        );
         textareaRef.current?.focus();
         return true;
       } catch {

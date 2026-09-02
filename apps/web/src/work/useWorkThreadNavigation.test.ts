@@ -181,4 +181,67 @@ describe("useWorkThreadNavigation", () => {
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
     unmount();
   });
+
+  it("does not let a slower timer read overwrite a newer Machine revision", async () => {
+    const timerRead = deferred<{
+      readonly threads: ReadonlyArray<ReturnType<typeof workThread>>;
+      readonly runtime: [];
+    }>();
+    const revisionRead = deferred<{
+      readonly threads: ReadonlyArray<ReturnType<typeof workThread>>;
+      readonly runtime: [];
+    }>();
+    const navigation = vi
+      .fn()
+      .mockImplementationOnce(() => timerRead.promise)
+      .mockImplementationOnce(() => revisionRead.promise);
+    const { result, rerender, unmount } = renderHook(
+      ({ changeRevision }) =>
+        useWorkThreadNavigation(
+          {
+            bootstrap: async () => decodeWorkThreadBootstrap({ threads: [workThread()] }),
+            navigation,
+          },
+          { changeRevision, navigationRefreshMs: 10 },
+        ),
+      { initialProps: { changeRevision: 0 } },
+    );
+    await waitFor(() => expect(navigation).toHaveBeenCalledOnce());
+
+    rerender({ changeRevision: 1 });
+    await waitFor(() => expect(navigation).toHaveBeenCalledTimes(2));
+    revisionRead.resolve({
+      threads: [
+        decodeWorkThread({
+          ...workThread(),
+          title: "Newest title",
+          updatedAt: "2026-08-02T20:00:00.000Z",
+        }),
+      ],
+      runtime: [],
+    });
+    await waitFor(() => expect(result.current.navigation[0]?.title).toBe("Newest title"));
+    timerRead.resolve({
+      threads: [
+        decodeWorkThread({
+          ...workThread(),
+          title: "Older title",
+          updatedAt: "2026-08-01T20:30:00.000Z",
+        }),
+      ],
+      runtime: [],
+    });
+    await act(async () => Promise.resolve());
+
+    expect(result.current.navigation[0]?.title).toBe("Newest title");
+    unmount();
+  });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}

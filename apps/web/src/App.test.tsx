@@ -392,6 +392,18 @@ describe("App", () => {
     }
   });
 
+  it("fails closed before rendering the shell when an injected capability is invalid", () => {
+    render(
+      <App
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectWindowCapability="invalid"
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Project authority is unavailable" })).toBeVisible();
+    expect(screen.queryByRole("main", { name: "Octant workspace" })).not.toBeInTheDocument();
+  });
+
   it("renders independent authoritative Chat sessions in every visible split pane", async () => {
     const chatApi = chats();
 

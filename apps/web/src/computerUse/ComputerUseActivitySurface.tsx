@@ -11,8 +11,14 @@ export function ComputerUseActivitySurface(props: {
   readonly pollIntervalMs?: number;
 }) {
   const [sessions, setSessions] = useState<ReadonlyArray<ComputerUseSessionView>>([]);
+  const backgroundSessions = sessions.filter((session) => {
+    const threadId = String(session.threadId);
+    const excludedSessionIds = props.excludedSessions?.get(threadId);
+    if (excludedSessionIds === undefined) return true;
+    return isNonterminalSession(session) && !excludedSessionIds.has(String(session.sessionId));
+  });
   const pollIntervalMs =
-    props.pollIntervalMs ?? (sessions.some(isNonterminalSession) ? 1_000 : 5_000);
+    props.pollIntervalMs ?? (backgroundSessions.some(isNonterminalSession) ? 1_000 : 5_000);
   useEffect(() => {
     let active = true;
     let inFlight = false;
@@ -38,12 +44,6 @@ export function ComputerUseActivitySurface(props: {
     };
   }, [pollIntervalMs, props.client]);
 
-  const backgroundSessions = sessions.filter((session) => {
-    const threadId = String(session.threadId);
-    const excludedSessionIds = props.excludedSessions?.get(threadId);
-    if (excludedSessionIds === undefined) return true;
-    return isNonterminalSession(session) && !excludedSessionIds.has(String(session.sessionId));
-  });
   if (backgroundSessions.length === 0) return null;
   return (
     <aside aria-label="Background computer use" className="computer-use-activity">

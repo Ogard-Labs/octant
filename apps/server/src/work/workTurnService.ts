@@ -550,6 +550,13 @@ export class WorkTurnService {
       ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
       ...(input.context.length === 0 ? {} : { context: input.context }),
       onDelta: (response) => {
+        const projected = this.#projection.lookup(input.command.requestId);
+        if (
+          input.signal.aborted ||
+          (projected?.status !== "accepted" && projected?.status !== "running")
+        ) {
+          return;
+        }
         const previous = this.#liveResponses.get(String(input.command.requestId)) ?? "";
         this.#liveResponses.set(String(input.command.requestId), response);
         const delta = response.startsWith(previous) ? response.slice(previous.length) : response;

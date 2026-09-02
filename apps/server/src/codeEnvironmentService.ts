@@ -42,7 +42,10 @@ const DEFAULT_MAX_CACHED_ROOTS = 64;
 export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
   readonly #gitObservations = new Map<
     string,
-    { readonly expiresAt: number; readonly observation: ReturnType<GitEnvironmentPort["observe"]> }
+    {
+      readonly expiresAt: number | undefined;
+      readonly observation: ReturnType<GitEnvironmentPort["observe"]>;
+    }
   >();
   readonly #now: () => number;
   readonly #cacheMs: number;
@@ -190,10 +193,18 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
   #observeGit(root: string, fresh = false): ReturnType<GitEnvironmentPort["observe"]> {
     const now = this.#now();
     for (const [cachedRoot, entry] of this.#gitObservations) {
-      if (entry.expiresAt <= now) this.#gitObservations.delete(cachedRoot);
+      if (entry.expiresAt !== undefined && entry.expiresAt <= now) {
+        this.#gitObservations.delete(cachedRoot);
+      }
     }
     const cached = this.#gitObservations.get(root);
-    if (!fresh && cached !== undefined && cached.expiresAt > now) return cached.observation;
+    if (
+      !fresh &&
+      cached !== undefined &&
+      (cached.expiresAt === undefined || cached.expiresAt > now)
+    ) {
+      return cached.observation;
+    }
     this.#gitObservations.delete(root);
     while (this.#gitObservations.size >= this.#maxCachedRoots) {
       const oldestRoot = this.#gitObservations.keys().next().value;
@@ -204,12 +215,22 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
     // happened to ask first. Callers may abandon their own wait without
     // canceling the shared Git probe for every other tab.
     const observation = this.options.git.observe(root);
-    this.#gitObservations.set(root, { expiresAt: now + this.#cacheMs, observation });
-    void observation.catch(() => {
-      if (this.#gitObservations.get(root)?.observation === observation) {
-        this.#gitObservations.delete(root);
-      }
-    });
+    this.#gitObservations.set(root, { expiresAt: undefined, observation });
+    void observation.then(
+      () => {
+        if (this.#gitObservations.get(root)?.observation === observation) {
+          this.#gitObservations.set(root, {
+            expiresAt: this.#now() + this.#cacheMs,
+            observation,
+          });
+        }
+      },
+      () => {
+        if (this.#gitObservations.get(root)?.observation === observation) {
+          this.#gitObservations.delete(root);
+        }
+      },
+    );
     return observation;
   }
 }

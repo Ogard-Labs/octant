@@ -152,6 +152,41 @@ describe("runWebCommand", () => {
     );
   });
 
+  it("keeps an explicit process data directory visible in development mode", async () => {
+    const previous = process.env.OCTANT_DATA_DIR;
+    const directory = "/tmp/octant-explicit-development-data";
+    process.env.OCTANT_DATA_DIR = directory;
+    try {
+      const attachOrCreateHost = vi.fn(async () => ({
+        kind: "attached" as const,
+        url: new URL("http://127.0.0.1:13773"),
+        instanceId: "instance-1",
+        version: "0.0.0-dev",
+      }));
+      const stdout = { write: vi.fn((chunk: string) => chunk.length > 0) };
+
+      await runWebCommand(
+        baseOptions({
+          attachOrCreateHost,
+          dev: true,
+          stdout,
+        }),
+      );
+
+      expect(attachOrCreateHost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          environment: expect.objectContaining({ OCTANT_DATA_DIR: directory }),
+        }),
+      );
+      expect(stdout.write).toHaveBeenCalledWith(
+        `Octant isolated development history persists in ${directory}.\n`,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.OCTANT_DATA_DIR;
+      else process.env.OCTANT_DATA_DIR = previous;
+    }
+  });
+
   it("fails closed when the host is disabled", async () => {
     const attachOrCreateHost = vi.fn(async () => ({
       kind: "disabled" as const,

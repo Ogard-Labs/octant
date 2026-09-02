@@ -5,6 +5,7 @@ import {
   GlobalSequence,
   MAX_CODE_OPERATION_EVIDENCE_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
+  MAX_CODE_EVIDENCE_BATCH_ITEMS,
   MAX_CODE_ATTACHMENT_BYTES,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   decodeCodeAttachmentId,
@@ -603,15 +604,27 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             }
             if (references.size > 0) {
               try {
-                const contents = await dependencies.service.readOperationContents(
-                  authenticatedWindowId,
-                  { threadId, items: [...references.values()] },
+                const items = [...references.values()];
+                const batches = await Promise.all(
+                  Array.from(
+                    { length: Math.ceil(items.length / MAX_CODE_EVIDENCE_BATCH_ITEMS) },
+                    (_, index) =>
+                      dependencies.service.readOperationContents?.(authenticatedWindowId, {
+                        threadId,
+                        items: items.slice(
+                          index * MAX_CODE_EVIDENCE_BATCH_ITEMS,
+                          (index + 1) * MAX_CODE_EVIDENCE_BATCH_ITEMS,
+                        ),
+                      }),
+                  ),
                 );
                 const text = new Map(
-                  contents.items.map((item) => [
-                    `${item.operationId}:${item.contentId}`,
-                    item.text,
-                  ]),
+                  batches.flatMap((contents) =>
+                    (contents?.items ?? []).map((item) => [
+                      `${item.operationId}:${item.contentId}`,
+                      item.text,
+                    ]),
+                  ),
                 );
                 streamFrames = frames.map((frame) => {
                   const displayText =

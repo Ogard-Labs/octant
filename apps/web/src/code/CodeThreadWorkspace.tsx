@@ -346,9 +346,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }
 
   const childRunStatus =
-    props.agentRunClient === undefined || !displayReady ? undefined : (
+    props.agentRunClient === undefined ? undefined : (
       <ThreadChildRunStatusSlot
         client={props.agentRunClient}
+        enabled={displayReady}
         {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
         threadId={String(props.threadId)}
       />

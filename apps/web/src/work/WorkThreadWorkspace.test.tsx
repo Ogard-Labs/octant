@@ -427,52 +427,61 @@ describe("WorkThreadWorkspace", () => {
   });
 
   it("paints live Work text from the stream without waiting for transcript polling", async () => {
-    const frame = deferred<{
-      readonly kind: "response-delta";
-      readonly sequence: 1;
-      readonly threadId: typeof threadId;
-      readonly requestId: ReturnType<typeof workTurn>["requestId"];
-      readonly text: "Immediate text";
-    }>();
-    const running = workTurn({
-      status: "running",
-      response: undefined,
-      transcript: [
-        { role: "user", text: "Start" },
-        { role: "assistant", text: "", status: "running" },
-      ],
-    });
-    const transcript = vi.fn(async () => ({ threadId, turns: [running], liveCursor: 0 }));
-    const list = vi.fn(async () => ({ requests: [] }));
-    const subscribe = vi.fn(async function* () {
-      yield await frame.promise;
-    });
+    vi.useFakeTimers();
+    try {
+      const frame = deferred<{
+        readonly kind: "response-delta";
+        readonly sequence: 1;
+        readonly threadId: typeof threadId;
+        readonly requestId: ReturnType<typeof workTurn>["requestId"];
+        readonly text: "Immediate text";
+      }>();
+      const running = workTurn({
+        status: "running",
+        response: undefined,
+        transcript: [
+          { role: "user", text: "Start" },
+          { role: "assistant", text: "", status: "running" },
+        ],
+      });
+      const transcript = vi.fn(async () => ({ threadId, turns: [running], liveCursor: 0 }));
+      const list = vi.fn(async () => ({ requests: [] }));
+      const subscribe = vi.fn(async function* () {
+        yield await frame.promise;
+      });
 
-    render(
-      <WorkThreadWorkspace
-        changeRevision={0}
-        initialThread={workThread()}
-        requestClient={{ list } as never}
-        threadClient={{ execute: vi.fn() } as never}
-        threadId={threadId}
-        title="Draft brief"
-        turnClient={{ transcript, subscribe } as never}
-      />,
-    );
+      render(
+        <WorkThreadWorkspace
+          changeRevision={0}
+          initialThread={workThread()}
+          requestClient={{ list } as never}
+          threadClient={{ execute: vi.fn() } as never}
+          threadId={threadId}
+          title="Draft brief"
+          turnClient={{ transcript, subscribe } as never}
+        />,
+      );
 
-    expect(await screen.findByText("Working…")).toBeInTheDocument();
-    frame.resolve({
-      kind: "response-delta",
-      sequence: 1,
-      threadId,
-      requestId: running.requestId,
-      text: "Immediate text",
-    });
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByText("Working…")).toBeInTheDocument();
+      await act(async () => {
+        frame.resolve({
+          kind: "response-delta",
+          sequence: 1,
+          threadId,
+          requestId: running.requestId,
+          text: "Immediate text",
+        });
+        await Promise.resolve();
+      });
 
-    expect(await screen.findByText("Immediate text")).toBeInTheDocument();
-    await new Promise((resolve) => setTimeout(resolve, 1_100));
-    expect(transcript).toHaveBeenCalledOnce();
-    expect(list).toHaveBeenCalledOnce();
+      expect(screen.getByText("Immediate text")).toBeInTheDocument();
+      await act(async () => vi.advanceTimersByTimeAsync(1_100));
+      expect(transcript).toHaveBeenCalledOnce();
+      expect(list).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("retries the initial Work snapshot before opening the live stream", async () => {
@@ -512,6 +521,7 @@ describe("WorkThreadWorkspace", () => {
   });
 
   it("pauses Work snapshot recovery while the document is hidden", async () => {
+    vi.useFakeTimers();
     const originalVisibility = document.visibilityState;
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -537,9 +547,7 @@ describe("WorkThreadWorkspace", () => {
         />,
       );
 
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 350));
-      });
+      await act(async () => vi.advanceTimersByTimeAsync(350));
       expect(transcript).toHaveBeenCalledOnce();
 
       await act(async () => {
@@ -548,37 +556,43 @@ describe("WorkThreadWorkspace", () => {
           value: "visible",
         });
         document.dispatchEvent(new Event("visibilitychange"));
+        await vi.advanceTimersByTimeAsync(250);
       });
-      expect(await screen.findByText("Visible recovery")).toBeVisible();
+      expect(screen.getByText("Visible recovery")).toBeVisible();
       expect(transcript).toHaveBeenCalledTimes(2);
     } finally {
       Object.defineProperty(document, "visibilityState", {
         configurable: true,
         value: originalVisibility,
       });
+      vi.useRealTimers();
     }
   });
 
   it("does not retry a Work snapshot the host permanently refuses", async () => {
-    const transcript = vi.fn(async () => {
-      throw new WorkTurnClientFailure("Work transcript is unauthorized.", 401);
-    });
-    render(
-      <WorkThreadWorkspace
-        changeRevision={0}
-        initialThread={workThread()}
-        threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
-        threadId={threadId}
-        title="Draft brief"
-        turnClient={{ transcript } as never}
-      />,
-    );
+    vi.useFakeTimers();
+    try {
+      const transcript = vi.fn(async () => {
+        throw new WorkTurnClientFailure("Work transcript is unauthorized.", 401);
+      });
+      render(
+        <WorkThreadWorkspace
+          changeRevision={0}
+          initialThread={workThread()}
+          threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+          threadId={threadId}
+          title="Draft brief"
+          turnClient={{ transcript } as never}
+        />,
+      );
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Work thread state could not be loaded.",
-    );
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    expect(transcript).toHaveBeenCalledOnce();
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByRole("alert")).toHaveTextContent("Work thread state could not be loaded.");
+      await act(async () => vi.advanceTimersByTimeAsync(350));
+      expect(transcript).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps a slow initial transcript read from overwriting a newer polled result", async () => {
@@ -723,35 +737,42 @@ describe("WorkThreadWorkspace", () => {
   });
 
   it("does not commit again when transcript polling returns the same data", async () => {
-    const turns = [workTurn()];
-    const transcript = vi.fn(async () => ({ threadId, turns }));
-    const turnClient = {
-      transcript,
-    };
-    const threadClient = {
-      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
-      execute: vi.fn(),
-    } as unknown as WorkThreadClient;
-    const commits: Array<string> = [];
+    vi.useFakeTimers();
+    try {
+      const turns = [workTurn()];
+      const transcript = vi.fn(async () => ({ threadId, turns }));
+      const turnClient = {
+        transcript,
+      };
+      const threadClient = {
+        bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+        execute: vi.fn(),
+      } as unknown as WorkThreadClient;
+      const commits: Array<string> = [];
 
-    render(
-      <Profiler id="work-thread-workspace" onRender={(_, phase) => commits.push(phase)}>
-        <WorkThreadWorkspace
-          threadClient={threadClient}
-          threadId={threadId}
-          title="Draft brief"
-          turnClient={turnClient as never}
-        />
-      </Profiler>,
-    );
+      render(
+        <Profiler id="work-thread-workspace" onRender={(_, phase) => commits.push(phase)}>
+          <WorkThreadWorkspace
+            threadClient={threadClient}
+            threadId={threadId}
+            title="Draft brief"
+            turnClient={turnClient as never}
+          />
+        </Profiler>,
+      );
 
-    await waitFor(() => expect(transcript.mock.calls.length).toBeGreaterThan(2), {
-      timeout: 2_500,
-    });
-    const commitsAfterPolling = commits.length;
-    await new Promise((resolve) => setTimeout(resolve, 1_100));
+      await act(async () => vi.advanceTimersByTimeAsync(3_100));
+      expect(transcript.mock.calls.length).toBeGreaterThan(2);
+      // Let the virtualized transcript finish its first timer-driven measure;
+      // the assertion below isolates later identical polling responses.
+      await act(async () => vi.advanceTimersByTimeAsync(1_100));
+      const commitsAfterPolling = commits.length;
+      await act(async () => vi.advanceTimersByTimeAsync(1_100));
 
-    expect(commits.length).toBe(commitsAfterPolling);
+      expect(commits.length).toBe(commitsAfterPolling);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("sends a follow-up written while a turn is running once that turn completes", async () => {
@@ -805,6 +826,61 @@ describe("WorkThreadWorkspace", () => {
         prompt: "Next instruction",
       }),
     );
+  });
+
+  it("does not duplicate a turn that settles before the start response arrives", async () => {
+    const user = userEvent.setup();
+    const settledTurn = workTurn({
+      requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      turnId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      status: "completed",
+      prompt: "Quick turn",
+      response: "Done",
+      transcript: [
+        { role: "user", text: "Quick turn" },
+        { role: "assistant", text: "Done", status: "completed" },
+      ],
+    });
+    const started = deferred<{
+      readonly kind: "accepted";
+      readonly turn: ReturnType<typeof workTurn>;
+    }>();
+    const settlement = deferred<{
+      readonly kind: "turn-settled";
+      readonly sequence: 1;
+      readonly threadId: typeof threadId;
+      readonly turn: ReturnType<typeof workTurn>;
+    }>();
+    const subscribe = vi.fn(async function* () {
+      yield await settlement.promise;
+    });
+    const startFirstTurn = vi.fn(() => started.promise);
+    render(
+      <WorkThreadWorkspace
+        changeRevision={0}
+        hostId={"local" as never}
+        initialThread={workThread()}
+        threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={
+          {
+            transcript: vi.fn(async () => ({ threadId, turns: [], liveCursor: 0 })),
+            subscribe,
+            startFirstTurn,
+          } as never
+        }
+      />,
+    );
+    await waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
+
+    await user.type(screen.getByLabelText("Work prompt"), "Quick turn");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce());
+    settlement.resolve({ kind: "turn-settled", sequence: 1, threadId, turn: settledTurn });
+    await waitFor(() => expect(screen.getByText("Done")).toBeVisible());
+    started.resolve({ kind: "accepted", turn: { ...settledTurn, status: "accepted" } });
+    await waitFor(() => expect(screen.getAllByText("Quick turn")).toHaveLength(1));
   });
 
   it("sends a follow-up written mid-turn even after that turn is cancelled", async () => {
@@ -1528,9 +1604,11 @@ describe("WorkThreadWorkspace", () => {
       bootstrap: vi.fn(async () => ({ threads: [] })),
       execute: vi.fn(),
     } as unknown as WorkThreadClient;
+    const onDisplayReadyChange = vi.fn();
     render(
       <WorkThreadWorkspace
         draftStore={store}
+        onDisplayReadyChange={onDisplayReadyChange}
         providerGroups={[providerGroup()]}
         threadClient={missing}
         threadId={threadId}
@@ -1538,6 +1616,7 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
     expect(await screen.findByText("This Work thread is no longer available.")).toBeInTheDocument();
+    expect(onDisplayReadyChange).toHaveBeenLastCalledWith(false);
     expect(store.read("work", String(threadId))).toBeUndefined();
   });
 

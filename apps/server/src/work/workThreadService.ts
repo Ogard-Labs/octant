@@ -210,7 +210,11 @@ export class WorkThreadService {
     const thread = this.#projection.read(threadId);
     if (thread === undefined) return undefined;
     const project = this.#persistence.readProject(thread.projectId);
-    return project?.type === "work" && project.lifecycle === "active" ? thread : undefined;
+    return thread.lifecycle === "active" &&
+      project?.type === "work" &&
+      project.lifecycle === "active"
+      ? thread
+      : undefined;
   }
 
   /**

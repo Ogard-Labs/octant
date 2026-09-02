@@ -37,7 +37,11 @@ export class WorkTurnLiveStore {
   #closed = false;
 
   constructor(options: { readonly maxFramesPerThread?: number } = {}) {
-    this.#maxFramesPerThread = options.maxFramesPerThread ?? DEFAULT_MAX_FRAMES_PER_THREAD;
+    const maxFramesPerThread = options.maxFramesPerThread ?? DEFAULT_MAX_FRAMES_PER_THREAD;
+    if (!Number.isSafeInteger(maxFramesPerThread) || maxFramesPerThread < 1) {
+      throw new Error("Work turn replay frame bound must be a positive safe integer.");
+    }
+    this.#maxFramesPerThread = maxFramesPerThread;
   }
 
   head(threadId: WorkThreadId): number {
