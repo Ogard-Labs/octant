@@ -220,7 +220,7 @@ describe("App", () => {
         name: /Controller foundation/,
       }),
     ).toBeVisible();
-    expect(codeApi.thread).toHaveBeenCalledWith(codeThreadId);
+    expect(codeApi.thread).toHaveBeenCalledWith(codeThreadId, expect.any(AbortSignal));
     expect(codeApi.subscribe).toHaveBeenCalledWith(codeThreadId, 0, expect.any(AbortSignal));
   });
 

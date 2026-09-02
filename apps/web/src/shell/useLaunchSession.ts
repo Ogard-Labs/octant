@@ -1,6 +1,6 @@
 import { isCanonicalLaunchSessionToken } from "@octant/contracts/launch-session";
 import { decodeWindowId, type WindowId } from "@octant/contracts/shell";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type LaunchSessionStatus = "idle" | "loading" | "ready" | "failed";
 
@@ -10,6 +10,7 @@ export interface LaunchSessionResult {
   readonly windowId?: WindowId;
   readonly failureMessage?: string;
   readonly authentication?: "launch-token" | "local-session";
+  readonly renew?: () => Promise<void>;
 }
 
 export interface UseLaunchSessionOptions {
@@ -18,11 +19,14 @@ export interface UseLaunchSessionOptions {
   readonly href?: string;
   readonly onExchanged?: () => void;
   readonly storage?: LaunchSessionStorage;
+  /** Stable for one browser tab; copied session storage must not merge two tabs. */
+  readonly clientContextId?: string;
 }
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 const STORAGE_KEY_PREFIX = "octant:launch-session:";
 const LAUNCH_REQUEST_TIMEOUT_MS = 15_000;
+const WINDOW_NAME_PREFIX = "octant-client-context:";
 const launchExchanges = new Map<
   string,
   Promise<{ readonly status: number; readonly body: unknown }>
@@ -45,6 +49,7 @@ function defaultStorage(): LaunchSessionStorage | undefined {
 function readStoredAuthority(
   storage: LaunchSessionStorage | undefined,
   serverUrl: string,
+  clientContextId: string,
 ):
   | {
       capability: string;
@@ -60,10 +65,12 @@ function readStoredAuthority(
       capability?: string;
       windowId?: string;
       authentication?: string;
+      clientContextId?: string;
     };
     const capability = parsed.capability;
     if (capability === undefined || !isCanonicalLaunchSessionToken(capability)) return undefined;
     if (typeof parsed.windowId !== "string") return undefined;
+    if (parsed.clientContextId !== clientContextId) return undefined;
     try {
       return {
         capability,
@@ -85,16 +92,28 @@ function writeStoredAuthority(
   capability: string,
   windowId: WindowId,
   authentication: "launch-token" | "local-session",
+  clientContextId: string,
 ): void {
   if (storage === undefined) return;
   try {
     storage.setItem(
       STORAGE_KEY_PREFIX + serverUrl,
-      JSON.stringify({ capability, windowId, authentication }),
+      JSON.stringify({ capability, windowId, authentication, clientContextId }),
     );
   } catch {
     // best-effort persistence
   }
+}
+
+function defaultClientContextId(): string {
+  const current = window.name;
+  if (current.startsWith(WINDOW_NAME_PREFIX)) {
+    const value = current.slice(WINDOW_NAME_PREFIX.length);
+    if (/^[0-9a-f-]{36}$/i.test(value)) return value;
+  }
+  const created = globalThis.crypto.randomUUID();
+  window.name = `${WINDOW_NAME_PREFIX}${created}`;
+  return created;
 }
 
 export function readLaunchTokenFromHref(href: string): string | undefined {
@@ -180,6 +199,58 @@ function sharedExchange(
 
 export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessionResult {
   const [result, setResult] = useState<LaunchSessionResult>({ status: "idle" });
+  const [defaultContextId] = useState(defaultClientContextId);
+  const clientContextId = options.clientContextId ?? defaultContextId;
+  const renewalRef = useRef<Promise<void> | undefined>(undefined);
+
+  const renew = useCallback((): Promise<void> => {
+    const existing = renewalRef.current;
+    if (existing !== undefined) return existing;
+    const serverUrl = options.serverUrl;
+    if (serverUrl === undefined)
+      return Promise.reject(new Error("Local Machine URL is unavailable."));
+    const storage = options.storage ?? defaultStorage();
+    const fetch = options.fetch ?? globalThis.fetch;
+    const stored = readStoredAuthority(storage, serverUrl, clientContextId);
+    const reusable = stored?.authentication === "local-session" ? stored : undefined;
+    const renewal = (async () => {
+      const response = await exchangeLocalSession(fetch, serverUrl, reusable);
+      if (response.status !== 200) throw new Error("Local Machine access is unavailable.");
+      const body = response.body as {
+        windowId: string;
+        capability: string;
+        authentication?: string;
+      };
+      if (
+        !isCanonicalLaunchSessionToken(body.capability) ||
+        body.authentication !== "local-session"
+      ) {
+        throw new Error("Local Machine response is invalid.");
+      }
+      const windowId = decodeWindowId(body.windowId);
+      writeStoredAuthority(
+        storage,
+        serverUrl,
+        body.capability,
+        windowId,
+        "local-session",
+        clientContextId,
+      );
+      setResult({
+        status: "ready",
+        capability: body.capability,
+        windowId,
+        authentication: "local-session",
+      });
+    })();
+    renewalRef.current = renewal;
+    void renewal
+      .finally(() => {
+        if (renewalRef.current === renewal) renewalRef.current = undefined;
+      })
+      .catch(() => undefined);
+    return renewal;
+  }, [clientContextId, options.fetch, options.serverUrl, options.storage]);
 
   useEffect(() => {
     const href = options.href ?? window.location.href;
@@ -191,7 +262,7 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
       return;
     }
     if (launchToken === undefined) {
-      const stored = readStoredAuthority(storage, serverUrl);
+      const stored = readStoredAuthority(storage, serverUrl, clientContextId);
       const fetch = options.fetch ?? globalThis.fetch;
       let cancelled = false;
       setResult({ status: "loading" });
@@ -226,7 +297,14 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
             return;
           }
           const windowId = decodeWindowId(body.windowId);
-          writeStoredAuthority(storage, serverUrl, body.capability, windowId, "local-session");
+          writeStoredAuthority(
+            storage,
+            serverUrl,
+            body.capability,
+            windowId,
+            "local-session",
+            clientContextId,
+          );
           setResult({
             status: "ready",
             capability: body.capability,
@@ -273,7 +351,14 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
           setResult({ status: "failed", failureMessage: "Octant launch session is invalid." });
           return;
         }
-        writeStoredAuthority(storage, serverUrl, body.capability, windowId, "launch-token");
+        writeStoredAuthority(
+          storage,
+          serverUrl,
+          body.capability,
+          windowId,
+          "launch-token",
+          clientContextId,
+        );
         setResult({
           status: "ready",
           capability: body.capability,
@@ -293,7 +378,7 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
     return () => {
       cancelled = true;
     };
-  }, [options.serverUrl, options.href, options.storage]);
+  }, [clientContextId, options.serverUrl, options.href, options.storage]);
 
-  return result;
+  return result.authentication === "local-session" ? { ...result, renew } : result;
 }

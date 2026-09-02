@@ -14,6 +14,47 @@ const otherThreadId = "20000000-0000-4000-8000-000000000002";
 const contextId = "30000000-0000-4000-8000-000000000001";
 
 describe("ThreadActivityPictureInPicture", () => {
+  it("defers Browser and Computer Use probes until the transcript is display-ready", async () => {
+    const browser = { inspectThread: vi.fn() } as unknown as BrowserAutomationClient;
+    const computerUse = { list: vi.fn() } as unknown as ComputerUseClient;
+    const { rerender } = render(
+      <ThreadActivityPictureInPicture
+        browserClient={browser}
+        computerUseClient={computerUse}
+        enabled={false}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>,
+    );
+
+    expect(screen.getByText("Conversation")).toBeVisible();
+    expect(browser.inspectThread).not.toHaveBeenCalled();
+    expect(computerUse.list).not.toHaveBeenCalled();
+
+    vi.mocked(browser.inspectThread).mockResolvedValue({
+      status: "ready",
+      threadId,
+      evidence: [],
+    } as never);
+    vi.mocked(computerUse.list).mockResolvedValue([]);
+    rerender(
+      <ThreadActivityPictureInPicture
+        browserClient={browser}
+        computerUseClient={computerUse}
+        enabled
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>,
+    );
+
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledOnce());
+    expect(computerUse.list).toHaveBeenCalledOnce();
+  });
+
   it("reports a Computer Use session only while the PiP renders it", async () => {
     const session = computerSession(threadId, "running");
     const onComputerUseSessionChange = vi.fn();

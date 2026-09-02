@@ -9,6 +9,7 @@ import type {
   CodeThreadId,
   CodeThreadView,
 } from "@octant/contracts/code";
+import type { CodeConversationPage, CodeEvidenceBatchRequest } from "@octant/contracts";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -445,7 +446,7 @@ describe("useCodeController", () => {
     // One read for navigation, and one that records the activity activating
     // the thread has just put on screen. Nothing else fetches.
     await waitFor(() => expect(client.bootstrap).toHaveBeenCalledTimes(2));
-    expect(client.thread).toHaveBeenCalledWith(ids.thread);
+    expect(client.thread).toHaveBeenCalledWith(ids.thread, expect.any(AbortSignal));
     expect(client.thread).toHaveBeenCalledTimes(1);
     expect(client.subscribe).toHaveBeenCalledWith(ids.thread, 1, expect.any(AbortSignal));
     unmount();
@@ -635,6 +636,57 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("aborts obsolete snapshot reads when the user switches threads", async () => {
+    const nextThreadId = "10000000-0000-4000-8000-000000000002" as CodeThreadId;
+    const firstView = deferred<CodeThreadView>();
+    let firstSignal: AbortSignal | undefined;
+    const client = fakeClient({
+      thread: vi.fn((threadId, signal) => {
+        if (threadId === ids.thread) {
+          firstSignal = signal;
+          return firstView.promise;
+        }
+        return Promise.resolve({ ...view(1), thread: { ...thread(1), id: nextThreadId } });
+      }),
+    });
+    const { result, rerender } = renderHook(
+      ({ activeThreadId }) =>
+        useCodeController({ activeThreadId, client, reconnectDelayMs: 60_000 }),
+      { initialProps: { activeThreadId: ids.thread } },
+    );
+    await waitFor(() => expect(firstSignal).toBeDefined());
+
+    rerender({ activeThreadId: nextThreadId });
+
+    await waitFor(() => expect(firstSignal?.aborted).toBe(true));
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(nextThreadId));
+  });
+
+  it("starts the thread view and conversation reads together", async () => {
+    const threadRead = deferred<CodeThreadView>();
+    const conversationRead = deferred<CodeConversationPage>();
+    const client = fakeClient({
+      thread: vi.fn(() => threadRead.promise),
+      conversation: vi.fn(() => conversationRead.promise),
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(client.thread).toHaveBeenCalledOnce());
+    expect(client.conversation).toHaveBeenCalledOnce();
+
+    threadRead.resolve(view(1));
+    conversationRead.resolve({
+      version: 3,
+      threadId: ids.thread,
+      turns: [],
+      nextCursor: 0,
+      hasMore: false,
+    });
+    await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+  });
+
   it("keeps one draft per thread while the user moves between them", async () => {
     const nextThreadId = "10000000-0000-4000-8000-000000000002" as CodeThreadId;
     const client = fakeClient({
@@ -800,6 +852,7 @@ describe("useCodeController", () => {
           channel: "message",
           content: { contentId, digest: "b".repeat(64), byteLength: 5 },
         },
+        displayText: "hello",
       };
       yield {
         threadId: ids.thread,
@@ -812,11 +865,12 @@ describe("useCodeController", () => {
     const subscribeOperation = vi.fn((_threadId, _operationId, cursor) =>
       cursor === 0 ? initialFrames() : completionFrames(),
     );
+    const operationContent = vi.fn();
     const client = fakeClient({
       putEvidence: putEvidence as never,
       executeOperation: executeOperation as never,
       subscribeOperation: subscribeOperation as never,
-      operationContent: vi.fn(async () => new TextEncoder().encode("hello")),
+      operationContent,
     });
     const { result } = renderHook(() =>
       useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
@@ -863,6 +917,7 @@ describe("useCodeController", () => {
       }),
     ]);
     expect(subscribeOperation).toHaveBeenCalledTimes(2);
+    expect(operationContent).not.toHaveBeenCalled();
     expect(result.current.turnStatus).toBe("idle");
   });
 
@@ -1741,10 +1796,19 @@ describe("useCodeController", () => {
       nextCursor: 42,
       hasMore: false,
     }));
-    const operationContent = vi.fn(async (_threadId, _operationId, contentId) =>
-      new TextEncoder().encode(contentId === promptId ? "check tests" : "tests failed"),
-    );
-    const client = fakeClient({ conversation: conversation as never, operationContent });
+    const operationContent = vi.fn();
+    const operationContents = vi.fn(async () => ({
+      threadId: ids.thread,
+      items: [
+        { operationId, contentId: promptId, text: "check tests" },
+        { operationId, contentId: replyId, text: "tests failed" },
+      ],
+    }));
+    const client = fakeClient({
+      conversation: conversation as never,
+      operationContent,
+      operationContents,
+    } as never);
     const { result, unmount } = renderHook(() =>
       useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
     );
@@ -1761,9 +1825,56 @@ describe("useCodeController", () => {
       modelId: "model-before-rebind",
       status: "failed",
     });
-    expect(conversation).toHaveBeenCalledWith(ids.thread, 0, 50);
-    expect(operationContent).toHaveBeenCalledTimes(2);
+    expect(conversation).toHaveBeenCalledWith(ids.thread, 0, 50, expect.any(AbortSignal));
+    expect(operationContents).toHaveBeenCalledOnce();
+    expect(operationContent).not.toHaveBeenCalled();
     unmount();
+  });
+
+  it("paints the first Code conversation page while older history is still loading", async () => {
+    const secondPage = deferred<CodeConversationPage>();
+    const firstOperationId = "70000000-0000-4000-8000-000000000030";
+    const secondOperationId = "70000000-0000-4000-8000-000000000031";
+    const firstPromptId = "60000000-0000-4000-8000-000000000030";
+    const secondPromptId = "60000000-0000-4000-8000-000000000031";
+    const conversation = vi.fn((_threadId, cursor) =>
+      cursor === 0
+        ? Promise.resolve({
+            version: 3 as const,
+            threadId: ids.thread,
+            turns: [conversationTurn(firstOperationId, firstPromptId)],
+            nextCursor: 1,
+            hasMore: true,
+          })
+        : secondPage.promise,
+    );
+    const operationContents = vi.fn(async (input: CodeEvidenceBatchRequest) => ({
+      threadId: input.threadId,
+      items: input.items.map((item) => ({
+        ...item,
+        text: item.contentId === firstPromptId ? "First visible page" : "Second visible page",
+      })),
+    }));
+    const client = fakeClient({ conversation: conversation as never, operationContents });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(result.current.conversation[0]?.text).toBe("First visible page"));
+    expect(result.current.conversationHistory).toBe("loading");
+
+    secondPage.resolve({
+      version: 3,
+      threadId: ids.thread,
+      turns: [conversationTurn(secondOperationId, secondPromptId)],
+      nextCursor: 2,
+      hasMore: false,
+    });
+    await waitFor(() =>
+      expect(result.current.conversation.map((message) => message.text)).toContain(
+        "Second visible page",
+      ),
+    );
   });
 
   it("replays the steps a reopened turn recorded, not just its message", async () => {
@@ -1928,7 +2039,7 @@ describe("useCodeController", () => {
       }),
     );
     expect(conversation).toHaveBeenCalledTimes(4);
-    expect(conversation).toHaveBeenNthCalledWith(3, ids.thread, 0, 1);
+    expect(conversation).toHaveBeenNthCalledWith(3, ids.thread, 0, 1, expect.any(AbortSignal));
     expect(result.current.turnStatus).toBe("idle");
     unmount();
   });
@@ -2660,6 +2771,27 @@ function thread(version: number): CodeThreadView["thread"] {
     },
     version: version as never,
     createdAt: now as never,
+    updatedAt: now as never,
+  };
+}
+
+function conversationTurn(
+  operationId: string,
+  promptId: string,
+): CodeConversationPage["turns"][number] {
+  return {
+    operationId: operationId as never,
+    providerInstanceId: ids.provider as never,
+    modelId: "model-a" as never,
+    sessionId: "80000000-0000-4000-8000-000000000030" as never,
+    prompt: {
+      contentId: promptId as never,
+      digest: "a".repeat(64) as never,
+      byteLength: 18,
+    },
+    assistant: [],
+    status: "completed",
+    startedAt: now as never,
     updatedAt: now as never,
   };
 }

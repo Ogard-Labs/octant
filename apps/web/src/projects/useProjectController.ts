@@ -30,6 +30,7 @@ export interface ProjectControllerOptions {
   readonly client?: ProjectClient;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  readonly changeRevision?: number;
 }
 
 interface Announcement {
@@ -115,6 +116,11 @@ export function useProjectController(options: ProjectControllerOptions) {
       memoryDisclosureGeneration.current += 1;
     };
   }, [load]);
+
+  useEffect(() => {
+    if (options.changeRevision === undefined || options.changeRevision <= 0) return;
+    void load("bootstrap");
+  }, [load, options.changeRevision]);
 
   const loadMemory = useCallback(
     async (projectId: ProjectId, reason: "open" | "retry" | "refresh" | "conflict" = "open") => {

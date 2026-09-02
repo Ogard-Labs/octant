@@ -10,7 +10,9 @@ import {
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
+  type WorkThreadTranscript,
   type WorkTurnState,
+  type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { PickerGroup } from "@octant/domain";
@@ -26,6 +28,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -66,6 +69,7 @@ import { samePollingData } from "../polling/samePollingData";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import { TranscriptWindow } from "../transcript/TranscriptWindow";
 
 /**
  * A message the user sent while a turn was still running.
@@ -86,9 +90,23 @@ interface WorkSteeredMessage {
   readonly draftRevision: number;
 }
 
+type WorkTranscriptRow =
+  | { readonly kind: "empty"; readonly key: "empty" }
+  | {
+      readonly kind: "message";
+      readonly key: string;
+      readonly entry: WorkTurnState["transcript"][number];
+    }
+  | { readonly kind: "steered"; readonly key: string; readonly prompt: string }
+  | { readonly kind: "request"; readonly key: string; readonly request: WorkRequest }
+  | { readonly kind: "status"; readonly key: "status"; readonly text: string };
+
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
   readonly threadId: WorkThreadId;
+  /** Machine-owned navigation snapshot; avoids rescanning every Project before transcript read. */
+  readonly initialThread?: WorkThread;
+  readonly changeRevision?: number;
   readonly threadClient: WorkThreadClient;
   readonly turnClient?: WorkTurnClient;
   readonly requestClient?: WorkRequestClient;
@@ -125,6 +143,87 @@ function artifactNameFromPrompt(prompt: string): string {
   return `${slug.length > 0 ? slug : "notes"}.md`;
 }
 
+function applyWorkTurnStreamFrame(
+  turns: ReadonlyArray<WorkTurnState>,
+  frame: WorkTurnStreamFrame,
+): ReadonlyArray<WorkTurnState> {
+  if (frame.kind === "snapshot-required") return turns;
+  const index = turns.findIndex(
+    (turn) =>
+      String(turn.requestId) ===
+      String(frame.kind === "turn-settled" ? frame.turn.requestId : frame.requestId),
+  );
+  if (frame.kind === "turn-settled") {
+    if (index === -1) return [...turns, frame.turn];
+    const next = turns.slice();
+    next[index] = frame.turn;
+    return next;
+  }
+  if (index === -1) return turns;
+  const current = turns[index]!;
+  const assistantIndex = current.transcript.findIndex((entry) => entry.role === "assistant");
+  const previousText =
+    assistantIndex === -1 ? (current.response ?? "") : current.transcript[assistantIndex]!.text;
+  const text = previousText + frame.text;
+  const transcript = current.transcript.slice();
+  const assistant = { role: "assistant" as const, text, status: "running" as const };
+  if (assistantIndex === -1) transcript.push(assistant);
+  else transcript[assistantIndex] = assistant;
+  const next = turns.slice();
+  next[index] = { ...current, status: "running", response: text, transcript };
+  return next;
+}
+
+async function consumeWorkTurnStream(input: {
+  readonly client: WorkTurnClient;
+  readonly threadId: WorkThreadId;
+  readonly afterSequence: number;
+  readonly signal: AbortSignal;
+  readonly active: () => boolean;
+  readonly apply: (frame: WorkTurnStreamFrame) => void;
+  readonly replace: (snapshot: WorkThreadTranscript) => void;
+}): Promise<void> {
+  let cursor = input.afterSequence;
+  let retryMs = 250;
+  while (input.active() && !input.signal.aborted) {
+    try {
+      let received = false;
+      for await (const frame of input.client.subscribe(input.threadId, cursor, input.signal)) {
+        if (!input.active() || input.signal.aborted) return;
+        received = true;
+        if (frame.kind === "snapshot-required") {
+          const snapshot = await input.client.transcript(input.threadId, input.signal);
+          if (!input.active() || input.signal.aborted) return;
+          input.replace(snapshot);
+          cursor = snapshot.liveCursor;
+          break;
+        }
+        cursor = frame.sequence;
+        input.apply(frame);
+      }
+      retryMs = received ? 50 : Math.min(retryMs * 2, 2_000);
+    } catch {
+      if (!input.active() || input.signal.aborted) return;
+      retryMs = Math.min(retryMs * 2, 2_000);
+    }
+    await waitForWorkStreamReconnect(input.signal, retryMs);
+  }
+}
+
+async function waitForWorkStreamReconnect(signal: AbortSignal, delayMs: number): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(done, delayMs);
+    const abort = () => done();
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
 export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const composerDraft = useComposerThreadDraft({
     mode: "work",
@@ -132,8 +231,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(props.draftStore === undefined ? {} : { store: props.draftStore }),
   });
   const prompt = composerDraft.text;
-  const [projectId, setProjectId] = useState<ProjectId | undefined>(undefined);
-  const [thread, setThread] = useState<WorkThread | undefined>(undefined);
+  const [projectId, setProjectId] = useState<ProjectId | undefined>(props.initialThread?.projectId);
+  const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState>>([]);
   const [pendingRequests, setPendingRequests] = useState<ReadonlyArray<WorkRequest>>([]);
   const [status, setStatus] = useState<string | undefined>(undefined);
@@ -197,6 +296,31 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     steered.pending === undefined &&
     projectId !== undefined &&
     (props.turnClient !== undefined || props.mutationClient !== undefined);
+  const transcriptRows = useMemo<ReadonlyArray<WorkTranscriptRow>>(() => {
+    const rows: WorkTranscriptRow[] = [];
+    if (turns.length === 0) rows.push({ kind: "empty", key: "empty" });
+    for (const [turnIndex, turn] of turns.entries()) {
+      for (const [index, entry] of turn.transcript.entries()) {
+        rows.push({
+          kind: "message",
+          key: `${String(turn.requestId)}-${String(turnIndex)}-${entry.role}-${String(index)}`,
+          entry,
+        });
+      }
+    }
+    if (steered.pending !== undefined) {
+      rows.push({
+        kind: "steered",
+        key: `steered-${steered.pending.id}`,
+        prompt: steered.pending.prompt,
+      });
+    }
+    for (const request of pendingRequests) {
+      rows.push({ kind: "request", key: `request-${String(request.requestId)}`, request });
+    }
+    if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
+    return rows;
+  }, [pendingRequests, status, steered.pending, turns]);
 
   // A confirmed completion means this thread will never run the message, so it
   // goes back to the composer instead of waiting for a settlement that is not
@@ -207,12 +331,16 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   useEffect(() => {
     const requestGeneration = ++transcriptGeneration.current;
+    const streamAbort = new AbortController();
     let cancelled = false;
     void (async () => {
       try {
-        const bootstrap = await props.threadClient.bootstrap();
-        if (cancelled || requestGeneration !== transcriptGeneration.current) return;
-        const thread = bootstrap.threads.find((candidate) => candidate.id === props.threadId);
+        const thread =
+          props.initialThread?.id === props.threadId
+            ? props.initialThread
+            : (await props.threadClient.bootstrap(streamAbort.signal)).threads.find(
+                (candidate) => candidate.id === props.threadId,
+              );
         if (thread === undefined) {
           composerDraft.purge(String(props.threadId));
           setErrorMessage("This Work thread is no longer available.");
@@ -220,33 +348,54 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         }
         setThread(thread);
         setProjectId(thread.projectId);
-        if (props.turnClient !== undefined) {
-          const transcript = await props.turnClient.transcript(props.threadId);
-          if (!cancelled && requestGeneration === transcriptGeneration.current) {
-            setTurns((current) =>
-              samePollingData(current, transcript.turns) ? current : transcript.turns,
-            );
+        const transcriptRead = async () => {
+          const turnClient = props.turnClient;
+          if (turnClient === undefined) return;
+          const transcript = await turnClient.transcript(props.threadId, streamAbort.signal);
+          if (cancelled || requestGeneration !== transcriptGeneration.current) return;
+          setTurns((current) =>
+            samePollingData(current, transcript.turns) ? current : transcript.turns,
+          );
+          if (typeof turnClient.subscribe === "function") {
+            void consumeWorkTurnStream({
+              client: turnClient,
+              threadId: props.threadId,
+              afterSequence: transcript.liveCursor,
+              signal: streamAbort.signal,
+              active: () => !cancelled && requestGeneration === transcriptGeneration.current,
+              apply: (frame) => setTurns((current) => applyWorkTurnStreamFrame(current, frame)),
+              replace: (next) =>
+                setTurns((current) =>
+                  samePollingData(current, next.turns) ? current : next.turns,
+                ),
+            });
           }
-        }
-        if (props.requestClient !== undefined) {
-          const requests = await props.requestClient.list(thread.projectId, props.threadId);
-          if (!cancelled && requestGeneration === transcriptGeneration.current) {
-            const pending = requests.requests.filter((request) => request.status === "pending");
-            setPendingRequests((current) =>
-              samePollingData(current, pending) ? current : pending,
-            );
-          }
-        }
+        };
+        const requestRead = async () => {
+          const requestClient = props.requestClient;
+          if (requestClient === undefined) return;
+          const requests = await requestClient.list(
+            thread.projectId,
+            props.threadId,
+            streamAbort.signal,
+          );
+          if (cancelled || requestGeneration !== transcriptGeneration.current) return;
+          const pending = requests.requests.filter((request) => request.status === "pending");
+          setPendingRequests((current) => (samePollingData(current, pending) ? current : pending));
+        };
+        await Promise.all([transcriptRead(), requestRead()]);
       } catch {
         if (!cancelled) setErrorMessage("Work thread state could not be loaded.");
       }
     })();
     return () => {
       cancelled = true;
+      streamAbort.abort();
       transcriptGeneration.current += 1;
     };
   }, [
     composerDraft.purge,
+    props.initialThread,
     props.requestClient,
     props.threadClient,
     props.threadId,
@@ -257,7 +406,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     const turnClient = props.turnClient;
     const requestClient = props.requestClient;
     if (turnClient === undefined && requestClient === undefined) return;
+    if (props.changeRevision !== undefined) return;
     let cancelled = false;
+    const pollAbort = new AbortController();
     // A cycle that outlives the interval must finish before the next one
     // starts. Without this guard, a poll slower than the interval is always
     // superseded by the next tick's generation bump before its response
@@ -267,18 +418,21 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     const stop = scheduleVisibleInterval(() => {
       if (cancelled || inFlight || !documentIsVisible()) return;
       inFlight = true;
-      const requestGeneration = ++transcriptGeneration.current;
+      const streamAvailable = typeof turnClient?.subscribe === "function";
+      const requestGeneration = streamAvailable
+        ? transcriptGeneration.current
+        : ++transcriptGeneration.current;
       const transcript =
-        turnClient === undefined
+        turnClient === undefined || streamAvailable
           ? Promise.resolve()
-          : turnClient.transcript(props.threadId).then((next) => {
+          : turnClient.transcript(props.threadId, pollAbort.signal).then((next) => {
               if (cancelled || requestGeneration !== transcriptGeneration.current) return;
               setTurns((current) => (samePollingData(current, next.turns) ? current : next.turns));
             });
       const requests =
         requestClient === undefined || projectId === undefined
           ? Promise.resolve()
-          : requestClient.list(projectId, props.threadId).then((next) => {
+          : requestClient.list(projectId, props.threadId, pollAbort.signal).then((next) => {
               if (cancelled || requestGeneration !== transcriptGeneration.current) return;
               const pending = next.requests.filter((request) => request.status === "pending");
               setPendingRequests((current) =>
@@ -291,9 +445,34 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     }, 1_000);
     return () => {
       cancelled = true;
+      pollAbort.abort();
       stop();
     };
-  }, [projectId, props.requestClient, props.threadId, props.turnClient]);
+  }, [projectId, props.changeRevision, props.requestClient, props.threadId, props.turnClient]);
+
+  useEffect(() => {
+    if (
+      props.changeRevision === undefined ||
+      props.changeRevision <= 0 ||
+      props.requestClient === undefined ||
+      projectId === undefined
+    )
+      return;
+    let cancelled = false;
+    const refreshAbort = new AbortController();
+    void props.requestClient
+      .list(projectId, props.threadId, refreshAbort.signal)
+      .then((next) => {
+        if (cancelled) return;
+        const pending = next.requests.filter((request) => request.status === "pending");
+        setPendingRequests((current) => (samePollingData(current, pending) ? current : pending));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      refreshAbort.abort();
+    };
+  }, [projectId, props.changeRevision, props.requestClient, props.threadId]);
 
   const changeProvider = useCallback(
     async (selection: {
@@ -683,91 +862,102 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         </section>
       ) : null}
 
-      <div aria-live="polite" className="work-thread-workspace__conversation" role="log">
-        <div className="work-thread-workspace__transcript">
-          {turns.length === 0 ? (
-            <article className="work-thread-workspace__message">
-              <strong>Octant Work</strong>
-              <p>
-                Start from Project Overview quick start to run the first provider-backed turn in
-                this confined Project. Approvals and user-input waits appear from the durable
-                request projection.
-              </p>
-            </article>
-          ) : (
-            turns.flatMap((turn) =>
-              turn.transcript.map((entry, index) => (
-                <article
-                  className="work-thread-workspace__message"
-                  key={`${turn.requestId}-${entry.role}-${index}`}
-                >
-                  <strong>{entry.role === "user" ? "You" : "Assistant"}</strong>
-                  {entry.text === "" ? (
-                    <p>Working…</p>
-                  ) : (
-                    <TrackerReferenceText asParagraph text={entry.text} />
-                  )}
-                  {entry.status === undefined ? null : <p role="status">{entry.status}</p>}
-                </article>
-              )),
-            )
-          )}
-          {steered.pending === undefined ? null : (
-            <article className="work-thread-workspace__message">
-              <strong>You</strong>
-              <TrackerReferenceText asParagraph text={steered.pending.prompt} />
-            </article>
-          )}
-          {pendingRequests.map((request) => (
-            <article
-              className="work-thread-workspace__message"
-              key={String(request.requestId)}
-              role="status"
-            >
-              <strong>
-                {request.detail.kind === "approval" ? "Approval required" : "Input required"}
-              </strong>
-              <p>
-                {request.detail.kind === "approval"
-                  ? `${request.detail.action}: ${request.detail.description}`
-                  : request.detail.prompt}
-              </p>
-            </article>
-          ))}
-          {status === undefined ? null : (
+      <TranscriptWindow
+        ariaLabel="Work transcript"
+        className="work-thread-workspace__conversation"
+        estimateSize={92}
+        gap={18}
+        itemKey={(row) => row.key}
+        items={transcriptRows}
+        listClassName="work-thread-workspace__transcript"
+        renderItem={(row) => {
+          if (row.kind === "empty") {
+            return (
+              <article className="work-thread-workspace__message">
+                <strong>Octant Work</strong>
+                <p>
+                  Start from Project Overview quick start to run the first provider-backed turn in
+                  this confined Project. Approvals and user-input waits appear from the durable
+                  request projection.
+                </p>
+              </article>
+            );
+          }
+          if (row.kind === "message") {
+            return (
+              <article className="work-thread-workspace__message">
+                <strong>{row.entry.role === "user" ? "You" : "Assistant"}</strong>
+                {row.entry.text === "" ? (
+                  <p>Working…</p>
+                ) : (
+                  <TrackerReferenceText asParagraph text={row.entry.text} />
+                )}
+                {row.entry.status === undefined ? null : <p role="status">{row.entry.status}</p>}
+              </article>
+            );
+          }
+          if (row.kind === "steered") {
+            return (
+              <article className="work-thread-workspace__message">
+                <strong>You</strong>
+                <TrackerReferenceText asParagraph text={row.prompt} />
+              </article>
+            );
+          }
+          if (row.kind === "request") {
+            return (
+              <article className="work-thread-workspace__message" role="status">
+                <strong>
+                  {row.request.detail.kind === "approval" ? "Approval required" : "Input required"}
+                </strong>
+                <p>
+                  {row.request.detail.kind === "approval"
+                    ? `${row.request.detail.action}: ${row.request.detail.description}`
+                    : row.request.detail.prompt}
+                </p>
+              </article>
+            );
+          }
+          return (
             <article className="work-thread-workspace__message" role="status">
               <strong>Saved locally</strong>
-              <p>{status}</p>
+              <p>{row.text}</p>
             </article>
-          )}
-          {props.imageGenerationClient === undefined ||
+          );
+        }}
+        restoreKey={`work:${String(props.threadId)}`}
+        role="log"
+        trail={
+          props.imageGenerationClient === undefined ||
           props.imageGenerationProfiles === undefined ? null : (
-            <GeneratedImageList
-              canSaveToProject
-              client={props.imageGenerationClient}
-              onAttach={(file) => images.attach([file])}
-              onSaveToProject={(job, artifact) => {
-                void props.imageGenerationClient
-                  ?.save({
-                    jobId: job.id,
-                    attachmentId: artifact.attachmentId,
-                    relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
-                  })
-                  .then((result) => {
-                    if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
-                    else setStatus(result.reason);
-                  })
-                  .catch(() => {
-                    setStatus("The image could not be saved.");
-                  });
-              }}
-              profiles={props.imageGenerationProfiles}
-              scopeId={decodeImageGenerationScopeId(String(props.threadId))}
-              threadKind="work-thread"
-            />
-          )}
-        </div>
-      </div>
+            <div className="work-thread-workspace__transcript-trail">
+              <GeneratedImageList
+                canSaveToProject
+                client={props.imageGenerationClient}
+                onAttach={(file) => images.attach([file])}
+                onSaveToProject={(job, artifact) => {
+                  void props.imageGenerationClient
+                    ?.save({
+                      jobId: job.id,
+                      attachmentId: artifact.attachmentId,
+                      relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+                    })
+                    .then((result) => {
+                      if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
+                      else setStatus(result.reason);
+                    })
+                    .catch(() => {
+                      setStatus("The image could not be saved.");
+                    });
+                }}
+                profiles={props.imageGenerationProfiles}
+                scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                threadKind="work-thread"
+              />
+            </div>
+          )
+        }
+      />
 
       <div className="work-thread-workspace__composer">
         {thread === undefined ? null : (

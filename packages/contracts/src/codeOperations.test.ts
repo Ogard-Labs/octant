@@ -4,6 +4,7 @@ import {
   decodeCodeConversationPage,
   decodeCodeOperationCommand,
   decodeCodeOperationEventFrame,
+  decodeCodeOperationStreamFrame,
   decodeCodeOperationApprovalReceipt,
   decodeCodeOperationApprovalRequest,
   decodeCodeOperationResult,
@@ -606,6 +607,11 @@ describe("Code operation contracts", () => {
       },
     } as const;
     expect(decodeCodeOperationEventFrame(frame)).toEqual(frame);
+    expect(decodeCodeOperationStreamFrame({ ...frame, displayText: "Visible reasoning" })).toEqual({
+      ...frame,
+      displayText: "Visible reasoning",
+    });
+    expect(() => decodeCodeOperationEventFrame({ ...frame, displayText: "not durable" })).toThrow();
     expect(() => decodeCodeOperationEventFrame({ ...frame, cursor: 0 })).toThrow();
     expect(() =>
       decodeCodeOperationEventFrame({ ...frame, event: { ...frame.event, text: "raw reasoning" } }),

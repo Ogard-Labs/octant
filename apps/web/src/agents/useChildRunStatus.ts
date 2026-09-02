@@ -83,7 +83,6 @@ interface ParentThreadFailure {
  * exactly whatever the server's cancel already includes.
  */
 export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatusController {
-  const refreshMs = options.refreshMs ?? 1_000;
   const client = useMemo(() => {
     if (options.client !== undefined) return options.client;
     if (options.serverUrl === undefined || options.windowCapability === undefined) return undefined;
@@ -121,6 +120,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
       ? read
       : undefined;
   const entries = current?.entries ?? NO_ENTRIES;
+  const refreshMs = options.refreshMs ?? (entries.length > 0 ? 1_000 : 5_000);
   const status: ChildRunStatusReadState =
     client === undefined || parentThreadId === undefined
       ? "idle"

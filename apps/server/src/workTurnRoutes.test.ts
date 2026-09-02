@@ -80,6 +80,30 @@ describe("Work turn attachment routes", () => {
   });
 });
 
+describe("Work turn live stream route", () => {
+  it("streams cursor-ordered Work response frames from the authorized thread", async () => {
+    const subscribe = vi.fn(async function* () {
+      yield {
+        kind: "response-delta" as const,
+        sequence: 5,
+        threadId,
+        requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        text: "Immediate text",
+      };
+    });
+    const route = routeFixture({ subscribe });
+
+    const response = await route(
+      request(`/api/work/turns/stream/${threadId}?afterSequence=4`, { method: "GET" }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("content-type")).toBe("application/x-ndjson");
+    await expect(response?.text()).resolves.toContain('"text":"Immediate text"');
+    expect(subscribe).toHaveBeenCalledWith(windowId, threadId, 4, expect.any(AbortSignal));
+  });
+});
+
 function request(path: string, init: RequestInit = {}): Request {
   const headers = new Headers(init.headers);
   if (!headers.has("x-octant-window-capability")) {

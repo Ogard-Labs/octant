@@ -94,7 +94,8 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       (isBootstrap && url.search !== "") ||
       (isSearch && [...url.searchParams.keys()].some((key) => key !== "q")) ||
       ((isCommands || isMemoryCommands || isMemory) && url.search !== "") ||
-      (isEnvironment && [...url.searchParams.keys()].some((key) => key !== "threadId"))
+      (isEnvironment &&
+        [...url.searchParams.keys()].some((key) => key !== "threadId" && key !== "fresh"))
     ) {
       return response({ category: "invalid", message: "Project request is invalid." }, 400, origin);
     }
@@ -126,6 +127,15 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       if (isEnvironment) {
+        const freshValue = url.searchParams.get("fresh");
+        if (freshValue !== null && freshValue !== "1") {
+          return response(
+            { category: "invalid", message: "Project request is invalid." },
+            400,
+            origin,
+          );
+        }
+        const fresh = freshValue === "1";
         let projectId;
         try {
           projectId = decodeProjectId(decodeURIComponent(environmentMatch[1] ?? ""));
@@ -145,18 +155,33 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
             );
           }
           return response(
-            await dependencies.environmentService.observeThread(
-              windowId,
-              projectId,
-              threadId,
-              request.signal,
-            ),
+            fresh
+              ? await dependencies.environmentService.observeThread(
+                  windowId,
+                  projectId,
+                  threadId,
+                  request.signal,
+                  true,
+                )
+              : await dependencies.environmentService.observeThread(
+                  windowId,
+                  projectId,
+                  threadId,
+                  request.signal,
+                ),
             200,
             origin,
           );
         }
         return response(
-          await dependencies.environmentService.observe(windowId, projectId, request.signal),
+          fresh
+            ? await dependencies.environmentService.observe(
+                windowId,
+                projectId,
+                request.signal,
+                true,
+              )
+            : await dependencies.environmentService.observe(windowId, projectId, request.signal),
           200,
           origin,
         );

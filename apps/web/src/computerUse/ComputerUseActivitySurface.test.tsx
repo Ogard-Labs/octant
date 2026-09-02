@@ -1,6 +1,6 @@
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import { decodeComputerUseSessionView } from "@octant/contracts/computer-use";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ComputerUseActivitySurface } from "./ComputerUseActivitySurface";
@@ -38,6 +38,23 @@ const view = decodeComputerUseSessionView({
 });
 
 describe("ComputerUseActivitySurface", () => {
+  it("backs off idle production polling while keeping the first read immediate", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = clientWith([]);
+      render(<ComputerUseActivitySurface client={client} />);
+      await act(async () => {});
+      expect(client.list).toHaveBeenCalledOnce();
+
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(client.list).toHaveBeenCalledOnce();
+      await act(async () => vi.advanceTimersByTimeAsync(4_000));
+      expect(client.list).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps background window sessions visible", async () => {
     const client = clientWith([view]);
     render(<ComputerUseActivitySurface client={client} pollIntervalMs={60_000} />);

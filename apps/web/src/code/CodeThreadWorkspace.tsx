@@ -187,13 +187,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       ? props.controller.activeView
       : undefined;
   const profileName = useAgentProfileName(view?.thread.profileId);
+  const displayReady = props.controller.conversationHistory !== "loading";
+  const emptyConversation =
+    props.controller.conversationHistory === "loaded" && props.controller.conversation.length === 0;
   const plan = useThreadPlan()?.plan;
   // The board observation is the host's changed-file evidence. Ask only when
   // the plan surface will render it: a thread with no plan has nowhere to put
   // the count, and querying every open conversation would rescan every worktree.
   const changedFiles = useObservedChangedFiles({
     client: props.controller.client,
-    enabled: view !== undefined && plan != null && plan.status !== "withdrawn",
+    enabled: displayReady && view !== undefined && plan != null && plan.status !== "withdrawn",
     projectId: view?.thread.projectId,
     threadId: props.threadId,
   });
@@ -214,6 +217,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     { readonly messageId: string; readonly kind: "mark" | "restore" } | undefined
   >();
   const checkpoints = useThreadCheckpoints({
+    enabled: displayReady && props.controller.conversation.length > 0,
     threadId: String(props.threadId),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -226,6 +230,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     };
   }, []);
   const scaffolds = useScaffoldCatalog({
+    enabled: emptyConversation,
     threadId: String(props.threadId),
     checkoutId: String(view?.checkout.id ?? ""),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -234,6 +239,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The preset needs the checkout the thread is bound to. A thread without one
   // yet has nothing to arrange around, so the picker offers nothing.
   const presets = useWorkspacePresets({
+    enabled: emptyConversation,
     threadId: props.threadId,
     ...(view === undefined ? {} : { checkoutId: view.checkout.id }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -340,7 +346,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }
 
   const childRunStatus =
-    props.agentRunClient === undefined ? undefined : (
+    props.agentRunClient === undefined || !displayReady ? undefined : (
       <ThreadChildRunStatusSlot
         client={props.agentRunClient}
         {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
@@ -1106,7 +1112,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
       <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
 
-      {props.imageGenerationClient === undefined ||
+      {!displayReady ||
+      props.imageGenerationClient === undefined ||
       props.imageGenerationProfiles === undefined ? null : (
         <GeneratedImageList
           canSaveToProject

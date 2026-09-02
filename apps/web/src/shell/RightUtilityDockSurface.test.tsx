@@ -62,7 +62,7 @@ describe("the right sidebar surface", () => {
 
     expect(screen.getByRole("tab", { name: "Browser" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Live Browser")).toBeVisible();
-    expect(screen.getByText("Live Terminal")).not.toBeVisible();
+    expect(screen.queryByText("Live Terminal")).not.toBeInTheDocument();
     const tabs = screen.getByRole("tablist", { name: "Open tools" }).parentElement;
     if (tabs === null) throw new Error("Expected the right-dock tab cluster.");
     expect(tabs).toHaveClass("right-utility-dock__tabs");

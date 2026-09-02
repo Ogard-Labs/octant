@@ -13,6 +13,8 @@ import {
   decodeCodeCommandResult,
   decodeCodeEvidenceContentId,
   decodeCodeEvidenceReference,
+  decodeCodeEvidenceBatchRequest,
+  decodeCodeEvidenceBatchResponse,
   decodeCodeEventFrame,
   decodeCodeFailure,
   decodeCodeFollowUpCommand,
@@ -26,7 +28,7 @@ import {
   decodeProjectId,
   decodeCodeOperationCommand,
   decodeCodeConversationPage,
-  decodeCodeOperationEventFrame,
+  decodeCodeOperationStreamFrame,
   decodeCodeOperationId,
   decodeCodeOperationResult,
   decodeCodeTerminalInspection,
@@ -62,6 +64,8 @@ import {
   type CodeCommandResult,
   type CodeEvidenceContentId,
   type CodeEvidenceReference,
+  type CodeEvidenceBatchRequest,
+  type CodeEvidenceBatchResponse,
   type CodeEventFrame,
   type CodeFailure,
   type CodeFollowUpCommand,
@@ -75,7 +79,7 @@ import {
   type ProjectId,
   type CodeOperationCommand,
   type CodeConversationPage,
-  type CodeOperationEventFrame,
+  type CodeOperationStreamFrame,
   type CodeOperationId,
   type CodeOperationResult,
   type CodeTerminalInspection,
@@ -132,7 +136,7 @@ export interface CodeFileSave {
 export interface CodeClient {
   bootstrap(): Promise<CodeBootstrap>;
   navigation(): Promise<CodeNavigation>;
-  thread(threadId: CodeThreadId): Promise<CodeThreadView>;
+  thread(threadId: CodeThreadId, signal?: AbortSignal): Promise<CodeThreadView>;
   execute(command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult>;
   executeOperation(command: CodeOperationCommand): Promise<CodeOperationResult>;
   inspectTerminal(request: CodeTerminalInspectionRequest): Promise<CodeTerminalInspection>;
@@ -140,6 +144,7 @@ export interface CodeClient {
     threadId: CodeThreadId,
     afterCursor: number,
     limit: number,
+    signal?: AbortSignal,
   ): Promise<CodeConversationPage>;
   queryBoard(query: CodeBoardQuery): Promise<CodeBoardView>;
   queryProjectPullRequests(query: CodeProjectPullRequestQuery): Promise<CodeProjectPullRequestView>;
@@ -191,7 +196,12 @@ export interface CodeClient {
     threadId: CodeThreadId,
     operationId: CodeOperationId,
     contentId: CodeEvidenceContentId,
+    signal?: AbortSignal,
   ): Promise<Uint8Array>;
+  operationContents?(
+    input: CodeEvidenceBatchRequest,
+    signal?: AbortSignal,
+  ): Promise<CodeEvidenceBatchResponse>;
   save(input: CodeFileSave): Promise<CodeFileSaveResult>;
   /**
    * Open a confined file for the editor surface. The host resolves the root
@@ -224,7 +234,7 @@ export interface CodeClient {
     operationId: CodeOperationId,
     afterCursor: number,
     signal: AbortSignal,
-  ): AsyncIterable<CodeOperationEventFrame>;
+  ): AsyncIterable<CodeOperationStreamFrame>;
 }
 
 export class CodeClientFailure extends Error {
@@ -274,11 +284,11 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeCodeNavigation,
       );
     },
-    thread(threadId) {
+    thread(threadId, signal) {
       return request(
         fetch,
         new URL(`/api/code/threads/${encodeURIComponent(threadId)}`, options.baseUrl).toString(),
-        { method: "GET", headers },
+        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
         decodeThreadView,
       );
     },
@@ -521,7 +531,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         decodeCodePlannerProposalOutcome,
       );
     },
-    conversation(threadId, afterCursor, limit) {
+    conversation(threadId, afterCursor, limit, signal) {
       try {
         decodeCodeThreadId(threadId);
         if (
@@ -542,7 +552,12 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
       url.searchParams.set("afterCursor", String(afterCursor));
       url.searchParams.set("limit", String(limit));
-      return request(fetch, url.toString(), { method: "GET", headers }, decodeCodeConversationPage);
+      return request(
+        fetch,
+        url.toString(),
+        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
+        decodeCodeConversationPage,
+      );
     },
     async putEvidence(threadId, text) {
       try {
@@ -629,7 +644,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         headers,
       );
     },
-    async operationContent(threadId, operationId, contentId) {
+    async operationContent(threadId, operationId, contentId, signal) {
       try {
         decodeCodeThreadId(threadId);
         decodeCodeOperationId(operationId);
@@ -644,6 +659,26 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           options.baseUrl,
         ).toString(),
         headers,
+        signal,
+      );
+    },
+    async operationContents(input, signal) {
+      let validated: CodeEvidenceBatchRequest;
+      try {
+        validated = decodeCodeEvidenceBatchRequest(input);
+      } catch {
+        throw invalidContent();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/evidence/batch", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+          ...(signal === undefined ? {} : { signal }),
+        },
+        decodeCodeEvidenceBatchResponse,
       );
     },
     async save(input) {
@@ -850,7 +885,7 @@ async function* parseOperationNdjsonFrames(
   operationId: CodeOperationId,
   afterCursor: number,
   signal: AbortSignal,
-): AsyncGenerator<CodeOperationEventFrame> {
+): AsyncGenerator<CodeOperationStreamFrame> {
   const response = await responsePromise;
   if (!response.ok) await rejectFailure(response);
   if (response.body === null) return;
@@ -862,9 +897,9 @@ async function* parseOperationNdjsonFrames(
   let frameCount = 0;
   const decodeLine = (line: string) => {
     if (utf8ByteLength(line) > MAX_CODE_NDJSON_LINE_BYTES) throw malformedResponse();
-    let frame: CodeOperationEventFrame;
+    let frame: CodeOperationStreamFrame;
     try {
-      frame = decodeCodeOperationEventFrame(JSON.parse(line));
+      frame = decodeCodeOperationStreamFrame(JSON.parse(line));
     } catch {
       throw malformedResponse();
     }
@@ -1008,8 +1043,13 @@ async function readVerifiedContent(
   fetcher: typeof globalThis.fetch,
   url: string,
   headers: Readonly<Record<string, string>>,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
-  const response = await requestRaw(fetcher, url, { method: "GET", headers });
+  const response = await requestRaw(fetcher, url, {
+    method: "GET",
+    headers,
+    ...(signal === undefined ? {} : { signal }),
+  });
   if (!response.ok) await rejectFailure(response);
   if (response.headers.get("content-type")?.split(";", 1)[0] !== "application/octet-stream") {
     throw malformedResponse();
@@ -1118,7 +1158,7 @@ function rejectedReplay(error: Error): AsyncIterable<CodeEventFrame> {
   };
 }
 
-function rejectedOperationReplay(error: Error): AsyncIterable<CodeOperationEventFrame> {
+function rejectedOperationReplay(error: Error): AsyncIterable<CodeOperationStreamFrame> {
   return {
     [Symbol.asyncIterator]() {
       return { next: () => Promise.reject(error) };

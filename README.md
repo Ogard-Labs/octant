@@ -223,7 +223,7 @@ scripts (`bun run smoke:*`) and are not part of `verify`.
 | `packages/contracts`      | Versioned schemas, commands, events, and RPC contracts (schema-only)         |
 | `packages/domain`         | Pure policy and state transitions                                            |
 | `packages/provider-sdk`   | Provider driver interface, normalized runtime events, discovery, conformance |
-| `packages/client-runtime` | Authenticated transport and replay synchronization                           |
+| `packages/client-runtime` | Authenticated, prioritized transport, reconnect, and replay synchronization  |
 | `packages/host-runtime`   | Host identity, paths, ownership, service and artifact lifecycle              |
 | `packages/plugin-host`    | Extension and skill packages, trust, and activation policy                   |
 | `packages/theme`          | Semantic theme schema and projections                                        |

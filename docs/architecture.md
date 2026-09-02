@@ -405,6 +405,18 @@ flowchart LR
   only a revoked, expired, lost, or host-changed credential forces a new pair.
   Revoke-self drops that host's sessions and streams before the client clears
   the local registry entry.
+- **Fast thread reads.** A thread paints from an authoritative snapshot before
+  auxiliary Files, Git, Browser, or Computer Use observations begin. Code
+  conversation evidence is read in bounded batches and page results paint as
+  they arrive; live Code operation frames carry bounded display text beside
+  their durable evidence references. Work uses a bounded delta feed over its
+  durable transcript. One post-commit Machine change feed invalidates mode
+  navigation and Project/extension projections instead of independent polling
+  timers. Every process-local feed sends `snapshot-required` after gaps,
+  overflow, or host restart. The client transport bounds and prioritizes reads,
+  coalesces identical work, cancels obsolete thread switches, renews local
+  client context without replaying mutations, and windows long transcripts.
+  See [0075](decisions/0075-thread-reads-are-snapshot-first-and-change-driven.md).
 - **Data lifecycle.** Reset, remove-all, delete-remote-host, and thread
   retention/purge operations are explicit, reported per scope, and never run
   implicitly. Removing a paired host or Project deletes what it owns and

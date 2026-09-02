@@ -280,11 +280,158 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.getByText("Here is the confined summary.")).toBeInTheDocument();
     expect(screen.getByText("Approval required")).toBeInTheDocument();
     expect(screen.getByText("write-file: Save notes.md in the Project root.")).toBeInTheDocument();
-    expect(turnClient.transcript).toHaveBeenCalledWith(threadId);
+    expect(turnClient.transcript).toHaveBeenCalledWith(threadId, expect.any(AbortSignal));
     expect(requestClient.list).toHaveBeenCalledWith(
       "20000000-0000-4000-8000-000000000101",
       threadId,
+      expect.any(AbortSignal),
     );
+  });
+
+  it("windows long Work transcripts instead of mounting every message", async () => {
+    const turns = Array.from({ length: 200 }, (_, index) =>
+      workTurn({
+        requestId: `request-${String(index)}`,
+        prompt: `Prompt ${String(index)}`,
+        transcript: [{ role: "user", text: `Prompt ${String(index)}` }],
+      }),
+    );
+    const { container } = render(
+      <WorkThreadWorkspace
+        initialThread={workThread()}
+        threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+        threadId={threadId}
+        title="Long brief"
+        turnClient={
+          {
+            transcript: vi.fn(async () => ({ threadId, turns, liveCursor: 0 })),
+          } as never
+        }
+      />,
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector("[data-transcript-window]")).toBeInTheDocument(),
+    );
+    expect(container.querySelectorAll("[data-transcript-row]").length).toBeLessThan(200);
+  });
+
+  it("starts transcript and pending-request reads together from the navigation thread", async () => {
+    const transcript = deferred<{ readonly threadId: typeof threadId; readonly turns: [] }>();
+    const requests = deferred<{ readonly requests: [] }>();
+    const threadClient = {
+      bootstrap: vi.fn(async () => {
+        throw new Error("full bootstrap must not gate an opened thread");
+      }),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = { transcript: vi.fn(() => transcript.promise) };
+    const requestClient = { list: vi.fn(() => requests.promise) };
+
+    render(
+      <WorkThreadWorkspace
+        initialThread={workThread()}
+        requestClient={requestClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(turnClient.transcript).toHaveBeenCalledWith(threadId, expect.any(AbortSignal));
+      expect(requestClient.list).toHaveBeenCalledWith(
+        "20000000-0000-4000-8000-000000000101",
+        threadId,
+        expect.any(AbortSignal),
+      );
+    });
+    expect(threadClient.bootstrap).not.toHaveBeenCalled();
+
+    transcript.resolve({ threadId, turns: [] });
+    requests.resolve({ requests: [] });
+  });
+
+  it("aborts obsolete transcript reads when the user switches Work threads", async () => {
+    const nextThreadId = decodeWorkThreadId("10000000-0000-4000-8000-000000000102");
+    let firstSignal: AbortSignal | undefined;
+    const transcript = vi.fn((requestedThreadId, signal?: AbortSignal) => {
+      if (requestedThreadId === threadId) firstSignal = signal;
+      return new Promise(() => undefined);
+    });
+    const threadClient = { execute: vi.fn() } as unknown as WorkThreadClient;
+    const { rerender } = render(
+      <WorkThreadWorkspace
+        initialThread={workThread()}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript } as never}
+      />,
+    );
+    await waitFor(() => expect(firstSignal).toBeDefined());
+
+    rerender(
+      <WorkThreadWorkspace
+        initialThread={workThread({ id: nextThreadId })}
+        threadClient={threadClient}
+        threadId={nextThreadId}
+        title="Next brief"
+        turnClient={{ transcript } as never}
+      />,
+    );
+
+    await waitFor(() => expect(firstSignal?.aborted).toBe(true));
+  });
+
+  it("paints live Work text from the stream without waiting for transcript polling", async () => {
+    const frame = deferred<{
+      readonly kind: "response-delta";
+      readonly sequence: 1;
+      readonly threadId: typeof threadId;
+      readonly requestId: ReturnType<typeof workTurn>["requestId"];
+      readonly text: "Immediate text";
+    }>();
+    const running = workTurn({
+      status: "running",
+      response: undefined,
+      transcript: [
+        { role: "user", text: "Start" },
+        { role: "assistant", text: "", status: "running" },
+      ],
+    });
+    const transcript = vi.fn(async () => ({ threadId, turns: [running], liveCursor: 0 }));
+    const list = vi.fn(async () => ({ requests: [] }));
+    const subscribe = vi.fn(async function* () {
+      yield await frame.promise;
+    });
+
+    render(
+      <WorkThreadWorkspace
+        changeRevision={0}
+        initialThread={workThread()}
+        requestClient={{ list } as never}
+        threadClient={{ execute: vi.fn() } as never}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript, subscribe } as never}
+      />,
+    );
+
+    expect(await screen.findByText("Working…")).toBeInTheDocument();
+    frame.resolve({
+      kind: "response-delta",
+      sequence: 1,
+      threadId,
+      requestId: running.requestId,
+      text: "Immediate text",
+    });
+
+    expect(await screen.findByText("Immediate text")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    expect(transcript).toHaveBeenCalledOnce();
+    expect(list).toHaveBeenCalledOnce();
   });
 
   it("keeps a slow initial transcript read from overwriting a newer polled result", async () => {

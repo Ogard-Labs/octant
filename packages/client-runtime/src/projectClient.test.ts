@@ -251,6 +251,30 @@ describe("ProjectClient", () => {
     );
   });
 
+  it("marks an explicit environment refresh as fresh", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({
+        status: "unavailable",
+        projectId,
+        projectName: "Octant",
+        observedAt: "2026-07-16T09:00:00.000Z",
+        reason: "Unavailable.",
+      }),
+    );
+    const client = createProjectClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+
+    await client.environmentForThread(projectId, threadId, undefined, true);
+
+    expect(fetch).toHaveBeenCalledWith(
+      `http://127.0.0.1:13773/api/projects/${encodeURIComponent(projectId)}/environment?threadId=${encodeURIComponent(threadId)}&fresh=1`,
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   it("forwards environment cancellation to the authenticated fetch", async () => {
     const controller = new AbortController();
     const fetch = vi.fn<typeof globalThis.fetch>(async () =>

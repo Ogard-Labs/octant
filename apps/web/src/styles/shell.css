@@ -1551,6 +1551,12 @@ form > .work-composer-adapter__attachments {
   margin: 0 auto;
 }
 
+.work-thread-workspace__transcript-trail {
+  width: min(100% - 40px, var(--oct-thread-measure));
+  padding-bottom: 28px;
+  margin: 0 auto;
+}
+
 .work-thread-workspace__message {
   display: grid;
   gap: 6px;

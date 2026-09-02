@@ -20,10 +20,13 @@ import {
   decodeCodeProjectPullRequestDetailView,
   decodeCodeCommand,
   decodeCodeEvidenceReference,
+  decodeCodeEvidenceBatchRequest,
+  decodeCodeEvidenceBatchResponse,
   decodeCodeEventFrame,
   decodeCodeFailure,
   decodeCodeOperationCommand,
   decodeCodeOperationEventFrame,
+  decodeCodeOperationStreamFrame,
   decodeCodeOperationId,
   decodeCodeOperationResult,
   decodeCodeTerminalInspection,
@@ -62,6 +65,8 @@ import {
   type CodeCommand,
   type CodeCommandResult,
   type CodeEvidenceReference,
+  type CodeEvidenceBatchRequest,
+  type CodeEvidenceBatchResponse,
   type CodeEventFrame,
   type CodeFailure,
   type CodeFollowUpCommand,
@@ -72,6 +77,7 @@ import {
   type CodePlannerView,
   type CodeOperationCommand,
   type CodeOperationEventFrame,
+  type CodeOperationStreamFrame,
   type CodeOperationId,
   type CodeOperationResult,
   type CodeTerminalInspection,
@@ -272,6 +278,10 @@ export interface CodeRouteService {
     operationId: CodeOperationId,
     contentId: string,
   ) => Promise<CodeContentRead> | CodeContentRead;
+  readonly readOperationContents?: (
+    authenticatedWindowId: WindowId,
+    input: CodeEvidenceBatchRequest,
+  ) => Promise<CodeEvidenceBatchResponse> | CodeEvidenceBatchResponse;
   readonly saveFile: (
     authenticatedWindowId: WindowId,
     input: CodeFileSaveInput,
@@ -576,7 +586,50 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             frames.push(frame);
             if (frames.length === MAX_CODE_REPLAY_FRAMES) break;
           }
-          return ndjsonResponse(frames, origin);
+          let streamFrames: ReadonlyArray<CodeOperationStreamFrame> = frames.map((frame) =>
+            decodeCodeOperationStreamFrame(frame),
+          );
+          if (dependencies.service.readOperationContents !== undefined) {
+            const references = new Map<
+              string,
+              { readonly operationId: CodeOperationId; readonly contentId: CodeEvidenceContentId }
+            >();
+            for (const frame of frames) {
+              if (frame.event.kind !== "provider-content") continue;
+              references.set(`${frame.operationId}:${frame.event.content.contentId}`, {
+                operationId: frame.operationId,
+                contentId: frame.event.content.contentId,
+              });
+            }
+            if (references.size > 0) {
+              try {
+                const contents = await dependencies.service.readOperationContents(
+                  authenticatedWindowId,
+                  { threadId, items: [...references.values()] },
+                );
+                const text = new Map(
+                  contents.items.map((item) => [
+                    `${item.operationId}:${item.contentId}`,
+                    item.text,
+                  ]),
+                );
+                streamFrames = frames.map((frame) => {
+                  const displayText =
+                    frame.event.kind === "provider-content"
+                      ? text.get(`${frame.operationId}:${frame.event.content.contentId}`)
+                      : undefined;
+                  return decodeCodeOperationStreamFrame({
+                    ...frame,
+                    ...(displayText === undefined ? {} : { displayText }),
+                  });
+                });
+              } catch {
+                // The durable reference still lets older clients recover the
+                // text through the evidence route when enrichment is unavailable.
+              }
+            }
+          }
+          return ndjsonResponse(streamFrames, origin);
         }
         case "conversation": {
           if (request.method !== "GET" || dependencies.service.conversation === undefined) {
@@ -1083,6 +1136,33 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "evidence-batch": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.readOperationContents === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code evidence batch is unavailable." },
+              503,
+              origin,
+            );
+          }
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
+          refuseRendererAuthoredIdentity(value);
+          let input: CodeEvidenceBatchRequest;
+          try {
+            input = decodeCodeEvidenceBatchRequest(value);
+          } catch {
+            throw new CodeRouteRejected("Code evidence batch is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeEvidenceBatchResponse(
+              await dependencies.service.readOperationContents(authenticatedWindowId, input),
+            ),
+            200,
+            origin,
+          );
+        }
         case "attachment": {
           const service = dependencies.service;
           if (
@@ -1180,6 +1260,7 @@ type MatchedRoute =
         | "file-watch"
         | "test-listing"
         | "stage-evidence"
+        | "evidence-batch"
         | "attachment"
         | "board"
         | "planner-commands"
@@ -1320,6 +1401,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/files/watch") return { kind: "file-watch" };
   if (pathname === "/api/code/tests/listing") return { kind: "test-listing" };
   if (pathname === "/api/code/evidence") return { kind: "stage-evidence" };
+  if (pathname === "/api/code/evidence/batch") return { kind: "evidence-batch" };
   if (pathname === "/api/code/attachments") return { kind: "attachment" };
   const thread = /^\/api\/code\/threads\/([^/]+)$/.exec(pathname);
   if (thread !== null) return { kind: "thread", threadId: thread[1]! };
@@ -1655,7 +1737,7 @@ function parseJson(bytes: Uint8Array): unknown {
 }
 
 function ndjsonResponse(
-  frames: ReadonlyArray<CodeEventFrame | CodeOperationEventFrame>,
+  frames: ReadonlyArray<CodeEventFrame | CodeOperationStreamFrame>,
   origin: string | null,
 ): Response {
   const body = frames.map(serializeNdjsonFrame).join("");
@@ -1735,9 +1817,9 @@ function serializeNoticeLine(notice: CodeFileChangeNotice): string | undefined {
   }
 }
 
-function serializeNdjsonFrame(frame: CodeEventFrame | CodeOperationEventFrame): string {
+function serializeNdjsonFrame(frame: CodeEventFrame | CodeOperationStreamFrame): string {
   const decoded =
-    "operationId" in frame ? decodeCodeOperationEventFrame(frame) : decodeCodeEventFrame(frame);
+    "operationId" in frame ? decodeCodeOperationStreamFrame(frame) : decodeCodeEventFrame(frame);
   const line = `${JSON.stringify(decoded)}\n`;
   if (Buffer.byteLength(line, "utf8") > MAX_CODE_NDJSON_LINE_BYTES) {
     throw new CodeRouteRejected("Code replay frame is too large.", 400);

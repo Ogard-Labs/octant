@@ -704,6 +704,36 @@ describe("code client", () => {
     );
   });
 
+  it("reads a conversation evidence batch in one request", async () => {
+    const response = {
+      threadId: ids.thread,
+      items: [
+        {
+          operationId: ids.operation,
+          contentId: ids.content,
+          text: "display text",
+        },
+      ],
+    };
+    const fetch = vi.fn().mockResolvedValue(Response.json(response));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    const controller = new AbortController();
+    await expect(
+      client.operationContents?.(
+        {
+          threadId: ids.thread as never,
+          items: [{ operationId: ids.operation as never, contentId: ids.content as never }],
+        },
+        controller.signal,
+      ),
+    ).resolves.toEqual(response);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/evidence/batch`,
+      expect.objectContaining({ method: "POST", signal: controller.signal }),
+    );
+  });
+
   it("replays only ordered bounded same-thread frames and requests a snapshot after a gap", async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(`${JSON.stringify(frame(42))}\n${JSON.stringify(frame(44))}\n`, {
@@ -781,6 +811,37 @@ describe("code client", () => {
     );
   });
 
+  it("decodes display-ready provider text from the operation stream", async () => {
+    const operationFrame = {
+      threadId: ids.thread,
+      operationId: ids.operation,
+      cursor: 1,
+      occurredAt: now,
+      event: {
+        kind: "provider-content",
+        channel: "message",
+        content: { contentId: ids.content, digest: "a".repeat(64), byteLength: 4 },
+      },
+      displayText: "fast",
+    };
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(`${JSON.stringify(operationFrame)}\n`, {
+        headers: { "content-type": "application/x-ndjson" },
+      }),
+    );
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const stream = client.subscribeOperation(
+      ids.thread as never,
+      ids.operation as never,
+      0,
+      new AbortController().signal,
+    );
+
+    await expect(stream[Symbol.asyncIterator]().next()).resolves.toMatchObject({
+      value: { displayText: "fast" },
+    });
+  });
+
   it("puts prompt evidence for a Code thread", async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(
@@ -823,10 +884,13 @@ describe("code client", () => {
     const fetch = vi.fn().mockResolvedValue(Response.json(page));
     const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
 
-    await expect(client.conversation(ids.thread as never, 40, 25)).resolves.toEqual(page);
+    const controller = new AbortController();
+    await expect(
+      client.conversation(ids.thread as never, 40, 25, controller.signal),
+    ).resolves.toEqual(page);
     expect(fetch).toHaveBeenCalledWith(
       `${baseUrl}/api/code/threads/${ids.thread}/conversation?afterCursor=40&limit=25`,
-      expect.objectContaining({ method: "GET" }),
+      expect.objectContaining({ method: "GET", signal: controller.signal }),
     );
   });
 

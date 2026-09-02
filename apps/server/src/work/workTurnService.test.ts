@@ -281,6 +281,51 @@ describe("WorkTurnService", () => {
     ]);
   });
 
+  it("reads one authorized transcript without repeating the full Work bootstrap", async () => {
+    const fixture = serviceFixture();
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    fixture.threads.bootstrap.mockClear();
+
+    const transcript = await fixture.service.transcript(ids.window, ids.thread);
+
+    expect(transcript.turns).toHaveLength(1);
+    expect(fixture.threads.read).toHaveBeenCalledWith(ids.window, ids.thread);
+    expect(fixture.threads.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it("streams response deltas immediately and settles through a cursor-safe frame", async () => {
+    const gate = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onDelta?.("Partial");
+          input.onDelta?.("Partial reply");
+          await gate.promise;
+          return { kind: "completed", response: "Partial reply" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const controller = new AbortController();
+    const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "response-delta", sequence: 1, text: "Partial" },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "response-delta", sequence: 2, text: " reply" },
+    });
+
+    gate.resolve();
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "turn-settled", sequence: 3, turn: { status: "completed" } },
+    });
+    const transcript = await fixture.service.transcript(ids.window, ids.thread);
+    expect(transcript.liveCursor).toBe(3);
+    controller.abort();
+  });
+
   it("hands a follow-up turn the prior transcript as provider context", async () => {
     const run = vi.fn();
     run.mockImplementationOnce(async () => ({
@@ -438,6 +483,21 @@ function serviceFixture(
         }),
       ],
     })),
+    read: vi.fn(async () =>
+      decodeWorkThread({
+        id: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        lifecycle: "active",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ),
   };
   const projects = {
     bootstrap: vi.fn(async () => ({
@@ -490,7 +550,7 @@ function serviceFixture(
     }
   };
 
-  return { service, persistence, projection, acquireInputs, waitForIdle };
+  return { service, persistence, projection, threads, acquireInputs, waitForIdle };
 }
 
 function workProject(): Project {

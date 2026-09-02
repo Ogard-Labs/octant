@@ -8,6 +8,7 @@ import {
   type CodeCheckpoint,
   type CodeCheckoutIdentity,
   type CodeEvidenceReference,
+  type CodeEvidenceContentId,
   type CodeOperationEvent,
   type CodeOperationEventFrame,
   type CodeOperationCommand,
@@ -1105,6 +1106,69 @@ export class CodeOperationService {
     const text = await this.#options.evidence.read?.(reference);
     if (text === undefined) throw new CodeOperationServiceError("unavailable");
     return { reference, text };
+  }
+
+  async readEvidenceBatch(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    items: ReadonlyArray<{
+      readonly operationId: CodeOperationId;
+      readonly contentId: CodeEvidenceContentId;
+    }>,
+  ): Promise<
+    ReadonlyArray<{
+      readonly operationId: CodeOperationId;
+      readonly contentId: CodeEvidenceContentId;
+      readonly text: string;
+    }>
+  > {
+    const thread = this.#options.authority.readThread(threadId);
+    if (thread === undefined || thread.id !== threadId) {
+      throw new CodeOperationServiceError("invalid");
+    }
+    if (!(await this.#options.authority.canAccessProject(windowId, thread.projectId))) {
+      throw new CodeOperationServiceError("unauthorized");
+    }
+    const requestedByOperation = new Map<string, Set<string>>();
+    for (const item of items) {
+      const requested = requestedByOperation.get(String(item.operationId)) ?? new Set<string>();
+      requested.add(String(item.contentId));
+      requestedByOperation.set(String(item.operationId), requested);
+    }
+    const references = new Map<string, CodeEvidenceReference>();
+    const processedOperations = new Set<string>();
+    for (const item of items) {
+      const operationKey = String(item.operationId);
+      if (processedOperations.has(operationKey)) continue;
+      processedOperations.add(operationKey);
+      const requested = requestedByOperation.get(operationKey) ?? new Set<string>();
+      let cursor = 0;
+      for (;;) {
+        const frames = this.#replay(threadId, item.operationId, cursor, 256).frames;
+        for (const frame of frames) {
+          for (const reference of evidenceReferences(frame.event)) {
+            if (requested.has(String(reference.contentId))) {
+              references.set(`${operationKey}:${String(reference.contentId)}`, reference);
+            }
+          }
+        }
+        if (
+          frames.length < 256 ||
+          [...requested].every((contentId) => references.has(`${operationKey}:${contentId}`))
+        )
+          break;
+        cursor = frames.at(-1)?.cursor ?? cursor;
+      }
+    }
+    const result = [];
+    for (const item of items) {
+      const reference = references.get(`${String(item.operationId)}:${String(item.contentId)}`);
+      if (reference === undefined) throw new CodeOperationServiceError("unauthorized");
+      const text = await this.#options.evidence.read?.(reference);
+      if (text === undefined) throw new CodeOperationServiceError("unavailable");
+      result.push({ operationId: item.operationId, contentId: item.contentId, text });
+    }
+    return result;
   }
 
   #replay(

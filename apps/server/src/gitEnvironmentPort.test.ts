@@ -89,6 +89,34 @@ describe("GitEnvironmentPort", () => {
     });
   });
 
+  it("observes independent worktree, branch, and status facts concurrently", async () => {
+    let active = 0;
+    let peak = 0;
+    const execFile = vi.fn(async (_file: string, args: readonly string[]) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      active -= 1;
+      if (args.includes("--show-toplevel")) return { exitCode: 0, stdout: "/repo\n" };
+      if (args.includes("worktree")) {
+        return { exitCode: 0, stdout: "worktree /repo\n" };
+      }
+      if (args.includes("symbolic-ref")) return { exitCode: 0, stdout: "main\n" };
+      return { exitCode: 0, stdout: "" };
+    });
+    const port = new GitEnvironmentPort(
+      {
+        realpath: async (path) => path,
+        stat: async () => ({ isDirectory: () => true }),
+        execFile,
+      },
+      confinedOptions(),
+    );
+
+    await expect(port.observe("/repo")).resolves.toMatchObject({ status: "ready" });
+    expect(peak).toBe(3);
+  });
+
   it("returns unavailable for missing, non-directory, and non-Git roots", async () => {
     const root = temporaryDirectory();
     const file = join(root, "file");
@@ -149,7 +177,7 @@ describe("GitEnvironmentPort", () => {
     );
 
     expect(await port.observe("/candidate")).toEqual({ status: "failed" });
-    expect(execFile).toHaveBeenCalledTimes(2);
+    expect(execFile).toHaveBeenCalledTimes(4);
     for (const environment of environments) {
       expect(environment).toMatchObject({
         PATH: process.env.PATH,
@@ -183,8 +211,8 @@ describe("GitEnvironmentPort", () => {
       { exitCode: 0, stdout: "/canonical\n" },
       { exitCode: 0, stdout: "worktree /canonical\n" },
       { exitCode: 1, stdout: "" },
-      { exitCode: 0, stdout: `${identity}\n` },
       { exitCode: 0, stdout: "" },
+      { exitCode: 0, stdout: `${identity}\n` },
     ];
     const execFile = vi.fn(async () => results.shift()!);
     const port = new GitEnvironmentPort(
@@ -204,6 +232,7 @@ describe("GitEnvironmentPort", () => {
       { exitCode: 0, stdout: "/canonical\n" },
       { exitCode: 0, stdout: "worktree /canonical\n" },
       { exitCode: 128, stdout: "" },
+      { exitCode: 0, stdout: "" },
     ];
     const execFile = vi.fn(async () => results.shift()!);
     const port = new GitEnvironmentPort(
@@ -216,7 +245,7 @@ describe("GitEnvironmentPort", () => {
     );
 
     expect(await port.observe("/canonical")).toEqual({ status: "failed" });
-    expect(execFile).toHaveBeenCalledTimes(3);
+    expect(execFile).toHaveBeenCalledTimes(4);
   });
 
   it("ignores an unrelated stale worktree while preserving primary and active identities", async () => {

@@ -18,7 +18,15 @@ const TOOLCHAIN_PREFIXES: ReadonlyArray<string> = [
   "/api/diagnostics/export",
 ];
 
-type MeasurementKey = "rpc" | "rpc-toolchain" | "provider-runtime-acquire" | "projection-catch-up";
+type MeasurementKey =
+  | "rpc"
+  | "rpc-navigation"
+  | "rpc-thread-read"
+  | "rpc-evidence"
+  | "rpc-environment"
+  | "rpc-toolchain"
+  | "provider-runtime-acquire"
+  | "projection-catch-up";
 
 interface Measurement {
   readonly key: MeasurementKey;
@@ -28,6 +36,10 @@ interface Measurement {
 
 const MEASUREMENTS: ReadonlyArray<Measurement> = [
   { key: "rpc", label: "Request handling", slowThresholdMs: 15_000 },
+  { key: "rpc-navigation", label: "Navigation snapshot", slowThresholdMs: 1_000 },
+  { key: "rpc-thread-read", label: "Thread snapshot", slowThresholdMs: 1_000 },
+  { key: "rpc-evidence", label: "Conversation evidence", slowThresholdMs: 1_000 },
+  { key: "rpc-environment", label: "Environment observation", slowThresholdMs: 2_500 },
   { key: "rpc-toolchain", label: "Toolchain request handling", slowThresholdMs: 120_000 },
   { key: "provider-runtime-acquire", label: "Provider runtime start", slowThresholdMs: undefined },
   { key: "projection-catch-up", label: "Projection catch-up", slowThresholdMs: undefined },
@@ -118,11 +130,43 @@ export function observedRpcLatency(pathname: string): ObservedLatency | undefine
   // HTTP response. Measuring that duration as host RPC mixes model time into
   // Request handling and fires the 15s slow-request warning on ordinary turns.
   if (pathname === "/api/chat/commands") return undefined;
+  if (
+    pathname === "/api/chat/navigation" ||
+    pathname === "/api/work/navigation" ||
+    pathname === "/api/code/navigation"
+  ) {
+    return "rpc-navigation";
+  }
+  if (
+    pathname.startsWith("/api/work/turns/transcript/") ||
+    /^\/api\/chat\/threads\/[^/]+$/.test(pathname) ||
+    /^\/api\/code\/threads\/[^/]+(?:\/conversation)?$/.test(pathname)
+  ) {
+    return "rpc-thread-read";
+  }
+  if (pathname === "/api/code/evidence/batch") return "rpc-evidence";
+  if (/^\/api\/projects\/[^/]+\/environment$/.test(pathname)) return "rpc-environment";
   return TOOLCHAIN_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   )
     ? "rpc-toolchain"
     : "rpc";
+}
+
+export function withServerTiming(
+  response: Response,
+  measurement: ObservedLatency,
+  durationMs: number,
+): Response {
+  const duration = Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : 0;
+  const headers = new Headers(response.headers);
+  headers.set("server-timing", `octant;dur=${String(duration)};desc="${measurement}"`);
+  headers.set("x-octant-latency-class", measurement);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

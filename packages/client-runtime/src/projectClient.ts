@@ -30,11 +30,16 @@ export interface ProjectClient {
   search(query: string): Promise<ReadonlyArray<ProjectSummary>>;
   executeProject(command: ProjectCommand): Promise<ProjectCommandResult>;
   memory(projectId: ProjectId): Promise<ProjectMemoryView>;
-  environment(projectId: ProjectId, signal?: AbortSignal): Promise<CodeEnvironmentObservation>;
+  environment(
+    projectId: ProjectId,
+    signal?: AbortSignal,
+    fresh?: boolean,
+  ): Promise<CodeEnvironmentObservation>;
   environmentForThread(
     projectId: ProjectId,
     threadId: CodeThreadId,
     signal?: AbortSignal,
+    fresh?: boolean,
   ): Promise<CodeEnvironmentObservation>;
   executeMemory(command: MemoryCommand): Promise<MemoryCommandResult>;
 }
@@ -89,11 +94,12 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
         decodeProjectMemoryView,
       );
     },
-    environment(projectId, signal) {
+    environment(projectId, signal, fresh = false) {
       const url = new URL(
         `/api/projects/${encodeURIComponent(projectId)}/environment`,
         options.baseUrl,
       );
+      if (fresh) url.searchParams.set("fresh", "1");
       return request(
         options.fetch,
         url.toString(),
@@ -101,12 +107,13 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
         decodeCodeEnvironmentObservation,
       );
     },
-    environmentForThread(projectId, threadId, signal) {
+    environmentForThread(projectId, threadId, signal, fresh = false) {
       const url = new URL(
         `/api/projects/${encodeURIComponent(projectId)}/environment`,
         options.baseUrl,
       );
       url.searchParams.set("threadId", threadId);
+      if (fresh) url.searchParams.set("fresh", "1");
       return request(
         options.fetch,
         url.toString(),

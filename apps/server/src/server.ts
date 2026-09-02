@@ -56,6 +56,8 @@ import { ResearchRouter } from "./chat/research/researchRouter";
 import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
 import { createChatRouteHandler } from "./chatRoutes";
+import { MachineChangeFeed } from "./machineChangeFeed";
+import { createMachineChangeRouteHandler } from "./machineChangeRoutes";
 import { createScaffoldRouteHandler } from "./scaffoldRoutes";
 import {
   admittedBundledProviderDriverKinds,
@@ -406,6 +408,7 @@ import {
   LatencyStatsProjection,
   observedRpcLatency,
   slowRequestRoute,
+  withServerTiming,
 } from "./latencyStatsProjection";
 import { ProviderService } from "./providers/providerService";
 import {
@@ -1225,6 +1228,7 @@ function withCodeOperationRuntime(
   service: CodeRouteService,
   runtime: CodeOperationRuntime,
 ): CodeRouteService {
+  const readEvidenceBatch = runtime.readEvidenceBatch?.bind(runtime);
   return {
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
@@ -1243,6 +1247,9 @@ function withCodeOperationRuntime(
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
     readOperationContent: (windowId, threadId, operationId, contentId) =>
       runtime.readEvidence(windowId, threadId, operationId, decodeCodeEvidenceContentId(contentId)),
+    ...(readEvidenceBatch === undefined
+      ? {}
+      : { readOperationContents: (windowId, input) => readEvidenceBatch(windowId, input) }),
     saveFile: (windowId, input) => service.saveFile(windowId, input),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
@@ -1342,6 +1349,9 @@ function withCodeBoard(
     ...(service.readOperationContent === undefined
       ? {}
       : { readOperationContent: service.readOperationContent.bind(service) }),
+    ...(service.readOperationContents === undefined
+      ? {}
+      : { readOperationContents: service.readOperationContents.bind(service) }),
     ...(service.stageEvidence === undefined
       ? {}
       : { stageEvidence: service.stageEvidence.bind(service) }),
@@ -1411,6 +1421,10 @@ export function startOctantServer(
     const startedAt = Date.now();
     const bindingReceiptStore = new DurableBindingReceiptStore(persistence.connection);
     const processAuthorityClock = new ProcessAuthorityClock();
+    const machineChangeFeed = new MachineChangeFeed();
+    const unsubscribeMachineChanges = persistence.journal.subscribeCommitted((append) =>
+      machineChangeFeed.publishCommitted(append),
+    );
     const processAuthorityNow = (wallClockMs: number) => processAuthorityClock.clamp(wallClockMs);
     const codeApprovalStore = new CodeOperationApprovalStore({
       uuid: randomUUID,
@@ -2015,6 +2029,10 @@ export function startOctantServer(
       launchSessionStore,
       windowAuthorityStore,
     });
+    const machineChangeRoutes = createMachineChangeRouteHandler({
+      feed: machineChangeFeed,
+      windowAuthorityStore,
+    });
     const webAssetsPath = options.webAssetsPath ?? resolveWebAssetsPath();
     const webAssets = createWebAssetsHandler({
       distPath: webAssetsPath,
@@ -2434,6 +2452,7 @@ export function startOctantServer(
           },
         },
         onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
+        waitForThreadChange: (signal) => machineChangeFeed.waitFor("code-navigation", signal),
         probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
         issueContext: githubIssueContextService,
         linearIssueContext: linearIssueContextService,
@@ -6009,6 +6028,7 @@ export function startOctantServer(
     const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
       (await projectBindingRoutes(request)) ??
       (await launchSessionRoutes(request)) ??
+      (await machineChangeRoutes(request)) ??
       (await contextRoutes(request)) ??
       (await projectRoutes(request)) ??
       (await agentRunRoutes(request)) ??
@@ -6089,7 +6109,7 @@ export function startOctantServer(
           `Octant request handling took ${(durationMs / 1_000).toFixed(1)}s for ${request.method} ${slowRequestRoute(url.pathname)}, past ${(thresholdMs / 1_000).toFixed(0)}s slow request threshold.`,
         );
       }
-      return response;
+      return withServerTiming(response, measurement, durationMs);
     };
 
     const forwardListDrift = compareRemoteForwardListToClassifier();
@@ -6425,6 +6445,13 @@ export function startOctantServer(
           }
           try {
             httpStop = server.stop(true);
+          } catch (error) {
+            shutdownFailure = error;
+          }
+          try {
+            unsubscribeMachineChanges();
+            machineChangeFeed.close();
+            workTurnService.closeLiveUpdates();
           } catch (error) {
             shutdownFailure = error;
           }

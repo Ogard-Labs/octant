@@ -133,7 +133,9 @@ export interface WorkspaceViewProps {
   readonly workPromotionController: WorkPromotionController;
   readonly workMutationClient?: WorkMutationClient;
   readonly workThreadClient?: WorkThreadClient;
+  readonly workThreads?: ReadonlyArray<WorkThread>;
   readonly workTurnClient?: WorkTurnClient;
+  readonly workChangeRevision?: number;
   readonly workRequestClient?: WorkRequestClient;
   readonly onWorkThreadUpdated?: (thread: WorkThread) => void;
   readonly codeProviderChoices: ReadonlyArray<CodeThreadProviderChoice>;
@@ -744,6 +746,7 @@ function renderCodeTab(
   }
   const surface = (
     <ThreadActivityPictureInPicture
+      enabled={codeController.conversationHistory !== "loading"}
       {...(props.browserAutomationClient === undefined
         ? {}
         : { browserClient: props.browserAutomationClient })}
@@ -765,10 +768,12 @@ function renderCodeTab(
     <CodeWorkspaceErrorBoundary key={tab.id}>
       <ThreadPlanProvider
         {...(props.planClient === undefined ? {} : { client: props.planClient })}
+        enabled={codeController.conversationHistory !== "loading"}
         threadId={String(tab.threadId)}
       >
         <CodeThreadEnvironment
           active={paneIsActive(props, paneId)}
+          observe={codeController.conversationHistory !== "loading"}
           {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
           {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -1062,6 +1067,9 @@ function renderNonCodeTab(
         />
       );
     }
+    const initialThread = props.workThreads?.find(
+      (thread) => String(thread.id) === String(tab.threadId),
+    );
     return (
       <WorkThreadEnvironment
         active={paneIsActive(props, paneId)}
@@ -1088,6 +1096,10 @@ function renderNonCodeTab(
           threadId={tab.threadId as never}
         >
           <WorkThreadWorkspace
+            {...(props.workChangeRevision === undefined
+              ? {}
+              : { changeRevision: props.workChangeRevision })}
+            {...(initialThread === undefined ? {} : { initialThread })}
             {...(props.workMutationClient === undefined
               ? {}
               : { mutationClient: props.workMutationClient })}

@@ -6,6 +6,7 @@ import {
   decodeWorkAttachmentReference,
   decodeWorkThreadId,
   decodeWorkThreadTranscript,
+  decodeWorkTurnStreamFrame,
   decodeWorkTurnCancelResult,
   decodeWorkTurnLookupResult,
   decodeWorkTurnRequestId,
@@ -17,6 +18,7 @@ import {
   type WorkTurnCancelResult,
   type WorkTurnFailure,
   type WorkTurnLookupResult,
+  type WorkTurnStreamFrame,
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -42,6 +44,12 @@ export interface WorkTurnRouteService {
     windowId: WindowId,
     threadId: WorkThreadId,
   ) => Promise<WorkThreadTranscript>;
+  readonly subscribe: (
+    windowId: WindowId,
+    threadId: WorkThreadId,
+    afterSequence: number,
+    signal: AbortSignal,
+  ) => AsyncIterable<WorkTurnStreamFrame>;
   readonly stageAttachment?: (
     windowId: WindowId,
     input: {
@@ -144,7 +152,10 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
     const isLookup = lookupMatch !== null && request.method === "GET";
     const transcriptMatch = url.pathname.match(/^\/api\/work\/turns\/transcript\/([^/]+)$/);
     const isTranscript = transcriptMatch !== null && request.method === "GET";
-    if (!isAttachment && !isStart && !isCancel && !isLookup && !isTranscript) return undefined;
+    const streamMatch = url.pathname.match(/^\/api\/work\/turns\/stream\/([^/]+)$/);
+    const isStream = streamMatch !== null && request.method === "GET";
+    if (!isAttachment && !isStart && !isCancel && !isLookup && !isTranscript && !isStream)
+      return undefined;
 
     let authenticatedWindowId: WindowId;
     try {
@@ -201,6 +212,27 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
           origin,
         );
       }
+      if (isStream) {
+        const threadId = decodeWorkThreadId(decodeURIComponent(streamMatch![1]!));
+        const afterSequence = Number(url.searchParams.get("afterSequence"));
+        if (
+          url.searchParams.size !== 1 ||
+          !Number.isSafeInteger(afterSequence) ||
+          afterSequence < 0
+        ) {
+          throw new WorkTurnRouteRejected("Work turn stream cursor is invalid.", 400);
+        }
+        return workTurnStreamResponse(
+          dependencies.service.subscribe(
+            authenticatedWindowId,
+            threadId,
+            afterSequence,
+            request.signal,
+          ),
+          request.signal,
+          origin,
+        );
+      }
       if (url.search !== "") {
         throw new WorkTurnRouteRejected("Work turn request is invalid.", 400);
       }
@@ -248,6 +280,52 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
       );
     }
   };
+}
+
+function workTurnStreamResponse(
+  frames: AsyncIterable<WorkTurnStreamFrame>,
+  signal: AbortSignal,
+  origin: string | null,
+): Response {
+  const encoder = new TextEncoder();
+  const iterator = frames[Symbol.asyncIterator]();
+  const abort = (): void => {
+    void iterator.return?.(undefined);
+  };
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        if (signal.aborted) {
+          controller.close();
+          return;
+        }
+        const next = await iterator.next();
+        if (next.done === true) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(
+          encoder.encode(`${JSON.stringify(decodeWorkTurnStreamFrame(next.value))}\n`),
+        );
+      } catch {
+        controller.close();
+      }
+    },
+    async cancel() {
+      signal.removeEventListener("abort", abort);
+      await iterator.return?.(undefined);
+    },
+  });
+  return new Response(body, {
+    status: 200,
+    headers: {
+      ...corsHeaders(origin),
+      "content-type": "application/x-ndjson",
+      "cache-control": "no-store",
+    },
+  });
 }
 
 class WorkTurnRouteRejected extends Error {

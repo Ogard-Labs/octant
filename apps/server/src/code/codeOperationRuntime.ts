@@ -7,6 +7,7 @@ import {
   decodeCodeOperationApprovalConfirmation,
   decodeCodeCheckoutId,
   decodeCodeOperationCommand,
+  decodeCodeEvidenceBatchResponse,
   decodeCodeRelativePath,
   decodeCodeReviewFindingId,
   decodeProviderSessionId,
@@ -15,6 +16,8 @@ import {
   type CodeOperationCommand,
   type CodeOperationFailure,
   type CodeConversationPage,
+  type CodeEvidenceBatchRequest,
+  type CodeEvidenceBatchResponse,
   type CodeOperationApprovalReceipt,
   type CodeOperationApprovalRequest,
   type CodeOperationApprovalChallenge,
@@ -241,6 +244,10 @@ export interface CodeOperationRuntime {
     operationId: CodeOperationId,
     contentId: CodeEvidenceContentId,
   ): Promise<{ readonly bytes: Uint8Array; readonly digest: string; readonly byteLength: number }>;
+  readEvidenceBatch?(
+    windowId: WindowId,
+    input: CodeEvidenceBatchRequest,
+  ): Promise<CodeEvidenceBatchResponse>;
   prepareApproval(
     windowId: WindowId,
     request: CodeOperationApprovalRequest,
@@ -692,6 +699,11 @@ export function createCodeOperationRuntime(
         });
       }
     },
+    readEvidenceBatch: async (windowId, input) =>
+      decodeCodeEvidenceBatchResponse({
+        threadId: input.threadId,
+        items: await service.readEvidenceBatch(windowId, input.threadId, input.items),
+      }),
     close: async () => {
       const tests = [...activeTests.values()];
       for (const test of tests) test.controller.abort();

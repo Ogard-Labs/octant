@@ -21,7 +21,7 @@ export interface WorkThreadClientOptions {
 }
 
 export interface WorkThreadClient {
-  bootstrap(): Promise<WorkThreadBootstrap>;
+  bootstrap(signal?: AbortSignal): Promise<WorkThreadBootstrap>;
   navigation(): Promise<WorkThreadNavigation>;
   execute(command: WorkThreadCommand): Promise<WorkThreadCommandResult>;
   queryBoard(query: WorkBoardQuery): Promise<WorkBoardView>;
@@ -41,12 +41,13 @@ export function createWorkThreadClient(options: WorkThreadClientOptions): WorkTh
   validateLoopbackBaseUrl(options.baseUrl);
   const fetch = bindFetchPort(options.fetch);
   return {
-    async bootstrap() {
+    async bootstrap(signal) {
       let response: Response;
       try {
         response = await fetch(new URL("/api/work/threads/bootstrap", options.baseUrl).toString(), {
           method: "GET",
           headers: { "x-octant-window-capability": options.windowCapability },
+          ...(signal === undefined ? {} : { signal }),
         });
       } catch {
         throw new WorkThreadClientFailure("Work thread service is unavailable.", 0);

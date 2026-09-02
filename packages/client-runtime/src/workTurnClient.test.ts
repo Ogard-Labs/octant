@@ -131,6 +131,7 @@ describe("createWorkTurnClient", () => {
     await expect(client.transcript(ids.thread)).resolves.toEqual({
       threadId: ids.thread,
       turns: [],
+      liveCursor: 0,
     });
     await expect(
       client.putAttachment({
@@ -144,6 +145,64 @@ describe("createWorkTurnClient", () => {
     await expect(
       client.discardAttachment(ids.thread, "22222222-2222-4222-8222-222222222222" as never),
     ).resolves.toBeUndefined();
+  });
+
+  it("decodes the resumable Work response stream", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          `${JSON.stringify({
+            kind: "response-delta",
+            sequence: 5,
+            threadId: ids.thread,
+            requestId: ids.request,
+            text: "Immediate text",
+          })}\n`,
+          { headers: { "content-type": "application/x-ndjson" } },
+        ),
+    );
+    const client = createWorkTurnClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetch as typeof globalThis.fetch,
+      windowCapability: "cap",
+    });
+    const controller = new AbortController();
+    const stream = client.subscribe(ids.thread, 4, controller.signal);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      done: false,
+      value: { kind: "response-delta", sequence: 5, text: "Immediate text" },
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      `http://127.0.0.1:8787/api/work/turns/stream/${ids.thread}?afterSequence=4`,
+      expect.objectContaining({ method: "GET", signal: controller.signal }),
+    );
+  });
+
+  it("accepts a restart snapshot marker below the previous process cursor", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          `${JSON.stringify({
+            kind: "snapshot-required",
+            sequence: 0,
+            threadId: ids.thread,
+          })}\n`,
+          { headers: { "content-type": "application/x-ndjson" } },
+        ),
+    );
+    const client = createWorkTurnClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetch as typeof globalThis.fetch,
+      windowCapability: "cap",
+    });
+
+    const stream = client.subscribe(ids.thread, 4, new AbortController().signal);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      done: false,
+      value: { kind: "snapshot-required", sequence: 0 },
+    });
   });
 
   it("rejects non-loopback base URLs", () => {

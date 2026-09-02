@@ -92,6 +92,27 @@ describe("Project routes", () => {
     );
   });
 
+  it("routes an explicit environment refresh past the observation cache", async () => {
+    const observeThread = vi.fn().mockResolvedValue({ status: "unavailable" });
+    const route = routeFixture({}, { observeThread });
+
+    const response = await route(
+      new Request(
+        `http://127.0.0.1/api/projects/${projectId}/environment?threadId=${threadId}&fresh=1`,
+        { headers: { "x-octant-window-capability": capability } },
+      ),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(observeThread).toHaveBeenCalledWith(
+      windowId,
+      projectId,
+      threadId,
+      expect.any(AbortSignal),
+      true,
+    );
+  });
+
   it("rejects missing, forged, and expired capabilities for environment requests", async () => {
     const observe = vi.fn();
     const { route, now } = routeFixtureWithClock({}, undefined, { observe });

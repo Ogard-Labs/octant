@@ -176,8 +176,13 @@ export class GitEnvironmentPort {
 
     try {
       const canonicalTopLevel = await this.#dependencies.realpath(topLevel.stdout.trim());
-      const worktrees = await run(["-C", canonicalRoot, "worktree", "list", "--porcelain"]);
+      const [worktrees, symbolic, status] = await Promise.all([
+        run(["-C", canonicalRoot, "worktree", "list", "--porcelain"]),
+        run(["-C", canonicalRoot, "symbolic-ref", "--quiet", "--short", "HEAD"]),
+        run(["-C", canonicalRoot, "status", "--porcelain=v1", "--untracked-files=normal"]),
+      ]);
       if (worktrees.exitCode !== 0) return { status: "failed" };
+      if (status.exitCode !== 0) return { status: "failed" };
 
       const worktreeEntries = parseWorktreeEntries(worktrees.stdout);
       if (worktreeEntries === undefined || worktreeEntries.length === 0)
@@ -195,14 +200,6 @@ export class GitEnvironmentPort {
       }
       if (!repositoryRoot || !worktreeRoot) return { status: "failed" };
 
-      const symbolic = await run([
-        "-C",
-        canonicalRoot,
-        "symbolic-ref",
-        "--quiet",
-        "--short",
-        "HEAD",
-      ]);
       let branch:
         | { readonly kind: "named"; readonly name: string }
         | {
@@ -219,15 +216,6 @@ export class GitEnvironmentPort {
         if (oid.exitCode !== 0 || !/^[0-9a-f]{40}$/.test(identity)) return { status: "failed" };
         branch = { kind: "detached", oid: identity };
       } else return { status: "failed" };
-
-      const status = await run([
-        "-C",
-        canonicalRoot,
-        "status",
-        "--porcelain=v1",
-        "--untracked-files=normal",
-      ]);
-      if (status.exitCode !== 0) return { status: "failed" };
 
       return {
         status: "ready",

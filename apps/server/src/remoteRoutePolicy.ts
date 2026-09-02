@@ -251,6 +251,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     "/api/code/",
     "/api/computer-use/",
     "/api/context/",
+    "/api/machine/",
     "/api/work/",
     "/api/extensions/catalog",
     "/api/extensions/inspect",

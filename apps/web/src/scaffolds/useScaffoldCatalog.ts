@@ -4,6 +4,7 @@ import type { ScaffoldEntry, ScaffoldRun } from "@octant/contracts/scaffolds";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 export interface ScaffoldCatalogOptions {
+  readonly enabled?: boolean;
   readonly threadId: string;
   readonly checkoutId: string;
   readonly serverUrl?: string;
@@ -35,6 +36,7 @@ export interface ScaffoldCatalog {
  */
 export function useScaffoldCatalog(options: ScaffoldCatalogOptions): ScaffoldCatalog {
   const { threadId, checkoutId, serverUrl, windowCapability } = options;
+  const enabled = options.enabled !== false;
   const load = options.load ?? loadScaffoldCatalog;
   const uuid = options.uuid ?? globalThis.crypto.randomUUID.bind(globalThis.crypto);
   const injectedCode = options.code;
@@ -55,7 +57,7 @@ export function useScaffoldCatalog(options: ScaffoldCatalogOptions): ScaffoldCat
   const [lastRun, setLastRun] = useState<ScaffoldRun>();
 
   useEffect(() => {
-    if (serverUrl === undefined || windowCapability === undefined) return;
+    if (!enabled || serverUrl === undefined || windowCapability === undefined) return;
     const controller = new AbortController();
     void (async () => {
       try {
@@ -73,7 +75,7 @@ export function useScaffoldCatalog(options: ScaffoldCatalogOptions): ScaffoldCat
       }
     })();
     return () => controller.abort();
-  }, [load, serverUrl, windowCapability]);
+  }, [enabled, load, serverUrl, windowCapability]);
 
   const start = useCallback(
     async (entry: ScaffoldEntry, directoryName: string): Promise<boolean> => {
@@ -117,7 +119,7 @@ export function useScaffoldCatalog(options: ScaffoldCatalogOptions): ScaffoldCat
       () => new Map(entries.map((entry) => [String(entry.id), tools.includes(entry.requiresTool)])),
       [entries, tools],
     ),
-    available: code !== undefined && entries.length > 0,
+    available: enabled && code !== undefined && entries.length > 0,
     busy,
     message,
     lastRun,

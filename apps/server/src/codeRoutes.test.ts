@@ -326,6 +326,41 @@ describe("Code routes", () => {
     );
   });
 
+  it("enriches provider text frames in one authorized batch", async () => {
+    const operationFrame = {
+      threadId,
+      operationId,
+      cursor: 1,
+      occurredAt: now,
+      event: {
+        kind: "provider-content" as const,
+        channel: "message" as const,
+        content: { contentId, digest, byteLength: 12 },
+      },
+    };
+    const subscribeOperation = vi.fn(async function* () {
+      yield operationFrame;
+    });
+    const readOperationContents = vi.fn(async () => ({
+      threadId,
+      items: [{ operationId, contentId, text: "Immediate text" }],
+    }));
+    const route = routeFixture({ subscribeOperation, readOperationContents });
+
+    const response = await route(
+      request(`/api/code/threads/${threadId}/operations/${operationId}/events?afterCursor=0`),
+    );
+
+    expect(response?.status).toBe(200);
+    await expect(response?.text()).resolves.toBe(
+      `${JSON.stringify({ ...operationFrame, displayText: "Immediate text" })}\n`,
+    );
+    expect(readOperationContents).toHaveBeenCalledWith(windowId, {
+      threadId,
+      items: [{ operationId, contentId }],
+    });
+  });
+
   it("reads a versioned paginated conversation through authenticated thread authority", async () => {
     const conversation = vi.fn(async () => ({
       version: 3,
@@ -469,6 +504,32 @@ describe("Code routes", () => {
     expect(response?.status).toBe(200);
     expect(new TextDecoder().decode(await response!.arrayBuffer())).toBe("diff evidence");
     expect(readOperationContent).toHaveBeenCalledWith(windowId, threadId, operationId, contentId);
+  });
+
+  it("hydrates one conversation page through a single authorized evidence batch", async () => {
+    const readOperationContents = vi.fn(async () => ({
+      threadId,
+      items: [{ operationId, contentId, text: "display text" }],
+    }));
+    const route = routeFixture({ readOperationContents });
+
+    const response = await route(
+      request("/api/code/evidence/batch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ threadId, items: [{ operationId, contentId }] }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({
+      threadId,
+      items: [{ operationId, contentId, text: "display text" }],
+    });
+    expect(readOperationContents).toHaveBeenCalledWith(windowId, {
+      threadId,
+      items: [{ operationId, contentId }],
+    });
   });
 
   it("accepts canonical raw UTF-8 save metadata without exposing a root path", async () => {

@@ -105,6 +105,7 @@ export interface ChatControllerOptions {
   readonly activeThreadId?: ChatThreadId;
   readonly client?: ChatClient;
   readonly navigationRefreshMs?: number;
+  readonly changeRevision?: number;
   readonly reconnectDelayMs?: number;
   readonly readCursorStore?: ChatReadCursorStore;
   readonly draftStore?: ComposerThreadDraftStore;
@@ -509,6 +510,25 @@ export function useChatController(options: ChatControllerOptions) {
       stop();
     };
   }, [applyNavigation, bootstrap, client, navigationRefreshMs]);
+
+  useEffect(() => {
+    if (
+      options.changeRevision === undefined ||
+      options.changeRevision <= 0 ||
+      bootstrap === undefined
+    )
+      return;
+    let cancelled = false;
+    void client
+      .navigation()
+      .then((next) => {
+        if (!cancelled && mounted.current) applyNavigation(next.threads);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [applyNavigation, bootstrap, client, options.changeRevision]);
 
   useEffect(() => {
     activeThreadIdRef.current = options.activeThreadId;

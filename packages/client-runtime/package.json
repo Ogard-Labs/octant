@@ -51,6 +51,7 @@
     "./thread-checkpoint-client": "./src/threadCheckpointClient.ts",
     "./code-file-listing-client": "./src/codeFileListingClient.ts",
     "./local-server-client": "./src/localServerClient.ts",
+    "./machine-change-client": "./src/machineChangeClient.ts",
     "./navigator-assistant-client": "./src/navigatorAssistantClient.ts",
     "./preview-client": "./src/previewClient.ts",
     "./project-client": "./src/projectClient.ts",

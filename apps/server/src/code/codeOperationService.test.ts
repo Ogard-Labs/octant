@@ -354,6 +354,56 @@ describe("CodeOperationService", () => {
       ),
     ).rejects.toEqual(new CodeOperationServiceError("unauthorized"));
 
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+      digest: "c".repeat(64),
+      byteLength: 6,
+    });
+    const reply = decodeCodeEvidenceReference({
+      contentId: "dededede-dede-4ede-8ede-dededededede",
+      digest: "d".repeat(64),
+      byteLength: 5,
+    });
+    events.replay.mockClear();
+    events.replay.mockReturnValueOnce({
+      status: "ok",
+      frames: [
+        {
+          threadId: ids.thread,
+          operationId: ids.operation,
+          cursor: 1,
+          occurredAt: "2026-07-21T10:00:00.000Z",
+          event: {
+            kind: "conversation-turn-started",
+            providerInstanceId: "00000000-0000-4000-8000-000000000908",
+            modelId: "model-a",
+            sessionId: "80000000-0000-4000-8000-000000000010",
+            prompt,
+          },
+        },
+        {
+          threadId: ids.thread,
+          operationId: ids.operation,
+          cursor: 2,
+          occurredAt: "2026-07-21T10:00:01.000Z",
+          event: { kind: "provider-content", channel: "message", content: reply },
+        },
+      ] as never,
+      nextCursor: 2,
+    });
+    evidence.read.mockResolvedValueOnce("prompt").mockResolvedValueOnce("reply");
+
+    await expect(
+      service.readEvidenceBatch(ids.window, ids.thread, [
+        { operationId: ids.operation, contentId: prompt.contentId },
+        { operationId: ids.operation, contentId: reply.contentId },
+      ]),
+    ).resolves.toEqual([
+      { operationId: ids.operation, contentId: prompt.contentId, text: "prompt" },
+      { operationId: ids.operation, contentId: reply.contentId, text: "reply" },
+    ]);
+    expect(events.replay).toHaveBeenCalledTimes(1);
+
     events.replay.mockReturnValueOnce({
       status: "ok",
       frames: [

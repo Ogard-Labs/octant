@@ -9,6 +9,7 @@ import {
   decodeWorkTurnCancelResult,
   decodeWorkTurnLookupResult,
   decodeWorkTurnRequestId,
+  decodeWorkTurnStreamFrame,
   decodeStartWorkThreadTurnCommand,
   type CancelWorkTurnCommand,
   type WorkAttachmentId,
@@ -19,6 +20,7 @@ import {
   type WorkTurnCancelResult,
   type WorkTurnLookupResult,
   type WorkTurnRequestId,
+  type WorkTurnStreamFrame,
   type StartWorkThreadTurnCommand,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -33,7 +35,12 @@ export interface WorkTurnClient {
   startFirstTurn(command: StartWorkThreadTurnCommand): Promise<WorkTurnLookupResult>;
   lookupFirstTurn(requestId: WorkTurnRequestId): Promise<WorkTurnLookupResult>;
   cancelFirstTurn(command: CancelWorkTurnCommand): Promise<WorkTurnCancelResult>;
-  transcript(threadId: WorkThreadId): Promise<WorkThreadTranscript>;
+  transcript(threadId: WorkThreadId, signal?: AbortSignal): Promise<WorkThreadTranscript>;
+  subscribe(
+    threadId: WorkThreadId,
+    afterSequence: number,
+    signal: AbortSignal,
+  ): AsyncGenerator<WorkTurnStreamFrame>;
   /**
    * Hand the host one image for a thread's next turn. The host answers with
    * the reference a `start-work-thread-turn` names by id; nothing about the
@@ -111,13 +118,37 @@ export function createWorkTurnClient(options: WorkTurnClientOptions): WorkTurnCl
         "Work turn cancel failed.",
       );
     },
-    async transcript(threadId) {
+    async transcript(threadId, signal) {
       return getJson(
         fetch,
         options,
         `/api/work/turns/transcript/${threadId}`,
         decodeWorkThreadTranscript,
         "Work transcript lookup failed.",
+        signal,
+      );
+    },
+    subscribe(threadId, afterSequence, signal) {
+      try {
+        decodeWorkThreadId(threadId);
+        if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) throw new Error("cursor");
+      } catch {
+        return rejectedWorkStream(new WorkTurnClientFailure("Work turn stream is invalid.", 0));
+      }
+      const url = new URL(
+        `/api/work/turns/stream/${encodeURIComponent(threadId)}`,
+        options.baseUrl,
+      );
+      url.searchParams.set("afterSequence", String(afterSequence));
+      return parseWorkTurnStream(
+        fetch(url.toString(), {
+          method: "GET",
+          headers: { "x-octant-window-capability": options.windowCapability },
+          signal,
+        }),
+        threadId,
+        afterSequence,
+        signal,
       );
     },
     async putAttachment(input) {
@@ -193,6 +224,113 @@ export function createWorkTurnClient(options: WorkTurnClientOptions): WorkTurnCl
   };
 }
 
+async function* parseWorkTurnStream(
+  responsePromise: Promise<Response>,
+  threadId: WorkThreadId,
+  afterSequence: number,
+  signal: AbortSignal,
+): AsyncGenerator<WorkTurnStreamFrame> {
+  let response: Response;
+  try {
+    response = await responsePromise;
+  } catch {
+    if (signal.aborted) return;
+    throw new WorkTurnClientFailure("Work turn stream is unavailable.", 0);
+  }
+  if (!response.ok)
+    throw new WorkTurnClientFailure("Work turn stream is unavailable.", response.status);
+  if (response.headers.get("content-type")?.split(";", 1)[0] !== "application/x-ndjson") {
+    throw new WorkTurnClientFailure("Work turn stream response is invalid.", 0);
+  }
+  if (response.body === null) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+  let lastSequence = afterSequence;
+  let frameCount = 0;
+  const decodeLine = (line: string): WorkTurnStreamFrame => {
+    if (encoder.encode(line).byteLength > 160 * 1024) {
+      throw new WorkTurnClientFailure("Work turn stream frame is too large.", 0);
+    }
+    let frame: WorkTurnStreamFrame;
+    try {
+      frame = decodeWorkTurnStreamFrame(JSON.parse(line));
+    } catch {
+      throw new WorkTurnClientFailure("Work turn stream frame is invalid.", 0);
+    }
+    const cursorRegressed =
+      frame.kind === "snapshot-required" ? false : frame.sequence <= lastSequence;
+    if (String(frame.threadId) !== String(threadId) || cursorRegressed) {
+      throw new WorkTurnClientFailure("Work turn stream cursor is invalid.", 0);
+    }
+    lastSequence = frame.sequence;
+    frameCount += 1;
+    if (frameCount > 512) {
+      throw new WorkTurnClientFailure("Work turn stream exceeded its frame budget.", 0);
+    }
+    return frame;
+  };
+  try {
+    for (;;) {
+      if (signal.aborted) return;
+      const next = await readWorkStreamChunk(reader, signal);
+      if (next.done) break;
+      buffer += decoder.decode(next.value, { stream: true });
+      let newline = buffer.indexOf("\n");
+      while (newline !== -1) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (line.trim() !== "") yield decodeLine(line);
+        newline = buffer.indexOf("\n");
+      }
+      if (encoder.encode(buffer).byteLength > 160 * 1024) {
+        throw new WorkTurnClientFailure("Work turn stream frame is too large.", 0);
+      }
+    }
+    const trailing = buffer.trim();
+    if (trailing !== "") yield decodeLine(trailing);
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    try {
+      reader.releaseLock();
+    } catch {
+      // Cancellation may already release the reader.
+    }
+  }
+}
+
+async function readWorkStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (signal.aborted) {
+    await reader.cancel();
+    return { done: true, value: undefined as undefined };
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reader.cancel().then(() => resolve({ done: true, value: undefined as undefined }), reject);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    reader.read().then(
+      (result) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(result);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function* rejectedWorkStream(error: Error): AsyncGenerator<WorkTurnStreamFrame> {
+  throw error;
+}
+
 async function postJson<T>(
   fetch: typeof globalThis.fetch,
   options: WorkTurnClientOptions,
@@ -231,12 +369,14 @@ async function getJson<T>(
   path: string,
   decode: (value: unknown) => T,
   failureMessage: string,
+  signal?: AbortSignal,
 ): Promise<T> {
   let response: Response;
   try {
     response = await fetch(new URL(path, options.baseUrl).toString(), {
       method: "GET",
       headers: { "x-octant-window-capability": options.windowCapability },
+      ...(signal === undefined ? {} : { signal }),
     });
   } catch {
     throw new WorkTurnClientFailure("Work turn service is unavailable.", 0);

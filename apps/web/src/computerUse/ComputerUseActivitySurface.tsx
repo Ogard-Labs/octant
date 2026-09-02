@@ -11,6 +11,8 @@ export function ComputerUseActivitySurface(props: {
   readonly pollIntervalMs?: number;
 }) {
   const [sessions, setSessions] = useState<ReadonlyArray<ComputerUseSessionView>>([]);
+  const pollIntervalMs =
+    props.pollIntervalMs ?? (sessions.some(isNonterminalSession) ? 1_000 : 5_000);
   useEffect(() => {
     let active = true;
     let inFlight = false;
@@ -27,14 +29,14 @@ export function ComputerUseActivitySurface(props: {
         inFlight = false;
       }
     };
-    const stop = scheduleVisibleInterval(() => void load(), props.pollIntervalMs ?? 1_000, {
+    const stop = scheduleVisibleInterval(() => void load(), pollIntervalMs, {
       runImmediately: true,
     });
     return () => {
       active = false;
       stop();
     };
-  }, [props.client, props.pollIntervalMs]);
+  }, [pollIntervalMs, props.client]);
 
   const backgroundSessions = sessions.filter((session) => {
     const threadId = String(session.threadId);

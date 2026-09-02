@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   LatencyStatsProjection,
   observedRpcLatency,
+  withServerTiming,
   slowRequestRoute,
 } from "./latencyStatsProjection";
 
@@ -76,12 +77,25 @@ describe("observedRpcLatency", () => {
   it("classifies product RPCs and excludes non-RPC paths", () => {
     expect(observedRpcLatency("/api/chat/commands")).toBeUndefined();
     expect(observedRpcLatency("/api/code/commands")).toBe("rpc");
+    expect(observedRpcLatency("/api/code/navigation")).toBe("rpc-navigation");
+    expect(observedRpcLatency("/api/work/turns/transcript/thread-id")).toBe("rpc-thread-read");
+    expect(observedRpcLatency("/api/code/threads/thread-id/conversation")).toBe("rpc-thread-read");
+    expect(observedRpcLatency("/api/code/evidence/batch")).toBe("rpc-evidence");
+    expect(observedRpcLatency("/api/projects/project-id/environment")).toBe("rpc-environment");
     expect(observedRpcLatency("/api/chat/attachments/file")).toBe("rpc-toolchain");
     expect(observedRpcLatency("/api/usage/export")).toBe("rpc-toolchain");
     expect(observedRpcLatency("/api/extensions/import-local")).toBe("rpc-toolchain");
     expect(observedRpcLatency("/api/extensions/import-local-receipts")).toBe("rpc");
     expect(observedRpcLatency("/health")).toBeUndefined();
     expect(observedRpcLatency("/assets/app.js")).toBeUndefined();
+  });
+
+  it("adds browser-readable server timing without changing the response", async () => {
+    const response = withServerTiming(Response.json({ ok: true }), "rpc-thread-read", 17);
+
+    expect(response.headers.get("server-timing")).toBe('octant;dur=17;desc="rpc-thread-read"');
+    expect(response.headers.get("x-octant-latency-class")).toBe("rpc-thread-read");
+    await expect(response.json()).resolves.toEqual({ ok: true });
   });
 });
 

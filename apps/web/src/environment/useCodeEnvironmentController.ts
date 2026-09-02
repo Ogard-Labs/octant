@@ -1,7 +1,6 @@
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import type { CodeEnvironmentObservation, CodeThreadId, ProjectSummary } from "@octant/contracts";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export type CodeEnvironmentControllerStatus = "idle" | "loading" | "ready" | "error";
 
@@ -21,8 +20,6 @@ export interface CodeEnvironmentControllerOptions {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
-
-export const CODE_ENVIRONMENT_REFRESH_INTERVAL_MS = 2_000;
 
 export function useCodeEnvironmentController(
   options: CodeEnvironmentControllerOptions,
@@ -45,7 +42,7 @@ export function useCodeEnvironmentController(
   const activeRequest = useRef<AbortController | undefined>(undefined);
 
   const load = useCallback(
-    async (reason: "open" | "poll" | "refresh" | "retry"): Promise<void> => {
+    async (fresh = false): Promise<void> => {
       const project = options.project;
       if (!options.enabled || project?.type !== "code") {
         activeRequest.current?.abort();
@@ -57,33 +54,38 @@ export function useCodeEnvironmentController(
         return;
       }
 
-      if (reason === "poll" && activeRequest.current !== undefined) return;
-
       activeRequest.current?.abort();
       const controller = new AbortController();
       activeRequest.current = controller;
       const request = ++generation.current;
-      if (reason !== "poll") {
-        setStatus("loading");
-        setObservation(undefined);
-        setErrorMessage(undefined);
-      }
+      setStatus("loading");
+      setObservation(undefined);
+      setErrorMessage(undefined);
       try {
         const nextObservation =
           options.threadId === undefined
-            ? await fallbackClient.environment(project.id, controller.signal)
-            : await fallbackClient.environmentForThread(
-                project.id,
-                options.threadId,
-                controller.signal,
-              );
+            ? fresh
+              ? await fallbackClient.environment(project.id, controller.signal, true)
+              : await fallbackClient.environment(project.id, controller.signal)
+            : fresh
+              ? await fallbackClient.environmentForThread(
+                  project.id,
+                  options.threadId,
+                  controller.signal,
+                  true,
+                )
+              : await fallbackClient.environmentForThread(
+                  project.id,
+                  options.threadId,
+                  controller.signal,
+                );
         if (!mounted.current || request !== generation.current) return;
         setObservation(nextObservation);
         setErrorMessage(undefined);
         setStatus("ready");
       } catch (error) {
         if (!mounted.current || request !== generation.current) return;
-        if (reason !== "poll") setStatus("error");
+        setStatus("error");
         setErrorMessage(failureMessage(error));
       } finally {
         if (activeRequest.current === controller) activeRequest.current = undefined;
@@ -102,7 +104,7 @@ export function useCodeEnvironmentController(
       setErrorMessage(undefined);
       return;
     }
-    void load("open");
+    void load();
   }, [
     load,
     options.enabled,
@@ -110,13 +112,6 @@ export function useCodeEnvironmentController(
     options.project?.type,
     options.project?.updatedAt,
   ]);
-
-  useEffect(() => {
-    if (!options.enabled || options.project?.type !== "code") return;
-    return scheduleVisibleInterval(() => {
-      void load("poll");
-    }, CODE_ENVIRONMENT_REFRESH_INTERVAL_MS);
-  }, [load, options.enabled, options.project?.type]);
 
   useEffect(() => {
     mounted.current = true;
@@ -132,8 +127,8 @@ export function useCodeEnvironmentController(
     status,
     observation,
     errorMessage,
-    refresh: () => load("refresh"),
-    retry: () => load("retry"),
+    refresh: () => load(true),
+    retry: () => load(true),
   };
 }
 

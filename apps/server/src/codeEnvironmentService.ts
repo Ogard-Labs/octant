@@ -15,12 +15,14 @@ export interface CodeEnvironmentServiceApi {
     authenticatedWindowId: WindowId,
     projectId: ProjectId,
     signal?: AbortSignal,
+    fresh?: boolean,
   ) => Promise<CodeEnvironmentObservation>;
   readonly observeThread: (
     authenticatedWindowId: WindowId,
     projectId: ProjectId,
     threadId: CodeThreadId,
     signal?: AbortSignal,
+    fresh?: boolean,
   ) => Promise<CodeEnvironmentObservation>;
 }
 
@@ -36,19 +38,32 @@ export interface CodeEnvironmentThreadSource {
 }
 
 export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
+  readonly #gitObservations = new Map<
+    string,
+    { readonly expiresAt: number; readonly observation: ReturnType<GitEnvironmentPort["observe"]> }
+  >();
+  readonly #now: () => number;
+  readonly #cacheMs: number;
+
   constructor(
     private readonly options: {
       readonly projects: Pick<ProjectServiceApi, "bootstrap">;
       readonly git: Pick<GitEnvironmentPort, "observe">;
       readonly clock: () => string;
       readonly code?: CodeEnvironmentThreadSource;
+      readonly now?: () => number;
+      readonly cacheMs?: number;
     },
-  ) {}
+  ) {
+    this.#now = options.now ?? Date.now;
+    this.#cacheMs = options.cacheMs ?? 5_000;
+  }
 
   async observe(
     windowId: WindowId,
     projectId: ProjectId,
     signal?: AbortSignal,
+    fresh = false,
   ): Promise<CodeEnvironmentObservation> {
     const bootstrap = await this.options.projects.bootstrap(windowId);
     const project = [...bootstrap.active, ...bootstrap.archived].find(
@@ -65,7 +80,7 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
         message: "Environment inspection requires an active Code Project.",
       });
 
-    const result = await this.options.git.observe(project.binding.canonicalRoot, signal);
+    const result = await this.#observeGit(project.binding.canonicalRoot, signal, fresh);
     const base = {
       projectId: project.id,
       projectName: project.name,
@@ -90,6 +105,7 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
     projectId: ProjectId,
     threadId: CodeThreadId,
     signal?: AbortSignal,
+    fresh = false,
   ): Promise<CodeEnvironmentObservation> {
     const code = this.options.code;
     if (code === undefined)
@@ -136,7 +152,7 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
         message: "The Code thread checkout is unavailable.",
       });
 
-    const result = await this.options.git.observe(root, signal);
+    const result = await this.#observeGit(root, signal, fresh);
     const base = {
       projectId: project.id,
       projectName: project.name,
@@ -158,5 +174,23 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
                 : "Octant could not inspect the Code thread checkout.",
           },
     );
+  }
+
+  #observeGit(
+    root: string,
+    signal?: AbortSignal,
+    fresh = false,
+  ): ReturnType<GitEnvironmentPort["observe"]> {
+    const now = this.#now();
+    const cached = this.#gitObservations.get(root);
+    if (!fresh && cached !== undefined && cached.expiresAt > now) return cached.observation;
+    const observation = this.options.git.observe(root, signal);
+    this.#gitObservations.set(root, { expiresAt: now + this.#cacheMs, observation });
+    void observation.catch(() => {
+      if (this.#gitObservations.get(root)?.observation === observation) {
+        this.#gitObservations.delete(root);
+      }
+    });
+    return observation;
   }
 }

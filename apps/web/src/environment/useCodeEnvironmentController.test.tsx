@@ -272,6 +272,7 @@ describe("useCodeEnvironmentController", () => {
     await act(async () => refresh.resolve(updated));
     await refreshPromise;
     expect(result.current).toMatchObject({ status: "ready", observation: updated });
+    expect(environment).toHaveBeenNthCalledWith(2, codeId, expect.any(AbortSignal), true);
   });
 
   it("aborts the superseded request during rapid refresh", async () => {
@@ -382,7 +383,7 @@ describe("useCodeEnvironmentController", () => {
     expect(signal?.aborted).toBe(true);
   });
 
-  it("refreshes the authoritative thread environment while the tab remains open", async () => {
+  it("does not spawn periodic Git observations while the thread remains open", async () => {
     vi.useFakeTimers();
     try {
       const api = client(
@@ -400,14 +401,9 @@ describe("useCodeEnvironmentController", () => {
       await act(async () => {});
       expect(api.environmentForThread).toHaveBeenCalledTimes(1);
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(2_000);
+        await vi.advanceTimersByTimeAsync(10_000);
       });
-      expect(api.environmentForThread).toHaveBeenCalledTimes(2);
-      expect(api.environmentForThread).toHaveBeenLastCalledWith(
-        codeId,
-        threadId,
-        expect.any(AbortSignal),
-      );
+      expect(api.environmentForThread).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

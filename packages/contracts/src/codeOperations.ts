@@ -1158,6 +1158,17 @@ export const CodeOperationEventFrame = Schema.Struct({
 }).annotations(strict);
 export type CodeOperationEventFrame = typeof CodeOperationEventFrame.Type;
 
+/**
+ * Authorized operation replay can carry display-ready text beside its durable
+ * evidence reference. The journal frame remains reference-only; this wire
+ * shape removes one follow-up HTTP read per provider text delta.
+ */
+export const CodeOperationStreamFrame = Schema.Struct({
+  ...CodeOperationEventFrame.fields,
+  displayText: Schema.optional(boundedText(MAX_CODE_OPERATION_TEXT_BYTES)),
+}).annotations(strict);
+export type CodeOperationStreamFrame = typeof CodeOperationStreamFrame.Type;
+
 export const MAX_CODE_CONVERSATION_PAGE_SIZE = 100;
 export const MAX_CODE_CONVERSATION_ASSISTANT_PARTS = 256;
 /**
@@ -1281,6 +1292,32 @@ export const CodeConversationPage = Schema.Struct({
   restoreUndo: Schema.optional(CodeCheckpoint),
 }).annotations(strict);
 export type CodeConversationPage = typeof CodeConversationPage.Type;
+
+export const MAX_CODE_EVIDENCE_BATCH_ITEMS = 256;
+
+/** References whose immutable display text one conversation page needs. */
+export const CodeEvidenceBatchRequest = Schema.Struct({
+  threadId: CodeThreadId,
+  items: Schema.Array(
+    Schema.Struct({
+      operationId: CodeOperationId,
+      contentId: CodeEvidenceContentId,
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_CODE_EVIDENCE_BATCH_ITEMS)),
+}).annotations(strict);
+export type CodeEvidenceBatchRequest = typeof CodeEvidenceBatchRequest.Type;
+
+export const CodeEvidenceBatchResponse = Schema.Struct({
+  threadId: CodeThreadId,
+  items: Schema.Array(
+    Schema.Struct({
+      operationId: CodeOperationId,
+      contentId: CodeEvidenceContentId,
+      text: boundedText(MAX_CODE_OPERATION_TEXT_BYTES),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(MAX_CODE_EVIDENCE_BATCH_ITEMS)),
+}).annotations(strict);
+export type CodeEvidenceBatchResponse = typeof CodeEvidenceBatchResponse.Type;
 
 export const MAX_CODE_THREAD_METADATA_VIEW_SIZE = 5_000;
 export const MAX_CODE_THREAD_METADATA_RECOVERY_REASONS = 8;
@@ -1806,8 +1843,11 @@ export const decodeCodeRunOutcome = Schema.decodeUnknownSync(CodeRunOutcome);
 export const decodeCodeOperationResult = Schema.decodeUnknownSync(CodeOperationResult);
 export const decodeCodeOperationEvent = Schema.decodeUnknownSync(CodeOperationEvent);
 export const decodeCodeOperationEventFrame = Schema.decodeUnknownSync(CodeOperationEventFrame);
+export const decodeCodeOperationStreamFrame = Schema.decodeUnknownSync(CodeOperationStreamFrame);
 export const decodeCodeConversationTurn = Schema.decodeUnknownSync(CodeConversationTurn);
 export const decodeCodeConversationPage = Schema.decodeUnknownSync(CodeConversationPage);
+export const decodeCodeEvidenceBatchRequest = Schema.decodeUnknownSync(CodeEvidenceBatchRequest);
+export const decodeCodeEvidenceBatchResponse = Schema.decodeUnknownSync(CodeEvidenceBatchResponse);
 export const decodeCodeOperationApprovalRequest = Schema.decodeUnknownSync(
   CodeOperationApprovalRequest,
 );

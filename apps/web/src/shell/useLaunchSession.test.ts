@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useLaunchSession } from "./useLaunchSession";
@@ -7,6 +7,7 @@ const serverUrl = "http://127.0.0.1:13773";
 const launchToken = `${"A".repeat(42)}A`;
 const windowId = "00000000-0000-4000-8000-000000000601";
 const capability = `${"C".repeat(42)}A`;
+const clientContextId = "browser-tab-a";
 
 function mockFetch(response: Response) {
   return vi.fn(async () => response) as unknown as typeof fetch;
@@ -103,6 +104,7 @@ describe("useLaunchSession", () => {
         capability,
         windowId,
         authentication: "local-session",
+        clientContextId,
       }),
     );
     const nextWindowId = "00000000-0000-4000-8000-000000000602";
@@ -121,6 +123,7 @@ describe("useLaunchSession", () => {
         href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}`,
         fetch: fetchMock,
         storage,
+        clientContextId,
       }),
     );
 
@@ -137,11 +140,42 @@ describe("useLaunchSession", () => {
     );
   });
 
+  it("renews a mounted local client context after an unauthorized response", async () => {
+    const nextWindowId = "00000000-0000-4000-8000-000000000602";
+    const nextCapability = `${"D".repeat(42)}A`;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ windowId, capability, authentication: "local-session" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          windowId: nextWindowId,
+          capability: nextCapability,
+          authentication: "local-session",
+        }),
+      ) as unknown as typeof fetch;
+    const { result } = renderHook(() =>
+      useLaunchSession({ serverUrl, href: `${serverUrl}/`, fetch: fetchMock }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.renew?.());
+
+    expect(result.current).toMatchObject({
+      status: "ready",
+      windowId: nextWindowId,
+      capability: nextCapability,
+      authentication: "local-session",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the same client context when the current host validates it", async () => {
     const storage = createMemoryStorage();
     storage.setItem(
       `octant:launch-session:${serverUrl}`,
-      JSON.stringify({ capability, windowId, authentication: "local-session" }),
+      JSON.stringify({ capability, windowId, authentication: "local-session", clientContextId }),
     );
     const fetchMock = mockFetch(
       jsonResponse({ windowId, capability, authentication: "local-session" }),
@@ -153,6 +187,7 @@ describe("useLaunchSession", () => {
         href: `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent(serverUrl)}`,
         fetch: fetchMock,
         storage,
+        clientContextId,
       }),
     );
 
@@ -162,6 +197,44 @@ describe("useLaunchSession", () => {
       capability,
       windowId,
     });
+  });
+
+  it("does not reuse copied local context in a different browser tab", async () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      `octant:launch-session:${serverUrl}`,
+      JSON.stringify({
+        capability,
+        windowId,
+        authentication: "local-session",
+        clientContextId,
+      }),
+    );
+    const nextWindowId = "00000000-0000-4000-8000-000000000602";
+    const nextCapability = `${"D".repeat(42)}A`;
+    const fetchMock = mockFetch(
+      jsonResponse({
+        windowId: nextWindowId,
+        capability: nextCapability,
+        authentication: "local-session",
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useLaunchSession({
+        serverUrl,
+        href: `${serverUrl}/`,
+        fetch: fetchMock,
+        storage,
+        clientContextId: "browser-tab-b",
+      }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("/api/shell/local-session", serverUrl),
+      expect.objectContaining({ body: "{}" }),
+    );
   });
 
   it("is idle when no server URL is available", () => {
@@ -298,7 +371,7 @@ describe("useLaunchSession", () => {
     const storage = createMemoryStorage();
     storage.setItem(
       `octant:launch-session:${serverUrl}`,
-      JSON.stringify({ capability, windowId, authentication: "local-session" }),
+      JSON.stringify({ capability, windowId, authentication: "local-session", clientContextId }),
     );
     const fetchMock = mockFetch(
       jsonResponse({ windowId, capability, authentication: "local-session" }),
@@ -309,6 +382,7 @@ describe("useLaunchSession", () => {
         href: "http://127.0.0.1:13773/",
         fetch: fetchMock,
         storage,
+        clientContextId,
       }),
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
