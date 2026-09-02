@@ -49,7 +49,7 @@ describe("CodeEnvironmentService", () => {
       changes: "dirty",
       observedAt,
     });
-    expect(git.observe).toHaveBeenCalledWith("/repo/.agent-worktrees/issue-52", controller.signal);
+    expect(git.observe).toHaveBeenCalledWith("/repo/.agent-worktrees/issue-52");
   });
 
   it("rejects Chat, archived Code, and missing Projects before observing Git", async () => {
@@ -127,10 +127,7 @@ describe("CodeEnvironmentService", () => {
       checkoutId: codeCheckoutId,
       worktreeRoot: "/repo/.octant-worktrees/issue-204",
     });
-    expect(git.observe).toHaveBeenCalledWith(
-      "/repo/.octant-worktrees/issue-204",
-      controller.signal,
-    );
+    expect(git.observe).toHaveBeenCalledWith("/repo/.octant-worktrees/issue-204");
   });
 
   it("coalesces simultaneous clients and reuses the recent Git observation", async () => {
@@ -170,6 +167,104 @@ describe("CodeEnvironmentService", () => {
     await Promise.all([first, second]);
     await service.observeThread(windowId, codeProjectId, codeThreadId);
     expect(git.observe).toHaveBeenCalledOnce();
+  });
+
+  it("does not let one canceled caller poison a shared Git observation", async () => {
+    const pending = deferred<{
+      readonly status: "ready";
+      readonly repositoryRoot: string;
+      readonly worktreeRoot: string;
+      readonly branch: { readonly kind: "named"; readonly name: string };
+      readonly changes: "clean";
+    }>();
+    const git = {
+      observe: vi.fn((_root: string, signal?: AbortSignal) => {
+        signal?.addEventListener(
+          "abort",
+          () => pending.reject(new Error("first caller canceled")),
+          { once: true },
+        );
+        return pending.promise;
+      }),
+    };
+    const code = {
+      readThread: vi.fn(() => ({
+        id: codeThreadId,
+        projectId: codeProjectId,
+        checkoutId: codeCheckoutId,
+      })),
+      readCheckout: vi.fn(() => ({
+        id: codeCheckoutId,
+        kind: "managed-worktree",
+        availability: "available",
+      })),
+      resolveCheckoutRoot: vi.fn().mockResolvedValue("/repo/shared"),
+    };
+    const service = serviceFixture(git, code);
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    const first = service.observeThread(
+      windowId,
+      codeProjectId,
+      codeThreadId,
+      firstController.signal,
+    );
+    const firstOutcome = first.catch(() => undefined);
+    const second = service.observeThread(
+      windowId,
+      codeProjectId,
+      codeThreadId,
+      secondController.signal,
+    );
+    await vi.waitFor(() => expect(git.observe).toHaveBeenCalledOnce());
+    firstController.abort();
+    pending.resolve({
+      status: "ready",
+      repositoryRoot: "/repo",
+      worktreeRoot: "/repo/shared",
+      branch: { kind: "named", name: "feature/shared" },
+      changes: "clean",
+    });
+
+    await expect(second).resolves.toMatchObject({ status: "ready" });
+    await firstOutcome;
+  });
+
+  it("evicts old roots from the bounded Git observation cache", async () => {
+    const git = {
+      observe: vi.fn(async (root: string) => ({
+        status: "ready" as const,
+        repositoryRoot: "/repo",
+        worktreeRoot: root,
+        branch: { kind: "named" as const, name: "feature/cache" },
+        changes: "clean" as const,
+      })),
+    };
+    const code = {
+      readThread: vi.fn(() => ({
+        id: codeThreadId,
+        projectId: codeProjectId,
+        checkoutId: codeCheckoutId,
+      })),
+      readCheckout: vi.fn(() => ({
+        id: codeCheckoutId,
+        kind: "managed-worktree",
+        availability: "available",
+      })),
+      resolveCheckoutRoot: vi
+        .fn()
+        .mockResolvedValueOnce("/repo/one")
+        .mockResolvedValueOnce("/repo/two")
+        .mockResolvedValueOnce("/repo/one"),
+    };
+    const service = serviceFixture(git, code, { maxCachedRoots: 1 });
+
+    await service.observeThread(windowId, codeProjectId, codeThreadId);
+    await service.observeThread(windowId, codeProjectId, codeThreadId);
+    await service.observeThread(windowId, codeProjectId, codeThreadId);
+
+    expect(git.observe).toHaveBeenCalledTimes(3);
   });
 
   it("bypasses a recent Git observation for an explicit refresh", async () => {
@@ -232,21 +327,25 @@ function serviceFixture(
     readonly readCheckout: ReturnType<typeof vi.fn>;
     readonly resolveCheckoutRoot: ReturnType<typeof vi.fn>;
   },
+  cache?: { readonly maxCachedRoots?: number },
 ) {
   return new CodeEnvironmentService({
     projects: { bootstrap: vi.fn().mockResolvedValue(bootstrapFixture()) },
     git: git as never,
     clock: () => observedAt,
     ...(code === undefined ? {} : { code: code as never }),
+    ...(cache?.maxCachedRoots === undefined ? {} : { maxCachedRoots: cache.maxCachedRoots }),
   });
 }
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((settle) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((settle, fail) => {
     resolve = settle;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function bootstrapFixture(): ProjectBootstrap {

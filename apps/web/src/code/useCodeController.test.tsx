@@ -1877,6 +1877,30 @@ describe("useCodeController", () => {
     );
   });
 
+  it("falls back to individual evidence reads when an older host has no batch route", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000032";
+    const promptId = "60000000-0000-4000-8000-000000000032";
+    const operationContent = vi.fn(async () => new TextEncoder().encode("Legacy host prompt"));
+    const client = fakeClient({
+      conversation: vi.fn(async () => ({
+        version: 3 as const,
+        threadId: ids.thread,
+        turns: [conversationTurn(operationId, promptId)],
+        nextCursor: 1,
+        hasMore: false,
+      })) as never,
+      operationContents: vi.fn(async () => Promise.reject(new Error("404 Not Found"))),
+      operationContent,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(result.current.conversation[0]?.text).toBe("Legacy host prompt"));
+    expect(result.current.conversationHistory).toBe("loaded");
+    expect(operationContent).toHaveBeenCalledOnce();
+  });
+
   it("replays the steps a reopened turn recorded, not just its message", async () => {
     const promptId = "60000000-0000-4000-8000-000000000012";
     const replyId = "60000000-0000-4000-8000-000000000013";
@@ -2109,6 +2133,64 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("reloads authoritative conversation state before replaying an operation stream gap", async () => {
+    const promptId = "60000000-0000-4000-8000-000000000034";
+    const operationId = "70000000-0000-4000-8000-000000000034";
+    const conversation = vi.fn(async () => ({
+      version: 3 as const,
+      threadId: ids.thread,
+      turns: [
+        {
+          ...conversationTurn(operationId, promptId),
+          status: "incomplete" as const,
+        },
+      ],
+      nextCursor: 1,
+      hasMore: false,
+    }));
+    async function* gappedFrames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "running" },
+      } as never;
+      throw new CodeClientSnapshotRequiredError(ids.thread, 1, 3);
+    }
+    async function* idleFrames(signal: AbortSignal) {
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+    }
+    let attempt = 0;
+    const subscribeOperation = vi.fn(
+      (_threadId, _operationId, cursor: number, signal: AbortSignal) => {
+        attempt += 1;
+        return attempt === 1 ? gappedFrames() : idleFrames(signal);
+      },
+    );
+    const client = fakeClient({
+      conversation: conversation as never,
+      operationContent: vi.fn(async () => new TextEncoder().encode("Recover this turn")),
+      subscribeOperation: subscribeOperation as never,
+    });
+    const { unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(subscribeOperation).toHaveBeenCalledTimes(2));
+    expect(subscribeOperation).toHaveBeenNthCalledWith(
+      2,
+      ids.thread,
+      operationId,
+      0,
+      expect.any(AbortSignal),
+    );
+    expect(conversation.mock.calls.length).toBeGreaterThan(1);
+    unmount();
+  });
+
   it("keeps the Code thread usable when conversation replay is temporarily unavailable", async () => {
     const client = fakeClient({
       conversation: vi.fn(async () => Promise.reject(new Error("offline"))),
@@ -2251,6 +2333,50 @@ describe("useCodeController", () => {
       document.dispatchEvent(new Event("visibilitychange"));
       await waitFor(() => expect(navigationRead.mock.calls.length).toBeGreaterThan(0));
       expect(bootstrapRead).toHaveBeenCalledOnce();
+      unmount();
+    } finally {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: originalVisibility,
+      });
+    }
+  });
+
+  it("pauses incomplete-conversation recovery while the document is hidden", async () => {
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    try {
+      const operationId = "70000000-0000-4000-8000-000000000033";
+      const promptId = "60000000-0000-4000-8000-000000000033";
+      const conversation = vi.fn(async () => ({
+        version: 3 as const,
+        threadId: ids.thread,
+        turns: [{ ...conversationTurn(operationId, promptId), status: "incomplete" as const }],
+        nextCursor: 1,
+        hasMore: false,
+      }));
+      const client = fakeClient({
+        conversation: conversation as never,
+        operationContent: vi.fn(async () => new TextEncoder().encode("Running prompt")),
+        subscribeOperation: vi.fn((_threadId, _operationId, _cursor, signal) => idleStream(signal)),
+      });
+      const { result, unmount } = renderHook(() =>
+        useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+      );
+
+      await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(conversation).toHaveBeenCalledOnce();
+
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "visible",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+      await waitFor(() => expect(conversation.mock.calls.length).toBeGreaterThan(1));
       unmount();
     } finally {
       Object.defineProperty(document, "visibilityState", {

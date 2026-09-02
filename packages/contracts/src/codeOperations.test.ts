@@ -4,6 +4,7 @@ import {
   decodeCodeConversationPage,
   decodeCodeOperationCommand,
   decodeCodeOperationEventFrame,
+  decodeCodeEvidenceBatchRequest,
   decodeCodeOperationStreamFrame,
   decodeCodeOperationApprovalReceipt,
   decodeCodeOperationApprovalRequest,
@@ -25,6 +26,7 @@ import {
   decodeCodeThreadFollowUpView,
   decodeCodeTerminalInspection,
   decodeCodeTerminalInspectionRequest,
+  MAX_CODE_EVIDENCE_BATCH_ITEMS,
 } from "./codeOperations";
 import { MAX_THREAD_MENTIONS_PER_TURN } from "./threadMentionIdentity";
 
@@ -68,6 +70,19 @@ const definition = {
 } as const;
 
 describe("Code operation contracts", () => {
+  it("keeps evidence batches below the authenticated remote response budget", () => {
+    expect(MAX_CODE_EVIDENCE_BATCH_ITEMS).toBe(64);
+    expect(() =>
+      decodeCodeEvidenceBatchRequest({
+        threadId: ids.thread,
+        items: Array.from({ length: 65 }, () => ({
+          operationId: ids.operation,
+          contentId: ids.content,
+        })),
+      }),
+    ).toThrow();
+  });
+
   it("strictly decodes a non-mutating terminal inspection request and result", () => {
     const request = {
       threadId: ids.thread,

@@ -187,7 +187,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       ? props.controller.activeView
       : undefined;
   const profileName = useAgentProfileName(view?.thread.profileId);
-  const displayReady = props.controller.conversationHistory !== "loading";
+  const displayReady = props.controller.conversationHistory === "loaded";
   const emptyConversation =
     props.controller.conversationHistory === "loaded" && props.controller.conversation.length === 0;
   const plan = useThreadPlan()?.plan;

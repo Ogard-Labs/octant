@@ -1293,7 +1293,9 @@ export const CodeConversationPage = Schema.Struct({
 }).annotations(strict);
 export type CodeConversationPage = typeof CodeConversationPage.Type;
 
-export const MAX_CODE_EVIDENCE_BATCH_ITEMS = 256;
+// At the per-item text ceiling, 64 items remain below the authenticated
+// remote route's 8 MiB response budget after JSON framing.
+export const MAX_CODE_EVIDENCE_BATCH_ITEMS = 64;
 
 /** References whose immutable display text one conversation page needs. */
 export const CodeEvidenceBatchRequest = Schema.Struct({

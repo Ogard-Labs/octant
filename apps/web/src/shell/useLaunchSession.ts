@@ -161,6 +161,24 @@ function exchangeLocalSession(
   );
 }
 
+function decodeLocalSessionAuthority(
+  value: unknown,
+): { readonly windowId: WindowId; readonly capability: string } | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  if (!("capability" in value) || !isCanonicalLaunchSessionToken(value.capability)) {
+    return undefined;
+  }
+  if (!("authentication" in value) || value.authentication !== "local-session") {
+    return undefined;
+  }
+  if (!("windowId" in value) || typeof value.windowId !== "string") return undefined;
+  try {
+    return { windowId: decodeWindowId(value.windowId), capability: value.capability };
+  } catch {
+    return undefined;
+  }
+}
+
 function sharedExchange(
   key: string,
   fetch: typeof globalThis.fetch,
@@ -216,30 +234,20 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
     const renewal = (async () => {
       const response = await exchangeLocalSession(fetch, serverUrl, reusable);
       if (response.status !== 200) throw new Error("Local Machine access is unavailable.");
-      const body = response.body as {
-        windowId: string;
-        capability: string;
-        authentication?: string;
-      };
-      if (
-        !isCanonicalLaunchSessionToken(body.capability) ||
-        body.authentication !== "local-session"
-      ) {
-        throw new Error("Local Machine response is invalid.");
-      }
-      const windowId = decodeWindowId(body.windowId);
+      const authority = decodeLocalSessionAuthority(response.body);
+      if (authority === undefined) throw new Error("Local Machine response is invalid.");
       writeStoredAuthority(
         storage,
         serverUrl,
-        body.capability,
-        windowId,
+        authority.capability,
+        authority.windowId,
         "local-session",
         clientContextId,
       );
       setResult({
         status: "ready",
-        capability: body.capability,
-        windowId,
+        capability: authority.capability,
+        windowId: authority.windowId,
         authentication: "local-session",
       });
     })();
@@ -278,16 +286,8 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
             });
             return;
           }
-          const body = response.body as {
-            windowId: string;
-            capability: string;
-            authentication?: string;
-          };
-          if (
-            cancelled ||
-            !isCanonicalLaunchSessionToken(body.capability) ||
-            body.authentication !== "local-session"
-          ) {
+          const authority = decodeLocalSessionAuthority(response.body);
+          if (cancelled || authority === undefined) {
             if (!cancelled) {
               setResult({
                 status: "failed",
@@ -296,19 +296,18 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
             }
             return;
           }
-          const windowId = decodeWindowId(body.windowId);
           writeStoredAuthority(
             storage,
             serverUrl,
-            body.capability,
-            windowId,
+            authority.capability,
+            authority.windowId,
             "local-session",
             clientContextId,
           );
           setResult({
             status: "ready",
-            capability: body.capability,
-            windowId,
+            capability: authority.capability,
+            windowId: authority.windowId,
             authentication: "local-session",
           });
         } catch {

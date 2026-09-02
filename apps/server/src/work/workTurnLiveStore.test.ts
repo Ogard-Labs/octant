@@ -46,6 +46,24 @@ describe("WorkTurnLiveStore", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("requires a snapshot instead of overfilling a subscriber with retained replay", async () => {
+    const store = new WorkTurnLiveStore();
+    for (let index = 0; index < 33; index += 1) {
+      store.appendResponse(threadId, requestId, String(index));
+    }
+
+    const stream = store.subscribe({
+      threadId,
+      afterSequence: 0,
+      signal: new AbortController().signal,
+    });
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "snapshot-required", sequence: 33, threadId },
+    });
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+  });
+
   it("requires a fresh snapshot when a cursor belongs to an older host process", async () => {
     const store = new WorkTurnLiveStore();
     const stream = store.subscribe({

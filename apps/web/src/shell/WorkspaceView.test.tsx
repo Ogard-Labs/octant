@@ -179,6 +179,31 @@ describe("WorkspaceView Code tab registration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open Browser tab" }));
     expect(onOpenSurface).toHaveBeenCalledWith("browser", ids.pane);
   });
+
+  it("keeps Code auxiliary probes off when conversation history is unavailable", async () => {
+    const tab = codeTab("code-overview", "Unavailable history");
+    const base = propsFor(tab);
+    const unavailableController = {
+      ...base.codeController,
+      conversationHistory: "unavailable",
+    } as never;
+    const codeControllers = createCodeThreadControllers();
+    codeControllers.publish(codeIds.thread as never, unavailableController);
+    const inspectThread = vi.fn();
+
+    render(
+      <WorkspaceView
+        {...base}
+        browserAutomationClient={{ inspectThread } as never}
+        codeController={unavailableController}
+        codeControllers={codeControllers}
+      />,
+    );
+
+    expect(await screen.findByRole("region", { name: "Code thread" })).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(inspectThread).not.toHaveBeenCalled();
+  });
 });
 
 /** Closes a pane the way a person does: right-click over its own header. */
@@ -782,6 +807,19 @@ describe("WorkspaceView child-run status chrome", () => {
       <WorkspaceView
         {...propsFor(tab)}
         agentRunClient={agentRunClient()}
+        workThreads={[
+          {
+            id: ids.thread,
+            projectId: ids.project,
+            title: "Draft brief",
+            lifecycle: "active",
+            providerInstanceId: "00000000-0000-4000-8000-000000000901",
+            modelId: "gpt-4",
+            version: 1,
+            createdAt: "2026-07-26T20:00:00.000Z",
+            updatedAt: "2026-07-26T20:00:00.000Z",
+          } as never,
+        ]}
         workThreadClient={
           { bootstrap: vi.fn(async () => ({ threads: [] })), execute: vi.fn() } as never
         }
@@ -990,7 +1028,7 @@ describe("WorkspaceView tab isolation", () => {
     rerender(
       <WorkspaceView
         {...secondProps}
-        browserAutomationClient={browserAutomationClient}
+        browserAutomationClient={browserAutomationClient as never}
         layout={secondLayout}
         workspace={{
           ...secondProps.workspace,
@@ -1467,6 +1505,64 @@ describe("WorkspaceView Work thread tab", () => {
       );
     });
   });
+
+  it("defers Work Browser probes until the transcript is display-ready", async () => {
+    const thread = {
+      id: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      lifecycle: "active",
+      providerInstanceId: "00000000-0000-4000-8000-000000000901",
+      modelId: "gpt-4",
+      version: 1,
+      createdAt: "2026-07-26T20:00:00.000Z",
+      updatedAt: "2026-07-26T20:00:00.000Z",
+    } as never;
+    let resolveTranscript: (value: {
+      readonly threadId: typeof ids.thread;
+      readonly turns: [];
+      readonly liveCursor: 0;
+    }) => void = () => undefined;
+    const transcript = new Promise<{
+      readonly threadId: typeof ids.thread;
+      readonly turns: [];
+      readonly liveCursor: 0;
+    }>((resolve) => {
+      resolveTranscript = resolve;
+    });
+    const browserAutomationClient = {
+      inspectThread: vi.fn(async () => ({
+        status: "ready",
+        threadId: ids.thread,
+        evidence: [],
+      })),
+    };
+    const bootstrap = vi.fn(async () => ({ threads: [thread] }));
+
+    render(
+      <WorkspaceView
+        {...propsFor({
+          id: ids.tab as never,
+          kind: "work-thread",
+          mode: "work",
+          threadId: ids.thread as never,
+          title: "Draft brief",
+        })}
+        browserAutomationClient={browserAutomationClient as never}
+        mode="work"
+        workThreadClient={{ bootstrap } as never}
+        workThreads={[thread]}
+        workTurnClient={{ transcript: vi.fn(() => transcript) } as never}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Draft brief" })).toBeVisible();
+    expect(browserAutomationClient.inspectThread).not.toHaveBeenCalled();
+
+    resolveTranscript({ threadId: ids.thread, turns: [], liveCursor: 0 });
+    await waitFor(() => expect(browserAutomationClient.inspectThread).toHaveBeenCalledOnce());
+    expect(bootstrap).not.toHaveBeenCalled();
+  });
 });
 
 describe("WorkspaceView Chat surfaces", () => {
@@ -1937,6 +2033,7 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
       },
       client,
       conversation: [],
+      conversationHistory: "loaded",
       providerRequests: [],
       answerProviderRequest: vi.fn(async () => true),
 

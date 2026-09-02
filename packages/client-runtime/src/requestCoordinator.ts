@@ -15,6 +15,18 @@ interface ScheduledRead {
   readonly reject: (error: unknown) => void;
 }
 
+const COORDINATED_POST_READ_PATHS = new Set([
+  "/api/code/board",
+  "/api/code/evidence/batch",
+  "/api/code/project-pull-requests",
+  "/api/code/project-pull-requests/detail",
+  "/api/code/terminals/inspect",
+  "/api/context/inspect",
+  "/api/usage/dashboard",
+  "/api/usage/query",
+  "/api/work/board",
+]);
+
 /**
  * One window-owned read coordinator for every feature client.
  *
@@ -142,7 +154,7 @@ function readKey(method: string, input: RequestInfo | URL, init: RequestInit | u
 }
 
 function isCoordinatedRead(method: string, url: URL): boolean {
-  return method === "GET" || (method === "POST" && url.pathname === "/api/code/evidence/batch");
+  return method === "GET" || (method === "POST" && COORDINATED_POST_READ_PATHS.has(url.pathname));
 }
 
 function withoutSignal(init: RequestInit | undefined): RequestInit | undefined {
@@ -165,6 +177,8 @@ function isBackgroundRead(url: URL): boolean {
     url.pathname.endsWith("/navigation") ||
     url.pathname.endsWith("/follow-up") ||
     url.pathname.endsWith("/environment") ||
+    (COORDINATED_POST_READ_PATHS.has(url.pathname) &&
+      url.pathname !== "/api/code/evidence/batch") ||
     url.pathname === "/api/extensions/snapshot" ||
     url.pathname === "/api/computer-use/sessions" ||
     url.pathname === "/api/browser/contexts/current" ||

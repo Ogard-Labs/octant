@@ -71,15 +71,23 @@ export function useCommandSkills(
         inFlight = false;
       }
     };
-    const stop =
-      refreshMs <= 0
-        ? (() => {
-            void load();
-            return () => undefined;
-          })()
-        : scheduleVisibleInterval(() => void load(), Math.max(10, refreshMs), {
-            runImmediately: true,
-          });
+    let stop: () => void;
+    if (refreshMs <= 0) {
+      const loadWhenVisible = () => {
+        if (documentIsVisible()) void load();
+      };
+      loadWhenVisible();
+      if (typeof document === "undefined") {
+        stop = () => undefined;
+      } else {
+        document.addEventListener("visibilitychange", loadWhenVisible);
+        stop = () => document.removeEventListener("visibilitychange", loadWhenVisible);
+      }
+    } else {
+      stop = scheduleVisibleInterval(() => void load(), Math.max(10, refreshMs), {
+        runImmediately: true,
+      });
+    }
     return () => {
       active = false;
       stop();

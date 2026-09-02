@@ -42,6 +42,18 @@ describe("MachineChangeFeed", () => {
     });
   });
 
+  it("requires a snapshot instead of overfilling a subscriber with retained replay", async () => {
+    const feed = new MachineChangeFeed();
+    for (let index = 0; index < 33; index += 1) feed.publish(["projects"]);
+
+    const stream = feed.subscribe({ afterSequence: 0, signal: new AbortController().signal });
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "snapshot-required", sequence: 33 },
+    });
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+  });
+
   it("requires a snapshot when a client reconnects with a cursor from an older host process", async () => {
     const feed = new MachineChangeFeed();
     const stream = feed.subscribe({ afterSequence: 42, signal: new AbortController().signal });

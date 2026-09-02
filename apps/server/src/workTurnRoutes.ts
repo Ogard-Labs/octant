@@ -213,7 +213,11 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
         );
       }
       if (isStream) {
-        const threadId = decodeWorkThreadId(decodeURIComponent(streamMatch![1]!));
+        const encodedThreadId = streamMatch?.[1];
+        if (encodedThreadId === undefined) {
+          throw new WorkTurnRouteRejected("Work turn stream path is invalid.", 400);
+        }
+        const threadId = decodeWorkThreadId(decodeURIComponent(encodedThreadId));
         const afterSequence = Number(url.searchParams.get("afterSequence"));
         if (
           url.searchParams.size !== 1 ||

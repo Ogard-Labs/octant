@@ -1263,7 +1263,7 @@ function LaunchedShell(
   const activeCodeThreadView = activeCodeThreadController?.activeView;
   const activeCodeThreadDisplayReady =
     activeCodeThreadController !== undefined &&
-    activeCodeThreadController.conversationHistory !== "loading";
+    activeCodeThreadController.conversationHistory === "loaded";
   // The Apple projects the host lists at the root of the Code thread in view.
   // The window's own Code reader binds to no thread, so the root comes from
   // that thread's own controller. Nothing is inferred from the Project name: a

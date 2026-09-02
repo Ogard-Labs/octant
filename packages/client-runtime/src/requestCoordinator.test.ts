@@ -64,6 +64,28 @@ describe("createRequestCoordinator", () => {
     await expect((await second).json()).resolves.toMatchObject({ threadId: "thread" });
   });
 
+  it("coalesces identical schema-declared POST queries without treating mutations as reads", async () => {
+    const boardRelease = deferred<Response>();
+    const fetch = vi.fn((input: RequestInfo | URL) =>
+      String(input).endsWith("/api/work/board")
+        ? boardRelease.promise
+        : Promise.resolve(Response.json({ status: "accepted" })),
+    );
+    const coordinated = createRequestCoordinator({ fetch: fetch as typeof globalThis.fetch });
+    const query = { method: "POST", body: JSON.stringify({ projectId: "project" }) };
+
+    const first = coordinated("http://127.0.0.1/api/work/board", query);
+    const second = coordinated("http://127.0.0.1/api/work/board", query);
+    const mutation = coordinated("http://127.0.0.1/api/work/threads/commands", query);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    boardRelease.resolve(Response.json({ cards: [] }));
+
+    await Promise.all([first, second, mutation]);
+    expect(
+      fetch.mock.calls.filter(([input]) => String(input).endsWith("/api/work/board")),
+    ).toHaveLength(1);
+  });
+
   it("starts a foreground transcript before queued background observations", async () => {
     const active = deferred<Response>();
     const fetch = vi.fn((input: RequestInfo | URL) => {

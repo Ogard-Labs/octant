@@ -171,6 +171,24 @@ describe("useLaunchSession", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects an invalid local-session renewal response with the product error", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ windowId, capability, authentication: "local-session" }),
+      )
+      .mockResolvedValueOnce(jsonResponse(null)) as unknown as typeof fetch;
+    const { result } = renderHook(() =>
+      useLaunchSession({ serverUrl, href: `${serverUrl}/`, fetch: fetchMock }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const renew = result.current.renew;
+    expect(renew).toBeDefined();
+    if (renew === undefined) throw new Error("Expected local-session renewal.");
+
+    await expect(renew()).rejects.toThrow("Local Machine response is invalid.");
+  });
+
   it("keeps the same client context when the current host validates it", async () => {
     const storage = createMemoryStorage();
     storage.setItem(

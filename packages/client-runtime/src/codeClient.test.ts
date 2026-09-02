@@ -811,6 +811,28 @@ describe("code client", () => {
     );
   });
 
+  it("turns a server operation replay conflict into a snapshot-required signal", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { category: "stale", message: "Code operation replay requires a snapshot." },
+          { status: 409 },
+        ),
+      );
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const stream = client.subscribeOperation(
+      ids.thread as never,
+      ids.operation as never,
+      7,
+      new AbortController().signal,
+    );
+
+    await expect(stream[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(
+      CodeClientSnapshotRequiredError,
+    );
+  });
+
   it("decodes display-ready provider text from the operation stream", async () => {
     const operationFrame = {
       threadId: ids.thread,

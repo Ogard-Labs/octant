@@ -155,33 +155,19 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
             );
           }
           return response(
-            fresh
-              ? await dependencies.environmentService.observeThread(
-                  windowId,
-                  projectId,
-                  threadId,
-                  request.signal,
-                  true,
-                )
-              : await dependencies.environmentService.observeThread(
-                  windowId,
-                  projectId,
-                  threadId,
-                  request.signal,
-                ),
+            await dependencies.environmentService.observeThread(
+              windowId,
+              projectId,
+              threadId,
+              request.signal,
+              fresh,
+            ),
             200,
             origin,
           );
         }
         return response(
-          fresh
-            ? await dependencies.environmentService.observe(
-                windowId,
-                projectId,
-                request.signal,
-                true,
-              )
-            : await dependencies.environmentService.observe(windowId, projectId, request.signal),
+          await dependencies.environmentService.observe(windowId, projectId, request.signal, fresh),
           200,
           origin,
         );

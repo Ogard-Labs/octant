@@ -16,6 +16,7 @@ export interface WorkThreadEnvironmentProps {
   readonly active?: boolean;
   readonly projects: ReadonlyArray<ProjectSummary>;
   readonly threadClient: WorkThreadClient;
+  readonly initialThread?: WorkThread;
   readonly children: ReactNode;
   readonly agentRunClient?: AgentRunClient;
   readonly onOpenAgents?: () => void;
@@ -33,6 +34,16 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
   const [thread, setThread] = useState<WorkThread | undefined>(undefined);
 
   useEffect(() => {
+    const initialThread = props.initialThread;
+    if (initialThread !== undefined && String(initialThread.id) === String(props.tab.threadId)) {
+      const initialProject = props.projects.find(
+        (entry): entry is WorkProject =>
+          entry.type === "work" && String(entry.id) === String(initialThread.projectId),
+      );
+      setProject(initialProject);
+      setThread(initialThread);
+      return;
+    }
     let cancelled = false;
     setProject(undefined);
     setThread(undefined);
@@ -41,11 +52,11 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
       .then((bootstrap) => {
         if (cancelled) return;
         const nextThread = bootstrap.threads.find(
-          (candidate) => candidate.id === props.tab.threadId,
+          (candidate) => String(candidate.id) === String(props.tab.threadId),
         );
         const candidate = props.projects.find(
           (entry): entry is WorkProject =>
-            entry.type === "work" && entry.id === nextThread?.projectId,
+            entry.type === "work" && String(entry.id) === String(nextThread?.projectId),
         );
         setProject(candidate);
         setThread(nextThread);
@@ -56,7 +67,7 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
     return () => {
       cancelled = true;
     };
-  }, [props.projects, props.tab.threadId, props.threadClient]);
+  }, [props.initialThread, props.projects, props.tab.threadId, props.threadClient]);
 
   const projection = deriveWorkEnvironmentProjection({
     projectName: project?.name ?? "Work",

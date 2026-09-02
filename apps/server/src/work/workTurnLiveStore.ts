@@ -90,8 +90,13 @@ export class WorkTurnLiveStore {
       yield this.#snapshotRequired(input.threadId);
       return;
     }
+    const replay = state.frames.filter((frame) => frame.sequence > input.afterSequence);
+    if (replay.length > MAX_PENDING_SUBSCRIBER_FRAMES) {
+      yield this.#snapshotRequired(input.threadId);
+      return;
+    }
     const subscriber: Subscriber = {
-      queue: state.frames.filter((frame) => frame.sequence > input.afterSequence),
+      queue: replay,
       signal: input.signal,
       onAbort: () => {
         subscriber.closed = true;

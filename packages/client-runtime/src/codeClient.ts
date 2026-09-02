@@ -887,7 +887,16 @@ async function* parseOperationNdjsonFrames(
   signal: AbortSignal,
 ): AsyncGenerator<CodeOperationStreamFrame> {
   const response = await responsePromise;
-  if (!response.ok) await rejectFailure(response);
+  if (!response.ok) {
+    try {
+      await rejectFailure(response);
+    } catch (error) {
+      if (error instanceof CodeClientFailure && error.category === "stale") {
+        throw new CodeClientSnapshotRequiredError(threadId, afterCursor, afterCursor);
+      }
+      throw error;
+    }
+  }
   if (response.body === null) return;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();

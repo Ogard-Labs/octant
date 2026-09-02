@@ -39,7 +39,7 @@ describe("Project routes", () => {
 
     expect(response?.status).toBe(200);
     expect(await response?.json()).toEqual(observation);
-    expect(observe).toHaveBeenCalledWith(windowId, projectId, expect.any(AbortSignal));
+    expect(observe).toHaveBeenCalledWith(windowId, projectId, expect.any(AbortSignal), false);
   });
 
   it("rejects malformed environment IDs, query strings, and unsupported methods", async () => {
@@ -89,6 +89,7 @@ describe("Project routes", () => {
       projectId,
       threadId,
       expect.any(AbortSignal),
+      false,
     );
   });
 

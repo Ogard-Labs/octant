@@ -1,4 +1,5 @@
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
+import { WorkTurnClientFailure } from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
 import {
   decodeFileMentionPath,
@@ -8,7 +9,7 @@ import {
 } from "@octant/contracts";
 import type { MentionableThreadId, ThreadMentionCandidate } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -353,6 +354,46 @@ describe("WorkThreadWorkspace", () => {
     requests.resolve({ requests: [] });
   });
 
+  it("keeps the live transcript mounted when navigation refreshes the same thread", async () => {
+    const transcript = vi.fn(async () => ({ threadId, turns: [], liveCursor: 0 }));
+    const subscribe = vi.fn(async function* (
+      _threadId: typeof threadId,
+      _cursor: number,
+      signal: AbortSignal,
+    ) {
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+      yield* [];
+    });
+    const turnClient = { transcript, subscribe } as never;
+    const threadClient = { execute: vi.fn() } as unknown as WorkThreadClient;
+    const { rerender } = render(
+      <WorkThreadWorkspace
+        initialThread={workThread()}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient}
+      />,
+    );
+    await waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
+
+    rerender(
+      <WorkThreadWorkspace
+        initialThread={workThread({ title: "Refreshed navigation title" })}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient}
+      />,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(transcript).toHaveBeenCalledOnce();
+    expect(subscribe).toHaveBeenCalledOnce();
+  });
+
   it("aborts obsolete transcript reads when the user switches Work threads", async () => {
     const nextThreadId = decodeWorkThreadId("10000000-0000-4000-8000-000000000102");
     let firstSignal: AbortSignal | undefined;
@@ -432,6 +473,112 @@ describe("WorkThreadWorkspace", () => {
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     expect(transcript).toHaveBeenCalledOnce();
     expect(list).toHaveBeenCalledOnce();
+  });
+
+  it("retries the initial Work snapshot before opening the live stream", async () => {
+    const recovered = workTurn({
+      prompt: "Recovered prompt",
+      transcript: [{ role: "user", text: "Recovered prompt" }],
+    });
+    const transcript = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("host is restarting"))
+      .mockResolvedValue({ threadId, turns: [recovered], liveCursor: 4 });
+    const subscribe = vi.fn(async function* (
+      _threadId: typeof threadId,
+      _cursor: number,
+      signal: AbortSignal,
+    ) {
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+      yield* [];
+    });
+
+    render(
+      <WorkThreadWorkspace
+        changeRevision={0}
+        initialThread={workThread()}
+        threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript, subscribe } as never}
+      />,
+    );
+
+    expect(await screen.findByText("Recovered prompt", {}, { timeout: 2_000 })).toBeVisible();
+    expect(transcript).toHaveBeenCalledTimes(2);
+    expect(subscribe).toHaveBeenCalledWith(threadId, 4, expect.any(AbortSignal));
+  });
+
+  it("pauses Work snapshot recovery while the document is hidden", async () => {
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    try {
+      const recovered = workTurn({
+        prompt: "Visible recovery",
+        transcript: [{ role: "user", text: "Visible recovery" }],
+      });
+      const transcript = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("host is restarting"))
+        .mockResolvedValue({ threadId, turns: [recovered], liveCursor: 0 });
+      render(
+        <WorkThreadWorkspace
+          changeRevision={0}
+          initialThread={workThread()}
+          threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+          threadId={threadId}
+          title="Draft brief"
+          turnClient={{ transcript } as never}
+        />,
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      });
+      expect(transcript).toHaveBeenCalledOnce();
+
+      await act(async () => {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          value: "visible",
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(await screen.findByText("Visible recovery")).toBeVisible();
+      expect(transcript).toHaveBeenCalledTimes(2);
+    } finally {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: originalVisibility,
+      });
+    }
+  });
+
+  it("does not retry a Work snapshot the host permanently refuses", async () => {
+    const transcript = vi.fn(async () => {
+      throw new WorkTurnClientFailure("Work transcript is unauthorized.", 401);
+    });
+    render(
+      <WorkThreadWorkspace
+        changeRevision={0}
+        initialThread={workThread()}
+        threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript } as never}
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Work thread state could not be loaded.",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(transcript).toHaveBeenCalledOnce();
   });
 
   it("keeps a slow initial transcript read from overwriting a newer polled result", async () => {

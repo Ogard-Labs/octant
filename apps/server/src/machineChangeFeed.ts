@@ -89,8 +89,13 @@ export class MachineChangeFeed {
       yield this.#snapshotRequired();
       return;
     }
+    const replay = this.#frames.filter((frame) => frame.sequence > input.afterSequence);
+    if (replay.length > MAX_PENDING_FRAMES) {
+      yield this.#snapshotRequired();
+      return;
+    }
     const subscriber: Subscriber = {
-      queue: this.#frames.filter((frame) => frame.sequence > input.afterSequence),
+      queue: replay,
       signal: input.signal,
       onAbort: () => {
         subscriber.closed = true;

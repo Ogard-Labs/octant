@@ -37,6 +37,8 @@ export interface CodeEnvironmentThreadSource {
   ) => Promise<string | undefined>;
 }
 
+const DEFAULT_MAX_CACHED_ROOTS = 64;
+
 export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
   readonly #gitObservations = new Map<
     string,
@@ -44,6 +46,7 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
   >();
   readonly #now: () => number;
   readonly #cacheMs: number;
+  readonly #maxCachedRoots: number;
 
   constructor(
     private readonly options: {
@@ -53,10 +56,15 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
       readonly code?: CodeEnvironmentThreadSource;
       readonly now?: () => number;
       readonly cacheMs?: number;
+      readonly maxCachedRoots?: number;
     },
   ) {
     this.#now = options.now ?? Date.now;
     this.#cacheMs = options.cacheMs ?? 5_000;
+    this.#maxCachedRoots = options.maxCachedRoots ?? DEFAULT_MAX_CACHED_ROOTS;
+    if (!Number.isSafeInteger(this.#maxCachedRoots) || this.#maxCachedRoots < 1) {
+      throw new Error("Git observation cache size must be positive.");
+    }
   }
 
   async observe(
@@ -80,7 +88,10 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
         message: "Environment inspection requires an active Code Project.",
       });
 
-    const result = await this.#observeGit(project.binding.canonicalRoot, signal, fresh);
+    const result = await waitForGitObservation(
+      this.#observeGit(project.binding.canonicalRoot, fresh),
+      signal,
+    );
     const base = {
       projectId: project.id,
       projectName: project.name,
@@ -152,7 +163,7 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
         message: "The Code thread checkout is unavailable.",
       });
 
-    const result = await this.#observeGit(root, signal, fresh);
+    const result = await waitForGitObservation(this.#observeGit(root, fresh), signal);
     const base = {
       projectId: project.id,
       projectName: project.name,
@@ -176,15 +187,23 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
     );
   }
 
-  #observeGit(
-    root: string,
-    signal?: AbortSignal,
-    fresh = false,
-  ): ReturnType<GitEnvironmentPort["observe"]> {
+  #observeGit(root: string, fresh = false): ReturnType<GitEnvironmentPort["observe"]> {
     const now = this.#now();
+    for (const [cachedRoot, entry] of this.#gitObservations) {
+      if (entry.expiresAt <= now) this.#gitObservations.delete(cachedRoot);
+    }
     const cached = this.#gitObservations.get(root);
     if (!fresh && cached !== undefined && cached.expiresAt > now) return cached.observation;
-    const observation = this.options.git.observe(root, signal);
+    this.#gitObservations.delete(root);
+    while (this.#gitObservations.size >= this.#maxCachedRoots) {
+      const oldestRoot = this.#gitObservations.keys().next().value;
+      if (typeof oldestRoot !== "string") break;
+      this.#gitObservations.delete(oldestRoot);
+    }
+    // A cached observation belongs to the service, not whichever renderer
+    // happened to ask first. Callers may abandon their own wait without
+    // canceling the shared Git probe for every other tab.
+    const observation = this.options.git.observe(root);
     this.#gitObservations.set(root, { expiresAt: now + this.#cacheMs, observation });
     void observation.catch(() => {
       if (this.#gitObservations.get(root)?.observation === observation) {
@@ -193,4 +212,29 @@ export class CodeEnvironmentService implements CodeEnvironmentServiceApi {
     });
     return observation;
   }
+}
+
+function waitForGitObservation(
+  observation: ReturnType<GitEnvironmentPort["observe"]>,
+  signal?: AbortSignal,
+): ReturnType<GitEnvironmentPort["observe"]> {
+  if (signal === undefined) return observation;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener("abort", abort);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    observation.then(
+      (result) => {
+        signal.removeEventListener("abort", abort);
+        resolve(result);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
 }

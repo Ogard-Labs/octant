@@ -642,6 +642,17 @@ function CodeThreadTabSurface(props: {
   return <>{props.children(controller)}</>;
 }
 
+function WorkThreadDisplayBoundary(props: {
+  readonly children: (state: {
+    readonly displayReady: boolean;
+    readonly onDisplayReadyChange: (ready: boolean) => void;
+  }) => ReactNode;
+}) {
+  const [displayReady, setDisplayReady] = useState(false);
+  const onDisplayReadyChange = useCallback((ready: boolean) => setDisplayReady(ready), []);
+  return <>{props.children({ displayReady, onDisplayReadyChange })}</>;
+}
+
 function renderCodeTab(
   tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>,
   props: WorkspaceViewProps,
@@ -746,7 +757,7 @@ function renderCodeTab(
   }
   const surface = (
     <ThreadActivityPictureInPicture
-      enabled={codeController.conversationHistory !== "loading"}
+      enabled={codeController.conversationHistory === "loaded"}
       {...(props.browserAutomationClient === undefined
         ? {}
         : { browserClient: props.browserAutomationClient })}
@@ -768,12 +779,12 @@ function renderCodeTab(
     <CodeWorkspaceErrorBoundary key={tab.id}>
       <ThreadPlanProvider
         {...(props.planClient === undefined ? {} : { client: props.planClient })}
-        enabled={codeController.conversationHistory !== "loading"}
+        enabled={codeController.conversationHistory === "loaded"}
         threadId={String(tab.threadId)}
       >
         <CodeThreadEnvironment
           active={paneIsActive(props, paneId)}
-          observe={codeController.conversationHistory !== "loading"}
+          observe={codeController.conversationHistory === "loaded"}
           {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
           {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -1057,7 +1068,8 @@ function renderNonCodeTab(
     );
   }
   if (tab.kind === "work-thread") {
-    if (props.workThreadClient === undefined) {
+    const workThreadClient = props.workThreadClient;
+    if (workThreadClient === undefined) {
       return (
         <ShellState
           eyebrow="Work thread"
@@ -1071,101 +1083,125 @@ function renderNonCodeTab(
       (thread) => String(thread.id) === String(tab.threadId),
     );
     return (
-      <WorkThreadEnvironment
-        active={paneIsActive(props, paneId)}
-        {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-        {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
-        key={tab.id}
-        projects={props.projects}
-        tab={tab}
-        threadClient={props.workThreadClient}
-      >
-        <ThreadActivityPictureInPicture
-          {...(props.browserAutomationClient === undefined
-            ? {}
-            : { browserClient: props.browserAutomationClient })}
-          {...(props.computerUseClient === undefined
-            ? {}
-            : { computerUseClient: props.computerUseClient })}
-          {...(props.onComputerUseSessionChange === undefined
-            ? {}
-            : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
-          {...(props.onOpenSurface === undefined
-            ? {}
-            : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
-          threadId={tab.threadId as never}
-        >
-          <WorkThreadWorkspace
-            {...(props.workChangeRevision === undefined
+      <WorkThreadDisplayBoundary key={tab.id}>
+        {({ displayReady, onDisplayReadyChange }) => (
+          <WorkThreadEnvironment
+            active={paneIsActive(props, paneId)}
+            {...(!displayReady || props.agentRunClient === undefined
               ? {}
-              : { changeRevision: props.workChangeRevision })}
+              : { agentRunClient: props.agentRunClient })}
+            {...(!displayReady || props.onOpenAgents === undefined
+              ? {}
+              : { onOpenAgents: props.onOpenAgents })}
             {...(initialThread === undefined ? {} : { initialThread })}
-            {...(props.workMutationClient === undefined
-              ? {}
-              : { mutationClient: props.workMutationClient })}
-            {...(props.workTurnClient === undefined ? {} : { turnClient: props.workTurnClient })}
-            {...(props.workRequestClient === undefined
-              ? {}
-              : { requestClient: props.workRequestClient })}
-            threadClient={props.workThreadClient}
-            {...(props.onOpenSurface === undefined
-              ? {}
-              : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
-            threadId={tab.threadId}
-            {...(props.revealChatTurn !== undefined &&
-            String(props.revealChatTurn.threadId) === String(tab.threadId)
-              ? { revealTurnId: props.revealChatTurn.turnId }
-              : {})}
-            title={tab.title}
-            providerGroups={props.workProviderGroups ?? []}
-            {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
-            {...(props.imageGenerationClient === undefined
-              ? {}
-              : { imageGenerationClient: props.imageGenerationClient })}
-            {...(props.providerController.snapshot === undefined
-              ? {}
-              : {
-                  imageGenerationProfiles: listEligibleImageProfiles(
-                    props.providerController.snapshot.instances,
-                  ),
-                })}
-            {...(openProviderSettings === undefined
-              ? {}
-              : { onOpenSettings: openProviderSettings })}
-            {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
-            {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-            {...(props.projectWindowCapability === undefined
-              ? {}
-              : { windowCapability: props.projectWindowCapability })}
-            {...(props.onOpenCanvasReference === undefined
-              ? {}
-              : { onOpenCanvas: props.onOpenCanvasReference })}
-            {...(props.onWorkThreadUpdated === undefined
-              ? {}
-              : { onThreadUpdated: props.onWorkThreadUpdated })}
-            childRunStatus={
-              <ThreadChildRunStatusSlot
-                {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
-                {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
-                threadId={String(tab.threadId)}
+            projects={props.projects}
+            tab={tab}
+            threadClient={workThreadClient}
+          >
+            <ThreadActivityPictureInPicture
+              enabled={displayReady}
+              {...(props.browserAutomationClient === undefined
+                ? {}
+                : { browserClient: props.browserAutomationClient })}
+              {...(props.computerUseClient === undefined
+                ? {}
+                : { computerUseClient: props.computerUseClient })}
+              {...(props.onComputerUseSessionChange === undefined
+                ? {}
+                : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
+              {...(props.onOpenSurface === undefined
+                ? {}
+                : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
+              threadId={tab.threadId as never}
+            >
+              <WorkThreadWorkspace
+                {...(props.workChangeRevision === undefined
+                  ? {}
+                  : { changeRevision: props.workChangeRevision })}
+                {...(initialThread === undefined ? {} : { initialThread })}
+                onDisplayReadyChange={onDisplayReadyChange}
+                {...(props.workMutationClient === undefined
+                  ? {}
+                  : { mutationClient: props.workMutationClient })}
+                {...(props.workTurnClient === undefined
+                  ? {}
+                  : { turnClient: props.workTurnClient })}
+                {...(props.workRequestClient === undefined
+                  ? {}
+                  : { requestClient: props.workRequestClient })}
+                threadClient={workThreadClient}
+                {...(props.onOpenSurface === undefined
+                  ? {}
+                  : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
+                threadId={tab.threadId}
+                {...(props.revealChatTurn !== undefined &&
+                String(props.revealChatTurn.threadId) === String(tab.threadId)
+                  ? { revealTurnId: props.revealChatTurn.turnId }
+                  : {})}
+                title={tab.title}
+                providerGroups={props.workProviderGroups ?? []}
+                {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+                {...(props.imageGenerationClient === undefined
+                  ? {}
+                  : { imageGenerationClient: props.imageGenerationClient })}
+                {...(props.providerController.snapshot === undefined
+                  ? {}
+                  : {
+                      imageGenerationProfiles: listEligibleImageProfiles(
+                        props.providerController.snapshot.instances,
+                      ),
+                    })}
+                {...(openProviderSettings === undefined
+                  ? {}
+                  : { onOpenSettings: openProviderSettings })}
+                {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
+                {...(props.projectServerUrl === undefined
+                  ? {}
+                  : { serverUrl: props.projectServerUrl })}
+                {...(props.projectWindowCapability === undefined
+                  ? {}
+                  : { windowCapability: props.projectWindowCapability })}
+                {...(props.onOpenCanvasReference === undefined
+                  ? {}
+                  : { onOpenCanvas: props.onOpenCanvasReference })}
+                {...(props.onWorkThreadUpdated === undefined
+                  ? {}
+                  : { onThreadUpdated: props.onWorkThreadUpdated })}
+                childRunStatus={
+                  displayReady ? (
+                    <ThreadChildRunStatusSlot
+                      {...(props.agentRunClient === undefined
+                        ? {}
+                        : { client: props.agentRunClient })}
+                      {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
+                      threadId={String(tab.threadId)}
+                    />
+                  ) : undefined
+                }
               />
-            }
-          />
-          <ThreadGoalPanel
-            {...(props.goalClient === undefined ? {} : { client: props.goalClient })}
-            {...(props.goalLoopClient === undefined ? {} : { loopClient: props.goalLoopClient })}
-            threadId={String(tab.threadId)}
-          />
-          <ThreadUsagePanel
-            client={props.usageDashboardClient}
-            subjectType="work-thread"
-            subjectId={String(tab.threadId)}
-            {...(props.onOpenUsageDashboard === undefined
-              ? {}
-              : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
-          />
-        </ThreadActivityPictureInPicture>
-      </WorkThreadEnvironment>
+              {displayReady ? (
+                <>
+                  <ThreadGoalPanel
+                    {...(props.goalClient === undefined ? {} : { client: props.goalClient })}
+                    {...(props.goalLoopClient === undefined
+                      ? {}
+                      : { loopClient: props.goalLoopClient })}
+                    threadId={String(tab.threadId)}
+                  />
+                  <ThreadUsagePanel
+                    client={props.usageDashboardClient}
+                    subjectType="work-thread"
+                    subjectId={String(tab.threadId)}
+                    {...(props.onOpenUsageDashboard === undefined
+                      ? {}
+                      : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
+                  />
+                </>
+              ) : null}
+            </ThreadActivityPictureInPicture>
+          </WorkThreadEnvironment>
+        )}
+      </WorkThreadDisplayBoundary>
     );
   }
   if (tab.kind === "settings") {

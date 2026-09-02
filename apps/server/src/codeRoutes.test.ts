@@ -16,6 +16,7 @@ import {
   MAX_CODE_NDJSON_LINE_BYTES,
   createCodeRouteHandler,
 } from "./codeRoutes";
+import { CodeOperationSnapshotRequiredError } from "./code/codeOperationService";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
@@ -436,6 +437,24 @@ describe("Code routes", () => {
       message: "Code replay requires a snapshot.",
     });
     expect(subscribe).toHaveBeenCalledWith(windowId, threadId, 999, expect.any(AbortSignal));
+  });
+
+  it("returns a snapshot-required conflict when operation replay retention has a gap", async () => {
+    const route = routeFixture({
+      subscribeOperation: vi.fn(async function* () {
+        throw new CodeOperationSnapshotRequiredError("gap");
+      }),
+    });
+
+    const response = await route(
+      request(`/api/code/threads/${threadId}/operations/${operationId}/events?afterCursor=7`),
+    );
+
+    expect(response?.status).toBe(409);
+    await expect(response?.json()).resolves.toEqual({
+      category: "stale",
+      message: "Code operation replay requires a snapshot.",
+    });
   });
 
   it("returns authorized content as raw bytes with digest and length metadata", async () => {

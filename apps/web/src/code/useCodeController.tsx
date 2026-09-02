@@ -1,4 +1,8 @@
-import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
+import {
+  CodeClientSnapshotRequiredError,
+  createCodeClient,
+  type CodeClient,
+} from "@octant/client-runtime/code-client";
 import type {
   CodeBootstrap,
   CodeNavigation,
@@ -41,7 +45,11 @@ import {
   type CodeTurnActivity,
 } from "./transcriptActivity";
 import { samePollingData } from "../polling/samePollingData";
-import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import {
+  documentIsVisible,
+  scheduleVisibleInterval,
+  waitUntilDocumentVisible,
+} from "../polling/documentVisibility";
 import { markInteraction } from "../polling/interactionTrace";
 import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
 
@@ -837,7 +845,26 @@ export function useCodeController(options: CodeControllerOptions) {
           operationStream = (async () => {
             let operationCursor = 0;
             let assistantText = "";
+            let snapshotRequired = false;
             while (isActive(request, threadGeneration, mounted) && !controller.signal.aborted) {
+              if (snapshotRequired) {
+                const hydrated = await hydrateConversation(
+                  threadId,
+                  request,
+                  controller.signal,
+                ).catch(() => undefined);
+                if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) {
+                  return;
+                }
+                if (hydrated === undefined) {
+                  await waitForReconnect(controller.signal, 250);
+                  continue;
+                }
+                if (hydrated.incomplete !== true) return;
+                operationCursor = 0;
+                assistantText = "";
+                snapshotRequired = false;
+              }
               let received = 0;
               try {
                 for await (const frame of client.subscribeOperation(
@@ -952,9 +979,12 @@ export function useCodeController(options: CodeControllerOptions) {
                     return;
                   }
                 }
-              } catch {
-                // The durable conversation poll below remains the recovery
-                // path; reconnect from the last fully applied operation frame.
+              } catch (error) {
+                // A gap means later deltas have no trustworthy base. Reload
+                // the durable conversation before replaying the operation
+                // from its beginning; ordinary disconnects resume at the last
+                // fully applied cursor.
+                if (error instanceof CodeClientSnapshotRequiredError) snapshotRequired = true;
               }
               if (!controller.signal.aborted) {
                 await waitForReconnect(controller.signal, received === 0 ? 250 : 50);
@@ -974,6 +1004,7 @@ export function useCodeController(options: CodeControllerOptions) {
             let delayMs = 250;
             while (isActive(request, threadGeneration, mounted) && !controller.signal.aborted) {
               await waitForReconnect(controller.signal, delayMs);
+              await waitUntilDocumentVisible(controller.signal);
               if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                 return;
               try {
@@ -2356,20 +2387,29 @@ async function readConversationEvidence(
     }
   }
   const items = [...unique.values()];
-  const responses = await Promise.all(
-    Array.from({ length: Math.ceil(items.length / MAX_CODE_EVIDENCE_BATCH_ITEMS) }, (_, index) =>
-      read(
-        {
-          threadId,
-          items: items.slice(
-            index * MAX_CODE_EVIDENCE_BATCH_ITEMS,
-            (index + 1) * MAX_CODE_EVIDENCE_BATCH_ITEMS,
-          ),
-        },
-        signal,
+  let responses: ReadonlyArray<Awaited<ReturnType<NonNullable<CodeClient["operationContents"]>>>>;
+  try {
+    responses = await Promise.all(
+      Array.from({ length: Math.ceil(items.length / MAX_CODE_EVIDENCE_BATCH_ITEMS) }, (_, index) =>
+        read(
+          {
+            threadId,
+            items: items.slice(
+              index * MAX_CODE_EVIDENCE_BATCH_ITEMS,
+              (index + 1) * MAX_CODE_EVIDENCE_BATCH_ITEMS,
+            ),
+          },
+          signal,
+        ),
       ),
-    ),
-  );
+    );
+  } catch (error) {
+    if (signal.aborted) throw error;
+    // A renderer may reconnect to a host from before the batch endpoint was
+    // introduced. Preserve transcript recovery through the existing bounded
+    // per-reference reads instead of treating that host as corrupt.
+    return undefined;
+  }
   const text = new Map<string, string>();
   for (const response of responses) {
     if (String(response.threadId) !== String(threadId)) continue;

@@ -9,6 +9,7 @@ import {
   type CodeCheckoutIdentity,
   type CodeEvidenceReference,
   type CodeEvidenceContentId,
+  type CodeFailure,
   type CodeOperationEvent,
   type CodeOperationEventFrame,
   type CodeOperationCommand,
@@ -127,6 +128,10 @@ export interface CodeOperationEventPort {
 
 export class CodeOperationSnapshotRequiredError extends Error {
   override readonly name = "CodeOperationSnapshotRequiredError";
+  readonly failure: CodeFailure = {
+    category: "stale",
+    message: "Code operation replay requires a snapshot.",
+  };
 
   constructor(
     readonly reason: Extract<
@@ -1123,7 +1128,7 @@ export class CodeOperationService {
     }>
   > {
     const thread = this.#options.authority.readThread(threadId);
-    if (thread === undefined || thread.id !== threadId) {
+    if (thread === undefined || String(thread.id) !== String(threadId)) {
       throw new CodeOperationServiceError("invalid");
     }
     if (!(await this.#options.authority.canAccessProject(windowId, thread.projectId))) {

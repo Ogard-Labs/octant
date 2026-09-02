@@ -20,7 +20,10 @@ import type { ChatComposerThreadMentionChip } from "../chat/ChatComposer";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
-import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
+import {
+  WorkTurnClientFailure,
+  type WorkTurnClient,
+} from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
 import { Check, Globe2, Paperclip } from "lucide-react";
 import {
@@ -68,7 +71,11 @@ import { useWorkFileMentions } from "./useWorkFileMentions";
 import { samePollingData } from "../polling/samePollingData";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import {
+  documentIsVisible,
+  scheduleVisibleInterval,
+  waitUntilDocumentVisible,
+} from "../polling/documentVisibility";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 
 /**
@@ -101,11 +108,14 @@ type WorkTranscriptRow =
   | { readonly kind: "request"; readonly key: string; readonly request: WorkRequest }
   | { readonly kind: "status"; readonly key: "status"; readonly text: string };
 
+const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
+
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
   readonly threadId: WorkThreadId;
   /** Machine-owned navigation snapshot; avoids rescanning every Project before transcript read. */
   readonly initialThread?: WorkThread;
+  readonly onDisplayReadyChange?: (ready: boolean) => void;
   readonly changeRevision?: number;
   readonly threadClient: WorkThreadClient;
   readonly turnClient?: WorkTurnClient;
@@ -160,10 +170,10 @@ function applyWorkTurnStreamFrame(
     return next;
   }
   if (index === -1) return turns;
-  const current = turns[index]!;
+  const current = turns[index];
+  if (current === undefined) return turns;
   const assistantIndex = current.transcript.findIndex((entry) => entry.role === "assistant");
-  const previousText =
-    assistantIndex === -1 ? (current.response ?? "") : current.transcript[assistantIndex]!.text;
+  const previousText = current.transcript[assistantIndex]?.text ?? current.response ?? "";
   const text = previousText + frame.text;
   const transcript = current.transcript.slice();
   const assistant = { role: "assistant" as const, text, status: "running" as const };
@@ -242,7 +252,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [completing, setCompleting] = useState(false);
   const [completionFormOpen, setCompletionFormOpen] = useState(false);
   const [completionEvidence, setCompletionEvidence] = useState("");
+  const changeDriven = props.changeRevision !== undefined;
   const transcriptGeneration = useRef(0);
+  const initialThread = useRef(props.initialThread);
+  if (String(props.initialThread?.id) === String(props.threadId)) {
+    initialThread.current = props.initialThread;
+  } else if (String(initialThread.current?.id) !== String(props.threadId)) {
+    initialThread.current = undefined;
+  }
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const currentThreadKeyRef = useRef(String(props.threadId));
   currentThreadKeyRef.current = String(props.threadId);
@@ -333,13 +350,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     const requestGeneration = ++transcriptGeneration.current;
     const streamAbort = new AbortController();
     let cancelled = false;
+    props.onDisplayReadyChange?.(false);
     void (async () => {
       try {
         const thread =
-          props.initialThread?.id === props.threadId
-            ? props.initialThread
+          String(initialThread.current?.id) === String(props.threadId)
+            ? initialThread.current
             : (await props.threadClient.bootstrap(streamAbort.signal)).threads.find(
-                (candidate) => candidate.id === props.threadId,
+                (candidate) => String(candidate.id) === String(props.threadId),
               );
         if (thread === undefined) {
           composerDraft.purge(String(props.threadId));
@@ -350,12 +368,36 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         setProjectId(thread.projectId);
         const transcriptRead = async () => {
           const turnClient = props.turnClient;
-          if (turnClient === undefined) return;
-          const transcript = await turnClient.transcript(props.threadId, streamAbort.signal);
+          if (turnClient === undefined) {
+            props.onDisplayReadyChange?.(true);
+            return;
+          }
+          let retryMs = 250;
+          let transcript: WorkThreadTranscript;
+          for (;;) {
+            try {
+              transcript = await turnClient.transcript(props.threadId, streamAbort.signal);
+              break;
+            } catch (error) {
+              if (cancelled || streamAbort.signal.aborted) return;
+              const permanentlyRefused =
+                error instanceof WorkTurnClientFailure && error.status >= 400 && error.status < 500;
+              if (!changeDriven || permanentlyRefused) throw error;
+              setErrorMessage(WORK_TRANSCRIPT_RECONNECTING_MESSAGE);
+              await waitUntilDocumentVisible(streamAbort.signal);
+              if (streamAbort.signal.aborted) return;
+              await waitForWorkStreamReconnect(streamAbort.signal, retryMs);
+              retryMs = Math.min(retryMs * 2, 2_000);
+            }
+          }
           if (cancelled || requestGeneration !== transcriptGeneration.current) return;
+          setErrorMessage((current) =>
+            current === WORK_TRANSCRIPT_RECONNECTING_MESSAGE ? undefined : current,
+          );
           setTurns((current) =>
             samePollingData(current, transcript.turns) ? current : transcript.turns,
           );
+          props.onDisplayReadyChange?.(true);
           if (typeof turnClient.subscribe === "function") {
             void consumeWorkTurnStream({
               client: turnClient,
@@ -394,13 +436,21 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       transcriptGeneration.current += 1;
     };
   }, [
+    changeDriven,
     composerDraft.purge,
-    props.initialThread,
+    props.onDisplayReadyChange,
     props.requestClient,
     props.threadClient,
     props.threadId,
     props.turnClient,
   ]);
+
+  useEffect(() => {
+    const next = props.initialThread;
+    if (next === undefined || String(next.id) !== String(props.threadId)) return;
+    setThread((current) => (samePollingData(current, next) ? current : next));
+    setProjectId(next.projectId);
+  }, [props.initialThread, props.threadId]);
 
   useEffect(() => {
     const turnClient = props.turnClient;
