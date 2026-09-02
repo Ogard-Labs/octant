@@ -25,6 +25,7 @@ export interface RightUtilityDockSurfaceProps {
   readonly review?: ReactNode;
   readonly closeButtonRef?: Ref<HTMLButtonElement>;
   readonly delivery?: ReactNode;
+  readonly environment?: ReactNode;
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
@@ -57,6 +58,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     canvas: props.canvas,
     review: props.review,
     delivery: props.delivery,
+    environment: props.environment,
     files: props.files,
     "ios-simulator": props.iosSimulator,
     plan: props.plan,
@@ -163,6 +165,7 @@ function DockWorkMap(props: {
 
 function workMapDetail(surface: RightUtilityDockSurfaceId): string {
   if (surface === "agents") return "Inspect and control child runs";
+  if (surface === "environment") return "Inspect this thread's working context";
   if (surface === "browser") return "Inspect live web activity";
   if (surface === "canvas") return "Open the thread Canvas";
   if (surface === "review") return "Review checkout changes";

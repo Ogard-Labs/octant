@@ -8,6 +8,7 @@ import {
   ListChecks,
   MessageCircle,
   Smartphone,
+  SlidersHorizontal,
   SquareTerminal,
   Truck,
   type LucideIcon,
@@ -15,6 +16,7 @@ import {
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
 const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
+  environment: SlidersHorizontal,
   browser: Globe2,
   canvas: FileStack,
   review: GitCompareArrows,

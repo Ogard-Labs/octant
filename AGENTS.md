@@ -45,7 +45,7 @@ Read the record that owns your change before editing, not all of them:
 | Image generation jobs, adapters, and artifacts                 | `docs/decisions/0055`, `docs/decisions/0056`                                               |
 | Context limits, capacity, scheduling                           | `docs/decisions/0008`                                                                      |
 | Usage spend ceilings (Project / thread)                        | `docs/decisions/0060`                                                                      |
-| Pull-request snapshot background refresh cadence               | `docs/decisions/0064`                                                                      |
+| Pull-request snapshot persistence and refresh cadence          | `docs/decisions/0064`, `docs/decisions/0076`                                               |
 | Sandbox, approvals, Plan mode, access postures                 | `docs/decisions/0009`, `docs/decisions/0018`, `docs/decisions/0057`, `docs/decisions/0068` |
 | File preview and canvas artifacts                              | `docs/decisions/0010`                                                                      |
 | Canvas boards, comments, and layout revisions                  | `docs/decisions/0052`                                                                      |
@@ -61,7 +61,7 @@ Read the record that owns your change before editing, not all of them:
 | Simulator frame input transport                                | `docs/decisions/0062`                                                                      |
 | Signed updates and in-app changelog                            | `docs/decisions/0034`, `docs/decisions/0061`                                               |
 | Computer-use destinations                                      | `docs/decisions/0053`                                                                      |
-| Shell, navigation, workspace layout                            | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`                         |
+| Shell, navigation, workspace layout                            | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`, `docs/decisions/0077`  |
 | Components and theme                                           | `docs/decisions/0016`, `docs/decisions/0046`                                               |
 | Visual language (Settings, first-run, welcome, palette)        | `docs/decisions/0070`, `docs/decisions/0072`, `docs/decisions/0073`                        |
 

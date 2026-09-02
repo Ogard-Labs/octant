@@ -80,8 +80,8 @@ or Project-wide surfaces.
   active thread or Project (0019).
 
 Canvas in the dock addresses the existing authorized document (0010); it does
-not copy content or treat renderer focus as authority. Environment remains a
-thread-header disclosure (0042). The central pane remains the thread, a board,
+not copy content or treat renderer focus as authority. Environment is a direct
+thread-owned dock tool under 0077. The central pane remains the thread, a board,
 a Project overview, or a Project-level list.
 
 ## Consequences
@@ -99,7 +99,7 @@ a Project overview, or a Project-level list.
   are restored as window presentation state; they do not widen thread or host
   authority.
 - 0015 remains Accepted as the current implemented shell. This record, with
-  0041 and 0042, is the approved migration of dock content, tool ownership,
+  0041 and 0077, is the approved migration of dock content, tool ownership,
   and placement. It does not change mode authority, journal ownership, or
   which capabilities exist.
 
@@ -115,5 +115,5 @@ a Project overview, or a Project-level list.
 - 0026 Shipping to a user-owned target
 - 0027 Plans as journaled artifacts
 - 0041 Panes hold one surface; the sidebar is the only switcher
-- 0042 Environment is a transient disclosure
 - 0043 Simulator follows the active thread in the right sidebar
+- 0077 Environment is a context-aware dock tool

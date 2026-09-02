@@ -4766,6 +4766,8 @@ function LaunchedShell(
                     onOpenSurface={(surface, paneId, browserContextId) =>
                       controller.openSurface(surface, paneId, browserContextId)
                     }
+                    environmentDockOpen={dockOpen && dockSurface === "environment"}
+                    onOpenEnvironment={(opener) => openDockTab("environment", opener)}
                     onDismissCrossContextOffer={controller.dismissCrossContextOffer}
                     onOpenCrossContextInNewWindow={() =>
                       void controller.openCrossContextInNewWindow()
@@ -4939,6 +4941,11 @@ function LaunchedShell(
               renderTab={(descriptor) => {
                 const utilityTab = displayedDockState.tabs.find((tab) => tab.id === descriptor.id);
                 if (utilityTab === undefined) return null;
+                if (utilityTab.surface === "environment") {
+                  return (
+                    <div className="thread-environment-dock-host" data-octant-environment-dock />
+                  );
+                }
                 if (
                   utilityTab.surface === "review" &&
                   projectPullRequestReviewOpen &&

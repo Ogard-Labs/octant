@@ -2427,7 +2427,7 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Code environment" })).toBeNull();
   });
 
-  it("does not execute set-environment-presentation when Environment is toggled", async () => {
+  it("opens Environment as a context-aware dock tab without a presentation command", async () => {
     const user = userEvent.setup();
     const projectApi = projects({
       ...projectBootstrap(),
@@ -2449,8 +2449,13 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await user.click(await screen.findByRole("button", { name: "Toggle environment" }));
-    expect(await screen.findByRole("dialog", { name: "Environment" })).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: "Open Environment" }));
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(within(dock).getByRole("tab", { name: "Environment" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(await within(dock).findByRole("region", { name: "Environment details" })).toBeVisible();
     expect(shellApi.execute.mock.calls.map(([command]) => command.kind)).not.toContain(
       "set-environment-presentation",
     );
@@ -3827,7 +3832,7 @@ describe("App", () => {
     const thread = await screen.findByRole("region", {
       name: "Workspace pane: Controller foundation",
     });
-    await user.click(await screen.findByRole("button", { name: "Toggle environment" }));
+    await user.click(await screen.findByRole("button", { name: "Open Environment" }));
     await user.click(await screen.findByRole("button", { name: "View changes" }));
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });

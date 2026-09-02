@@ -104,11 +104,12 @@ and draft pull requests from authorized connected Code Projects. Octant
 resolves each Project's github.com origin from the bound root's git remotes.
 Projects without a github.com origin stay visible as unconnected.
 
-The list is a cached read of a temporary in-memory snapshot. Opening the
-workspace, switching Projects, and ordinary board queries do not call GitHub.
+The list is a cached read of a private host-local snapshot. A successful
+refresh survives an app or host restart; opening the workspace, switching
+Projects, and ordinary board queries do not call GitHub.
 Refresh all and per-Project refresh are explicit; repositories are read
 concurrently through the installed authenticated `gh` CLI, then reconciled in
-stable Project order. A Project can also opt into **background refresh** with
+stable Project order. A Project can also opt into **Auto-refresh** with
 the toggle in its group header: while enabled and the Project has
 board-relevant pull requests, the host re-observes the snapshot on a bounded
 cadence (never faster than every 30 seconds, every 2 minutes by default),

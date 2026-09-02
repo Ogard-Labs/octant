@@ -17,6 +17,8 @@ export interface ChatThreadEnvironmentProps {
   readonly active?: boolean;
   readonly agentRunClient?: AgentRunClient;
   readonly onOpenAgents?: () => void;
+  readonly environmentOpen?: boolean;
+  readonly onOpenEnvironment?: (opener: HTMLElement) => void;
 }
 
 /**
@@ -26,7 +28,8 @@ export interface ChatThreadEnvironmentProps {
  * Project id and never as a fallback authority source.
  */
 export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
-  const [disclosureOpen, setDisclosureOpen] = useState(false);
+  const [localEnvironmentOpen, setLocalEnvironmentOpen] = useState(false);
+  const environmentOpen = props.environmentOpen ?? localEnvironmentOpen;
   const view = props.controller.activeView;
   const projectId = view?.thread.projectId;
   const project = props.projects.find(
@@ -44,8 +47,9 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
     <div className="thread-environment-wrapper">
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
-        onOpenChange={setDisclosureOpen}
-        open={disclosureOpen}
+        inlineFallback={props.environmentOpen === undefined}
+        onOpen={props.onOpenEnvironment ?? (() => setLocalEnvironmentOpen(true))}
+        open={environmentOpen}
         summary={{ identity: projection.identity }}
       >
         <ChatEnvironmentFacts

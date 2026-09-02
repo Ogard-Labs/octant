@@ -20,6 +20,8 @@ export interface WorkThreadEnvironmentProps {
   readonly children: ReactNode;
   readonly agentRunClient?: AgentRunClient;
   readonly onOpenAgents?: () => void;
+  readonly environmentOpen?: boolean;
+  readonly onOpenEnvironment?: (opener: HTMLElement) => void;
 }
 
 /**
@@ -29,7 +31,8 @@ export interface WorkThreadEnvironmentProps {
  * unavailable instead of guessing a folder from renderer state.
  */
 export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
-  const [disclosureOpen, setDisclosureOpen] = useState(false);
+  const [localEnvironmentOpen, setLocalEnvironmentOpen] = useState(false);
+  const environmentOpen = props.environmentOpen ?? localEnvironmentOpen;
   const [project, setProject] = useState<WorkProject | undefined>(undefined);
   const [thread, setThread] = useState<WorkThread | undefined>(undefined);
 
@@ -78,8 +81,9 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
     <div className="code-thread-environment">
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
-        onOpenChange={setDisclosureOpen}
-        open={disclosureOpen}
+        inlineFallback={props.environmentOpen === undefined}
+        onOpen={props.onOpenEnvironment ?? (() => setLocalEnvironmentOpen(true))}
+        open={environmentOpen}
         summary={{
           identity: projection.identity,
           ...(thread === undefined

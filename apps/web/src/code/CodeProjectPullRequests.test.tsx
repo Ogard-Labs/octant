@@ -129,7 +129,7 @@ describe("CodeProjectPullRequests", () => {
 
     const octant = await screen.findByRole("region", { name: "Project Octant" });
     const notes = screen.getByRole("region", { name: "Project Local notes" });
-    expect(within(octant).getByRole("heading", { name: "octant/octant" })).toBeVisible();
+    expect(within(octant).getByText("octant/octant")).toBeVisible();
     expect(within(octant).getByText("#12")).toBeVisible();
     expect(within(octant).getByText("octocat")).toBeVisible();
     expect(within(octant).getByText("feature/manual-refresh → development")).toBeVisible();
@@ -144,7 +144,7 @@ describe("CodeProjectPullRequests", () => {
     expect(octant.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("toggles a connected Project's background refresh through the authoritative setter", async () => {
+  it("toggles a connected Project's auto-refresh through the authoritative setter", async () => {
     const user = userEvent.setup();
     const setEnabled = vi.fn(async () => true);
     renderWorkspace({
@@ -152,12 +152,12 @@ describe("CodeProjectPullRequests", () => {
     });
     await screen.findByText("List active pull requests");
 
-    const toggle = screen.getByRole("button", { name: "Background refresh for Octant" });
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(toggle).toHaveTextContent("Background refresh off");
+    const toggle = screen.getByRole("switch", { name: "Auto-refresh Octant pull requests" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Auto-refresh")).toBeVisible();
     // The unconnected Project has nothing to refresh, so it gets no toggle.
     expect(
-      screen.queryByRole("button", { name: "Background refresh for Local notes" }),
+      screen.queryByRole("switch", { name: "Auto-refresh Local notes pull requests" }),
     ).not.toBeInTheDocument();
 
     await user.click(toggle);
@@ -176,7 +176,7 @@ describe("CodeProjectPullRequests", () => {
 
     expect(
       await screen.findByText(
-        "Background refresh is unavailable: the GitHub CLI is missing or not authenticated.",
+        "Auto-refresh is unavailable: the GitHub CLI is missing or not authenticated.",
       ),
     ).toBeVisible();
   });
@@ -337,20 +337,29 @@ describe("CodeProjectPullRequests", () => {
 
     await user.click(screen.getByRole("button", { name: "Clear pull-request search" }));
     expect(await screen.findByText("List active pull requests")).toBeVisible();
+    expect(search).toHaveFocus();
     expect(load).toHaveBeenCalledTimes(1);
     expect(refresh).not.toHaveBeenCalled();
   });
 
   it("keeps pull-request row content from collapsing by separating metadata into its own column", () => {
     const rowContent = ruleBody(stylesheet, ".code-project-pull-requests__row-content");
+    const row = ruleBody(stylesheet, ".code-project-pull-requests__row");
+    expect(row).toMatch(/height:\s*auto/);
+    expect(row).toMatch(/min-height:\s*66px/);
     expect(rowContent).toMatch(/display:\s*grid/);
-    expect(rowContent).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+    expect(rowContent).toMatch(
+      /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(250px,\s*auto\)/,
+    );
     expect(rowContent).not.toMatch(/gap:\s*3px/);
     expect(rowContent).toMatch(/gap:\s*var\(--oct-space-2\)\s+var\(--oct-space-3\)/);
 
     const meta = ruleBody(stylesheet, ".code-project-pull-requests__meta");
     expect(meta).toMatch(/grid-column:\s*2/);
-    expect(meta).toMatch(/grid-row:\s*1\s*\/\s*span\s+4/);
+    expect(meta).toMatch(/grid-row:\s*1\s*\/\s*span\s+3/);
+    const title = ruleBody(stylesheet, ".code-project-pull-requests__title");
+    expect(title).toMatch(/text-overflow:\s*ellipsis/);
+    expect(title).toMatch(/white-space:\s*nowrap/);
 
     const narrowMeta = ruleBody(
       stylesheet,

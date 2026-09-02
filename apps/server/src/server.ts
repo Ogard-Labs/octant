@@ -205,6 +205,7 @@ import {
   type CodeProjectPullRequestListPort,
 } from "./code/codeProjectPullRequestService";
 import { CodeProjectPullRequestCadence } from "./code/codeProjectPullRequestCadence";
+import { CodeProjectPullRequestSnapshotStore } from "./code/codeProjectPullRequestSnapshotStore";
 import { createGhCommandPort, GhPullRequestPort } from "./code/ghPullRequestPort";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
@@ -2519,6 +2520,9 @@ export function startOctantServer(
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
       cacheStats,
+      snapshotStore: new CodeProjectPullRequestSnapshotStore(
+        join(persistence.dataDirectory, "code", "pull-request-snapshot.json"),
+      ),
       onSnapshotRefreshed: (rows) => observeRefreshedPullRequestRows?.(rows),
       threads: {
         list: () => listProjectPullRequestThreadFacts(),

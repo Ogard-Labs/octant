@@ -39,7 +39,7 @@ export interface LocalServersControllerOptions {
   /** True only while local servers may be observed at all. */
   readonly enabled: boolean;
   /**
-   * Interval refresh while the disclosure is open. A closed Environment still
+   * Interval refresh while the Environment tab is open. A closed tab still
    * takes one observation for the summary count and then stays quiet.
    */
   readonly poll?: boolean;
@@ -56,7 +56,7 @@ export interface LocalServersControllerOptions {
  * offered at all; this controller only transports commands and holds the last
  * snapshot. A closed Environment takes one observation for the compact count
  * and then stays quiet. Interval refresh, and a refresh the moment polling
- * starts, run only while the disclosure is open. Disabled sections never scan.
+ * starts, run only while the Environment tab is open. Disabled sections never scan.
  */
 export function useLocalServersController(
   options: LocalServersControllerOptions,

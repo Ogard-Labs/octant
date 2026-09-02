@@ -1,6 +1,7 @@
 import type { OctantMode } from "@octant/contracts/modes";
 
 export type RightUtilityDockSurfaceId =
+  | "environment"
   | "side-chat"
   | "browser"
   | "files"
@@ -106,6 +107,12 @@ export type RightUtilityDockResolution =
  */
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
+    id: "environment",
+    label: "Environment",
+    modes: ["chat", "work", "code"],
+    scope: "thread",
+  },
+  {
     id: "side-chat",
     label: "Side Chat",
     modes: ["chat", "work", "code"],
@@ -175,17 +182,18 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
 
 const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSurfaceDescriptor>> =
   {
-    "side-chat": RIGHT_UTILITY_DOCK_SURFACES[0],
-    browser: RIGHT_UTILITY_DOCK_SURFACES[1],
-    files: RIGHT_UTILITY_DOCK_SURFACES[2],
-    canvas: RIGHT_UTILITY_DOCK_SURFACES[3],
-    plan: RIGHT_UTILITY_DOCK_SURFACES[4],
-    delivery: RIGHT_UTILITY_DOCK_SURFACES[5],
-    agents: RIGHT_UTILITY_DOCK_SURFACES[6],
-    review: RIGHT_UTILITY_DOCK_SURFACES[7],
-    terminal: RIGHT_UTILITY_DOCK_SURFACES[8],
-    tests: RIGHT_UTILITY_DOCK_SURFACES[9],
-    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[10],
+    environment: RIGHT_UTILITY_DOCK_SURFACES[0],
+    "side-chat": RIGHT_UTILITY_DOCK_SURFACES[1],
+    browser: RIGHT_UTILITY_DOCK_SURFACES[2],
+    files: RIGHT_UTILITY_DOCK_SURFACES[3],
+    canvas: RIGHT_UTILITY_DOCK_SURFACES[4],
+    plan: RIGHT_UTILITY_DOCK_SURFACES[5],
+    delivery: RIGHT_UTILITY_DOCK_SURFACES[6],
+    agents: RIGHT_UTILITY_DOCK_SURFACES[7],
+    review: RIGHT_UTILITY_DOCK_SURFACES[8],
+    terminal: RIGHT_UTILITY_DOCK_SURFACES[9],
+    tests: RIGHT_UTILITY_DOCK_SURFACES[10],
+    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[11],
   };
 
 export function resolveRightUtilityDockSurface(
