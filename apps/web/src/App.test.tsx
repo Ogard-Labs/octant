@@ -220,7 +220,7 @@ describe("App", () => {
         name: /Controller foundation/,
       }),
     ).toBeVisible();
-    expect(codeApi.thread).toHaveBeenCalledWith(codeThreadId);
+    expect(codeApi.thread).toHaveBeenCalledWith(codeThreadId, expect.any(AbortSignal));
     expect(codeApi.subscribe).toHaveBeenCalledWith(codeThreadId, 0, expect.any(AbortSignal));
   });
 
@@ -341,18 +341,23 @@ describe("App", () => {
     );
   });
 
-  it("authenticates a browser session by exchanging a launch token from the URL fragment", async () => {
-    const launchToken = `${"A".repeat(42)}A`;
+  it("opens the canonical Machine directly in a browser without a launch token", async () => {
     const browserCapability = `${"C".repeat(42)}A`;
     const originalHref = window.location.href;
-    window.location.hash = `launchToken=${launchToken}`;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/api/shell/launch-session")) {
-        return new Response(JSON.stringify({ windowId, capability: browserCapability }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+      if (url.endsWith("/api/shell/local-session")) {
+        return new Response(
+          JSON.stringify({
+            windowId,
+            capability: browserCapability,
+            authentication: "local-session",
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       const canvasResponse = canvasFetchPassthrough(url);
       if (canvasResponse !== undefined) {
@@ -378,14 +383,25 @@ describe("App", () => {
         }),
       ).toBeVisible();
       expect(fetchMock).toHaveBeenCalledWith(
-        new URL("/api/shell/launch-session", window.location.origin),
+        new URL("/api/shell/local-session", window.location.origin),
         expect.objectContaining({ method: "POST" }),
       );
-      expect(window.location.hash).toBe("");
     } finally {
       vi.unstubAllGlobals();
       window.history.replaceState(null, "", originalHref);
     }
+  });
+
+  it("fails closed before rendering the shell when an injected capability is invalid", () => {
+    render(
+      <App
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectWindowCapability="invalid"
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Project authority is unavailable" })).toBeVisible();
+    expect(screen.queryByRole("main", { name: "Octant workspace" })).not.toBeInTheDocument();
   });
 
   it("renders independent authoritative Chat sessions in every visible split pane", async () => {
@@ -3219,16 +3235,6 @@ describe("App", () => {
         }),
       ),
     );
-  });
-
-  it("fails closed when the renderer Project capability is missing", () => {
-    render(
-      <App launch={{ serverUrl: "http://127.0.0.1:13773", windowId }} shellClient={client()} />,
-    );
-    expect(
-      screen.getByRole("heading", { name: /Project authority is unavailable/i }),
-    ).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Code" })).not.toBeInTheDocument();
   });
 
   it("keeps native picker cancellation and raw paths out of Project creation state", async () => {

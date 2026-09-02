@@ -8,6 +8,25 @@ export function documentIsVisible(): boolean {
   return typeof document === "undefined" || document.visibilityState !== "hidden";
 }
 
+/** Pause recovery work without waking hidden renderers on a polling timer. */
+export function waitUntilDocumentVisible(signal: AbortSignal): Promise<void> {
+  if (signal.aborted || documentIsVisible() || typeof document === "undefined") {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const done = () => {
+      document.removeEventListener("visibilitychange", visible);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const visible = () => {
+      if (documentIsVisible()) done();
+    };
+    document.addEventListener("visibilitychange", visible);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
 export interface VisibleIntervalOptions {
   /**
    * Run the tick as soon as the interval is scheduled, not only after the

@@ -30,6 +30,7 @@ export interface ProjectControllerOptions {
   readonly client?: ProjectClient;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  readonly changeRevision?: number;
 }
 
 interface Announcement {
@@ -82,9 +83,11 @@ export function useProjectController(options: ProjectControllerOptions) {
   const memoryOwnerProjectId = useRef<ProjectId | undefined>(undefined);
 
   const load = useCallback(
-    async (reason: "bootstrap" | "retry" | "refresh" | "conflict" = "retry") => {
+    async (reason: "bootstrap" | "retry" | "refresh" | "conflict" | "revision" = "retry") => {
       const request = ++generation.current;
-      setStatus(reason === "conflict" ? "conflict-reload" : "loading");
+      if (reason !== "revision") {
+        setStatus(reason === "conflict" ? "conflict-reload" : "loading");
+      }
       setErrorMessage(undefined);
       try {
         const bootstrap = await fallbackClient.bootstrap();
@@ -98,6 +101,10 @@ export function useProjectController(options: ProjectControllerOptions) {
         }
       } catch (error) {
         if (!mounted.current || request !== generation.current) return;
+        if (reason === "revision") {
+          setErrorMessage(failureMessage(error));
+          return;
+        }
         setStatus("disconnected");
         setErrorMessage(failureMessage(error));
       }
@@ -115,6 +122,11 @@ export function useProjectController(options: ProjectControllerOptions) {
       memoryDisclosureGeneration.current += 1;
     };
   }, [load]);
+
+  useEffect(() => {
+    if (options.changeRevision === undefined || options.changeRevision <= 0) return;
+    void load("revision");
+  }, [load, options.changeRevision]);
 
   const loadMemory = useCallback(
     async (projectId: ProjectId, reason: "open" | "retry" | "refresh" | "conflict" = "open") => {

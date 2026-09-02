@@ -6,6 +6,7 @@ const ThreadPlanContext = createContext<PlanController | undefined>(undefined);
 
 export interface ThreadPlanProviderProps {
   readonly client?: PlanClient;
+  readonly enabled?: boolean;
   readonly threadId: string;
   readonly children: ReactNode;
 }
@@ -21,7 +22,7 @@ export interface ThreadPlanProviderProps {
 export function ThreadPlanProvider(props: ThreadPlanProviderProps) {
   const controller = usePlanController({
     client: props.client,
-    enabled: props.client !== undefined,
+    enabled: props.client !== undefined && props.enabled !== false,
     threadId: props.threadId,
   });
   return (

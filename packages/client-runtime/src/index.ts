@@ -34,6 +34,8 @@ export * from "./hostClient";
 export * from "./hostControlClient";
 export * from "./hostFederationRegistry";
 export * from "./localHostDisplayName";
+export * from "./machineChangeClient";
+export * from "./requestCoordinator";
 export * from "./hostFederationTransports";
 export * from "./environmentSelection";
 export * from "./listArrangement";

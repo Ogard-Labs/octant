@@ -3,7 +3,6 @@ import { decodeWindowId, type WindowId } from "@octant/contracts/shell";
 export interface ShellLaunch {
   readonly serverUrl: string;
   readonly windowId?: WindowId;
-  readonly developmentWebBootstrap?: true;
 }
 
 export function launchFromLocation(href: string): ShellLaunch | undefined {
@@ -12,8 +11,12 @@ export function launchFromLocation(href: string): ShellLaunch | undefined {
     const launchTokenFragment = url.hash.startsWith("#launchToken=");
     const windowIdParam = url.searchParams.get("windowId");
     const serverUrl = url.searchParams.get("serverUrl");
-    const developmentWebBootstrap = url.searchParams.get("developmentWebBootstrap") === "1";
-    if (serverUrl === null && !launchTokenFragment) return undefined;
+    const directCanonicalHost =
+      serverUrl === null &&
+      !launchTokenFragment &&
+      url.protocol === "http:" &&
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost");
+    if (serverUrl === null && !launchTokenFragment && !directCanonicalHost) return undefined;
     const resolvedServerUrl =
       serverUrl === null ? `${url.origin}${url.pathname === "/" ? "" : url.pathname}` : serverUrl;
     const parsedServerUrl = new URL(resolvedServerUrl);
@@ -24,7 +27,6 @@ export function launchFromLocation(href: string): ShellLaunch | undefined {
     return {
       serverUrl: parsedServerUrl.toString(),
       ...(windowId === undefined ? {} : { windowId }),
-      ...(developmentWebBootstrap ? { developmentWebBootstrap: true as const } : {}),
     };
   } catch {
     return undefined;

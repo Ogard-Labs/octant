@@ -40,6 +40,12 @@ tombstone rather than leaving a hole with no explanation.
 
 ## User-level recovery
 
+- **Local clients**: reopening Electron or the canonical browser URL after
+  sleep or a host restart renews process-local client context automatically.
+  It does not create another store or require a recovery workflow.
+- **Threads**: reconnect resumes from bounded live cursors. If a cursor belongs
+  to an older host process or fell outside replay, the client reloads the
+  authoritative transcript before applying more updates.
 - **Settings**: a failed settings command restores the last authoritative
   value and announces the failure.
 - **Zen**: when state cannot be decoded, **Recover Zen** restores the main

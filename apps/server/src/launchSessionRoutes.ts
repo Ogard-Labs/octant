@@ -20,9 +20,8 @@ export interface LaunchSessionRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
   readonly maxRequestBodySize?: number;
-  readonly developmentWebBootstrap?: true;
   readonly allowedRendererHttpOrigin?: string | null;
-  readonly generateDevelopmentAuthority?: () => {
+  readonly generateLocalAuthority?: () => {
     readonly windowId: WindowId;
     readonly capability: string;
   };
@@ -35,20 +34,20 @@ export function createLaunchSessionRouteHandler(dependencies: LaunchSessionRoute
     const url = new URL(request.url);
     const isAdminRoute = url.pathname === "/api/desktop/launch-sessions";
     const isExchangeRoute = url.pathname === "/api/shell/launch-session";
-    const isDevelopmentRoute = url.pathname === "/api/shell/development-session";
-    if (!isAdminRoute && !isExchangeRoute && !isDevelopmentRoute) return undefined;
+    const isLocalRoute = url.pathname === "/api/shell/local-session";
+    if (!isAdminRoute && !isExchangeRoute && !isLocalRoute) return undefined;
 
     if (isAdminRoute) {
       return handleAdminCreate(request, url, dependencies, maxBody);
     }
-    if (isDevelopmentRoute) {
-      return handleDevelopmentBootstrap(request, url, dependencies, now, maxBody);
+    if (isLocalRoute) {
+      return handleLocalBootstrap(request, url, dependencies, now, maxBody);
     }
     return handleRendererExchange(request, url, dependencies, now, maxBody);
   };
 }
 
-async function handleDevelopmentBootstrap(
+async function handleLocalBootstrap(
   request: Request,
   url: URL,
   dependencies: LaunchSessionRouteDependencies,
@@ -56,23 +55,16 @@ async function handleDevelopmentBootstrap(
   maxBody: number,
 ): Promise<Response> {
   const origin = request.headers.get("origin");
-  if (dependencies.developmentWebBootstrap !== true) {
-    return failureResponse(
-      { category: "unavailable", message: "Octant development web bootstrap is unavailable." },
-      origin,
-      404,
-    );
-  }
   if (!isLoopbackHostname(url.hostname)) {
     return failureResponse(
-      { category: "invalid", message: "Development web bootstrap must use loopback." },
+      { category: "invalid", message: "Local client bootstrap must use loopback." },
       origin,
       400,
     );
   }
   if (
     origin === null ||
-    !isAllowedDevelopmentRendererOrigin(origin, dependencies.allowedRendererHttpOrigin)
+    !isAllowedLocalRendererOrigin(origin, dependencies.allowedRendererHttpOrigin)
   ) {
     return failureResponse(
       { category: "invalid", message: "Renderer origin is not allowed." },
@@ -100,12 +92,12 @@ async function handleDevelopmentBootstrap(
   }
   if (decoded.kind === "invalid") {
     return failureResponse(
-      { category: "invalid", message: "Development web bootstrap request is invalid." },
+      { category: "invalid", message: "Local client bootstrap request is invalid." },
       origin,
       400,
     );
   }
-  const previous = developmentAuthorityCandidate(decoded.value);
+  const previous = localAuthorityCandidate(decoded.value);
   if (previous !== undefined) {
     try {
       const authenticatedWindowId = dependencies.windowAuthorityStore.authenticate(
@@ -114,36 +106,28 @@ async function handleDevelopmentBootstrap(
       );
       if (String(authenticatedWindowId) === String(previous.windowId)) {
         dependencies.windowAuthorityStore.registerOrRefresh({ ...previous, now: now() });
-        return jsonResponse(
-          { ...previous, authentication: "development-bypass" as const },
-          200,
-          origin,
-        );
+        return jsonResponse({ ...previous, authentication: "local-session" as const }, 200, origin);
       }
     } catch {
       // A restarted host owns no matching capability. Fall through and mint a
-      // fresh window while the durable development data remains unchanged.
+      // fresh client context while the Machine-owned data remains unchanged.
     }
   }
-  const generate = dependencies.generateDevelopmentAuthority ?? defaultDevelopmentAuthority;
+  const generate = dependencies.generateLocalAuthority ?? defaultLocalAuthority;
   try {
     const authority = generate();
     dependencies.windowAuthorityStore.register({ ...authority, now: now() });
-    return jsonResponse(
-      { ...authority, authentication: "development-bypass" as const },
-      200,
-      origin,
-    );
+    return jsonResponse({ ...authority, authentication: "local-session" as const }, 200, origin);
   } catch {
     return failureResponse(
-      { category: "unavailable", message: "Development web bootstrap failed." },
+      { category: "unavailable", message: "Local client bootstrap failed." },
       origin,
       503,
     );
   }
 }
 
-function developmentAuthorityCandidate(
+function localAuthorityCandidate(
   value: unknown,
 ): { readonly windowId: WindowId; readonly capability: string } | undefined {
   if (typeof value !== "object" || value === null) return undefined;
@@ -158,10 +142,7 @@ function developmentAuthorityCandidate(
   }
 }
 
-function isAllowedDevelopmentRendererOrigin(
-  origin: string,
-  allowedHttpOrigin?: string | null,
-): boolean {
+function isAllowedLocalRendererOrigin(origin: string, allowedHttpOrigin?: string | null): boolean {
   if (!isAllowedRendererOrigin(origin, allowedHttpOrigin)) return false;
   try {
     return new URL(origin).protocol === "http:";
@@ -170,7 +151,7 @@ function isAllowedDevelopmentRendererOrigin(
   }
 }
 
-function defaultDevelopmentAuthority(): {
+function defaultLocalAuthority(): {
   readonly windowId: WindowId;
   readonly capability: string;
 } {

@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export interface ThreadCheckpointsOptions {
+  readonly enabled?: boolean;
   readonly threadId: string;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -52,6 +53,7 @@ const refusalText: Record<ThreadCheckpointRefusalReason, string> = {
  */
 export function useThreadCheckpoints(options: ThreadCheckpointsOptions): ThreadCheckpoints {
   const { threadId, serverUrl, windowCapability } = options;
+  const enabled = options.enabled !== false;
   const injected = options.client;
   const client = useMemo(() => {
     if (injected !== undefined) return injected;
@@ -70,14 +72,14 @@ export function useThreadCheckpoints(options: ThreadCheckpointsOptions): ThreadC
   activeThreadId.current = threadId;
 
   const refresh = useCallback(async () => {
-    if (client === undefined || threadId.length === 0) return;
+    if (!enabled || client === undefined || threadId.length === 0) return;
     try {
       const listed = await client.list(threadId);
       if (activeThreadId.current === threadId) setCheckpoints(listed);
     } catch {
       if (activeThreadId.current === threadId) setCheckpoints([]);
     }
-  }, [client, threadId]);
+  }, [client, enabled, threadId]);
 
   useEffect(() => {
     setCheckpoints([]);
@@ -122,7 +124,7 @@ export function useThreadCheckpoints(options: ThreadCheckpointsOptions): ThreadC
 
   return {
     byAnchor,
-    available: client !== undefined,
+    available: enabled && client !== undefined,
     busy,
     message,
     mark: useCallback(

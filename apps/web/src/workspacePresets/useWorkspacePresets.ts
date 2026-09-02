@@ -11,6 +11,7 @@ import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import { useCallback, useEffect, useState } from "react";
 
 export interface WorkspacePresetsOptions {
+  readonly enabled?: boolean;
   readonly threadId: CodeThreadId;
   readonly checkoutId?: CodeCheckoutId;
   readonly serverUrl?: string;
@@ -42,6 +43,7 @@ export interface WorkspacePresets {
  */
 export function useWorkspacePresets(options: WorkspacePresetsOptions): WorkspacePresets {
   const { threadId, checkoutId, serverUrl, windowCapability } = options;
+  const enabled = options.enabled !== false;
   const load = options.load ?? loadWorkspacePresetCatalog;
   const send = options.apply ?? applyWorkspacePreset;
   const [presets, setPresets] = useState<ReadonlyArray<WorkspacePreset>>([]);
@@ -50,7 +52,7 @@ export function useWorkspacePresets(options: WorkspacePresetsOptions): Workspace
   const [skills, setSkills] = useState<ReadonlyArray<WorkspacePresetSkillReport>>([]);
 
   useEffect(() => {
-    if (serverUrl === undefined || windowCapability === undefined) return;
+    if (!enabled || serverUrl === undefined || windowCapability === undefined) return;
     const controller = new AbortController();
     void (async () => {
       try {
@@ -69,7 +71,7 @@ export function useWorkspacePresets(options: WorkspacePresetsOptions): Workspace
       }
     })();
     return () => controller.abort();
-  }, [load, serverUrl, windowCapability]);
+  }, [enabled, load, serverUrl, windowCapability]);
 
   const apply = useCallback(
     async (preset: WorkspacePreset): Promise<boolean> => {
@@ -106,6 +108,7 @@ export function useWorkspacePresets(options: WorkspacePresetsOptions): Workspace
   return {
     presets,
     available:
+      enabled &&
       presets.length > 0 &&
       serverUrl !== undefined &&
       windowCapability !== undefined &&

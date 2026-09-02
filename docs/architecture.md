@@ -62,8 +62,8 @@ flowchart LR
     mobile["apps/mobile<br/>Expo iOS/Android"]
   end
 
-  desktop -- "spawns, watches, restarts" --> server
-  desktop -- "loads with window token" --> renderer
+  desktop -- "attaches or starts" --> server
+  desktop -- "loads with native client context" --> renderer
   renderer -- "HTTP + streaming<br/>127.0.0.1" --> server
   server -- "loopback broker<br/>indirect refs only" --> desktop
   desktop --- keychain
@@ -74,12 +74,12 @@ flowchart LR
 ```
 
 **Desktop (`apps/desktop`).** The Electron main process owns native windows,
-menus, the macOS Keychain, project-root and plugin-folder pickers, the in-app
-updater, and the lifecycle of the server child process. It reserves a loopback
-port, spawns the server (`bun run start` from source, or the packaged
-`dist/main.mjs` under `ELECTRON_RUN_AS_NODE`), passes `OCTANT_*` environment
-(port, instance id, broker URLs and tokens, desktop bridge secret), and probes
-storage readiness before showing a window. It also runs two loopback-only
+menus, the macOS Keychain, project-root and plugin-folder pickers, and the
+in-app updater. It attaches to the canonical host at
+`http://127.0.0.1:13773`, or starts that independently runnable host when it is
+absent, then probes storage readiness before showing a window. It passes only
+native broker coordinates and the desktop bridge secret that native-only
+operations require. It also runs two loopback-only
 brokers the server talks back to: the credential broker (Keychain access by
 opaque reference) and the browser runtime broker.
 Every app window confines top-level navigation, redirects, and opened windows to
@@ -88,13 +88,14 @@ IPC also requires that trusted renderer URL, and the packaged renderer ships a
 strict Content Security Policy; external pages are opened through explicit
 server- or host-authorized flows instead of replacing the app window.
 
-**Server (`apps/server`).** A Bun HTTP server bound to `127.0.0.1` on the port
-the desktop reserved. It registers route modules per feature (`chatRoutes`,
+**Server (`apps/server`).** A Bun HTTP server bound to the stable canonical
+loopback endpoint `127.0.0.1:13773`. It registers route modules per feature (`chatRoutes`,
 `workThreadRoutes`, `codeRoutes`, `projectRoutes`, `extensionRoutes`,
 `remote/*`, …), resolves a **client principal** for every request — a
-`local-window` principal carrying a window authority token, or a
-`remote-device` principal carrying a paired device key — and runs all mutations
-through services that append to the journal. Providers, tools, Git, terminals,
+process-local client context on the loopback listener (internally still named
+`local-window` while that contract is migrated), or a `remote-device` principal
+carrying authenticated remote identity — and runs all mutations through
+services that append to the journal. Providers, tools, Git, terminals,
 subagents, extensions, and recovery live here. A headless host runs the same
 server through `@octant/cli` (`octant server run`, `octant web`).
 
@@ -108,19 +109,21 @@ built assets.
 are host-owned; the phone stores only device keys, a host registry, and session
 material. It uses the same contracts and client runtime as the browser.
 
-**Window authority.** Each desktop window receives a 256-bit opaque token with a
-bounded lifetime. Routes bind reads and writes to the Projects that window is
-bound to, so two windows on the same host cannot see across each other's
-Project scope by accident. The packaged renderer sends that capability on its
-shell requests. `POST /api/shell/bootstrap` registers the capability-bound
-window, while `GET` only reads an existing registration and never accepts a
-caller-selected `windowId`. An opaque `file://` origin or a missing Origin is
-accepted only with the renderer identity bound at desktop window registration
-and that exact window capability; the scheme alone is never authority. The
-desktop injects that renderer proof only for the exact packaged frame (or the
-configured development origin), not from renderer-controlled state. The
-loopback transport validates the actual Host header before dispatch, and
-closing or revoking the window removes its shell registration as well.
+**Local client context.** Opening the canonical host URL directly creates a
+process-local client context through `/api/shell/local-session`; no launcher
+token, persisted clock posture, or alternate profile is required. Electron,
+ordinary browsers, and Vite therefore read the same Machine-owned Projects,
+threads, settings, and journal. The context id scopes window-local presentation
+and guards against accidental cross-window commands, but it is not a separate
+Machine or durable authentication epoch. The packaged renderer additionally
+proves its native renderer identity for desktop-only integration. When the host
+instance changes, Electron re-registers every live Project window, replaces the
+main-process authority and renderer identity, and publishes the new capability
+so the renderer rebuilds its clients before snapshot recovery. The loopback
+transport still validates the actual Host header, rejects non-loopback origins,
+and removes process-local registration when its owning client closes. Loopback
+renderer ports share the local-user trust class; the listener never reflects a
+non-loopback web origin into local authority.
 
 ## Modes: Chat, Work, and Code
 
@@ -405,6 +408,18 @@ flowchart LR
   only a revoked, expired, lost, or host-changed credential forces a new pair.
   Revoke-self drops that host's sessions and streams before the client clears
   the local registry entry.
+- **Fast thread reads.** A thread paints from an authoritative snapshot before
+  auxiliary Files, Git, Browser, or Computer Use observations begin. Code
+  conversation evidence is read in bounded batches and page results paint as
+  they arrive; live Code operation frames carry bounded display text beside
+  their durable evidence references. Work uses a bounded delta feed over its
+  durable transcript. One post-commit Machine change feed invalidates mode
+  navigation and Project/extension projections instead of independent polling
+  timers. Every process-local feed sends `snapshot-required` after gaps,
+  overflow, or host restart. The client transport bounds and prioritizes reads,
+  coalesces identical work, cancels obsolete thread switches, renews local
+  client context without replaying mutations, and windows long transcripts.
+  See [0075](decisions/0075-thread-reads-are-snapshot-first-and-change-driven.md).
 - **Data lifecycle.** Reset, remove-all, delete-remote-host, and thread
   retention/purge operations are explicit, reported per scope, and never run
   implicitly. Removing a paired host or Project deletes what it owns and
@@ -692,11 +707,10 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   run the script manually and source `session.env` the same way. Provider
   CLIs are ordinary host binaries: install one to a user-writable path such
   as `~/.local/bin` and point the provider instance at that absolute path.
-- `octant web --dev` owns a persistent development host profile. Its storage,
-  host discovery receipts, and bridge authority resolve from one development
-  data directory across launches; the renderer still requests a fresh window
-  capability for each browser session. This keeps browser QA history stable
-  without sharing production storage or persisting a window capability.
+- `octant web --dev` changes only the renderer: it starts Vite and attaches it
+  to the canonical Machine host. Browser QA and Electron share the same store,
+  Projects, threads, and live journal. Destructive tests use an explicit
+  `OCTANT_DATA_DIR`; development mode never creates an implicit profile.
 - `bun run package:desktop` packages the peer Machine for the build host:
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with

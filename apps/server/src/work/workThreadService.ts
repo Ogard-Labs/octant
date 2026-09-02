@@ -198,6 +198,26 @@ export class WorkThreadService {
   }
 
   /**
+   * Reads one Machine-owned Work thread without rescanning every Project root.
+   * Root availability is revalidated at command admission; opening durable
+   * transcript state needs only the active Project and thread projections.
+   */
+  async read(
+    _authenticatedWindowId: WindowId,
+    threadId: WorkThreadId,
+  ): Promise<WorkThread | undefined> {
+    this.#assertReady();
+    const thread = this.#projection.read(threadId);
+    if (thread === undefined) return undefined;
+    const project = this.#persistence.readProject(thread.projectId);
+    return thread.lifecycle === "active" &&
+      project?.type === "work" &&
+      project.lifecycle === "active"
+      ? thread
+      : undefined;
+  }
+
+  /**
    * Reads the Work sidebar from rebuildable thread and Project projections.
    * Root validation belongs to bootstrap and command admission; performing it
    * here would turn an ordinary sidebar tick into filesystem observation.

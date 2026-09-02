@@ -12,8 +12,10 @@ describe("launchFromLocation", () => {
     expect(launch).toEqual({ serverUrl: "http://127.0.0.1:13773/", windowId: undefined });
   });
 
-  it("returns undefined when neither serverUrl nor a launch token fragment is present", () => {
-    expect(launchFromLocation("http://127.0.0.1:13773/")).toBeUndefined();
+  it("opens the canonical Machine directly from its stable loopback URL", () => {
+    expect(launchFromLocation("http://127.0.0.1:13773/")).toEqual({
+      serverUrl: "http://127.0.0.1:13773/",
+    });
   });
 
   it("prefers an explicit serverUrl query param over the origin", () => {
@@ -23,11 +25,10 @@ describe("launchFromLocation", () => {
     expect(launch?.windowId).toBe(windowId);
   });
 
-  it("recognizes an explicit development web bootstrap launch without a token", () => {
-    const href = `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent("http://127.0.0.1:13773")}&developmentWebBootstrap=1`;
+  it("points a Vite renderer at the canonical Machine without changing its identity", () => {
+    const href = `http://127.0.0.1:5173/?serverUrl=${encodeURIComponent("http://127.0.0.1:13773")}`;
     expect(launchFromLocation(href)).toEqual({
       serverUrl: "http://127.0.0.1:13773/",
-      developmentWebBootstrap: true,
     });
   });
 });

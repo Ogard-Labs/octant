@@ -56,7 +56,7 @@ export class ManagedRootGrantStore {
 
   /**
    * `clampNow` clamps every caller-supplied wall-clock reading
-   * against a shared, server-owned monotonic bound (see `LocalAuthorityClock`)
+   * against a shared, server-owned process-monotonic bound (see `ProcessAuthorityClock`)
    * before it is used for expiry math, so a host wall-clock rollback cannot
    * revive an expired managed-root grant. Defaults to the identity function.
    */

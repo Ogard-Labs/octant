@@ -92,6 +92,37 @@ describe("attachOrCreateHost", () => {
     );
   });
 
+  it("attaches to a healthy legacy receipt before starting the canonical host", async () => {
+    const legacyUrl = new URL("http://127.0.0.1:4000/");
+    const fetch = mockFetch(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === "string" ? input : input.toString());
+      if (url.origin === legacyUrl.origin) {
+        return Response.json({
+          product: "Octant",
+          status: "ok",
+          storage: "ready",
+          instanceId: "legacy-host",
+        });
+      }
+      throw new Error("ECONNREFUSED");
+    });
+    const spawn = vi.fn();
+
+    const result = await attachOrCreateHost(
+      deps({
+        fetch,
+        spawn,
+        resolveAttachedHost: vi.fn(async () => ({
+          url: legacyUrl,
+          instanceId: "legacy-host",
+        })),
+      }),
+    );
+
+    expect(result).toMatchObject({ kind: "attached", url: legacyUrl });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("does not automatically spawn when the persisted service policy is disabled", async () => {
     const fetch = mockFetch(async () => {
       throw new Error("ECONNREFUSED");
@@ -134,13 +165,17 @@ describe("attachOrCreateHost", () => {
       };
     });
 
-    const result = await attachOrCreateHost(deps({ resolveAttachedHost, waitForHost }));
+    const child = { kill: vi.fn(), on: vi.fn() };
+    const result = await attachOrCreateHost(
+      deps({ resolveAttachedHost, waitForHost, spawn: vi.fn(() => child) }),
+    );
 
     expect(result).toMatchObject({
-      kind: "started",
+      kind: "attached",
       url: winnerUrl,
       instanceId: "foreground-winner",
     });
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
     expect(waitForHost).toHaveBeenCalledWith(
       expect.objectContaining({ resolveAttachedHost: expect.any(Function) }),
     );
@@ -174,7 +209,7 @@ describe("attachOrCreateHost", () => {
     expect(result).toMatchObject({ kind: "start-failed" });
   });
 
-  it("passes the development web bootstrap only to a freshly spawned dev host", async () => {
+  it("starts a host for the development renderer without selecting another host mode", async () => {
     const fetch = mockFetch(async () => {
       throw new Error("ECONNREFUSED");
     });
@@ -183,12 +218,10 @@ describe("attachOrCreateHost", () => {
       deps({
         fetch,
         spawn,
-        developmentWebBootstrap: true,
         environment: { OCTANT_CODE_FILE_HELPER_PATH: "/repo/dist/octant-code-file-helper" },
         waitForHost: vi.fn(async () => ({
           status: "ready" as const,
           url: new URL("http://127.0.0.1:13773"),
-          developmentWebBootstrap: true,
         })),
       }),
     );
@@ -197,10 +230,11 @@ describe("attachOrCreateHost", () => {
       expect.objectContaining({
         env: expect.objectContaining({
           OCTANT_CODE_FILE_HELPER_PATH: "/repo/dist/octant-code-file-helper",
-          OCTANT_DEV_WEB_BOOTSTRAP: "1",
         }),
       }),
     );
+    const spawnEnvironment = vi.mocked(spawn).mock.calls[0]?.[0].env;
+    expect(spawnEnvironment).not.toHaveProperty("OCTANT_DEV_WEB_BOOTSTRAP");
   });
 
   it("reports a disabled host when storage is not ready", async () => {

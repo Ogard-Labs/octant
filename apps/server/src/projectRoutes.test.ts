@@ -39,7 +39,7 @@ describe("Project routes", () => {
 
     expect(response?.status).toBe(200);
     expect(await response?.json()).toEqual(observation);
-    expect(observe).toHaveBeenCalledWith(windowId, projectId, expect.any(AbortSignal));
+    expect(observe).toHaveBeenCalledWith(windowId, projectId, expect.any(AbortSignal), false);
   });
 
   it("rejects malformed environment IDs, query strings, and unsupported methods", async () => {
@@ -89,6 +89,28 @@ describe("Project routes", () => {
       projectId,
       threadId,
       expect.any(AbortSignal),
+      false,
+    );
+  });
+
+  it("routes an explicit environment refresh past the observation cache", async () => {
+    const observeThread = vi.fn().mockResolvedValue({ status: "unavailable" });
+    const route = routeFixture({}, { observeThread });
+
+    const response = await route(
+      new Request(
+        `http://127.0.0.1/api/projects/${projectId}/environment?threadId=${threadId}&fresh=1`,
+        { headers: { "x-octant-window-capability": capability } },
+      ),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(observeThread).toHaveBeenCalledWith(
+      windowId,
+      projectId,
+      threadId,
+      expect.any(AbortSignal),
+      true,
     );
   });
 

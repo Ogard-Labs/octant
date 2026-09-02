@@ -67,7 +67,7 @@
     "./remote-push-notifications": "./src/remotePushNotifications.ts",
     "./remote-request-proof": "./src/remoteRequestProof.ts",
     "./launch-session": "./src/launchSession.ts",
-    "./local-authority-clock": "./src/localAuthorityClock.ts",
+    "./machine-changes": "./src/machineChanges.ts",
     "./modes": "./src/modes.ts",
     "./multi-model-pool": "./src/multiModelPool.ts",
     "./navigator-assistant": "./src/navigatorAssistant.ts",

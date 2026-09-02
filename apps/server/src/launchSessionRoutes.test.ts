@@ -12,7 +12,6 @@ const now = () => 1_000;
 
 function makeHandler(options?: {
   bridgeSecret?: string | undefined;
-  developmentWebBootstrap?: true | undefined;
   allowedRendererHttpOrigin?: string | null;
 }) {
   const store = new LaunchSessionStore({ now });
@@ -29,14 +28,11 @@ function makeHandler(options?: {
       launchSessionStore: store,
       windowAuthorityStore: authorityStore,
       now,
-      ...(options?.developmentWebBootstrap === undefined
-        ? {}
-        : { developmentWebBootstrap: options.developmentWebBootstrap }),
       ...(options !== undefined &&
       Object.prototype.hasOwnProperty.call(options, "allowedRendererHttpOrigin")
         ? { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }
         : {}),
-      generateDevelopmentAuthority: () => ({ windowId, capability }),
+      generateLocalAuthority: () => ({ windowId, capability }),
     }),
   };
 }
@@ -282,7 +278,7 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
     expect(authorityStore.authenticate(capability, now())).toBe(windowId);
   });
 
-  it("rejects a development origin when the renderer is packaged", async () => {
+  it("keeps loopback browser clients available when Electron is packaged", async () => {
     const { handler, store } = makeHandler({ allowedRendererHttpOrigin: null });
     const receipt = store.create({ windowId, capability, ttlMs: 60_000 });
     const response = await handler(
@@ -292,8 +288,8 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
         { origin: "http://localhost:5173" },
       ),
     );
-    expect(response?.status).toBe(400);
-    expect(response?.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
   });
 
   it("handles an OPTIONS preflight for the renderer exchange route", async () => {
@@ -364,29 +360,40 @@ describe("createLaunchSessionRouteHandler — renderer exchange", () => {
   });
 });
 
-describe("createLaunchSessionRouteHandler — development bootstrap", () => {
-  it("creates and registers a fresh authority when explicitly enabled on loopback", async () => {
-    const { handler, authorityStore } = makeHandler({ developmentWebBootstrap: true });
+describe("createLaunchSessionRouteHandler — local client bootstrap", () => {
+  it("creates and registers local client context directly on the canonical host", async () => {
+    const { handler, authorityStore } = makeHandler();
     const response = await handler(
-      post("/api/shell/development-session", {}, { origin: "http://127.0.0.1:5173" }),
+      post("/api/shell/local-session", {}, { origin: "http://127.0.0.1:13773" }),
     );
 
     expect(response?.status).toBe(200);
     expect(await response?.json()).toEqual({
       windowId,
       capability,
-      authentication: "development-bypass",
+      authentication: "local-session",
     });
     expect(authorityStore.authenticate(capability, now())).toBe(windowId);
   });
 
-  it("reuses a development window authority that belongs to the current host", async () => {
-    const { handler, authorityStore } = makeHandler({ developmentWebBootstrap: true });
-    await handler(post("/api/shell/development-session", {}, { origin: "http://127.0.0.1:5173" }));
+  it("keeps the canonical host available while a Vite renderer is configured", async () => {
+    const { handler } = makeHandler({ allowedRendererHttpOrigin: "http://localhost:5173" });
+    const response = await handler(
+      post("/api/shell/local-session", {}, { origin: "http://127.0.0.1:13773" }),
+    );
+
+    expect(response?.status).toBe(200);
+  });
+
+  it("reuses a Vite client context only from the explicitly configured renderer origin", async () => {
+    const { handler, authorityStore } = makeHandler({
+      allowedRendererHttpOrigin: "http://127.0.0.1:5173",
+    });
+    await handler(post("/api/shell/local-session", {}, { origin: "http://127.0.0.1:5173" }));
 
     const response = await handler(
       post(
-        "/api/shell/development-session",
+        "/api/shell/local-session",
         { windowId, capability },
         { origin: "http://127.0.0.1:5173" },
       ),
@@ -396,34 +403,36 @@ describe("createLaunchSessionRouteHandler — development bootstrap", () => {
     expect(await response?.json()).toEqual({
       windowId,
       capability,
-      authentication: "development-bypass",
+      authentication: "local-session",
     });
     expect(authorityStore.size()).toBe(1);
   });
 
-  it("is unavailable unless the host was explicitly started for development web", async () => {
+  it("admits another loopback renderer as the same local-user trust class", async () => {
     const { handler } = makeHandler();
+
     const response = await handler(
-      post("/api/shell/development-session", {}, { origin: "http://127.0.0.1:5173" }),
+      post("/api/shell/local-session", {}, { origin: "http://127.0.0.1:9999" }),
     );
 
-    expect(response?.status).toBe(404);
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("access-control-allow-origin")).toBe("http://127.0.0.1:9999");
   });
 
   it("rejects a non-loopback request host and a disallowed renderer origin", async () => {
-    const { handler } = makeHandler({ developmentWebBootstrap: true });
+    const { handler } = makeHandler();
     const remote = await handler(
-      new Request("http://10.0.0.1:13773/api/shell/development-session", {
+      new Request("http://10.0.0.1:13773/api/shell/local-session", {
         method: "POST",
         headers: { "content-type": "application/json", origin: "http://127.0.0.1:5173" },
         body: "{}",
       }),
     );
     const foreignOrigin = await handler(
-      post("/api/shell/development-session", {}, { origin: "https://example.com" }),
+      post("/api/shell/local-session", {}, { origin: "https://example.com" }),
     );
     const electronOrigin = await handler(
-      post("/api/shell/development-session", {}, { origin: "file://" }),
+      post("/api/shell/local-session", {}, { origin: "file://" }),
     );
 
     expect(remote?.status).toBe(400);

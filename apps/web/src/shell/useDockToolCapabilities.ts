@@ -14,6 +14,7 @@ import {
 } from "./dockToolAvailability";
 
 export interface UseDockToolCapabilitiesOptions {
+  readonly enabled?: boolean;
   readonly agentRunClient?: AgentRunClient;
   readonly addAgentInvoked: boolean;
   readonly canvasClient?: CanvasClient;
@@ -39,11 +40,16 @@ export function useDockToolCapabilities(
   const [delivery, setDelivery] = useState<ThreadFlag>(UNKNOWN_FLAG);
   const [canvas, setCanvas] = useState<ThreadFlag>(UNKNOWN_FLAG);
   const [childRuns, setChildRuns] = useState<ThreadFlag>(UNKNOWN_FLAG);
+  const enabled = options.enabled !== false;
   const { agentRunClient, canvasClient, mode, planClient, projectId, shipClient, threadId } =
     options;
 
   useEffect(() => {
     let alive = true;
+    if (!enabled) {
+      setPlan({ ...(threadId === undefined ? {} : { threadId }), value: "unknown" });
+      return;
+    }
     if (threadId === undefined || planClient === undefined) {
       setPlan({ ...(threadId === undefined ? {} : { threadId }), value: false });
       return () => {
@@ -62,10 +68,14 @@ export function useDockToolCapabilities(
     return () => {
       alive = false;
     };
-  }, [planClient, threadId]);
+  }, [enabled, planClient, threadId]);
 
   useEffect(() => {
     let alive = true;
+    if (!enabled) {
+      setDelivery({ ...(threadId === undefined ? {} : { threadId }), value: "unknown" });
+      return;
+    }
     if (threadId === undefined || shipClient === undefined) {
       setDelivery({ ...(threadId === undefined ? {} : { threadId }), value: false });
       return () => {
@@ -84,10 +94,14 @@ export function useDockToolCapabilities(
     return () => {
       alive = false;
     };
-  }, [shipClient, threadId]);
+  }, [enabled, shipClient, threadId]);
 
   useEffect(() => {
     let alive = true;
+    if (!enabled) {
+      setCanvas({ ...(threadId === undefined ? {} : { threadId }), value: "unknown" });
+      return;
+    }
     if (threadId === undefined || canvasClient === undefined) {
       setCanvas({ ...(threadId === undefined ? {} : { threadId }), value: false });
       return () => {
@@ -112,10 +126,14 @@ export function useDockToolCapabilities(
     return () => {
       alive = false;
     };
-  }, [canvasClient, mode, projectId, threadId]);
+  }, [canvasClient, enabled, mode, projectId, threadId]);
 
   useEffect(() => {
     let alive = true;
+    if (!enabled) {
+      setChildRuns({ ...(threadId === undefined ? {} : { threadId }), value: "unknown" });
+      return;
+    }
     if (threadId === undefined || agentRunClient === undefined) {
       setChildRuns({ ...(threadId === undefined ? {} : { threadId }), value: false });
       return () => {
@@ -143,7 +161,7 @@ export function useDockToolCapabilities(
     return () => {
       alive = false;
     };
-  }, [agentRunClient, threadId]);
+  }, [agentRunClient, enabled, threadId]);
 
   if (threadId === undefined) {
     return {

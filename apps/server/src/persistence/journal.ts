@@ -106,6 +106,7 @@ export class Journal {
   readonly #projections: ProjectionRegistry;
   readonly #clock: () => string;
   readonly #onCommitted: ((append: CommittedAppend) => void) | undefined;
+  readonly #committedListeners = new Set<(append: CommittedAppend) => void>();
   readonly #hasActorJson: boolean;
   readonly #selectHead: SqliteStatement;
   readonly #insertEvent: SqliteStatement;
@@ -426,7 +427,19 @@ export class Journal {
       // Publication is best-effort after commit. The durable journal remains
       // authoritative, so a subscriber failure cannot change append success.
     }
+    for (const listener of this.#committedListeners) {
+      try {
+        listener(committed);
+      } catch {
+        // One runtime observer cannot change the committed journal or starve peers.
+      }
+    }
     return committed;
+  }
+
+  subscribeCommitted(listener: (append: CommittedAppend) => void): () => void {
+    this.#committedListeners.add(listener);
+    return () => this.#committedListeners.delete(listener);
   }
 
   replay(cursor: ReplayCursor): ReadonlyArray<EventEnvelope> {

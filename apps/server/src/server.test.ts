@@ -904,6 +904,10 @@ describe("startOctantServer", () => {
         hasMore: false,
       })),
       readEvidence: vi.fn(),
+      readEvidenceBatch: vi.fn(async (_windowId, input) => ({
+        threadId: input.threadId,
+        items: [],
+      })),
       close: vi.fn(async () => undefined),
     };
 
@@ -972,6 +976,26 @@ describe("startOctantServer", () => {
           );
           expect(replay.status).toBe(200);
           expect(runtime.subscribe).toHaveBeenCalledWith(windowId, threadId, operationId, 0, 100);
+
+          const evidenceBatch = yield* Effect.promise(() =>
+            Promise.resolve(
+              routeHandler?.(
+                new Request("http://127.0.0.1:13773/api/code/evidence/batch", {
+                  method: "POST",
+                  headers: {
+                    "content-type": "application/json",
+                    "x-octant-window-capability": capability,
+                  },
+                  body: JSON.stringify({ threadId, items: [] }),
+                }),
+              ),
+            ).then(assertResponse),
+          );
+          expect(evidenceBatch.status).toBe(200);
+          expect(runtime.readEvidenceBatch).toHaveBeenCalledWith(windowId, {
+            threadId,
+            items: [],
+          });
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),
     );

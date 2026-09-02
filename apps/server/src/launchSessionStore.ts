@@ -32,7 +32,7 @@ export interface LaunchSessionStoreOptions {
   /**
    * Clamp every wall-clock reading (this store's own internal
    * `now()` and any caller-supplied `exchange`/`now` value) against a shared,
-   * server-owned monotonic bound (see `LocalAuthorityClock`) before it is used
+   * server-owned process-monotonic bound (see `ProcessAuthorityClock`) before it is used
    * for expiry math, so a host wall-clock rollback cannot revive an expired
    * launch session. Defaults to the identity function.
    */

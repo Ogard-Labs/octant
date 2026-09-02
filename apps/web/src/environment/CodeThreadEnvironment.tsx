@@ -31,6 +31,8 @@ type CodeThreadWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 export interface CodeThreadEnvironmentProps {
   readonly tab: CodeThreadWorkspaceTab;
   readonly active?: boolean;
+  /** Defers filesystem and Git observation until the primary transcript is ready. */
+  readonly observe?: boolean;
   readonly project?: ProjectSummary | undefined;
   readonly projectClient?: ProjectClient | undefined;
   readonly serverUrl?: string;
@@ -73,7 +75,7 @@ export interface CodeThreadEnvironmentProps {
 export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   const controller = useCodeEnvironmentController({
     ...(props.projectClient === undefined ? {} : { client: props.projectClient }),
-    enabled: props.project !== undefined,
+    enabled: props.project !== undefined && props.observe !== false,
     project: props.project,
     threadId: props.tab.threadId,
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),

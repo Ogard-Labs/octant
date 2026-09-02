@@ -300,6 +300,35 @@ describe("useProjectController", () => {
     expect(result.current.availabilityByProject.get(codeId)?.status).toBe("unavailable");
   });
 
+  it("keeps the current Project list visible while a Machine revision reloads it", async () => {
+    const initial = bootstrap();
+    const server = client(initial);
+    const revision = deferred<ProjectBootstrap>();
+    vi.mocked(server.api.bootstrap)
+      .mockResolvedValueOnce(initial)
+      .mockImplementationOnce(() => revision.promise);
+    const { result, rerender } = renderHook(
+      ({ changeRevision }) =>
+        useProjectController({
+          activeMode: "code",
+          activeProjectId: codeId,
+          changeRevision,
+          client: server.api,
+        }),
+      { initialProps: { changeRevision: 0 } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    rerender({ changeRevision: 1 });
+    await waitFor(() => expect(server.api.bootstrap).toHaveBeenCalledTimes(2));
+    expect(result.current.status).toBe("ready");
+    expect(result.current.activeProject?.id).toBe(codeId);
+
+    revision.resolve(initial);
+    await act(async () => revision.promise);
+    expect(result.current.status).toBe("ready");
+  });
+
   it("uses server-backed search and clears stale results", async () => {
     const server = client();
     const { result } = renderHook(() =>

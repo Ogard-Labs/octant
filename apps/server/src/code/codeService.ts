@@ -334,6 +334,8 @@ export interface CodePersistencePort {
 }
 
 export interface CodeWindowAccessPort {
+  /** Machine-owned navigation metadata; never grants checkout or operation authority. */
+  readonly canBrowseProject: (projectId: ProjectId) => boolean;
   readonly canAccessProject: (
     authenticatedWindowId: WindowId,
     projectId: ProjectId,
@@ -524,6 +526,7 @@ export interface CodeServiceOptions {
     readonly projectId: ProjectId;
     readonly threadId: CodeThreadId;
   }) => Promise<void>;
+  readonly waitForThreadChange?: (signal: AbortSignal) => Promise<void>;
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
 }
@@ -634,6 +637,7 @@ export class CodeService {
   readonly #probeProvider: CodeServiceOptions["probeProvider"];
   readonly #workingDirectories: CodeServiceOptions["workingDirectories"];
   readonly #onWorkingDirectoryChanged: CodeServiceOptions["onWorkingDirectoryChanged"];
+  readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
   readonly #issueContext?: GithubIssueContextPort;
   readonly #linearIssueContext?: LinearIssueContextPort;
   /**
@@ -674,6 +678,7 @@ export class CodeService {
     this.#probeProvider = options.probeProvider;
     this.#workingDirectories = options.workingDirectories;
     this.#onWorkingDirectoryChanged = options.onWorkingDirectoryChanged;
+    this.#waitForThreadChange = options.waitForThreadChange;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
@@ -824,7 +829,7 @@ export class CodeService {
   async #visibleThreads(authenticatedWindowId: WindowId): Promise<CodeThread[]> {
     const threads: CodeThread[] = [];
     for (const thread of this.#persistence.readCodeThreads()) {
-      if (await this.#access.canAccessProject(authenticatedWindowId, thread.projectId)) {
+      if (this.#access.canBrowseProject(thread.projectId)) {
         threads.push(this.#sessionAuthority.effectiveThread(authenticatedWindowId, thread));
       }
     }
@@ -1630,7 +1635,7 @@ export class CodeService {
     if (afterSequence > view.lastSequence || afterSequence > view.thread.version) {
       throw this.#failure("stale", "Code replay requires a snapshot.");
     }
-    if (afterSequence === view.thread.version) return;
+    if (afterSequence === view.thread.version && this.#waitForThreadChange === undefined) return;
     let threadCursor = afterSequence;
     while (!signal?.aborted) {
       const events = this.#persistence.journal.replayAggregate({
@@ -1639,7 +1644,11 @@ export class CodeService {
         afterVersion: threadCursor,
         limit: 100,
       });
-      if (events.length === 0) break;
+      if (events.length === 0) {
+        if (signal === undefined || this.#waitForThreadChange === undefined) break;
+        await this.#waitForThreadChange(signal);
+        continue;
+      }
       for (const event of events) {
         if (event.aggregateVersion !== threadCursor + 1) {
           throw this.#failure("stale", "Code replay requires a snapshot.");
@@ -1650,7 +1659,10 @@ export class CodeService {
           yield frame;
         }
       }
-      if (events.length < 100) break;
+      if (events.length < 100) {
+        if (signal === undefined || this.#waitForThreadChange === undefined) break;
+        await this.#waitForThreadChange(signal);
+      }
     }
   }
 

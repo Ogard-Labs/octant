@@ -382,7 +382,7 @@ describe("shell routes", () => {
     expect(await rejected?.json()).toMatchObject({ category: "unsupported" });
   });
 
-  it("rejects a non-Vite loopback origin when development origin is pinned", async () => {
+  it("keeps other loopback clients available when a Vite origin is configured", async () => {
     const authority = new WindowAuthorityStore();
     authority.register({ windowId, capability, rendererIdentity, now: 0 });
     const handle = createShellRouteHandler(serviceStub(), {
@@ -390,18 +390,17 @@ describe("shell routes", () => {
       now: () => 0,
       allowedRendererHttpOrigin: "http://localhost:5173",
     });
-    const rejected = await handle(
+    const response = await handle(
       new Request("http://127.0.0.1:13773/api/shell/bootstrap", {
         method: "POST",
         headers: { origin: "http://127.0.0.1:5173", "x-octant-window-capability": capability },
       }),
     );
-    expect(rejected?.status).toBe(400);
-    expect(await rejected?.json()).toMatchObject({ category: "unsupported" });
-    expect(rejected?.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("access-control-allow-origin")).toBe("http://127.0.0.1:5173");
   });
 
-  it("rejects HTTP origins when the renderer is packaged", async () => {
+  it("keeps loopback browser clients available when Electron is packaged", async () => {
     const service = serviceStub();
     const authority = new WindowAuthorityStore();
     authority.register({ windowId, capability, rendererIdentity, now: 0 });
@@ -410,14 +409,13 @@ describe("shell routes", () => {
       now: () => 0,
       allowedRendererHttpOrigin: null,
     });
-    const rejected = await handle(
+    const browser = await handle(
       new Request("http://127.0.0.1:13773/api/shell/bootstrap", {
         method: "POST",
         headers: { origin: "http://localhost:5173", "x-octant-window-capability": capability },
       }),
     );
-    expect(rejected?.status).toBe(400);
-    expect(service.bootstrap).not.toHaveBeenCalled();
+    expect(browser?.status).toBe(200);
 
     const allowed = await handle(
       new Request("http://127.0.0.1:13773/api/shell/bootstrap", {
@@ -441,18 +439,18 @@ describe("isAllowedRendererOrigin", () => {
     expect(isAllowedRendererOrigin("http://localhost:5173")).toBe(true);
   });
 
-  it("requires the configured development origin when set", () => {
+  it("keeps every loopback client while distinguishing the opaque renderer", () => {
     expect(isAllowedRendererOrigin("http://localhost:5173", "http://localhost:5173")).toBe(true);
-    expect(isAllowedRendererOrigin("http://127.0.0.1:5173", "http://localhost:5173")).toBe(false);
+    expect(isAllowedRendererOrigin("http://127.0.0.1:5173", "http://localhost:5173")).toBe(true);
     expect(isAllowedRendererOrigin("file://", "http://localhost:5173")).toBe(false);
     expect(isAllowedRendererOrigin("null", "http://localhost:5173")).toBe(false);
   });
 
-  it("allows only the packaged file origin", () => {
+  it("allows the packaged renderer and loopback browser clients", () => {
     expect(isAllowedRendererOrigin("file://", null)).toBe(true);
     expect(isAllowedRendererOrigin("null", null)).toBe(true);
-    expect(isAllowedRendererOrigin("http://127.0.0.1:5173", null)).toBe(false);
-    expect(isAllowedRendererOrigin("http://localhost:5173", null)).toBe(false);
+    expect(isAllowedRendererOrigin("http://127.0.0.1:5173", null)).toBe(true);
+    expect(isAllowedRendererOrigin("http://localhost:5173", null)).toBe(true);
   });
 
   it("resolves packaged, Vite, and unset development origins", () => {

@@ -105,6 +105,7 @@ export interface ChatControllerOptions {
   readonly activeThreadId?: ChatThreadId;
   readonly client?: ChatClient;
   readonly navigationRefreshMs?: number;
+  readonly changeRevision?: number;
   readonly reconnectDelayMs?: number;
   readonly readCursorStore?: ChatReadCursorStore;
   readonly draftStore?: ComposerThreadDraftStore;
@@ -195,6 +196,7 @@ export function useChatController(options: ChatControllerOptions) {
   const mounted = useRef(true);
   const activeThreadIdRef = useRef(options.activeThreadId);
   const bootstrapGeneration = useRef(0);
+  const navigationGeneration = useRef(0);
   const threadGeneration = useRef(0);
   const streamAbort = useRef<AbortController | undefined>(undefined);
   const pendingSubmissionIds = useRef(new Map<string, ChatSubmissionId>());
@@ -489,10 +491,11 @@ export function useChatController(options: ChatControllerOptions) {
     const refresh = async () => {
       if (!documentIsVisible() || inFlight) return;
       inFlight = true;
+      const request = ++navigationGeneration.current;
       try {
         try {
           const next = await client.navigation();
-          if (cancelled || !mounted.current) return;
+          if (cancelled || !mounted.current || request !== navigationGeneration.current) return;
           applyNavigation(next.threads);
         } catch {
           // Keep the indicator unknown or at its last authoritative value until refresh works.
@@ -506,9 +509,33 @@ export function useChatController(options: ChatControllerOptions) {
     });
     return () => {
       cancelled = true;
+      navigationGeneration.current += 1;
       stop();
     };
   }, [applyNavigation, bootstrap, client, navigationRefreshMs]);
+
+  useEffect(() => {
+    if (
+      options.changeRevision === undefined ||
+      options.changeRevision <= 0 ||
+      bootstrap === undefined
+    )
+      return;
+    let cancelled = false;
+    const request = ++navigationGeneration.current;
+    void client
+      .navigation()
+      .then((next) => {
+        if (!cancelled && mounted.current && request === navigationGeneration.current) {
+          applyNavigation(next.threads);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      if (request === navigationGeneration.current) navigationGeneration.current += 1;
+    };
+  }, [applyNavigation, bootstrap, client, options.changeRevision]);
 
   useEffect(() => {
     activeThreadIdRef.current = options.activeThreadId;

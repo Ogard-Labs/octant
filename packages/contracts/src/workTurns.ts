@@ -244,8 +244,32 @@ export type WorkTurnCancelResult = typeof WorkTurnCancelResult.Type;
 export const WorkThreadTranscript = Schema.Struct({
   threadId: WorkThreadId,
   turns: Schema.Array(WorkTurnState).pipe(Schema.maxItems(64)),
+  liveCursor: Schema.optionalWith(Schema.Int.pipe(Schema.nonNegative()), { default: () => 0 }),
 }).annotations(strict);
 export type WorkThreadTranscript = typeof WorkThreadTranscript.Type;
+
+/** Process-local Work response updates after a durable transcript snapshot. */
+export const WorkTurnStreamFrame = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("response-delta"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    text: boundedText(MAX_WORK_TURN_RESPONSE_BYTES),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("turn-settled"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    turn: WorkTurnState,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("snapshot-required"),
+    sequence: Schema.Int.pipe(Schema.nonNegative()),
+    threadId: WorkThreadId,
+  }).annotations(strict),
+);
+export type WorkTurnStreamFrame = typeof WorkTurnStreamFrame.Type;
 
 export const WorkTurnAccepted = Schema.Struct({
   kind: Schema.Literal("turn-accepted"),
@@ -307,5 +331,6 @@ export const decodeCancelWorkTurnCommand = Schema.decodeUnknownSync(CancelWorkTu
 export const decodeWorkTurnLookupResult = Schema.decodeUnknownSync(WorkTurnLookupResult);
 export const decodeWorkTurnCancelResult = Schema.decodeUnknownSync(WorkTurnCancelResult);
 export const decodeWorkThreadTranscript = Schema.decodeUnknownSync(WorkThreadTranscript);
+export const decodeWorkTurnStreamFrame = Schema.decodeUnknownSync(WorkTurnStreamFrame);
 export const decodeWorkTurnAccepted = Schema.decodeUnknownSync(WorkTurnAccepted);
 export const decodeWorkTurnUpdated = Schema.decodeUnknownSync(WorkTurnUpdated);

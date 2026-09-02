@@ -410,6 +410,66 @@ describe("useChatController", () => {
     unmount();
   });
 
+  it("does not let a slower timer read overwrite a newer Machine revision", async () => {
+    const timerRead = deferred<ReturnType<typeof decodeChatNavigation>>();
+    const revisionRead = deferred<ReturnType<typeof decodeChatNavigation>>();
+    const navigation = vi
+      .fn()
+      .mockImplementationOnce(() => timerRead.promise)
+      .mockImplementationOnce(() => revisionRead.promise);
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      navigation,
+      thread: vi.fn(async () => threadView(0)),
+      subscribe: vi.fn(async function* () {}),
+    });
+    const { result, rerender, unmount } = renderHook(
+      ({ changeRevision }) =>
+        useChatController({
+          changeRevision,
+          client,
+          navigationRefreshMs: 60_000,
+          serverUrl: "http://127.0.0.1",
+          windowCapability: capability,
+        }),
+      { initialProps: { changeRevision: 0 } },
+    );
+    await waitFor(() => expect(navigation).toHaveBeenCalledOnce());
+
+    rerender({ changeRevision: 1 });
+    await waitFor(() => expect(navigation).toHaveBeenCalledTimes(2));
+    const threads = bootstrap().threads;
+    revisionRead.resolve(
+      decodeChatNavigation({
+        threads: threads.map((thread) => ({
+          id: thread.id,
+          title: thread.title,
+          providerInstanceId: thread.providerInstanceId,
+          updatedAt: "2026-07-19T12:02:00.000Z",
+          lastSequence: 2,
+          followUpOpen: false,
+        })),
+      }),
+    );
+    await waitFor(() => expect(result.current.navigation[0]?.updatedAt).toContain("12:02"));
+    timerRead.resolve(
+      decodeChatNavigation({
+        threads: threads.map((thread) => ({
+          id: thread.id,
+          title: thread.title,
+          providerInstanceId: thread.providerInstanceId,
+          updatedAt: "2026-07-19T12:01:00.000Z",
+          lastSequence: 1,
+          followUpOpen: false,
+        })),
+      }),
+    );
+    await act(async () => Promise.resolve());
+
+    expect(result.current.navigation[0]?.updatedAt).toContain("12:02");
+    unmount();
+  });
+
   it("keeps the last authoritative navigation facts when a refresh fails", async () => {
     const navigation = vi
       .fn()

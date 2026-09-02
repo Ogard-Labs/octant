@@ -44,6 +44,7 @@ export interface RightUtilityDockSurfaceProps {
 export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const activeSurface = props.resolution.kind === "closed" ? undefined : props.resolution.surface;
   const activeTabId = props.activeTabId ?? activeSurface?.id;
+  const activeTab = props.tabs.find((tab) => tab.id === activeTabId);
   const remaining = props.launchableSurfaces.filter(
     (surface) =>
       surface.id === "browser" ||
@@ -100,12 +101,11 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
             state="neutral"
             title={`${activeSurface?.label ?? "Tool"} has nothing to describe here`}
           />
-        ) : (
-          props.tabs.map((tab) => (
-            <div hidden={tab.id !== activeTabId} key={tab.id} className="right-utility-dock__tool">
-              {props.renderTab?.(dockTabDescriptor(tab)) ?? contents[dockTabSurface(tab).id]}
-            </div>
-          ))
+        ) : activeTab === undefined ? null : (
+          <div key={activeTab.id} className="right-utility-dock__tool">
+            {props.renderTab?.(dockTabDescriptor(activeTab)) ??
+              contents[dockTabSurface(activeTab).id]}
+          </div>
         )}
       </div>
     </div>

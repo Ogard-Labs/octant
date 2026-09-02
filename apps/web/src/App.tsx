@@ -62,6 +62,7 @@ import {
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
+import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import type { CodeOperationId } from "@octant/contracts";
 import type {
   CodeProjectPullRequestDetailQuery,
@@ -123,6 +124,7 @@ import { loadPluginSidebarDestinationAction } from "./shell/pluginSidebarDestina
 import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDestinationRegistry";
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
+import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
 import { buildInboxAttentionItems, inboxThreadProjectId } from "./inbox/inboxModel";
 import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
@@ -387,20 +389,19 @@ export interface AppProps {
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() => launchFromLocation(window.location.href));
   const launch = props.launch ?? locationLaunch;
-  const injectedCapability =
+  const initialInjectedCapability =
     props.projectWindowCapability ?? props.hostBridge?.projectWindowCapability;
+  const injectedCapability = useDesktopWindowAuthority(initialInjectedCapability, props.hostBridge);
   const hostWindowId = windowIdFromHostBridge(props.hostBridge);
   const launchSession = useLaunchSession({
     ...(injectedCapability === undefined && launch !== undefined
       ? { serverUrl: launch.serverUrl }
       : {}),
     onExchanged: clearLaunchTokenFragment,
-    allowDevelopmentBootstrap: launch?.developmentWebBootstrap === true,
   });
 
-  // Remote browser entry: without a desktop launch token, a
-  // non-loopback origin is the pairing surface (typed code or fragment ticket).
-  // Localhost without launch still falls through to the desktop-session warning.
+  // A non-loopback browser remains a pairing surface. Loopback launches are
+  // resolved above and establish their process-local client context directly.
   if (injectedCapability === undefined && launch === undefined && typeof window !== "undefined") {
     const pairingTicket = readPairingFragment(window.location.href);
     const isRemote = isRemotePairingOrigin(window.location.href);
@@ -462,6 +463,7 @@ export function App(props: AppProps) {
         <LaunchedShell
           {...props}
           launch={resolvedLaunch}
+          {...(launchSession.renew === undefined ? {} : { onUnauthorized: launchSession.renew })}
           projectWindowCapability={launchSession.capability}
         />
       );
@@ -518,6 +520,7 @@ export function App(props: AppProps) {
 function LaunchedShell(
   props: AppProps & {
     readonly launch: ShellLaunch & { readonly windowId: WindowId };
+    readonly onUnauthorized?: () => Promise<void>;
     readonly projectWindowCapability: string;
   },
 ) {
@@ -887,6 +890,7 @@ function LaunchedShell(
       createLaunchedShellClients({
         serverUrl: props.launch.serverUrl,
         windowCapability: props.projectWindowCapability,
+        ...(props.onUnauthorized === undefined ? {} : { onUnauthorized: props.onUnauthorized }),
         agentProfileClient: props.agentProfileClient,
         agentRunClient: props.agentRunClient,
         agentRunSettingsClient: props.agentRunSettingsClient,
@@ -922,6 +926,7 @@ function LaunchedShell(
       props.hostClient,
       props.launch.serverUrl,
       props.navigatorAssistantClient,
+      props.onUnauthorized,
       props.planClient,
       props.projectWindowCapability,
       props.shipClient,
@@ -953,6 +958,7 @@ function LaunchedShell(
     hostControlClient,
     imageGenerationClient,
     linearTransport,
+    machineChangeClient,
     navigatorAssistantClient,
     planClient,
     previewClient,
@@ -967,6 +973,7 @@ function LaunchedShell(
     workThreadClient,
     workTurnClient,
   } = launchedClients;
+  const machineChanges = useMachineChangeFeed(machineChangeClient);
   // One Navigator reader for the whole window: the dock panel and Zen's
   // assistant are two fronts on it, so a turn sent from either is immediately
   // on screen in both.
@@ -975,7 +982,10 @@ function LaunchedShell(
   // Skills this host reports as installed and effective. They become the
   // Skills group of the `/` composer affordance; an unreachable extension
   // service simply contributes nothing.
-  const commandSkills = useCommandSkills(extensionClient);
+  const commandSkills = useCommandSkills(extensionClient, {
+    refreshMs: 0,
+    changeRevision: machineChanges.extensions,
+  });
   // The Chat bootstrap lists only active threads because it feeds the sidebar,
   // so the Thread Search overlay's Archived group is filled from the host's own
   // lifecycle-spanning Chat thread search instead.
@@ -991,7 +1001,8 @@ function LaunchedShell(
   });
   const chatController = useChatController({
     client: chatClient,
-    ...(activeMode === "chat" ? {} : { navigationRefreshMs: 0 }),
+    navigationRefreshMs: 0,
+    changeRevision: machineChanges.chatNavigation,
     readCursorStore: chatReadCursorStore,
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
@@ -1021,7 +1032,8 @@ function LaunchedShell(
     return () => clearTimeout(timer);
   }, [threadExportNotice]);
   const workNavigation = useWorkThreadNavigation(workThreadClient, {
-    ...(activeMode === "work" ? {} : { navigationRefreshMs: 0 }),
+    navigationRefreshMs: 0,
+    changeRevision: machineChanges.workNavigation,
   });
   const githubClient = useMemo(
     () => withGithubIssuesReadSync(githubTransport, setGithubIssuesReadAvailable),
@@ -1219,7 +1231,8 @@ function LaunchedShell(
   // transcript or stream depends on which tab happens to be in front.
   const codeController = useCodeController({
     client: codeClient,
-    ...(activeMode === "code" ? {} : { navigationRefreshMs: 0 }),
+    navigationRefreshMs: 0,
+    changeRevision: machineChanges.codeNavigation,
     readCursorStore: codeReadCursorStore,
   });
   // Bringing a Code thread's tab in front is the user opening it: the thread's
@@ -1250,12 +1263,15 @@ function LaunchedShell(
     openCodeThreadIds,
   );
   const activeCodeThreadView = activeCodeThreadController?.activeView;
+  const activeCodeThreadDisplayReady =
+    activeCodeThreadController !== undefined &&
+    activeCodeThreadController.conversationHistory === "loaded";
   // The Apple projects the host lists at the root of the Code thread in view.
   // The window's own Code reader binds to no thread, so the root comes from
   // that thread's own controller. Nothing is inferred from the Project name: a
   // checkout with no Xcode project simply offers no workbench entry point.
   const appleProjects = useAppleProjects({
-    ...(activeCodeThreadView === undefined
+    ...(!activeCodeThreadDisplayReady || activeCodeThreadView === undefined
       ? {}
       : {
           threadId: activeCodeThreadView.thread.id,
@@ -1331,14 +1347,20 @@ function LaunchedShell(
         aggregateId: String(activeWorkThreadId),
       });
     }
-    if (activeMode === "code" && activeCodeThreadId !== undefined) {
+    if (activeMode === "code" && activeCodeThreadId !== undefined && activeCodeThreadDisplayReady) {
       return decodeContextSubjectRef({
         aggregateType: "code-thread",
         aggregateId: String(activeCodeThreadId),
       });
     }
     return undefined;
-  }, [activeChatThreadId, activeCodeThreadId, activeMode, activeWorkThreadId]);
+  }, [
+    activeChatThreadId,
+    activeCodeThreadDisplayReady,
+    activeCodeThreadId,
+    activeMode,
+    activeWorkThreadId,
+  ]);
   // The context snapshot measures a conversation that keeps growing, so it has
   // to be asked again when the subject's own turns move on. Work threads run
   // their controller inside their workspace rather than here, so their meter
@@ -1356,6 +1378,7 @@ function LaunchedShell(
   });
   const projectController = useProjectController({
     activeMode: controller.workspace?.activeMode ?? "chat",
+    changeRevision: machineChanges.projects,
     ...(activeProjectId === undefined ? {} : { activeProjectId }),
     ...(props.projectClient === undefined ? {} : { client: props.projectClient }),
     serverUrl: props.launch.serverUrl,
@@ -1575,6 +1598,7 @@ function LaunchedShell(
               }),
         };
   const dockToolCapabilities = useDockToolCapabilities({
+    enabled: activeMode !== "code" || activeCodeThreadDisplayReady,
     agentRunClient,
     addAgentInvoked: dockThreadKey !== undefined && addAgentInvokedByThread.has(dockThreadKey),
     canvasClient,
@@ -2092,6 +2116,16 @@ function LaunchedShell(
   );
   function threadUtility(surface: RightUtilityDockSurfaceId, utilityTab?: ThreadUtilityDockTab) {
     if (dockThread === undefined || dockThreadKey === undefined) return null;
+    if (dockThread.mode === "code" && !activeCodeThreadDisplayReady) {
+      return (
+        <ShellState
+          eyebrow="Thread tools"
+          message="The selected tool will open after the transcript is ready."
+          state="loading"
+          title="Loading thread first"
+        />
+      );
+    }
     const sidecarThreadId = dockSidecarsByThread.get(dockThreadKey);
     const appleProjectPath = appleProjects[0]?.projectPath;
     return (
@@ -4650,8 +4684,10 @@ function LaunchedShell(
                     workCreateThreadAvailable={workCreateThreadAvailable}
                     workMutationClient={workMutationClient}
                     workThreadClient={workThreadClient}
+                    workThreads={workNavigation.bootstrap?.threads ?? []}
                     onWorkThreadUpdated={workNavigation.applyThread}
                     workTurnClient={workTurnClient}
+                    workChangeRevision={machineChanges.workNavigation}
                     workRequestClient={workRequestClient}
                     workOverviewClient={workOverviewClient}
                     workResearchClient={workResearchClient}

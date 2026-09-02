@@ -19,7 +19,11 @@ export interface WorkRequestClientOptions {
 }
 
 export interface WorkRequestClient {
-  list(projectId: ProjectId, threadId?: WorkThreadId): Promise<WorkRequestList>;
+  list(
+    projectId: ProjectId,
+    threadId?: WorkThreadId,
+    signal?: AbortSignal,
+  ): Promise<WorkRequestList>;
   execute(command: WorkRequestCommand): Promise<WorkRequestCommandResult>;
 }
 
@@ -37,7 +41,7 @@ export function createWorkRequestClient(options: WorkRequestClientOptions): Work
   validateLoopbackBaseUrl(options.baseUrl);
   const headers = { "x-octant-window-capability": options.windowCapability };
   return {
-    list(projectId, threadId) {
+    list(projectId, threadId, signal) {
       const url = new URL("/api/work/requests", options.baseUrl);
       url.searchParams.set("projectId", String(projectId));
       if (threadId !== undefined) {
@@ -46,7 +50,7 @@ export function createWorkRequestClient(options: WorkRequestClientOptions): Work
       return request(
         options.fetch,
         url.toString(),
-        { method: "GET", headers },
+        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
         decodeWorkRequestList,
       );
     },
@@ -80,7 +84,8 @@ async function request<T>(
   let response: Response;
   try {
     response = await fetch(url, init);
-  } catch {
+  } catch (error) {
+    if (init.signal?.aborted === true || isAbortError(error)) throw error;
     throw unavailable("Octant Work request service is unavailable.");
   }
   let body: unknown;
@@ -102,6 +107,10 @@ async function request<T>(
   } catch {
     throw malformedResponse();
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function validateLoopbackBaseUrl(baseUrl: string): void {

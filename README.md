@@ -169,29 +169,33 @@ bun run dev
 ```
 
 `bun run dev` starts the Vite renderer for `apps/web` with hot reload and
-launches Electron against it. The desktop shell spawns the server from source:
-renderer edits hot-reload, server edits take effect on the next app relaunch,
-and `apps/desktop/src` edits are rebuilt automatically the next time you start
-`bun run dev`.
+launches Electron against it. Electron attaches to the canonical host or starts
+it from source when absent: renderer edits hot-reload, server edits take effect
+on the next app relaunch, and `apps/desktop/src` edits are rebuilt automatically
+the next time you start `bun run dev`.
 
 To run the host without Electron and attach a browser client:
 
 ```sh
-bun --cwd packages/cli src/bin.ts server run   # terminal 1
-bun --cwd packages/cli src/bin.ts web          # terminal 2
+bun --cwd packages/cli src/bin.ts server run   # http://127.0.0.1:13773/
 ```
+
+Open `http://127.0.0.1:13773/` directly, or run
+`bun --cwd packages/cli src/bin.ts web` as a convenience. Electron and every
+local browser attach to this same canonical Machine, data store, Projects, and
+threads.
 
 For browser UI development with hot reload, use the development launcher
 instead of pairing a hand-started server with Vite:
 
 ```sh
-bun --cwd packages/cli src/bin.ts web --dev --no-open --port 10111
+bun --cwd packages/cli src/bin.ts web --dev --no-open
 ```
 
-It prints the local browser URL, mints a fresh development window session on
-each open, and keeps Projects, threads, and settings in a separate persistent
-development data directory. Reopening the URL therefore does not reset the
-workspace, while production Octant data remains untouched.
+It starts only the Vite renderer and points it at the canonical host. Renderer
+mode never selects another data directory: browser QA, Electron, and Vite show
+the same Projects and threads. Tests that need an isolated store must set an
+explicit `OCTANT_DATA_DIR`.
 
 Common checks:
 
@@ -219,7 +223,7 @@ scripts (`bun run smoke:*`) and are not part of `verify`.
 | `packages/contracts`      | Versioned schemas, commands, events, and RPC contracts (schema-only)         |
 | `packages/domain`         | Pure policy and state transitions                                            |
 | `packages/provider-sdk`   | Provider driver interface, normalized runtime events, discovery, conformance |
-| `packages/client-runtime` | Authenticated transport and replay synchronization                           |
+| `packages/client-runtime` | Authenticated, prioritized transport, reconnect, and replay synchronization  |
 | `packages/host-runtime`   | Host identity, paths, ownership, service and artifact lifecycle              |
 | `packages/plugin-host`    | Extension and skill packages, trust, and activation policy                   |
 | `packages/theme`          | Semantic theme schema and projections                                        |

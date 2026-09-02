@@ -25,20 +25,8 @@ describe("healthResponse", () => {
     });
   });
 
-  it("advertises development web bootstrap only when explicitly enabled", async () => {
-    const response = healthResponse("0.0.0-dev", undefined, true);
-
-    expect(await response.json()).toEqual({
-      product: "Octant",
-      status: "ok",
-      storage: "ready",
-      version: "0.0.0-dev",
-      developmentWebBootstrap: true,
-    });
-  });
-
   it("exposes bounded host activity facts when supplied", async () => {
-    const response = healthResponse("0.0.0-dev", "managed-instance", undefined, {
+    const response = healthResponse("0.0.0-dev", "managed-instance", {
       activeAgentCount: 2,
       attentionRequired: true,
     });
@@ -50,5 +38,11 @@ describe("healthResponse", () => {
       activeAgentCount: 2,
       attentionRequired: true,
     });
+  });
+
+  it("does not expose renderer mode because every renderer attaches to the same host", async () => {
+    const response = healthResponse("0.0.0-dev");
+
+    expect(await response.json()).not.toHaveProperty("developmentWebBootstrap");
   });
 });

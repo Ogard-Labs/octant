@@ -2,6 +2,7 @@ import {
   createAgentProfileClient,
   createAutomationClient,
   createUsageDashboardClient,
+  createRequestCoordinator,
   type AgentProfileClient,
   type AutomationClient,
 } from "@octant/client-runtime";
@@ -41,6 +42,7 @@ import { createHostClient, type HostClient } from "@octant/client-runtime/host-c
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { createIntegrationClient } from "@octant/client-runtime/integration-client";
+import { createMachineChangeClient } from "@octant/client-runtime/machine-change-client";
 import {
   createNavigatorAssistantClient,
   type NavigatorAssistantClient,
@@ -64,6 +66,7 @@ export interface CreateLaunchedShellClientsOptions {
   readonly serverUrl: string;
   readonly windowCapability: string;
   readonly fetch?: typeof globalThis.fetch;
+  readonly onUnauthorized?: () => Promise<void>;
   readonly agentProfileClient: AgentProfileClient | undefined;
   readonly agentRunClient: AgentRunClient | undefined;
   readonly agentRunSettingsClient: AgentRunSettingsClient | undefined;
@@ -108,6 +111,7 @@ export interface LaunchedShellClients {
   readonly hostControlClient: ReturnType<typeof createHostControlClient>;
   readonly imageGenerationClient: ReturnType<typeof createImageGenerationClient>;
   readonly linearTransport: ReturnType<typeof createIntegrationClient>;
+  readonly machineChangeClient: ReturnType<typeof createMachineChangeClient>;
   readonly navigatorAssistantClient: NavigatorAssistantClient | undefined;
   readonly planClient: PlanClient;
   readonly previewClient: ReturnType<typeof createPreviewClient>;
@@ -128,7 +132,10 @@ export interface LaunchedShellClients {
 export function createLaunchedShellClients(
   options: CreateLaunchedShellClientsOptions,
 ): LaunchedShellClients {
-  const fetch = options.fetch ?? globalThis.fetch;
+  const fetch = createRequestCoordinator({
+    fetch: options.fetch ?? globalThis.fetch,
+    ...(options.onUnauthorized === undefined ? {} : { onUnauthorized: options.onUnauthorized }),
+  });
   const port = {
     baseUrl: options.serverUrl,
     fetch,
@@ -181,6 +188,7 @@ export function createLaunchedShellClients(
     hostControlClient: createHostControlClient(port),
     imageGenerationClient: createImageGenerationClient(port),
     linearTransport: createIntegrationClient({ ...port, slug: "linear" }),
+    machineChangeClient: createMachineChangeClient(port),
     navigatorAssistantClient,
     planClient: options.planClient ?? createPlanClient(port),
     previewClient: createPreviewClient(port),

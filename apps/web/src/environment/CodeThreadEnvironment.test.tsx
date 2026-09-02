@@ -86,6 +86,29 @@ async function openEnvironment(): Promise<void> {
 }
 
 describe("CodeThreadEnvironment", () => {
+  it("defers Git observation until the transcript is display-ready", async () => {
+    const client = projectClient(readyObservation());
+    const { rerender } = render(
+      <CodeThreadEnvironment
+        observe={false}
+        project={codeProject()}
+        projectClient={client}
+        tab={codeTab()}
+      >
+        <div>Transcript</div>
+      </CodeThreadEnvironment>,
+    );
+
+    expect(client.environmentForThread).not.toHaveBeenCalled();
+    rerender(
+      <CodeThreadEnvironment observe project={codeProject()} projectClient={client} tab={codeTab()}>
+        <div>Transcript</div>
+      </CodeThreadEnvironment>,
+    );
+
+    await waitFor(() => expect(client.environmentForThread).toHaveBeenCalledOnce());
+  });
+
   it("renders the code workspace children inside the content area", () => {
     render(
       <CodeThreadEnvironment

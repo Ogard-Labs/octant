@@ -10,6 +10,7 @@ const DEFAULT_REFRESH_MS = 5_000;
 
 export interface CommandSkillsOptions {
   readonly refreshMs?: number;
+  readonly changeRevision?: number;
 }
 
 /**
@@ -70,14 +71,28 @@ export function useCommandSkills(
         inFlight = false;
       }
     };
-    const stop = scheduleVisibleInterval(() => void load(), Math.max(10, refreshMs), {
-      runImmediately: true,
-    });
+    let stop: () => void;
+    if (refreshMs <= 0) {
+      const loadWhenVisible = () => {
+        if (documentIsVisible()) void load();
+      };
+      loadWhenVisible();
+      if (typeof document === "undefined") {
+        stop = () => undefined;
+      } else {
+        document.addEventListener("visibilitychange", loadWhenVisible);
+        stop = () => document.removeEventListener("visibilitychange", loadWhenVisible);
+      }
+    } else {
+      stop = scheduleVisibleInterval(() => void load(), Math.max(10, refreshMs), {
+        runImmediately: true,
+      });
+    }
     return () => {
       active = false;
       stop();
     };
-  }, [client, refreshMs]);
+  }, [client, options.changeRevision, refreshMs]);
 
   return skills;
 }

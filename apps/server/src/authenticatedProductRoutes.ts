@@ -56,6 +56,9 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "GET" || method === "HEAD") return "project.overview.read";
     return undefined;
   }
+  if (path === "/api/machine/changes") {
+    return method === "GET" || method === "HEAD" ? "project.overview.read" : undefined;
+  }
   if (path.startsWith("/api/work/")) {
     if (method === "POST" && path === "/api/work/board") return "project.overview.read";
     if (method === "POST") return "work.update-document";
@@ -64,6 +67,9 @@ export function classifyProductAction(request: Request): string | undefined {
   }
   if (path.startsWith("/api/code/")) {
     if (method === "POST" && path === "/api/code/board") return "project.overview.read";
+    if (method === "POST" && path === "/api/code/evidence/batch") {
+      return "project.overview.read";
+    }
     if (method === "PUT" && path === "/api/code/evidence") return "code.plan-turn";
     if (method === "POST" && path.includes("/threads")) return "code.create-thread";
     // Local servers is a catalogued authority of its own, so it must not

@@ -1,4 +1,8 @@
-import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
+import {
+  CodeClientSnapshotRequiredError,
+  createCodeClient,
+  type CodeClient,
+} from "@octant/client-runtime/code-client";
 import type {
   CodeBootstrap,
   CodeNavigation,
@@ -19,6 +23,7 @@ import {
   type CodeApprovalId,
   type CodeCheckpoint,
   type CodeConversationTurn,
+  MAX_CODE_EVIDENCE_BATCH_ITEMS,
   type CodeProviderLimit,
   type CodeEvidenceContentId,
   type CodeOperationEvent,
@@ -40,7 +45,11 @@ import {
   type CodeTurnActivity,
 } from "./transcriptActivity";
 import { samePollingData } from "../polling/samePollingData";
-import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import {
+  documentIsVisible,
+  scheduleVisibleInterval,
+  waitUntilDocumentVisible,
+} from "../polling/documentVisibility";
 import { markInteraction } from "../polling/interactionTrace";
 import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
 
@@ -272,6 +281,7 @@ export interface CodeControllerOptions {
    * background would show no unread mark until something else reloaded.
    */
   readonly navigationRefreshMs?: number;
+  readonly changeRevision?: number;
   readonly reconnectDelayMs?: number;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -699,115 +709,50 @@ export function useCodeController(options: CodeControllerOptions) {
   );
 
   const hydrateConversation = useCallback(
-    async (threadId: CodeThreadId, request: number) => {
+    async (threadId: CodeThreadId, request: number, signal: AbortSignal) => {
       let cursor = 0;
       let nextCursor = 0;
       let pageCount = 0;
       const turns: CodeConversationTurn[] = [];
+      const messages: CodeConversationMessage[] = [];
       let pageLimits: ReadonlyArray<CodeProviderLimit> = [];
       let pageRestoreUndo: CodeCheckpoint | undefined;
+      usageByOperation.current = new Map();
       for (;;) {
-        const page = await client.conversation(threadId, cursor, 50);
+        const page = await client.conversation(threadId, cursor, 50, signal);
         if (!isActive(request, threadGeneration, mounted) || page.threadId !== threadId)
           return undefined;
+        const evidence = await readConversationEvidence(client, threadId, page.turns, signal);
+        if (!isActive(request, threadGeneration, mounted)) return undefined;
+        const projected = await projectConversationTurns(
+          client,
+          threadId,
+          page.turns,
+          evidence,
+          signal,
+        );
+        if (!isActive(request, threadGeneration, mounted)) return undefined;
         turns.push(...page.turns);
+        messages.push(...projected.messages);
+        for (const turn of page.turns) {
+          if (turn.usage !== undefined) {
+            usageByOperation.current.set(String(turn.operationId), turn.usage);
+          }
+        }
         if (page.limits !== undefined) pageLimits = page.limits;
         pageRestoreUndo = page.restoreUndo;
         nextCursor = page.nextCursor;
+        setThreadUsage({ ...totalTurnUsage(usageByOperation.current), limits: pageLimits });
+        setRestoreUndo(pageRestoreUndo);
+        setConversation([...messages]);
+        if (projected.activity.size > 0) {
+          setTurnActivity((current) => new Map([...current, ...projected.activity]));
+        }
         if (!page.hasMore) break;
         if (page.nextCursor <= cursor || (pageCount += 1) >= 100) {
           throw new Error("Code conversation pagination did not advance.");
         }
         cursor = page.nextCursor;
-      }
-
-      const messages: CodeConversationMessage[] = [];
-      const replayedActivity = new Map<string, CodeTurnActivity>();
-      for (const turn of turns) {
-        const prompt = await readOperationText(
-          client,
-          threadId,
-          turn.operationId,
-          turn.prompt.contentId,
-        );
-        if (!isActive(request, threadGeneration, mounted)) return undefined;
-        messages.push({
-          id: `${turn.operationId}:user`,
-          role: "user",
-          text: prompt ?? "Conversation prompt evidence is unavailable.",
-          operationId: turn.operationId,
-          providerInstanceId: turn.providerInstanceId,
-          modelId: turn.modelId,
-          status: turn.status,
-          ...(turn.attachments === undefined || turn.attachments.length === 0
-            ? {}
-            : { attachments: turn.attachments }),
-          ...(turn.checkpoint === undefined ? {} : { checkpoint: turn.checkpoint }),
-          ...(turn.executionPolicy === undefined ? {} : { executionPolicy: turn.executionPolicy }),
-        });
-        const parts: string[] = [];
-        for (const reference of turn.assistant) {
-          const part = await readOperationText(
-            client,
-            threadId,
-            turn.operationId,
-            reference.contentId,
-          );
-          if (part !== undefined) parts.push(part);
-        }
-        if (!isActive(request, threadGeneration, mounted)) return undefined;
-        messages.push({
-          id: `${turn.operationId}:assistant`,
-          role: "assistant",
-          text: parts.join("") || conversationFallback(turn.status),
-          operationId: turn.operationId,
-          providerInstanceId: turn.providerInstanceId,
-          modelId: turn.modelId,
-          status: turn.status,
-        });
-        // The steps this turn recorded, folded into the same rows the live
-        // transcript builds, so a reopened thread reads like the turn did.
-        const steps = turn.steps ?? [];
-        if (steps.length > 0 || turn.stepsTruncated === true) {
-          // Fold replayed steps through the same classifier the live stream
-          // uses, so a reopened thread and a watched turn agree on rows.
-          let replayed = EMPTY_TURN_ACTIVITY;
-          for (const step of steps) {
-            if (step.kind === "tool") {
-              replayed = applyActivityEvent(replayed, {
-                kind: "tool-activity",
-                toolCallId: step.toolCallId,
-                toolName: step.toolName,
-                state: step.state,
-                ...(step.summary === undefined ? {} : { summary: step.summary }),
-              });
-              continue;
-            }
-            const text = await readOperationText(
-              client,
-              threadId,
-              turn.operationId,
-              step.content.contentId,
-            );
-            if (text !== undefined) replayed = appendReasoning(replayed, text);
-          }
-          if (!isActive(request, threadGeneration, mounted)) return undefined;
-          replayedActivity.set(String(turn.operationId), {
-            ...replayed,
-            ...(turn.stepsTruncated === true ? { truncated: true } : {}),
-          });
-        }
-      }
-      usageByOperation.current = new Map(
-        turns.flatMap((turn) =>
-          turn.usage === undefined ? [] : [[String(turn.operationId), turn.usage] as const],
-        ),
-      );
-      setThreadUsage({ ...totalTurnUsage(usageByOperation.current), limits: pageLimits });
-      setRestoreUndo(pageRestoreUndo);
-      setConversation(messages);
-      if (replayedActivity.size > 0) {
-        setTurnActivity((current) => new Map([...current, ...replayedActivity]));
       }
       const latestTurn = turns.at(-1);
       const incomplete = latestTurn?.status === "incomplete";
@@ -844,7 +789,8 @@ export function useCodeController(options: CodeControllerOptions) {
     async (threadId: CodeThreadId) => {
       const request = ++threadGeneration.current;
       streamAbort.current?.abort();
-      streamAbort.current = undefined;
+      const controller = new AbortController();
+      streamAbort.current = controller;
       clearFailure();
       // Usage belongs to the thread being left. Hydration may fail, so it is
       // cleared on the way in rather than replaced on the way out; otherwise the
@@ -856,8 +802,10 @@ export function useCodeController(options: CodeControllerOptions) {
       // another thread's checkout would overwrite files nobody asked about.
       setRestoreUndo(undefined);
       setConversationHistory("loading");
+      const conversationRead = hydrateConversation(threadId, request, controller.signal);
+      void conversationRead.catch(() => undefined);
       try {
-        const initial = await client.thread(threadId);
+        const initial = await client.thread(threadId, controller.signal);
         if (!isActive(request, threadGeneration, mounted)) return;
         installView(initial);
         void refreshFollowUp(threadId);
@@ -865,7 +813,7 @@ export function useCodeController(options: CodeControllerOptions) {
         let conversationIncomplete = false;
         let conversationOperationId: CodeOperationId | undefined;
         try {
-          const hydrated = await hydrateConversation(threadId, request);
+          const hydrated = await conversationRead;
           conversationIncomplete = hydrated?.incomplete === true;
           conversationOperationId = hydrated?.activeOperationId;
           conversationCursor = hydrated?.nextCursor ?? 0;
@@ -891,15 +839,32 @@ export function useCodeController(options: CodeControllerOptions) {
         // clear. Marking stays tied to this open, never to a timer.
         void recordSeenActivity(threadId);
         let cursor = Number(initial.lastSequence);
-        const controller = new AbortController();
-        streamAbort.current = controller;
         let operationStream: Promise<void> | undefined;
         const startConversationOperationStream = (operationId: CodeOperationId) => {
           if (operationStream !== undefined) return;
           operationStream = (async () => {
             let operationCursor = 0;
             let assistantText = "";
+            let snapshotRequired = false;
             while (isActive(request, threadGeneration, mounted) && !controller.signal.aborted) {
+              if (snapshotRequired) {
+                const hydrated = await hydrateConversation(
+                  threadId,
+                  request,
+                  controller.signal,
+                ).catch(() => undefined);
+                if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) {
+                  return;
+                }
+                if (hydrated === undefined) {
+                  await waitForReconnect(controller.signal, 250);
+                  continue;
+                }
+                if (hydrated.incomplete !== true) return;
+                operationCursor = 0;
+                assistantText = "";
+                snapshotRequired = false;
+              }
               let received = 0;
               try {
                 for await (const frame of client.subscribeOperation(
@@ -916,21 +881,27 @@ export function useCodeController(options: CodeControllerOptions) {
                   noteActivity(operationId, event);
                   noteUsage(operationId, event);
                   if (event.kind === "provider-content" && event.channel === "reasoning") {
-                    const chunk = await readOperationText(
-                      client,
-                      threadId,
-                      operationId,
-                      event.content.contentId,
-                    );
+                    const chunk =
+                      frame.displayText ??
+                      (await readOperationText(
+                        client,
+                        threadId,
+                        operationId,
+                        event.content.contentId,
+                        controller.signal,
+                      ));
                     if (chunk !== undefined) noteReasoning(operationId, chunk);
                   }
                   if (event.kind === "provider-content" && event.channel === "message") {
-                    const chunk = await readOperationText(
-                      client,
-                      threadId,
-                      operationId,
-                      event.content.contentId,
-                    );
+                    const chunk =
+                      frame.displayText ??
+                      (await readOperationText(
+                        client,
+                        threadId,
+                        operationId,
+                        event.content.contentId,
+                        controller.signal,
+                      ));
                     if (
                       !isActive(request, threadGeneration, mounted) ||
                       controller.signal.aborted
@@ -977,9 +948,11 @@ export function useCodeController(options: CodeControllerOptions) {
                   if (terminalState !== undefined) {
                     activeTurnOperations.current.delete(String(threadId));
                     if (terminalState !== "waiting") setProviderRequests([]);
-                    const hydrated = await hydrateConversation(threadId, request).catch(
-                      () => undefined,
-                    );
+                    const hydrated = await hydrateConversation(
+                      threadId,
+                      request,
+                      controller.signal,
+                    ).catch(() => undefined);
                     // The turn ended in front of the user. Recording it here,
                     // rather than waiting for the timed refresh, is what keeps
                     // leaving for another thread in the same moment from
@@ -1006,9 +979,12 @@ export function useCodeController(options: CodeControllerOptions) {
                     return;
                   }
                 }
-              } catch {
-                // The durable conversation poll below remains the recovery
-                // path; reconnect from the last fully applied operation frame.
+              } catch (error) {
+                // A gap means later deltas have no trustworthy base. Reload
+                // the durable conversation before replaying the operation
+                // from its beginning; ordinary disconnects resume at the last
+                // fully applied cursor.
+                if (error instanceof CodeClientSnapshotRequiredError) snapshotRequired = true;
               }
               if (!controller.signal.aborted) {
                 await waitForReconnect(controller.signal, received === 0 ? 250 : 50);
@@ -1028,6 +1004,7 @@ export function useCodeController(options: CodeControllerOptions) {
             let delayMs = 250;
             while (isActive(request, threadGeneration, mounted) && !controller.signal.aborted) {
               await waitForReconnect(controller.signal, delayMs);
+              await waitUntilDocumentVisible(controller.signal);
               if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                 return;
               try {
@@ -1035,6 +1012,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   threadId,
                   Math.max(0, conversationCursor - 1),
                   1,
+                  controller.signal,
                 );
                 if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                   return;
@@ -1042,7 +1020,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   delayMs = Math.min(delayMs * 2, 2_000);
                   continue;
                 }
-                const hydrated = await hydrateConversation(threadId, request);
+                const hydrated = await hydrateConversation(threadId, request, controller.signal);
                 if (hydrated?.incomplete !== true) {
                   // Same reason as the streamed terminal frame: the finished
                   // turn is on screen now, and the timed refresh that would
@@ -1083,7 +1061,7 @@ export function useCodeController(options: CodeControllerOptions) {
         const resume = async (): Promise<"stop" | "again"> => {
           for (;;) {
             try {
-              const recovered = await client.thread(threadId);
+              const recovered = await client.thread(threadId, controller.signal);
               if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) {
                 return "stop";
               }
@@ -1126,14 +1104,14 @@ export function useCodeController(options: CodeControllerOptions) {
               }
               cursor = Number(frame.sequence);
               setBootstrap((current) => applyEvent(current, frame));
-              const refreshed = await client.thread(threadId);
+              const refreshed = await client.thread(threadId, controller.signal);
               if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                 return;
               installView(refreshed);
               void refreshFollowUp(threadId);
               if (conversationPoll === undefined) {
                 try {
-                  const hydrated = await hydrateConversation(threadId, request);
+                  const hydrated = await hydrateConversation(threadId, request, controller.signal);
                   conversationIncomplete = hydrated?.incomplete === true;
                   conversationOperationId = hydrated?.activeOperationId;
                   conversationCursor = hydrated?.nextCursor ?? conversationCursor;
@@ -1165,6 +1143,7 @@ export function useCodeController(options: CodeControllerOptions) {
         }
       } catch (error) {
         if (!isActive(request, threadGeneration, mounted)) return;
+        controller.abort();
         fail(error);
       }
     },
@@ -1194,20 +1173,25 @@ export function useCodeController(options: CodeControllerOptions) {
     const ids = followUpThreadKey === "" ? [] : followUpThreadKey.split(",");
     let active = true;
     void (async () => {
-      for (const id of ids) {
-        if (!active || !mounted.current) return;
-        try {
-          const view = await client.readFollowUp(id as CodeThreadId);
-          if (!active || !mounted.current) return;
-          setFollowUps((current) => {
-            const next = new Map(current);
-            next.set(id, view);
-            return next;
-          });
-        } catch {
-          // A per-thread follow-up read failure is non-fatal to navigation.
+      const views = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            return { id, view: await client.readFollowUp(id as CodeThreadId) };
+          } catch {
+            // A per-thread follow-up read failure is non-fatal to navigation.
+            return undefined;
+          }
+        }),
+      );
+      if (!active || !mounted.current) return;
+      if (views.length === 0) return;
+      setFollowUps((current) => {
+        const next = new Map(current);
+        for (const result of views) {
+          if (result !== undefined) next.set(result.id, result.view);
         }
-      }
+        return next;
+      });
     })();
     return () => {
       active = false;
@@ -1366,6 +1350,27 @@ export function useCodeController(options: CodeControllerOptions) {
       stop();
     };
   }, [applyNavigationRefresh, client, navigationRefreshMs, nextNavigationRead]);
+
+  useEffect(() => {
+    if (
+      options.changeRevision === undefined ||
+      options.changeRevision <= 0 ||
+      bootstrapRef.current === undefined
+    )
+      return;
+    let cancelled = false;
+    const read = nextNavigationRead();
+    void client
+      .navigation()
+      .then((next) => {
+        if (cancelled || !mounted.current) return;
+        applyNavigationRefresh(next, read);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [applyNavigationRefresh, client, nextNavigationRead, options.changeRevision]);
 
   const execute = useCallback(
     async (command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult | undefined> => {
@@ -1930,21 +1935,27 @@ export function useCodeController(options: CodeControllerOptions) {
               }
             }
             if (event.kind === "provider-content" && event.channel === "reasoning") {
-              const chunk = await readOperationText(
-                client,
-                view.thread.id,
-                operationId,
-                event.content.contentId,
-              );
+              const chunk =
+                frame.displayText ??
+                (await readOperationText(
+                  client,
+                  view.thread.id,
+                  operationId,
+                  event.content.contentId,
+                  controller.signal,
+                ));
               if (chunk !== undefined) noteReasoning(operationId, chunk);
             }
             if (event.kind === "provider-content" && event.channel === "message") {
-              const chunk = await readOperationText(
-                client,
-                view.thread.id,
-                operationId,
-                event.content.contentId,
-              );
+              const chunk =
+                frame.displayText ??
+                (await readOperationText(
+                  client,
+                  view.thread.id,
+                  operationId,
+                  event.content.contentId,
+                  controller.signal,
+                ));
               if (chunk !== undefined) {
                 assistantText += chunk;
                 const nextText = assistantText;
@@ -2253,13 +2264,175 @@ async function readOperationText(
   threadId: CodeThreadId,
   operationId: CodeOperationId,
   contentId: CodeEvidenceContentId,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   try {
-    const bytes = await client.operationContent(threadId, operationId, contentId);
+    const bytes = await client.operationContent(threadId, operationId, contentId, signal);
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     return undefined;
   }
+}
+
+async function projectConversationTurns(
+  client: CodeClient,
+  threadId: CodeThreadId,
+  turns: ReadonlyArray<CodeConversationTurn>,
+  evidence: ReadonlyMap<string, string> | undefined,
+  signal: AbortSignal,
+): Promise<{
+  readonly messages: ReadonlyArray<CodeConversationMessage>;
+  readonly activity: ReadonlyMap<string, CodeTurnActivity>;
+}> {
+  const messages: CodeConversationMessage[] = [];
+  const activity = new Map<string, CodeTurnActivity>();
+  for (const turn of turns) {
+    if (signal.aborted) throw new DOMException("The request was aborted.", "AbortError");
+    const prompt = await readConversationText(
+      client,
+      threadId,
+      turn.operationId,
+      turn.prompt.contentId,
+      evidence,
+      signal,
+    );
+    messages.push({
+      id: `${turn.operationId}:user`,
+      role: "user",
+      text: prompt ?? "Conversation prompt evidence is unavailable.",
+      operationId: turn.operationId,
+      providerInstanceId: turn.providerInstanceId,
+      modelId: turn.modelId,
+      status: turn.status,
+      ...(turn.attachments === undefined || turn.attachments.length === 0
+        ? {}
+        : { attachments: turn.attachments }),
+      ...(turn.checkpoint === undefined ? {} : { checkpoint: turn.checkpoint }),
+      ...(turn.executionPolicy === undefined ? {} : { executionPolicy: turn.executionPolicy }),
+    });
+    const parts: string[] = [];
+    for (const reference of turn.assistant) {
+      const part = await readConversationText(
+        client,
+        threadId,
+        turn.operationId,
+        reference.contentId,
+        evidence,
+        signal,
+      );
+      if (part !== undefined) parts.push(part);
+    }
+    messages.push({
+      id: `${turn.operationId}:assistant`,
+      role: "assistant",
+      text: parts.join("") || conversationFallback(turn.status),
+      operationId: turn.operationId,
+      providerInstanceId: turn.providerInstanceId,
+      modelId: turn.modelId,
+      status: turn.status,
+    });
+    const steps = turn.steps ?? [];
+    if (steps.length === 0 && turn.stepsTruncated !== true) continue;
+    let replayed = EMPTY_TURN_ACTIVITY;
+    for (const step of steps) {
+      if (step.kind === "tool") {
+        replayed = applyActivityEvent(replayed, {
+          kind: "tool-activity",
+          toolCallId: step.toolCallId,
+          toolName: step.toolName,
+          state: step.state,
+          ...(step.summary === undefined ? {} : { summary: step.summary }),
+        });
+        continue;
+      }
+      const text = await readConversationText(
+        client,
+        threadId,
+        turn.operationId,
+        step.content.contentId,
+        evidence,
+        signal,
+      );
+      if (text !== undefined) replayed = appendReasoning(replayed, text);
+    }
+    activity.set(String(turn.operationId), {
+      ...replayed,
+      ...(turn.stepsTruncated === true ? { truncated: true } : {}),
+    });
+  }
+  return { messages, activity };
+}
+
+async function readConversationEvidence(
+  client: CodeClient,
+  threadId: CodeThreadId,
+  turns: ReadonlyArray<CodeConversationTurn>,
+  signal: AbortSignal,
+): Promise<ReadonlyMap<string, string> | undefined> {
+  const read = client.operationContents;
+  if (read === undefined) return undefined;
+  const unique = new Map<
+    string,
+    { readonly operationId: CodeOperationId; readonly contentId: CodeEvidenceContentId }
+  >();
+  for (const turn of turns) {
+    const references = [
+      turn.prompt,
+      ...turn.assistant,
+      ...(turn.steps ?? []).flatMap((step) => (step.kind === "reasoning" ? [step.content] : [])),
+    ];
+    for (const reference of references) {
+      const key = `${String(turn.operationId)}:${String(reference.contentId)}`;
+      unique.set(key, { operationId: turn.operationId, contentId: reference.contentId });
+    }
+  }
+  const items = [...unique.values()];
+  let responses: ReadonlyArray<Awaited<ReturnType<NonNullable<CodeClient["operationContents"]>>>>;
+  try {
+    responses = await Promise.all(
+      Array.from({ length: Math.ceil(items.length / MAX_CODE_EVIDENCE_BATCH_ITEMS) }, (_, index) =>
+        read(
+          {
+            threadId,
+            items: items.slice(
+              index * MAX_CODE_EVIDENCE_BATCH_ITEMS,
+              (index + 1) * MAX_CODE_EVIDENCE_BATCH_ITEMS,
+            ),
+          },
+          signal,
+        ),
+      ),
+    );
+  } catch (error) {
+    if (signal.aborted) throw error;
+    // A renderer may reconnect to a host from before the batch endpoint was
+    // introduced. Preserve transcript recovery through the existing bounded
+    // per-reference reads instead of treating that host as corrupt.
+    return undefined;
+  }
+  const text = new Map<string, string>();
+  for (const response of responses) {
+    if (String(response.threadId) !== String(threadId)) continue;
+    for (const item of response.items) {
+      text.set(`${String(item.operationId)}:${String(item.contentId)}`, item.text);
+    }
+  }
+  return text;
+}
+
+async function readConversationText(
+  client: CodeClient,
+  threadId: CodeThreadId,
+  operationId: CodeOperationId,
+  contentId: CodeEvidenceContentId,
+  evidence: ReadonlyMap<string, string> | undefined,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (evidence !== undefined) {
+    const text = evidence.get(`${String(operationId)}:${String(contentId)}`);
+    if (text !== undefined) return text;
+  }
+  return readOperationText(client, threadId, operationId, contentId, signal);
 }
 
 async function waitForReconnect(signal: AbortSignal, delayMs: number): Promise<void> {

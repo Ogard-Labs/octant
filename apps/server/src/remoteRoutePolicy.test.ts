@@ -212,7 +212,7 @@ describe("remote route policy", () => {
     const fixture = handler();
 
     for (const path of [
-      "/api/shell/development-session",
+      "/api/shell/local-session",
       "/api/shell/launch-session",
       "/api/desktop/launch-sessions",
       "/api/desktop/window-authorities",

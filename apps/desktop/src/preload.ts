@@ -23,6 +23,7 @@ export const IPC_CHANNELS = {
   clearProviderCredential: "octant:provider-credential:clear",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
+  projectWindowCapability: "octant:window:project-capability",
   maximizeOrRestore: "octant:window:maximize-or-restore",
   minimize: "octant:window:minimize",
   openCodeExternalEditor: "octant:code:open-external-editor",
@@ -240,6 +241,7 @@ type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
 const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
 const PROVIDER_INSTANCE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PROJECT_WINDOW_CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 type ProjectRootPickerResult =
   | Readonly<{ kind: "cancelled" }>
   | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
@@ -349,6 +351,7 @@ export interface OctantHostBridge {
     request: CodeOperationApprovalRequest,
   ) => Promise<CodeApprovalId | undefined>;
   readonly projectWindowCapability: string;
+  readonly subscribeProjectWindowCapability: (listener: (capability: string) => void) => () => void;
   readonly windowId?: string;
   readonly providerCredentialStatus: (
     providerInstanceId: string,
@@ -584,6 +587,31 @@ export function createHostBridge(
       return value as CodeApprovalId;
     },
     projectWindowCapability,
+    subscribeProjectWindowCapability: (listener: (capability: string) => void) => {
+      let active = true;
+      let observedCapability = projectWindowCapability;
+      const publish = (value: unknown): void => {
+        if (
+          !active ||
+          typeof value !== "string" ||
+          !PROJECT_WINDOW_CAPABILITY_PATTERN.test(value) ||
+          value === observedCapability
+        ) {
+          return;
+        }
+        observedCapability = value;
+        listener(value);
+      };
+      const receive: MaterialListener = (_event, value) => {
+        publish(value);
+      };
+      ipc.on(IPC_CHANNELS.projectWindowCapability, receive);
+      void ipc.invoke(IPC_CHANNELS.projectWindowCapability).then(publish, () => undefined);
+      return () => {
+        active = false;
+        ipc.removeListener(IPC_CHANNELS.projectWindowCapability, receive);
+      };
+    },
     ...(windowId === undefined ? {} : { windowId }),
     providerCredentialStatus: async (providerInstanceId: string) => {
       validateProviderInstanceId(providerInstanceId);
@@ -1522,7 +1550,7 @@ export function decodeProjectWindowCapability(argv: readonly string[]): string {
   const values = argv.filter((argument) => argument.startsWith(prefix));
   if (values.length !== 1) throw new TypeError("Invalid Project window capability.");
   const capability = values[0]?.slice(prefix.length);
-  if (capability === undefined || !/^[A-Za-z0-9_-]{43}$/.test(capability)) {
+  if (capability === undefined || !PROJECT_WINDOW_CAPABILITY_PATTERN.test(capability)) {
     throw new TypeError("Invalid Project window capability.");
   }
   return capability;

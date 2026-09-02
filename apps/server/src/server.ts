@@ -56,6 +56,8 @@ import { ResearchRouter } from "./chat/research/researchRouter";
 import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
 import { createChatRouteHandler } from "./chatRoutes";
+import { MachineChangeFeed } from "./machineChangeFeed";
+import { createMachineChangeRouteHandler } from "./machineChangeRoutes";
 import { createScaffoldRouteHandler } from "./scaffoldRoutes";
 import {
   admittedBundledProviderDriverKinds,
@@ -208,7 +210,7 @@ import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
 import { CodeOperationApprovalStore } from "./code/codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./code/codeSessionAuthorityStore";
-import { LocalAuthorityClock } from "./localAuthorityClock";
+import { ProcessAuthorityClock } from "./processAuthorityClock";
 import {
   createFileHelperProcessTransport,
   type FileHelperProcessTransport,
@@ -406,6 +408,7 @@ import {
   LatencyStatsProjection,
   observedRpcLatency,
   slowRequestRoute,
+  withServerTiming,
 } from "./latencyStatsProjection";
 import { ProviderService } from "./providers/providerService";
 import {
@@ -808,7 +811,6 @@ export interface StartOctantServerOptions {
    */
   readonly platformCapabilities?: ReadonlyArray<string>;
   readonly desktopBridgeSecret?: string;
-  readonly developmentWebBootstrap?: true;
   /**
    * HTTP origin the local renderer may present. `null` is packaged
    * (`file://` only). Omitted keeps loopback-any-port for tests.
@@ -1226,6 +1228,7 @@ function withCodeOperationRuntime(
   service: CodeRouteService,
   runtime: CodeOperationRuntime,
 ): CodeRouteService {
+  const readEvidenceBatch = runtime.readEvidenceBatch?.bind(runtime);
   return {
     bootstrap: (windowId) => service.bootstrap(windowId),
     navigation: (windowId) => service.navigation(windowId),
@@ -1244,6 +1247,9 @@ function withCodeOperationRuntime(
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
     readOperationContent: (windowId, threadId, operationId, contentId) =>
       runtime.readEvidence(windowId, threadId, operationId, decodeCodeEvidenceContentId(contentId)),
+    ...(readEvidenceBatch === undefined
+      ? {}
+      : { readOperationContents: (windowId, input) => readEvidenceBatch(windowId, input) }),
     saveFile: (windowId, input) => service.saveFile(windowId, input),
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
@@ -1343,6 +1349,9 @@ function withCodeBoard(
     ...(service.readOperationContent === undefined
       ? {}
       : { readOperationContent: service.readOperationContent.bind(service) }),
+    ...(service.readOperationContents === undefined
+      ? {}
+      : { readOperationContents: service.readOperationContents.bind(service) }),
     ...(service.stageEvidence === undefined
       ? {}
       : { stageEvidence: service.stageEvidence.bind(service) }),
@@ -1411,21 +1420,16 @@ export function startOctantServer(
     const version = options.version ?? "0.0.0-dev";
     const startedAt = Date.now();
     const bindingReceiptStore = new DurableBindingReceiptStore(persistence.connection);
-    // Server-owned monotonic epoch guard for process-local,
-    // time-bounded authority (Code operation approvals, launch sessions,
-    // window authority, managed-root grants). Constructed unconditionally —
-    // unlike the remote gateway's `MonotonicRemoteClock`, which is only built
-    // lazily on first remote-listener enable — because local authority is
-    // always active. See `localAuthorityClock.ts` for why this is a distinct,
-    // simpler guard rather than a second `MonotonicRemoteClock` instance.
-    const localAuthorityClock = new LocalAuthorityClock({ connection: persistence.connection });
-    const localAuthorityClampNow = (wallClockMs: number) => localAuthorityClock.clamp(wallClockMs);
-    const localAuthorityClockPosture = () => localAuthorityClock.postureKind();
+    const processAuthorityClock = new ProcessAuthorityClock();
+    const machineChangeFeed = new MachineChangeFeed();
+    const unsubscribeMachineChanges = persistence.journal.subscribeCommitted((append) =>
+      machineChangeFeed.publishCommitted(append),
+    );
+    const processAuthorityNow = (wallClockMs: number) => processAuthorityClock.clamp(wallClockMs);
     const codeApprovalStore = new CodeOperationApprovalStore({
       uuid: randomUUID,
       now: Date.now,
-      clampNow: localAuthorityClampNow,
-      clockPosture: localAuthorityClockPosture,
+      clampNow: processAuthorityNow,
     });
     const extensionToolApprovalService = new ExtensionToolApprovalService({
       uuid: randomUUID,
@@ -1456,8 +1460,7 @@ export function startOctantServer(
         void activeComputerUseRuntime?.revokeWindow(windowId);
       },
       {
-        clampNow: localAuthorityClampNow,
-        clockPosture: localAuthorityClockPosture,
+        clampNow: processAuthorityNow,
       },
     );
     const agentRunEventStore = new AgentRunEventStore({
@@ -2016,18 +2019,18 @@ export function startOctantServer(
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     const launchSessionStore = new LaunchSessionStore({
-      clampNow: localAuthorityClampNow,
-      clockPosture: localAuthorityClockPosture,
+      clampNow: processAuthorityNow,
     });
     const launchSessionRoutes = createLaunchSessionRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
-      ...(options.developmentWebBootstrap === undefined
-        ? {}
-        : { developmentWebBootstrap: options.developmentWebBootstrap }),
       ...(options.allowedRendererHttpOrigin === undefined
         ? {}
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
       launchSessionStore,
+      windowAuthorityStore,
+    });
+    const machineChangeRoutes = createMachineChangeRouteHandler({
+      feed: machineChangeFeed,
       windowAuthorityStore,
     });
     const webAssetsPath = options.webAssetsPath ?? resolveWebAssetsPath();
@@ -2407,6 +2410,7 @@ export function startOctantServer(
       new CodeService({
         persistence,
         access: {
+          canBrowseProject: (projectId) => projectService.hasActiveProject(projectId, "code"),
           canAccessProject: canAccessCodeProject,
         },
         checkouts,
@@ -2448,6 +2452,7 @@ export function startOctantServer(
           },
         },
         onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
+        waitForThreadChange: (signal) => machineChangeFeed.waitFor("code-navigation", signal),
         probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
         issueContext: githubIssueContextService,
         linearIssueContext: linearIssueContextService,
@@ -2770,11 +2775,7 @@ export function startOctantServer(
     });
     const managedWorktreePorts = createManagedWorktreeNodePorts();
     const managedWorktreeService = new ManagedWorktreeService({
-      grants: new ManagedRootGrantStore(
-        randomUUID,
-        localAuthorityClampNow,
-        localAuthorityClockPosture,
-      ),
+      grants: new ManagedRootGrantStore(randomUUID, processAuthorityNow),
       receipts: managedWorktreeReceipts,
       ...managedWorktreePorts,
       authority: {
@@ -6027,6 +6028,7 @@ export function startOctantServer(
     const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
       (await projectBindingRoutes(request)) ??
       (await launchSessionRoutes(request)) ??
+      (await machineChangeRoutes(request)) ??
       (await contextRoutes(request)) ??
       (await projectRoutes(request)) ??
       (await agentRunRoutes(request)) ??
@@ -6107,7 +6109,7 @@ export function startOctantServer(
           `Octant request handling took ${(durationMs / 1_000).toFixed(1)}s for ${request.method} ${slowRequestRoute(url.pathname)}, past ${(thresholdMs / 1_000).toFixed(0)}s slow request threshold.`,
         );
       }
-      return response;
+      return withServerTiming(response, measurement, durationMs);
     };
 
     const forwardListDrift = compareRemoteForwardListToClassifier();
@@ -6296,55 +6298,34 @@ export function startOctantServer(
             port: options.port,
             maxRequestBodySize: MAX_CHAT_ATTACHMENT_BYTES,
             fetch: async (request) => {
-              try {
-                const url = new URL(request.url);
-                if (url.pathname === "/health") {
-                  return healthResponse(
-                    version,
-                    options.instanceId,
-                    options.developmentWebBootstrap,
-                    {
-                      activeAgentCount: providerRuntimeRegistry.activeSessionTotal(),
-                      attentionRequired: providerRuntimeRegistry.attentionRequired(),
-                    },
-                  );
-                }
-                // Intentionally pre-auth (like /health): returns static, non-sensitive
-                // host identity so the UI can render the selector before capability exchange.
-                if (url.pathname === "/api/hosts") {
-                  const origin = request.headers.get("origin");
-                  const headers = new Headers({ vary: "Origin" });
-                  if (
-                    origin !== null &&
-                    isAllowedRendererOrigin(origin, options.allowedRendererHttpOrigin)
-                  ) {
-                    headers.set("access-control-allow-origin", origin);
-                  }
-                  return Response.json({ hosts: listHosts(localHostDisplayName()) }, { headers });
-                }
-                return (
-                  (await privateListenerAdministrationRoutes(request)) ??
-                  (await localDeviceAdministrationRoutes(request)) ??
-                  (await hostControlRoutes(request)) ??
-                  (await dispatchMeasuredProductRoutes(request)) ??
-                  (await webAssets(request)) ??
-                  new Response("Not Found", { status: 404 })
-                );
-              } finally {
-                // Durably persist any monotonic advance observed
-                // while handling this request, mirroring the remote gateway's
-                // `persistIfAdvanced` pattern so an expiry-boundary
-                // advance for local authority is not lost on a crash before a
-                // clean stop. Best-effort — a persistence failure must not
-                // change the response already produced above.
-                try {
-                  localAuthorityClock.persistIfAdvanced();
-                } catch {
-                  // Ignore — the guard row is a best-effort durability
-                  // optimization; the in-memory bound remains authoritative
-                  // for the lifetime of this process either way.
-                }
+              const url = new URL(request.url);
+              if (url.pathname === "/health") {
+                return healthResponse(version, options.instanceId, {
+                  activeAgentCount: providerRuntimeRegistry.activeSessionTotal(),
+                  attentionRequired: providerRuntimeRegistry.attentionRequired(),
+                });
               }
+              // Intentionally pre-auth (like /health): returns static, non-sensitive
+              // host identity so the UI can render the selector before capability exchange.
+              if (url.pathname === "/api/hosts") {
+                const origin = request.headers.get("origin");
+                const headers = new Headers({ vary: "Origin" });
+                if (
+                  origin !== null &&
+                  isAllowedRendererOrigin(origin, options.allowedRendererHttpOrigin)
+                ) {
+                  headers.set("access-control-allow-origin", origin);
+                }
+                return Response.json({ hosts: listHosts(localHostDisplayName()) }, { headers });
+              }
+              return (
+                (await privateListenerAdministrationRoutes(request)) ??
+                (await localDeviceAdministrationRoutes(request)) ??
+                (await hostControlRoutes(request)) ??
+                (await dispatchMeasuredProductRoutes(request)) ??
+                (await webAssets(request)) ??
+                new Response("Not Found", { status: 404 })
+              );
             },
           });
           // Warming keeps one idle runtime per enabled provider so the first
@@ -6468,17 +6449,11 @@ export function startOctantServer(
             shutdownFailure = error;
           }
           try {
-            // Durable checkpoint of the local-authority monotonic
-            // bound on clean shutdown, matching the remote gateway's
-            // best-effort `persistClockGuardSafely` on stop. The
-            // per-request `persistIfAdvanced` above already covers a crash
-            // before a clean stop; this is a best-effort final write, wrapped
-            // so a persistence failure (for example an already-closed
-            // connection during test/shutdown races) never turns into a
-            // shutdown failure.
-            localAuthorityClock.persist();
-          } catch {
-            // Ignore — see comment above.
+            unsubscribeMachineChanges();
+            machineChangeFeed.close();
+            workTurnService.closeLiveUpdates();
+          } catch (error) {
+            shutdownFailure = error;
           }
           try {
             await gitEnvironmentPort.close();

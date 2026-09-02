@@ -21,6 +21,8 @@ export interface ChildRunStatusOptions {
   readonly windowCapability?: string;
   readonly parentThreadId?: AgentRunParentThreadId;
   readonly refreshMs?: number;
+  /** Pause new reads while retaining already-known safety controls. */
+  readonly enabled?: boolean;
 }
 
 /**
@@ -83,7 +85,6 @@ interface ParentThreadFailure {
  * exactly whatever the server's cancel already includes.
  */
 export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatusController {
-  const refreshMs = options.refreshMs ?? 1_000;
   const client = useMemo(() => {
     if (options.client !== undefined) return options.client;
     if (options.serverUrl === undefined || options.windowCapability === undefined) return undefined;
@@ -121,6 +122,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
       ? read
       : undefined;
   const entries = current?.entries ?? NO_ENTRIES;
+  const refreshMs = options.refreshMs ?? (entries.length > 0 ? 1_000 : 5_000);
   const status: ChildRunStatusReadState =
     client === undefined || parentThreadId === undefined
       ? "idle"
@@ -136,7 +138,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
       : undefined;
 
   useEffect(() => {
-    if (client === undefined || parentThreadId === undefined) return;
+    if (client === undefined || parentThreadId === undefined || options.enabled === false) return;
     let cancelled = false;
     let inFlight = false;
     const load = async () => {
@@ -183,7 +185,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
       cancelled = true;
       stop();
     };
-  }, [client, parentThreadId, refreshMs, refreshToken]);
+  }, [client, options.enabled, parentThreadId, refreshMs, refreshToken]);
 
   const summary = useMemo(
     () => (entries.length === 0 ? EMPTY_SUMMARY : buildChildRunStatusSummary(entries)),

@@ -1,6 +1,6 @@
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import { decodeComputerUseSessionView } from "@octant/contracts/computer-use";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ComputerUseActivitySurface } from "./ComputerUseActivitySurface";
@@ -38,6 +38,60 @@ const view = decodeComputerUseSessionView({
 });
 
 describe("ComputerUseActivitySurface", () => {
+  it("backs off idle production polling while keeping the first read immediate", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = clientWith([]);
+      render(<ComputerUseActivitySurface client={client} />);
+      await act(async () => {});
+      expect(client.list).toHaveBeenCalledOnce();
+
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(client.list).toHaveBeenCalledOnce();
+      await act(async () => vi.advanceTimersByTimeAsync(4_000));
+      expect(client.list).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for the faster interval after an active session appears", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = clientWith([view]);
+      render(<ComputerUseActivitySurface client={client} />);
+      await act(async () => {});
+      expect(client.list).toHaveBeenCalledOnce();
+
+      await act(async () => vi.advanceTimersByTimeAsync(999));
+      expect(client.list).toHaveBeenCalledOnce();
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(client.list).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for the idle interval after the last active session disappears", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = clientWith([view]);
+      client.list.mockResolvedValueOnce([view]).mockResolvedValue([]);
+      render(<ComputerUseActivitySurface client={client} />);
+      await act(async () => {});
+      expect(client.list).toHaveBeenCalledOnce();
+
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(client.list).toHaveBeenCalledTimes(2);
+      await act(async () => vi.advanceTimersByTimeAsync(4_999));
+      expect(client.list).toHaveBeenCalledTimes(2);
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(client.list).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps background window sessions visible", async () => {
     const client = clientWith([view]);
     render(<ComputerUseActivitySurface client={client} pollIntervalMs={60_000} />);
@@ -61,6 +115,28 @@ describe("ComputerUseActivitySurface", () => {
     );
     await vi.waitFor(() => expect(client.list).toHaveBeenCalledOnce());
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("backs off when every active session is already represented by the visible thread", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = clientWith([view]);
+      render(
+        <ComputerUseActivitySurface
+          client={client}
+          excludedSessions={new Map([[String(view.threadId), new Set([String(view.sessionId)])]])}
+        />,
+      );
+      await act(async () => {});
+      expect(client.list).toHaveBeenCalledOnce();
+
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(client.list).toHaveBeenCalledOnce();
+      await act(async () => vi.advanceTimersByTimeAsync(4_000));
+      expect(client.list).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps an unrepresented active session visible when one thread owns multiple sessions", async () => {
@@ -125,20 +201,24 @@ describe("ComputerUseActivitySurface", () => {
   });
 
   it("clears lifecycle authority when the host session list becomes unavailable", async () => {
-    const client = clientWith([view]);
-    client.list.mockResolvedValueOnce([view]).mockRejectedValue(new Error("host disconnected"));
+    vi.useFakeTimers();
+    try {
+      const client = clientWith([view]);
+      client.list.mockResolvedValueOnce([view]).mockRejectedValue(new Error("host disconnected"));
 
-    const { rerender } = render(
-      <ComputerUseActivitySurface client={client} pollIntervalMs={60_000} />,
-    );
+      render(<ComputerUseActivitySurface client={client} pollIntervalMs={1_000} />);
+      await act(async () => {});
+      expect(screen.getByText("click in Preview")).toBeVisible();
 
-    expect(await screen.findByText("click in Preview")).toBeVisible();
-    rerender(<ComputerUseActivitySurface client={client} pollIntervalMs={59_999} />);
-    await waitFor(() => expect(client.list).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByText("click in Preview")).not.toBeInTheDocument());
-    expect(
-      screen.queryByRole("complementary", { name: "Background computer use" }),
-    ).not.toBeInTheDocument();
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(client.list).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText("click in Preview")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("complementary", { name: "Background computer use" }),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not commit again when polling returns the same sessions", async () => {

@@ -26,7 +26,7 @@ interface AuthorityRecord {
 export interface WindowAuthorityStoreOptions {
   /**
    * Clamp every caller-supplied wall-clock reading against a
-   * shared, server-owned monotonic bound (see `LocalAuthorityClock`) before
+   * shared, server-owned process-monotonic bound (see `ProcessAuthorityClock`) before
    * it is used for expiry math. Every route that reaches this store still
    * passes its own raw `Date.now()`-derived value unchanged; the store itself
    * refuses to trust a reading that has moved backward past what has already

@@ -127,6 +127,7 @@ describe("desktop preload bridge", () => {
       "subscribeBrowserSurfaceState",
       "subscribeCodeDeepLinks",
       "subscribeOpenSettings",
+      "subscribeProjectWindowCapability",
       "subscribeResolvedMaterial",
       "subscribeResolvedSidebarVibrancy",
       "subscribeStartNewAgent",
@@ -568,6 +569,49 @@ describe("desktop preload bridge", () => {
       IPC_CHANNELS.resolvedSidebarVibrancy,
       registered,
     );
+  });
+
+  it("relays only a valid replacement Project window capability", () => {
+    let registered: ((event: unknown, capability: unknown) => void) | undefined;
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn().mockResolvedValue(projectWindowCapability),
+      on: vi.fn((_channel, listener) => {
+        registered = listener;
+      }),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(
+      ipc,
+      projectWindowCapability,
+    ).subscribeProjectWindowCapability(listener);
+
+    registered?.({}, "short");
+    registered?.({}, { capability: "D".repeat(43) });
+    registered?.({}, "D".repeat(43));
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenCalledWith("D".repeat(43));
+    unsubscribe();
+    expect(ipc.removeListener).toHaveBeenCalledWith(
+      IPC_CHANNELS.projectWindowCapability,
+      registered,
+    );
+  });
+
+  it("replays the current Project window capability when replacement preceded subscription", async () => {
+    const replacement = "D".repeat(43);
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn().mockResolvedValue(replacement),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+
+    createHostBridge(ipc, projectWindowCapability).subscribeProjectWindowCapability(listener);
+
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(replacement));
+    expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.projectWindowCapability);
   });
 
   it("forwards menu-bar start-new-agent events without exposing IPC", () => {

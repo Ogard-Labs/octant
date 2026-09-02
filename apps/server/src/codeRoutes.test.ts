@@ -3,6 +3,7 @@ import {
   decodeCodeThread,
   decodeCodeThreadId,
   decodeCodeOperationId,
+  MAX_CODE_EVIDENCE_BATCH_ITEMS,
   decodeWindowId,
   type CodeEventFrame,
   type CodeOperationEventFrame,
@@ -16,6 +17,7 @@ import {
   MAX_CODE_NDJSON_LINE_BYTES,
   createCodeRouteHandler,
 } from "./codeRoutes";
+import { CodeOperationSnapshotRequiredError } from "./code/codeOperationService";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
@@ -326,6 +328,89 @@ describe("Code routes", () => {
     );
   });
 
+  it("enriches provider text frames in one authorized batch", async () => {
+    const operationFrame = {
+      threadId,
+      operationId,
+      cursor: 1,
+      occurredAt: now,
+      event: {
+        kind: "provider-content" as const,
+        channel: "message" as const,
+        content: { contentId, digest, byteLength: 12 },
+      },
+    };
+    const subscribeOperation = vi.fn(async function* () {
+      yield operationFrame;
+    });
+    const readOperationContents = vi.fn(async () => ({
+      threadId,
+      items: [{ operationId, contentId, text: "Immediate text" }],
+    }));
+    const route = routeFixture({ subscribeOperation, readOperationContents });
+
+    const response = await route(
+      request(`/api/code/threads/${threadId}/operations/${operationId}/events?afterCursor=0`),
+    );
+
+    expect(response?.status).toBe(200);
+    await expect(response?.text()).resolves.toBe(
+      `${JSON.stringify({ ...operationFrame, displayText: "Immediate text" })}\n`,
+    );
+    expect(readOperationContents).toHaveBeenCalledWith(windowId, {
+      threadId,
+      items: [{ operationId, contentId }],
+    });
+  });
+
+  it("chunks operation stream enrichment within the evidence batch contract", async () => {
+    const frames = Array.from({ length: 65 }, (_, index) => {
+      const frameContentId = `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+      return {
+        threadId,
+        operationId,
+        cursor: index + 1,
+        occurredAt: now,
+        event: {
+          kind: "provider-content" as const,
+          channel: "message" as const,
+          content: { contentId: frameContentId, digest, byteLength: 1 },
+        },
+      };
+    });
+    const subscribeOperation = vi.fn(async function* () {
+      yield* frames;
+    });
+    const readOperationContents = vi.fn(
+      async (
+        _windowId: unknown,
+        input: {
+          readonly items: ReadonlyArray<{
+            readonly operationId: string;
+            readonly contentId: string;
+          }>;
+        },
+      ) => {
+        expect(input.items.length).toBeLessThanOrEqual(MAX_CODE_EVIDENCE_BATCH_ITEMS);
+        return {
+          threadId,
+          items: input.items.map((item) => ({ ...item, text: "x" })),
+        };
+      },
+    );
+    const route = routeFixture({ subscribeOperation, readOperationContents });
+
+    const response = await route(
+      request(`/api/code/threads/${threadId}/operations/${operationId}/events?afterCursor=0`),
+    );
+    const lines = (await response?.text())?.trim().split("\n") ?? [];
+
+    expect(response?.status).toBe(200);
+    expect(readOperationContents).toHaveBeenCalledTimes(2);
+    expect(lines).toHaveLength(65);
+    expect(lines.every((line) => JSON.parse(line).displayText === "x")).toBe(true);
+  });
+
   it("reads a versioned paginated conversation through authenticated thread authority", async () => {
     const conversation = vi.fn(async () => ({
       version: 3,
@@ -403,6 +488,24 @@ describe("Code routes", () => {
     expect(subscribe).toHaveBeenCalledWith(windowId, threadId, 999, expect.any(AbortSignal));
   });
 
+  it("returns a snapshot-required conflict when operation replay retention has a gap", async () => {
+    const route = routeFixture({
+      subscribeOperation: vi.fn(async function* () {
+        throw new CodeOperationSnapshotRequiredError("gap");
+      }),
+    });
+
+    const response = await route(
+      request(`/api/code/threads/${threadId}/operations/${operationId}/events?afterCursor=7`),
+    );
+
+    expect(response?.status).toBe(409);
+    await expect(response?.json()).resolves.toEqual({
+      category: "stale",
+      message: "Code operation replay requires a snapshot.",
+    });
+  });
+
   it("returns authorized content as raw bytes with digest and length metadata", async () => {
     const bytes = new Uint8Array([0, 1, 2, 255]);
     const readContent = vi.fn(() => ({ bytes, digest, byteLength: bytes.byteLength }));
@@ -469,6 +572,32 @@ describe("Code routes", () => {
     expect(response?.status).toBe(200);
     expect(new TextDecoder().decode(await response!.arrayBuffer())).toBe("diff evidence");
     expect(readOperationContent).toHaveBeenCalledWith(windowId, threadId, operationId, contentId);
+  });
+
+  it("hydrates one conversation page through a single authorized evidence batch", async () => {
+    const readOperationContents = vi.fn(async () => ({
+      threadId,
+      items: [{ operationId, contentId, text: "display text" }],
+    }));
+    const route = routeFixture({ readOperationContents });
+
+    const response = await route(
+      request("/api/code/evidence/batch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ threadId, items: [{ operationId, contentId }] }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({
+      threadId,
+      items: [{ operationId, contentId, text: "display text" }],
+    });
+    expect(readOperationContents).toHaveBeenCalledWith(windowId, {
+      threadId,
+      items: [{ operationId, contentId }],
+    });
   });
 
   it("accepts canonical raw UTF-8 save metadata without exposing a root path", async () => {

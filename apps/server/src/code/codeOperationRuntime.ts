@@ -7,6 +7,7 @@ import {
   decodeCodeOperationApprovalConfirmation,
   decodeCodeCheckoutId,
   decodeCodeOperationCommand,
+  decodeCodeEvidenceBatchResponse,
   decodeCodeRelativePath,
   decodeCodeReviewFindingId,
   decodeProviderSessionId,
@@ -15,6 +16,8 @@ import {
   type CodeOperationCommand,
   type CodeOperationFailure,
   type CodeConversationPage,
+  type CodeEvidenceBatchRequest,
+  type CodeEvidenceBatchResponse,
   type CodeOperationApprovalReceipt,
   type CodeOperationApprovalRequest,
   type CodeOperationApprovalChallenge,
@@ -241,6 +244,10 @@ export interface CodeOperationRuntime {
     operationId: CodeOperationId,
     contentId: CodeEvidenceContentId,
   ): Promise<{ readonly bytes: Uint8Array; readonly digest: string; readonly byteLength: number }>;
+  readEvidenceBatch?(
+    windowId: WindowId,
+    input: CodeEvidenceBatchRequest,
+  ): Promise<CodeEvidenceBatchResponse>;
   prepareApproval(
     windowId: WindowId,
     request: CodeOperationApprovalRequest,
@@ -679,17 +686,17 @@ export function createCodeOperationRuntime(
         }
         return { bytes, digest, byteLength: bytes.byteLength };
       } catch (error) {
-        const category =
-          error instanceof CodeOperationServiceError ? error.category : ("unavailable" as const);
-        throw Object.assign(new Error("Code operation evidence is unavailable."), {
-          failure: {
-            category,
-            message:
-              category === "unauthorized"
-                ? "Code operation evidence is unauthorized."
-                : "Code operation evidence is unavailable.",
-          },
+        throw codeEvidenceReadFailure(error);
+      }
+    },
+    readEvidenceBatch: async (windowId, input) => {
+      try {
+        return decodeCodeEvidenceBatchResponse({
+          threadId: input.threadId,
+          items: await service.readEvidenceBatch(windowId, input.threadId, input.items),
         });
+      } catch (error) {
+        throw codeEvidenceReadFailure(error);
       }
     },
     close: async () => {
@@ -706,6 +713,20 @@ export function createCodeOperationRuntime(
       ]);
     },
   };
+}
+
+function codeEvidenceReadFailure(error: unknown): Error {
+  const category =
+    error instanceof CodeOperationServiceError ? error.category : ("unavailable" as const);
+  return Object.assign(new Error("Code operation evidence is unavailable."), {
+    failure: {
+      category,
+      message:
+        category === "unauthorized"
+          ? "Code operation evidence is unauthorized."
+          : "Code operation evidence is unavailable.",
+    },
+  });
 }
 
 interface ApprovalContext {

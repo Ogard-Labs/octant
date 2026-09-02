@@ -40,7 +40,7 @@ export interface CodeOperationApprovalStoreOptions {
   readonly now: () => number;
   /**
    * Clamp every wall-clock reading from `now()` against a shared,
-   * server-owned monotonic bound (see `LocalAuthorityClock`) before it is used
+   * server-owned process-monotonic bound (see `ProcessAuthorityClock`) before it is used
    * for expiry math, so a host wall-clock rollback cannot revive an expired
    * Code operation approval. Defaults to the identity function.
    */

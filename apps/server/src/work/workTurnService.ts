@@ -24,6 +24,7 @@ import {
   type WorkTurnLookupResult,
   type WorkTurnRequestId,
   type WorkTurnState,
+  type WorkTurnStreamFrame,
   type Project,
   type ProjectId,
   type ProviderAttachmentInput,
@@ -59,6 +60,7 @@ import {
   type WorkTurnRuntimeOutcome,
   type WorkTurnRuntimePort,
 } from "./workTurnRuntime";
+import { WorkTurnLiveStore } from "./workTurnLiveStore";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -115,6 +117,7 @@ export interface WorkTurnServiceDependencies {
     readonly bootstrap: (windowId: WindowId) => Promise<{
       readonly threads: ReadonlyArray<WorkThread>;
     }>;
+    readonly read: (windowId: WindowId, threadId: WorkThreadId) => Promise<WorkThread | undefined>;
   };
   readonly projects: {
     readonly bootstrap: (windowId: WindowId) => Promise<{
@@ -176,6 +179,7 @@ export interface WorkTurnServiceDependencies {
    * default until this thread's model reports a window.
    */
   readonly safeInputBudgetTokens?: number;
+  readonly liveUpdates?: WorkTurnLiveStore;
 }
 
 export class WorkTurnService {
@@ -197,6 +201,7 @@ export class WorkTurnService {
   readonly #clock: () => string;
   readonly #expectedHostId: string;
   readonly #safeInputBudgetTokens: number;
+  readonly #liveUpdates: WorkTurnLiveStore;
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
   readonly #liveResponses = new Map<string, string>();
@@ -226,6 +231,7 @@ export class WorkTurnService {
     this.#clock = dependencies.clock;
     this.#expectedHostId = dependencies.expectedHostId ?? "local";
     this.#safeInputBudgetTokens = dependencies.safeInputBudgetTokens ?? WORK_TURN_SAFE_INPUT_TOKENS;
+    this.#liveUpdates = dependencies.liveUpdates ?? new WorkTurnLiveStore();
   }
 
   async startFirstTurn(
@@ -239,10 +245,7 @@ export class WorkTurnService {
       return this.#lookupMatching(command, existing);
     }
 
-    const threadBootstrap = await this.#threads.bootstrap(authenticatedWindowId);
-    const thread = threadBootstrap.threads.find(
-      (candidate) => String(candidate.id) === String(command.threadId),
-    );
+    const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     const accessible = projectBootstrap.active.some(
       (project) =>
@@ -464,6 +467,8 @@ export class WorkTurnService {
       status: "cancelled",
       ...(turn.response === undefined ? {} : { response: turn.response }),
     });
+    const cancelled = this.#projection.lookup(turn.requestId);
+    if (cancelled !== undefined) this.#liveUpdates.settle(turn.threadId, cancelled);
     return decodeWorkTurnCancelResult({
       kind: "turn-cancelled",
       requestId: turn.requestId,
@@ -478,15 +483,33 @@ export class WorkTurnService {
     threadId: WorkThreadId,
   ): Promise<WorkThreadTranscript> {
     this.#assertReady();
-    const bootstrap = await this.#threads.bootstrap(authenticatedWindowId);
-    const thread = bootstrap.threads.find((candidate) => String(candidate.id) === String(threadId));
+    const thread = await this.#threads.read(authenticatedWindowId, threadId);
     if (thread === undefined) {
       throw this.#failure("unauthorized", "Work thread is unavailable for this window.");
     }
     return decodeWorkThreadTranscript({
       threadId,
       turns: this.#projection.listForThread(threadId).map((turn) => this.#withLive(turn)),
+      liveCursor: this.#liveUpdates.head(threadId),
     });
+  }
+
+  async *subscribe(
+    authenticatedWindowId: WindowId,
+    threadId: WorkThreadId,
+    afterSequence: number,
+    signal: AbortSignal,
+  ): AsyncGenerator<WorkTurnStreamFrame> {
+    this.#assertReady();
+    const thread = await this.#threads.read(authenticatedWindowId, threadId);
+    if (thread === undefined) {
+      throw this.#failure("unauthorized", "Work thread is unavailable for this window.");
+    }
+    yield* this.#liveUpdates.subscribe({ threadId, afterSequence, signal });
+  }
+
+  closeLiveUpdates(): void {
+    this.#liveUpdates.close();
   }
 
   #withLive(turn: WorkTurnState): WorkTurnState {
@@ -527,7 +550,17 @@ export class WorkTurnService {
       ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
       ...(input.context.length === 0 ? {} : { context: input.context }),
       onDelta: (response) => {
+        const projected = this.#projection.lookup(input.command.requestId);
+        if (
+          input.signal.aborted ||
+          (projected?.status !== "accepted" && projected?.status !== "running")
+        ) {
+          return;
+        }
+        const previous = this.#liveResponses.get(String(input.command.requestId)) ?? "";
         this.#liveResponses.set(String(input.command.requestId), response);
+        const delta = response.startsWith(previous) ? response.slice(previous.length) : response;
+        this.#liveUpdates.appendResponse(input.command.threadId, input.command.requestId, delta);
       },
     });
     const latest = this.#projection.lookup(input.command.requestId);
@@ -537,6 +570,8 @@ export class WorkTurnService {
       live === undefined ? latest : decodeWorkTurnState({ ...latest, response: live }),
       outcome,
     );
+    const settled = this.#projection.lookup(input.command.requestId);
+    if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
   }
 
   #issueContextContribution(threadId: WorkThreadId): ReadonlyArray<WorkTurnContextContribution> {
@@ -805,8 +840,7 @@ export class WorkTurnService {
     threadId: WorkThreadId,
   ): Promise<WorkAttachmentStore> {
     this.#assertReady();
-    const bootstrap = await this.#threads.bootstrap(authenticatedWindowId);
-    const thread = bootstrap.threads.find((candidate) => String(candidate.id) === String(threadId));
+    const thread = await this.#threads.read(authenticatedWindowId, threadId);
     if (thread === undefined) {
       throw this.#failure("unauthorized", "Work thread is unavailable for this window.");
     }
@@ -867,8 +901,7 @@ export class WorkTurnService {
     threadId: WorkThreadId,
     projectId: ProjectId,
   ): Promise<void> {
-    const bootstrap = await this.#threads.bootstrap(windowId);
-    const thread = bootstrap.threads.find((candidate) => String(candidate.id) === String(threadId));
+    const thread = await this.#threads.read(windowId, threadId);
     if (thread === undefined || String(thread.projectId) !== String(projectId)) {
       throw this.#failure("unauthorized", "Work turn is unavailable for this window.");
     }

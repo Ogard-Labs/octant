@@ -12,8 +12,9 @@ export interface ShellRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
   /**
-   * HTTP origin the renderer is allowed to present. `null` is packaged
-   * (`file://` only). Omitted keeps loopback-any-port for tests.
+   * Whether the opaque packaged renderer is admitted: `null` or omission
+   * admits it, while a development renderer URL excludes it. Canonical
+   * loopback HTTP origins are always admitted independently of this value.
    */
   readonly allowedRendererHttpOrigin?: string | null;
 }
@@ -177,8 +178,9 @@ export function isLoopbackHostname(hostname: string): boolean {
 
 /**
  * Packaged Electron file pages send Origin: null (opaque) or file://.
- * Development may pin the Vite origin. Tests omit `allowedHttpOrigin` and
- * keep loopback HTTP on any port.
+ * The local listener trusts canonical loopback HTTP clients independently of
+ * which loopback renderer Electron currently uses. `allowedHttpOrigin` only
+ * distinguishes whether the opaque packaged renderer is also admitted.
  */
 export function isAllowedRendererOrigin(
   origin: string,
@@ -198,9 +200,7 @@ export function isAllowedRendererOrigin(
       url.pathname === "/" &&
       url.search === "" &&
       url.hash === "";
-    if (!loopbackHttp) return false;
-    if (allowedHttpOrigin === undefined) return true;
-    return origin === allowedHttpOrigin;
+    return loopbackHttp;
   } catch {
     return false;
   }

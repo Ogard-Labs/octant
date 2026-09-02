@@ -280,6 +280,20 @@ describe("Journal", () => {
     connection.close();
   });
 
+  it("publishes committed ranges to runtime subscribers until they unsubscribe", () => {
+    const connection = openMigratedConnection();
+    const journal = createJournal(connection);
+    const published: Array<ReturnType<Journal["append"]>> = [];
+    const unsubscribe = journal.subscribeCommitted((append) => published.push(append));
+
+    const first = journal.append(appendRequest([pendingEvent(ids.event1)]));
+    unsubscribe();
+    journal.append(appendRequest([pendingEvent(ids.event2)], 1));
+
+    expect(published).toEqual([first]);
+    connection.close();
+  });
+
   it("persists and replays remote-device and agent EventActor attribution", () => {
     const connection = openMigratedConnection();
     const journal = createJournal(connection);

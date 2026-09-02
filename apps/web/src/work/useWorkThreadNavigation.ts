@@ -29,6 +29,7 @@ export function buildWorkThreadNavigation(
 
 export interface UseWorkThreadNavigationOptions {
   readonly navigationRefreshMs?: number;
+  readonly changeRevision?: number;
 }
 
 export function useWorkThreadNavigation(
@@ -125,6 +126,29 @@ export function useWorkThreadNavigation(
       }
     };
   }, [bootstrap !== undefined, navigationRefreshMs]);
+
+  useEffect(() => {
+    if (
+      options.changeRevision === undefined ||
+      options.changeRevision <= 0 ||
+      !bootstrapped.current
+    )
+      return;
+    let cancelled = false;
+    const request = ++requestGeneration.current;
+    void clientRef.current
+      .navigation()
+      .then((next) => {
+        if (!cancelled && mounted.current && request === requestGeneration.current) {
+          setBootstrap(next);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      if (request === requestGeneration.current) requestGeneration.current += 1;
+    };
+  }, [options.changeRevision]);
 
   const navigation = useMemo(
     () => buildWorkThreadNavigation(bootstrap?.threads ?? [], bootstrap?.runtime ?? []),

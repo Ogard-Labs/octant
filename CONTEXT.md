@@ -6,12 +6,20 @@ their work, and the isolated places where that work executes.
 ## Control and ownership
 
 **Device**:
-A phone, browser, laptop, or desktop app used to control Octant work.
+A phone, browser, laptop, or desktop app used to control one Machine. Device
+type, renderer mode, and development tooling never select a different Machine
+or authoritative store.
 _Avoid_: Host, environment
 
 **Machine**:
-A computer that owns Octant threads, data, credentials, and execution.
+A computer with one canonical Octant identity and authoritative store that owns
+Projects, threads, credentials, and execution for every connected Device.
 _Avoid_: Device, environment
+
+**Client context**:
+A Device-local presentation context such as its active panes, layout, focus,
+and unsaved drafts. It never owns or partitions Projects, threads, or history.
+_Avoid_: Machine, Project
 
 **This Mac**:
 The local desktop Machine running the current Octant app.

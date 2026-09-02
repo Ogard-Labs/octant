@@ -2227,6 +2227,56 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByRole("heading", { name: "Code is disconnected" })).toBeVisible();
   });
 
+  it("keeps loaded child-run stop controls visible when the Code transcript disconnects", async () => {
+    const agentRunClient = {
+      parentSummary: vi.fn(async () => ({
+        parentThreadId: String(threadId),
+        entries: [
+          {
+            runId: "run-a",
+            requestId: "request-a",
+            parentThreadId: String(threadId),
+            role: "worker",
+            task: "Check the fix",
+            lifecycleStatus: "running",
+            executionKind: "managed",
+            usageQuality: "measured",
+            resultAcknowledgement: { required: false, acknowledged: false },
+            version: 1,
+            updatedAt: "2026-08-14T10:00:00.000Z",
+          },
+        ],
+      })),
+      acknowledge: vi.fn(),
+      cancel: vi.fn(async () => ({ results: [] })),
+      requestRun: vi.fn(),
+    } as never;
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        agentRunClient={agentRunClient}
+        controller={controller()}
+        threadId={threadId}
+      />,
+    );
+    expect(await screen.findByRole("region", { name: "Child run status" })).toBeVisible();
+
+    rerender(
+      <CodeThreadWorkspace
+        agentRunClient={agentRunClient}
+        controller={controller({
+          activeView: undefined,
+          conversationHistory: "unavailable",
+          errorMessage: "Code transport disconnected.",
+          status: "disconnected",
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "Child run status" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Stop this thread's children" })).toBeVisible();
+  });
+
   it("shows the historical provider binding and terminal state for replayed turns", () => {
     render(
       <CodeThreadWorkspace

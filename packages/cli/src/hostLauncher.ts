@@ -19,7 +19,6 @@ export interface HostHealth {
   readonly url?: URL;
   readonly instanceId?: string;
   readonly version?: string;
-  readonly developmentWebBootstrap?: boolean;
 }
 
 export interface HostLauncherDependencies {
@@ -35,7 +34,6 @@ export interface HostLauncherDependencies {
     readonly args: readonly string[];
   };
   readonly resolveAttachedHost?: () => Promise<AttachedHostCandidate | undefined>;
-  readonly developmentWebBootstrap?: true;
   readonly environment?: NodeJS.ProcessEnv;
   /** Persisted automatic-startup policy. Launch paths inject a real store. */
   readonly policyStore?: HostServicePolicyReader;
@@ -75,14 +73,12 @@ export type HostLauncherResult =
       readonly url: URL;
       readonly instanceId?: string;
       readonly version?: string;
-      readonly developmentWebBootstrap?: boolean;
     }
   | {
       readonly kind: "started";
       readonly url: URL;
       readonly instanceId?: string;
       readonly version?: string;
-      readonly developmentWebBootstrap?: boolean;
     }
   | { readonly kind: "disabled"; readonly reason: string }
   | { readonly kind: "start-failed"; readonly reason: string };
@@ -102,9 +98,6 @@ export async function attachOrCreateHost(
       url,
       ...(probe.instanceId === undefined ? {} : { instanceId: probe.instanceId }),
       ...(probe.version === undefined ? {} : { version: probe.version }),
-      ...(probe.developmentWebBootstrap === undefined
-        ? {}
-        : { developmentWebBootstrap: probe.developmentWebBootstrap }),
     };
   }
   if (probe.status === "disabled") {
@@ -112,6 +105,16 @@ export async function attachOrCreateHost(
       kind: "disabled",
       reason:
         "Octant host storage is not ready. Restart the Octant desktop application or `octant server` and retry.",
+    };
+  }
+
+  const attached = await probeAttachedCandidate(dependencies.resolveAttachedHost, fetch);
+  if (attached !== undefined) {
+    return {
+      kind: "attached",
+      url: attached.url,
+      instanceId: attached.instanceId,
+      ...(attached.version === undefined ? {} : { version: attached.version }),
     };
   }
 
@@ -140,7 +143,7 @@ export async function attachOrCreateHost(
   }
   const spawn = dependencies.spawn ?? defaultSpawn;
   const command = dependencies.serverStartCommand?.() ?? defaultServerStartCommand();
-  spawn({
+  const child = spawn({
     command: command.command,
     args: command.args,
     env: {
@@ -149,7 +152,6 @@ export async function attachOrCreateHost(
       OCTANT_DESKTOP_BRIDGE_SECRET: dependencies.bridgeSecret,
       OCTANT_SERVER_PORT: String(port),
       OCTANT_HOST_SERVICE_MODE: "web",
-      ...(dependencies.developmentWebBootstrap === true ? { OCTANT_DEV_WEB_BOOTSTRAP: "1" } : {}),
     },
     bridgeSecret: dependencies.bridgeSecret,
     port,
@@ -166,27 +168,55 @@ export async function attachOrCreateHost(
   });
   if (ready.status === "ready") {
     const readyUrl = ready.url ?? url;
+    const startedCanonicalHost = readyUrl.toString() === url.toString();
+    if (!startedCanonicalHost) stopSpawnedChild(child);
     return {
-      kind: "started",
+      kind: startedCanonicalHost ? "started" : "attached",
       url: readyUrl,
       ...(ready.instanceId === undefined ? {} : { instanceId: ready.instanceId }),
       ...(ready.version === undefined ? {} : { version: ready.version }),
-      ...(ready.developmentWebBootstrap === undefined
-        ? {}
-        : { developmentWebBootstrap: ready.developmentWebBootstrap }),
     };
   }
   if (ready.status === "disabled") {
+    stopSpawnedChild(child);
     return {
       kind: "disabled",
       reason:
         "Octant host storage did not become ready. Restart the Octant desktop application or `octant server` and retry.",
     };
   }
+  stopSpawnedChild(child);
   return {
     kind: "start-failed",
     reason: `Octant host did not become ready within ${dependencies.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS}ms. Another process may already own port ${port}.`,
   };
+}
+
+async function probeAttachedCandidate(
+  resolveAttachedHost: (() => Promise<AttachedHostCandidate | undefined>) | undefined,
+  fetch: typeof globalThis.fetch,
+): Promise<(AttachedHostCandidate & { readonly version?: string }) | undefined> {
+  if (resolveAttachedHost === undefined) return undefined;
+  try {
+    const candidate = await resolveAttachedHost();
+    if (candidate === undefined) return undefined;
+    const probe = await probeHostHealth({ url: candidate.url, fetch });
+    if (probe.status !== "ready" || probe.instanceId !== candidate.instanceId) return undefined;
+    return {
+      ...candidate,
+      ...(probe.version === undefined ? {} : { version: probe.version }),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function stopSpawnedChild(child: HostChildProcess | undefined): void {
+  try {
+    child?.kill("SIGTERM");
+  } catch {
+    // A competing canonical host may win after this child has already exited.
+  }
 }
 
 export async function probeHostHealth(options: {
@@ -203,7 +233,6 @@ export async function probeHostHealth(options: {
       readonly storage?: string;
       readonly instanceId?: string;
       readonly version?: string;
-      readonly developmentWebBootstrap?: boolean;
     };
     if (body.product !== "Octant" || body.status !== "ok") return { status: "timeout" };
     if (body.storage !== "ready") {
@@ -218,9 +247,6 @@ export async function probeHostHealth(options: {
       url: options.url,
       ...(body.instanceId === undefined ? {} : { instanceId: body.instanceId }),
       ...(body.version === undefined ? {} : { version: body.version }),
-      ...(body.developmentWebBootstrap === undefined
-        ? {}
-        : { developmentWebBootstrap: body.developmentWebBootstrap === true }),
     };
   } catch {
     return { status: "timeout" };

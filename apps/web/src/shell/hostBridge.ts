@@ -185,6 +185,9 @@ export interface OctantHostBridge {
     request: CodeOperationApprovalRequest,
   ) => Promise<string | undefined>;
   readonly projectWindowCapability: string;
+  readonly subscribeProjectWindowCapability?: (
+    listener: (capability: string) => void,
+  ) => () => void;
   /** Capability-bound window identity from Electron argv, never from a query. */
   readonly windowId?: string;
   readonly providerCredentialStatus: (

@@ -83,6 +83,11 @@ describe("authenticated product route dispatch", () => {
     ).toBe("project.overview.read");
     expect(
       classifyProductAction(
+        new Request("https://octant.example/api/code/evidence/batch", { method: "POST" }),
+      ),
+    ).toBe("project.overview.read");
+    expect(
+      classifyProductAction(
         new Request("https://octant.example/api/work/board", { method: "POST" }),
       ),
     ).toBe("project.overview.read");

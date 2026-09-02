@@ -65,6 +65,13 @@ describe("WorkThreadService", () => {
     expect(fixture.projects.bootstrap).not.toHaveBeenCalled();
   });
 
+  it("does not read a deleted Work thread from its durable projection", async () => {
+    const deleted = thread({ lifecycle: "deleted" });
+    const fixture = serviceFixture({ threads: [deleted] });
+
+    await expect(fixture.service.read(ids.window, ids.thread)).resolves.toBeUndefined();
+  });
+
   it("creates a thread for the active Work Project with a local-user event", async () => {
     const fixture = serviceFixture({ threads: [] });
 

@@ -12,11 +12,13 @@ import { useChildRunStatus } from "./useChildRunStatus";
  */
 export function ThreadChildRunStatusSlot(props: {
   readonly client?: AgentRunClient;
+  readonly enabled?: boolean;
   readonly threadId: string;
   readonly onAddAgent?: () => void;
 }) {
   const childRuns = useChildRunStatus({
     ...(props.client === undefined ? {} : { client: props.client }),
+    ...(props.enabled === undefined ? {} : { enabled: props.enabled }),
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
   if (childRuns.status !== "ready") return null;

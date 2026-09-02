@@ -16,6 +16,7 @@ export interface ThreadActivityPictureInPictureProps {
   readonly browserClient?: BrowserAutomationClient;
   readonly children: ReactNode;
   readonly computerUseClient?: ComputerUseClient;
+  readonly enabled?: boolean;
   readonly onComputerUseSessionChange?: (
     threadId: string,
     sessionId: string,
@@ -38,6 +39,10 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
   const [selectedKind, setSelectedKind] = useState<ActivityKind>();
   const [busy, setBusy] = useState(false);
   const activityGeneration = useRef(0);
+  const hasPolledActivity =
+    (browserSnapshot !== undefined && isBrowserActivity(browserSnapshot)) ||
+    (computerSession !== undefined && isComputerUseActivity(computerSession));
+  const pollIntervalMs = props.pollIntervalMs ?? (hasPolledActivity ? 1_000 : 5_000);
 
   const loadBrowser = useCallback(
     async (signal?: AbortSignal) => {
@@ -91,6 +96,12 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
   );
 
   useEffect(() => {
+    if (props.enabled === false) {
+      activityGeneration.current += 1;
+      setBrowserSnapshot(undefined);
+      setComputerSession(undefined);
+      return;
+    }
     const controller = new AbortController();
     let browserInFlight = false;
     let computerInFlight = false;
@@ -113,21 +124,25 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
         void refreshBrowser();
         void refreshComputer();
       },
-      props.pollIntervalMs ?? 1_000,
+      pollIntervalMs,
       { runImmediately: true },
     );
     return () => {
       controller.abort();
       stop();
     };
-  }, [loadBrowser, loadComputerUse, props.pollIntervalMs]);
+  }, [loadBrowser, loadComputerUse, pollIntervalMs, props.enabled]);
 
   const currentBrowserSnapshot =
-    browserSnapshot !== undefined && String(browserSnapshot.threadId) === String(props.threadId)
+    props.enabled !== false &&
+    browserSnapshot !== undefined &&
+    String(browserSnapshot.threadId) === String(props.threadId)
       ? browserSnapshot
       : undefined;
   const currentComputerSession =
-    computerSession !== undefined && String(computerSession.threadId) === String(props.threadId)
+    props.enabled !== false &&
+    computerSession !== undefined &&
+    String(computerSession.threadId) === String(props.threadId)
       ? computerSession
       : undefined;
 
