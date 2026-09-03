@@ -31,6 +31,9 @@ export function shellStateEnvironment(directory: string): Record<string, string>
     // user's behalf, so both current and legacy Oh My Zsh switches stay off.
     DISABLE_AUTO_UPDATE: "true",
     DISABLE_UPDATE_PROMPT: "true",
+    // zsh draws an inverse "%" before the first prompt of a fresh pty, where
+    // no partial line preceded it; in the dock it read as a rendering fault.
+    PROMPT_EOL_MARK: "",
     HISTFILE: join(directory, "zsh_history"),
     XDG_CACHE_HOME: join(directory, "cache"),
     XDG_STATE_HOME: join(directory, "state"),
@@ -148,6 +151,11 @@ export function ensureNodePtySpawnHelperExecutable(
   }
 }
 
+export const TERMINAL_TTY_RULES: ReadonlyArray<string> = [
+  '(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))',
+  "(allow pseudo-tty)",
+];
+
 export class TerminalProcessPort {
   readonly #dependencies: {
     readonly spawn: NonNullable<TerminalProcessDependencies["spawn"]>;
@@ -259,6 +267,11 @@ export class TerminalProcessPort {
         additionalWriteRoots: [shellState],
         networkEgress: this.#dependencies.networkEgress,
         allowFileReadStar: true,
+        // The shell claims its pseudo-terminal's foreground process group
+        // through a tty ioctl. With that denied, zsh printed "can't set tty
+        // pgrp: operation not permitted", ran without job control, and echoed
+        // every command line twice. Only the pty devices are opened up.
+        extraRules: TERMINAL_TTY_RULES,
         // Deny the whole shared base, not the siblings that happen to exist
         // now: another repository's state directory may be created after this
         // profile is generated, and this shell must never gain it. The allow
