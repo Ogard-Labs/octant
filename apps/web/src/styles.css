@@ -1453,16 +1453,19 @@ button:focus-visible {
   background: var(--octant-workspace);
 }
 
+/* The title band shares the 34px rail with the dock head beside it, and its
+   hairline runs to the window's edge: the space reserved for the native
+   window controls is padding inside the band, not a margin outside it, which
+   stopped the rule short and left a gap before the dock's own rule. */
 .workspace-thread-tabs {
   position: relative;
   z-index: 5;
   display: flex;
   min-width: 0;
-  min-height: 36px;
+  min-height: 34px;
   align-items: center;
   gap: 4px;
-  margin-right: var(--octant-window-chrome-reserved-width, 148px);
-  padding: 3px 0 3px var(--oct-space-3);
+  padding: 2px var(--octant-window-chrome-reserved-width, 148px) 2px var(--oct-space-3);
   border-bottom: 1px solid var(--octant-border);
   background: color-mix(in srgb, var(--octant-workspace) 96%, var(--octant-control));
 }
@@ -2514,6 +2517,41 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .shell-state [data-slot="empty-state-actions"] button {
   min-height: 32px;
   padding-inline: 10px;
+}
+
+/* Loading is not an object on the page; it is the page not being there yet.
+   The raised card with an icon well, a title, and a sentence read as a
+   finished empty state ("Loading pull requests / Reading the last authorized
+   snapshot.") on every route that was still fetching. While loading, the
+   state is one quiet line: spinner, then the title. */
+.shell-state[data-state="loading"] {
+  width: auto;
+  max-width: none;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0 8px;
+  padding: 12px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--oct-meta);
+}
+
+.shell-state[data-state="loading"] [data-slot="empty-state-media"] {
+  width: 16px;
+  height: 16px;
+  background: transparent;
+}
+
+.shell-state[data-state="loading"] [data-slot="empty-state-title"] {
+  color: var(--oct-meta);
+  font-weight: 400;
+}
+
+.shell-state[data-state="loading"] [data-slot="empty-state-eyebrow"],
+.shell-state[data-state="loading"] [data-slot="empty-state-description"] {
+  display: none;
 }
 
 .shell-state__spinner {
@@ -5308,7 +5346,10 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
   width: min(640px, 90vw);
-  height: min(60vh, 520px);
+  /* A cap, not a height: five models do not need a 520px box with four
+     hundred empty pixels under them. The pane scrolls once the list is
+     longer than the cap. */
+  max-height: min(60vh, 520px);
   padding: 0;
   overflow: hidden;
   background: var(--octant-surface);

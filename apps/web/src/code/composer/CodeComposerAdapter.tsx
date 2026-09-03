@@ -441,25 +441,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         </div>
 
         <div className="composer-stack">
-          <div className="composer-tray" aria-label="Thread context">
-            <div className="composer-tray__leading">
-              {projectControl}
-              {branchControl}
-              {environmentControl}
-            </div>
-            <div className="composer-tray__trailing">
-              {hasProject ? (
-                <CodeWorkspaceSelector
-                  onChange={setWorkspaceOverride}
-                  value={workspace}
-                  {...(props.creating === true ? { disabled: true } : {})}
-                />
-              ) : null}
-              {props.githubControl}
-              {props.createFromControl}
-            </div>
-          </div>
-
           <ThreadComposer
             chips={
               <>
@@ -602,6 +583,26 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 },
               },
             }}
+            footer={
+              <div className="composer-tray" aria-label="Thread context">
+                <div className="composer-tray__leading">
+                  {projectControl}
+                  {branchControl}
+                  {environmentControl}
+                </div>
+                <div className="composer-tray__trailing">
+                  {hasProject ? (
+                    <CodeWorkspaceSelector
+                      onChange={setWorkspaceOverride}
+                      value={workspace}
+                      {...(props.creating === true ? { disabled: true } : {})}
+                    />
+                  ) : null}
+                  {props.githubControl}
+                  {props.createFromControl}
+                </div>
+              </div>
+            }
           />
         </div>
 
