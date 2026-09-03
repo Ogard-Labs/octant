@@ -214,7 +214,7 @@ export function ThemeAppearanceEditor(props: {
           </label>
         </div>
       </fieldset>
-      <details className="settings-card-section settings-theme-editor__disclosure">
+      <details className="settings-card-section settings-card-section--open settings-theme-editor__disclosure">
         <summary>
           <span>Import or export theme</span>
           <ChevronDown

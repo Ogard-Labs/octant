@@ -1512,12 +1512,15 @@ strong {
   display: none;
 }
 
+/* Thread tabs follow the dock's tab grammar: quiet labels, the active one
+   on the selection fill, no border or shadow. The bordered, shadowed pill
+   read as a button dropped into the breadcrumb. */
 .workspace-thread-tabs__item {
   display: inline-flex;
   min-width: 0;
   flex: 0 1 auto;
   align-items: center;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
   background: transparent;
@@ -1530,16 +1533,14 @@ strong {
 
 .workspace-thread-tabs__item[data-active="true"] {
   color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border-color: var(--octant-border);
-  box-shadow: var(--octant-shadow-xs);
+  background: var(--octant-selection);
 }
 
 .workspace-thread-tabs__select {
   min-width: 0;
   max-width: 30ch;
-  height: 27px;
-  padding: 0 7px;
+  height: 28px;
+  padding: 0 8px;
   color: inherit;
   font-size: var(--oct-text-xs);
 }

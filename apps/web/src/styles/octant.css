@@ -1027,6 +1027,37 @@ input.switch:checked::after {
   background: var(--oct-accent-on);
 }
 
+/* The Base UI switch adapter (.octant-switch) is sized and coloured here
+   rather than by its utility classes: the utility track and thumb left the
+   "on" thumb flush with the track's edge under a drop shadow, which read as
+   a clipped half-moon. Track and thumb are the same monochrome pair as
+   input.switch, and the thumb's own shadow is gone. */
+.octant-switch[data-slot="switch"] {
+  width: 38px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-border);
+  box-shadow: none;
+  transition: background var(--oct-motion-base) var(--oct-ease-standard);
+}
+.octant-switch[data-slot="switch"][data-checked] {
+  background: var(--oct-fg);
+}
+.octant-switch[data-slot="switch"] > [data-slot="switch-thumb"] {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+  box-shadow: none;
+  translate: 3px 0;
+  transition: translate var(--oct-motion-base) var(--oct-ease-standard);
+}
+.octant-switch[data-slot="switch"][data-checked] > [data-slot="switch-thumb"] {
+  background: var(--oct-bg);
+  translate: 19px 0;
+}
+
 /* ─── table ───────────────────────────────────────────────────────────
    Wrap every table in .table-scroll. Body sets overflow-x: hidden, so an
    unwrapped table does not scroll on a narrow screen — it silently clips
