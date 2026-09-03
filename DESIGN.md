@@ -86,7 +86,7 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 
 ### Colour
 
-Neutral graphite, one accent, four statuses. Text is three greys (primary,
+Neutral graphite, a monochrome accent, a blue keyboard focus ring, four statuses. Text is three greys (primary,
 secondary, muted) and never a fourth. Hairlines separate; fills select. See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
@@ -164,33 +164,44 @@ primitive import.
 ## Colour system
 
 The default runtime palette is neutral graphite. The following values are the
-`System`/`Dark` defaults in `packages/theme/src/tokens.ts` and the matching
-renderer fallback. The `Light` defaults are the paired values shown below.
+`System` defaults in `packages/theme/src/tokens.ts` and the matching renderer
+fallback; `Dark` and `Light` are the same values pinned to one mode.
 
 ### Semantic roles
 
-| Role                   | CSS variable                                        | Dark      | Light     | Use                                        |
-| ---------------------- | --------------------------------------------------- | --------- | --------- | ------------------------------------------ |
-| Application background | `--octant-app-background`                           | `#171717` | `#f7f7f7` | Host ground behind shell surfaces          |
-| Chrome                 | `--octant-chrome`                                   | `#181818` | `#fafafa` | Title bars and shell chrome                |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#202020` | `#f0f0f0` | Navigation surface                         |
-| Workspace              | `--octant-workspace`                                | `#171717` | `#ffffff` | Main reading surface                       |
-| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#242424` | `#f3f3f3` | Cards, menus, popovers, dialogs            |
-| Control                | `--octant-control` / `--octant-surface-muted`       | `#292929` | `#efefef` | Quiet control fill                         |
-| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#303030` | `#e7e7e7` | Hover and highlighted rows                 |
-| Control pressed        | `--octant-control-pressed`                          | `#383838` | `#dedede` | Pressed state                              |
-| Border                 | `--octant-border`                                   | `#2d2d2d` | `#dedede` | Hairline separation                        |
-| Strong border          | `--octant-border-strong`                            | `#454545` | `#c5c5c5` | Focus-adjacent and draggable boundaries    |
-| Strong divider         | `--octant-divider-strong`                           | `#6b6b6b` | `#8a8a8a` | Rare structural divider                    |
-| Primary text           | `--octant-text-primary`                             | `#f2f2f2` | `#202020` | Body and control text                      |
-| Secondary text         | `--octant-text-secondary`                           | `#b5b5b5` | `#5f5f5f` | Supporting copy                            |
-| Muted text             | `--octant-text-muted`                               | `#8a8a8a` | `#707070` | Metadata and hints; not for essential text |
-| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff` | Text on primary fill                       |
-| Focus ring             | `--octant-focus-ring`                               | `#f2f2f2` | `#202020` | Keyboard focus                             |
-| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#303030` | `#e7e7e7` | Selected rows and active controls          |
-| Accent fill            | `--octant-accent`                                   | `#f2f2f2` | `#202020` | One primary action or active mark          |
-| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff` | Text on accent fill                        |
-| Accent text            | `--octant-accent-text`                              | `#f2f2f2` | `#202020` | Accent used as text; normal-text contrast  |
+| Role                   | CSS variable                                        | Dark      | Light       | Use                                               |
+| ---------------------- | --------------------------------------------------- | --------- | ----------- | ------------------------------------------------- |
+| Application background | `--octant-app-background`                           | `#151515` | `#f6f6f5`   | Page ground: welcome, lists, Settings             |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#f6f6f5`   | Title bars and shell chrome                       |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#ebebea`   | Navigation surface, one step off the page         |
+| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor               |
+| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                          |
+| Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles         |
+| Tray                   | `--octant-tray` (derived)                           | workspace | control mix | The rear context card behind the composer         |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#ebebea`   | Quiet control fill, secondary buttons             |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e1e1df`   | Hover and highlighted rows                        |
+| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#d6d6d4`   | Pressed state                                     |
+| Border                 | `--octant-border`                                   | `#303030` | `#d2d2d0`   | Hairline separation                               |
+| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#a9a9a7`   | Input and outline-button edges                    |
+| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                           |
+| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                             |
+| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                   |
+| Muted text             | `--octant-text-muted`                               | `#8a8a8a` | `#6b6b6b`   | Metadata and hints; not for essential text        |
+| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                              |
+| Focus ring             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Keyboard focus                                    |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#e1e1df`   | Selected rows and active controls                 |
+| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                 |
+| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                               |
+| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast         |
+| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash |
+
+The ladder is deliberate: in dark the page is near-black, the sidebar a step
+darker, the reading surface a step lighter, and cards lift one more step. In
+light the reading surface is white on a quiet grey well and the sidebar is
+the greyest thing on screen. Every hairline registers on the surface it
+separates (about 1.5:1 in light, 1.3:1 in dark); inputs and outline buttons
+use the strong border so an edge is never guessed. The renderer fallback in
+`apps/web/src/styles.css` mirrors these values exactly.
 
 Status roles are paired to the surface where they render. Use the text role
 for labels and the surface role for a background; never rely on hue alone:
@@ -279,8 +290,8 @@ button paint. Phone-only
 surfaces use the larger 22/26/30px mobile radii.
 
 Controls are 44px by default and 34px compact. Dense operating rails use a
-28px navigation row and a 30px terminal toolbar while retaining at least 24px
-pointer targets. Icon sizes are 16/19/22px for small/medium/large actions; touch
+28px navigation row; the title band, the right dock head, and the bottom panel
+toolbar share one 34px rail so their tabs and hairlines sit on one level. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace sidebar defaults to 232px, supports
 resizing, and may collapse completely while leaving Show sidebar and New thread
 in the native title rail. Settings uses a separate compact 248px navigation

@@ -306,7 +306,9 @@
   margin: 0 auto -18px;
   padding: 8px 16px 22px;
   color: var(--oct-meta);
-  background: var(--octant-workspace);
+  /* The rear card is one quiet step below the composer in front of it, so
+     the stack reads as two layers instead of two white cards. */
+  background: var(--octant-tray);
   border-radius: var(--oct-radius-lg);
   box-shadow: var(--octant-shadow-sm);
 }

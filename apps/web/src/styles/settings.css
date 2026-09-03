@@ -13,7 +13,7 @@
   /* Light cards are workspace white; dark cards lift with the floating fill.
      Using floating in light is the grey well. Using workspace in dark is
      invisible against the same app ground. */
-  --octant-settings-card: var(--octant-workspace);
+  --octant-settings-card: var(--octant-card);
   --oct-settings-gutter: clamp(32px, 4vw, 56px);
   --oct-settings-reading-width: 680px;
 }

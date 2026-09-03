@@ -77,22 +77,22 @@ describe("theme semantic token catalog", () => {
 
   it("uses the design system's neutral graphite palette in both modes", () => {
     expect(DEFAULT_LIGHT_TOKENS).toMatchObject({
-      "app-background": "#f2f2f0",
+      "app-background": "#f6f6f5",
       workspace: "#ffffff",
-      floating: "#f7f7f7",
-      "text-primary": "#202020",
-      accent: "#1f6f96",
+      floating: "#fdfdfc",
+      "text-primary": "#1b1b1b",
+      accent: "#1b1b1b",
       "accent-foreground": "#ffffff",
-      "accent-text": "#1f6f96",
+      "accent-text": "#1b1b1b",
     });
     expect(DEFAULT_DARK_TOKENS).toMatchObject({
-      "app-background": "#101010",
-      workspace: "#171717",
-      floating: "#1e1e1e",
-      "text-primary": "#f2f2f2",
-      accent: "#4d9ec8",
+      "app-background": "#151515",
+      workspace: "#1a1a1a",
+      floating: "#232323",
+      "text-primary": "#f0f0f0",
+      accent: "#f0f0f0",
       "accent-foreground": "#171717",
-      "accent-text": "#4d9ec8",
+      "accent-text": "#f0f0f0",
     });
   });
 

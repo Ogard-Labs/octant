@@ -54,7 +54,9 @@
   justify-content: space-between;
   padding-inline: 8px var(--octant-window-chrome-reserved-width, 96px);
   background: transparent;
-  border-bottom: 0;
+  /* The same hairline the pane header draws beside it, so the two rails
+     read as one line across the window instead of two unrelated bars. */
+  border-bottom: 1px solid var(--oct-border);
   font-family: var(--oct-font-display);
   letter-spacing: normal;
   text-transform: none;
@@ -73,12 +75,10 @@
   gap: 2px;
 }
 
-html[data-octant-native-host="true"] .right-utility-dock__toolbar {
-  min-height: 58px;
-  padding-top: 24px;
-  padding-bottom: 0;
-}
-
+/* The native host keeps the same 34px bar as the pane header beside it. An
+   earlier 58px bar with a 24px top inset dropped the dock tabs a full row
+   below the title band; the right padding already reserves the space the
+   window controls need, so no vertical offset is required. */
 .right-utility-dock__actions {
   display: flex;
   flex: 0 0 auto;
@@ -328,7 +328,9 @@ html[data-octant-native-host="true"] .right-utility-dock__toolbar {
   min-height: 0;
   grid-column: 1 / -1;
   grid-row: 2;
-  grid-template-rows: 30px minmax(0, 1fr);
+  /* One rail height everywhere: the title band, the dock head, and this
+     toolbar are all 34px so their hairlines and tabs sit on one level. */
+  grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
   color: var(--oct-fg);
   background: var(--octant-workspace);
