@@ -228,8 +228,12 @@ Thread utilities live in the Right Utility Dock outside the split tree. The
 top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. An available empty dock shows a compact launcher;
 an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
-Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal, Tests,
-and iOS Simulator, as mode and capability allow. The dock follows the active
+Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
+Tests, and iOS Simulator, as mode and capability allow. Document shows the
+Markdown or text file the Code thread's turn most recently wrote, read through
+the host-authorized file open; the renderer offers a written document (or a
+Chat-authored Canvas) in the dock once per document, never after the person
+closed its tab, and never by moving focus. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
@@ -342,9 +346,10 @@ thread-owned dock tab and may include a truthful child-run summary
 language: true tabs stay flat, segmented values keep an enclosed track, active
 pane identity stays on the grip, routine Settings rows remain open while
 discrete objects are raised, and narrow Settings uses a drawer.
-The dock already hosts live thread-owned tool instances — Files, Browser,
-Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery,
-thread-level Agents, and Review — rather than a generic Thread accordion.
+The dock already hosts live thread-owned tool instances — Files, Document,
+Browser, Terminal, Canvas, Side chat, artifact-gated Plan, conditional
+Delivery, thread-level Agents, and Review — rather than a generic Thread
+accordion.
 Open tools restore as per-window presentation keyed by thread; hiding a
 Browser or Terminal does not stop its server-owned lifecycle. Pane Add tab
 no longer mints those tools as split-tree surfaces. Local checkout changes

@@ -33,6 +33,7 @@ import { ShipPanel } from "../ship/ShipPanel";
 import type { PickerGroup } from "@octant/domain";
 import type { ProviderController } from "../providers/useProviderController";
 import { DockCanvasTool } from "./DockCanvasTool";
+import { DockDocumentTool } from "./DockDocumentTool";
 import type { OctantHostBridge } from "./hostBridge";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 import { ShellState } from "./ShellState";
@@ -89,6 +90,8 @@ export interface ThreadUtilityDockContentProps {
   readonly surface: RightUtilityDockSurfaceId;
   readonly utilityTabId?: string;
   readonly windowCapability?: string;
+  /** Checkout-relative path of the document the thread most recently wrote. */
+  readonly writtenDocumentPath?: string;
 }
 
 export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
@@ -185,6 +188,29 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
             : { windowCapability: props.windowCapability })}
         />
       </Suspense>
+    );
+  }
+
+  if (props.surface === "document") {
+    if (props.subject.mode !== "code" || props.codeController === undefined) {
+      return unavailable("Document", "Documents are not yet available for this thread type.");
+    }
+    if (props.writtenDocumentPath === undefined) {
+      return unavailable("Document", "This thread has not written a document yet.");
+    }
+    return (
+      <DockDocumentTool
+        {...(props.subject.checkoutId === undefined
+          ? {}
+          : { checkoutId: props.subject.checkoutId })}
+        client={props.codeController.client}
+        path={props.writtenDocumentPath}
+        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+        threadId={decodeCodeThreadId(props.subject.threadId)}
+        {...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability })}
+      />
     );
   }
 

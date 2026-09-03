@@ -3771,6 +3771,123 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
   });
 
+  it("opens a document a Code turn wrote beside the transcript once, and not again after it is closed", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    const now = "2026-07-21T12:00:00.000Z";
+    const contentId = "60000000-0000-4000-8000-000000000031";
+    const operations: string[] = [];
+    let change: "created" | "modified" = "created";
+    vi.mocked(codeApi.putEvidence).mockResolvedValue({
+      contentId,
+      digest: "a".repeat(64),
+      byteLength: 5,
+    } as never);
+    vi.mocked(codeApi.executeOperation).mockImplementation(async (command) => {
+      if (command.kind !== "start-provider-turn") {
+        return {
+          kind: "operation-failed",
+          operationId: command.operationId,
+          failure: { message: "no" },
+        } as never;
+      }
+      operations.push(String(command.operationId));
+      return {
+        kind: "provider-turn-state",
+        operationId: command.operationId,
+        state: "running",
+      } as never;
+    });
+    vi.mocked(codeApi.subscribeOperation).mockImplementation(((
+      _threadId: unknown,
+      operationId: unknown,
+      cursor: number,
+    ) => {
+      const frame = (index: number, event: unknown, displayText?: string) => ({
+        threadId: codeThreadId,
+        operationId,
+        cursor: index,
+        occurredAt: now,
+        event,
+        ...(displayText === undefined ? {} : { displayText }),
+      });
+      async function* initial() {
+        yield frame(1, {
+          kind: "operation-result",
+          result: { kind: "provider-turn-state", operationId, state: "running" },
+        });
+      }
+      async function* completion() {
+        yield frame(2, { kind: "file-change", path: "docs/handoff.md", change, reconciled: true });
+        yield frame(
+          3,
+          {
+            kind: "provider-content",
+            channel: "message",
+            content: { contentId, digest: "b".repeat(64), byteLength: 5 },
+          },
+          "Written.",
+        );
+        yield frame(4, { kind: "operation-state", state: "completed" });
+      }
+      return cursor === 0 ? initial() : completion();
+    }) as never);
+    vi.mocked(codeApi.openFile).mockResolvedValue({
+      status: "editable",
+      fileId: "80000000-0000-4000-8000-000000000031",
+      metadata: {
+        identity: { device: "1", inode: "2" },
+        byteLength: 20,
+        modifiedNanoseconds: "1",
+        digest: "c".repeat(64),
+      },
+      content: { contentId, digest: "c".repeat(64), byteLength: 20 },
+    } as never);
+    vi.mocked(codeApi.content).mockResolvedValue(new TextEncoder().encode("# Handoff\n\nDone.\n"));
+
+    render(
+      <App
+        codeClient={codeApi}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    const composer = await screen.findByPlaceholderText(
+      "Ask for follow-up changes…",
+      {},
+      { timeout: 5_000 },
+    );
+    await user.type(composer, "write the handoff{Enter}");
+
+    // The written document opens in the dock beside the transcript, already
+    // readable, while the caret stays in the composer.
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    const documentTab = await within(dock).findByRole("tab", { name: "Document" });
+    expect(documentTab).toHaveAttribute("aria-selected", "true");
+    expect(await within(dock).findByRole("heading", { name: "Handoff" })).toBeVisible();
+    expect(composer).toHaveFocus();
+    expect(codeApi.openFile).toHaveBeenCalledWith(
+      codeThreadId,
+      "40000000-0000-4000-8000-000000000001",
+      "docs/handoff.md",
+    );
+
+    await user.click(within(dock).getByRole("button", { name: "Hide Document" }));
+    expect(within(dock).queryByRole("tab", { name: "Document" })).toBeNull();
+
+    // The next turn rewrites the same file: the tab the person closed stays closed.
+    change = "modified";
+    await user.type(composer, "rewrite it{Enter}");
+    await waitFor(() => expect(operations).toHaveLength(2));
+    await screen.findAllByText("Written.");
+    expect(within(dock).queryByRole("tab", { name: "Document" })).toBeNull();
+  }, 15_000);
+
   it("opens Review beside the active Code thread from View changes", async () => {
     const user = userEvent.setup();
     const projectApi = projects({

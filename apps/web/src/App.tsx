@@ -264,8 +264,20 @@ import {
   updateThreadUtilityTabBrowserContext,
   updateUtilityTabBrowserContext,
 } from "./shell/rightUtilityDockSelection";
-import { isDockToolLaunchable, isDockToolStillOpenable } from "./shell/dockToolAvailability";
+import {
+  isAuthorizedCanvasDocument,
+  isDockToolLaunchable,
+  isDockToolStillOpenable,
+} from "./shell/dockToolAvailability";
 import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
+import {
+  NO_WRITTEN_DOCUMENTS,
+  isDocumentPath,
+  noteExistingDocuments,
+  noteWrittenDocument,
+  type WrittenDocumentOffers,
+} from "./shell/writtenDocuments";
+import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { NavigatorPopover } from "./navigator/NavigatorPopover";
 import { useNavigatorAssistant } from "./navigator/useNavigatorAssistant";
 import { ComposerContextMeterShortcut } from "./context/ComposerContextMeter";
@@ -745,6 +757,14 @@ function LaunchedShell(
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
   const [addAgentInvokedByThread, setAddAgentInvokedByThread] = useState(() => new Set<string>());
+  // Documents a turn wrote, per thread, and which the dock already offered.
+  // Session-local presentation: nothing here is authority, and a reopened
+  // window starts by offering nothing until a turn writes again.
+  const [writtenDocumentsByThread, setWrittenDocumentsByThread] = useState<
+    ReadonlyMap<ThreadUtilityDockKey, WrittenDocumentOffers>
+  >(new Map());
+  const writtenDocumentsRef = useRef(writtenDocumentsByThread);
+  writtenDocumentsRef.current = writtenDocumentsByThread;
   const [dockSidecarsByThread, setDockSidecarsByThread] = useState<
     ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>
   >(new Map());
@@ -1622,12 +1642,78 @@ function LaunchedShell(
     canvasClient,
     hasAppleSimulator:
       appleProjects[0]?.projectPath !== undefined && appleToolchainClient !== undefined,
+    hasWrittenDocument:
+      dockThreadKey !== undefined &&
+      writtenDocumentsByThread.get(dockThreadKey)?.current?.kind === "file",
     mode: activeMode,
     planClient,
     ...(activeProjectId === undefined ? {} : { projectId: activeProjectId }),
     shipClient,
     ...(dockThreadId === undefined ? {} : { threadId: String(dockThreadId) }),
   });
+  // A Markdown or text file the active Code turn created or rewrote opens in
+  // the dock's Document tool once, beside the transcript, the way a written
+  // handoff sits next to the conversation. The offer never moves focus: the
+  // composer keeps the caret, and a tab the person closed stays closed.
+  const activeCodeTurnActivity = activeCodeThreadController?.turnActivity;
+  useEffect(() => {
+    if (activeCodeThreadId === undefined || activeCodeTurnActivity === undefined) return;
+    const key = threadUtilityDockKey("code", String(activeCodeThreadId));
+    const offers = writtenDocumentsByThread.get(key) ?? NO_WRITTEN_DOCUMENTS;
+    let next = offers;
+    let open = false;
+    for (const activity of activeCodeTurnActivity.values()) {
+      for (const path of activity.writtenPaths ?? []) {
+        if (!isDocumentPath(path)) continue;
+        const noted = noteWrittenDocument(next, { kind: "file", path });
+        next = noted.offers;
+        if (noted.open) open = true;
+      }
+    }
+    if (next === offers) return;
+    setWrittenDocumentsByThread((current) => new Map(current).set(key, next));
+    if (!open) return;
+    setDockVisible(true);
+    setDockStatesByThread((current) => openThreadUtilityTab(current, key, "document"));
+  }, [
+    activeCodeThreadId,
+    activeCodeTurnActivity,
+    setDockStatesByThread,
+    setDockVisible,
+    writtenDocumentsByThread,
+  ]);
+  /**
+   * A Canvas the thread authored opens in the dock's Canvas tool once. The
+   * cards the thread already had when it was opened are seen documents, not
+   * new writing, so reopening an old thread never raises the dock.
+   */
+  function noteCanvasReferences(
+    threadId: string,
+    cards: ReadonlyArray<CanvasThreadReferenceCard>,
+  ): void {
+    const key = threadUtilityDockKey("chat", threadId);
+    const documents = cards
+      .filter(isAuthorizedCanvasDocument)
+      .map((card) => ({ kind: "canvas" as const, canvasId: String(card.canvasId) }));
+    const offers = writtenDocumentsRef.current.get(key);
+    if (offers === undefined) {
+      const seeded = noteExistingDocuments(NO_WRITTEN_DOCUMENTS, documents);
+      setWrittenDocumentsByThread((current) => new Map(current).set(key, seeded));
+      return;
+    }
+    let next = offers;
+    let open = false;
+    for (const document of documents) {
+      const noted = noteWrittenDocument(next, document);
+      next = noted.offers;
+      if (noted.open) open = true;
+    }
+    if (next === offers) return;
+    setWrittenDocumentsByThread((current) => new Map(current).set(key, next));
+    if (!open) return;
+    setDockVisible(true);
+    setDockStatesByThread((current) => openThreadUtilityTab(current, key, "canvas"));
+  }
   const retainedDockState = retainAvailableUtilityTabs(
     dockState,
     new Set(
@@ -2146,6 +2232,8 @@ function LaunchedShell(
     }
     const sidecarThreadId = dockSidecarsByThread.get(dockThreadKey);
     const appleProjectPath = appleProjects[0]?.projectPath;
+    const writtenDocument = writtenDocumentsByThread.get(dockThreadKey)?.current;
+    const writtenDocumentPath = writtenDocument?.kind === "file" ? writtenDocument.path : undefined;
     return (
       <ThreadUtilityDockContent
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
@@ -2167,6 +2255,7 @@ function LaunchedShell(
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         planClient={planClient}
         shipClient={shipClient}
+        {...(writtenDocumentPath === undefined ? {} : { writtenDocumentPath })}
         onOpenFile={(relativePath) => {
           if (dockThread.mode !== "code") return;
           void controller.openCodeSurface({
@@ -4825,6 +4914,7 @@ function LaunchedShell(
                         projectId,
                       });
                     }}
+                    onCanvasReferencesObserved={noteCanvasReferences}
                     onOpenCanvas={(entry) =>
                       void controller.openCanvas({
                         mode: entry.mode,
@@ -4919,6 +5009,11 @@ function LaunchedShell(
                 bottomPanelOpen && activeBottomSurface?.id === "canvas"
                   ? undefined
                   : threadUtility("canvas")
+              }
+              document={
+                bottomPanelOpen && activeBottomSurface?.id === "document"
+                  ? undefined
+                  : threadUtility("document")
               }
               review={
                 bottomPanelOpen &&

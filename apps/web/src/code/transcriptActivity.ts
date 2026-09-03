@@ -37,6 +37,12 @@ export interface CodeTurnActivity {
    * event by event and misses nothing.
    */
   readonly truncated?: boolean;
+  /**
+   * Paths the turn created or rewrote, in first-write order, from the host's
+   * file-change events. Only a live turn reports them; replayed history keeps
+   * tool and reasoning steps, so a reopened thread offers nothing here.
+   */
+  readonly writtenPaths?: ReadonlyArray<string>;
 }
 
 export const EMPTY_TURN_ACTIVITY: CodeTurnActivity = { rows: [], reasoning: "" };
@@ -106,6 +112,16 @@ export function applyActivityEvent(
         summary: event.summary,
       }),
     };
+  }
+  if (event.kind === "file-change") {
+    const path = String(event.path);
+    const written = activity.writtenPaths ?? [];
+    if (event.change === "deleted") {
+      if (!written.includes(path)) return activity;
+      return { ...activity, writtenPaths: written.filter((candidate) => candidate !== path) };
+    }
+    if (written.includes(path)) return activity;
+    return { ...activity, writtenPaths: [...written, path] };
   }
   return activity;
 }

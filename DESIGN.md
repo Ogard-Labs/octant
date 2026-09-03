@@ -406,9 +406,15 @@ The right dock follows the active pane and never leaks another pane's content.
 On wide windows it may use at most 38 percent of the viewport, preserving a
 560px primary workspace; the bottom panel may use at most 38 percent of the
 viewport height while preserving 320px for the primary workspace. It can host
-Review, Files, Browser, Terminal, Canvas, Plan (only for a real
-plan artifact), Delivery (only for a configured target), Agents (when children
-exist or explicitly invoked), Simulator, and Side chat. The dock launcher is
+Review, Files, Document (only once a turn has written one), Browser, Terminal,
+Canvas, Plan (only for a real plan artifact), Delivery (only for a configured
+target), Agents (when children exist or explicitly invoked), Simulator, and
+Side chat. A Markdown or text file a Code turn creates or rewrites, and a
+Canvas a Chat turn authors, open in the dock beside the transcript once, the
+first time they appear: the offer never moves focus from the composer, a
+rewrite never reopens a tab, and a tab the person closed stays closed. Document
+reads the file through the same host-authorized open the editor uses and
+renders Markdown with the preview's own viewer. The dock launcher is
 not a second thread switcher. With no open tab, it shows only capability-valid
 tool rows; the head's Add tool action appears once a tab is open, since with
 none open the body is already the list of tools to add. The bottom panel uses
@@ -419,8 +425,8 @@ session when moved.
 
 Browser and Terminal are repeatable right-dock workspaces: Add tool creates a
 new tab identity, an isolated Browser context or Terminal session, and a stable
-numbered label when siblings are open. Files, Review, Agents, Canvas, Plan,
-Delivery, Simulator, and Side chat are singleton destinations. One instance
+numbered label when siblings are open. Files, Document, Review, Agents, Canvas,
+Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
 still appears in only one region at a time.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
