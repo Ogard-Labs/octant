@@ -65,6 +65,16 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__nat
   left: var(--octant-window-chrome-leading-width, 148px);
 }
 
+/* The right dock's tab strip lives in the same band. The strip used to run
+   over it, so the tabs and their close controls dragged the window instead
+   of responding; it now ends where the dock begins. */
+html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__native-drag-strip {
+  right: max(
+    var(--octant-window-chrome-reserved-width, 148px),
+    var(--octant-context-sidebar-width, 0px)
+  );
+}
+
 .window-no-drag,
 .window-no-drag * {
   -webkit-app-region: no-drag;
