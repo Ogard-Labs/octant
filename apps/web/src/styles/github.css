@@ -122,6 +122,29 @@
   background: var(--octant-selection);
 }
 
+/* The select recipe fills its row; on a toolbar it is one control among
+   several and the search takes the slack instead. */
+.github-issue-browser__sort {
+  width: auto;
+  min-width: 11rem;
+  flex: 0 0 auto;
+}
+
+.github-issue-browser__row-repository {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-detail);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-issue-browser__across-notes {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
 .github-issue-browser__row-title {
   display: -webkit-box;
   -webkit-box-orient: vertical;

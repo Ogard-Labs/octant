@@ -116,6 +116,16 @@ export interface CodeComposerAdapterProps {
    */
   readonly githubControl?: ReactNode;
   readonly createFromControl?: ReactNode;
+  /** Ready-made prompts shown under the composer; choosing one fills the prompt. */
+  readonly suggestions?: ReadonlyArray<CodeComposerSuggestion>;
+  /** Content shown under the composer (what is waiting, what to continue). */
+  readonly beneath?: ReactNode;
+  /**
+   * A prompt handed in from beneath the composer, such as an assigned issue
+   * chosen from "Up next". Each new revision replaces the draft and focuses
+   * the prompt; the same revision is never applied twice.
+   */
+  readonly promptRequest?: { readonly text: string; readonly revision: number };
   /** Optional multi-model pool control slot rendered in the composer bar. */
   readonly poolControl?: ReactNode;
   /**
@@ -138,6 +148,12 @@ export interface CodeComposerAdapterProps {
     readonly scopeId?: ImageGenerationScopeId;
     readonly onOpenSettings?: () => void;
   };
+}
+
+export interface CodeComposerSuggestion {
+  readonly id: string;
+  readonly label: string;
+  readonly prompt: string;
 }
 
 export interface CodeComposerSubmitInput {
@@ -166,6 +182,20 @@ export interface CodeComposerSubmitInput {
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const appliedPromptRevision = useRef<number | undefined>(undefined);
+  const promptRequest = props.promptRequest;
+  useEffect(() => {
+    if (promptRequest === undefined || appliedPromptRevision.current === promptRequest.revision) {
+      return;
+    }
+    appliedPromptRevision.current = promptRequest.revision;
+    setPrompt(promptRequest.text);
+    textareaRef.current?.focus();
+  }, [promptRequest]);
+  const applySuggestion = (suggestion: CodeComposerSuggestion) => {
+    setPrompt(suggestion.prompt);
+    textareaRef.current?.focus();
+  };
   const mentionListId = "code-new-thread-mentions";
   const images = useWorkComposerImages();
   const imageSupport = selectedModelReadsImages(props.providerGroups, {
@@ -625,6 +655,26 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             startFromOrigin={startFromOrigin}
           />
         )}
+
+        {props.suggestions === undefined ||
+        props.suggestions.length === 0 ||
+        prompt !== "" ? null : (
+          <div aria-label="Suggested prompts" className="code-home__suggestions" role="group">
+            {props.suggestions.map((suggestion) => (
+              <OctantButton
+                disabled={props.creating}
+                key={suggestion.id}
+                onClick={() => applySuggestion(suggestion)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                {suggestion.label}
+              </OctantButton>
+            ))}
+          </div>
+        )}
+        {props.beneath}
 
         {props.errorMessage !== undefined ? (
           <p className="code-composer-adapter__error" role="alert">
