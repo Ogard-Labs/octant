@@ -48,7 +48,7 @@ describe("SidebarNavigation", () => {
       />,
     );
 
-    for (const label of ["New thread", "Thread board", "Issues", "Pull requests"]) {
+    for (const label of ["New thread", "Board", "Issues", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     expect(actions["new-code-thread"]).toHaveBeenCalledOnce();

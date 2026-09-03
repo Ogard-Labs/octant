@@ -3021,7 +3021,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "New thread" })).toBeVisible();
     await user.click(within(sidebar).getByRole("button", { name: "Account menu, Set your name" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Thread board" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
     const addFolder = screen.getByRole("button", { name: "Add folder" });
     expect(addFolder).toHaveClass("project-section__add");

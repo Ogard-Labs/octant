@@ -149,8 +149,8 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
   return (
     <Surface ariaLabel="Work Thread Board" className="code-board" measure="wide">
       <SurfaceHeader
-        subtitle="One runtime-derived view of your Work threads and confined Projects."
-        title="Threads"
+        subtitle="Your Work threads by status."
+        title="Board"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
 
