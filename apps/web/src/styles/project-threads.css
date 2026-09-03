@@ -39,7 +39,7 @@
 }
 
 .project-overview__threads .project-threads:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-muted);
   outline-offset: 2px;
 }
 
