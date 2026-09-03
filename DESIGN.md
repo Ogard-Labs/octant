@@ -176,36 +176,36 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 
 | Role                   | CSS variable                                        | Dark      | Light       | Use                                               |
 | ---------------------- | --------------------------------------------------- | --------- | ----------- | ------------------------------------------------- |
-| Application background | `--octant-app-background`                           | `#151515` | `#f6f6f5`   | Page ground: welcome, lists, Settings             |
-| Chrome                 | `--octant-chrome`                                   | `#151515` | `#f6f6f5`   | Title bars and shell chrome                       |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#ebebea`   | Navigation surface, one step off the page         |
+| Application background | `--octant-app-background`                           | `#151515` | `#f7f7f6`   | Page ground: welcome, lists, Settings             |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#f7f7f6`   | Title bars and shell chrome                       |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#f7f7f6`   | Navigation surface, on the page ground            |
 | Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor               |
 | Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                          |
 | Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles         |
 | Tray                   | `--octant-tray` (derived)                           | workspace | control mix | The rear context card behind the composer         |
-| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#ebebea`   | Quiet control fill, secondary buttons             |
-| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e1e1df`   | Hover and highlighted rows                        |
-| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#d6d6d4`   | Pressed state                                     |
-| Border                 | `--octant-border`                                   | `#303030` | `#d2d2d0`   | Hairline separation                               |
-| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#a9a9a7`   | Input and outline-button edges                    |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons             |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                        |
+| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                     |
+| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                               |
+| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                    |
 | Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                           |
 | Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                             |
 | Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                   |
 | Muted text             | `--octant-text-muted`                               | `#8a8a8a` | `#6b6b6b`   | Metadata and hints; not for essential text        |
 | Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                              |
 | Focus ring             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Keyboard focus                                    |
-| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#e1e1df`   | Selected rows and active controls                 |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                 |
 | Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                 |
 | Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                               |
 | Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast         |
 | Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
-darker, the reading surface a step lighter, and cards lift one more step. In
-light the reading surface is white on a quiet grey well and the sidebar is
-the greyest thing on screen. Every hairline registers on the surface it
-separates (about 1.5:1 in light, 1.3:1 in dark); inputs and outline buttons
-use the strong border so an edge is never guessed. The renderer fallback in
+darker, the reading surface a step lighter, and cards lift one more step. In light the sidebar and the page share one near-white ground and the
+reading surface is white; a hairline, not a grey fill, separates the sidebar
+from the workspace. Every hairline registers on the surface it separates
+(about 1.3:1 in both modes); inputs and outline buttons use the strong border
+so an edge is never guessed. The renderer fallback in
 `apps/web/src/styles.css` mirrors these values exactly.
 
 Status roles are paired to the surface where they render. Use the text role
