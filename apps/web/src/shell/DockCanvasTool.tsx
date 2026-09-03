@@ -4,11 +4,16 @@ import type { CanvasId } from "@octant/contracts/canvas";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import { decodeWorkspaceTab, decodeWorkspaceTabId } from "@octant/contracts";
-import { useEffect, useState } from "react";
-import { CanvasWorkspaceTab } from "../canvas/CanvasWorkspaceTab";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { isAuthorizedCanvasDocument } from "./dockToolAvailability";
 import { ShellState } from "./ShellState";
+
+const CanvasWorkspaceTab = lazy(() =>
+  import("../canvas/CanvasWorkspaceTab").then((module) => ({
+    default: module.CanvasWorkspaceTab,
+  })),
+);
 
 const dockCanvasTabId = decodeWorkspaceTabId("90000000-0000-4000-8000-000000000007");
 
@@ -129,7 +134,11 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
             All canvases
           </OctantButton>
         )}
-        <CanvasWorkspaceTab client={props.client} tab={tab} />
+        <Suspense
+          fallback={<ShellState message="Loading canvas." state="loading" title="Loading Canvas" />}
+        >
+          <CanvasWorkspaceTab client={props.client} tab={tab} />
+        </Suspense>
       </div>
     );
   }

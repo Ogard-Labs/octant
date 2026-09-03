@@ -85,7 +85,6 @@ import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchai
 import { WorkPromotionFlow } from "../work/WorkPromotionFlow";
 import type { WorkPromotionController } from "../work/useWorkPromotionController";
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
-import { CanvasWorkspaceTab } from "../canvas/CanvasWorkspaceTab";
 import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
 import type { DraftRecentThread } from "./DraftThreadWorkspace";
@@ -103,6 +102,11 @@ import {
 } from "./WorkspaceThreadTabs";
 
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
+const CanvasWorkspaceTab = lazy(() =>
+  import("../canvas/CanvasWorkspaceTab").then((module) => ({
+    default: module.CanvasWorkspaceTab,
+  })),
+);
 const PreviewWorkspaceTab = lazy(() =>
   import("../preview/PreviewWorkspaceTab").then((module) => ({
     default: module.PreviewWorkspaceTab,
@@ -1248,15 +1252,19 @@ function renderNonCodeTab(
   }
   if (tab.kind === "canvas") {
     return (
-      <CanvasWorkspaceTab
-        key={tab.id}
-        client={props.canvasClient}
-        tab={tab}
-        onAttachContext={canvasContext.onAttachCanvasContext}
-        {...(props.onPinCanvasInFocusZone === undefined
-          ? {}
-          : { onPinCanvasInFocusZone: props.onPinCanvasInFocusZone })}
-      />
+      <Suspense
+        fallback={<ShellState message="Loading canvas." state="loading" title="Loading Canvas" />}
+      >
+        <CanvasWorkspaceTab
+          key={tab.id}
+          client={props.canvasClient}
+          tab={tab}
+          onAttachContext={canvasContext.onAttachCanvasContext}
+          {...(props.onPinCanvasInFocusZone === undefined
+            ? {}
+            : { onPinCanvasInFocusZone: props.onPinCanvasInFocusZone })}
+        />
+      </Suspense>
     );
   }
   if (tab.kind === "browser") {

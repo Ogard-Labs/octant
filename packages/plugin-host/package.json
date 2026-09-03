@@ -11,7 +11,8 @@
     "./addressing": "./src/addressing.ts",
     "./collisions": "./src/collisions.ts",
     "./composer": "./src/composer.ts",
-    "./model": "./src/model.ts"
+    "./model": "./src/model.ts",
+    "./bundled-skills": "./src/bundledSkills.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

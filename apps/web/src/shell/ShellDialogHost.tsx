@@ -3,7 +3,15 @@ import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/con
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import { CodeSearchDialog } from "../code/CodeSearchDialog";
-import { FirstRunOnboarding, type FirstRunOnboardingProps } from "../onboarding/FirstRunOnboarding";
+import { lazy, Suspense } from "react";
+import type { FirstRunOnboardingProps } from "../onboarding/FirstRunOnboarding";
+
+// First run is shown once per install; its wizard stays out of the first bundle.
+const FirstRunOnboarding = lazy(() =>
+  import("../onboarding/FirstRunOnboarding").then((module) => ({
+    default: module.FirstRunOnboarding,
+  })),
+);
 import { CommandPalette } from "../palette/CommandPalette";
 import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
 import type { OctantHostBridge } from "./hostBridge";
@@ -126,7 +134,9 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
           threadId={props.activeCodeThreadView.thread.id}
         />
       )}
-      <FirstRunOnboarding {...props.firstRun} />
+      <Suspense fallback={null}>
+        <FirstRunOnboarding {...props.firstRun} />
+      </Suspense>
       <p
         aria-atomic="true"
         aria-live="polite"

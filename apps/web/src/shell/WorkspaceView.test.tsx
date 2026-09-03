@@ -871,7 +871,7 @@ describe("WorkspaceView cross-context banner", () => {
 });
 
 describe("WorkspaceView Code draft integrations", () => {
-  it("threads the GitHub onboarding clients into the Code draft composer", () => {
+  it("threads the GitHub onboarding clients into the Code draft composer", async () => {
     const tab = {
       id: ids.tab,
       kind: "draft-thread",
@@ -896,7 +896,8 @@ describe("WorkspaceView Code draft integrations", () => {
         onCreateProject={vi.fn(async () => undefined)}
       />,
     );
-    expect(screen.getByRole("button", { name: "GitHub repository" })).toBeVisible();
+    // The GitHub control loads on demand, so it lands a tick after the rest.
+    expect(await screen.findByRole("button", { name: "GitHub repository" })).toBeVisible();
   });
 });
 
