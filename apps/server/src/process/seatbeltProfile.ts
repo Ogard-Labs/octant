@@ -236,9 +236,32 @@ function shebangInterpreter(
   const [command, ...rest] = header.slice(2).split(/\r?\n/, 1)[0]!.trim().split(/\s+/);
   if (command === undefined || !isAbsolute(command)) return undefined;
   if (basename(command) !== "env") return { command };
-  // `env -S name` and `env name` both name the real interpreter after the flags.
-  const program = rest.find((token) => !token.startsWith("-"));
+  const program = envInterpreterOperand(rest);
   return program === undefined ? { command } : { command, program };
+}
+
+// `env` names the interpreter after its own options and any `NAME=value`
+// assignments, so `#!/usr/bin/env -u NODE_OPTIONS FORCE_COLOR=0 node` still
+// resolves to `node`. Picking the first non-flag token instead selects an
+// unset name or an assignment, and the generated allowlist then omits the
+// interpreter and blocks the launch.
+function envInterpreterOperand(tokens: ReadonlyArray<string>): string | undefined {
+  // These carry a separate operand that is not the interpreter. `-S` and
+  // `--split-string` are excluded on purpose: their operand opens the command.
+  const optionsTakingOperand = new Set(["-u", "--unset", "-P", "-C", "--chdir"]);
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index]!;
+    if (token === "--") {
+      index += 1;
+      break;
+    }
+    if (!token.startsWith("-")) break;
+    index += optionsTakingOperand.has(token) ? 2 : 1;
+  }
+  // An assignment can only precede the interpreter, never follow it.
+  while (index < tokens.length && /^[^=/\s]+=/.test(tokens[index]!)) index += 1;
+  return tokens[index];
 }
 
 function resolveOnSearchPath(program: string, searchPath: string | undefined): string | undefined {

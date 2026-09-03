@@ -453,6 +453,44 @@ describe("shared Seatbelt profile builder", () => {
     expect(profile).not.toContain(seatbeltExecRule("/bin/sh"));
   });
 
+  it("resolves the interpreter past env options and environment assignments", () => {
+    const root = temporaryRoot();
+    const boundRoot = join(root, "project");
+    const temporaryDirectory = join(root, "tmp");
+    const binDirectory = join(root, "bin");
+    const sandboxPath = join(root, "sandbox-exec");
+    const interpreter = join(binDirectory, "node");
+    const script = join(root, "cli.js");
+    mkdirSync(boundRoot);
+    mkdirSync(temporaryDirectory);
+    mkdirSync(binDirectory);
+    writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
+    writeFileSync(interpreter, "#!/bin/sh\n", { mode: 0o700 });
+    writeFileSync(script, "#!/usr/bin/env -u NODE_OPTIONS FORCE_COLOR=0 node\nconsole.log(1)\n", {
+      mode: 0o700,
+    });
+
+    const launch = makeSeatbeltConfinementLive({
+      platform: "darwin",
+      sandboxPath,
+      homeDirectory: root,
+      usersDirectory: root,
+      interpreterSearchPath: binDirectory,
+    }).prepare({
+      executable: script,
+      args: [],
+      boundRoot,
+      temporaryDirectory,
+      networkEgress: "none",
+      writeBoundRoot: false,
+      allowProcessExec: false,
+      allowProcessFork: false,
+    });
+
+    const profile = launch.args[1];
+    expect(profile).toContain(seatbeltExecRule(realpathSync(interpreter)));
+  });
+
   it("keeps process-exec fully denied for a program with no interpreter beyond itself", () => {
     const root = temporaryRoot();
     const boundRoot = join(root, "project");
