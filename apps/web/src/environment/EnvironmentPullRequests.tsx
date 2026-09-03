@@ -3,6 +3,7 @@ import type { GithubCatalogueReadResponse, GithubPullRequestRow } from "@octant/
 import { ExternalLink, GitPullRequest, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { describeGithubRemediation } from "../github/githubRemediation";
 
 interface RepositoryRef {
   readonly owner: string;
@@ -152,7 +153,10 @@ function toPullRequestState(response: GithubCatalogueReadResponse): PullRequestS
   if (response.kind === "unavailable") {
     return {
       status: "unavailable",
-      message: response.remediation ?? "Pull requests are unavailable from GitHub.",
+      message:
+        response.remediation === undefined
+          ? "Pull requests are unavailable from GitHub."
+          : describeGithubRemediation(response.remediation),
     };
   }
   if (response.kind !== "pull-requests") {

@@ -3,6 +3,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
+/** The thread root is stored as "."; a person reads that as a typo, not a place. */
+export function workingFolderLabel(value: ThreadWorkingDirectory | "." | string): string {
+  return String(value) === "." ? "Repository root" : String(value);
+}
+
 export function ChangeWorkingFolder(props: {
   readonly value: ThreadWorkingDirectory | ".";
   readonly disabled?: boolean;
@@ -11,7 +16,12 @@ export function ChangeWorkingFolder(props: {
   const [editing, setEditing] = useState(false);
   if (!editing) {
     return (
-      <OctantButton onClick={() => setEditing(true)} type="button" variant="ghost">
+      <OctantButton
+        className="environment-group__action"
+        onClick={() => setEditing(true)}
+        type="button"
+        variant="ghost"
+      >
         Change working folder
       </OctantButton>
     );
