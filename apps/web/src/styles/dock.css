@@ -93,12 +93,15 @@
   gap: 2px;
 }
 
+/* Tabs fill the 34px bar less a 2px breath, so the whole strip is a target:
+   a 26px tab in a 34px bar left dead rows above and below every tab. */
 .dock-tool-strip__tab {
   display: inline-flex;
   flex: none;
   min-width: 0;
-  max-width: 8.5rem;
-  align-items: center;
+  min-height: 30px;
+  max-width: 11rem;
+  align-items: stretch;
   overflow: hidden;
   color: var(--oct-meta);
   border-radius: var(--oct-radius-sm);
@@ -118,10 +121,10 @@
 .dock-tool-strip__select {
   display: inline-flex;
   min-width: 0;
-  min-height: 26px;
+  min-height: 30px;
   align-items: center;
-  gap: 4px;
-  padding: 0 4px 0 8px;
+  gap: 5px;
+  padding: 0 4px 0 10px;
   overflow: hidden;
   color: inherit;
   background: transparent;
@@ -133,10 +136,11 @@
 }
 
 .dock-tool-strip__close {
-  width: 22px;
-  height: 22px;
-  min-height: 22px;
-  opacity: 0.55;
+  width: 26px;
+  height: auto;
+  min-height: 30px;
+  border-radius: 0;
+  opacity: 0.7;
 }
 
 .dock-tool-strip__tab:hover .dock-tool-strip__close,

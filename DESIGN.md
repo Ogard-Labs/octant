@@ -427,17 +427,16 @@ A welcome, Project, or other pane with neither a bound thread nor a valid
 launchable tool keeps the dock closed and omits its toggle. Restored presentation
 for another subject never makes unavailable chrome visible.
 
-Environment is a transient active-thread disclosure, at most 320px wide, with
-the 20px overlay radius. Its
-44px header, label/value repository rows, direct View changes action, and
-collapsed 44px detail rows form one compact operating list on an opaque floating
-surface. It summarizes Project, branch, clean/dirty state, working folder,
+Environment is a right-dock tool, opened from the dock's tab strip or Add tool
+and nowhere else; the title band carries no second Environment button. Its
+header names the thread's identity and facts (branch, clean or dirty, working
+folder, running servers), and its body is a definition list of git facts,
+row-styled actions, and collapsible groups on the dock's own ground. It summarizes Project, branch, clean/dirty state, working folder,
 changes, local servers, pull-request
 identity, sources, and compact active/completed subagent rows with lifecycle,
 model, and retained final response when authoritative. It is not a permanent
 stack of cards and does not duplicate the Agents dock. Missing checkout context
-is neutral explanatory text rather than a warning callout. When the right dock
-is open, the disclosure shifts over the central pane and never covers the dock.
+is neutral explanatory text rather than a warning callout.
 
 The Board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. All

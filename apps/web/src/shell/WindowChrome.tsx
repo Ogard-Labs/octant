@@ -116,7 +116,6 @@ export function WindowChrome(props: WindowChromeProps) {
       ) : null}
       <div className="window-chrome__trailing window-no-drag" ref={trailing}>
         <span className="window-chrome__open-in-action" data-octant-open-in-action />
-        <span className="window-chrome__environment-action" data-octant-environment-action />
         {props.isNarrow ? (
           <NarrowOverflow
             dockAvailable={props.dockAvailable}
