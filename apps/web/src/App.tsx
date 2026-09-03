@@ -4803,7 +4803,6 @@ function LaunchedShell(
                       controller.openSurface(surface, paneId, browserContextId)
                     }
                     environmentDockOpen={dockOpen && dockSurface === "environment"}
-                    onOpenEnvironment={(opener) => openDockTab("environment", opener)}
                     onDismissCrossContextOffer={controller.dismissCrossContextOffer}
                     onOpenCrossContextInNewWindow={() =>
                       void controller.openCrossContextInNewWindow()

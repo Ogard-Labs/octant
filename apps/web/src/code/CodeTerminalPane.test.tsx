@@ -287,6 +287,38 @@ describe("CodeTerminalPane", () => {
     unmount();
   });
 
+  it("uses text inlined in the stream instead of reading each chunk again", async () => {
+    const client = codeClient();
+    (client.operationContent as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      new TextEncoder().encode("ready\n"),
+    );
+    async function* outputFrames(signal: AbortSignal) {
+      yield { ...terminalOutputFrame(2), displayText: "TERMINAL_OK\n" } as never;
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+    }
+    (client.subscribeOperation as ReturnType<typeof vi.fn>).mockImplementation(
+      (_threadId, _operationId, _cursor, signal) => outputFrames(signal),
+    );
+    const runtime = xtermRuntime();
+
+    const { unmount } = render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    await waitFor(() => expect(runtime.setOutput).toHaveBeenCalledWith("ready\nTERMINAL_OK\n"));
+    expect(client.operationContent).toHaveBeenCalledOnce();
+    unmount();
+  });
+
   it("loads replay before subscribing so a slower baseline cannot overwrite live output", async () => {
     const client = codeClient();
     let resolveReplay: ((value: Uint8Array) => void) | undefined;

@@ -437,9 +437,8 @@ describe("WindowChrome", () => {
     expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");
     expect(cssRule(".environment-git-group__error")).toContain("background: transparent;");
     expect(cssRule(".environment-git-group__error")).not.toMatch(/warn|yellow/i);
-    expect(
-      cssRule('.thread-environment-summary__button[data-environment-status="unavailable"]'),
-    ).toContain("color: var(--oct-muted);");
+    expect(cssRule(".thread-environment-dock__header span")).toContain("color: var(--oct-muted);");
+    expect(styles).not.toContain(".thread-environment-summary");
     expect(cssRule(".thread-environment-disclosure .environment-group__summary")).toContain(
       "font-family: var(--oct-font-display);",
     );

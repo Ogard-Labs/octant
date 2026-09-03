@@ -50,6 +50,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   const [notice, setNotice] = useState<string>();
   const readSelection = useRef<(() => string) | undefined>(undefined);
   const operationQueue = useRef(Promise.resolve());
+  const wakeReplay = useRef<(() => void) | undefined>(undefined);
   const interactive = props.executionPolicy !== "plan" && result.state === "running";
   const replayReady = loadedReplayKey === replayKey;
 
@@ -99,13 +100,16 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
               frame.event.terminalId === result.terminalId
             ) {
               const terminalOutput = frame.event;
-              const bytes = await props.client.operationContent(
-                props.scope.threadId,
-                result.operationId,
-                terminalOutput.content.contentId,
-              );
-              if (controller.signal.aborted) return;
-              const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+              let text = frame.displayText;
+              if (text === undefined) {
+                const bytes = await props.client.operationContent(
+                  props.scope.threadId,
+                  result.operationId,
+                  terminalOutput.content.contentId,
+                );
+                if (controller.signal.aborted) return;
+                text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+              }
               setOutput((current) => (terminalOutput.replace ? text : `${current}${text}`));
               setFailure(undefined);
             }
@@ -134,8 +138,13 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           }
         }
         if (!controller.signal.aborted && received === 0) {
-          await waitForTerminalReplay(controller.signal, idleDelayMs);
-          idleDelayMs = Math.min(idleDelayMs * 2, 2_000);
+          const wake = new AbortController();
+          wakeReplay.current = () => wake.abort();
+          await waitForTerminalReplay(controller.signal, idleDelayMs, wake.signal);
+          wakeReplay.current = undefined;
+          // Keystrokes wake the wait; the echo they expect must not sit
+          // behind an idle back-off that had grown to two seconds.
+          idleDelayMs = wake.signal.aborted ? 150 : Math.min(idleDelayMs * 2, 2_000);
         } else if (received > 0) {
           idleDelayMs = 150;
         }
@@ -170,6 +179,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
               rows: (value as readonly [number, number])[1],
             } as const);
       const next = await props.client.executeOperation(command);
+      if (kind === "write") wakeReplay.current?.();
       if (next.kind === "terminal-state" && kind === "write" && next.state !== "running") {
         setResult({ ...next, operationId: result.operationId });
       }
@@ -312,16 +322,22 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   );
 }
 
-async function waitForTerminalReplay(signal: AbortSignal, delayMs: number): Promise<void> {
-  if (signal.aborted) return;
+async function waitForTerminalReplay(
+  signal: AbortSignal,
+  delayMs: number,
+  wake: AbortSignal,
+): Promise<void> {
+  if (signal.aborted || wake.aborted) return;
   await new Promise<void>((resolve) => {
     const done = () => {
       globalThis.clearTimeout(timeout);
       signal.removeEventListener("abort", done);
+      wake.removeEventListener("abort", done);
       resolve();
     };
     const timeout = globalThis.setTimeout(done, delayMs);
     signal.addEventListener("abort", done, { once: true });
+    wake.addEventListener("abort", done, { once: true });
   });
 }
 

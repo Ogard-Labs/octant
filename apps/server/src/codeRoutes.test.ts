@@ -363,6 +363,38 @@ describe("Code routes", () => {
     });
   });
 
+  it("inlines terminal output text so the renderer needs no second read per chunk", async () => {
+    const operationFrame = {
+      threadId,
+      operationId,
+      cursor: 1,
+      occurredAt: now,
+      event: {
+        kind: "terminal-output" as const,
+        terminalId: "00000000-0000-4000-8000-000000000911",
+        content: { contentId, digest, byteLength: 12 },
+        replace: false,
+      },
+    };
+    const subscribeOperation = vi.fn(async function* () {
+      yield operationFrame;
+    });
+    const readOperationContents = vi.fn(async () => ({
+      threadId,
+      items: [{ operationId, contentId, text: "$ bun test\n" }],
+    }));
+    const route = routeFixture({ subscribeOperation, readOperationContents });
+
+    const response = await route(
+      request(`/api/code/threads/${threadId}/operations/${operationId}/events?afterCursor=0`),
+    );
+
+    expect(response?.status).toBe(200);
+    await expect(response?.text()).resolves.toBe(
+      `${JSON.stringify({ ...operationFrame, displayText: "$ bun test\n" })}\n`,
+    );
+  });
+
   it("chunks operation stream enrichment within the evidence batch contract", async () => {
     const frames = Array.from({ length: 65 }, (_, index) => {
       const frameContentId = `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
