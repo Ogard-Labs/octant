@@ -15,9 +15,19 @@
  * Native macOS sandbox-exec probes remain packaged/native validation evidence;
  * Linux CI covers profile string generation and Bubblewrap launch construction.
  */
-import { accessSync, constants, existsSync, readdirSync, realpathSync } from "node:fs";
+import {
+  accessSync,
+  closeSync,
+  constants,
+  existsSync,
+  openSync,
+  readdirSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, sep } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, sep } from "node:path";
 import { buildLinuxConfinementLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
 
@@ -43,6 +53,12 @@ export interface SeatbeltProfileInput {
   readonly networkEgress: OsNetworkEgress;
   readonly allowProcessExec?: boolean;
   readonly allowProcessFork?: boolean;
+  /**
+   * Programs that stay executable when `allowProcessExec` is false: the
+   * confined program itself and its script interpreter. See
+   * {@link confinedExecutableExecPaths}.
+   */
+  readonly execAllowPaths?: ReadonlyArray<string>;
   readonly allowFileReadStar?: boolean;
   readonly writeBoundRoot?: boolean;
   /**
@@ -112,6 +128,8 @@ export interface SeatbeltConfinementOptions {
   readonly sandboxPath?: string;
   readonly homeDirectory?: string;
   readonly usersDirectory?: string;
+  /** `PATH` used to resolve a `#!/usr/bin/env` interpreter; defaults to the host's. */
+  readonly interpreterSearchPath?: string;
 }
 
 export interface RequireSandboxExecInput {
@@ -153,6 +171,113 @@ export function seatbeltAllowRule(operation: "file-read*" | "file-write*", path:
 
 export function seatbeltDenyRule(operation: "file-read*" | "file-write*", path: string): string {
   return `(deny ${operation} (subpath "${escapeSeatbeltPath(path)}"))`;
+}
+
+export function seatbeltExecRule(path: string): string {
+  return `(allow process-exec (literal "${escapeSeatbeltPath(path)}"))`;
+}
+
+const SHEBANG_BYTES = 512;
+
+/**
+ * The programs a launch has to exec before the confined process exists: the
+ * program itself and, for a `#!` script, its interpreter. Seatbelt judges the
+ * launch exec too, so a profile that denies `process-exec` outright made
+ * `sandbox-exec` refuse to start the very program it was confining; every
+ * Chat and Plan launch of a Seatbelt-confined provider died with "Operation
+ * not permitted" before speaking a byte of protocol (observed with Pi 0.84.1
+ * under `--no-tools`, whose entry point is `#!/usr/bin/env node`). Seatbelt
+ * matches literals against the resolved path, so each entry is listed with its
+ * real path as well. Listing these adds no reach: the confined process already
+ * is that program, and every further exec is still judged against this list.
+ */
+export function confinedExecutableExecPaths(
+  executable: string,
+  searchPath: string | undefined,
+): ReadonlyArray<string> {
+  const paths = new Set<string>();
+  const add = (path: string) => {
+    paths.add(path);
+    try {
+      paths.add(realpathSync(path));
+    } catch {
+      // A missing program keeps its literal; the launch reports the failure.
+    }
+  };
+  add(executable);
+  const interpreter = shebangInterpreter(executable);
+  if (interpreter !== undefined) {
+    add(interpreter.command);
+    if (interpreter.program !== undefined) {
+      const resolved = resolveOnSearchPath(interpreter.program, searchPath);
+      if (resolved !== undefined) add(resolved);
+    }
+  }
+  return [...paths];
+}
+
+function shebangInterpreter(
+  executable: string,
+): { readonly command: string; readonly program?: string } | undefined {
+  let header: string;
+  try {
+    const descriptor = openSync(executable, "r");
+    try {
+      const buffer = Buffer.alloc(SHEBANG_BYTES);
+      const read = readSync(descriptor, buffer, 0, SHEBANG_BYTES, 0);
+      header = buffer.subarray(0, read).toString("utf8");
+    } finally {
+      closeSync(descriptor);
+    }
+  } catch {
+    return undefined;
+  }
+  if (!header.startsWith("#!")) return undefined;
+  const [command, ...rest] = header.slice(2).split(/\r?\n/, 1)[0]!.trim().split(/\s+/);
+  if (command === undefined || !isAbsolute(command)) return undefined;
+  if (basename(command) !== "env") return { command };
+  const program = envInterpreterOperand(rest);
+  return program === undefined ? { command } : { command, program };
+}
+
+// `env` names the interpreter after its own options and any `NAME=value`
+// assignments, so `#!/usr/bin/env -u NODE_OPTIONS FORCE_COLOR=0 node` still
+// resolves to `node`. Picking the first non-flag token instead selects an
+// unset name or an assignment, and the generated allowlist then omits the
+// interpreter and blocks the launch.
+function envInterpreterOperand(tokens: ReadonlyArray<string>): string | undefined {
+  // These carry a separate operand that is not the interpreter. `-S` and
+  // `--split-string` are excluded on purpose: their operand opens the command.
+  const optionsTakingOperand = new Set(["-u", "--unset", "-P", "-C", "--chdir"]);
+  let index = 0;
+  while (index < tokens.length) {
+    const token = tokens[index]!;
+    if (token === "--") {
+      index += 1;
+      break;
+    }
+    if (!token.startsWith("-")) break;
+    index += optionsTakingOperand.has(token) ? 2 : 1;
+  }
+  // An assignment can only precede the interpreter, never follow it.
+  while (index < tokens.length && /^[^=/\s]+=/.test(tokens[index]!)) index += 1;
+  return tokens[index];
+}
+
+function resolveOnSearchPath(program: string, searchPath: string | undefined): string | undefined {
+  if (program.includes("/")) return isAbsolute(program) ? program : undefined;
+  for (const directory of (searchPath ?? "").split(delimiter)) {
+    if (!isAbsolute(directory)) continue;
+    const candidate = join(directory, program);
+    try {
+      if (!statSync(candidate).isFile()) continue;
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Not here; keep looking.
+    }
+  }
+  return undefined;
 }
 
 export function privateHomeDenyReadRules(
@@ -245,7 +370,9 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
   const lines = [
     "(version 1)",
     "(deny default)",
-    ...(allowProcessExec ? ["(allow process-exec)"] : []),
+    ...(allowProcessExec
+      ? ["(allow process-exec)"]
+      : uniqueAbsolutePaths(input.execAllowPaths ?? []).map(seatbeltExecRule)),
     ...(allowProcessFork ? ["(allow process-fork)"] : []),
     "(allow signal (target self))",
     "(allow sysctl-read)",
@@ -362,6 +489,14 @@ function prepareDarwinSeatbelt(
       : { additionalWriteRoots: input.additionalWriteRoots }),
     ...(input.readRoots === undefined ? {} : { readRoots: input.readRoots }),
     ...(input.allowProcessExec === undefined ? {} : { allowProcessExec: input.allowProcessExec }),
+    ...(input.allowProcessExec === false
+      ? {
+          execAllowPaths: confinedExecutableExecPaths(
+            input.executable,
+            options.interpreterSearchPath ?? process.env.PATH,
+          ),
+        }
+      : {}),
     ...(input.allowProcessFork === undefined ? {} : { allowProcessFork: input.allowProcessFork }),
     ...(input.allowFileReadStar === undefined
       ? {}

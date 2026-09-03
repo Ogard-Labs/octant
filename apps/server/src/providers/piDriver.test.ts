@@ -171,6 +171,48 @@ describe("Pi provider driver", () => {
     expect(released()).toBe(1);
   });
 
+  it("reads a Pi 0.84.1 model list served by a custom OpenAI-compatible provider", async () => {
+    const { driver, client } = fixture();
+    // Captured from `pi --mode rpc` 0.84.1 with a models.json entry pointing at
+    // a local oMLX server: no `reasoning`, extra transport fields, and a
+    // provider name Octant has never heard of.
+    client.request.mockImplementationOnce(async () => ({
+      type: "response" as const,
+      command: "get_available_models",
+      success: true,
+      data: {
+        models: [
+          {
+            id: "gemma-4-12B-it-4bit",
+            name: "gemma-4-12B-it-4bit",
+            api: "openai-completions",
+            provider: "omlx",
+            baseUrl: "http://127.0.0.1:8088/v1",
+            reasoning: false,
+            input: ["text", "image"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 131072,
+            maxTokens: 16384,
+          },
+        ],
+      },
+    }));
+
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    expect(result).toMatchObject({
+      readiness: "ready",
+      models: [
+        {
+          id: "omlx/gemma-4-12B-it-4bit",
+          displayName: "gemma-4-12B-it-4bit",
+          contextLimit: 131072,
+          reasoning: "unsupported",
+        },
+      ],
+    });
+  });
+
   it("streams ordered events and correlates approval answers", async () => {
     const { driver, client, starts } = fixture();
     const scope = await Effect.runPromise(Scope.make());
