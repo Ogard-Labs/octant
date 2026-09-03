@@ -422,7 +422,7 @@ describe("FirstRunOnboarding", () => {
     expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
   });
 
-  it("waits for a provider it turned on to land before recording completion", async () => {
+  it("waits for a provider switch to land before recording completion", async () => {
     const user = userEvent.setup();
     let acceptEnable!: (accepted: boolean) => void;
     const onSetProviderEnabled = vi.fn(
@@ -434,7 +434,12 @@ describe("FirstRunOnboarding", () => {
     const props = mount({ ...readyHandoff(), onSetProviderEnabled });
 
     await user.click(screen.getByRole("button", { name: /Providers/ }));
+    // The discovered provider is on, so this switch turns it off; the wizard
+    // waits on the write either way, and asserting the direction keeps the
+    // fixture from drifting out from under the test.
     await user.click(screen.getByRole("switch", { name: "Enable Ollama" }));
+    expect(onSetProviderEnabled).toHaveBeenCalledWith(instanceId, false);
+
     await openHandoff(user);
     await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
 
