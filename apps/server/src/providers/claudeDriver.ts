@@ -549,7 +549,6 @@ function probeSdk(
   options: ClaudeDriverOptions,
   environmentFactory: ClaudeEnvironmentFactory,
   environmentOptions: ClaudeEnvironmentScopeOptions,
-  expectedVersion: string,
 ): Effect.Effect<readonly ProviderModel[], ProviderFailure, Scope.Scope> {
   return Effect.gen(function* () {
     const environment = yield* environmentFactory(options.authentication, environmentOptions);
@@ -563,17 +562,9 @@ function probeSdk(
       canUseTool: async () => ({ behavior: "deny", message: "Probe cannot use tools." }),
       preToolUse: async () => ({ behavior: "deny", message: "Probe cannot use tools." }),
     });
-    const first = yield* Stream.runHead(query.messages);
-    if (first._tag !== "Some" || first.value.kind !== "initialized") {
-      return yield* Effect.fail(
-        failure("protocol", "Claude probe did not initialize its runtime."),
-      );
-    }
-    if (first.value.runtimeVersion !== expectedVersion) {
-      return yield* Effect.fail(
-        failure("protocol", "Claude initialization version did not match the configured binary."),
-      );
-    }
+    // The runtime initializes only once a user message arrives, so the probe
+    // reads the catalogue and account through the SDK's control requests
+    // and never consumes the message stream.
     const account = yield* query.accountInfo();
     if (!account.ready) {
       return yield* Effect.fail(failure("unauthenticated", "Claude authentication is required."));
@@ -677,7 +668,6 @@ function makeProbe(
         options,
         environmentFactory,
         apiKey === undefined ? {} : { apiKey },
-        version,
       ).pipe(
         Effect.map((models) => ({ kind: "ready" as const, models })),
         Effect.catchAll((providerFailure) =>
@@ -950,10 +940,11 @@ function makeConnection(
         if (
           message.kind !== "initialized" ||
           message.projectRoot !== state.projectRoot ||
-          message.model !== state.modelId ||
+          message.requestedModel !== state.modelId ||
           message.runtimeVersion !== state.expectedRuntimeVersion ||
           (state.expectedClaudeSessionId !== undefined &&
-            message.sessionId !== state.expectedClaudeSessionId)
+            message.sessionId !== state.expectedClaudeSessionId) ||
+          (state.claudeSessionId !== undefined && message.sessionId !== state.claudeSessionId)
         ) {
           const failed = failure("protocol", "Claude initialization did not match the session.");
           state.initialized.reject(failed);
@@ -1086,6 +1077,9 @@ function makeConnection(
         }
         scope = await runSetupEffect(Scope.make(), signal);
         const initialized = deferred<string>();
+        // Startup no longer waits on this: the runtime initializes with the
+        // first turn, and a rejected initialization fails that turn instead.
+        void initialized.promise.catch(() => undefined);
         const terminalResult = deferred<void>();
         const environment = await runSetupEffect(
           environmentFactory(options.authentication, apiKey === undefined ? {} : { apiKey }).pipe(
@@ -1353,6 +1347,9 @@ function makeConnection(
           }
           return grant();
         };
+        // The runtime initializes with the first turn, so a new session's id
+        // is assigned here and the initialized message is later held to it.
+        const assignedSessionId = resumeSessionId === undefined ? randomUUID() : undefined;
         const query = await runSetupEffect(
           options.sdk
             .openQuery({
@@ -1363,6 +1360,7 @@ function makeConnection(
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
               ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
+              ...(assignedSessionId === undefined ? {} : { sessionId: assignedSessionId }),
               tools: executionOptions.tools,
               ...(sandbox === undefined ? {} : { sandbox }),
               canUseTool,
@@ -1420,15 +1418,17 @@ function makeConnection(
           options.runtimeRegistry.activeSessionCount(options.instanceId) + 1,
         );
         startCollector(state);
-        const claudeSessionId = await awaitSetupPromise(
-          promiseWithTimeout(
-            initialized.promise,
-            options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
-            failure("unavailable", "Claude session startup timed out."),
+        const claudeSessionId = await runSetupEffect(
+          query.sessionId.pipe(
+            Effect.timeoutFail({
+              duration: options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
+              onTimeout: () => failure("unavailable", "Claude session startup timed out."),
+            }),
           ),
           signal,
         );
         throwIfSetupCancelled(signal);
+        state.claudeSessionId ??= claudeSessionId;
         if (state.terminal && !state.outputAccepted) {
           throw failure("protocol", "Claude session failed during startup.");
         }
