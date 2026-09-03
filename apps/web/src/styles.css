@@ -3668,7 +3668,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   border-top: 1px solid var(--oct-hairline);
 }
 .thread-environment-dock .environment-group__header {
-  min-height: 44px;
+  min-height: 36px;
   padding: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
@@ -3676,21 +3676,108 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   letter-spacing: normal;
   text-transform: none;
 }
-.thread-environment-dock .environment-group__body {
-  padding: 0 0 var(--oct-space-2);
+.thread-environment-dock .environment-group__summary {
+  overflow: hidden;
+  max-width: 55%;
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.thread-environment-dock .environment-group__body {
+  padding: 0 0 var(--oct-space-3);
+}
+/* The git facts are a definition list, not a card: label column, value
+   column, one line each, the same type scale as the group headers below. */
 .thread-environment-dock .environment-git-group dl {
+  padding: var(--oct-space-2) 0;
   border: 0;
   border-radius: 0;
   background: transparent;
 }
 .thread-environment-dock .environment-git-group__row,
 .thread-environment-dock .local-servers__row {
-  min-height: 30px;
+  min-height: 28px;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+.thread-environment-dock .environment-git-group__row {
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--oct-space-2);
+}
+.thread-environment-dock .environment-git-group__row + .environment-git-group__row {
+  border-top: 0;
+}
+.thread-environment-dock .environment-git-group__row dt {
+  gap: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+.thread-environment-dock .environment-git-group__row dd {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+}
+.thread-environment-dock .environment-git-group__identity-primary {
+  color: var(--oct-fg-2);
+}
+.thread-environment-dock .environment-git-group__identity-secondary {
+  font-size: var(--oct-text-xs);
+}
+/* Actions read as rows, not links: same height as a group header, foreground
+   text, no underline, and they start where the group titles start. */
+.thread-environment-dock .environment-group__action {
+  min-height: 32px;
+  justify-self: start;
+  width: auto;
+  color: var(--oct-fg-2);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+}
+.thread-environment-dock .environment-group__action:hover,
+.thread-environment-dock .environment-group__action:focus-visible {
+  color: var(--oct-fg);
+  text-decoration: none;
+}
+.thread-environment-dock .local-servers {
+  gap: var(--oct-space-2);
+}
+.thread-environment-dock .local-servers__group {
+  gap: 0;
+}
+.thread-environment-dock .local-servers__group-heading {
+  padding: var(--oct-space-1) 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+}
+.thread-environment-dock .local-servers__row {
+  gap: 3px;
+  padding: var(--oct-space-2) 0;
+}
+.thread-environment-dock .local-servers__row + .local-servers__row {
+  border-top: 1px solid var(--oct-hairline);
+}
+.thread-environment-dock .local-servers__name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+.thread-environment-dock .local-servers__url {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+.thread-environment-dock .local-servers__meta,
+.thread-environment-dock .local-servers__details {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+.thread-environment-dock .local-servers__actions {
+  margin-top: 2px;
+  margin-left: calc(var(--oct-space-2) * -1);
+}
+.thread-environment-dock .environment-pull-requests__refresh {
+  top: -32px;
 }
 
 .environment-subagents {

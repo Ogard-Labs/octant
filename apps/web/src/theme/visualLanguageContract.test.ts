@@ -118,15 +118,18 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/padding:\s*18px 16px 12px/);
   });
 
-  it("keeps keyboard focus inside the composer edge instead of drawing a detached halo", () => {
+  it("lets focus lift the composer instead of framing the prompt", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const focus =
       system.match(
         /\.composer:focus-within:has\(\.composer-input:focus-visible\)\s*\{[^}]+\}/,
       )?.[0] ?? "";
 
-    expect(focus).toMatch(/outline:\s*2px solid var\(--oct-accent\)/);
-    expect(focus).toMatch(/outline-offset:\s*-2px/);
+    expect(focus).toMatch(/outline:\s*none/);
+    expect(focus).not.toMatch(/border|--oct-accent\b/);
+    expect(system).toMatch(
+      /\.composer:focus-within\s*\{\s*box-shadow:\s*var\(--octant-shadow-lg\)/,
+    );
   });
 
   it("keeps empty composer pickers as quiet toolbar items instead of nested fields", () => {

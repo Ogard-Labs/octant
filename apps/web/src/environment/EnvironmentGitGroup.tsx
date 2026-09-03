@@ -58,7 +58,6 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
     <div className="environment-git-group">
       <dl>
         <GitRow icon={GitCommitHorizontal} label="Changes" value={content.changes} />
-        <GitRow icon={Files} label="Local" value={content.local} />
         <GitRow icon={GitBranch} label="Branch" value={content.branch} />
         <GitRow icon={FolderGit2} label="Repository" value={content.repository} />
         <GitRow icon={Files} label="Worktree" value={content.worktree} />
@@ -76,7 +75,7 @@ function GitRow(props: {
   return (
     <div className="environment-git-group__row">
       <dt>
-        <Icon aria-hidden="true" size={16} strokeWidth={1.8} />
+        <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
         {props.label}
       </dt>
       <dd>{props.value}</dd>
@@ -88,14 +87,13 @@ function gitContent(
   observation: Extract<CodeEnvironmentObservation, { readonly status: "ready" }>,
 ): {
   readonly changes: ReactNode;
-  readonly local: ReactNode;
   readonly branch: ReactNode;
   readonly repository: ReactNode;
   readonly worktree: ReactNode;
 } {
   return {
     changes: observation.changes === "dirty" ? "Dirty working tree" : "Clean working tree",
-    local: (
+    worktree: (
       <PathIdentity
         path={observation.worktreeRoot}
         primary={pathBasename(observation.worktreeRoot)}
@@ -120,7 +118,6 @@ function gitContent(
         testId="environment-repository-value"
       />
     ),
-    worktree: <span title={observation.worktreeRoot}>{observation.worktreeRoot}</span>,
   };
 }
 
