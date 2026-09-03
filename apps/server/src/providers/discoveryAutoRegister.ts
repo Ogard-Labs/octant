@@ -70,6 +70,8 @@ function configuredBinaryPath(instance: ProviderInstance): string | undefined {
     case "claude-agent-sdk":
     case "mistral-vibe-acp":
     case "grok-acp":
+    case "goose-acp":
+    case "glm-acp":
     case "devin-acp":
     case "kilo-acp":
     case "pi-rpc":

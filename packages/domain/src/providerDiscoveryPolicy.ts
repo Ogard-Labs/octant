@@ -69,6 +69,8 @@ const AUTO_DETECTABLE_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set([
   "ollama",
   "kimi-code",
   "grok",
+  "goose",
+  "glm",
 ]);
 
 const MANUAL_ENDPOINT_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set([

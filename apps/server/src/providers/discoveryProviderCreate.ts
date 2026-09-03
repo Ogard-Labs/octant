@@ -18,6 +18,8 @@ type DiscoveryCreateCommand = Extract<
       | "create-claude-provider"
       | "create-mistral-vibe-provider"
       | "create-grok-provider"
+      | "create-goose-provider"
+      | "create-glm-provider"
       | "create-devin-provider"
       | "create-kilo-provider"
       | "create-pi-provider"
@@ -117,6 +119,37 @@ export function createProviderFromDiscoveryCandidate(
             kind: "grok-acp",
             binaryPath: candidate.binaryPath,
             authentication: "subscription",
+          },
+          enabled: options.enabled,
+        },
+      };
+    case "goose":
+      return {
+        instanceId,
+        command: {
+          kind: "create-goose-provider",
+          instanceId,
+          expectedVersion,
+          displayName: candidate.displayName,
+          configuration: {
+            kind: "goose-acp",
+            binaryPath: candidate.binaryPath,
+          },
+          enabled: options.enabled,
+        },
+      };
+    case "glm":
+      return {
+        instanceId,
+        command: {
+          kind: "create-glm-provider",
+          instanceId,
+          expectedVersion,
+          displayName: candidate.displayName,
+          configuration: {
+            kind: "glm-acp",
+            binaryPath: candidate.binaryPath,
+            authentication: "api-key",
           },
           enabled: options.enabled,
         },

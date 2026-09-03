@@ -21,6 +21,8 @@ import {
   FoundryConfigurationForm,
   GeminiImageConfigurationForm,
   GrokConfigurationForm,
+  GlmConfigurationForm,
+  GooseConfigurationForm,
   HttpConfigurationForm,
   OpenAiImageConfigurationForm,
   KiloConfigurationForm,
@@ -60,6 +62,8 @@ export type ProviderSettingsListProps = Pick<
   | "onChangeOllamaConfiguration"
   | "onChangeMistralVibeConfiguration"
   | "onChangeGrokConfiguration"
+  | "onChangeGooseConfiguration"
+  | "onChangeGlmConfiguration"
   | "onChangeOpenAiCompatibleConfiguration"
   | "onChangeAnthropicCompatibleConfiguration"
   | "onChangeAzureFoundryConfiguration"
@@ -177,6 +181,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
                 onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
                 onChangeGrokConfiguration={props.onChangeGrokConfiguration}
+                onChangeGooseConfiguration={props.onChangeGooseConfiguration}
+                onChangeGlmConfiguration={props.onChangeGlmConfiguration}
                 onChangeDevinConfiguration={props.onChangeDevinConfiguration}
                 onChangeKiloConfiguration={props.onChangeKiloConfiguration}
                 onChangePiConfiguration={props.onChangePiConfiguration}
@@ -395,6 +401,8 @@ interface ProviderRowProps {
   readonly onChangeOllamaConfiguration: ProviderSettingsViewProps["onChangeOllamaConfiguration"];
   readonly onChangeMistralVibeConfiguration: ProviderSettingsViewProps["onChangeMistralVibeConfiguration"];
   readonly onChangeGrokConfiguration: ProviderSettingsViewProps["onChangeGrokConfiguration"];
+  readonly onChangeGooseConfiguration: ProviderSettingsViewProps["onChangeGooseConfiguration"];
+  readonly onChangeGlmConfiguration: ProviderSettingsViewProps["onChangeGlmConfiguration"];
   readonly onChangeOpenAiCompatibleConfiguration: ProviderSettingsViewProps["onChangeOpenAiCompatibleConfiguration"];
   readonly onChangeAnthropicCompatibleConfiguration: ProviderSettingsViewProps["onChangeAnthropicCompatibleConfiguration"];
   readonly onChangeAzureFoundryConfiguration: ProviderSettingsViewProps["onChangeAzureFoundryConfiguration"];
@@ -426,6 +434,8 @@ function ProviderRow(props: ProviderRowProps) {
   const isClaude = props.instance.driverKind === "claude";
   const isVibe = props.instance.driverKind === "mistral-vibe";
   const isGrok = props.instance.driverKind === "grok";
+  const isGoose = props.instance.driverKind === "goose";
+  const isGlm = props.instance.driverKind === "glm";
   const isDevin = props.instance.driverKind === "devin";
   const isKilo = props.instance.driverKind === "kilo";
   const isPi = props.instance.driverKind === "pi";
@@ -442,12 +452,12 @@ function ProviderRow(props: ProviderRowProps) {
     isAnthropicHttp ||
     isFoundry ||
     isImageProfile ||
-    ((isClaude || isVibe || isGrok) && props.instance.configuration.authentication === "api-key");
+    ((isClaude || isVibe || isGrok || isGlm) && props.instance.configuration.authentication === "api-key");
   const credential = useCredentialStatus(props, !usesCredential);
   const label = driverLabel(props.instance.driverKind);
   const runtimeLabel = isClaude
     ? "Agent SDK"
-    : isVibe || isGrok || isDevin || isKilo
+    : isVibe || isGrok || isGoose || isGlm || isDevin || isKilo
       ? "ACP"
       : isPi || isOhMyPi
         ? "RPC"
@@ -686,6 +696,19 @@ function ProviderRow(props: ProviderRowProps) {
               ) : null}
             </div>
           )}
+          {!isGoose ? null : (
+            <div className="provider-card__facts provider-card__facts--goose">
+              <span>Authentication: provider-owned Goose credentials</span>
+            </div>
+          )}
+          {!isGlm ? null : (
+            <div className="provider-card__facts provider-card__facts--glm">
+              <span>Authentication: Z.AI API key</span>
+              <span>
+                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+              </span>
+            </div>
+          )}
           {!isDevin ? null : (
             <div className="provider-card__facts provider-card__facts--devin">
               <span>Authentication: Devin subscription</span>
@@ -759,6 +782,8 @@ function ProviderRow(props: ProviderRowProps) {
           isClaude ||
           isVibe ||
           isGrok ||
+          isGoose ||
+          isGlm ||
           isDevin ||
           isKilo ||
           isPi ||
@@ -895,6 +920,24 @@ function ProviderRow(props: ProviderRowProps) {
                   key={`grok:${props.instance.version}`}
                   onBeginAuthentication={props.onBeginProviderAuthentication}
                   onChange={props.onChangeGrokConfiguration}
+                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
+                />
+              ) : isGoose ? (
+                <GooseConfigurationForm
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`goose:${props.instance.version}`}
+                  onChange={props.onChangeGooseConfiguration}
+                />
+              ) : isGlm ? (
+                <GlmConfigurationForm
+                  credential={credential}
+                  credentialManagementAvailable={props.credentialManagementAvailable}
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`glm:${props.instance.version}`}
+                  onBeginAuthentication={props.onBeginProviderAuthentication}
+                  onChange={props.onChangeGlmConfiguration}
                   onCompleteAuthentication={props.onCompleteProviderAuthentication}
                 />
               ) : isDevin ? (
@@ -1099,7 +1142,11 @@ function guidance(
                             ? instance.configuration.authentication === "api-key"
                               ? "Add or replace the xAI API key in the Octant host, then check the connection again."
                               : "Use the xAI browser sign-in action below, then check the connection again."
-                            : driverKind === "anthropic-compatible"
+                            : driverKind === "goose"
+                              ? "Run `goose configure` in your terminal, then check the connection again."
+                              : driverKind === "glm"
+                                ? "Add or replace the Z.AI API key in the Octant host, then check the connection again."
+                                : driverKind === "anthropic-compatible"
                               ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
                               : driverKind === "azure-foundry"
                                 ? "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again."

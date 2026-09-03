@@ -26,6 +26,8 @@ const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   ollama: "Ollama",
   "kimi-code": "Kimi Code ACP",
   grok: "Grok Build ACP",
+  goose: "Goose ACP",
+  glm: "GLM Agent ACP",
   "openai-compatible": "OpenAI-compatible HTTP",
   "anthropic-compatible": "Anthropic-compatible HTTP",
   "azure-foundry": "Azure AI Foundry",

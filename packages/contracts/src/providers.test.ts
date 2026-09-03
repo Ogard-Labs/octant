@@ -54,6 +54,8 @@ describe("provider registry contracts", () => {
     "ollama",
     "kimi-code",
     "grok",
+    "goose",
+    "glm",
     "openai-compatible",
     "anthropic-compatible",
     "azure-foundry",
@@ -639,6 +641,81 @@ describe("provider registry contracts", () => {
       decodeProviderInstance({
         ...grok,
         configuration: { ...grok.configuration, authentication: "automatic" },
+      }),
+    ).toThrow();
+  });
+
+  it("decodes only strict non-secret Goose instances, events, and commands", () => {
+    const goose = {
+      id: ids.instance,
+      displayName: "Goose local",
+      driverKind: "goose",
+      configuration: {
+        kind: "goose-acp",
+        binaryPath: "/Users/example/.local/bin/goose",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(decodeProviderInstance(goose)).toEqual(goose);
+    expect(decodeProviderInstanceConfigurationChanged({ instance: goose })).toEqual({
+      instance: goose,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-goose-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: goose.displayName,
+        configuration: goose.configuration,
+      }),
+    ).toMatchObject({ kind: "create-goose-provider" });
+    expect(() =>
+      decodeProviderInstance({
+        ...goose,
+        configuration: { ...goose.configuration, binaryPath: "bin/goose" },
+      }),
+    ).toThrow();
+  });
+
+  it("decodes only strict non-secret GLM instances, events, and commands", () => {
+    const glm = {
+      id: ids.instance,
+      displayName: "GLM local",
+      driverKind: "glm",
+      configuration: {
+        kind: "glm-acp",
+        binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+        authentication: "api-key",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(decodeProviderInstance(glm)).toEqual(glm);
+    expect(decodeProviderInstanceConfigurationChanged({ instance: glm })).toEqual({
+      instance: glm,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-glm-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: glm.displayName,
+        configuration: glm.configuration,
+      }),
+    ).toMatchObject({ kind: "create-glm-provider" });
+    expect(() =>
+      decodeProviderInstance({
+        ...glm,
+        configuration: { ...glm.configuration, authentication: "subscription" },
       }),
     ).toThrow();
   });

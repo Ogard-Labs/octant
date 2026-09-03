@@ -6,6 +6,8 @@ import type {
   DevinProviderConfiguration,
   DiscoverySnapshot,
   GrokProviderConfiguration,
+  GlmProviderConfiguration,
+  GooseProviderConfiguration,
   KiloProviderConfiguration,
   MistralVibeProviderConfiguration,
   GeminiImageProviderConfiguration,
@@ -42,7 +44,7 @@ export interface ProviderSettingsViewProps {
   readonly credentialManagementAvailable: boolean;
   readonly message?: string;
   readonly onCreate: (
-    driverKind: "opencode" | "codex" | "kimi-code" | "devin" | "kilo" | "pi" | "oh-my-pi",
+    driverKind: "opencode" | "codex" | "kimi-code" | "devin" | "kilo" | "pi" | "oh-my-pi" | "goose",
     displayName: string,
     binaryPath: string,
   ) => Promise<boolean>;
@@ -84,6 +86,11 @@ export interface ProviderSettingsViewProps {
   readonly onCreateGrok: (
     displayName: string,
     configuration: GrokProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onCreateGlm: (
+    displayName: string,
+    configuration: GlmProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onCreateOllama: (
@@ -130,6 +137,15 @@ export interface ProviderSettingsViewProps {
   readonly onChangeGrokConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: GrokProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeGooseConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: GooseProviderConfiguration,
+  ) => Promise<boolean>;
+  readonly onChangeGlmConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: GlmProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeDevinConfiguration: (
@@ -214,6 +230,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             onCreateAzureFoundry={props.onCreateAzureFoundry}
             onCreateClaude={props.onCreateClaude}
             onCreateGrok={props.onCreateGrok}
+            onCreateGlm={props.onCreateGlm}
             onCreateMistralVibe={props.onCreateMistralVibe}
             onCreateOllama={props.onCreateOllama}
             onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
@@ -236,6 +253,8 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
         onChangeDevinConfiguration={props.onChangeDevinConfiguration}
         onChangeGrokConfiguration={props.onChangeGrokConfiguration}
+        onChangeGooseConfiguration={props.onChangeGooseConfiguration}
+        onChangeGlmConfiguration={props.onChangeGlmConfiguration}
         onChangeKiloConfiguration={props.onChangeKiloConfiguration}
         onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
         onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}

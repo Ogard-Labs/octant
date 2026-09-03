@@ -22,6 +22,8 @@ const everyDriverKind = [
   "ollama",
   "kimi-code",
   "grok",
+  "goose",
+  "glm",
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",

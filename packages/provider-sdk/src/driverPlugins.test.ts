@@ -20,6 +20,8 @@ describe("provider-driver host runtime", () => {
     expect(runtimes.get("mistral-vibe")).toBe("acp-host-profile");
     expect(runtimes.get("kimi-code")).toBe("acp-host-profile");
     expect(runtimes.get("grok")).toBe("acp-host-profile");
+    expect(runtimes.get("goose")).toBe("acp-host-profile");
+    expect(runtimes.get("glm")).toBe("acp-host-profile");
     expect(runtimes.get("codex")).toBe("managed-process");
     expect(runtimes.get("claude")).toBe("managed-process");
     expect(runtimes.get("opencode")).toBe("managed-process");
@@ -33,7 +35,7 @@ describe("provider-driver host runtime", () => {
       DISCOVERY_DESCRIPTORS.filter((descriptor) =>
         isAcpHostProfileDriver(descriptor.driverKind),
       ).map((descriptor) => descriptor.driverKind),
-    ).toEqual(["kimi-code", "devin", "kilo", "mistral-vibe", "grok"]);
+    ).toEqual(["kimi-code", "devin", "kilo", "mistral-vibe", "grok", "goose", "glm"]);
   });
 
   it("omits models from discovery when a driver plugin is not admitted", () => {

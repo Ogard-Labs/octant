@@ -35,6 +35,8 @@ export const ProviderDriverKind = Schema.Literal(
   "ollama",
   "kimi-code",
   "grok",
+  "goose",
+  "glm",
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
@@ -239,6 +241,21 @@ export const GrokProviderConfiguration = Schema.Struct({
   authentication: GrokAuthentication,
 }).annotations(strict);
 export type GrokProviderConfiguration = typeof GrokProviderConfiguration.Type;
+
+export const GooseProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("goose-acp"),
+  binaryPath: AbsoluteBinaryPath,
+}).annotations(strict);
+export type GooseProviderConfiguration = typeof GooseProviderConfiguration.Type;
+
+export const GlmAuthentication = Schema.Literal("api-key");
+export type GlmAuthentication = typeof GlmAuthentication.Type;
+export const GlmProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("glm-acp"),
+  binaryPath: AbsoluteBinaryPath,
+  authentication: GlmAuthentication,
+}).annotations(strict);
+export type GlmProviderConfiguration = typeof GlmProviderConfiguration.Type;
 
 export const DevinProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("devin-acp"),
@@ -477,6 +494,20 @@ export const GrokProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type GrokProviderInstance = typeof GrokProviderInstance.Type;
 
+export const GooseProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("goose"),
+  configuration: GooseProviderConfiguration,
+}).annotations(strict);
+export type GooseProviderInstance = typeof GooseProviderInstance.Type;
+
+export const GlmProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("glm"),
+  configuration: GlmProviderConfiguration,
+}).annotations(strict);
+export type GlmProviderInstance = typeof GlmProviderInstance.Type;
+
 export const DevinProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
   driverKind: Schema.Literal("devin"),
@@ -548,6 +579,8 @@ export const ProviderInstance = Schema.Union(
   KiloProviderInstance,
   MistralVibeProviderInstance,
   GrokProviderInstance,
+  GooseProviderInstance,
+  GlmProviderInstance,
   DevinProviderInstance,
   PiProviderInstance,
   OhMyPiProviderInstance,
@@ -622,6 +655,8 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     ClaudeProviderInstance,
     MistralVibeProviderInstance,
     GrokProviderInstance,
+    GooseProviderInstance,
+    GlmProviderInstance,
     KiloProviderInstance,
     DevinProviderInstance,
     PiProviderInstance,
@@ -1006,6 +1041,18 @@ export const ProviderRegistryCommand = Schema.Union(
     configuration: GrokProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("create-goose-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: GooseProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("create-glm-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: GlmProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-devin-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
@@ -1084,6 +1131,16 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-grok-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: GrokProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-goose-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: GooseProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-glm-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: GlmProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-devin-configuration"),

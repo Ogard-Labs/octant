@@ -478,7 +478,7 @@ modelId }`, and the model picker is provider-first. Discovery can find
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
   Code turn drivers), SDK/RPC drivers (Claude Agent SDK, Codex app-server,
   OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
-  (Kilo Code, Devin, Mistral Vibe, Kimi Code, Grok Build). Image profiles are
+  (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent). Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
   Generation itself is a journaled job with OpenAI and Gemini adapters, a
   bounded generated-image attachment scope, and usage rows attributed as

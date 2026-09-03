@@ -20,6 +20,8 @@ const ACP_HOST_PROFILE_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
   "mistral-vibe",
   "kimi-code",
   "grok",
+  "goose",
+  "glm",
 ]);
 
 export function providerDriverHostRuntime(

@@ -77,6 +77,9 @@ disabled until you enable them):
 - Pi RPC
 - Oh My Pi
 - Mistral Vibe ACP
+- Grok Build ACP
+- Goose ACP
+- GLM Agent
 - Ollama (local HTTP)
 
 Direct API endpoints:

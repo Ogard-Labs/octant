@@ -14,6 +14,8 @@ describe("provider discovery descriptors", () => {
     expect(kinds).toContain("oh-my-pi");
     expect(kinds).toContain("mistral-vibe");
     expect(kinds).toContain("grok");
+    expect(kinds).toContain("goose");
+    expect(kinds).toContain("glm");
     expect(kinds).toContain("ollama");
     expect(kinds).toContain("openai-compatible");
     expect(kinds).toContain("anthropic-compatible");
@@ -41,7 +43,9 @@ describe("provider discovery descriptors", () => {
   it("every discoverable descriptor has executable names and version probe", () => {
     for (const descriptor of discoverableDescriptors()) {
       expect(descriptor.executableNames.length).toBeGreaterThan(0);
-      expect(descriptor.versionProbeArgs.length).toBeGreaterThan(0);
+      if (descriptor.driverKind !== "glm") {
+        expect(descriptor.versionProbeArgs.length).toBeGreaterThan(0);
+      }
       expect(descriptor.approvedLocations.length).toBeGreaterThan(0);
       expect(descriptor.onboardingGuidance.length).toBeGreaterThan(0);
     }

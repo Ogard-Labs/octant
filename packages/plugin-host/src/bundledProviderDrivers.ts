@@ -30,6 +30,8 @@ const BUNDLED_PROVIDER_DRIVERS = [
   { driverKind: "ollama", displayName: "Ollama", digestNibble: "8", uuidNibble: "09" },
   { driverKind: "kimi-code", displayName: "Kimi Code CLI", digestNibble: "9", uuidNibble: "0a" },
   { driverKind: "grok", displayName: "Grok Build", digestNibble: "a", uuidNibble: "0b" },
+  { driverKind: "goose", displayName: "Goose ACP", digestNibble: "e", uuidNibble: "0f" },
+  { driverKind: "glm", displayName: "GLM Agent", digestNibble: "f", uuidNibble: "10" },
   {
     driverKind: "openai-compatible",
     displayName: "OpenAI-compatible HTTP",

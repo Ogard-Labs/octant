@@ -145,6 +145,25 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     isDirectEndpoint: false,
   },
   {
+    driverKind: "goose",
+    displayName: "Goose",
+    executableNames: ["goose"],
+    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
+    versionProbeArgs: ["--version"],
+    onboardingGuidance: "Run `goose configure`, then check the connection again.",
+    isDirectEndpoint: false,
+  },
+  {
+    driverKind: "glm",
+    displayName: "GLM Agent",
+    executableNames: ["glm-acp-agent"],
+    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
+    versionProbeArgs: [],
+    onboardingGuidance:
+      "Sign in to GLM Agent from Provider Settings with a Z.AI API key, then check the connection again.",
+    isDirectEndpoint: false,
+  },
+  {
     driverKind: "ollama",
     displayName: "Ollama",
     executableNames: ["ollama"],

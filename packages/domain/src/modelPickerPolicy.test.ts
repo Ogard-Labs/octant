@@ -207,6 +207,8 @@ describe("model picker policy", () => {
       expect(driverLabel("pi")).toBe("Pi RPC");
       expect(driverLabel("mistral-vibe")).toBe("Mistral Vibe ACP");
       expect(driverLabel("grok")).toBe("Grok Build ACP");
+      expect(driverLabel("goose")).toBe("Goose ACP");
+      expect(driverLabel("glm")).toBe("GLM Agent ACP");
     });
   });
 

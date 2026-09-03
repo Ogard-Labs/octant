@@ -6,6 +6,8 @@ import {
   type ClaudeProviderConfiguration,
   type DevinProviderConfiguration,
   type GrokProviderConfiguration,
+  type GlmProviderConfiguration,
+  type GooseProviderConfiguration,
   type KiloProviderConfiguration,
   type MistralVibeProviderConfiguration,
   type GeminiImageProviderConfiguration,
@@ -250,7 +252,7 @@ export function useProviderController(options: ProviderControllerOptions) {
 
   const create = useCallback(
     (
-      driverKind: "opencode" | "codex" | "kimi-code" | "devin" | "kilo" | "pi" | "oh-my-pi",
+      driverKind: "opencode" | "codex" | "kimi-code" | "devin" | "kilo" | "pi" | "oh-my-pi" | "goose",
       displayName: string,
       binaryPath: string,
     ) =>
@@ -300,6 +302,15 @@ export function useProviderController(options: ProviderControllerOptions) {
             expectedVersion,
             displayName,
             configuration: { kind: "kilo-acp", binaryPath },
+          };
+        }
+        if (driverKind === "goose") {
+          return {
+            kind: "create-goose-provider",
+            instanceId,
+            expectedVersion,
+            displayName,
+            configuration: { kind: "goose-acp", binaryPath },
           };
         }
         return {
@@ -758,6 +769,60 @@ export function useProviderController(options: ProviderControllerOptions) {
     },
     [client, hostBridge, install, recoverRegistryFailure],
   );
+  const createGlm = useCallback(
+    (
+      displayName: string,
+      configuration: GlmProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) => {
+      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          if (hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          if (credentialValue.length === 0) {
+            if (mounted.current) {
+              setMessage("Enter a Z.AI API key before creating this provider.");
+            }
+            return false;
+          }
+          const current = authoritative.current;
+          if (client === undefined || current === undefined) return false;
+          let created = false;
+          try {
+            applyResult(
+              await client.execute({
+                kind: "create-glm-provider",
+                instanceId,
+                expectedVersion: 0 as ProviderDefaults["version"],
+                displayName,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            created = true;
+            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            return true;
+          } catch (error) {
+            if (created) {
+              if (mounted.current) {
+                setMessage("The provider was created, but its credential could not be stored.");
+              }
+            } else {
+              await recoverRegistryFailure(error, "Provider configuration could not be created.");
+            }
+            return false;
+          }
+        }),
+      );
+    },
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
 
   const beginProviderAuthentication = useCallback(
     async (instanceId: ProviderInstanceId): Promise<ProviderAuthenticationAttempt | undefined> => {
@@ -1135,6 +1200,73 @@ export function useProviderController(options: ProviderControllerOptions) {
                 ? "Provider configuration could not be updated, so its credential was left in place."
                 : "Provider configuration could not be updated.",
             );
+            return false;
+          }
+        }),
+      ),
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const changeGooseConfiguration = useCallback(
+    (instanceId: ProviderInstanceId, configuration: GooseProviderConfiguration) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        if (instance?.driverKind !== "goose") return undefined;
+        return {
+          kind: "change-goose-configuration",
+          instanceId,
+          expectedVersion: instance.version,
+          configuration,
+        };
+      }),
+    [execute],
+  );
+  const changeGlmConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: GlmProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const current = authoritative.current;
+          const instance = current === undefined ? undefined : findProvider(current, instanceId);
+          if (client === undefined || current === undefined || instance?.driverKind !== "glm") {
+            return false;
+          }
+          const mustSet = credentialValue.length > 0;
+          if (mustSet && hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          const bridge = hostBridge;
+          if (mustSet && bridge !== undefined) {
+            try {
+              await bridge.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              if (mounted.current) {
+                setMessage(
+                  "The provider credential could not be stored, so the configuration was unchanged.",
+                );
+              }
+              return false;
+            }
+          }
+          try {
+            applyResult(
+              await client.execute({
+                kind: "change-glm-configuration",
+                instanceId,
+                expectedVersion: instance.version,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            return true;
+          } catch (error) {
+            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
             return false;
           }
         }),
@@ -1838,6 +1970,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     createClaude,
     createMistralVibe,
     createGrok,
+    createGlm,
     createOllama,
     createOpenAiCompatible,
     createAnthropicCompatible,
@@ -1854,6 +1987,8 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeOllamaConfiguration,
     changeMistralVibeConfiguration,
     changeGrokConfiguration,
+    changeGooseConfiguration,
+    changeGlmConfiguration,
     changeOpenAiCompatibleConfiguration,
     changeOpenAiImageConfiguration,
     changeGeminiImageConfiguration,

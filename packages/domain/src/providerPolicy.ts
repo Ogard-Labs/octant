@@ -17,6 +17,11 @@ import type {
   GrokAuthentication,
   GrokProviderConfiguration,
   GrokProviderInstance,
+  GlmAuthentication,
+  GlmProviderConfiguration,
+  GlmProviderInstance,
+  GooseProviderConfiguration,
+  GooseProviderInstance,
   KimiCodeProviderInstance,
   KiloProviderConfiguration,
   KiloProviderInstance,
@@ -299,6 +304,17 @@ export interface GrokConfigurationInput {
   readonly authentication: GrokAuthentication;
 }
 
+export interface GooseConfigurationInput {
+  readonly kind: GooseProviderConfiguration["kind"];
+  readonly binaryPath: string;
+}
+
+export interface GlmConfigurationInput {
+  readonly kind: GlmProviderConfiguration["kind"];
+  readonly binaryPath: string;
+  readonly authentication: GlmAuthentication;
+}
+
 export interface DevinConfigurationInput {
   readonly kind: DevinProviderConfiguration["kind"];
   readonly binaryPath: string;
@@ -430,6 +446,26 @@ function normalizeGrokConfiguration(
   };
 }
 
+function normalizeGooseConfiguration(
+  configuration: GooseConfigurationInput,
+): GooseProviderConfiguration {
+  return {
+    kind: "goose-acp",
+    binaryPath: normalizeBinaryPath(configuration.binaryPath),
+  };
+}
+
+function normalizeGlmConfiguration(configuration: GlmConfigurationInput): GlmProviderConfiguration {
+  if (configuration.authentication !== "api-key") {
+    reject("invalid-authentication", "GLM Agent authentication must be api-key.");
+  }
+  return {
+    kind: "glm-acp",
+    binaryPath: normalizeBinaryPath(configuration.binaryPath),
+    authentication: "api-key",
+  };
+}
+
 function normalizeClaudeConfiguration(
   configuration: ClaudeConfigurationInput,
 ): ClaudeProviderConfiguration {
@@ -549,6 +585,88 @@ export function changeGrokConfiguration(
   return {
     ...provider,
     configuration: normalizeGrokConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+interface CreateGooseProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: GooseConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createGooseProvider(input: CreateGooseProviderInput): GooseProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "goose",
+    configuration: normalizeGooseConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeGooseConfiguration(
+  provider: GooseProviderInstance,
+  configuration: GooseConfigurationInput,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): GooseProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
+  }
+  return {
+    ...provider,
+    configuration: normalizeGooseConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+interface CreateGlmProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: GlmConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createGlmProvider(input: CreateGlmProviderInput): GlmProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "glm",
+    configuration: normalizeGlmConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeGlmConfiguration(
+  provider: GlmProviderInstance,
+  configuration: GlmConfigurationInput,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): GlmProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
+  }
+  return {
+    ...provider,
+    configuration: normalizeGlmConfiguration(configuration),
     version: nextVersion(provider.version),
     updatedAt,
   };

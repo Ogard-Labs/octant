@@ -1742,6 +1742,8 @@ function ControllerBackedProviderSettings(props: {
       onChangeOllamaConfiguration={controller.changeOllamaConfiguration}
       onChangeMistralVibeConfiguration={controller.changeMistralVibeConfiguration}
       onChangeGrokConfiguration={controller.changeGrokConfiguration}
+      onChangeGooseConfiguration={controller.changeGooseConfiguration}
+      onChangeGlmConfiguration={controller.changeGlmConfiguration}
       onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
       onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
       onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
@@ -1754,6 +1756,7 @@ function ControllerBackedProviderSettings(props: {
       onCreateClaude={controller.createClaude}
       onCreateMistralVibe={controller.createMistralVibe}
       onCreateGrok={controller.createGrok}
+      onCreateGlm={controller.createGlm}
       onCreateOllama={controller.createOllama}
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}
@@ -1857,6 +1860,10 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onCreateGlm: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
     onCreateOllama: vi.fn(async () => true),
     onCreateOpenAiCompatible: vi.fn(async (_name, _configuration, credential) => {
       credential.clear();
@@ -1894,6 +1901,11 @@ function fixture(
       return true;
     }),
     onChangeGrokConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeGooseConfiguration: vi.fn(async () => true),
+    onChangeGlmConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
     }),
