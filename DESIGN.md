@@ -325,7 +325,16 @@ creating a second environment model. Repository and workspace remain on that rea
 choices; nothing about delivery is asked up front (see "Language"). Access is
 a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch. The
-prompt itself is frameless:
+Under the Code composer the start screen reads like GitHub Copilot's and
+Cursor's agent homes: suggested prompts as small cards (a label and the
+sentence they fill in), then Up next (assigned GitHub issues and pull
+requests and Linear issues, in a hairline panel that says "You're all caught
+up" when empty), Start something new (open issues in recent repositories that
+nobody has picked up, with a way to the Issues surface), and Continue (the
+latest Board cards, each led by a tile naming its delivery state: Running,
+PR #n, Merged, Done, Waiting, with changed lines beneath). Picking an item
+fills the prompt and attaches the issue as the thread's Create from context.
+The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not
 repaint those controls a third time. Opaque shadcn

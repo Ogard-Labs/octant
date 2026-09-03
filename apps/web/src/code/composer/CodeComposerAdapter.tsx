@@ -672,7 +672,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 type="button"
                 variant="ghost"
               >
-                {suggestion.label}
+                <span className="code-home__suggestion-label">{suggestion.label}</span>
+                <span className="code-home__suggestion-text">{suggestion.prompt}</span>
               </OctantButton>
             ))}
           </div>

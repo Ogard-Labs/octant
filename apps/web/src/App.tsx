@@ -4860,6 +4860,32 @@ function LaunchedShell(
                       FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true
                     }
                     linearClient={linearClient}
+                    codeHome={{
+                      loadBoard: (query) => codeClient.queryBoard(query),
+                      loadAssignedLinearIssues,
+                      projectNames: new Map(
+                        codeBoardProjects.map((project) => [String(project.id), project.name]),
+                      ),
+                      providerLabels: new Map(
+                        codeProviderGroups.map((group) => [
+                          String(group.instance.id),
+                          group.instance.displayName,
+                        ]),
+                      ),
+                      onOpenThread: (target) => {
+                        const thread = codeController.bootstrap?.threads.find(
+                          (candidate) => String(candidate.id) === String(target.threadId),
+                        );
+                        void controller.openCodeThread(
+                          target.threadId,
+                          thread?.title ?? "Code thread",
+                          undefined,
+                          target.projectId,
+                        );
+                      },
+                      onOpenInbox: openInbox,
+                      onOpenIssues: () => setGithubIssuesOpen(true),
+                    }}
                     linearPluginEnabled={
                       FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true
                     }

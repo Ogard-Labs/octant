@@ -2216,31 +2216,55 @@ form > .work-composer-adapter__attachments {
 }
 
 /* ── Code home ─────────────────────────────────────────────────────────
-   Under the Code composer: ready-made prompts as quiet chips, then what
-   GitHub is waiting on and the threads to continue, as rows over
-   hairlines. Nothing here competes with the prompt above it. */
+   Under the Code composer: suggested prompts as small cards, then the
+   sections that say what is waiting (Up next), what nobody has picked up
+   (Start something new), and where the latest threads stand (Continue).
+   Sections are a label, a note, and a hairline panel; Continue's cards lead
+   with a tile that names the thread's delivery state. */
 .code-home__suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
 }
 
 .code-home__suggestions button {
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
+  display: grid;
+  height: auto;
+  min-height: 0;
+  align-content: start;
+  justify-items: start;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  color: var(--oct-fg);
+  background: var(--octant-card);
+  text-align: left;
+  white-space: normal;
 }
 
 .code-home__suggestions button:hover:not(:disabled) {
+  border-color: var(--oct-border-strong);
+  background: var(--octant-card);
+}
+
+.code-home__suggestion-label {
   color: var(--oct-fg);
-  background: transparent;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-home__suggestion-text {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  line-height: var(--oct-leading-snug);
 }
 
 .code-home {
   display: grid;
-  gap: var(--oct-space-5);
-  margin-top: var(--oct-space-3);
+  gap: var(--oct-space-6);
+  margin-top: var(--oct-space-4);
 }
 
 .code-home .draft-thread__recent {
@@ -2249,18 +2273,60 @@ form > .work-composer-adapter__attachments {
 
 .code-home__section {
   display: grid;
-  gap: var(--oct-space-1);
+  gap: var(--oct-space-3);
 }
 
-.code-home__section-title,
+.code-home__section-head {
+  display: grid;
+  gap: 2px;
+}
+
+.code-home__section-title {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-home__section-note,
 .code-home__note {
   margin: 0;
-  color: var(--oct-meta);
+  color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
 
-.code-home__note {
-  padding: 6px 10px;
+.code-home__panel {
+  display: grid;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+}
+
+.code-home__panel > .code-home__note {
+  padding: 12px 14px;
+}
+
+.code-home__panel-foot {
+  display: flex;
+  justify-content: flex-start;
+  padding: 4px 8px 6px;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.code-home__empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 28px 14px;
+  color: var(--oct-muted);
+  text-align: center;
+}
+
+.code-home__empty p {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
 }
 
 .code-home__list {
@@ -2279,13 +2345,22 @@ form > .work-composer-adapter__attachments {
   width: 100%;
   height: auto;
   min-height: 0;
+  justify-content: flex-start;
   align-items: flex-start;
   gap: var(--oct-space-2);
-  padding: 8px 10px;
-  border-radius: var(--oct-radius-md);
+  padding: 10px 14px;
+  border-radius: 0;
   font-weight: 400;
   text-align: left;
   white-space: normal;
+}
+
+.code-home__list > li:first-child .code-home__row {
+  border-radius: var(--oct-radius-md) var(--oct-radius-md) 0 0;
+}
+
+.code-home__list > li:last-child .code-home__row {
+  border-radius: 0 0 var(--oct-radius-md) var(--oct-radius-md);
 }
 
 .code-home__row-icon {
@@ -2311,4 +2386,101 @@ form > .work-composer-adapter__attachments {
 .code-home__row-meta {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+.code-home__cards {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-home__card {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 12px 6px 6px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+}
+
+.code-home__card:hover:not(:disabled) {
+  border-color: var(--oct-border-strong);
+  background: var(--octant-card);
+}
+
+.code-home__tile {
+  display: grid;
+  flex: 0 0 auto;
+  width: 120px;
+  height: 64px;
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface-inset);
+}
+
+.code-home__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--oct-radius-pill);
+  color: var(--oct-fg-2);
+  background: var(--octant-control);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-home__badge[data-tone="merged"],
+.code-home__badge[data-tone="done"] {
+  color: var(--octant-success-text);
+  background: var(--octant-success-surface);
+}
+
+.code-home__badge[data-tone="running"] {
+  color: var(--oct-fg);
+  background: var(--octant-selection);
+}
+
+.code-home__badge[data-tone="waiting"] {
+  color: var(--octant-warning-text, var(--oct-fg-2));
+}
+
+.code-home__tile-detail {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.code-home__card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.code-home__card-title {
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-home__card-meta {
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
