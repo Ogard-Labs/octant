@@ -3985,11 +3985,12 @@ input.switch:checked::after {
 .composer:focus-within {
   box-shadow: var(--octant-shadow-lg);
 }
-/* Keyboard focus still earns a real accent ring; pointer focus does not, so
-   clicking into the box stays quiet. */
+/* Focus lifts the composer's shadow and shows the caret; it draws no
+   outline. A text field takes :focus-visible on click as well as on Tab,
+   so any edge rule framed the prompt on every click and read as a
+   highlighted field rather than the raised object it is. */
 .composer:focus-within:has(.composer-input:focus-visible) {
-  outline: 2px solid var(--oct-accent);
-  outline-offset: -2px;
+  outline: none;
 }
 .composer-chips {
   display: flex;

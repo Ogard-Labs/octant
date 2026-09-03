@@ -32,7 +32,6 @@ function row(label: string): HTMLElement {
 function expectRowOrder(): void {
   expect(screen.getAllByRole("term").map((term) => term.textContent)).toEqual([
     "Changes",
-    "Local",
     "Branch",
     "Repository",
     "Worktree",
@@ -46,14 +45,14 @@ describe("EnvironmentGitGroup", () => {
     expectRowOrder();
     expect(within(row("Changes")).getByText("Dirty working tree")).toBeVisible();
 
-    const local = within(row("Local"));
-    expect(local.getByText("issue-52-reference-faithful-shell")).toHaveClass(
+    const worktree = within(row("Worktree"));
+    expect(worktree.getByText("issue-52-reference-faithful-shell")).toHaveClass(
       "environment-git-group__identity-primary",
     );
-    expect(local.getByText(readyObservation.worktreeRoot)).toHaveClass(
+    expect(worktree.getByText(readyObservation.worktreeRoot)).toHaveClass(
       "environment-git-group__identity-secondary",
     );
-    expect(local.getByTitle(readyObservation.worktreeRoot)).toBeVisible();
+    expect(worktree.getByTitle(readyObservation.worktreeRoot)).toBeVisible();
 
     expect(
       within(row("Branch")).getByText("feature/issue-52-reference-faithful-shell"),
@@ -65,8 +64,6 @@ describe("EnvironmentGitGroup", () => {
       "environment-git-group__identity-secondary",
     );
     expect(repository.getByTitle(readyObservation.repositoryRoot)).toBeVisible();
-
-    expect(within(row("Worktree")).getByText(readyObservation.worktreeRoot)).toBeVisible();
   });
 
   it.each([

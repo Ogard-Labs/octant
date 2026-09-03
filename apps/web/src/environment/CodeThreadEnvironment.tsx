@@ -20,7 +20,7 @@ import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { useCodeEnvironmentController } from "./useCodeEnvironmentController";
 import { useLocalServersController } from "./useLocalServersController";
-import { ChangeWorkingFolder } from "./WorkingDirectoryControl";
+import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
 import { OpenInMenu } from "./OpenInMenu";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
@@ -212,7 +212,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         {workingDirectory === undefined ||
         threadVersion === undefined ||
         props.onExecute === undefined ? null : (
-          <EnvironmentGroup summary={String(workingDirectory)} title="Working folder">
+          <EnvironmentGroup summary={workingFolderLabel(workingDirectory)} title="Working folder">
             <ChangeWorkingFolder
               value={workingDirectory}
               onApply={async (nextWorkingDirectory) => {
