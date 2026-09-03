@@ -46,9 +46,9 @@ describe("ComputerUseActivitySurface", () => {
       await act(async () => {});
       expect(client.list).toHaveBeenCalledOnce();
 
-      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
       expect(client.list).toHaveBeenCalledOnce();
-      await act(async () => vi.advanceTimersByTimeAsync(4_000));
+      await act(async () => vi.advanceTimersByTimeAsync(25_000));
       expect(client.list).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
@@ -83,7 +83,7 @@ describe("ComputerUseActivitySurface", () => {
 
       await act(async () => vi.advanceTimersByTimeAsync(1_000));
       expect(client.list).toHaveBeenCalledTimes(2);
-      await act(async () => vi.advanceTimersByTimeAsync(4_999));
+      await act(async () => vi.advanceTimersByTimeAsync(29_999));
       expect(client.list).toHaveBeenCalledTimes(2);
       await act(async () => vi.advanceTimersByTimeAsync(1));
       expect(client.list).toHaveBeenCalledTimes(3);
@@ -130,9 +130,9 @@ describe("ComputerUseActivitySurface", () => {
       await act(async () => {});
       expect(client.list).toHaveBeenCalledOnce();
 
-      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
       expect(client.list).toHaveBeenCalledOnce();
-      await act(async () => vi.advanceTimersByTimeAsync(4_000));
+      await act(async () => vi.advanceTimersByTimeAsync(25_000));
       expect(client.list).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();

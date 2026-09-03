@@ -18,8 +18,11 @@ export function ComputerUseActivitySurface(props: {
     if (excludedSessionIds === undefined) return true;
     return isNonterminalSession(session) && !excludedSessionIds.has(String(session.sessionId));
   });
+  // A session that is still running can change every second; with none
+  // running this list changes only when a thread starts one, so an idle
+  // window re-reads on a slow cadence rather than every few seconds.
   const pollIntervalMs =
-    props.pollIntervalMs ?? (backgroundSessions.some(isNonterminalSession) ? 1_000 : 5_000);
+    props.pollIntervalMs ?? (backgroundSessions.some(isNonterminalSession) ? 1_000 : 30_000);
   useEffect(() => {
     let active = true;
     let inFlight = false;

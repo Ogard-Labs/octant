@@ -122,7 +122,9 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
       ? read
       : undefined;
   const entries = current?.entries ?? NO_ENTRIES;
-  const refreshMs = options.refreshMs ?? (entries.length > 0 ? 1_000 : 5_000);
+  // Children that exist can finish or report at any second; a parent with
+  // none can only gain one from a turn's tool, so it re-reads slowly.
+  const refreshMs = options.refreshMs ?? (entries.length > 0 ? 1_000 : 30_000);
   const status: ChildRunStatusReadState =
     client === undefined || parentThreadId === undefined
       ? "idle"
