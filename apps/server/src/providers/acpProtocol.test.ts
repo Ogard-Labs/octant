@@ -84,6 +84,110 @@ describe("ACP protocol boundary", () => {
     await client.close();
   });
 
+  it("accepts the handshake vibe-acp 2.16.1 sends, keeping only the fields Octant reads", async () => {
+    // Captured over stdio from `vibe-acp` 2.16.1: session capabilities Octant
+    // does not consume (`close`, `fork`), a titled agentInfo, described auth
+    // methods, and a session/new that spells its models three ways at once.
+    const { client, stdin, stdout } = transport();
+    const written = lines(stdin);
+    const initialized = client.initialize();
+    const session = client.newSession("/tmp/octant-acp");
+    await tick();
+    stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        result: {
+          agentCapabilities: {
+            loadSession: true,
+            promptCapabilities: { audio: false, embeddedContext: true, image: false },
+            sessionCapabilities: { close: {}, fork: {}, list: {} },
+          },
+          agentInfo: { name: "@mistralai/mistral-vibe", title: "Mistral Vibe", version: "2.16.1" },
+          authMethods: [
+            {
+              description: "Sign into Mistral Vibe through your Mistral AI Studio account.",
+              id: "browser-auth",
+              name: "Sign in through Mistral AI Studio",
+            },
+          ],
+          protocolVersion: 1,
+        },
+      })}\n`,
+    );
+    stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        result: {
+          configOptions: [
+            {
+              currentValue: "default",
+              options: [
+                {
+                  description: "Requires approval for tool executions",
+                  name: "Default",
+                  value: "default",
+                },
+                {
+                  description: "Read-only agent for exploration and planning",
+                  name: "Plan",
+                  value: "plan",
+                },
+              ],
+              category: "mode",
+              id: "mode",
+              name: "Session Mode",
+              type: "select",
+            },
+            {
+              currentValue: "mistral-medium-3.5",
+              options: [
+                {
+                  description: "mistral-vibe-cli-latest",
+                  name: "mistral-medium-3.5",
+                  value: "mistral-medium-3.5",
+                },
+                { description: "devstral", name: "local", value: "local" },
+              ],
+              category: "model",
+              id: "model",
+              name: "Model",
+              type: "select",
+            },
+          ],
+          models: {
+            availableModels: [
+              { modelId: "mistral-medium-3.5", name: "mistral-medium-3.5" },
+              { modelId: "local", name: "local" },
+            ],
+            currentModelId: "mistral-medium-3.5",
+          },
+          modes: {
+            availableModes: [{ description: "Requires approval", id: "default", name: "Default" }],
+            currentModeId: "default",
+          },
+          sessionId: "90efe725-aba2-551f-5fc4-f75c8319c110",
+        },
+      })}\n`,
+    );
+    await expect(initialized).resolves.toMatchObject({
+      agentInfo: { name: "@mistralai/mistral-vibe", version: "2.16.1" },
+      agentCapabilities: { loadSession: true, sessionCapabilities: { list: {} } },
+      authMethods: [{ id: "browser-auth" }],
+    });
+    const opened = await session;
+    expect(opened.sessionId).toBe("90efe725-aba2-551f-5fc4-f75c8319c110");
+    expect(opened.configOptions?.map((option) => option.id)).toEqual(["mode", "model"]);
+    expect(opened.models?.availableModels.map((model) => model.modelId)).toEqual([
+      "mistral-medium-3.5",
+      "local",
+    ]);
+    expect("modes" in opened).toBe(false);
+    written.dispose();
+    await client.close();
+  });
+
   it("correlates concurrent responses that arrive out of order", async () => {
     const { client, stdin, stdout } = transport();
     const written = lines(stdin);

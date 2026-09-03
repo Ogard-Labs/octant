@@ -73,7 +73,7 @@ import {
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Fiber, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
@@ -192,10 +192,19 @@ export class ProviderService implements ProviderServiceApi {
     this.#runtime = options.runtimeRegistry;
     if (options.probe !== undefined) this.#probeProvider = options.probe;
     else if (options.driver !== undefined) {
-      this.#probeProvider = (instance) =>
-        Effect.runPromise(
+      // A refused probe must surface as the driver's typed failure, not as the
+      // Error wrapper `Effect.runPromise` rejects with. That wrapper carries the
+      // failure only as its message text, so the classification below read
+      // every version floor, missing binary, and sign-in refusal as a generic
+      // "degraded" and told the user nothing about what to do.
+      this.#probeProvider = async (instance) => {
+        const exit = await Effect.runPromiseExit(
           Effect.scoped(options.driver!(instance).probe({ instanceId: instance.id })),
         );
+        if (Exit.isSuccess(exit)) return exit.value;
+        const refused = Cause.failureOption(exit.cause);
+        throw Option.isSome(refused) ? refused.value : Cause.squash(exit.cause);
+      };
     } else {
       this.#probeProvider = async () => {
         throw this.#unavailable();
@@ -1043,16 +1052,16 @@ export class ProviderService implements ProviderServiceApi {
     error: unknown,
   ): ProviderObservedState | undefined {
     if (error instanceof ProviderServiceError) return undefined;
-    const category = isProviderFailure(error)
-      ? decodeProviderFailure(error).category
-      : "provider-failed";
-    const readiness = probeFailureReadiness(category);
+    const failure = providerFailureOfError(error);
+    const readiness = probeFailureReadiness(failure?.category ?? "provider-failed");
     return decodeProviderObservedState({
       instanceId,
       readiness,
       processState: "stopped",
       models: [],
       capabilities: unavailableCapabilities,
+      // Only the category crosses into the observed state: a driver's own
+      // sentence can quote provider output, and this state reaches every client.
       message: probeFailureMessage(readiness),
       observedAt: decodeTimestamp(this.#clock()),
     });

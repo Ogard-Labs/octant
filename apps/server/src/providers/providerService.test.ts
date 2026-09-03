@@ -2411,6 +2411,34 @@ describe("ProviderService", () => {
     expect(fixture.runtime.observedState(instanceId)?.readiness).toBe("unavailable");
     expect(fixture.runtime.observedState(otherId)?.readiness).toBe("ready");
   });
+
+  it("reports a driver's refused probe as that refusal instead of a generic degraded state", async () => {
+    const fixture = serviceFixture({ instances: [mistralVibeProvider()] });
+    const service = new ProviderService({
+      persistence: fixture.persistence,
+      runtimeRegistry: fixture.runtime,
+      driver: () => ({
+        kind: "mistral-vibe",
+        probe: () =>
+          Effect.fail({
+            category: "incompatible",
+            message: "Mistral Vibe 2.24.1 or later is required.",
+          }),
+        acquire: () => Effect.die("unused"),
+      }),
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+    });
+
+    await expect(service.probe(windowId, instanceId)).rejects.toMatchObject({
+      failure: { category: "incompatible" },
+    });
+
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({
+      readiness: "incompatible",
+      message: "Provider configuration is incompatible.",
+    });
+  });
 });
 
 function serviceFixture(

@@ -2227,9 +2227,11 @@ describe("startOctantServer", () => {
             ).then(assertResponse),
           );
           expect(probeCodex.status).toBe(503);
+          // The driver's typed refusal reaches the route as itself; the generic
+          // service line is only for a failure that never carried a category.
           expect(yield* Effect.promise(() => probeCodex.json())).toEqual({
             category: "unavailable",
-            message: "Octant Provider service is unavailable.",
+            message: "Codex process selected.",
           });
           expect(codexStart).toHaveBeenCalledOnce();
           const created = yield* Effect.promise(() =>
