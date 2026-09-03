@@ -56,6 +56,7 @@ import { listEligibleImageProfiles } from "@octant/domain";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import { decodeImageGenerationScopeId } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type { HostId } from "@octant/contracts/host";
 import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
@@ -84,6 +85,8 @@ export interface ChatWorkspaceProps {
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /** Told which Canvas the host wrote when the thread is handed off. */
+  readonly onThreadHandedOff?: (threadId: string, outcome: ThreadHandOffOutcome) => void;
   /** The Canvas cards the host lists for this thread, each time they are read. */
   readonly onCanvasReferencesObserved?: (
     threadId: string,
@@ -858,6 +861,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             connectionStatus={
               props.controller.status === "disconnected" ? "disconnected" : "connected"
             }
+            {...(props.onThreadHandedOff === undefined
+              ? {}
+              : {
+                  onHandedOff: (outcome: ThreadHandOffOutcome) =>
+                    props.onThreadHandedOff?.(String(view.thread.id), outcome),
+                })}
             view={view}
             {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
             {...(props.windowCapability === undefined

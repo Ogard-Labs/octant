@@ -270,6 +270,7 @@ import {
   isDockToolStillOpenable,
 } from "./shell/dockToolAvailability";
 import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
+import type { DockToolCapabilities } from "./shell/dockToolAvailability";
 import {
   NO_WRITTEN_DOCUMENTS,
   isDocumentPath,
@@ -278,6 +279,12 @@ import {
   type WrittenDocumentOffers,
 } from "./shell/writtenDocuments";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
+import {
+  handOffThread,
+  resolveThreadHandOffClient,
+  threadHandOffMessage,
+} from "./thread/threadHandOff";
 import { NavigatorPopover } from "./navigator/NavigatorPopover";
 import { useNavigatorAssistant } from "./navigator/useNavigatorAssistant";
 import { ComposerContextMeterShortcut } from "./context/ComposerContextMeter";
@@ -1061,6 +1068,14 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
+  const threadHandOffClient = useMemo(
+    () =>
+      resolveThreadHandOffClient({
+        serverUrl: props.launch.serverUrl,
+        windowCapability: props.projectWindowCapability,
+      }),
+    [props.launch.serverUrl, props.projectWindowCapability],
+  );
   // The export receipt is a receipt, not a state the sidebar keeps: it clears
   // itself so a "Saved …" line from ten minutes ago is not still standing over
   // the Project list.
@@ -1635,7 +1650,7 @@ function LaunchedShell(
                       )?.checkoutId,
               }),
         };
-  const dockToolCapabilities = useDockToolCapabilities({
+  const observedDockToolCapabilities = useDockToolCapabilities({
     enabled: activeMode !== "code" || activeCodeThreadDisplayReady,
     agentRunClient,
     addAgentInvoked: dockThreadKey !== undefined && addAgentInvokedByThread.has(dockThreadKey),
@@ -1651,6 +1666,15 @@ function LaunchedShell(
     shipClient,
     ...(dockThreadId === undefined ? {} : { threadId: String(dockThreadId) }),
   });
+  // A Canvas this window saw written for the thread is a document the host
+  // holds now, even while the capability read from when the thread opened
+  // still says there was none.
+  const writtenCanvasForDock =
+    dockThreadKey === undefined ? undefined : writtenDocumentsByThread.get(dockThreadKey)?.current;
+  const dockToolCapabilities: DockToolCapabilities =
+    writtenCanvasForDock?.kind === "canvas"
+      ? { ...observedDockToolCapabilities, hasCanvasDocument: true }
+      : observedDockToolCapabilities;
   // A Markdown or text file the active Code turn created or rewrote opens in
   // the dock's Document tool once, beside the transcript, the way a written
   // handoff sits next to the conversation. The offer never moves focus: the
@@ -1711,6 +1735,20 @@ function LaunchedShell(
     if (next === offers) return;
     setWrittenDocumentsByThread((current) => new Map(current).set(key, next));
     if (!open) return;
+    setDockVisible(true);
+    setDockStatesByThread((current) => openThreadUtilityTab(current, key, "canvas"));
+  }
+  /**
+   * The host handed the thread off: its document is a Canvas of that thread,
+   * so the Canvas tool opens on it beside the transcript, once, like any
+   * document a turn wrote.
+   */
+  function noteHandedOffDocument(mode: OctantMode, threadId: string, canvasId: string): void {
+    const key = threadUtilityDockKey(mode, threadId);
+    const offers = writtenDocumentsRef.current.get(key) ?? NO_WRITTEN_DOCUMENTS;
+    const noted = noteWrittenDocument(offers, { kind: "canvas", canvasId });
+    setWrittenDocumentsByThread((current) => new Map(current).set(key, noted.offers));
+    if (!noted.open) return;
     setDockVisible(true);
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "canvas"));
   }
@@ -2234,6 +2272,8 @@ function LaunchedShell(
     const appleProjectPath = appleProjects[0]?.projectPath;
     const writtenDocument = writtenDocumentsByThread.get(dockThreadKey)?.current;
     const writtenDocumentPath = writtenDocument?.kind === "file" ? writtenDocument.path : undefined;
+    const writtenCanvasId =
+      writtenDocument?.kind === "canvas" ? writtenDocument.canvasId : undefined;
     return (
       <ThreadUtilityDockContent
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
@@ -2256,6 +2296,7 @@ function LaunchedShell(
         planClient={planClient}
         shipClient={shipClient}
         {...(writtenDocumentPath === undefined ? {} : { writtenDocumentPath })}
+        {...(writtenCanvasId === undefined ? {} : { writtenCanvasId })}
         onOpenFile={(relativePath) => {
           if (dockThread.mode !== "code") return;
           void controller.openCodeSurface({
@@ -2831,6 +2872,26 @@ function LaunchedShell(
   const exportCodeThread = exportThreadFromRow("code");
   const exportChatThread = exportThreadFromRow("chat");
   const exportWorkThread = exportThreadFromRow("work");
+  /**
+   * The Hand off item for a thread row. The host writes the document and
+   * keeps it; the sidebar shows the receipt and the dock opens on the Canvas.
+   */
+  function handOffThreadFromRow(
+    mode: OctantMode,
+  ): ((threadId: string, title: string) => void) | undefined {
+    const client = threadHandOffClient;
+    if (client === undefined) return undefined;
+    return (threadId, title) => {
+      setThreadExportNotice(`Writing the hand-off document for ${title}…`);
+      void handOffThread(client, { mode, threadId }).then((outcome) => {
+        setThreadExportNotice(threadHandOffMessage(outcome));
+        if (outcome.kind === "handed-off") noteHandedOffDocument(mode, threadId, outcome.canvasId);
+      });
+    };
+  }
+  const handOffCodeThread = handOffThreadFromRow("code");
+  const handOffChatThread = handOffThreadFromRow("chat");
+  const handOffWorkThread = handOffThreadFromRow("work");
 
   function pinChatThreadInPane(threadId: string): void {
     if (chatController.status !== "ready") return;
@@ -2881,6 +2942,7 @@ function LaunchedShell(
 
   const codeThreadRowActions: ThreadRowActions = {
     ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
+    ...(handOffCodeThread === undefined ? {} : { onHandOffThread: handOffCodeThread }),
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
     onCompleteFollowUp: (threadId) =>
       void codeController.completeFollowUp(decodeCodeThreadId(threadId)),
@@ -2899,12 +2961,14 @@ function LaunchedShell(
   // that without a list pin they cannot honor.
   const chatThreadRowActions: ThreadRowActions = {
     ...(exportChatThread === undefined ? {} : { onExportThread: exportChatThread }),
+    ...(handOffChatThread === undefined ? {} : { onHandOffThread: handOffChatThread }),
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
     onPinInPane: pinChatThreadInPane,
   };
   const workThreadRowActions: ThreadRowActions = {
     ...(exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread }),
+    ...(handOffWorkThread === undefined ? {} : { onHandOffThread: handOffWorkThread }),
     onPinInPane: pinWorkThreadInPane,
   };
 
@@ -4915,6 +4979,11 @@ function LaunchedShell(
                       });
                     }}
                     onCanvasReferencesObserved={noteCanvasReferences}
+                    onThreadHandedOff={(threadId: string, outcome: ThreadHandOffOutcome) => {
+                      if (outcome.kind === "handed-off") {
+                        noteHandedOffDocument("chat", threadId, outcome.canvasId);
+                      }
+                    }}
                     onOpenCanvas={(entry) =>
                       void controller.openCanvas({
                         mode: entry.mode,

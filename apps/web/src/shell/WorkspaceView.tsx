@@ -19,6 +19,7 @@ import { listEligibleImageProfiles } from "@octant/domain";
 import type { CanvasInventoryEntry } from "@octant/contracts";
 import type { CanvasId } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type {
   CanvasContextSelection,
   CanvasContextSelectionId,
@@ -306,6 +307,7 @@ export interface WorkspaceViewProps {
     threadId: string,
     cards: ReadonlyArray<CanvasThreadReferenceCard>,
   ) => void;
+  readonly onThreadHandedOff?: (threadId: string, outcome: ThreadHandOffOutcome) => void;
   readonly draftProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly codeProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly workProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
@@ -1072,6 +1074,9 @@ function renderNonCodeTab(
         {...(props.onCanvasReferencesObserved === undefined
           ? {}
           : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
+        {...(props.onThreadHandedOff === undefined
+          ? {}
+          : { onThreadHandedOff: props.onThreadHandedOff })}
         {...(props.onOpenChatThread === undefined ? {} : { onOpenThread: props.onOpenChatThread })}
         {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
         threadId={tab.threadId}
@@ -1779,6 +1784,7 @@ function ChatThreadWorkspace(props: {
     threadId: string,
     cards: ReadonlyArray<CanvasThreadReferenceCard>,
   ) => void;
+  readonly onThreadHandedOff?: (threadId: string, outcome: ThreadHandOffOutcome) => void;
   /** Opens another Chat thread as a workspace tab — e.g. a branch just minted. */
   readonly onOpenThread?: (threadId: ChatThreadId, title: string, projectId?: ProjectId) => void;
   /** Opens the Side Chat tab for a sidecar the host has already resolved. */
@@ -1852,6 +1858,9 @@ function ChatThreadWorkspace(props: {
         {...(props.onCanvasReferencesObserved === undefined
           ? {}
           : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
+        {...(props.onThreadHandedOff === undefined
+          ? {}
+          : { onThreadHandedOff: props.onThreadHandedOff })}
         {...(props.onOpenThread === undefined
           ? {}
           : {

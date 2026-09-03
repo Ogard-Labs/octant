@@ -22,6 +22,8 @@ export interface DockCanvasToolProps {
   readonly mode: OctantMode;
   readonly projectId?: ProjectId;
   readonly threadId: string;
+  /** The Canvas to show first when the thread has several — the one just written. */
+  readonly preferredCanvasId?: string;
 }
 
 /**
@@ -56,7 +58,12 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
         if (!alive) return;
         const authorized = outcome.cards.filter(isAuthorizedCanvasDocument);
         setCards(authorized);
-        setOpenCanvasId(authorized.length === 1 ? authorized[0]?.canvasId : undefined);
+        const preferred = authorized.find(
+          (card) => String(card.canvasId) === props.preferredCanvasId,
+        );
+        setOpenCanvasId(
+          preferred?.canvasId ?? (authorized.length === 1 ? authorized[0]?.canvasId : undefined),
+        );
         setStatus("ready");
       })
       .catch(() => {
@@ -67,7 +74,7 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
     return () => {
       alive = false;
     };
-  }, [props.client, props.mode, props.projectId, props.threadId]);
+  }, [props.client, props.mode, props.preferredCanvasId, props.projectId, props.threadId]);
 
   if (status === "loading") {
     return (

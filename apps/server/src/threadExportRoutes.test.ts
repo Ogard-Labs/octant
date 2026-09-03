@@ -1,7 +1,11 @@
 import { THREAD_EXPORT_FORMAT, type ThreadExportOutcome } from "@octant/contracts/thread-export";
-import { describe, expect, it } from "vitest";
-import { createThreadExportRouteHandler } from "./threadExportRoutes";
+import { describe, expect, it, vi } from "vitest";
+import {
+  createThreadExportRouteHandler,
+  createThreadHandOffRouteHandler,
+} from "./threadExportRoutes";
 import type { ThreadExportService } from "./threadExportService";
+import type { ThreadHandOffService } from "./threadHandOffService";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const nowMs = Date.parse("2026-08-19T12:00:00.000Z");
@@ -120,5 +124,28 @@ describe("thread export routes", () => {
     );
     expect(response?.status).toBe(404);
     expect(await response!.json()).toEqual({ kind: "refused", reason: "not-found" });
+  });
+
+  it("answers a hand-off refusal the person can act on as an ordinary reply", async () => {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+    const handOff = vi.fn(async () => ({ kind: "refused", reason: "turn-running" }) as const);
+    const handler = createThreadHandOffRouteHandler({
+      service: { handOff } as unknown as ThreadHandOffService,
+      windowAuthorityStore,
+      now: () => nowMs,
+    });
+    const response = await handler(
+      makeRequest("/api/threads/hand-off", { body: { mode: "code", threadId }, capability }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ kind: "refused", reason: "turn-running" });
+    expect(handOff).toHaveBeenCalledWith(windowId, "local-window", { mode: "code", threadId });
+
+    const unauthenticated = await handler(
+      makeRequest("/api/threads/hand-off", { body: { mode: "code", threadId } }),
+    );
+    expect(unauthenticated?.status).toBe(401);
+    expect(await handler(makeRequest("/api/threads/export", { capability }))).toBeUndefined();
   });
 });

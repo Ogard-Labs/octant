@@ -92,6 +92,8 @@ export interface ThreadUtilityDockContentProps {
   readonly windowCapability?: string;
   /** Checkout-relative path of the document the thread most recently wrote. */
   readonly writtenDocumentPath?: string;
+  /** The Canvas the thread most recently wrote or handed off. */
+  readonly writtenCanvasId?: string;
 }
 
 export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
@@ -238,6 +240,9 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
         {...(props.canvasClient === undefined ? {} : { client: props.canvasClient })}
         mode={props.subject.mode}
         {...(props.subject.projectId === undefined ? {} : { projectId: props.subject.projectId })}
+        {...(props.writtenCanvasId === undefined
+          ? {}
+          : { preferredCanvasId: props.writtenCanvasId })}
         threadId={props.subject.threadId}
       />
     );

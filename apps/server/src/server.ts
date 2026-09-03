@@ -458,8 +458,13 @@ import {
 import { createCodeThreadLocalServerScopeResolver } from "./localServers/localServerScopeResolver";
 import { LocalServerService } from "./localServers/localServerService";
 import { createDiagnosticsExportRouteHandler } from "./diagnosticsExportRoutes";
-import { createThreadExportRouteHandler } from "./threadExportRoutes";
+import {
+  createThreadExportRouteHandler,
+  createThreadHandOffRouteHandler,
+} from "./threadExportRoutes";
 import { ThreadExportService } from "./threadExportService";
+import { makeThreadHandOffCompletion } from "./threadHandOffCompletion";
+import { ThreadHandOffService } from "./threadHandOffService";
 import { createValidationEvidenceRouteHandler } from "./validationEvidenceRoutes";
 import { createValidationEvidenceLoader } from "./validation/validationEvidenceLoader";
 import { createExtensionRouteHandler } from "./extensionRoutes";
@@ -5538,6 +5543,104 @@ export function startOctantServer(
       mirror: artifactMirrorService,
       windowAuthorityStore,
     });
+    // Hand-off starts from the export cut and keeps its document as a Canvas
+    // of the thread, resolved from the thread the way an authoring agent's
+    // Canvas is — never from whichever Project the window happens to show.
+    const threadHandOffService = new ThreadHandOffService({
+      exports: threadExportService,
+      provider: {
+        readiness: (providerInstanceId) => {
+          const instance = persistence.readProviderInstance(providerInstanceId);
+          if (instance === undefined || !instance.enabled) return undefined;
+          return providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
+        },
+        complete: makeThreadHandOffCompletion({
+          resolveDriver: (providerInstanceId) => {
+            const instance = persistence.readProviderInstance(providerInstanceId);
+            if (instance === undefined || !instance.enabled) return undefined;
+            try {
+              return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+            } catch {
+              return undefined;
+            }
+          },
+          scratchRoot: (threadId) => {
+            const root = join(persistence.dataDirectory, "hand-off-scratch", threadId);
+            mkdirSync(root, { recursive: true, mode: 0o700 });
+            return root;
+          },
+          uuid: randomUUID,
+        }),
+      },
+      documents: {
+        save: async ({ windowId, mode, threadId, projectId, title, blocks }) => {
+          const bootstrap = await projectService.bootstrap(windowId);
+          const project = bootstrap.active.find(
+            (candidate) => String(candidate.id) === String(projectId),
+          );
+          if (project === undefined || project.lifecycle !== "active" || project.type !== mode) {
+            return { kind: "refused", message: "The thread's Project is unavailable." };
+          }
+          let workspace: import("@octant/contracts/canvas-cards").CanvasWorkspaceScope;
+          if (mode === "chat") {
+            workspace = { kind: "chat-virtual", projectId };
+          } else if (mode === "work") {
+            // The renderer's own Create Canvas names the thread as the Work root.
+            workspace = { kind: "work-root", projectId, rootId: threadId as never };
+          } else {
+            const view = await routeCodeService.read(windowId, decodeCodeThreadId(threadId));
+            workspace = {
+              kind: "code-worktree",
+              projectId,
+              repositoryId: view.thread.repositoryId,
+              bindingRevisionId: view.thread.bindingRevisionId,
+              checkoutId: view.thread.checkoutId,
+              verified: true,
+            };
+          }
+          const created = canvasService.create(
+            {
+              schemaVersion: 1,
+              kind: "canvas-create",
+              requestId: randomUUID(),
+              intent: "blank",
+              hostId: LOCAL_HOST_ID,
+              mode,
+              workspace,
+              originThreadId: threadId,
+              title,
+              sourceManifest: [],
+              // A hand-off is a document: it reads nothing and runs nothing.
+              requestedAuthority: {
+                filesystem: false,
+                shell: false,
+                git: false,
+                network: false,
+                tools: false,
+                subagents: false,
+                executionPolicy: "plan",
+                permissionPersistence: "current-session",
+              },
+            },
+            { mode, projectId: String(projectId) },
+            { id: String(project.id), type: mode, lifecycle: "active" },
+            blocks,
+          );
+          if (created.kind !== "accepted") {
+            return { kind: "refused", message: created.message };
+          }
+          return {
+            kind: "saved",
+            canvasId: String(created.card.canvasId),
+            versionId: String(created.card.versionId),
+          };
+        },
+      },
+    });
+    const threadHandOffRoutes = createThreadHandOffRouteHandler({
+      service: threadHandOffService,
+      windowAuthorityStore,
+    });
     const canvasRoutes = createCanvasRouteHandler({
       canvasProjection: persistence.canvasProjection,
       canvasService,
@@ -6082,6 +6185,7 @@ export function startOctantServer(
       (await usageRoutes(request)) ??
       (await diagnosticsExportRoutes(request)) ??
       (await threadExportRoutes(request)) ??
+      (await threadHandOffRoutes(request)) ??
       (await computerUseRoutes(request)) ??
       (await validationEvidenceRoutes(request)) ??
       (await extensionRoutes(request)) ??
