@@ -596,7 +596,15 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               { readonly operationId: CodeOperationId; readonly contentId: CodeEvidenceContentId }
             >();
             for (const frame of frames) {
-              if (frame.event.kind !== "provider-content") continue;
+              // Terminal output rides along the same way: a frame per chunk
+              // that each cost the renderer a second round trip made typing
+              // feel a beat behind the shell.
+              if (
+                frame.event.kind !== "provider-content" &&
+                frame.event.kind !== "terminal-output"
+              ) {
+                continue;
+              }
               references.set(`${frame.operationId}:${frame.event.content.contentId}`, {
                 operationId: frame.operationId,
                 contentId: frame.event.content.contentId,
@@ -628,7 +636,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 );
                 streamFrames = frames.map((frame) => {
                   const displayText =
-                    frame.event.kind === "provider-content"
+                    frame.event.kind === "provider-content" ||
+                    frame.event.kind === "terminal-output"
                       ? text.get(`${frame.operationId}:${frame.event.content.contentId}`)
                       : undefined;
                   return decodeCodeOperationStreamFrame({
