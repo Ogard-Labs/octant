@@ -115,6 +115,7 @@ describe("TerminalProcessPort", () => {
     )[2].env;
     expect(dirname(stateDirectory)).toBe(shellStateDirectory);
     expect(launchedEnvironment.DISABLE_AUTO_UPDATE).toBe("true");
+    expect(launchedEnvironment.PROMPT_EOL_MARK).toBe("");
     expect(launchedEnvironment.DISABLE_UPDATE_PROMPT).toBe("true");
     expect(spawn).toHaveBeenCalledWith(
       fake.sandboxPath,
@@ -134,6 +135,8 @@ describe("TerminalProcessPort", () => {
     expect(existsSync(stateDirectory)).toBe(true);
     const profile = launchedProfile(spawn);
     expect(profile).toContain("(deny default)");
+    expect(profile).toContain('(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))');
+    expect(profile).toContain("(allow pseudo-tty)");
     expect(profile).toContain(`(allow file-write* (subpath "${realpathSync(stateDirectory)}"))`);
     expect(profile).not.toContain("(allow network*)");
   });

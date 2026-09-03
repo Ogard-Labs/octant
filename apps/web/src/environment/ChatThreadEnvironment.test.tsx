@@ -6,7 +6,7 @@ import {
   type ProjectSummary,
   type WorkspaceTab,
 } from "@octant/contracts";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatController } from "../chat/useChatController";
 import { ChatThreadEnvironment } from "./ChatThreadEnvironment";
@@ -107,26 +107,32 @@ function controller(): ChatController {
 }
 
 describe("the Chat thread environment summary", () => {
-  it("keeps independent open state for two tab views of the same thread", async () => {
+  it("shows only the active tab view's Environment for two views of the same thread", async () => {
     const authoritative = controller();
 
     render(
       <>
-        <ChatThreadEnvironment controller={authoritative} projects={[chatProject()]} tab={tabA}>
+        <ChatThreadEnvironment
+          controller={authoritative}
+          environmentOpen
+          projects={[chatProject()]}
+          tab={tabA}
+        >
           <div>First view</div>
         </ChatThreadEnvironment>
-        <ChatThreadEnvironment controller={authoritative} projects={[chatProject()]} tab={tabB}>
+        <ChatThreadEnvironment
+          active={false}
+          controller={authoritative}
+          environmentOpen
+          projects={[chatProject()]}
+          tab={tabB}
+        >
           <div>Second view</div>
         </ChatThreadEnvironment>
       </>,
     );
 
-    const triggers = screen.getAllByRole("button", { name: "Open Environment" });
-    expect(triggers).toHaveLength(2);
-    const first = triggers[0];
-    expect(first).toBeInstanceOf(HTMLButtonElement);
-    if (!(first instanceof HTMLButtonElement)) return;
-    fireEvent.click(first);
+    expect(screen.queryByRole("button", { name: "Open Environment" })).not.toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getAllByRole("region", { name: "Environment details" })).toHaveLength(1),
     );
@@ -137,18 +143,14 @@ describe("the Chat thread environment summary", () => {
 
   it("fails closed when the authoritative thread references an unresolved Project", async () => {
     render(
-      <ChatThreadEnvironment controller={controller()} projects={[]} tab={tabA}>
+      <ChatThreadEnvironment controller={controller()} environmentOpen projects={[]} tab={tabA}>
         <div />
       </ChatThreadEnvironment>,
     );
 
-    const environment = screen.getByRole("button", { name: "Open Environment" });
+    const environment = await screen.findByRole("region", { name: "Environment details" });
     expect(environment).toHaveAttribute("data-environment-status", "unavailable");
-    expect(screen.getByText("Chat · Project unavailable")).toHaveClass("sr-only");
-    fireEvent.click(environment);
-    await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Environment details" })).toBeVisible(),
-    );
+    expect(screen.getByText("Chat · Project unavailable")).toBeVisible();
     expect(screen.getByText("Authoritative Chat context is unavailable.")).toBeVisible();
     expect(screen.queryByText("Unavailable for unfiled Chat")).not.toBeInTheDocument();
     expect(screen.queryByText("1 attachment")).not.toBeInTheDocument();

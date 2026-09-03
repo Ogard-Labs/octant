@@ -79,9 +79,6 @@ async function openEnvironment(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
   });
-  fireEvent.click(await screen.findByRole("button", { name: "Open Environment" }));
-  // A fireEvent-driven open doesn't yield to the animation frame that settles
-  // the popup's enter transition, so wait for it before callers act inside.
   await waitFor(() =>
     expect(screen.getByRole("region", { name: "Environment details" })).toBeVisible(),
   );
@@ -92,6 +89,7 @@ describe("CodeThreadEnvironment", () => {
     const client = projectClient(readyObservation());
     const { rerender } = render(
       <CodeThreadEnvironment
+        environmentOpen
         observe={false}
         project={codeProject()}
         projectClient={client}
@@ -103,7 +101,13 @@ describe("CodeThreadEnvironment", () => {
 
     expect(client.environmentForThread).not.toHaveBeenCalled();
     rerender(
-      <CodeThreadEnvironment observe project={codeProject()} projectClient={client} tab={codeTab()}>
+      <CodeThreadEnvironment
+        environmentOpen
+        observe
+        project={codeProject()}
+        projectClient={client}
+        tab={codeTab()}
+      >
         <div>Transcript</div>
       </CodeThreadEnvironment>,
     );
@@ -114,6 +118,7 @@ describe("CodeThreadEnvironment", () => {
   it("renders the code workspace children inside the content area", () => {
     render(
       <CodeThreadEnvironment
+        environmentOpen
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -124,9 +129,10 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.getByTestId("code-workspace-content")).toBeVisible();
   });
 
-  it("shows a compact truthful Environment summary in the thread header", async () => {
+  it("names the thread's identity and facts in the Environment header", async () => {
     render(
       <CodeThreadEnvironment
+        environmentOpen
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -137,14 +143,15 @@ describe("CodeThreadEnvironment", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(screen.getByRole("button", { name: "Open Environment" })).toBeVisible();
-    expect(screen.getByText(/Octant · feature\/issue-204 · Dirty · \./)).toHaveClass("sr-only");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Environment details" })).toBeVisible();
+    expect(screen.getByText("Octant · feature/issue-204 · Dirty")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Open Environment" })).not.toBeInTheDocument();
   });
 
   it("holds only environment-scoped groups, leaving the thread's own surfaces to the dock", async () => {
     render(
       <CodeThreadEnvironment
+        environmentOpen
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -188,6 +195,7 @@ describe("CodeThreadEnvironment", () => {
     } as unknown as GithubClient;
     render(
       <CodeThreadEnvironment
+        environmentOpen
         githubClient={githubClient}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
@@ -214,6 +222,7 @@ describe("CodeThreadEnvironment", () => {
     const onOpenChanges = vi.fn();
     render(
       <CodeThreadEnvironment
+        environmentOpen
         onOpenChanges={onOpenChanges}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
@@ -231,6 +240,7 @@ describe("CodeThreadEnvironment", () => {
   it("renders the authoritative Git facts in the disclosure once opened", async () => {
     render(
       <CodeThreadEnvironment
+        environmentOpen
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -246,6 +256,7 @@ describe("CodeThreadEnvironment", () => {
   it("reports an unavailable identity when no project is bound to the tab", () => {
     render(
       <CodeThreadEnvironment
+        environmentOpen
         project={undefined}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -253,16 +264,17 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    expect(screen.getByRole("button", { name: "Open Environment" })).toHaveAttribute(
+    expect(screen.getByRole("region", { name: "Environment details" })).toHaveAttribute(
       "data-environment-status",
       "unavailable",
     );
-    expect(screen.getByText("Code · No project")).toHaveClass("sr-only");
+    expect(screen.getByText("Code · No project")).toBeVisible();
   });
 
   it("keeps open state as renderer state and closes when the pane is no longer active", async () => {
     const { rerender } = render(
       <CodeThreadEnvironment
+        environmentOpen
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -275,6 +287,7 @@ describe("CodeThreadEnvironment", () => {
 
     rerender(
       <CodeThreadEnvironment
+        environmentOpen
         active={false}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
@@ -294,6 +307,7 @@ describe("CodeThreadEnvironment", () => {
     }));
     render(
       <CodeThreadEnvironment
+        environmentOpen
         onExecute={onExecute as never}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
@@ -334,6 +348,7 @@ describe("CodeThreadEnvironment", () => {
     }));
     render(
       <CodeThreadEnvironment
+        environmentOpen
         onExecute={onExecute as never}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}

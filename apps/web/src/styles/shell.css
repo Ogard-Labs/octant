@@ -193,7 +193,6 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   pointer-events: auto;
 }
 
-.window-chrome__environment-action,
 .window-chrome__open-in-action {
   position: relative;
   display: inline-flex;
