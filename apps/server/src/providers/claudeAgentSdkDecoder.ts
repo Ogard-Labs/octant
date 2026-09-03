@@ -218,9 +218,9 @@ function decodeStreamEvent(value: unknown, allowedTools: readonly string[]): Cla
       (delta.stop_reason !== null &&
         (typeof delta.stop_reason !== "string" || !STREAM_STOP_REASONS.has(delta.stop_reason))) ||
       (delta.stop_sequence !== null && typeof delta.stop_sequence !== "string") ||
-      delta.stop_details !== null ||
-      delta.container !== null ||
-      event.context_management !== null
+      !absentOrNull(delta.stop_details) ||
+      !absentOrNull(delta.container) ||
+      !absentNullOrObject(event.context_management)
     ) {
       throw protocol("Claude returned an unsupported runtime message.");
     }
@@ -310,6 +310,18 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
   return { kind: "tool-results", sessionId: message.session_id, results };
 }
 
+// Claude Code 2.1.258 omits `container` and `stop_details` from assistant
+// messages instead of sending null, and reports context management as an
+// object (`{ applied_edits: [] }`) rather than null. Neither shape widens what
+// the session can do, so both spellings are accepted.
+function absentOrNull(value: unknown): boolean {
+  return value === undefined || value === null;
+}
+
+function absentNullOrObject(value: unknown): boolean {
+  return value === undefined || value === null || object(value) !== undefined;
+}
+
 function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
   const allowedKeys = new Set(allowed);
   return Object.keys(value).every((key) => allowedKeys.has(key));
@@ -325,7 +337,61 @@ function isHarmlessInformational(message: Record<string, unknown>): boolean {
       typeof message.session_id === "string"
     );
   }
+  // Claude Code 2.1.258 announces the active goal and the autocompact window
+  // as their own message types, before the runtime initializes and again when
+  // they change. Neither carries authority; both are dropped.
+  if (message.type === "active_goal") {
+    return (
+      hasOnlyKeys(message, ["type", "value", "uuid", "session_id"]) &&
+      (message.value === null ||
+        typeof message.value === "string" ||
+        object(message.value) !== undefined) &&
+      typeof message.uuid === "string" &&
+      typeof message.session_id === "string"
+    );
+  }
+  // The runtime acknowledges each queued user message with a lifecycle note
+  // (2.1.258), and sends it before the initialized message on the first turn.
+  if (message.type === "command_lifecycle") {
+    return (
+      hasOnlyKeys(message, ["type", "command_uuid", "state", "uuid", "session_id"]) &&
+      typeof message.command_uuid === "string" &&
+      typeof message.state === "string" &&
+      typeof message.uuid === "string" &&
+      typeof message.session_id === "string"
+    );
+  }
+  if (message.type === "autocompact_state") {
+    return (
+      hasOnlyKeys(message, ["type", "value", "uuid", "session_id"]) &&
+      object(message.value) !== undefined &&
+      typeof message.uuid === "string" &&
+      typeof message.session_id === "string"
+    );
+  }
   if (message.type !== "system") return false;
+  // A post-turn summary is the runtime's own one-line status of the turn it
+  // just finished (2.1.258); it neither changes state nor grants anything.
+  if (message.subtype === "post_turn_summary") {
+    return (
+      hasOnlyKeys(message, [
+        "type",
+        "subtype",
+        "summarizes_uuid",
+        "status_category",
+        "status_detail",
+        "needs_action",
+        "uuid",
+        "session_id",
+      ]) &&
+      typeof message.summarizes_uuid === "string" &&
+      typeof message.status_category === "string" &&
+      typeof message.status_detail === "string" &&
+      typeof message.needs_action === "string" &&
+      typeof message.uuid === "string" &&
+      typeof message.session_id === "string"
+    );
+  }
   if (message.subtype === "notification") {
     return (
       hasOnlyKeys(message, [
@@ -428,24 +494,25 @@ export function decodeAccount(value: unknown): ClaudeAccountState {
 
 export function decodeInitialization(value: unknown): ClaudeInitialization {
   const initialized = object(value);
-  const commands = initialized === undefined ? undefined : stringArray(initialized.commands);
   const availableOutputStyles =
-    initialized === undefined ? undefined : stringArray(initialized.available_output_styles);
+    initialized === undefined || initialized.available_output_styles === undefined
+      ? []
+      : stringArray(initialized.available_output_styles);
+  // Claude Code announces its built-in slash commands and agents here on
+  // every install (2.1.258 lists `clear`, `compact`, `Explore`, `Plan`, ...)
+  // and the entries are objects, not names. Their presence is not evidence of
+  // injected authority: the query is opened with no setting sources, skills,
+  // agents, plugins, or MCP servers, and the tool set is checked on the
+  // initialized message. Only the shape is validated here; requiring the
+  // lists to be empty rejected every current install as incompatible.
   if (
     initialized === undefined ||
     !Array.isArray(initialized.agents) ||
-    commands === undefined ||
+    !Array.isArray(initialized.commands) ||
     typeof initialized.output_style !== "string" ||
     availableOutputStyles === undefined
   ) {
     throw protocol();
-  }
-  if (
-    initialized.agents.length > 0 ||
-    commands.length > 0 ||
-    initialized.output_style !== "default"
-  ) {
-    throw protocol("Claude initialized an unexpected runtime surface.");
   }
   return {
     models: decodeModels(initialized.models),
@@ -459,32 +526,31 @@ export function permissionMode(policy: ProviderExecutionPolicy): ClaudePermissio
   return "default";
 }
 
-function sameStrings(actual: readonly string[], expected: readonly string[]): boolean {
-  return (
-    actual.length === expected.length && actual.every((value, index) => value === expected[index])
-  );
+// Authority only widens when the runtime holds a tool Octant did not ask
+// for. It may hold fewer: Claude Code 2.1.258 never lists AskUserQuestion in
+// the initialized tool set even when it was requested.
+function withinRequestedTools(granted: readonly string[], requested: readonly string[]): boolean {
+  const requestedSet = new Set(requested);
+  return granted.every((tool) => requestedSet.has(tool));
 }
 
 function decodeInitializedMessage(
   message: Record<string, unknown>,
   input: ClaudeOpenQueryInput,
+  acceptedModels: ReadonlySet<string> | undefined,
 ): ClaudeDecodedMessage {
-  const agents = message.agents === undefined ? [] : stringArray(message.agents);
   const mcpServers = Array.isArray(message.mcp_servers) ? message.mcp_servers : undefined;
-  const skills = stringArray(message.skills);
-  const plugins = Array.isArray(message.plugins) ? message.plugins : undefined;
   const tools = stringArray(message.tools);
-  const slashCommands = stringArray(message.slash_commands);
   const capabilities = message.capabilities === undefined ? [] : stringArray(message.capabilities);
   const expectedPermissionMode = permissionMode(input.executionPolicy);
   if (
-    agents === undefined ||
     mcpServers === undefined ||
-    skills === undefined ||
-    plugins === undefined ||
     tools === undefined ||
-    slashCommands === undefined ||
     capabilities === undefined ||
+    (message.agents !== undefined && !Array.isArray(message.agents)) ||
+    (message.skills !== undefined && !Array.isArray(message.skills)) ||
+    (message.plugins !== undefined && !Array.isArray(message.plugins)) ||
+    (message.slash_commands !== undefined && !Array.isArray(message.slash_commands)) ||
     typeof message.session_id !== "string" ||
     typeof message.cwd !== "string" ||
     typeof message.model !== "string" ||
@@ -494,18 +560,22 @@ function decodeInitializedMessage(
   ) {
     throw protocol("Claude returned an unsupported runtime message.");
   }
+  // Authority is what the runtime can actually do: the working directory,
+  // the permission mode, no tool beyond the requested set, and no MCP server
+  // Octant did not configure. Claude Code 2.1.258 also announces its built-in agents and
+  // slash commands and the user's own skills on every install, returns the
+  // tool list sorted, and echoes the model an alias resolved to. None of
+  // those widen what the session may touch, so they are tolerated instead of
+  // being reported as an incompatible runtime.
+  const modelAccepted =
+    message.model === input.model || acceptedModels?.has(message.model) === true;
   if (
     message.cwd !== input.projectRoot ||
-    message.model !== input.model ||
+    !modelAccepted ||
     message.permissionMode !== expectedPermissionMode ||
     (input.resumeSessionId !== undefined && message.session_id !== input.resumeSessionId) ||
-    agents.length > 0 ||
     mcpServers.length > 0 ||
-    skills.length > 0 ||
-    plugins.length > 0 ||
-    slashCommands.length > 0 ||
-    message.output_style !== "default" ||
-    !sameStrings(tools, input.tools)
+    !withinRequestedTools(tools, input.tools)
   ) {
     throw protocol("Claude initialized an unexpected runtime surface.");
   }
@@ -514,6 +584,7 @@ function decodeInitializedMessage(
     sessionId: message.session_id,
     projectRoot: message.cwd,
     model: message.model,
+    requestedModel: input.model,
     permissionMode: expectedPermissionMode,
     tools,
     capabilities,
@@ -662,7 +733,11 @@ function decodeResult(
 }
 
 export type ClaudeDecodePhase =
-  | { readonly kind: "initializing" }
+  | {
+      readonly kind: "initializing";
+      /** Model ids the runtime may report for the alias that was requested. */
+      readonly acceptedModels?: ReadonlySet<string>;
+    }
   | { readonly kind: "active"; readonly sessionId: string };
 
 export function decodeMessage(
@@ -676,10 +751,11 @@ export function decodeMessage(
   }
   const isInitialization = message.type === "system" && message.subtype === "init";
   if (phase.kind === "initializing") {
-    if (!isInitialization) {
-      throw protocol("Claude returned an unsupported runtime message.");
-    }
-    return decodeInitializedMessage(message, input);
+    if (isInitialization) return decodeInitializedMessage(message, input, phase.acceptedModels);
+    // Since Claude Code 2.1.258 the runtime does not initialize until the
+    // first user message arrives; what it sends before that is informational.
+    if (isHarmlessInformational(message)) return { kind: "ignored" };
+    throw protocol("Claude returned an unsupported runtime message.");
   }
   if (
     isInitialization ||
@@ -699,10 +775,10 @@ export function decodeMessage(
       assistant.role !== "assistant" ||
       typeof assistant.model !== "string" ||
       !Array.isArray(assistant.content) ||
-      assistant.container !== null ||
-      assistant.context_management !== null ||
-      assistant.diagnostics !== null ||
-      assistant.stop_details !== null ||
+      !absentOrNull(assistant.container) ||
+      !absentNullOrObject(assistant.context_management) ||
+      !absentNullOrObject(assistant.diagnostics) ||
+      !absentOrNull(assistant.stop_details) ||
       (assistant.stop_reason !== null &&
         (typeof assistant.stop_reason !== "string" ||
           !STREAM_STOP_REASONS.has(assistant.stop_reason))) ||
