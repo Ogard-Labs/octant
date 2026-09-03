@@ -198,16 +198,17 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultDark: "#2c2c2c",
   },
   {
-    // Primary action fill. One scarce hue, per 0016: it marks focus, the
-    // primary action, and links, and nothing else. A fully achromatic accent
-    // made focus, selection, and primary text indistinguishable from body ink.
+    // Primary action fill. The accent is monochrome: the primary button, the
+    // send control, and an active mark are the ink colour inverted, so the
+    // one hue on screen stays the keyboard focus ring. Links keep their
+    // underline, which is what separates them from body text.
     id: "accent",
     displayName: "Accent",
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#1f6f96",
-    defaultDark: "#4d9ec8",
+    defaultLight: "#1b1b1b",
+    defaultDark: "#f0f0f0",
   },
   {
     id: "accent-foreground",
@@ -226,8 +227,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#1f6f96",
-    defaultDark: "#4d9ec8",
+    defaultLight: "#1b1b1b",
+    defaultDark: "#f0f0f0",
   },
   {
     id: "success-surface",

@@ -86,7 +86,7 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 
 ### Colour
 
-Neutral graphite, one scarce blue accent, four statuses. Text is three greys (primary,
+Neutral graphite, a monochrome accent, a blue keyboard focus ring, four statuses. Text is three greys (primary,
 secondary, muted) and never a fourth. Hairlines separate; fills select. See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
