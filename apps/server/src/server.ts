@@ -3980,6 +3980,7 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       maxAttachmentBodySize: MAX_CHAT_ATTACHMENT_BYTES,
+      waitForThreadChange: (signal) => machineChangeFeed.waitFor("chat-navigation", signal),
     });
     // Checkpoints span Chat and Code, so the service owns only the marker and
     // delegates every thread it produces to the mode that owns the authority

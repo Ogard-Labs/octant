@@ -113,6 +113,9 @@ function SideChatSidecarSurface(props: {
   readonly threadMentionClient?: ThreadMentionClient;
 }) {
   const controller = useChatController({
+    // The App-level controller already refreshes navigation from the Machine
+    // change feed; a second timer here only repeated its reads once a second.
+    navigationRefreshMs: 0,
     activeThreadId: props.sidecarThreadId,
     client: props.chatClient,
     readCursorStore: props.chatReadCursorStore,
