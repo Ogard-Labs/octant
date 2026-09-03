@@ -99,6 +99,9 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
       },
     });
     setRevise(undefined);
+    // The slow cadence assumes an enqueue re-reads the list itself; without
+    // this the new job stayed invisible for up to thirty seconds.
+    refreshRef.current();
   }
 
   if (jobs.length === 0) return null;

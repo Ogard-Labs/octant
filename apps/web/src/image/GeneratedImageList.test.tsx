@@ -1,5 +1,6 @@
-import { act, render, screen } from "@testing-library/react";
-import type { ImageJob } from "@octant/contracts";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GeneratedImageList } from "./GeneratedImageList";
@@ -20,6 +21,37 @@ function queuedJob(jobScopeId: typeof scopeId): ImageJob {
     version: 1 as never,
     createdAt: "2026-08-31T00:00:00.000Z" as never,
     updatedAt: "2026-08-31T00:00:00.000Z" as never,
+  };
+}
+
+function profile(): ImageGenerationProfileView {
+  return {
+    instanceId: "a3000000-0000-4000-8000-000000000005" as ImageGenerationProfileView["instanceId"],
+    displayName: "OpenAI Image",
+    driverKind: "openai-image",
+    modelAllowlist: ["gpt-image-2" as never],
+    defaultModel: "gpt-image-2" as never,
+  };
+}
+
+function completedJob(): ImageJob {
+  return {
+    ...queuedJob(scopeId),
+    status: "completed",
+    artifacts: [
+      {
+        attachmentId: "a3000000-0000-4000-8000-000000000006",
+        hash: "b".repeat(64),
+        size: 128,
+        mime: "image/png",
+        evidence: {
+          profileInstanceId: profile().instanceId,
+          modelId: "gpt-image-2",
+          promptHash: "a".repeat(64),
+          jobId: "a3000000-0000-4000-8000-000000000004",
+        },
+      } as unknown as ImageArtifactRecord,
+    ],
   };
 }
 
@@ -148,5 +180,35 @@ describe("GeneratedImageList polling", () => {
     );
 
     expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a revision the moment it is enqueued instead of after the idle cadence", async () => {
+    const user = userEvent.setup();
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({ jobs: [completedJob()] })
+      .mockResolvedValue({ jobs: [completedJob(), queuedJob(scopeId)] });
+    const client = {
+      list,
+      enqueue: vi.fn(async () => queuedJob(scopeId)),
+      artifact: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+    } as unknown as ImageGenerationClient;
+    render(
+      <GeneratedImageList
+        client={client}
+        profiles={[profile()]}
+        scopeId={scopeId}
+        threadKind="chat-thread"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Revise" }));
+    await user.type(screen.getByLabelText("Image prompt"), "make it blue");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() => expect(client.enqueue).toHaveBeenCalledOnce());
+    // Without its own re-read the queued revision stays hidden for the whole
+    // thirty-second idle interval.
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
   });
 });
