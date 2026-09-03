@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { OctantCommandProvider } from "../palette/CommandRegistry";
 import { ShellDialogHost, type ShellDialogHostProps } from "./ShellDialogHost";
@@ -30,7 +30,10 @@ describe("ShellDialogHost", () => {
       </OctantCommandProvider>,
     );
 
-    await waitFor(() => expect(screen.queryByTestId("first-run")).not.toBeInTheDocument());
+    // `waitFor` would pass on the first tick, before a deferred import had any
+    // chance to evaluate; settling them is what makes the absence meaningful.
+    await vi.dynamicImportSettled();
+    expect(screen.queryByTestId("first-run")).not.toBeInTheDocument();
     expect(importedOnboarding).not.toHaveBeenCalled();
   });
 });
