@@ -11,6 +11,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-policy";
 import { ChevronDown, Filter, GitBranch, GitPullRequest, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { ShellState } from "../shell/ShellState";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -31,6 +32,31 @@ import { ThreadBoardPullRequestSummaries } from "../threadBoard/ThreadBoardPullR
 
 const GROUPING_STORAGE_KEY = "octant.code.board.grouping";
 const SHOW_EMPTY_GROUPS_STORAGE_KEY = "octant.code.board.show-empty-groups";
+const LAYOUT_STORAGE_KEY = "octant.code.board.layout";
+
+type CodeBoardLayout = "board" | "list";
+
+function readStoredLayout(
+  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
+): CodeBoardLayout | undefined {
+  try {
+    const value = storage?.getItem(LAYOUT_STORAGE_KEY);
+    return value === "board" || value === "list" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStoredLayout(
+  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
+  layout: CodeBoardLayout,
+): void {
+  try {
+    storage?.setItem(LAYOUT_STORAGE_KEY, layout);
+  } catch {
+    // A device that cannot persist the preference still works this session.
+  }
+}
 const ALL_STATUSES: readonly CodeBoardStatus[] = THREAD_BOARD_STATUS_COLUMN_ORDER;
 
 export interface CodeThreadOpenTarget {
@@ -96,11 +122,13 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
-  // Empty lanes are optional detail. The default scan path spends width on
-  // work that exists; View can still reveal the complete status workflow.
+  // The four status lanes are the workflow, so they all show by default:
+  // a board that hid its empty lanes read as one column of cards. View can
+  // still collapse the empty ones.
   const [showEmptyGroups, setShowEmptyGroups] = useState(
-    () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? false,
+    () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? true,
   );
+  const [layout, setLayout] = useState<CodeBoardLayout>(() => readStoredLayout(storage) ?? "board");
   const [board, setBoard] = useState<BoardState>({ status: "loading" });
   const [refreshNonce, setRefreshNonce] = useState(0);
 
@@ -167,12 +195,26 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   return (
     <Surface ariaLabel="Code Thread Board" className="code-board" measure="wide">
       <SurfaceHeader
-        subtitle="One runtime-derived view of your Code threads and coding agents."
-        title="Threads"
+        subtitle="Your Code threads by status, with the agents working on them."
+        title="Board"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
 
       <div aria-label="Board controls" className="surface-toolbar" role="group">
+        <OctantToggleGroup<CodeBoardLayout>
+          aria-label="Layout"
+          className="code-board__layout"
+          onValueChange={(value) => {
+            const selected = value[0];
+            if (selected !== "board" && selected !== "list") return;
+            setLayout(selected);
+            writeStoredLayout(storage, selected);
+          }}
+          value={[layout]}
+        >
+          <OctantToggleGroupItem value="board">Board</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="list">List</OctantToggleGroupItem>
+        </OctantToggleGroup>
         <OctantToggleGroup<CodeBoardGrouping>
           aria-label="Group by"
           className="code-board__grouping"
@@ -400,7 +442,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
         board={board}
         filters={filters}
         grouping={grouping}
-        isNarrow={props.isNarrow === true}
+        isNarrow={props.isNarrow === true || layout === "list"}
         onResetFilters={() => setFilters(DEFAULT_FILTERS)}
         projectNames={projectNames}
         projects={props.projects}
@@ -491,8 +533,11 @@ function CodeBoardBody(props: {
       </div>
     ) : null;
   const columns = groupCodeBoardCards(cards, props.grouping, { projects: props.projects });
+  // Lanes are the workflow on the board; stacked into a list, an empty lane
+  // is only a heading with nothing under it, so the list keeps the groups
+  // that hold work.
   const visibleColumns =
-    props.showEmptyGroups || cards.length === 0
+    (props.showEmptyGroups && !props.isNarrow) || cards.length === 0
       ? columns
       : columns.filter((column) => column.cards.length > 0);
   return (
@@ -646,6 +691,9 @@ function CodeBoardCardView(props: {
       data-follow-up={card.followUp ? "true" : "false"}
       data-status={card.status}
     >
+      {props.layout === "card" && props.projectName !== undefined ? (
+        <span className="board-card-eyebrow">{props.projectName}</span>
+      ) : null}
       <span className={props.layout === "list" ? "issuerow-main" : "board-card-top"}>
         {props.unread ? <span className="sr-only">Unread</span> : null}
         <OctantButton
@@ -676,12 +724,16 @@ function CodeBoardCardView(props: {
           {statusLabel}
         </span>
       </span>
-      {props.layout === "card" && card.childAgents.latestSummary !== undefined ? (
-        <span className="board-card-activity">{card.childAgents.latestSummary}</span>
-      ) : null}
+      {/* A card says what the thread is doing now, who runs it, and when it
+          last moved; the checkout, branch, plan, and review facts live in the
+          list view and on the thread. Stacked on the card they made every
+          thread a wall of metadata with the same weight as its title. */}
       <span className={props.layout === "list" ? "issuerow-meta" : "board-card-facts"}>
-        {cardFacts(card, props.projectName, props.providerLabel).map((fact) => (
-          <span className={fact.className ?? "fact"} key={fact.key}>
+        {(props.layout === "list"
+          ? cardFacts(card, props.projectName, props.providerLabel)
+          : cardSummary(card, props.providerLabel, waitingReason)
+        ).map((fact) => (
+          <span className={fact.className ?? "fact"} key={fact.key} title={fact.title}>
             {fact.icon}
             {fact.text}
           </span>
@@ -693,23 +745,25 @@ function CodeBoardCardView(props: {
           : { onSelect: props.onSelectPullRequest })}
         summaries={card.pullRequestSummaries}
       />
-      {waitingReason === undefined ? null : (
+      {props.layout === "list" && waitingReason !== undefined ? (
         <span className="board-card-blocked">{waitingReason}</span>
-      )}
-      <details className="code-board__card-details">
-        <summary aria-label={`Details for ${card.title}`}>
-          <span>Details</span>
-          <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
-        </summary>
-        <dl className="code-board__card-meta">
-          {cardDetailRows(card, props.projectName, props.providerLabel).map((row) => (
-            <div key={row.label}>
-              <dt>{row.label}</dt>
-              <dd>{row.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </details>
+      ) : null}
+      {props.layout === "list" ? (
+        <details className="code-board__card-details">
+          <summary aria-label={`Details for ${card.title}`}>
+            <span>Details</span>
+            <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+          </summary>
+          <dl className="code-board__card-meta">
+            {cardDetailRows(card, props.projectName, props.providerLabel).map((row) => (
+              <div key={row.label}>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      ) : null}
     </article>
   );
 }
@@ -781,6 +835,38 @@ interface CardFact {
   readonly text: string;
   readonly className?: string;
   readonly icon?: ReactNode;
+  readonly title?: string;
+}
+
+/** The one line under a card title: activity, who runs it, when it last moved. */
+function cardSummary(
+  card: CodeBoardCard,
+  providerLabel: string | undefined,
+  waitingReason: string | undefined,
+): ReadonlyArray<CardFact> {
+  const facts: CardFact[] = [];
+  if (waitingReason !== undefined) facts.push({ key: "waiting", text: waitingReason });
+  if (card.childAgents.latestSummary !== undefined) {
+    facts.push({ key: "activity", text: card.childAgents.latestSummary });
+  }
+  if (card.childAgents.active > 0) {
+    facts.push({
+      key: "child-runs",
+      text: `${card.childAgents.active} active ${card.childAgents.active === 1 ? "run" : "runs"}`,
+    });
+  }
+  if (card.checks.state === "failing") {
+    facts.push({ key: "checks", text: "Checks failing", className: "fact bad" });
+  }
+  if (providerLabel !== undefined) facts.push({ key: "provider", text: providerLabel });
+  if (card.lastMeaningfulActivityAt !== null) {
+    facts.push({
+      key: "activity-at",
+      text: relativeTimeLabel(card.lastMeaningfulActivityAt),
+      title: absoluteTimeFormatter.format(new Date(card.lastMeaningfulActivityAt)),
+    });
+  }
+  return facts;
 }
 
 function cardFacts(

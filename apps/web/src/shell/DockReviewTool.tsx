@@ -48,8 +48,8 @@ export function DockReviewTool(props: DockReviewToolProps) {
     return (
       <ShellState
         message="This Code thread is still loading its Review state."
-        state="neutral"
-        title="Review is unavailable"
+        state="loading"
+        title="Loading Review"
       />
     );
   }

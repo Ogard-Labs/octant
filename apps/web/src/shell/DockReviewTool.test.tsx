@@ -49,9 +49,7 @@ describe("Review beside the active thread", () => {
     await waitFor(() =>
       expect(fixture.options?.original).toBe("const answer = 41;\nexport { answer };"),
     );
-    expect(
-      screen.queryByRole("heading", { name: "Review is unavailable" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Loading Review" })).not.toBeInTheDocument();
   });
 
   it("toggles inline and side-by-side layouts", async () => {
@@ -231,7 +229,7 @@ describe("Review beside the active thread", () => {
     render(
       <DockReviewTool controller={controller(ids.otherThread)} threadId={ids.thread as never} />,
     );
-    expect(screen.getByRole("heading", { name: "Review is unavailable" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Loading Review" })).toBeVisible();
     expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
   });
 });

@@ -11,7 +11,7 @@ import type {
 } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
@@ -20,7 +20,7 @@ import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { useCodeEnvironmentController } from "./useCodeEnvironmentController";
 import { useLocalServersController } from "./useLocalServersController";
-import { ChangeWorkingFolder } from "./WorkingDirectoryControl";
+import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
 import { OpenInMenu } from "./OpenInMenu";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
@@ -67,7 +67,6 @@ export interface CodeThreadEnvironmentProps {
   readonly agentRunClient?: AgentRunClient;
   readonly onOpenAgents?: () => void;
   readonly environmentOpen?: boolean;
-  readonly onOpenEnvironment?: (opener: HTMLElement) => void;
 }
 
 /**
@@ -75,9 +74,7 @@ export interface CodeThreadEnvironmentProps {
  * disclosure for checkout facts, local servers, and the working folder.
  */
 export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
-  const [localEnvironmentOpen, setLocalEnvironmentOpen] = useState(false);
-  const environmentOpen = props.environmentOpen ?? localEnvironmentOpen;
-  const openEnvironment = props.onOpenEnvironment ?? (() => setLocalEnvironmentOpen(true));
+  const environmentOpen = props.environmentOpen === true;
   const controller = useCodeEnvironmentController({
     ...(props.projectClient === undefined ? {} : { client: props.projectClient }),
     enabled: props.project !== undefined && props.observe !== false,
@@ -132,8 +129,6 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       />
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
-        inlineFallback={props.environmentOpen === undefined}
-        onOpen={openEnvironment}
         open={environmentOpen}
         summary={{
           identity: projection.identity,
@@ -212,7 +207,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         {workingDirectory === undefined ||
         threadVersion === undefined ||
         props.onExecute === undefined ? null : (
-          <EnvironmentGroup summary={String(workingDirectory)} title="Working folder">
+          <EnvironmentGroup summary={workingFolderLabel(workingDirectory)} title="Working folder">
             <ChangeWorkingFolder
               value={workingDirectory}
               onApply={async (nextWorkingDirectory) => {

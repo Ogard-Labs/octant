@@ -150,23 +150,23 @@
 }
 
 html[data-octant-theme-mode="light"] {
-  --octant-app-background: #f6f6f5;
-  --octant-chrome: #f6f6f5;
-  --octant-sidebar: #ebebea;
-  --octant-sidebar-opaque: #ebebea;
+  --octant-app-background: #fafaf9;
+  --octant-chrome: #fafaf9;
+  --octant-sidebar: #fafaf9;
+  --octant-sidebar-opaque: #fafaf9;
   --octant-workspace: #ffffff;
   --octant-surface: #ffffff;
   --octant-surface-canvas: #ffffff;
   --octant-floating: #fdfdfc;
   --octant-surface-raised: #fdfdfc;
-  --octant-control: #ebebea;
-  --octant-surface-muted: #ebebea;
-  --octant-control-hover: #e1e1df;
-  --octant-surface-hover: #e1e1df;
-  --octant-control-pressed: #d6d6d4;
-  --octant-border: #d2d2d0;
-  --octant-border-subtle: #d2d2d0;
-  --octant-border-strong: #a9a9a7;
+  --octant-control: #f0f0ef;
+  --octant-surface-muted: #f0f0ef;
+  --octant-control-hover: #e8e8e6;
+  --octant-surface-hover: #e8e8e6;
+  --octant-control-pressed: #dfdfdd;
+  --octant-border: #e0e0de;
+  --octant-border-subtle: #e0e0de;
+  --octant-border-strong: #bdbdbb;
   --octant-divider-strong: #6f6f6d;
   --octant-text-primary: #1b1b1b;
   --octant-text-secondary: #4f4f4f;
@@ -174,8 +174,8 @@ html[data-octant-theme-mode="light"] {
   --octant-primary-foreground: #ffffff;
   --octant-focus-ring: #1f6f96;
   --octant-focus: #1f6f96;
-  --octant-selection: #e1e1df;
-  --octant-surface-selected: #e1e1df;
+  --octant-selection: #ebebea;
+  --octant-surface-selected: #ebebea;
   --octant-accent: #1b1b1b;
   --octant-accent-foreground: #ffffff;
   --octant-accent-text: #1b1b1b;
@@ -196,7 +196,7 @@ html[data-octant-theme-mode="light"] {
   --octant-palette-blue: #1e5fae;
   --octant-palette-purple: #5b4bb0;
   --octant-palette-pink: #b3356e;
-  --octant-surface-inset: #f0f0ef;
+  --octant-surface-inset: #f2f2f1;
   --octant-card: var(--octant-workspace);
   --octant-tray: color-mix(in srgb, var(--octant-control) 55%, var(--octant-workspace));
   --octant-text-primary-high-contrast: #0e0f11;
@@ -402,7 +402,7 @@ html[data-octant-native-host="true"] body {
 }
 
 .thread-activity-pip__visual--interactive:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-muted);
   outline-offset: -2px;
 }
 
@@ -647,11 +647,6 @@ strong {
   }
 }
 
-button:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
-}
-
 .sr-only {
   position: absolute;
   width: 1px;
@@ -694,8 +689,7 @@ button:focus-visible {
 
 .octant-menu__trigger:focus-visible,
 .octant-menu__item:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 1px;
+  outline: none;
 }
 
 .octant-menu__positioner {
@@ -1453,16 +1447,19 @@ button:focus-visible {
   background: var(--octant-workspace);
 }
 
+/* The title band shares the 34px rail with the dock head beside it, and its
+   hairline runs to the window's edge: the space reserved for the native
+   window controls is padding inside the band, not a margin outside it, which
+   stopped the rule short and left a gap before the dock's own rule. */
 .workspace-thread-tabs {
   position: relative;
   z-index: 5;
   display: flex;
   min-width: 0;
-  min-height: 36px;
+  min-height: 34px;
   align-items: center;
   gap: 4px;
-  margin-right: var(--octant-window-chrome-reserved-width, 148px);
-  padding: 3px 0 3px var(--oct-space-3);
+  padding: 2px var(--octant-window-chrome-reserved-width, 148px) 2px var(--oct-space-3);
   border-bottom: 1px solid var(--octant-border);
   background: color-mix(in srgb, var(--octant-workspace) 96%, var(--octant-control));
 }
@@ -2062,7 +2059,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .settings-view__checkbox:focus-visible,
 .settings-view__range:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-muted);
   outline-offset: 2px;
 }
 
@@ -2224,6 +2221,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   border-color: var(--octant-border);
 }
 
+/* The form is rows in the open section, not a raised card inside it. */
 .provider-settings__create {
   display: grid;
   grid-template-columns:
@@ -2231,11 +2229,11 @@ html[data-octant-native-host="true"] .workspace-pane__header {
     auto;
   align-items: end;
   gap: 10px;
-  padding: 14px;
-  background: var(--octant-surface-raised);
+  padding: 0;
+  background: transparent;
   border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .provider-settings__disclosure-icon,
@@ -2249,11 +2247,25 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transform: rotate(180deg);
 }
 
+.provider-settings__create-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.provider-settings__create-heading h3 {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
 /* Sits under the open provider list at the section edge. */
 .provider-settings__manual-body {
   display: grid;
   gap: 12px;
-  padding: 12px 0 0;
+  margin-top: 12px;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .provider-settings__create--openai-compatible,
@@ -2514,6 +2526,41 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .shell-state [data-slot="empty-state-actions"] button {
   min-height: 32px;
   padding-inline: 10px;
+}
+
+/* Loading is not an object on the page; it is the page not being there yet.
+   The raised card with an icon well, a title, and a sentence read as a
+   finished empty state ("Loading pull requests / Reading the last authorized
+   snapshot.") on every route that was still fetching. While loading, the
+   state is one quiet line: spinner, then the title. */
+.shell-state[data-state="loading"] {
+  width: auto;
+  max-width: none;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0 8px;
+  padding: 12px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--oct-meta);
+}
+
+.shell-state[data-state="loading"] [data-slot="empty-state-media"] {
+  width: 16px;
+  height: 16px;
+  background: transparent;
+}
+
+.shell-state[data-state="loading"] [data-slot="empty-state-title"] {
+  color: var(--oct-meta);
+  font-weight: 400;
+}
+
+.shell-state[data-state="loading"] [data-slot="empty-state-eyebrow"],
+.shell-state[data-state="loading"] [data-slot="empty-state-description"] {
+  display: none;
 }
 
 .shell-state__spinner {
@@ -3226,7 +3273,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .project-memory-inspector__toolbar select:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-muted);
   outline-offset: 2px;
 }
 
@@ -3352,102 +3399,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   line-height: var(--oct-leading-snug);
-}
-
-.thread-environment-summary {
-  position: relative;
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-.thread-environment-summary__button {
-  display: inline-grid;
-  width: 26px;
-  min-width: 26px;
-  max-width: none;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  height: 26px;
-  min-height: 26px;
-  padding: 0;
-  overflow: hidden;
-  color: var(--oct-muted);
-  border-radius: var(--oct-radius-sm);
-  border: 1px solid transparent;
-}
-
-.thread-environment-summary__button:hover,
-.thread-environment-summary__button[aria-pressed="true"] {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
-.thread-environment-summary__button[aria-pressed="true"] {
-  border-color: var(--oct-border-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-fg) 5%, transparent);
-}
-
-.thread-environment-summary__button[data-environment-status="unavailable"],
-.thread-environment-summary__button[data-environment-status="disconnected"] {
-  color: var(--oct-muted);
-}
-
-.thread-environment-summary__label {
-  flex: 0 0 auto;
-  color: var(--oct-fg);
-  font-size: 11.5px;
-  font-weight: var(--oct-weight-strong);
-}
-
-.thread-environment-summary__fact {
-  overflow: hidden;
-  min-width: 0;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-mono);
-  font-size: calc(11 * var(--oct-text-step));
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thread-environment-summary__fact + .thread-environment-summary__fact::before {
-  content: "·";
-  margin-right: 8px;
-  opacity: 0.6;
-}
-
-.thread-environment-summary__status {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-muted);
-  font-size: calc(9 * var(--oct-text-step));
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.thread-environment-summary__status--available {
-  color: var(--octant-success-text);
-  background: var(--octant-success-surface);
-}
-
-.thread-environment-summary__status--unavailable,
-.thread-environment-summary__status--disconnected {
-  color: var(--octant-text-muted);
-  background: var(--octant-surface-raised);
-}
-
-.thread-environment-summary__status--stale,
-.thread-environment-summary__status--recovery {
-  color: var(--octant-text-muted);
-  background: var(--octant-surface-raised);
 }
 
 /* Position/anchoring now comes from OctantPopover's floating positioner
@@ -3630,7 +3581,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   border-top: 1px solid var(--oct-hairline);
 }
 .thread-environment-dock .environment-group__header {
-  min-height: 44px;
+  min-height: 36px;
   padding: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
@@ -3638,21 +3589,108 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   letter-spacing: normal;
   text-transform: none;
 }
-.thread-environment-dock .environment-group__body {
-  padding: 0 0 var(--oct-space-2);
+.thread-environment-dock .environment-group__summary {
+  overflow: hidden;
+  max-width: 55%;
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.thread-environment-dock .environment-group__body {
+  padding: 0 0 var(--oct-space-3);
+}
+/* The git facts are a definition list, not a card: label column, value
+   column, one line each, the same type scale as the group headers below. */
 .thread-environment-dock .environment-git-group dl {
+  padding: var(--oct-space-2) 0;
   border: 0;
   border-radius: 0;
   background: transparent;
 }
 .thread-environment-dock .environment-git-group__row,
 .thread-environment-dock .local-servers__row {
-  min-height: 30px;
+  min-height: 28px;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+.thread-environment-dock .environment-git-group__row {
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--oct-space-2);
+}
+.thread-environment-dock .environment-git-group__row + .environment-git-group__row {
+  border-top: 0;
+}
+.thread-environment-dock .environment-git-group__row dt {
+  gap: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+.thread-environment-dock .environment-git-group__row dd {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+}
+.thread-environment-dock .environment-git-group__identity-primary {
+  color: var(--oct-fg-2);
+}
+.thread-environment-dock .environment-git-group__identity-secondary {
+  font-size: var(--oct-text-xs);
+}
+/* Actions read as rows, not links: same height as a group header, foreground
+   text, no underline, and they start where the group titles start. */
+.thread-environment-dock .environment-group__action {
+  min-height: 32px;
+  justify-self: start;
+  width: auto;
+  color: var(--oct-fg-2);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+}
+.thread-environment-dock .environment-group__action:hover,
+.thread-environment-dock .environment-group__action:focus-visible {
+  color: var(--oct-fg);
+  text-decoration: none;
+}
+.thread-environment-dock .local-servers {
+  gap: var(--oct-space-2);
+}
+.thread-environment-dock .local-servers__group {
+  gap: 0;
+}
+.thread-environment-dock .local-servers__group-heading {
+  padding: var(--oct-space-1) 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+}
+.thread-environment-dock .local-servers__row {
+  gap: 3px;
+  padding: var(--oct-space-2) 0;
+}
+.thread-environment-dock .local-servers__row + .local-servers__row {
+  border-top: 1px solid var(--oct-hairline);
+}
+.thread-environment-dock .local-servers__name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+.thread-environment-dock .local-servers__url {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+.thread-environment-dock .local-servers__meta,
+.thread-environment-dock .local-servers__details {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+.thread-environment-dock .local-servers__actions {
+  margin-top: 2px;
+  margin-left: calc(var(--oct-space-2) * -1);
+}
+.thread-environment-dock .environment-pull-requests__refresh {
+  top: -32px;
 }
 
 .environment-subagents {
@@ -3863,10 +3901,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 @media (max-width: 720px) {
   .thread-environment-disclosure {
     max-height: min(70vh, calc(100% - var(--oct-space-2) * 2));
-  }
-
-  .thread-environment-summary__fact {
-    max-width: 7rem;
   }
 }
 
@@ -5308,7 +5342,10 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
   width: min(640px, 90vw);
-  height: min(60vh, 520px);
+  /* A cap, not a height: five models do not need a 520px box with four
+     hundred empty pixels under them. The pane scrolls once the list is
+     longer than the cap. */
+  max-height: min(60vh, 520px);
   padding: 0;
   overflow: hidden;
   background: var(--octant-surface);
@@ -5382,7 +5419,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .composer-model-picker__rail-item:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-muted);
   outline-offset: -2px;
 }
 
@@ -5538,7 +5575,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .composer-model-picker__model:focus-visible,
 .composer-model-picker__star:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-muted);
   outline-offset: -2px;
 }
 
@@ -6751,19 +6788,22 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin-left: 0;
 }
 
+/* A disclosure row in the open section (0072): label, count, chevron over
+   a hairline, not a bordered box. */
 .agent-eligible-models {
   display: grid;
   overflow: hidden;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-sm);
+  border: 0;
+  border-top: 1px solid var(--oct-hairline);
+  border-radius: 0;
 }
 
 .agent-eligible-models__trigger {
   display: flex;
-  min-height: 38px;
+  min-height: 40px;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
+  padding: 0 2px;
   color: var(--octant-text-secondary);
   background: transparent;
   border: 0;
@@ -6777,7 +6817,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .agent-eligible-models__trigger:hover,
 .agent-eligible-models__trigger:focus-visible {
   color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  background: transparent;
 }
 
 .agent-eligible-models__count {
@@ -6798,8 +6838,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .agent-eligible-models__body {
   display: grid;
   gap: 8px;
-  padding: 0 10px 10px;
-  border-top: 1px solid var(--octant-border);
+  padding: 0 2px 10px;
+  border-top: 0;
 }
 
 .agent-eligible-models__list {
@@ -6812,12 +6852,12 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .agent-eligible-models__item {
   display: flex;
+  min-height: 32px;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: 0.4rem;
-  border: 1px solid var(--octant-border, rgba(255, 255, 255, 0.12));
-  background: var(--octant-surface-raised, rgba(255, 255, 255, 0.03));
+  padding: 0 2px;
+  border-top: 1px solid var(--oct-hairline);
+  font-size: var(--oct-text-sm);
 }
 
 .agent-eligible-models__option {

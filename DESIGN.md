@@ -87,7 +87,9 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 ### Colour
 
 Neutral graphite, a monochrome accent, a blue keyboard focus ring, four statuses. Text is three greys (primary,
-secondary, muted) and never a fourth. Hairlines separate; fills select. See
+secondary, muted) and never a fourth. Hairlines separate; fills select. The
+focus ring is painted once, by the global `:focus-visible` rule; a field
+recipe does not add a second border or halo of its own. See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
@@ -119,12 +121,15 @@ navigation rail. Rows in Settings are `SettingRow`; rows everywhere else are
 
 ### Welcome and composer
 
-Chat, Work, and Code open on the same screen: the hero question, a rear
-context tray, and the raised composer in front. The tray holds where the
-thread runs (Project, base branch, checkout, Environment, repository); the
-composer bar holds how it runs (attach and image on the left; model and
-access on the right, next to send). Nothing about delivery is asked up
-front; it is derived from the tray and shown on the thread once it exists.
+Chat, Work, and Code open on the same screen: the hero question and one
+raised composer. The composer is prompt first, four lines tall before it
+grows; its toolbar row holds how the thread runs (attach and image on the
+left; model and access on the right, next to send); its lower band holds
+where it runs (Project, base branch, checkout, Environment, repository).
+The band is part of the card, ruled off by a hairline, and it wraps rather
+than grows: a control that needs a list ("Create from…") floats over the
+page. Nothing about delivery is asked up front; it is derived from the band
+and shown on the thread once it exists.
 
 ## Source of truth and CSS layers
 
@@ -171,36 +176,36 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 
 | Role                   | CSS variable                                        | Dark      | Light       | Use                                               |
 | ---------------------- | --------------------------------------------------- | --------- | ----------- | ------------------------------------------------- |
-| Application background | `--octant-app-background`                           | `#151515` | `#f6f6f5`   | Page ground: welcome, lists, Settings             |
-| Chrome                 | `--octant-chrome`                                   | `#151515` | `#f6f6f5`   | Title bars and shell chrome                       |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#ebebea`   | Navigation surface, one step off the page         |
+| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings             |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                       |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground            |
 | Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor               |
 | Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                          |
 | Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles         |
 | Tray                   | `--octant-tray` (derived)                           | workspace | control mix | The rear context card behind the composer         |
-| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#ebebea`   | Quiet control fill, secondary buttons             |
-| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e1e1df`   | Hover and highlighted rows                        |
-| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#d6d6d4`   | Pressed state                                     |
-| Border                 | `--octant-border`                                   | `#303030` | `#d2d2d0`   | Hairline separation                               |
-| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#a9a9a7`   | Input and outline-button edges                    |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons             |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                        |
+| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                     |
+| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                               |
+| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                    |
 | Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                           |
 | Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                             |
 | Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                   |
 | Muted text             | `--octant-text-muted`                               | `#8a8a8a` | `#6b6b6b`   | Metadata and hints; not for essential text        |
 | Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                              |
 | Focus ring             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Keyboard focus                                    |
-| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#e1e1df`   | Selected rows and active controls                 |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                 |
 | Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                 |
 | Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                               |
 | Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast         |
 | Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
-darker, the reading surface a step lighter, and cards lift one more step. In
-light the reading surface is white on a quiet grey well and the sidebar is
-the greyest thing on screen. Every hairline registers on the surface it
-separates (about 1.5:1 in light, 1.3:1 in dark); inputs and outline buttons
-use the strong border so an edge is never guessed. The renderer fallback in
+darker, the reading surface a step lighter, and cards lift one more step. In light the sidebar and the page share one near-white ground and the
+reading surface is white; a hairline, not a grey fill, separates the sidebar
+from the workspace. Every hairline registers on the surface it separates
+(about 1.3:1 in both modes); inputs and outline buttons use the strong border
+so an edge is never guessed. The renderer fallback in
 `apps/web/src/styles.css` mirrors these values exactly.
 
 Status roles are paired to the surface where they render. Use the text role
@@ -298,6 +303,9 @@ in the native title rail. Settings uses a separate compact 248px navigation
 rail. The right dock defaults to 320px when open. A fresh window starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is 34px in the native host and the status bar is 26px.
+While a route or tool is still loading, its state is one quiet line (spinner,
+then the title) on the page ground, never a raised card: a card with a title
+and a sentence reads as a finished empty state.
 
 Navigation panes stay compact hairline rails. Routine form layouts stay open
 and unshadowed; setup objects, discrete settings objects, welcome composers,
@@ -308,9 +316,9 @@ composer. Starter actions appear only when recent work does not already give
 the person a next step. In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
 as a sunken field. Code welcome keeps one stable question while Project,
-base branch, and Environment sit on a second raised card above the composer.
-The tray is slightly narrower and slides under the prompt by one corner radius,
-so the front card overlaps only its empty lower padding. Environment is the
+base branch, and Environment sit on the composer's lower band
+(`.composer-tray`, rendered through the composer's `footer` slot), under the
+prompt and its toolbar, on the tray fill with a hairline above. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
 creating a second environment model. Repository and workspace remain on that rear card after the three primary
@@ -355,7 +363,7 @@ threads; provider marks are fixed-size inline and can be hidden without changing
 row height or indentation. Project View and Project Overview are real features,
 not decorative shortcuts.
 
-Primary sidebar destinations are New thread, Thread board, and Pull requests
+Primary sidebar destinations are New thread, Board, and Pull requests
 when valid for the active mode. The bottom-left identity menu owns Settings,
 Navigator, Agents, Providers, Usage, Plugins, Automations, Artifacts, and Zen
 entry points. Search is a compact in-place filter for the current mode's visible
@@ -402,9 +410,10 @@ Review, Files, Browser, Terminal, Canvas, Plan (only for a real
 plan artifact), Delivery (only for a configured target), Agents (when children
 exist or explicitly invoked), Simulator, and Side chat. The dock launcher is
 not a second thread switcher. With no open tab, it shows only capability-valid
-tool rows and a visible Add tool action. The bottom panel uses the same compact
-tool-tab and Add tool model for Review, Terminal, Browser, Files, and Side chat
-where supported. Selecting a tool removes that presentation from the other
+tool rows; the head's Add tool action appears once a tab is open, since with
+none open the body is already the list of tools to add. The bottom panel uses
+the same compact tool-tab and Add tool model for Review, Terminal, Browser,
+Files, and Side chat where supported. Selecting a tool removes that presentation from the other
 region; Terminal immediately attaches or starts and preserves one server
 session when moved.
 
@@ -418,22 +427,26 @@ A welcome, Project, or other pane with neither a bound thread nor a valid
 launchable tool keeps the dock closed and omits its toggle. Restored presentation
 for another subject never makes unavailable chrome visible.
 
-Environment is a transient active-thread disclosure, at most 320px wide, with
-the 20px overlay radius. Its
-44px header, label/value repository rows, direct View changes action, and
-collapsed 44px detail rows form one compact operating list on an opaque floating
-surface. It summarizes Project, branch, clean/dirty state, working folder,
+Environment is a right-dock tool, opened from the dock's tab strip or Add tool
+and nowhere else; the title band carries no second Environment button. Its
+header names the thread's identity and facts (branch, clean or dirty, working
+folder, running servers), and its body is a definition list of git facts,
+row-styled actions, and collapsible groups on the dock's own ground. It summarizes Project, branch, clean/dirty state, working folder,
 changes, local servers, pull-request
 identity, sources, and compact active/completed subagent rows with lifecycle,
 model, and retained final response when authoritative. It is not a permanent
 stack of cards and does not duplicate the Agents dock. Missing checkout context
-is neutral explanatory text rather than a warning callout. When the right dock
-is open, the disclosure shifts over the central pane and never covers the dock.
+is neutral explanatory text rather than a warning callout.
 
-The thread board is an operational reading surface with four fixed,
-server-authoritative statuses: Ready, In Progress, Waiting, and Done. Columns
-and compact cards use the raised card recipe; empty columns stay dashed.
-Waiting does not become a warning wall. Labels and facts use the selected
+The Board is an operational reading surface with four fixed,
+server-authoritative statuses: Ready, In Progress, Waiting, and Done. All
+four lanes show by default, each named once by mark, label, and count with no
+rule under the head; a Board/List toggle leads the toolbar. A card is a flat
+hairline-edged object on the card fill: the Project as an eyebrow, the title,
+and one line of what the thread waits on or is doing, active runs and failing
+checks, who runs it, and when it last moved. Checkout, branch, plan, and
+review facts live on the list view and the thread. Waiting does not become a
+warning wall. Labels and facts use the selected
 interface typography. Thread listing, pull-request snapshot, and per-thread
 runtime reads overlap where independent.
 

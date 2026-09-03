@@ -5,7 +5,7 @@ import { deriveWorkEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useEffect, useState, type ReactNode } from "react";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
-import { ChangeWorkingFolder } from "./WorkingDirectoryControl";
+import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 
 type WorkThreadWorkspaceTab = Extract<WorkspaceTab, { readonly kind: "work-thread" }>;
@@ -21,7 +21,6 @@ export interface WorkThreadEnvironmentProps {
   readonly agentRunClient?: AgentRunClient;
   readonly onOpenAgents?: () => void;
   readonly environmentOpen?: boolean;
-  readonly onOpenEnvironment?: (opener: HTMLElement) => void;
 }
 
 /**
@@ -31,8 +30,7 @@ export interface WorkThreadEnvironmentProps {
  * unavailable instead of guessing a folder from renderer state.
  */
 export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
-  const [localEnvironmentOpen, setLocalEnvironmentOpen] = useState(false);
-  const environmentOpen = props.environmentOpen ?? localEnvironmentOpen;
+  const environmentOpen = props.environmentOpen === true;
   const [project, setProject] = useState<WorkProject | undefined>(undefined);
   const [thread, setThread] = useState<WorkThread | undefined>(undefined);
 
@@ -81,8 +79,6 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
     <div className="code-thread-environment">
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
-        inlineFallback={props.environmentOpen === undefined}
-        onOpen={props.onOpenEnvironment ?? (() => setLocalEnvironmentOpen(true))}
         open={environmentOpen}
         summary={{
           identity: projection.identity,
@@ -99,7 +95,10 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
           />
         )}
         {thread === undefined ? null : (
-          <EnvironmentGroup summary={String(thread.workingDirectory ?? ".")} title="Working folder">
+          <EnvironmentGroup
+            summary={workingFolderLabel(thread.workingDirectory ?? ".")}
+            title="Working folder"
+          >
             <ChangeWorkingFolder
               value={thread.workingDirectory ?? "."}
               onApply={async (workingDirectory) => {

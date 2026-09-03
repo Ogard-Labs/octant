@@ -43,6 +43,16 @@ export interface FirstRunOnboardingProps {
   readonly onOpenProviderSettings: () => void;
   readonly onRescan: () => void;
   readonly scanning: boolean;
+  /**
+   * Turn a discovered provider on or off without leaving the wizard.
+   *
+   * The promise is the answer landing on the host: first run waits for it
+   * before recording its outcome, the same as every other answer here.
+   */
+  readonly onSetProviderEnabled?: (
+    instanceId: ProviderInstanceId,
+    enabled: boolean,
+  ) => Promise<boolean>;
 
   /** The profile the host currently holds. The step edits a draft of it. */
   readonly profile: UserProfile;
@@ -197,6 +207,15 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
    * issues its write in the same gesture as the click on Skip, so a write that
    * disabled the buttons would swallow the very click it needs to wait for.
    */
+  // Enabling a provider is an answer like any other, so first run waits for
+  // it before recording its outcome; a discarded promise let the wizard close
+  // against a host that had not accepted the choice yet.
+  function setProviderEnabled(instanceId: ProviderInstanceId, enabled: boolean): void {
+    const write = props.onSetProviderEnabled;
+    if (write === undefined) return;
+    track(write(instanceId, enabled));
+  }
+
   function track(write: Promise<boolean>): void {
     unsettledWrites.current.push(write.catch(() => false));
   }
@@ -434,6 +453,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               readiness={props.readiness}
               ref={providerAction}
               scanning={props.scanning}
+              {...(props.onSetProviderEnabled === undefined
+                ? {}
+                : { onSetProviderEnabled: setProviderEnabled })}
               {...(props.discoveryNotice === undefined
                 ? {}
                 : { discoveryNotice: props.discoveryNotice })}

@@ -49,7 +49,9 @@ describe("the right sidebar surface", () => {
     expect(screen.getByRole("button", { name: "Files" })).toHaveTextContent(
       "Browse the active checkout",
     );
-    expect(screen.getByRole("button", { name: "Add tool" })).toBeVisible();
+    // The body already lists every tool; a second entry point beside an
+    // empty strip would be a control with nothing to add.
+    expect(screen.queryByRole("button", { name: "Add tool" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Terminal" }));
     expect(onOpenTab).toHaveBeenCalledWith("terminal");
     expect(screen.queryByRole("tab", { name: "Thread tools" })).not.toBeInTheDocument();

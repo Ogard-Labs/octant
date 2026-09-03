@@ -4803,7 +4803,6 @@ function LaunchedShell(
                       controller.openSurface(surface, paneId, browserContextId)
                     }
                     environmentDockOpen={dockOpen && dockSurface === "environment"}
-                    onOpenEnvironment={(opener) => openDockTab("environment", opener)}
                     onDismissCrossContextOffer={controller.dismissCrossContextOffer}
                     onOpenCrossContextInNewWindow={() =>
                       void controller.openCrossContextInNewWindow()
@@ -5178,6 +5177,8 @@ function LaunchedShell(
               : { navigatorDefault: controller.settings.navigatorAssistant.defaultProvider }),
             onOpenProviderSettings: () => void controller.openSettings({ section: "providers" }),
             onRescan: () => void discoveryController.scan(),
+            onSetProviderEnabled: (instanceId, enabled) =>
+              providerController.setEnabled(instanceId, enabled),
             scanning: discoveryController.scanning,
           }}
           announcement={controller.announcement}

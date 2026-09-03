@@ -410,20 +410,23 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 /* --- Settings primitives: open routine groups, raised discrete objects --- */
 
+/* Panels are open sections (0072): a label, a rule, rows. The raised card
+   this used to draw was the last one left in Settings. */
 .settings-panel {
-  overflow: hidden;
+  overflow: visible;
   display: grid;
   gap: 0;
-  background: var(--octant-settings-card);
+  background: transparent;
   border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .settings-panel__header {
   display: grid;
   gap: 4px;
-  padding: 20px 20px 0;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 .settings-panel__header h2,
@@ -447,23 +450,21 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 .settings-panel__body {
-  overflow: hidden;
+  overflow: visible;
   background: transparent;
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
 
-.settings-panel--danger {
-  box-shadow:
-    var(--octant-shadow-sm),
-    inset 0 0 0 1px color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
+.settings-panel--danger .settings-panel__header h2 {
+  color: var(--octant-danger-text);
 }
 
 .settings-panel__stack {
   display: grid;
   gap: var(--oct-space-4);
-  padding: 16px 20px 20px;
+  padding: 12px 0 20px;
 }
 
 .settings-fact-list {
@@ -477,11 +478,11 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
   align-items: center;
   gap: var(--oct-space-4);
-  padding: 16px 20px;
+  padding: 12px 0;
 }
 
 .settings-fact-list__row + .settings-fact-list__row {
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .settings-fact-list dt,
@@ -747,6 +748,13 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-card-section--open > .setgroup > .setrow {
   padding-inline: 0;
+}
+
+/* The row's trailing control keeps a hair of room before the rule ends: a
+   switch or icon button flush with the last pixel drew its shadow and focus
+   ring past the hairline, so the controls looked cut off at the edge. */
+.settings-card-section--open > .provlist > .provrow {
+  padding-inline: 0 4px;
 }
 
 .settings-card-section--open > .setgroup > .setrow:first-child {

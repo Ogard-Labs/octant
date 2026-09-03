@@ -34,17 +34,20 @@ describe("CodeComposerAdapter", () => {
     );
   });
 
-  it("puts Project, branch, and Environment on an upper tray before the prompt", () => {
+  it("puts Project, branch, and Environment on the composer's lower band after the prompt", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
+    const row = container.querySelector(".composer-row");
     expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
-    if (frame === null || dock === null) throw new Error("Composer stack is incomplete.");
-    expect(dock.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(frame?.querySelector(".host-selector")).toBeNull();
-    expect(frame?.textContent).not.toContain("My Repo");
+    if (frame === null || dock === null || row === null) {
+      throw new Error("Composer stack is incomplete.");
+    }
+    expect(frame.contains(dock)).toBe(true);
+    expect(row.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(row.querySelector(".host-selector")).toBeNull();
     expect(dock?.textContent).toContain("My Repo");
     expect(dock?.querySelector(".host-selector")).not.toBeNull();
     expect(dock?.querySelector(".host-selector--environment")).not.toBeNull();
@@ -119,7 +122,7 @@ describe("CodeComposerAdapter", () => {
     const dock = container.querySelector(".composer-tray");
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
-    expect(frame?.contains(dock)).toBe(false);
+    expect(frame?.contains(dock)).toBe(true);
     expect(dock?.textContent).toContain("GitHub control slot");
     expect(dock?.textContent).toContain("development");
     expect(container.querySelector('[class*="context-strip"]')).toBeNull();

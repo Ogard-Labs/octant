@@ -2449,8 +2449,10 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await user.click(await screen.findByRole("button", { name: "Open Environment" }));
+    expect(screen.queryByRole("button", { name: "Open Environment" })).not.toBeInTheDocument();
+    await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await user.click(within(dock).getByRole("button", { name: "Environment" }));
     expect(within(dock).getByRole("tab", { name: "Environment" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -3021,7 +3023,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "New thread" })).toBeVisible();
     await user.click(within(sidebar).getByRole("button", { name: "Account menu, Set your name" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Thread board" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
     const addFolder = screen.getByRole("button", { name: "Add folder" });
     expect(addFolder).toHaveClass("project-section__add");
@@ -3832,7 +3834,13 @@ describe("App", () => {
     const thread = await screen.findByRole("region", {
       name: "Workspace pane: Controller foundation",
     });
-    await user.click(await screen.findByRole("button", { name: "Open Environment" }));
+    await showRightUtilityDock(user);
+    await user.click(
+      within(await screen.findByRole("complementary", { name: "Right Utility Dock" })).getByRole(
+        "button",
+        { name: "Environment" },
+      ),
+    );
     await user.click(await screen.findByRole("button", { name: "View changes" }));
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });

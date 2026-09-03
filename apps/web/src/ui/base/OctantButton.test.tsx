@@ -59,7 +59,7 @@ describe("OctantButton", () => {
     expect(screen.getByRole("button", { name: "Close dock" }).className).not.toContain("btn-send");
   });
 
-  it("layers the element reset so recipes can paint and leaves the keyboard outline unlayered", () => {
+  it("layers the element reset so recipes can paint and leaves keyboard focus to the shared ring", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
     const { body: baseLayer, remainder } = extractNamedLayer(styles, "base");
 
@@ -69,8 +69,10 @@ describe("OctantButton", () => {
     expect(baseLayer).not.toContain("button:focus-visible");
 
     expect(remainder).not.toMatch(/(?:^|\n)button\s*\{/);
-    expect(remainder).toMatch(/button:focus-visible\s*\{/);
-    expect(remainder).toContain("outline: 2px solid var(--octant-focus-ring);");
+    // The neutral :focus-visible ring in octant.css is the only keyboard
+    // focus treatment; a second accent outline here doubled it on buttons.
+    expect(remainder).not.toMatch(/(?:^|\n)button:focus-visible\s*\{/);
+    expect(styles).not.toContain("outline: 2px solid var(--octant-focus-ring);");
     expect(styles).not.toContain(".project-button--primary");
   });
 });

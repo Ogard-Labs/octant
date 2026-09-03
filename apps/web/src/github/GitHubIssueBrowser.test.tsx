@@ -122,6 +122,60 @@ async function selectFirstRepository() {
 }
 
 describe("GitHubIssueBrowser", () => {
+  it("opens on every recent repository, attributes each row, and sorts across them", async () => {
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") {
+        return {
+          kind: "recent-repositories",
+          rows: [repositoryRow(1), repositoryRow(2)],
+        } satisfies GithubCatalogueReadResponse;
+      }
+      if (request.kind === "repositories") return repositories;
+      if (request.kind === "issues" && request.name === "repo-2") {
+        return {
+          kind: "issues",
+          page: {
+            rows: [
+              issueRow(40, { title: "Newest in repo-2", updatedAt: "2026-09-01T09:00:00.000Z" }),
+            ],
+            sort: "updated-desc",
+            hasNextPage: false,
+            freshness: { status: "fresh" },
+          },
+        } satisfies GithubCatalogueReadResponse;
+      }
+      if (request.kind === "issues") return issuesPageOne;
+      if (request.kind === "issue") {
+        return {
+          kind: "issue",
+          issue: issueDetail(request.number, { title: `Detail ${request.number}` }),
+          freshness: { status: "fresh" },
+        } satisfies GithubCatalogueReadResponse;
+      }
+      throw new Error(`unexpected ${request.kind}`);
+    });
+    render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
+
+    const list = await screen.findByRole("list", { name: "GitHub issues" });
+    const rows = within(list).getAllByRole("button");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("octant/repo-2#40 Newest in repo-2"),
+      expect.stringContaining("octant/repo-1#1 Issue 1"),
+      expect.stringContaining("octant/repo-1#2 Login timeout"),
+    ]);
+    expect(screen.getByRole("group", { name: "Issue scope" })).toBeVisible();
+    expect(screen.getByText(/Showing the newest 20 from octant\/repo-1/)).toBeVisible();
+
+    fireEvent.click(rows[0]!);
+    expect(await screen.findByRole("heading", { name: /Detail 40/ })).toBeVisible();
+    expect(readCatalogue).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "issue", name: "repo-2", number: 40 }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "One repository" }));
+    expect(await screen.findByRole("option", { name: /octant\/repo-1/ })).toBeVisible();
+  });
+
   it("lists issues for the selected repository and opens a plain-text detail pane", async () => {
     const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
       if (request.kind === "recent-repositories") return recents;
@@ -289,12 +343,12 @@ describe("GitHubIssueBrowser", () => {
     fireEvent.click(await screen.findByRole("button", { name: /#1 Issue 1/ }));
     expect(await screen.findByRole("article", { name: "Issue #1" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Change repository" }));
+    await user.click(screen.getByRole("button", { name: "Repository: octant/repo-1" }));
     fireEvent.click(await screen.findByRole("option", { name: /octant\/repo-2/ }));
 
     expect(await screen.findByRole("button", { name: /#9 Other repo/ })).toBeInTheDocument();
     expect(screen.queryByRole("article", { name: "Issue #1" })).not.toBeInTheDocument();
-    expect(screen.getByText("Select an issue to read its details.")).toBeInTheDocument();
+    expect(screen.getByText("Select an issue to read it.")).toBeInTheDocument();
     expect(
       readCatalogue.mock.calls.some(
         ([request]) =>
@@ -379,7 +433,7 @@ describe("GitHubIssueBrowser", () => {
     await waitFor(() =>
       expect(screen.queryByRole("article", { name: "Issue #1" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByText("Select an issue to read its details.")).toBeInTheDocument();
+    expect(screen.getByText("Select an issue to read it.")).toBeInTheDocument();
   });
 
   it("renders unavailable reason, remediation, and retry delay", async () => {

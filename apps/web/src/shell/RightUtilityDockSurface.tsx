@@ -81,7 +81,12 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               tabs={props.tabs}
             />
           )}
-          <DockUtilityLauncher onOpen={props.onOpenTab} surfaces={remaining} />
+          {/* With no tool open the body already lists every tool; a second
+              entry point beside an empty strip is a control with nothing to
+              add. */}
+          {props.tabs.length === 0 ? null : (
+            <DockUtilityLauncher onOpen={props.onOpenTab} surfaces={remaining} />
+          )}
         </div>
         <div className="right-utility-dock__actions">
           {props.onClose === undefined ? null : (

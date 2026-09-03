@@ -245,10 +245,10 @@
 }
 
 /* ── Welcome composer ──────────────────────────────────────────────────
-   Chat, Work, and Code start from the same geometry: one hero question, a
-   rear context tray, and the raised `.composer` in front. The tray is the
-   Code tray promoted to a shared recipe; the per-mode adapters only decide
-   which controls sit on it. */
+   Chat, Work, and Code start from the same geometry: one hero question and
+   the raised `.composer`, whose lower band (`.composer-tray`) carries where
+   the thread runs. The per-mode adapters only decide which controls sit on
+   that band. */
 
 .welcome {
   display: flex;
@@ -291,53 +291,46 @@
 }
 
 .composer-stack > .composer > .composer-input {
-  min-height: 64px;
+  /* Four lines before the box has to grow: a prompt is a paragraph, not a
+     search query, and 64px read as one. */
+  min-height: 96px;
 }
 
-.composer-tray {
-  position: relative;
-  z-index: 0;
+/* The context strip is the composer's own lower band, attached under the
+   prompt and its toolbar: where the thread runs sits on the object that
+   starts it, as one card. The earlier rear tray peeked out above the
+   composer and had to expand in place when a control opened, which let a
+   repository list push the prompt down the page. */
+.composer > .composer-tray {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px 12px;
-  width: calc(100% - 40px);
-  margin: 0 auto -18px;
-  padding: 8px 16px 22px;
+  gap: 6px 12px;
+  margin: 0;
+  padding: 8px 12px;
   color: var(--oct-meta);
-  /* The rear card is one quiet step below the composer in front of it, so
-     the stack reads as two layers instead of two white cards. */
   background: var(--octant-tray);
-  border-radius: var(--oct-radius-lg);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-/* Anchored menus open from inside the tray. Raise it, and stop clipping its
-   cells, only while one is open so the resting depth order never changes. */
-.composer-tray:has([aria-expanded="true"]) {
-  z-index: 2;
+  border-top: 1px solid var(--oct-border);
+  border-radius: 0 0 var(--oct-radius-lg) var(--oct-radius-lg);
 }
 
 .composer-tray__leading,
 .composer-tray__trailing {
   display: inline-flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
 }
 
 .composer-tray__leading {
   flex: 1 1 auto;
-  overflow: hidden;
-}
-
-.composer-tray__leading:has([aria-expanded="true"]) {
-  overflow: visible;
 }
 
 .composer-tray__trailing {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  justify-content: flex-end;
 }
 
 .composer-tray .host-selector__health {
@@ -379,19 +372,7 @@
 }
 
 @media (max-width: 920px) {
-  .composer-tray {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: end;
-  }
-
-  .composer-tray__leading {
-    flex-wrap: wrap;
-    overflow: visible;
-  }
-
   .composer-tray__trailing {
-    flex-wrap: wrap;
     justify-content: flex-start;
   }
 }

@@ -422,6 +422,34 @@ describe("FirstRunOnboarding", () => {
     expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
   });
 
+  it("waits for a provider switch to land before recording completion", async () => {
+    const user = userEvent.setup();
+    let acceptEnable!: (accepted: boolean) => void;
+    const onSetProviderEnabled = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          acceptEnable = resolve;
+        }),
+    );
+    const props = mount({ ...readyHandoff(), onSetProviderEnabled });
+
+    await user.click(screen.getByRole("button", { name: /Providers/ }));
+    // The discovered provider is on, so this switch turns it off; the wizard
+    // waits on the write either way, and asserting the direction keeps the
+    // fixture from drifting out from under the test.
+    await user.click(screen.getByRole("switch", { name: "Enable Ollama" }));
+    expect(onSetProviderEnabled).toHaveBeenCalledWith(instanceId, false);
+
+    await openHandoff(user);
+    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
+
+    // Providers are a separate controller, so this write is still running.
+    expect(props.controller.complete).not.toHaveBeenCalled();
+
+    acceptEnable(true);
+    await waitFor(() => expect(props.controller.complete).toHaveBeenCalledOnce());
+  });
+
   it("keeps first run pending when a model choice is rejected", async () => {
     const user = userEvent.setup();
     const props = mount({

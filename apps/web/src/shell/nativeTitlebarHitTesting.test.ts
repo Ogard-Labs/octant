@@ -87,9 +87,7 @@ describe("native titlebar hit-test boundary", () => {
     );
     expect(cssRule(shellStyles, ".window-chrome__leading")).toContain("pointer-events: auto;");
     expect(cssRule(shellStyles, ".window-chrome__trailing")).toContain("pointer-events: auto;");
-    expect(cssRule(shellStyles, ".window-chrome__environment-action")).toContain(
-      "pointer-events: auto;",
-    );
+    expect(shellStyles).not.toContain("window-chrome__environment-action");
     expect(cssRule(shellStyles, ".window-chrome__open-in-action")).toContain(
       "pointer-events: auto;",
     );

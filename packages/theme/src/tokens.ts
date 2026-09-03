@@ -25,7 +25,11 @@ export interface ThemeTokenRoleDefinition {
 export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
   // The default palette is a neutral graphite workspace: a near-black page
   // with a slightly lighter reading surface in dark, a white reading surface
-  // on a quiet grey well in light, and one scarce accent. Every step of the
+  // on a near-white ground in light, and one scarce accent. In light the
+  // sidebar shares the page's ground and a hairline separates it from the
+  // workspace; a grey sidebar beside a white pane read as a heavy panel, and
+  // the native host paints the sidebar at partial alpha over window
+  // vibrancy, so the token has to sit a hair below white to render white. Every step of the
   // ladder is a deliberate, visible move: the earlier defaults sat two or
   // three hex points apart and the sidebar, page, cards, and hairlines read
   // as one flat plate in both modes. The renderer fallback in
@@ -38,7 +42,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     id: "app-background",
     displayName: "Application background",
     category: "foundation",
-    defaultLight: "#f6f6f5",
+    defaultLight: "#fafaf9",
     defaultDark: "#151515",
   },
   {
@@ -47,7 +51,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "foundation",
     contrastTarget: "app-background",
     contrastLevel: "ui",
-    defaultLight: "#f6f6f5",
+    defaultLight: "#fafaf9",
     defaultDark: "#151515",
   },
   {
@@ -56,7 +60,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "foundation",
     contrastTarget: "app-background",
     contrastLevel: "ui",
-    defaultLight: "#ebebea",
+    defaultLight: "#fafaf9",
     defaultDark: "#101010",
   },
   {
@@ -88,7 +92,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#ebebea",
+    defaultLight: "#f0f0ef",
     defaultDark: "#2b2b2b",
   },
   {
@@ -97,7 +101,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e1e1df",
+    defaultLight: "#e8e8e6",
     defaultDark: "#333333",
   },
   {
@@ -106,12 +110,12 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#d6d6d4",
+    defaultLight: "#dfdfdd",
     defaultDark: "#3b3b3b",
   },
   {
     // Hairlines have to register on the surface they separate: the light
-    // value measures about 1.5:1 on the white workspace and the dark value
+    // value measures about 1.3:1 on the white workspace and the dark value
     // about 1.3:1 on the reading surface, which is the point where a
     // separator is visible without reading as a rule.
     id: "border",
@@ -119,7 +123,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#d2d2d0",
+    defaultLight: "#e0e0de",
     defaultDark: "#303030",
   },
   {
@@ -128,7 +132,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#a9a9a7",
+    defaultLight: "#bdbdbb",
     defaultDark: "#4d4d4d",
   },
   {
@@ -194,7 +198,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "focus",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e1e1df",
+    defaultLight: "#ebebea",
     defaultDark: "#2c2c2c",
   },
   {

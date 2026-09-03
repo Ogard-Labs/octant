@@ -73,13 +73,14 @@ function threadClient(result: "ready" | "failed" = "ready"): WorkThreadClient {
 }
 
 async function openEnvironment(): Promise<void> {
-  fireEvent.click(await screen.findByRole("button", { name: "Open Environment" }));
+  await screen.findByRole("region", { name: "Environment details" });
 }
 
 describe("WorkThreadEnvironment", () => {
   it("renders the Work workspace inside a thread-scoped environment", async () => {
     render(
       <WorkThreadEnvironment
+        environmentOpen
         projects={[workProject()]}
         tab={workTab()}
         threadClient={threadClient()}
@@ -89,17 +90,18 @@ describe("WorkThreadEnvironment", () => {
     );
 
     expect(screen.getByTestId("work-workspace-content")).toBeVisible();
-    expect(await screen.findByRole("button", { name: "Open Environment" })).toHaveAttribute(
+    expect(await screen.findByRole("region", { name: "Environment details" })).toHaveAttribute(
       "data-environment-status",
       "available",
     );
-    expect(screen.getByText(/Knowledge Base · work-root/)).toHaveClass("sr-only");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText(/Knowledge Base · work-root/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Open Environment" })).not.toBeInTheDocument();
   });
 
   it("fails closed when authoritative thread state cannot be loaded", async () => {
     render(
       <WorkThreadEnvironment
+        environmentOpen
         projects={[workProject()]}
         tab={workTab()}
         threadClient={threadClient("failed")}
@@ -108,18 +110,23 @@ describe("WorkThreadEnvironment", () => {
       </WorkThreadEnvironment>,
     );
 
-    expect(await screen.findByRole("button", { name: "Open Environment" })).toHaveAttribute(
+    expect(await screen.findByRole("region", { name: "Environment details" })).toHaveAttribute(
       "data-environment-status",
       "unavailable",
     );
-    expect(screen.getByText("Work · No folder Project")).toHaveClass("sr-only");
+    expect(screen.getByText("Work · No folder Project")).toBeVisible();
   });
 
   it("submits a bounded relative working directory through the focused Change working folder flow", async () => {
     const client = threadClient();
     const user = userEvent.setup();
     render(
-      <WorkThreadEnvironment projects={[workProject()]} tab={workTab()} threadClient={client}>
+      <WorkThreadEnvironment
+        environmentOpen
+        projects={[workProject()]}
+        tab={workTab()}
+        threadClient={client}
+      >
         <div />
       </WorkThreadEnvironment>,
     );
@@ -153,7 +160,12 @@ describe("WorkThreadEnvironment", () => {
       message: "Work working directory is unavailable.",
     });
     render(
-      <WorkThreadEnvironment projects={[workProject()]} tab={workTab()} threadClient={client}>
+      <WorkThreadEnvironment
+        environmentOpen
+        projects={[workProject()]}
+        tab={workTab()}
+        threadClient={client}
+      >
         <div />
       </WorkThreadEnvironment>,
     );

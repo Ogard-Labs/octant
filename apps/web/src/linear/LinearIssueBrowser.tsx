@@ -244,7 +244,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
         <ShellState
           eyebrow="Linear"
           message="Reading issues from the connected workspace."
-          state="neutral"
+          state="loading"
           title="Loading issues"
         />
       ) : null}
@@ -362,7 +362,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
               <ShellState
                 eyebrow="Linear"
                 message="Reading the selected issue."
-                state="neutral"
+                state="loading"
                 title="Loading issue"
               />
             ) : null}
