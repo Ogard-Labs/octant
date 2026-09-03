@@ -2215,3 +2215,101 @@ form > .work-composer-adapter__attachments {
     display: none;
   }
 }
+
+/* ── Code home ─────────────────────────────────────────────────────────
+   Under the Code composer: ready-made prompts as quiet chips, then what
+   GitHub is waiting on and the threads to continue, as rows over
+   hairlines. Nothing here competes with the prompt above it. */
+.code-home__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.code-home__suggestions button {
+  color: var(--oct-muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.code-home__suggestions button:hover:not(:disabled) {
+  color: var(--oct-fg);
+  background: transparent;
+}
+
+.code-home {
+  display: grid;
+  gap: var(--oct-space-5);
+  margin-top: var(--oct-space-3);
+}
+
+.code-home .draft-thread__recent {
+  margin-top: 0;
+}
+
+.code-home__section {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.code-home__section-title,
+.code-home__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-home__note {
+  padding: 6px 10px;
+}
+
+.code-home__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-home__list > li + li {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.code-home__row {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  align-items: flex-start;
+  gap: var(--oct-space-2);
+  padding: 8px 10px;
+  border-radius: var(--oct-radius-md);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+}
+
+.code-home__row-icon {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--oct-muted);
+}
+
+.code-home__row-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.code-home__row-title {
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-home__row-meta {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
