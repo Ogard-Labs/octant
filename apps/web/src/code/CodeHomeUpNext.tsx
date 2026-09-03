@@ -38,8 +38,9 @@ export function CodeHomeUpNext(props: CodeHomeUpNextProps) {
   useEffect(() => {
     let cancelled = false;
     setState({ kind: "loading" });
-    client.readCatalogue({ kind: "assigned-work" }).then(
-      (response) => {
+    const read = async () => {
+      try {
+        const response = await client.readCatalogue({ kind: "assigned-work" });
         if (cancelled) return;
         if (response.kind === "assigned-work") {
           setState({
@@ -53,15 +54,15 @@ export function CodeHomeUpNext(props: CodeHomeUpNextProps) {
         } else {
           setState({ kind: "failed", message: "GitHub returned an unexpected response." });
         }
-      },
-      (error: unknown) => {
+      } catch (error) {
         if (cancelled) return;
         setState({
           kind: "failed",
           message: error instanceof Error ? error.message : "GitHub could not be reached.",
         });
-      },
-    );
+      }
+    };
+    void read();
     return () => {
       cancelled = true;
     };
