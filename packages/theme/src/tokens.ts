@@ -27,7 +27,9 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
   // with a slightly lighter reading surface in dark, a white reading surface
   // on a near-white ground in light, and one scarce accent. In light the
   // sidebar shares the page's ground and a hairline separates it from the
-  // workspace; a grey sidebar beside a white pane read as a heavy panel. Every step of the
+  // workspace; a grey sidebar beside a white pane read as a heavy panel, and
+  // the native host paints the sidebar at partial alpha over window
+  // vibrancy, so the token has to sit a hair below white to render white. Every step of the
   // ladder is a deliberate, visible move: the earlier defaults sat two or
   // three hex points apart and the sidebar, page, cards, and hairlines read
   // as one flat plate in both modes. The renderer fallback in
@@ -40,7 +42,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     id: "app-background",
     displayName: "Application background",
     category: "foundation",
-    defaultLight: "#f7f7f6",
+    defaultLight: "#fafaf9",
     defaultDark: "#151515",
   },
   {
@@ -49,7 +51,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "foundation",
     contrastTarget: "app-background",
     contrastLevel: "ui",
-    defaultLight: "#f7f7f6",
+    defaultLight: "#fafaf9",
     defaultDark: "#151515",
   },
   {
@@ -58,7 +60,7 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "foundation",
     contrastTarget: "app-background",
     contrastLevel: "ui",
-    defaultLight: "#f7f7f6",
+    defaultLight: "#fafaf9",
     defaultDark: "#101010",
   },
   {

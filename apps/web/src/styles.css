@@ -150,10 +150,10 @@
 }
 
 html[data-octant-theme-mode="light"] {
-  --octant-app-background: #f7f7f6;
-  --octant-chrome: #f7f7f6;
-  --octant-sidebar: #f7f7f6;
-  --octant-sidebar-opaque: #f7f7f6;
+  --octant-app-background: #fafaf9;
+  --octant-chrome: #fafaf9;
+  --octant-sidebar: #fafaf9;
+  --octant-sidebar-opaque: #fafaf9;
   --octant-workspace: #ffffff;
   --octant-surface: #ffffff;
   --octant-surface-canvas: #ffffff;

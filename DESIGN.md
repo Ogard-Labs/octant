@@ -176,9 +176,9 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 
 | Role                   | CSS variable                                        | Dark      | Light       | Use                                               |
 | ---------------------- | --------------------------------------------------- | --------- | ----------- | ------------------------------------------------- |
-| Application background | `--octant-app-background`                           | `#151515` | `#f7f7f6`   | Page ground: welcome, lists, Settings             |
-| Chrome                 | `--octant-chrome`                                   | `#151515` | `#f7f7f6`   | Title bars and shell chrome                       |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#f7f7f6`   | Navigation surface, on the page ground            |
+| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings             |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                       |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground            |
 | Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor               |
 | Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                          |
 | Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles         |
