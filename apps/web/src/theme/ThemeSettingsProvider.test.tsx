@@ -21,7 +21,7 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-focus")).toBe("#1f6f96");
     expect(root.style.getPropertyValue("--octant-palette-green")).toBe("#41761c");
     expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toBe(
-      "color-mix(in srgb, #f7f7f6 78%, transparent)",
+      "color-mix(in srgb, #fafaf9 78%, transparent)",
     );
     expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe(
       "color-mix(in srgb, #ffffff 78%, transparent)",
