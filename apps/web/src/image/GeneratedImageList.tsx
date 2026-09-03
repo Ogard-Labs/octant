@@ -68,8 +68,12 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
     };
   }, [props.client, props.scopeId, props.threadKind]);
 
+  // Fast only while a job is in flight. With nothing pending the list can
+  // change only when someone enqueues (which refreshes here) or a turn's
+  // tool does, so an idle thread re-reads on a slow cadence instead of
+  // asking the host every four seconds for a list that has not moved.
   useEffect(
-    () => scheduleVisibleInterval(() => refreshRef.current(), hasPendingJob ? 750 : 4_000),
+    () => scheduleVisibleInterval(() => refreshRef.current(), hasPendingJob ? 750 : 30_000),
     [hasPendingJob],
   );
 

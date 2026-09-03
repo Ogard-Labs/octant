@@ -50,7 +50,7 @@ describe("GeneratedImageList polling", () => {
     expect(list).toHaveBeenCalledTimes(1);
 
     await act(async () => resolveFirst?.({ jobs: [] }));
-    await act(async () => vi.advanceTimersByTimeAsync(4_000));
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
     expect(list).toHaveBeenCalledTimes(2);
   });
 
