@@ -77,7 +77,7 @@ describe("theme semantic token catalog", () => {
 
   it("uses the design system's neutral graphite palette in both modes", () => {
     expect(DEFAULT_LIGHT_TOKENS).toMatchObject({
-      "app-background": "#f6f6f5",
+      "app-background": "#f7f7f6",
       workspace: "#ffffff",
       floating: "#fdfdfc",
       "text-primary": "#1b1b1b",
