@@ -186,6 +186,38 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByLabelText("Follow-up message")).toBeEnabled();
   });
 
+  it("keeps a failed turn's reason out of the callout once the transcript carries it", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "failed",
+          turnError: "The provider turn failed.",
+          turnErrorInTranscript: true,
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps a refused send's reason visible when no failed turn reached the transcript", () => {
+    // A send the host refuses before any turn exists adds no transcript row,
+    // so this callout is the only place its reason is ever read.
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "failed",
+          turnError: "The provider refused the turn.",
+          turnErrorInTranscript: false,
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("The provider refused the turn.");
+  });
+
   it("keeps the retry control off an ordinary turn error", () => {
     render(
       <CodeThreadWorkspace
@@ -2587,6 +2619,7 @@ function controller(
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     noteRestoreUndo: vi.fn(),
     turnActivity: new Map(),
+    turnErrorInTranscript: false,
     sendFollowUp: vi.fn(async () => true),
     setPendingDraft: vi.fn(),
     status: "ready",

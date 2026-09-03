@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute, relative, sep } from "node:path";
 import {
   CodeApprovalId,
+  MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
   decodeCodeOperationApprovalRequest,
   decodeCodeOperationApprovalConfirmation,
@@ -1486,8 +1487,43 @@ function normalizedOperationEvent(
   if (event.category === "completion") return { kind: "operation-state", state: "completed" };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };
   if (event.category === "interruption") return { kind: "operation-state", state: "interrupted" };
-  if (event.category === "failure") return { kind: "operation-state", state: "failed" };
+  // The provider's sentence is the only reason the person will ever see:
+  // without it the transcript said "The provider turn failed" and nothing
+  // else, whatever the driver had refused with.
+  if (event.category === "failure") {
+    const message = event.text === undefined ? undefined : boundProviderFailureMessage(event.text);
+    return {
+      kind: "operation-state",
+      state: "failed",
+      ...(message === undefined ? {} : { failure: { category: "failed", message } }),
+    };
+  }
   return undefined;
+}
+
+const FAILURE_MESSAGE_SUFFIX = "\n[Provider failure message truncated.]";
+
+/**
+ * `CodeOperationFailure` accepts at most
+ * `MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES` of trimmed, non-empty UTF-8. A
+ * provider sentence that is longer, blank, or untrimmed would make the whole
+ * `operation-state` frame invalid when the event store validates it, so the
+ * reason it was carrying would never be journaled at all. Bounding it here
+ * keeps the reason; only a message with nothing left to say is dropped.
+ */
+function boundProviderFailureMessage(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (trimmed === "") return undefined;
+  const bytes = new TextEncoder().encode(trimmed);
+  if (bytes.byteLength <= MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES) return trimmed;
+  const suffixBytes = new TextEncoder().encode(FAILURE_MESSAGE_SUFFIX).byteLength;
+  const head = new TextDecoder()
+    .decode(bytes.slice(0, MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES - suffixBytes))
+    // Slicing bytes can cut a multi-byte character in half; the decoder leaves
+    // a replacement character behind that is wider than the bytes it replaced.
+    .replace(/\uFFFD+$/, "")
+    .trimEnd();
+  return head === "" ? undefined : `${head}${FAILURE_MESSAGE_SUFFIX}`;
 }
 
 function sanitizeProviderEvent(

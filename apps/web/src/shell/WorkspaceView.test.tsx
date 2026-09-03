@@ -2038,6 +2038,7 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
       answerProviderRequest: vi.fn(async () => true),
 
       turnActivity: new Map(),
+      turnErrorInTranscript: false,
       followUps: new Map(),
       pendingDraft: "",
       completeFollowUp: vi.fn(async () => true),

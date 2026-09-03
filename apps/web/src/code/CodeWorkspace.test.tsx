@@ -478,6 +478,7 @@ function controller(
     answerProviderRequest: vi.fn(async () => true),
 
     turnActivity: new Map(),
+    turnErrorInTranscript: false,
     followUps: new Map(),
     markFollowUp: vi.fn(async () => true),
     completeFollowUp: vi.fn(async () => true),

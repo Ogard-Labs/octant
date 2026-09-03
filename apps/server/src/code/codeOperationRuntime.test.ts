@@ -580,6 +580,51 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("journals a provider failure sentence that arrived padded with whitespace", async () => {
+    // `CodeOperationFailure` requires a trimmed, non-empty message, and
+    // providers routinely end their last line with a newline. Forwarding the
+    // raw text made the whole `operation-state` frame invalid, so the reason
+    // the turn failed never reached the journal.
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(44);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "failed",
+          failure: { category: "provider-failed", message: "  Provider process died.\n" },
+        }),
+      ),
+    );
+
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+      expect(frames).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event: {
+              kind: "operation-state",
+              state: "failed",
+              failure: { category: "failed", message: "Provider process died." },
+            },
+          }),
+        ]),
+      );
+    });
+    fixture.close();
+  });
+
   it("fails closed when provider, credential, or gh executable authority is missing", async () => {
     const missingProvider = runtimeFixture({ provider: undefined });
     await expect(

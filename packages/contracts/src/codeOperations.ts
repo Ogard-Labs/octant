@@ -261,8 +261,12 @@ export const CodeReviewFindingUpdated = Schema.Struct({
 export type CodeReviewFindingUpdated = typeof CodeReviewFindingUpdated.Type;
 
 const ProviderRequestId = boundedNonEmptyText(255);
+export const MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES = 8 * 1024;
 export const CodeOperationFailure = CodeFailure.pipe(
-  Schema.filter((failure) => encoder.encode(failure.message).byteLength <= 8 * 1024),
+  Schema.filter(
+    (failure) =>
+      encoder.encode(failure.message).byteLength <= MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
+  ),
 );
 export type CodeOperationFailure = typeof CodeOperationFailure.Type;
 
@@ -1257,6 +1261,12 @@ export const CodeConversationTurn = Schema.Struct({
   /** Whether the turn journaled more steps than `steps` carries. */
   stepsTruncated: Schema.optional(Schema.Boolean),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
+  /**
+   * Why a failed turn failed, as the provider or the host reported it. Absent
+   * on a turn that did not fail, and on one journaled before the host kept
+   * the reason.
+   */
+  failure: Schema.optional(CodeOperationFailure),
   startedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 }).annotations(strict);

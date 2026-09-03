@@ -466,6 +466,7 @@ function controller(): CodeController {
     rebindThreadCheckout: vi.fn(async () => undefined),
 
     turnActivity: new Map(),
+    turnErrorInTranscript: false,
     providerRequests: [],
     bootstrap: { checkouts: [checkout], settings: {} as never, threads: [thread] } as never,
     client: { queryBoard: vi.fn(async () => boardView([])) } as never,

@@ -491,11 +491,13 @@ export class CodeOperationEventStore {
           });
         } else if (frame.event.kind === "operation-state") {
           builder.status = conversationStatus(frame.event.state);
+          if (frame.event.failure !== undefined) builder.failure = frame.event.failure;
         } else if (frame.event.kind === "operation-result") {
           if (frame.event.result.kind === "provider-turn-state") {
             builder.status = conversationStatus(frame.event.result.state);
           } else if (frame.event.result.kind === "operation-failed") {
             builder.status = "failed";
+            builder.failure = frame.event.result.failure;
           }
         }
       }
@@ -545,6 +547,7 @@ type CodeConversationBuilder = {
   steps: Array<CodeConversationStep>;
   stepsTruncated: boolean;
   status: CodeConversationTurn["status"];
+  failure?: CodeConversationTurn["failure"];
   startedAt: CodeConversationTurn["startedAt"];
   updatedAt: CodeConversationTurn["updatedAt"];
 };
