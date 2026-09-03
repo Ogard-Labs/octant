@@ -261,8 +261,12 @@ export const CodeReviewFindingUpdated = Schema.Struct({
 export type CodeReviewFindingUpdated = typeof CodeReviewFindingUpdated.Type;
 
 const ProviderRequestId = boundedNonEmptyText(255);
+export const MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES = 8 * 1024;
 export const CodeOperationFailure = CodeFailure.pipe(
-  Schema.filter((failure) => encoder.encode(failure.message).byteLength <= 8 * 1024),
+  Schema.filter(
+    (failure) =>
+      encoder.encode(failure.message).byteLength <= MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
+  ),
 );
 export type CodeOperationFailure = typeof CodeOperationFailure.Type;
 

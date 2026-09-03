@@ -352,7 +352,27 @@ export function useCodeController(options: CodeControllerOptions) {
     () => new Map(),
   );
   const [turnStatus, setTurnStatus] = useState<CodeTurnStatus>("idle");
-  const [turnError, setTurnError] = useState<string>();
+  const [turnError, setTurnErrorMessage] = useState<string>();
+  /**
+   * Whether the current failure already reads in the transcript. A turn the
+   * host projected as failed carries its reason in its own assistant row; a
+   * send the host refused before any turn existed adds no row at all, so the
+   * callout above the transcript is the only place its reason is ever seen.
+   */
+  const [turnErrorInTranscript, setTurnErrorInTranscript] = useState(false);
+  const setTurnError = useCallback(
+    (
+      next: string | undefined | ((current: string | undefined) => string | undefined),
+      options?: { readonly inTranscript?: boolean },
+    ) => {
+      setTurnErrorMessage(next);
+      // An updater revises whichever failure is already showing, so it keeps
+      // that failure's provenance; a plain message is a new failure and is not
+      // in the transcript unless its caller says so.
+      if (typeof next !== "function") setTurnErrorInTranscript(options?.inTranscript === true);
+    },
+    [],
+  );
   const [providerRequests, setProviderRequests] = useState<ReadonlyArray<CodeProviderRequest>>([]);
 
   const noteProviderRequest = useCallback((event: CodeOperationEvent) => {
@@ -969,11 +989,14 @@ export function useCodeController(options: CodeControllerOptions) {
                       }
                     } else {
                       setTurnStatus(terminalState === "waiting" ? "waiting" : "failed");
+                      // The reloaded transcript already carries this turn's
+                      // row, so the callout above it would only repeat it.
                       setTurnError(
                         terminalMessage ??
                           (terminalState === "waiting"
                             ? "The provider turn is waiting for approval, input, or recovery."
                             : `Provider turn ${terminalState}.`),
+                        { inTranscript: true },
                       );
                     }
                     return;
@@ -1890,7 +1913,8 @@ export function useCodeController(options: CodeControllerOptions) {
           message: string,
         ) => {
           setTurnStatus(status === "waiting" ? "waiting" : "failed");
-          setTurnError(message);
+          // The same sentence lands on this turn's assistant row below.
+          setTurnError(message, { inTranscript: true });
           restoreFailedPrompt();
           setConversation((current) =>
             current.map((entry) =>
@@ -2141,6 +2165,7 @@ export function useCodeController(options: CodeControllerOptions) {
     threadUsage,
     turnActivity,
     turnError,
+    turnErrorInTranscript,
     turnStatus,
     updateSettings,
   };
