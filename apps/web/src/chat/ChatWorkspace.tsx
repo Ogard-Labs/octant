@@ -162,6 +162,9 @@ interface ModelOptionBase {
   readonly values: Readonly<Record<string, string>>;
 }
 
+const ACTIVE_TOOL_APPROVAL_POLL_MS = 500;
+const IDLE_TOOL_APPROVAL_POLL_MS = 5_000;
+
 export function ChatWorkspace(props: ChatWorkspaceProps) {
   const view = props.controller.activeView;
   const [pendingAttachments, setPendingAttachments] = useState<ReadonlyArray<PendingAttachment>>(
@@ -192,6 +195,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   >([]);
   const activeThread = view?.thread;
   const activeThreadId = activeThread?.id;
+  // Tool approvals only arrive while a turn is running, so the fast poll is
+  // reserved for that; an idle thread checks rarely. At a flat 500ms every
+  // open Chat thread kept two requests a second going for as long as it was
+  // on screen.
+  const turnActive = view !== undefined && latestActiveAttempt(view) !== undefined;
   const pendingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
   // Attachments captured by a steered message stay visible in the composer,
   // but their cleanup ownership moves here until that message is accepted or
@@ -361,12 +369,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         inFlight = false;
       }
     };
-    const stop = scheduleVisibleInterval(() => void refresh(), 500, { runImmediately: true });
+    const stop = scheduleVisibleInterval(
+      () => void refresh(),
+      turnActive ? ACTIVE_TOOL_APPROVAL_POLL_MS : IDLE_TOOL_APPROVAL_POLL_MS,
+      { runImmediately: true },
+    );
     return () => {
       controller.abort();
       stop();
     };
-  }, [activeThreadId, props.extensionClient]);
+  }, [activeThreadId, props.extensionClient, turnActive]);
   const threadMentions = useThreadMentions({
     ...(props.threadMentionClient === undefined ? {} : { client: props.threadMentionClient }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),

@@ -1665,7 +1665,7 @@ describe("ChatWorkspace", () => {
     render(
       <Profiler id="chat-workspace" onRender={(_, phase) => commits.push(phase)}>
         <ChatWorkspace
-          controller={controllerFixture()}
+          controller={controllerFixture({ activeView: viewWithAttempt("streaming") })}
           extensionClient={client}
           providerSnapshot={providerSnapshot()}
         />
@@ -1680,6 +1680,25 @@ describe("ChatWorkspace", () => {
     await new Promise((resolve) => setTimeout(resolve, 600));
 
     expect(commits.length).toBe(commitsAfterPolling);
+  });
+
+  it("polls tool approvals rarely while no turn is running", async () => {
+    const client = extensionClient();
+    vi.mocked(client.listToolApprovals).mockResolvedValue([]);
+    const listToolApprovals = vi.mocked(client.listToolApprovals);
+
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({ activeView: viewWithAttempt("completed") })}
+        extensionClient={client}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+
+    await waitFor(() => expect(listToolApprovals).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+
+    expect(listToolApprovals).toHaveBeenCalledTimes(1);
   });
 
   it("windows the conversation so a long thread mounts a bounded number of turns", () => {

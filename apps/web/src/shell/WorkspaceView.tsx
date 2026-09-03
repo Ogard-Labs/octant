@@ -1785,6 +1785,9 @@ function ChatThreadWorkspace(props: {
   readonly revealTurnId?: import("@octant/contracts/chat").ChatTurnId;
 }) {
   const controller = useChatController({
+    // The App-level controller already refreshes navigation from the Machine
+    // change feed; a second timer here only repeated its reads once a second.
+    navigationRefreshMs: 0,
     activeThreadId: props.threadId,
     client: props.chatClient,
     readCursorStore: props.chatReadCursorStore,
