@@ -422,6 +422,29 @@ describe("FirstRunOnboarding", () => {
     expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
   });
 
+  it("waits for a provider it turned on to land before recording completion", async () => {
+    const user = userEvent.setup();
+    let acceptEnable!: (accepted: boolean) => void;
+    const onSetProviderEnabled = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          acceptEnable = resolve;
+        }),
+    );
+    const props = mount({ ...readyHandoff(), onSetProviderEnabled });
+
+    await user.click(screen.getByRole("button", { name: /Providers/ }));
+    await user.click(screen.getByRole("switch", { name: "Enable Ollama" }));
+    await openHandoff(user);
+    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
+
+    // Providers are a separate controller, so this write is still running.
+    expect(props.controller.complete).not.toHaveBeenCalled();
+
+    acceptEnable(true);
+    await waitFor(() => expect(props.controller.complete).toHaveBeenCalledOnce());
+  });
+
   it("keeps first run pending when a model choice is rejected", async () => {
     const user = userEvent.setup();
     const props = mount({
