@@ -737,7 +737,7 @@ describe("DraftThreadWorkspace", () => {
     };
   }
 
-  it("keeps Host, Project, and GitHub repository distinct visible selections in the Code draft", () => {
+  it("keeps Host, Project, and GitHub repository distinct visible selections in the Code draft", async () => {
     render(
       <DraftThreadWorkspace
         {...baseProps}
@@ -751,7 +751,8 @@ describe("DraftThreadWorkspace", () => {
 
     expect(screen.getByRole("status", { name: /Environment: This computer/ })).toBeVisible();
     expect(screen.getByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "GitHub repository" })).toBeVisible();
+    // The GitHub control loads on demand, so it lands a tick after the rest.
+    expect(await screen.findByRole("button", { name: "GitHub repository" })).toBeVisible();
   });
 
   it("keeps another folder reachable from the Project control after Code creation is refused", async () => {

@@ -236,7 +236,6 @@ import {
   chatDefaultModelCommand,
 } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
-import { RemotePairingView } from "./remote/RemotePairingView";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
 import { DockProjectPullRequestReviewTool } from "./shell/DockProjectPullRequestReviewTool";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
@@ -283,17 +282,12 @@ import {
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
 import type { ZenClient } from "@octant/client-runtime/zen-client";
 import { ZenRoot } from "./zen/ZenRoot";
-import { ZenSurface } from "./zen/ZenSurface";
-import { ZenCanvasCard } from "./zen/ZenCanvasCard";
-import { ZenResearchDock } from "./zen/ZenResearchDock";
-import { ZenTerminalCard } from "./zen/ZenTerminalCard";
 import { useZenController } from "./zen/useZenController";
 import { resolveZenLiveThreadCard, type ZenLiveThreadClients } from "./zen/ZenLiveThreadCards";
 import { resolveZenTerminalPinTarget } from "./zen/zenThreadActions";
 import { useAppleProjects } from "./apple/useAppleProjects";
 import { useThemeController } from "./theme/useThemeController";
 import { AgentProfileNamesProvider } from "./agentProfile/AgentProfileNames";
-import { ExecutionProfileWorkflow } from "./agentProfile/ExecutionProfileWorkflow";
 import { useExecutionProfileController } from "./agentProfile/useExecutionProfileController";
 import { useWorkThreadNavigation } from "./work/useWorkThreadNavigation";
 import type { ThreadRowActions } from "./projects/ThreadRowMenu";
@@ -308,6 +302,28 @@ import { useCommandSkills } from "./palette/useCommandSkills";
 
 const UsageWorkspace = lazy(() =>
   import("./usage/UsageWorkspace").then((module) => ({ default: module.UsageWorkspace })),
+);
+// Surfaces most sessions never open stay out of the first bundle: pairing a
+// remote device, the execution-profile editor in Settings, and Zen.
+const RemotePairingView = lazy(() =>
+  import("./remote/RemotePairingView").then((module) => ({ default: module.RemotePairingView })),
+);
+const ZenSurface = lazy(() =>
+  import("./zen/ZenSurface").then((module) => ({ default: module.ZenSurface })),
+);
+const ZenCanvasCard = lazy(() =>
+  import("./zen/ZenCanvasCard").then((module) => ({ default: module.ZenCanvasCard })),
+);
+const ZenResearchDock = lazy(() =>
+  import("./zen/ZenResearchDock").then((module) => ({ default: module.ZenResearchDock })),
+);
+const ZenTerminalCard = lazy(() =>
+  import("./zen/ZenTerminalCard").then((module) => ({ default: module.ZenTerminalCard })),
+);
+const ExecutionProfileWorkflow = lazy(() =>
+  import("./agentProfile/ExecutionProfileWorkflow").then((module) => ({
+    default: module.ExecutionProfileWorkflow,
+  })),
 );
 
 export type { ShellLaunch } from "./shell/shellLaunch";
@@ -409,7 +425,9 @@ export function App(props: AppProps) {
       const baseUrl = new URL(window.location.href).origin;
       return (
         <main className="shell-boundary">
-          <RemotePairingView baseUrl={baseUrl} ticket={pairingTicket} />
+          <Suspense fallback={null}>
+            <RemotePairingView baseUrl={baseUrl} ticket={pairingTicket} />
+          </Suspense>
         </main>
       );
     }
@@ -3856,7 +3874,9 @@ function LaunchedShell(
       codeController={codeController}
       discoveryController={discoveryController}
       executionProfiles={
-        <ExecutionProfileWorkflow controller={executionProfileController} variant="settings" />
+        <Suspense fallback={null}>
+          <ExecutionProfileWorkflow controller={executionProfileController} variant="settings" />
+        </Suspense>
       }
       extensionClient={extensionClient}
       {...(props.hostBridge?.selectLocalPluginFolder === undefined
@@ -3916,124 +3936,140 @@ function LaunchedShell(
             Opening Zen…
           </div>
         ) : (
-          <ZenSurface
-            assistant={zen.assistant}
-            focusZone={zen.focusZone}
-            renderTerminal={({ element, activity }) => {
-              // The card acts under the thread that owns the shell, so its
-              // posture is that thread's own. A thread this window can no
-              // longer see is a card that opens nothing.
-              const owner = codeController.bootstrap?.threads.find(
-                (candidate) => String(candidate.id) === String(element.sourceContext.threadId),
-              );
-              if (owner === undefined) return undefined;
-              return (
-                <ZenTerminalCard
-                  client={codeClient}
-                  createOperationId={createCodeOperationId}
-                  executionPolicy={owner.executionPolicy}
-                  live={activity.activity === "live"}
-                  scope={{ checkoutId: element.checkoutId, threadId: owner.id }}
-                  terminalId={element.terminalId}
-                />
-              );
-            }}
-            renderCanvas={({ element }) => {
-              // The card reads the same document a workspace tab reads, so it
-              // needs the same client and no authority of its own. Without one
-              // the card says it cannot read rather than showing nothing.
-              if (canvasClient === undefined) return undefined;
-              return <ZenCanvasCard canvasId={element.canvasId} client={canvasClient} />;
-            }}
-            renderResearchDock={({ dock }) => {
-              // The dock shows the bound thread's own browsing context. Zen
-              // holds no browser client of its own; it hands over the binding
-              // and the shell's client, and the server decides what that
-              // thread's context may reach.
-              if (browserAutomationClient === undefined) return undefined;
-              return (
-                <ZenResearchDock
-                  client={browserAutomationClient}
-                  dock={dock}
-                  {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                  serverUrl={props.launch.serverUrl}
-                  {...(props.projectWindowCapability === undefined
-                    ? {}
-                    : { windowCapability: props.projectWindowCapability })}
-                  onCollapse={(collapsed) =>
-                    void zen.dockResearch({
-                      thread: {
-                        threadId:
-                          dock.sourceContext.threadKind === "code"
-                            ? decodeCodeThreadId(String(dock.sourceContext.threadId))
-                            : decodeWorkThreadId(String(dock.sourceContext.threadId)),
-                        mode: dock.sourceContext.threadKind === "code" ? "code" : "work",
-                      },
-                      width: dock.width,
-                      collapsed,
-                    })
-                  }
-                  onUndock={() => void zen.dockResearch({ thread: null })}
-                />
-              );
-            }}
-            spacesBusy={zen.panelBusy}
-            onAddSpace={(name) => void zen.addSpace(name)}
-            onRemoveSpace={(spaceId) => void zen.removeSpace(spaceId)}
-            onRenameSpace={(spaceId, name) => void zen.renameSpace(spaceId, name)}
-            onShowSpace={(spaceId) => void zen.showSpace(spaceId)}
-            {...(zen.backgroundObjectUrl === undefined
-              ? {}
-              : { backgroundImageUrl: zen.backgroundObjectUrl })}
-            backgroundStatus={zen.backgroundStatus}
-            assistantOpen={zen.assistantOpen}
-            barCollapsed={zen.barCollapsed}
-            {...(zen.message === undefined ? {} : { message: zen.message })}
-            panelBusy={zen.panelBusy}
-            threadEntries={zen.threadEntries}
-            threadPickerOpen={zen.threadPickerOpen}
-            threadQuery={zen.threadQuery}
-            onAddTimer={(durationMs) => void zen.addTimer(durationMs)}
-            onAddBrowser={addZenBrowser}
-            onAddTerminal={(sourceContext) => {
-              void addZenTerminal(sourceContext);
-            }}
-            canAddTerminal={canAddZenTerminal}
-            onPinThread={(catalogRef) => void zen.pinThread(catalogRef)}
-            onCloseAssistant={() => zen.setAssistantOpen(false)}
-            onCloseThreadPicker={() => zen.setThreadPickerOpen(false)}
-            renderLiveThread={(input) =>
-              resolveZenLiveThreadCard({ ...input, clients: zenLiveThreadClients })
+          <Suspense
+            fallback={
+              <div className="zen-surface zen-surface--loading" role="status">
+                Opening Zen…
+              </div>
             }
-            onConfirmRecipePreview={(action) => void zen.confirmRecipePreview(action)}
-            onCreateReference={(url, label) =>
-              void zen.createReference(url, label).catch(() => undefined)
-            }
-            onUploadBackground={(file) => void zen.uploadBackground(file).catch(() => undefined)}
-            onCreateWidget={(kind) => void zen.createWidget(kind).catch(() => undefined)}
-            onExit={zen.exitZen}
-            onExpandBar={() => zen.setBarCollapsed(false)}
-            onHideBar={() => zen.setBarCollapsed(true)}
-            navigatorAssistant={navigatorAssistant}
-            onAssistantTurn={() => zen.refreshAssistant()}
-            onOpenAssistant={() => zen.openAssistant()}
-            onOpenSettings={(target) => void controller.openSettings(target)}
-            onOpenThreads={(query) => void zen.openThreads(query)}
-            onAddChecklistItem={zen.addChecklistItem}
-            onRemoveElement={(elementId) => void zen.removeElement(elementId)}
-            onRemoveChecklistItem={zen.removeChecklistItem}
-            onReorderChecklistItem={zen.reorderChecklistItem}
-            onSaveNotes={zen.saveNotes}
-            onTimerAction={(elementId, action, durationMs) =>
-              void zen.timerAction(elementId, action, durationMs)
-            }
-            onRefreshTimers={() => void zen.refreshTimers()}
-            onSetChecklistItemCompleted={zen.setChecklistItemCompleted}
-            onUpdateAppearance={(appearance) => void zen.updateAppearance(appearance)}
-            onUpdateElement={(element) => zen.updateElement(element)}
-            onUpdateViewport={(viewport) => void zen.updateViewport(viewport)}
-            space={zen.space}
-          />
+          >
+            <ZenSurface
+              assistant={zen.assistant}
+              focusZone={zen.focusZone}
+              renderTerminal={({ element, activity }) => {
+                // The card acts under the thread that owns the shell, so its
+                // posture is that thread's own. A thread this window can no
+                // longer see is a card that opens nothing.
+                const owner = codeController.bootstrap?.threads.find(
+                  (candidate) => String(candidate.id) === String(element.sourceContext.threadId),
+                );
+                if (owner === undefined) return undefined;
+                return (
+                  <Suspense fallback={null}>
+                    <ZenTerminalCard
+                      client={codeClient}
+                      createOperationId={createCodeOperationId}
+                      executionPolicy={owner.executionPolicy}
+                      live={activity.activity === "live"}
+                      scope={{ checkoutId: element.checkoutId, threadId: owner.id }}
+                      terminalId={element.terminalId}
+                    />
+                  </Suspense>
+                );
+              }}
+              renderCanvas={({ element }) => {
+                // The card reads the same document a workspace tab reads, so it
+                // needs the same client and no authority of its own. Without one
+                // the card says it cannot read rather than showing nothing.
+                if (canvasClient === undefined) return undefined;
+                return (
+                  <Suspense fallback={null}>
+                    <ZenCanvasCard canvasId={element.canvasId} client={canvasClient} />
+                  </Suspense>
+                );
+              }}
+              renderResearchDock={({ dock }) => {
+                // The dock shows the bound thread's own browsing context. Zen
+                // holds no browser client of its own; it hands over the binding
+                // and the shell's client, and the server decides what that
+                // thread's context may reach.
+                if (browserAutomationClient === undefined) return undefined;
+                return (
+                  <Suspense fallback={null}>
+                    <ZenResearchDock
+                      client={browserAutomationClient}
+                      dock={dock}
+                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                      serverUrl={props.launch.serverUrl}
+                      {...(props.projectWindowCapability === undefined
+                        ? {}
+                        : { windowCapability: props.projectWindowCapability })}
+                      onCollapse={(collapsed) =>
+                        void zen.dockResearch({
+                          thread: {
+                            threadId:
+                              dock.sourceContext.threadKind === "code"
+                                ? decodeCodeThreadId(String(dock.sourceContext.threadId))
+                                : decodeWorkThreadId(String(dock.sourceContext.threadId)),
+                            mode: dock.sourceContext.threadKind === "code" ? "code" : "work",
+                          },
+                          width: dock.width,
+                          collapsed,
+                        })
+                      }
+                      onUndock={() => void zen.dockResearch({ thread: null })}
+                    />
+                  </Suspense>
+                );
+              }}
+              spacesBusy={zen.panelBusy}
+              onAddSpace={(name) => void zen.addSpace(name)}
+              onRemoveSpace={(spaceId) => void zen.removeSpace(spaceId)}
+              onRenameSpace={(spaceId, name) => void zen.renameSpace(spaceId, name)}
+              onShowSpace={(spaceId) => void zen.showSpace(spaceId)}
+              {...(zen.backgroundObjectUrl === undefined
+                ? {}
+                : { backgroundImageUrl: zen.backgroundObjectUrl })}
+              backgroundStatus={zen.backgroundStatus}
+              assistantOpen={zen.assistantOpen}
+              barCollapsed={zen.barCollapsed}
+              {...(zen.message === undefined ? {} : { message: zen.message })}
+              panelBusy={zen.panelBusy}
+              threadEntries={zen.threadEntries}
+              threadPickerOpen={zen.threadPickerOpen}
+              threadQuery={zen.threadQuery}
+              onAddTimer={(durationMs) => void zen.addTimer(durationMs)}
+              onAddBrowser={addZenBrowser}
+              onAddTerminal={(sourceContext) => {
+                void addZenTerminal(sourceContext);
+              }}
+              canAddTerminal={canAddZenTerminal}
+              onPinThread={(catalogRef) => void zen.pinThread(catalogRef)}
+              onCloseAssistant={() => zen.setAssistantOpen(false)}
+              onCloseThreadPicker={() => zen.setThreadPickerOpen(false)}
+              renderLiveThread={(input) =>
+                resolveZenLiveThreadCard({ ...input, clients: zenLiveThreadClients })
+              }
+              onConfirmRecipePreview={(action) => void zen.confirmRecipePreview(action)}
+              onCreateReference={(url, label) =>
+                void zen.createReference(url, label).catch(() => undefined)
+              }
+              onUploadBackground={(file) => void zen.uploadBackground(file).catch(() => undefined)}
+              onCreateWidget={(kind) => void zen.createWidget(kind).catch(() => undefined)}
+              onExit={zen.exitZen}
+              onExpandBar={() => zen.setBarCollapsed(false)}
+              onHideBar={() => zen.setBarCollapsed(true)}
+              navigatorAssistant={navigatorAssistant}
+              onAssistantTurn={() => zen.refreshAssistant()}
+              onOpenAssistant={() => zen.openAssistant()}
+              onOpenSettings={(target) => void controller.openSettings(target)}
+              onOpenThreads={(query) => void zen.openThreads(query)}
+              onAddChecklistItem={zen.addChecklistItem}
+              onRemoveElement={(elementId) => void zen.removeElement(elementId)}
+              onRemoveChecklistItem={zen.removeChecklistItem}
+              onReorderChecklistItem={zen.reorderChecklistItem}
+              onSaveNotes={zen.saveNotes}
+              onTimerAction={(elementId, action, durationMs) =>
+                void zen.timerAction(elementId, action, durationMs)
+              }
+              onRefreshTimers={() => void zen.refreshTimers()}
+              onSetChecklistItemCompleted={zen.setChecklistItemCompleted}
+              onUpdateAppearance={(appearance) => void zen.updateAppearance(appearance)}
+              onUpdateElement={(element) => zen.updateElement(element)}
+              onUpdateViewport={(viewport) => void zen.updateViewport(viewport)}
+              space={zen.space}
+            />
+          </Suspense>
         )
       }
     >

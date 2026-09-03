@@ -43,13 +43,21 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import {
   CodeComposerAdapter,
   type CodeComposerSubmitInput,
 } from "../code/composer/CodeComposerAdapter";
 import { useWorktreeRemoteFacts } from "../code/composer/useWorktreeRemoteFacts";
-import { GitHubRepositoryOnboarding } from "../code/GitHubRepositoryOnboarding";
 import { WorkComposerAdapter } from "../work/composer/WorkComposerAdapter";
 import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
@@ -58,6 +66,14 @@ import {
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
 import { OctantButton } from "../ui/base/OctantButton";
+
+// Cloning a repository from GitHub is a first-time step, not a start-screen
+// staple; its onboarding stays out of the first bundle.
+const GitHubRepositoryOnboarding = lazy(() =>
+  import("../code/GitHubRepositoryOnboarding").then((module) => ({
+    default: module.GitHubRepositoryOnboarding,
+  })),
+);
 import { RecentThreadList, type RecentThreadListItem } from "./RecentThreadList";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -346,18 +362,20 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     props.githubClient !== undefined &&
     props.githubCloneClient !== undefined &&
     onCreateProjectForGithub !== undefined ? (
-      <GitHubRepositoryOnboarding
-        client={props.githubClient}
-        cloneClient={props.githubCloneClient}
-        createProject={(name, receiptId) => onCreateProjectForGithub("code", name, receiptId)}
-        {...(props.creating === undefined ? {} : { disabled: props.creating })}
-        {...(selectedProjectName === undefined ? {} : { fixedProjectName: selectedProjectName })}
-        hostName={githubHostName}
-        onProjectCreated={(projectId, name) => {
-          selectProject(decodeProjectId(projectId));
-          setSelectedProjectLabel(name);
-        }}
-      />
+      <Suspense fallback={null}>
+        <GitHubRepositoryOnboarding
+          client={props.githubClient}
+          cloneClient={props.githubCloneClient}
+          createProject={(name, receiptId) => onCreateProjectForGithub("code", name, receiptId)}
+          {...(props.creating === undefined ? {} : { disabled: props.creating })}
+          {...(selectedProjectName === undefined ? {} : { fixedProjectName: selectedProjectName })}
+          hostName={githubHostName}
+          onProjectCreated={(projectId, name) => {
+            selectProject(decodeProjectId(projectId));
+            setSelectedProjectLabel(name);
+          }}
+        />
+      </Suspense>
     ) : null;
 
   const addFolderDialog =

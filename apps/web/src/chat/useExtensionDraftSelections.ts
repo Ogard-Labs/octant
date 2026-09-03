@@ -6,12 +6,14 @@ import type {
   ExtensionSnapshot,
 } from "@octant/contracts/extension-rpc";
 import type { ExtensionProviderFamily, SourceQualifiedSkillId } from "@octant/contracts/extensions";
+// Subpath imports: the package index re-exports the skill loader and with it
+// the YAML parser, which every window paid for in its first bundle.
 import {
-  parseComposerReference,
   resolveDraftExtensionReference,
-  sourceQualifiedSkillId,
   type ExtensionAddressingCatalog,
-} from "@octant/plugin-host";
+} from "@octant/plugin-host/addressing";
+import { parseComposerReference } from "@octant/plugin-host/composer";
+import { sourceQualifiedSkillId } from "@octant/plugin-host/model";
 import { useCallback, useEffect, useState } from "react";
 import type { ChatComposerExtensionSelection } from "./ChatComposer";
 

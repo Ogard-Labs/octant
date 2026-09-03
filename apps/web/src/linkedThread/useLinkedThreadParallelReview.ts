@@ -5,7 +5,7 @@ import {
 } from "@octant/client-runtime/linked-thread-client";
 import type { LinkedThreadAggregate, LinkedThreadPreview } from "@octant/contracts";
 import type { ChatThread } from "@octant/contracts/chat";
-import { REVIEW_IN_PARALLEL_SKILL_NAME } from "@octant/plugin-host";
+import { REVIEW_IN_PARALLEL_SKILL_NAME } from "@octant/plugin-host/bundled-skills";
 import { useCallback, useMemo, useState } from "react";
 import {
   buildReviewInParallelPreviewCommand,
