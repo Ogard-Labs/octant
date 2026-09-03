@@ -110,7 +110,9 @@
   --oct-elev-raised:
     0 28px 70px light-dark(rgba(38, 37, 30, 0.13), rgba(0, 0, 0, 0.5)),
     0 14px 32px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.36)), 0 0 0 1px var(--oct-border);
-  --oct-focus-ring: 0 0 0 2px var(--oct-bg), 0 0 0 4px var(--oct-accent-fg);
+  /* Keyboard focus is a neutral hairline ring, not a coloured highlight: the
+     accent ring read as a selection mark on every focused control. */
+  --oct-focus-ring: 0 0 0 1px var(--oct-bg), 0 0 0 3px var(--oct-muted);
 
   /* ── type ── */
   --oct-font-display: "Octant Display", system-ui, "Helvetica Neue", Helvetica, Arial, sans-serif;

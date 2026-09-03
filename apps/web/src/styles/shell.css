@@ -1691,7 +1691,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-branch-selector__trigger:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-muted);
   outline-offset: 2px;
 }
 
@@ -1813,7 +1813,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-choice__trigger:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-muted);
   outline-offset: 2px;
 }
 
