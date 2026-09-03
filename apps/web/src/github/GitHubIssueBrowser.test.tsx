@@ -289,12 +289,12 @@ describe("GitHubIssueBrowser", () => {
     fireEvent.click(await screen.findByRole("button", { name: /#1 Issue 1/ }));
     expect(await screen.findByRole("article", { name: "Issue #1" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Change repository" }));
+    await user.click(screen.getByRole("button", { name: "Repository: octant/repo-1" }));
     fireEvent.click(await screen.findByRole("option", { name: /octant\/repo-2/ }));
 
     expect(await screen.findByRole("button", { name: /#9 Other repo/ })).toBeInTheDocument();
     expect(screen.queryByRole("article", { name: "Issue #1" })).not.toBeInTheDocument();
-    expect(screen.getByText("Select an issue to read its details.")).toBeInTheDocument();
+    expect(screen.getByText("Select an issue to read it.")).toBeInTheDocument();
     expect(
       readCatalogue.mock.calls.some(
         ([request]) =>
@@ -379,7 +379,7 @@ describe("GitHubIssueBrowser", () => {
     await waitFor(() =>
       expect(screen.queryByRole("article", { name: "Issue #1" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByText("Select an issue to read its details.")).toBeInTheDocument();
+    expect(screen.getByText("Select an issue to read it.")).toBeInTheDocument();
   });
 
   it("renders unavailable reason, remediation, and retry delay", async () => {

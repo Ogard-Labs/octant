@@ -363,7 +363,7 @@ threads; provider marks are fixed-size inline and can be hidden without changing
 row height or indentation. Project View and Project Overview are real features,
 not decorative shortcuts.
 
-Primary sidebar destinations are New thread, Thread board, and Pull requests
+Primary sidebar destinations are New thread, Board, and Pull requests
 when valid for the active mode. The bottom-left identity menu owns Settings,
 Navigator, Agents, Providers, Usage, Plugins, Automations, Artifacts, and Zen
 entry points. Search is a compact in-place filter for the current mode's visible
@@ -439,13 +439,15 @@ stack of cards and does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout. When the right dock
 is open, the disclosure shifts over the central pane and never covers the dock.
 
-The thread board is an operational reading surface with four fixed,
-server-authoritative statuses: Ready, In Progress, Waiting, and Done. Columns
-and compact cards use the raised card recipe; empty columns stay dashed. A
-card is the Project as an eyebrow, the title, and one line: what the thread
-waits on or is doing, active runs and failing checks, who runs it, and when it
-last moved. Checkout, branch, plan, and review facts live on the list view and
-the thread. Waiting does not become a warning wall. Labels and facts use the selected
+The Board is an operational reading surface with four fixed,
+server-authoritative statuses: Ready, In Progress, Waiting, and Done. All
+four lanes show by default, each named once by mark, label, and count with no
+rule under the head; a Board/List toggle leads the toolbar. A card is a flat
+hairline-edged object on the card fill: the Project as an eyebrow, the title,
+and one line of what the thread waits on or is doing, active runs and failing
+checks, who runs it, and when it last moved. Checkout, branch, plan, and
+review facts live on the list view and the thread. Waiting does not become a
+warning wall. Labels and facts use the selected
 interface typography. Thread listing, pull-request snapshot, and per-thread
 runtime reads overlap where independent.
 

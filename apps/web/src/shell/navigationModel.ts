@@ -162,7 +162,7 @@ const descriptors = {
   agents: { id: "agents", label: "Agents" },
   "artifact-library": { id: "artifact-library", label: "Artifacts" },
   plugins: { id: "plugins", label: "Plugins" },
-  "thread-board": { id: "thread-board", label: "Thread board" },
+  "thread-board": { id: "thread-board", label: "Board" },
   "pull-requests": { id: "pull-requests", label: "Pull requests" },
   "github-issues": { id: "github-issues", label: "Issues" },
   "linear-issues": { id: "linear-issues", label: "Linear" },

@@ -1,47 +1,67 @@
 /* Host-scoped GitHub issue browser. Distinct from Project-bound pull-request
    surfaces: this overlay lists issues from any accessible repository. */
 
-.github-issue-browser {
+/* ── Issues ─────────────────────────────────────────────────────────────
+   A Surface: header, one toolbar (repository, state, search), then two
+   panes. The list is rows over hairlines with the number as a quiet
+   identifier; the reader keeps the body as plain text on purpose. */
+.github-issue-browser__choose {
+  max-width: 560px;
+}
+
+.github-issue-browser__repository {
+  gap: 6px;
+}
+
+.github-issue-browser__repository-name {
+  max-width: 28ch;
+  overflow: hidden;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-detail);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-issue-browser__search {
   display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  font-family: var(--oct-font-display);
-  background: var(--oct-bg);
-}
-
-.github-issue-browser__header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
-  padding: 16px var(--oct-space-4) 10px;
-}
-
-.github-issue-browser__identity {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: var(--oct-space-1) 8px;
-  min-width: 0;
-}
-
-.github-issue-browser__title {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-  color: var(--oct-fg);
-}
-
-.github-issue-browser__subtitle {
-  margin: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 200px;
+  height: 30px;
+  padding: 0 9px;
   color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--octant-control);
+}
+
+.github-issue-browser__search:focus-within {
+  border-color: var(--octant-focus-ring);
+}
+
+.github-issue-browser__search input[type="search"] {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  color: var(--oct-fg);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--oct-text-sm);
+}
+
+.github-issue-browser__repository-popup {
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: min(60vh, 32rem);
+  padding: 12px;
+  overflow: auto;
 }
 
 .github-issue-browser__body {
   display: grid;
-  grid-template-columns: minmax(240px, 36%) minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 34%) minmax(0, 1fr);
   min-height: 0;
   flex: 1 1 auto;
   border-top: 1px solid var(--oct-border);
@@ -55,40 +75,12 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: var(--oct-space-3) var(--oct-space-4);
+  padding: var(--oct-space-3) 0;
 }
 
 .github-issue-browser__detail-pane {
+  padding: var(--oct-space-4) var(--oct-space-2) var(--oct-space-6) var(--oct-space-6);
   border-left: 1px solid var(--oct-border);
-}
-
-.github-issue-browser__repository {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--oct-space-2);
-}
-
-.github-issue-browser__repository-name {
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-weight: 600;
-}
-
-.github-issue-browser__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.github-issue-browser__state {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
 }
 
 .github-issue-browser__list {
@@ -97,7 +89,10 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+}
+
+.github-issue-browser__list > li + li {
+  border-top: 1px solid var(--oct-border-soft);
 }
 
 .github-issue-browser__row {
@@ -105,62 +100,109 @@
   flex-direction: column;
   align-items: flex-start;
   justify-content: flex-start;
-  gap: 2px;
+  gap: 4px;
   width: 100%;
   height: auto;
   min-height: 0;
-  padding: 7px var(--oct-space-2);
+  padding: 10px var(--oct-space-3) 10px var(--oct-space-2);
   border: 0;
-  border-radius: var(--oct-radius-sm);
+  border-radius: 0;
   text-align: start;
   color: inherit;
   background: transparent;
+  /* The button recipe keeps labels on one line; an issue title wraps. */
+  white-space: normal;
 }
 
-.github-issue-browser__row:hover,
-.github-issue-browser__row[aria-current="true"] {
+.github-issue-browser__row:hover {
   background: var(--oct-fg-soft);
 }
 
+.github-issue-browser__row[aria-current="true"] {
+  background: var(--octant-selection);
+}
+
 .github-issue-browser__row-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   overflow-wrap: anywhere;
-  font-weight: 600;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  line-height: var(--oct-leading-snug);
+}
+
+.github-issue-browser__row-number {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-weight: 400;
 }
 
 .github-issue-browser__row-meta {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: var(--oct-space-2);
+  align-items: center;
+  gap: 4px var(--oct-space-2);
   margin: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
 
+.github-issue-browser__state[data-state="open"] {
+  color: var(--octant-success-text);
+  border-color: color-mix(in srgb, var(--octant-success-text) 45%, transparent);
+}
+
+.github-issue-browser__state[data-state="closed"] {
+  color: var(--oct-meta);
+}
+
+.github-issue-browser__more {
+  align-self: flex-start;
+  margin-top: var(--oct-space-2);
+}
+
+.github-issue-browser__stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
 .github-issue-browser__note {
   margin: 0;
   color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
   line-height: var(--oct-leading-snug);
+}
+
+.github-issue-browser__placeholder {
+  padding: var(--oct-space-6) 0;
 }
 
 .github-issue-browser__detail {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-3);
+  gap: var(--oct-space-4);
   min-width: 0;
+  max-width: 76ch;
 }
 
 .github-issue-browser__detail-header {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-1);
+  gap: var(--oct-space-2);
 }
 
 .github-issue-browser__detail-title {
   margin: 0;
   overflow-wrap: anywhere;
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-lg);
+  font-weight: 500;
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.25;
 }
 
 .github-issue-browser__url {
@@ -178,24 +220,32 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
 }
 
 .github-issue-browser__body-text {
   margin: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+  color: var(--oct-fg);
   font-family: var(--oct-font-body);
   font-size: var(--oct-text-sm);
-  line-height: var(--oct-leading-snug);
+  line-height: var(--oct-leading-body);
+}
+
+.github-issue-browser__comments-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+  padding-top: var(--oct-space-2);
 }
 
 .github-issue-browser__comments-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--oct-space-2);
   margin: 0;
-  font-size: var(--oct-text-xs);
-  font-weight: 600;
-  color: var(--oct-meta);
+  padding-bottom: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-border);
 }
 
 .github-issue-browser__comments {
@@ -204,13 +254,22 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-3);
 }
 
 .github-issue-browser__comment {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-1);
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) 0;
+}
+
+.github-issue-browser__comment + .github-issue-browser__comment {
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.github-issue-browser__comment-author {
+  color: var(--oct-fg-2);
+  font-weight: var(--oct-weight-display);
 }
 
 @media (max-width: 680px) {
@@ -219,6 +278,7 @@
   }
 
   .github-issue-browser__detail-pane {
+    padding-left: 0;
     border-left: 0;
     border-top: 1px solid var(--oct-border);
   }

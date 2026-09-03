@@ -2666,21 +2666,24 @@ input.switch:checked::after {
   min-height: 0;
   max-height: 100%;
 }
+/* A lane is named once, quietly: mark, label, count, no rule underneath.
+   The cards below carry their own edges, so a hairline over each lane
+   drew a second grid across the board. */
 .board-col-head {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
   position: sticky;
   top: 0;
-  padding: 10px 0 8px;
-  border-bottom: 1px solid var(--oct-hairline);
+  padding: 8px 2px;
   background: var(--octant-app-background);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-display);
 }
 .board-col-head .count {
-  margin-left: auto;
+  margin-left: 0;
+  color: var(--oct-meta);
   font-variant-numeric: tabular-nums;
 }
 .board-col-body {
@@ -2704,23 +2707,25 @@ input.switch:checked::after {
    Title first, then activity, then compact facts, then blocked/plan
    reason. Every layer is readable on its own line so long text does not
    push into neighbours. */
+/* A card is a flat object with its own hairline edge: on a board full of
+   them, a shadow under each one read as clutter, and a hover fill that
+   changed the ground made the lane flicker. Hover firms the edge instead. */
 .board-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   min-width: 0;
   padding: var(--oct-space-3) 14px;
-  border: 0;
+  border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-  background: var(--oct-bg);
-  box-shadow: var(--octant-shadow-sm);
+  background: var(--octant-card);
   color: inherit;
   text-align: left;
   text-decoration: none;
 }
 .board-card:hover {
-  background: var(--oct-surface-warm);
+  border-color: var(--octant-border-strong);
 }
 .board-card:focus-visible {
   outline: 2px solid var(--oct-focus);

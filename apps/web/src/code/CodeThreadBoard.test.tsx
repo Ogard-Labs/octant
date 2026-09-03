@@ -151,7 +151,7 @@ describe("CodeThreadBoard", () => {
     expect(within(cardFor("Read thread")).queryByText("Unread")).toBeNull();
   });
 
-  it("renders populated Status columns by default, can reveal empty ones, and opens a thread", async () => {
+  it("renders every Status lane by default, can hide the empty ones, and opens a thread", async () => {
     const loadBoard = vi.fn(async () =>
       view([
         card({ id: "01", status: "ready", title: "Ready thread" }),
@@ -169,20 +169,21 @@ describe("CodeThreadBoard", () => {
     );
 
     await screen.findByRole("button", { name: "Ready thread" });
-    // The default scan path spends space only on work that exists.
+    // The four lanes are the workflow, so every one shows by default.
     const columns = screen.getAllByRole("region", { name: /\(\d+\)$/ });
     expect(columns.map((column) => column.getAttribute("aria-label"))).toEqual([
       "Ready (1)",
+      "In progress (0)",
+      "Waiting (0)",
       "Done (1)",
     ]);
     const doneColumn = screen.getByRole("region", { name: "Done (1)" });
     expect(within(doneColumn).getByText("Done thread")).toBeVisible();
-    expect(screen.queryByRole("region", { name: "Waiting (0)" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View" }));
     fireEvent.click(await screen.findByRole("checkbox", { name: "Show empty groups" }));
-    expect(screen.getByRole("region", { name: "In progress (0)" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "Waiting (0)" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "In progress (0)" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Waiting (0)" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Ready (1)" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Ready thread" }));
@@ -200,15 +201,15 @@ describe("CodeThreadBoard", () => {
     );
 
     await screen.findByText("Thread 01");
-    expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Done (0)" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "View" }));
     fireEvent.click(await screen.findByRole("checkbox", { name: "Show empty groups" }));
-    expect(screen.getByRole("region", { name: "Done (0)" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
     first.unmount();
 
     render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={storage} />);
     await screen.findByText("Thread 01");
-    expect(screen.getByRole("region", { name: "Done (0)" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
   });
 
   it("keeps the loaded board when its host re-renders with a fresh callback", async () => {
@@ -604,7 +605,7 @@ describe("CodeThreadBoard", () => {
 
     await screen.findByRole("button", { name: "Ready thread" });
     const columns = screen.getAllByRole("region", { name: /\(\d+\)$/ });
-    expect(columns).toHaveLength(2);
+    expect(columns).toHaveLength(4);
     for (const column of columns) {
       expect(column.className).toContain("board-col");
     }
@@ -632,7 +633,8 @@ describe("CodeThreadBoard", () => {
   });
 
   it("truncates long card titles and wraps facts instead of letting metadata overlap", async () => {
-    expect(octantCss).toMatch(/\.board-card\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\)/s);
+    expect(octantCss).toMatch(/\.board-card\s*\{[^}]*border:\s*1px solid var\(--oct-border\)/s);
+    expect(octantCss).not.toMatch(/\.board-card\s*\{[^}]*box-shadow/s);
     expect(octantCss).toMatch(/\.board-card-title\s*\{[^}]*overflow:\s*hidden[^}]*\}/s);
     expect(octantCss).toMatch(/\.board-card-title\s*\{[^}]*-webkit-line-clamp:\s*2[^}]*\}/s);
     expect(octantCss).toMatch(/\.board-card-facts\s*\{[^}]*flex-wrap:\s*wrap[^}]*\}/s);
@@ -659,8 +661,6 @@ describe("CodeThreadBoard", () => {
     render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
     const ready = await screen.findByRole("region", { name: "Ready (1)" });
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Show empty groups" }));
     const waiting = screen.getByRole("region", { name: "Waiting (0)" });
     expect(ready.className).toContain("board-col");
     expect(waiting.className).toContain("board-col");
