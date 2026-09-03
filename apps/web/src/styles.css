@@ -3401,102 +3401,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   line-height: var(--oct-leading-snug);
 }
 
-.thread-environment-summary {
-  position: relative;
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-.thread-environment-summary__button {
-  display: inline-grid;
-  width: 26px;
-  min-width: 26px;
-  max-width: none;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
-  height: 26px;
-  min-height: 26px;
-  padding: 0;
-  overflow: hidden;
-  color: var(--oct-muted);
-  border-radius: var(--oct-radius-sm);
-  border: 1px solid transparent;
-}
-
-.thread-environment-summary__button:hover,
-.thread-environment-summary__button[aria-pressed="true"] {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
-.thread-environment-summary__button[aria-pressed="true"] {
-  border-color: var(--oct-border-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-fg) 5%, transparent);
-}
-
-.thread-environment-summary__button[data-environment-status="unavailable"],
-.thread-environment-summary__button[data-environment-status="disconnected"] {
-  color: var(--oct-muted);
-}
-
-.thread-environment-summary__label {
-  flex: 0 0 auto;
-  color: var(--oct-fg);
-  font-size: 11.5px;
-  font-weight: var(--oct-weight-strong);
-}
-
-.thread-environment-summary__fact {
-  overflow: hidden;
-  min-width: 0;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-mono);
-  font-size: calc(11 * var(--oct-text-step));
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thread-environment-summary__fact + .thread-environment-summary__fact::before {
-  content: "·";
-  margin-right: 8px;
-  opacity: 0.6;
-}
-
-.thread-environment-summary__status {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-muted);
-  font-size: calc(9 * var(--oct-text-step));
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.thread-environment-summary__status--available {
-  color: var(--octant-success-text);
-  background: var(--octant-success-surface);
-}
-
-.thread-environment-summary__status--unavailable,
-.thread-environment-summary__status--disconnected {
-  color: var(--octant-text-muted);
-  background: var(--octant-surface-raised);
-}
-
-.thread-environment-summary__status--stale,
-.thread-environment-summary__status--recovery {
-  color: var(--octant-text-muted);
-  background: var(--octant-surface-raised);
-}
-
 /* Position/anchoring now comes from OctantPopover's floating positioner
    (side="bottom" align="end"); only width, max-height, and font remain this
    surface's own. */
@@ -3997,10 +3901,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 @media (max-width: 720px) {
   .thread-environment-disclosure {
     max-height: min(70vh, calc(100% - var(--oct-space-2) * 2));
-  }
-
-  .thread-environment-summary__fact {
-    max-width: 7rem;
   }
 }
 

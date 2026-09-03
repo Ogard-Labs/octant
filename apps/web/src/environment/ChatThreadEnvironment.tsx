@@ -1,6 +1,6 @@
 import type { ProjectSummary, WorkspaceTab } from "@octant/contracts";
 import { deriveChatEnvironmentProjection } from "@octant/domain/shell-policy";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { ChatController } from "../chat/useChatController";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
@@ -18,7 +18,6 @@ export interface ChatThreadEnvironmentProps {
   readonly agentRunClient?: AgentRunClient;
   readonly onOpenAgents?: () => void;
   readonly environmentOpen?: boolean;
-  readonly onOpenEnvironment?: (opener: HTMLElement) => void;
 }
 
 /**
@@ -28,8 +27,7 @@ export interface ChatThreadEnvironmentProps {
  * Project id and never as a fallback authority source.
  */
 export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
-  const [localEnvironmentOpen, setLocalEnvironmentOpen] = useState(false);
-  const environmentOpen = props.environmentOpen ?? localEnvironmentOpen;
+  const environmentOpen = props.environmentOpen === true;
   const view = props.controller.activeView;
   const projectId = view?.thread.projectId;
   const project = props.projects.find(
@@ -47,8 +45,6 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
     <div className="thread-environment-wrapper">
       <ThreadEnvironmentPanel
         {...(props.active === undefined ? {} : { active: props.active })}
-        inlineFallback={props.environmentOpen === undefined}
-        onOpen={props.onOpenEnvironment ?? (() => setLocalEnvironmentOpen(true))}
         open={environmentOpen}
         summary={{ identity: projection.identity }}
       >
