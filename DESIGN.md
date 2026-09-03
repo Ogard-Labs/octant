@@ -87,7 +87,9 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 ### Colour
 
 Neutral graphite, a monochrome accent, a blue keyboard focus ring, four statuses. Text is three greys (primary,
-secondary, muted) and never a fourth. Hairlines separate; fills select. See
+secondary, muted) and never a fourth. Hairlines separate; fills select. The
+focus ring is painted once, by the global `:focus-visible` rule; a field
+recipe does not add a second border or halo of its own. See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
@@ -119,12 +121,15 @@ navigation rail. Rows in Settings are `SettingRow`; rows everywhere else are
 
 ### Welcome and composer
 
-Chat, Work, and Code open on the same screen: the hero question, a rear
-context tray, and the raised composer in front. The tray holds where the
-thread runs (Project, base branch, checkout, Environment, repository); the
-composer bar holds how it runs (attach and image on the left; model and
-access on the right, next to send). Nothing about delivery is asked up
-front; it is derived from the tray and shown on the thread once it exists.
+Chat, Work, and Code open on the same screen: the hero question and one
+raised composer. The composer is prompt first, four lines tall before it
+grows; its toolbar row holds how the thread runs (attach and image on the
+left; model and access on the right, next to send); its lower band holds
+where it runs (Project, base branch, checkout, Environment, repository).
+The band is part of the card, ruled off by a hairline, and it wraps rather
+than grows: a control that needs a list ("Create from…") floats over the
+page. Nothing about delivery is asked up front; it is derived from the band
+and shown on the thread once it exists.
 
 ## Source of truth and CSS layers
 
@@ -298,6 +303,9 @@ in the native title rail. Settings uses a separate compact 248px navigation
 rail. The right dock defaults to 320px when open. A fresh window starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is 34px in the native host and the status bar is 26px.
+While a route or tool is still loading, its state is one quiet line (spinner,
+then the title) on the page ground, never a raised card: a card with a title
+and a sentence reads as a finished empty state.
 
 Navigation panes stay compact hairline rails. Routine form layouts stay open
 and unshadowed; setup objects, discrete settings objects, welcome composers,
@@ -308,9 +316,9 @@ composer. Starter actions appear only when recent work does not already give
 the person a next step. In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
 as a sunken field. Code welcome keeps one stable question while Project,
-base branch, and Environment sit on a second raised card above the composer.
-The tray is slightly narrower and slides under the prompt by one corner radius,
-so the front card overlaps only its empty lower padding. Environment is the
+base branch, and Environment sit on the composer's lower band
+(`.composer-tray`, rendered through the composer's `footer` slot), under the
+prompt and its toolbar, on the tray fill with a hairline above. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
 creating a second environment model. Repository and workspace remain on that rear card after the three primary
@@ -402,9 +410,10 @@ Review, Files, Browser, Terminal, Canvas, Plan (only for a real
 plan artifact), Delivery (only for a configured target), Agents (when children
 exist or explicitly invoked), Simulator, and Side chat. The dock launcher is
 not a second thread switcher. With no open tab, it shows only capability-valid
-tool rows and a visible Add tool action. The bottom panel uses the same compact
-tool-tab and Add tool model for Review, Terminal, Browser, Files, and Side chat
-where supported. Selecting a tool removes that presentation from the other
+tool rows; the head's Add tool action appears once a tab is open, since with
+none open the body is already the list of tools to add. The bottom panel uses
+the same compact tool-tab and Add tool model for Review, Terminal, Browser,
+Files, and Side chat where supported. Selecting a tool removes that presentation from the other
 region; Terminal immediately attaches or starts and preserves one server
 session when moved.
 
@@ -432,8 +441,11 @@ is open, the disclosure shifts over the central pane and never covers the dock.
 
 The thread board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. Columns
-and compact cards use the raised card recipe; empty columns stay dashed.
-Waiting does not become a warning wall. Labels and facts use the selected
+and compact cards use the raised card recipe; empty columns stay dashed. A
+card is the Project as an eyebrow, the title, and one line: what the thread
+waits on or is doing, active runs and failing checks, who runs it, and when it
+last moved. Checkout, branch, plan, and review facts live on the list view and
+the thread. Waiting does not become a warning wall. Labels and facts use the selected
 interface typography. Thread listing, pull-request snapshot, and per-thread
 runtime reads overlap where independent.
 

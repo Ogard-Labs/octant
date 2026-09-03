@@ -10,8 +10,10 @@ import {
   TriangleAlert,
   Unplug,
 } from "lucide-react";
+import type { ProviderInstanceId } from "@octant/contracts";
 import { forwardRef, type ComponentType } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import type {
   FirstRunDiscoveryNotice,
   FirstRunProviderState,
@@ -25,6 +27,12 @@ export interface FirstRunProviderStepProps {
   readonly onOpenProviderSettings: () => void;
   readonly onRescan: () => void;
   readonly scanning: boolean;
+  /**
+   * Turn a configured provider on or off from this step. Discovery registers
+   * every runtime it finds switched off, so without this the step could only
+   * report "Disabled" and send the person to Settings to flip the switch.
+   */
+  readonly onSetProviderEnabled?: (instanceId: ProviderInstanceId, enabled: boolean) => void;
 }
 
 const PROVIDER_ICONS: Record<FirstRunProviderState, ComponentType<{ readonly size?: number }>> = {
@@ -109,6 +117,17 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
                     <Icon size={16} />
                     <span className="first-run__provider-name">{provider.displayName}</span>
                     <span className="first-run__provider-label">{provider.label}</span>
+                    {props.onSetProviderEnabled === undefined ? null : (
+                      <span className="first-run__provider-switch">
+                        <OctantSwitch
+                          checked={provider.state !== "disabled"}
+                          label={`Enable ${provider.displayName}`}
+                          onCheckedChange={(enabled) =>
+                            props.onSetProviderEnabled?.(provider.instanceId, enabled)
+                          }
+                        />
+                      </span>
+                    )}
                     <span className="first-run__provider-detail">{provider.detail}</span>
                   </li>
                 );

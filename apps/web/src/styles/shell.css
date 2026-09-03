@@ -1378,6 +1378,13 @@ form > .work-composer-adapter__attachments {
   gap: 6px;
 }
 
+.create-from-issue-control__popup {
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: min(60vh, 32rem);
+  padding: 8px 12px 12px;
+  overflow: auto;
+}
+
 .create-from-issue-control__panel,
 .create-from-issue {
   display: flex;

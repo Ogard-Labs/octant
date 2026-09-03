@@ -5142,6 +5142,8 @@ function LaunchedShell(
               : { navigatorDefault: controller.settings.navigatorAssistant.defaultProvider }),
             onOpenProviderSettings: () => void controller.openSettings({ section: "providers" }),
             onRescan: () => void discoveryController.scan(),
+            onSetProviderEnabled: (instanceId, enabled) =>
+              void providerController.setEnabled(instanceId, enabled),
             scanning: discoveryController.scanning,
           }}
           announcement={controller.announcement}

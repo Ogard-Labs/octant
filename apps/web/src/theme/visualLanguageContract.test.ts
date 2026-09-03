@@ -139,10 +139,10 @@ describe("the public-block visual language", () => {
     expect(emptyPicker).toMatch(/background:\s*transparent/);
   });
 
-  it("tucks the shared context tray above the composer on every welcome", () => {
+  it("attaches the shared context strip beneath the prompt on every welcome", () => {
     const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
     const stack = surface.match(/\.composer-stack \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
-    const dock = surface.match(/\.composer-tray \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+    const strip = surface.match(/\.composer > \.composer-tray \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const prompt =
       surface.match(/\.composer-stack > \.composer > \.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ??
       "";
@@ -152,19 +152,19 @@ describe("the public-block visual language", () => {
       "code/composer/CodeComposerAdapter.tsx",
     ].map((path) => readFileSync(join(webRoot, path), "utf8"));
 
-    expect(stack).toMatch(/position:\s*relative/);
-    expect(stack).toMatch(/isolation:\s*isolate/);
     expect(stack).toMatch(/flex-direction:\s*column/);
-    expect(dock).toMatch(/margin:\s*0 auto -18px/);
-    expect(dock).toMatch(/width:\s*calc\(100% - 40px\)/);
-    expect(dock).toMatch(/padding:\s*8px 16px 22px/);
-    expect(dock).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
-    expect(dock).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
-    expect(dock).not.toMatch(/border-radius:\s*0 0/);
-    expect(dock).not.toMatch(/position:\s*absolute/);
-    expect(prompt).toMatch(/min-height:\s*64px/);
+    // One card: the strip is the composer's own lower band, ruled off by a
+    // hairline and rounded only where the card ends, never a second object
+    // peeking out above the prompt.
+    expect(strip).toMatch(/border-top:\s*1px solid var\(--oct-border\)/);
+    expect(strip).toMatch(/border-radius:\s*0 0 var\(--oct-radius-lg\) var\(--oct-radius-lg\)/);
+    expect(strip).toMatch(/margin:\s*0/);
+    expect(strip).not.toMatch(/box-shadow/);
+    expect(strip).not.toMatch(/position:\s*absolute/);
+    // A prompt is a paragraph: four lines before the box grows.
+    expect(prompt).toMatch(/min-height:\s*96px/);
     for (const source of welcomes) {
-      expect(source).toContain("composer-tray");
+      expect(source).toMatch(/footer=\{\s*<div className="composer-tray"/);
       expect(source).not.toContain("context-strip");
     }
   });

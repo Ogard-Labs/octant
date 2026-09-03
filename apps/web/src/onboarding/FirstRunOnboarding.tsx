@@ -43,6 +43,8 @@ export interface FirstRunOnboardingProps {
   readonly onOpenProviderSettings: () => void;
   readonly onRescan: () => void;
   readonly scanning: boolean;
+  /** Turn a discovered provider on or off without leaving the wizard. */
+  readonly onSetProviderEnabled?: (instanceId: ProviderInstanceId, enabled: boolean) => void;
 
   /** The profile the host currently holds. The step edits a draft of it. */
   readonly profile: UserProfile;
@@ -434,6 +436,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               readiness={props.readiness}
               ref={providerAction}
               scanning={props.scanning}
+              {...(props.onSetProviderEnabled === undefined
+                ? {}
+                : { onSetProviderEnabled: props.onSetProviderEnabled })}
               {...(props.discoveryNotice === undefined
                 ? {}
                 : { discoveryNotice: props.discoveryNotice })}

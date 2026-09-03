@@ -2707,10 +2707,10 @@ input.switch:checked::after {
 .board-card {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-1);
+  gap: 6px;
   width: 100%;
   min-width: 0;
-  padding: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-3) 14px;
   border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
@@ -2731,6 +2731,15 @@ input.switch:checked::after {
   align-items: center;
   gap: var(--oct-space-2);
   min-width: 0;
+}
+.board-card-eyebrow {
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .board-card-title {
   /* Two lines, then ellipsis — a long title must not make one card tower
