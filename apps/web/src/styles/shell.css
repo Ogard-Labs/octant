@@ -740,6 +740,30 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   content: "\25CF ";
 }
 
+/* Unread ends the row as a small filled dot after the title; the row's own
+   label names it, so it is never colour alone. */
+.sidebar-navigation__thread-unread-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: var(--oct-radius-pill);
+  background: var(--octant-text-primary);
+}
+
+/* Show more and Show less are one quiet row at the end of a folded list. */
+.project-threads__more {
+  min-height: 26px;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.project-threads__more:hover,
+.project-threads__more:focus-visible {
+  color: var(--oct-fg);
+}
+
 .sidebar-navigation__thread-row {
   display: flex;
   align-items: center;

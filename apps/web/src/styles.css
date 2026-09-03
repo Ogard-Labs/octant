@@ -1118,6 +1118,13 @@ strong {
   margin-top: 2px;
 }
 
+/* Projects, then Chats: two flat groups parted by one hairline, never cards. */
+.project-section + .project-section {
+  margin-top: var(--oct-space-2);
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+
 /* Child threads stay one compact step inside their folder row. */
 .project-threads {
   display: grid;

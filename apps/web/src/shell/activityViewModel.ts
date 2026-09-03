@@ -118,7 +118,7 @@ export function filterSidebarActivityView(
 export function buildSidebarActivityView(input: {
   readonly now?: Date;
   readonly projects: ReadonlyArray<SidebarActivityProject>;
-  readonly unfiledLabel?: "Unfiled" | "Recents";
+  readonly unfiledLabel?: "Unfiled" | "Recents" | "Chats";
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
 }): SidebarActivityView {
   const now = input.now ?? new Date();
@@ -162,7 +162,7 @@ export function buildSidebarActivityView(input: {
 function toActivityThread(
   thread: ChatThreadNavigationItem,
   projectNames: ReadonlyMap<string, string>,
-  unfiledLabel: "Unfiled" | "Recents",
+  unfiledLabel: "Unfiled" | "Recents" | "Chats",
 ): SidebarActivityThread {
   const projectName =
     thread.projectId === undefined
