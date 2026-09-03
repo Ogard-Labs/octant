@@ -790,7 +790,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>{waitingTurnLabel(props.controller.providerRequests)}</span>
         </div>
-      ) : props.controller.turnError === undefined ? null : (
+      ) : props.controller.turnError === undefined ||
+        (props.controller.turnStatus === "failed" &&
+          props.controller.conversationHistory !== "unavailable") ? null : (
+        // A failed turn is already in the transcript with its reason; a second
+        // notice above it said the same thing louder. The callout stays for a
+        // history the host cannot read, where the retry offer lives.
         <div
           className="callout callout-warn thread-column code-thread-workspace__callout"
           role="alert"

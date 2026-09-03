@@ -2325,7 +2325,7 @@ async function projectConversationTurns(
     messages.push({
       id: `${turn.operationId}:assistant`,
       role: "assistant",
-      text: parts.join("") || conversationFallback(turn.status),
+      text: parts.join("") || turn.failure?.message || conversationFallback(turn.status),
       operationId: turn.operationId,
       providerInstanceId: turn.providerInstanceId,
       modelId: turn.modelId,

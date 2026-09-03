@@ -1257,6 +1257,12 @@ export const CodeConversationTurn = Schema.Struct({
   /** Whether the turn journaled more steps than `steps` carries. */
   stepsTruncated: Schema.optional(Schema.Boolean),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
+  /**
+   * Why a failed turn failed, as the provider or the host reported it. Absent
+   * on a turn that did not fail, and on one journaled before the host kept
+   * the reason.
+   */
+  failure: Schema.optional(CodeOperationFailure),
   startedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 }).annotations(strict);

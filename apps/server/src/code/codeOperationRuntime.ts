@@ -1486,7 +1486,15 @@ function normalizedOperationEvent(
   if (event.category === "completion") return { kind: "operation-state", state: "completed" };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };
   if (event.category === "interruption") return { kind: "operation-state", state: "interrupted" };
-  if (event.category === "failure") return { kind: "operation-state", state: "failed" };
+  // The provider's sentence is the only reason the person will ever see:
+  // without it the transcript said "The provider turn failed" and nothing
+  // else, whatever the driver had refused with.
+  if (event.category === "failure")
+    return {
+      kind: "operation-state",
+      state: "failed",
+      ...(event.text === undefined ? {} : { failure: { category: "failed", message: event.text } }),
+    };
   return undefined;
 }
 
