@@ -276,6 +276,52 @@ describe("Chat routes", () => {
     expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal));
   });
 
+  it("holds an idle events stream open and continues from its cursor after the next commit", async () => {
+    let signalChange!: () => void;
+    const changed = new Promise<void>((resolve) => {
+      signalChange = resolve;
+    });
+    let waits = 0;
+    const subscribe = vi.fn(async function* (_threadId: unknown, afterSequence: number) {
+      if (afterSequence === 41 && subscribe.mock.calls.length === 2) yield frame42;
+    });
+    const route = routeFixture({ subscribe }, undefined, {
+      // The first wait ends with a commit; later waits see nothing and run
+      // into the idle bound, which is what closes the stream.
+      waitForThreadChange: () => (++waits === 1 ? changed : new Promise<void>(() => {})),
+      idleWaitMs: 30,
+    });
+    const responsePromise = route(request(`/api/chat/threads/${threadId}/events?afterSequence=41`));
+    const framesPromise = collectFrames(responsePromise);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    signalChange();
+
+    await expect(framesPromise).resolves.toEqual([frame42]);
+    expect(subscribe.mock.calls.map((call) => call[1])).toEqual([41, 41]);
+  });
+
+  it("closes an idle events stream at the idle bound and releases its change wait", async () => {
+    let waitAborted = false;
+    const subscribe = vi.fn(async function* () {});
+    const route = routeFixture({ subscribe }, undefined, {
+      waitForThreadChange: (signal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            waitAborted = true;
+            reject(new Error("aborted"));
+          });
+        }),
+      idleWaitMs: 20,
+    });
+
+    await expect(
+      collectFrames(route(request(`/api/chat/threads/${threadId}/events?afterSequence=41`))),
+    ).resolves.toEqual([]);
+    expect(waitAborted).toBe(true);
+    expect(subscribe).toHaveBeenCalledOnce();
+  });
+
   it("fails a live replay stream whose NDJSON line exceeds the one MiB bound", async () => {
     const oversizedFrame = {
       threadId,
@@ -317,7 +363,11 @@ async function collectFrames(
     .map((line) => JSON.parse(line) as ChatEventFrame);
 }
 
-function routeFixture(overrides: Record<string, unknown> = {}, maxJsonBodySize?: number) {
+function routeFixture(
+  overrides: Record<string, unknown> = {},
+  maxJsonBodySize?: number,
+  dependencies: Partial<Parameters<typeof createChatRouteHandler>[0]> = {},
+) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   const service = {
@@ -357,5 +407,6 @@ function routeFixture(overrides: Record<string, unknown> = {}, maxJsonBodySize?:
     windowAuthorityStore: store,
     now: () => 1,
     ...(maxJsonBodySize === undefined ? {} : { maxJsonBodySize }),
+    ...dependencies,
   });
 }

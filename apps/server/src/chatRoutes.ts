@@ -38,7 +38,22 @@ export interface ChatRouteDependencies {
   readonly maxJsonBodySize?: number;
   readonly maxAttachmentBodySize?: number;
   readonly now?: () => number;
+  /**
+   * Resolves once the journal commits a Chat change. With it, an events
+   * stream that has replayed everything stays open and continues from its
+   * cursor after the next commit instead of closing at once; without it the
+   * stream is a bounded replay.
+   */
+  readonly waitForThreadChange?: (signal: AbortSignal) => Promise<void>;
+  /** How long an idle events stream is held open before it closes. */
+  readonly idleWaitMs?: number;
 }
+
+/* Bun closes a response that has sent nothing for 10 seconds, so an idle
+   stream gives up just under that and lets the client reopen it. Before the
+   stream waited at all, a completed thread's client reopened it four times a
+   second for as long as the thread was on screen. */
+const DEFAULT_IDLE_WAIT_MS = 8_000;
 
 export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
   const now = dependencies.now ?? Date.now;
@@ -262,7 +277,14 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           );
         }
         return ndjsonStreamResponse(
-          (signal) => dependencies.service.subscribe(threadId, afterSequence, signal),
+          {
+            frames: (cursor, signal) => dependencies.service.subscribe(threadId, cursor, signal),
+            afterSequence,
+            ...(dependencies.waitForThreadChange === undefined
+              ? {}
+              : { waitForChange: dependencies.waitForThreadChange }),
+            idleWaitMs: dependencies.idleWaitMs ?? DEFAULT_IDLE_WAIT_MS,
+          },
           request.signal,
           origin,
         );
@@ -521,7 +543,12 @@ function jsonResponse(body: unknown, status: number, origin: string | null): Res
 }
 
 function ndjsonStreamResponse(
-  frames: (signal: AbortSignal) => AsyncIterable<ChatEventFrame>,
+  source: {
+    readonly frames: (afterSequence: number, signal: AbortSignal) => AsyncIterable<ChatEventFrame>;
+    readonly afterSequence: number;
+    readonly waitForChange?: (signal: AbortSignal) => Promise<void>;
+    readonly idleWaitMs: number;
+  },
   requestSignal: AbortSignal,
   origin: string | null,
 ): Response {
@@ -534,13 +561,32 @@ function ndjsonStreamResponse(
     start(controller) {
       void (async () => {
         try {
-          iterator = frames(streamAbort.signal)[Symbol.asyncIterator]();
+          let cursor = source.afterSequence;
           let emitted = 0;
-          while (!streamAbort.signal.aborted && emitted < MAX_REPLAY_FRAMES) {
-            const next = await iterator.next();
-            if (next.done) break;
-            controller.enqueue(encoder.encode(serializeNdjsonFrame(next.value)));
-            emitted += 1;
+          for (;;) {
+            iterator = source.frames(cursor, streamAbort.signal)[Symbol.asyncIterator]();
+            while (!streamAbort.signal.aborted && emitted < MAX_REPLAY_FRAMES) {
+              const next = await iterator.next();
+              if (next.done) break;
+              cursor = next.value.sequence;
+              controller.enqueue(encoder.encode(serializeNdjsonFrame(next.value)));
+              emitted += 1;
+            }
+            await iterator.return?.();
+            iterator = undefined;
+            if (
+              streamAbort.signal.aborted ||
+              emitted >= MAX_REPLAY_FRAMES ||
+              source.waitForChange === undefined
+            ) {
+              break;
+            }
+            const changed = await waitForChangeWithin(
+              source.waitForChange,
+              source.idleWaitMs,
+              streamAbort.signal,
+            );
+            if (!changed) break;
           }
           if (!streamAbort.signal.aborted) controller.close();
         } catch (error) {
@@ -564,6 +610,39 @@ function ndjsonStreamResponse(
       "content-type": "application/x-ndjson",
     },
   });
+}
+
+/**
+ * True when a Chat change was committed before the idle bound, false when the
+ * bound passed or the stream was aborted. A wait that fails (the change feed
+ * is full or closing) counts as the bound passing rather than as a change, so
+ * a client never spins on an unavailable feed.
+ */
+async function waitForChangeWithin(
+  waitForChange: (signal: AbortSignal) => Promise<void>,
+  idleWaitMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (signal.aborted) return false;
+  const waitAbort = new AbortController();
+  const onAbort = () => waitAbort.abort();
+  signal.addEventListener("abort", onAbort, { once: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      waitForChange(waitAbort.signal).then(
+        () => !signal.aborted,
+        () => false,
+      ),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), idleWaitMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
+    waitAbort.abort();
+  }
 }
 
 function serializeNdjsonFrame(frame: ChatEventFrame): string {
