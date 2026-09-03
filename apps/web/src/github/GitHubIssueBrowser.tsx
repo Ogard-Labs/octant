@@ -21,6 +21,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { describeGithubRemediation } from "./githubRemediation";
 import {
+  DEFAULT_ISSUE_SORT,
   ISSUE_SORT_OPTIONS,
   isIssueSort,
   readIssuesAcrossRepositories,
@@ -132,7 +133,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
   const [repository, setRepository] = useState<GithubRepositoryRow>();
   const [repositoryPickerOpen, setRepositoryPickerOpen] = useState(false);
   const [stateFilter, setStateFilter] = useState<GithubIssueStateFilter>("open");
-  const [sort, setSort] = useState<IssueSort>("updated-desc");
+  const [sort, setSort] = useState<IssueSort>(DEFAULT_ISSUE_SORT);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search.trim(), SEARCH_DEBOUNCE_MS);
   const [list, setList] = useState<IssueListState>({ kind: "idle" });
@@ -335,6 +336,10 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
     if (next === scope) return;
     clearSelection();
     setScope(next);
+    // Sorting by repository only exists across repositories. Carrying it into
+    // the one-repository scope left the sort trigger with no matching option
+    // and so no label at all.
+    if (next !== "all" && sort === "repository") setSort(DEFAULT_ISSUE_SORT);
   };
 
   // Both scopes end in one sorted list of attributed rows, so the list below

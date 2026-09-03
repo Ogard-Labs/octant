@@ -656,9 +656,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         )}
 
+        {/* A draft of only spaces is empty to submit, so it is empty here too:
+            the suggestions stay reachable instead of disappearing behind a
+            stray space. */}
         {props.suggestions === undefined ||
         props.suggestions.length === 0 ||
-        prompt !== "" ? null : (
+        trimmed !== "" ? null : (
           <div aria-label="Suggested prompts" className="code-home__suggestions" role="group">
             {props.suggestions.map((suggestion) => (
               <OctantButton

@@ -448,13 +448,19 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           client={props.githubClient}
           onPick={(item) => {
             const reference = `${item.owner}/${item.name}#${String(item.number)}`;
-            if (item.category === "issue") {
-              setCreateFromSelection({
-                kind: "github",
-                request: { owner: item.owner, name: item.name, number: item.number },
-                label: reference,
-              });
-            }
+            // Only an issue can be attached to the new thread, so picking a
+            // pull request has to take the previous issue back off: leaving it
+            // sent a "Review pull request …" draft away carrying an unrelated
+            // issue as its context.
+            setCreateFromSelection(
+              item.category === "issue"
+                ? {
+                    kind: "github",
+                    request: { owner: item.owner, name: item.name, number: item.number },
+                    label: reference,
+                  }
+                : undefined,
+            );
             setPromptRequest((current) => ({
               text:
                 item.category === "issue"

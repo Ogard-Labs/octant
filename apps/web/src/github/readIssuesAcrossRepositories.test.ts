@@ -100,6 +100,26 @@ describe("sortIssueRows", () => {
     ]);
     expect(rows).toEqual(original);
   });
+
+  it("keeps rows sharing an update time in the same order whichever repository answered first", () => {
+    // Concurrent reads append in response order, so the same two issues can
+    // arrive either way round between refreshes.
+    const sameDay = "2026-08-04";
+    const first = [
+      { ...issueRow(11, sameDay), owner: "octant", name: "zeta" },
+      { ...issueRow(4, sameDay), owner: "octant", name: "alpha" },
+    ];
+    const reversed = [...first].reverse();
+
+    for (const sort of ["updated-desc", "updated-asc"] as const) {
+      expect(sortIssueRows(first, sort).map((row) => `${row.name}#${row.number}`)).toEqual(
+        sortIssueRows(reversed, sort).map((row) => `${row.name}#${row.number}`),
+      );
+    }
+    expect(
+      sortIssueRows(reversed, "updated-desc").map((row) => `${row.name}#${row.number}`),
+    ).toEqual(["alpha#4", "zeta#11"]);
+  });
 });
 
 function issueRow(number: number, day: string) {

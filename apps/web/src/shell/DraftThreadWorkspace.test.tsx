@@ -220,6 +220,60 @@ describe("DraftThreadWorkspace", () => {
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
+  it("drops a picked issue when the next pick is a pull request", async () => {
+    const user = userEvent.setup();
+    const onCreateCodeThread = vi.fn();
+    const githubClient = {
+      readCatalogue: async () => ({
+        kind: "assigned-work",
+        page: {
+          items: [
+            {
+              category: "issue",
+              owner: "octant",
+              name: "app",
+              number: 12,
+              title: "Name the Board",
+              author: "octocat",
+              updatedAt: "2026-08-05T09:00:00.000Z",
+              url: "https://github.com/octant/app/issues/12",
+            },
+            {
+              category: "pull-request",
+              owner: "octant",
+              name: "app",
+              number: 13,
+              title: "Widen the dock tabs",
+              author: "octocat",
+              updatedAt: "2026-08-04T09:00:00.000Z",
+              url: "https://github.com/octant/app/pull/13",
+            },
+          ],
+        },
+      }),
+    } as never;
+
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        githubClient={githubClient}
+        mode="code"
+        onCreateCodeThread={onCreateCodeThread}
+        projectId={"20000000-0000-4000-8000-000000000001" as never}
+        projects={projects}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /Name the Board/ }));
+    await user.click(screen.getByRole("button", { name: /Widen the dock tabs/ }));
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+
+    // The draft is now about the pull request, so the issue it replaced must
+    // not ride along as the new thread's context.
+    expect(onCreateCodeThread).toHaveBeenCalled();
+    expect(onCreateCodeThread.mock.calls[0]?.[0]).not.toHaveProperty("issueContext");
+  });
+
   it("shows project context in the context strip", () => {
     render(
       <DraftThreadWorkspace

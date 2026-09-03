@@ -37,6 +37,9 @@ export const ISSUE_SORT_OPTIONS: ReadonlyArray<{ readonly id: IssueSort; readonl
     { id: "repository", label: "Repository" },
   ];
 
+/** Sorting by repository exists only across repositories; this one always does. */
+export const DEFAULT_ISSUE_SORT: IssueSort = "updated-desc";
+
 export function isIssueSort(value: string): value is IssueSort {
   return ISSUE_SORT_OPTIONS.some((option) => option.id === value);
 }
@@ -126,13 +129,19 @@ export function sortIssueRows<Row extends RepositoryIssueRow>(
   rows: ReadonlyArray<Row>,
   sort: IssueSort,
 ): ReadonlyArray<Row> {
-  const byUpdatedDesc = (a: Row, b: Row) => b.updatedAt.localeCompare(a.updatedAt);
+  // Concurrent reads append rows in whatever order the responses land, so two
+  // issues sharing a timestamp would swap places between refreshes. Repository
+  // and number settle every remaining tie.
+  const byIdentity = (a: Row, b: Row) =>
+    `${a.owner}/${a.name}`.localeCompare(`${b.owner}/${b.name}`) || a.number - b.number;
+  const byUpdatedDesc = (a: Row, b: Row) =>
+    b.updatedAt.localeCompare(a.updatedAt) || byIdentity(a, b);
   const sorted = [...rows];
   switch (sort) {
     case "updated-desc":
       return sorted.sort(byUpdatedDesc);
     case "updated-asc":
-      return sorted.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+      return sorted.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt) || byIdentity(a, b));
     case "number-desc":
       return sorted.sort((a, b) => b.number - a.number || byUpdatedDesc(a, b));
     case "repository":

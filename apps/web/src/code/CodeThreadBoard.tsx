@@ -39,8 +39,23 @@ type CodeBoardLayout = "board" | "list";
 function readStoredLayout(
   storage: Pick<Storage, "getItem" | "setItem"> | undefined,
 ): CodeBoardLayout | undefined {
-  const value = storage?.getItem(LAYOUT_STORAGE_KEY);
-  return value === "board" || value === "list" ? value : undefined;
+  try {
+    const value = storage?.getItem(LAYOUT_STORAGE_KEY);
+    return value === "board" || value === "list" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStoredLayout(
+  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
+  layout: CodeBoardLayout,
+): void {
+  try {
+    storage?.setItem(LAYOUT_STORAGE_KEY, layout);
+  } catch {
+    // A device that cannot persist the preference still works this session.
+  }
 }
 const ALL_STATUSES: readonly CodeBoardStatus[] = THREAD_BOARD_STATUS_COLUMN_ORDER;
 
@@ -193,7 +208,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             const selected = value[0];
             if (selected !== "board" && selected !== "list") return;
             setLayout(selected);
-            storage?.setItem(LAYOUT_STORAGE_KEY, selected);
+            writeStoredLayout(storage, selected);
           }}
           value={[layout]}
         >
