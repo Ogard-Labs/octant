@@ -116,8 +116,32 @@ export function ProviderUsageLimitsPanel(props: {
   );
 }
 
+/**
+ * A flat "Unavailable" said nothing about whether limits could ever appear.
+ * The reason names the actual state: most runtimes only report their windows
+ * while a session runs, so an idle provider has simply not reported yet.
+ */
+const UNAVAILABLE_COPY: Readonly<Record<"unsupported" | "not-configured" | "not-ready", string>> = {
+  unsupported: "Not reported yet. Limits appear once a session with this runtime reports them.",
+  "not-configured": "Provider is off.",
+  "not-ready": "Waiting for the provider.",
+};
+
+const WINDOW_LABELS: Readonly<Record<string, string>> = {
+  five_hour: "5-hour window",
+  seven_day: "7-day window",
+  seven_day_opus: "7-day Opus window",
+  seven_day_sonnet: "7-day Sonnet window",
+};
+
+function windowLabel(window: string): string {
+  return WINDOW_LABELS[window] ?? window.replaceAll("_", " ");
+}
+
 function EntryDetails({ entry }: { readonly entry: ProviderUsageLimitsEntry }) {
-  if (entry.status === "unavailable") return <p className="provider-limits__state">Unavailable</p>;
+  if (entry.status === "unavailable") {
+    return <p className="provider-limits__state">{UNAVAILABLE_COPY[entry.reason]}</p>;
+  }
   const limits = entry.status === "available" ? entry.limits : entry.staleLimits;
   return (
     <div className="provider-limits__details">
@@ -151,7 +175,7 @@ function LimitBuckets({ limits }: { readonly limits: ProviderServiceLimits }) {
       {limits.rateLimitWindows?.map((window) => (
         <div className="provider-limits__window" key={window.window}>
           <p>
-            {window.window} · {capitalize(window.status)}
+            {windowLabel(window.window)} · {capitalize(window.status)}
             {window.utilization === undefined
               ? ""
               : ` · ${Math.round(window.utilization * 100)}% used`}
@@ -159,7 +183,7 @@ function LimitBuckets({ limits }: { readonly limits: ProviderServiceLimits }) {
           </p>
           {window.utilization === undefined ? null : (
             <progress
-              aria-label={`${window.window} used`}
+              aria-label={`${windowLabel(window.window)} used`}
               max={100}
               value={Math.round(window.utilization * 100)}
             />
