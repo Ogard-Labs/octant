@@ -49,7 +49,7 @@
   --octant-sidebar-translucent: rgb(16 16 16 / 88%);
   --octant-sidebar-translucent-subtle: rgb(16 16 16 / 62%);
   --octant-sidebar-translucent-strong: rgb(16 16 16 / 34%);
-  --octant-scrim: rgb(0 0 0 / 70%);
+  --octant-scrim: #000000;
   --octant-floating: #232323;
   --octant-control: #2b2b2b;
   --octant-surface-muted: #2b2b2b;
@@ -203,7 +203,7 @@ html[data-octant-theme-mode="light"] {
   --octant-text-secondary-high-contrast: #3a3a3a;
   --octant-text-muted-high-contrast: #565656;
   --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 10%, transparent);
-  --octant-scrim: rgb(15 17 19 / 45%);
+  --octant-scrim: #000000;
   --octant-shadow-xs: 0 0 0 1px rgb(16 24 40 / 6%), 0 1px 2px rgb(16 24 40 / 5%);
   --octant-shadow-sm:
     0 0 0 1px rgb(16 24 40 / 8%), 0 1px 2px rgb(16 24 40 / 7%), 0 6px 18px -10px rgb(16 24 40 / 16%);

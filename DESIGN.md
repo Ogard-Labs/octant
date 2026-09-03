@@ -190,9 +190,9 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 | Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                              |
 | Focus ring             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Keyboard focus                                    |
 | Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#e1e1df`   | Selected rows and active controls                 |
-| Accent fill            | `--octant-accent`                                   | `#4d9ec8` | `#1f6f96`   | One primary action or active mark                 |
+| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                 |
 | Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                               |
-| Accent text            | `--octant-accent-text`                              | `#4d9ec8` | `#1f6f96`   | Accent used as text; normal-text contrast         |
+| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast         |
 | Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
