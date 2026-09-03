@@ -134,9 +134,14 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
           threadId={props.activeCodeThreadView.thread.id}
         />
       )}
-      <Suspense fallback={null}>
-        <FirstRunOnboarding {...props.firstRun} />
-      </Suspense>
+      {/* First run renders nothing once it has been answered, but a mounted
+          lazy element still fetches its chunk. Asking about visibility here
+          keeps the whole wizard out of every launch after the first. */}
+      {props.firstRun.controller.visible ? (
+        <Suspense fallback={null}>
+          <FirstRunOnboarding {...props.firstRun} />
+        </Suspense>
+      ) : null}
       <p
         aria-atomic="true"
         aria-live="polite"
