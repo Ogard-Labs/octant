@@ -98,24 +98,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         </div>
 
         <div className="composer-stack">
-          <div className="composer-tray" aria-label="Thread context">
-            <div className="composer-tray__leading">
-              <HostSelector
-                presentation="environment"
-                {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                {...(props.selectedHostId === undefined
-                  ? {}
-                  : { selectedHostId: props.selectedHostId })}
-                {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-                {...(props.lastSelectedHealthyHostId === undefined
-                  ? {}
-                  : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-                {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-                {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
-                requiredCapability="chat"
-              />
-            </div>
-          </div>
           <ThreadComposer
             input={
               <OctantTextarea
@@ -158,6 +140,28 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 send: { ariaLabel: "Start chat", disabled: !canSubmit, onSend: submit },
               },
             }}
+            footer={
+              <div className="composer-tray" aria-label="Thread context">
+                <div className="composer-tray__leading">
+                  <HostSelector
+                    presentation="environment"
+                    {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                    {...(props.selectedHostId === undefined
+                      ? {}
+                      : { selectedHostId: props.selectedHostId })}
+                    {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+                    {...(props.lastSelectedHealthyHostId === undefined
+                      ? {}
+                      : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                    {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+                    {...(props.onSelectHost === undefined
+                      ? {}
+                      : { onSelectHost: props.onSelectHost })}
+                    requiredCapability="chat"
+                  />
+                </div>
+              </div>
+            }
           />
         </div>
         {statusMessage === undefined ? null : (

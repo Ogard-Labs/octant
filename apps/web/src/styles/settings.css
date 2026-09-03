@@ -749,6 +749,13 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding-inline: 0;
 }
 
+/* The row's trailing control keeps a hair of room before the rule ends: a
+   switch or icon button flush with the last pixel drew its shadow and focus
+   ring past the hairline, so the controls looked cut off at the edge. */
+.settings-card-section--open > .provlist > .provrow {
+  padding-inline: 0 4px;
+}
+
 .settings-card-section--open > .setgroup > .setrow:first-child {
   border-top: 1px solid var(--oct-hairline);
 }

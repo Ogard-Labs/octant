@@ -66,6 +66,12 @@ import {
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantPopover } from "../ui/base/OctantPopover";
+import { RecentThreadList, type RecentThreadListItem } from "./RecentThreadList";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { ThreadComposer } from "../composer/ThreadComposer";
+import { HostSelector } from "./HostSelector";
+import type { OctantHostBridge } from "./hostBridge";
 
 // Cloning a repository from GitHub is a first-time step, not a start-screen
 // staple; its onboarding stays out of the first bundle.
@@ -74,11 +80,6 @@ const GitHubRepositoryOnboarding = lazy(() =>
     default: module.GitHubRepositoryOnboarding,
   })),
 );
-import { RecentThreadList, type RecentThreadListItem } from "./RecentThreadList";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
-import { ThreadComposer } from "../composer/ThreadComposer";
-import { HostSelector } from "./HostSelector";
-import type { OctantHostBridge } from "./hostBridge";
 
 /** One row of the start screen's recent-work list. */
 export type DraftRecentThread = RecentThreadListItem;
@@ -673,19 +674,78 @@ function CreateFromIssueControl(props: {
         : showGithub
           ? "github"
           : "linear";
+  const panel = (
+    <div className="create-from-issue-control__panel">
+      <div role="tablist" aria-label="Create from">
+        {showGithub ? (
+          <OctantButton
+            aria-selected={activeTab === "github"}
+            onClick={() => props.onTabChange("github")}
+            role="tab"
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Issues
+          </OctantButton>
+        ) : null}
+        {showLinear ? (
+          <OctantButton
+            aria-selected={activeTab === "linear"}
+            onClick={() => props.onTabChange("linear")}
+            role="tab"
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Linear
+          </OctantButton>
+        ) : null}
+      </div>
+      {activeTab === "github" && props.githubClient !== undefined ? (
+        <div role="tabpanel">
+          <CreateFromIssuePicker
+            client={props.githubClient}
+            disabled={props.creating}
+            onSelect={props.onSelectGithub}
+            {...(props.selectedGithub === undefined ? {} : { selected: props.selectedGithub })}
+          />
+        </div>
+      ) : null}
+      {activeTab === "linear" && props.linearClient !== undefined ? (
+        <div role="tabpanel">
+          <CreateFromLinearIssuePicker
+            client={props.linearClient}
+            disabled={props.creating}
+            onSelect={props.onSelectLinear}
+            {...(props.selectedLinear === undefined ? {} : { selected: props.selectedLinear })}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+  // The picker floats over the page. Opened in place it grew the context
+  // strip by a repository list and pushed the prompt down with it.
   return (
     <div className="create-from-issue-control">
       <div className="create-from-issue-control__bar">
-        <OctantButton
-          aria-expanded={props.open}
-          disabled={props.creating}
-          onClick={props.onToggle}
-          size="sm"
-          type="button"
-          variant="ghost"
+        <OctantPopover
+          align="end"
+          className="create-from-issue-control__popup"
+          onOpenChange={(open) => {
+            if (open !== props.open) props.onToggle();
+          }}
+          open={props.open}
+          side="bottom"
+          sideOffset={8}
+          title="Create from an issue"
+          trigger={<>Create from…</>}
+          triggerDisabled={props.creating}
+          triggerLabel="Create from…"
+          triggerVariant="ghost"
         >
-          Create from…
-        </OctantButton>
+          {panel}
+        </OctantPopover>
         {props.selectedLabel === undefined ? null : (
           <span className="create-from-issue-control__selection">
             <span>{props.selectedLabel}</span>
@@ -702,56 +762,6 @@ function CreateFromIssueControl(props: {
           </span>
         )}
       </div>
-      {props.open ? (
-        <div className="create-from-issue-control__panel">
-          <div role="tablist" aria-label="Create from">
-            {showGithub ? (
-              <OctantButton
-                aria-selected={activeTab === "github"}
-                onClick={() => props.onTabChange("github")}
-                role="tab"
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Issues
-              </OctantButton>
-            ) : null}
-            {showLinear ? (
-              <OctantButton
-                aria-selected={activeTab === "linear"}
-                onClick={() => props.onTabChange("linear")}
-                role="tab"
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Linear
-              </OctantButton>
-            ) : null}
-          </div>
-          {activeTab === "github" && props.githubClient !== undefined ? (
-            <div role="tabpanel">
-              <CreateFromIssuePicker
-                client={props.githubClient}
-                disabled={props.creating}
-                onSelect={props.onSelectGithub}
-                {...(props.selectedGithub === undefined ? {} : { selected: props.selectedGithub })}
-              />
-            </div>
-          ) : null}
-          {activeTab === "linear" && props.linearClient !== undefined ? (
-            <div role="tabpanel">
-              <CreateFromLinearIssuePicker
-                client={props.linearClient}
-                disabled={props.creating}
-                onSelect={props.onSelectLinear}
-                {...(props.selectedLinear === undefined ? {} : { selected: props.selectedLinear })}
-              />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }

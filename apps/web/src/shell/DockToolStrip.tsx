@@ -34,19 +34,33 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
     if (props.capacity !== undefined) return;
     const node = strip.current;
     if (node === null) return;
+    // The strip shrinks to its content, so its own width says how many tabs
+    // it currently shows, not how many would fit: measured that way it folded
+    // tabs into the overflow menu one by one until a wide dock showed a
+    // single tab. The room available is the cluster's width minus the
+    // siblings that share it (the Add tool trigger).
+    const cluster = node.parentElement;
     const measure = () => {
-      const width = node.clientWidth;
+      const width = cluster === null ? node.clientWidth : cluster.clientWidth;
       // jsdom reports 0; treat that as unknown width and keep every tool.
       if (width === 0) {
         setMeasuredCapacity(props.tabs.length);
         return;
       }
-      setMeasuredCapacity(Math.max(1, Math.floor((width - OVERFLOW_SLOT_WIDTH) / TOOL_SLOT_WIDTH)));
+      let siblings = 0;
+      if (cluster !== null) {
+        for (const child of cluster.children) {
+          if (child !== node && child instanceof HTMLElement) siblings += child.offsetWidth + 2;
+        }
+      }
+      setMeasuredCapacity(
+        Math.max(1, Math.floor((width - siblings - OVERFLOW_SLOT_WIDTH) / TOOL_SLOT_WIDTH)),
+      );
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
-    observer.observe(node);
+    observer.observe(cluster ?? node);
     return () => observer.disconnect();
   }, [props.capacity, props.tabs.length]);
 

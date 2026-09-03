@@ -297,7 +297,7 @@
 
 .first-run__provider {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
   column-gap: var(--oct-space-2);
   row-gap: 2px;
@@ -333,6 +333,14 @@ button.first-run__fact-action {
   font-size: var(--oct-text-xs);
   white-space: nowrap;
   color: var(--oct-muted);
+}
+
+/* The switch is the row's one control; it sits after the state word so the
+   name, the state, and the action read left to right. */
+.first-run__provider-switch {
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--oct-space-2);
 }
 
 .first-run__provider-detail {

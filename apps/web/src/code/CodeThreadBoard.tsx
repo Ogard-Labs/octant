@@ -646,6 +646,9 @@ function CodeBoardCardView(props: {
       data-follow-up={card.followUp ? "true" : "false"}
       data-status={card.status}
     >
+      {props.layout === "card" && props.projectName !== undefined ? (
+        <span className="board-card-eyebrow">{props.projectName}</span>
+      ) : null}
       <span className={props.layout === "list" ? "issuerow-main" : "board-card-top"}>
         {props.unread ? <span className="sr-only">Unread</span> : null}
         <OctantButton
@@ -676,12 +679,16 @@ function CodeBoardCardView(props: {
           {statusLabel}
         </span>
       </span>
-      {props.layout === "card" && card.childAgents.latestSummary !== undefined ? (
-        <span className="board-card-activity">{card.childAgents.latestSummary}</span>
-      ) : null}
+      {/* A card says what the thread is doing now, who runs it, and when it
+          last moved; the checkout, branch, plan, and review facts live in the
+          list view and on the thread. Stacked on the card they made every
+          thread a wall of metadata with the same weight as its title. */}
       <span className={props.layout === "list" ? "issuerow-meta" : "board-card-facts"}>
-        {cardFacts(card, props.projectName, props.providerLabel).map((fact) => (
-          <span className={fact.className ?? "fact"} key={fact.key}>
+        {(props.layout === "list"
+          ? cardFacts(card, props.projectName, props.providerLabel)
+          : cardSummary(card, props.providerLabel, waitingReason)
+        ).map((fact) => (
+          <span className={fact.className ?? "fact"} key={fact.key} title={fact.title}>
             {fact.icon}
             {fact.text}
           </span>
@@ -693,23 +700,25 @@ function CodeBoardCardView(props: {
           : { onSelect: props.onSelectPullRequest })}
         summaries={card.pullRequestSummaries}
       />
-      {waitingReason === undefined ? null : (
+      {props.layout === "list" && waitingReason !== undefined ? (
         <span className="board-card-blocked">{waitingReason}</span>
-      )}
-      <details className="code-board__card-details">
-        <summary aria-label={`Details for ${card.title}`}>
-          <span>Details</span>
-          <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
-        </summary>
-        <dl className="code-board__card-meta">
-          {cardDetailRows(card, props.projectName, props.providerLabel).map((row) => (
-            <div key={row.label}>
-              <dt>{row.label}</dt>
-              <dd>{row.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </details>
+      ) : null}
+      {props.layout === "list" ? (
+        <details className="code-board__card-details">
+          <summary aria-label={`Details for ${card.title}`}>
+            <span>Details</span>
+            <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+          </summary>
+          <dl className="code-board__card-meta">
+            {cardDetailRows(card, props.projectName, props.providerLabel).map((row) => (
+              <div key={row.label}>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      ) : null}
     </article>
   );
 }
@@ -781,6 +790,53 @@ interface CardFact {
   readonly text: string;
   readonly className?: string;
   readonly icon?: ReactNode;
+  readonly title?: string;
+}
+
+/** The one line under a card title: activity, who runs it, when it last moved. */
+function cardSummary(
+  card: CodeBoardCard,
+  providerLabel: string | undefined,
+  waitingReason: string | undefined,
+): ReadonlyArray<CardFact> {
+  const facts: CardFact[] = [];
+  if (waitingReason !== undefined) facts.push({ key: "waiting", text: waitingReason });
+  if (card.childAgents.latestSummary !== undefined) {
+    facts.push({ key: "activity", text: card.childAgents.latestSummary });
+  }
+  if (card.childAgents.active > 0) {
+    facts.push({
+      key: "child-runs",
+      text: `${card.childAgents.active} active ${card.childAgents.active === 1 ? "run" : "runs"}`,
+    });
+  }
+  if (card.checks.state === "failing") {
+    facts.push({ key: "checks", text: "Checks failing", className: "fact bad" });
+  }
+  if (providerLabel !== undefined) facts.push({ key: "provider", text: providerLabel });
+  if (card.lastMeaningfulActivityAt !== null) {
+    facts.push({
+      key: "activity-at",
+      text: relativeActivity(card.lastMeaningfulActivityAt, Date.now()),
+      title: activityFormatter.format(new Date(card.lastMeaningfulActivityAt)),
+    });
+  }
+  return facts;
+}
+
+const activityFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+function relativeActivity(at: string, now: number): string {
+  const elapsedMs = Math.max(0, now - Date.parse(at));
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function cardFacts(

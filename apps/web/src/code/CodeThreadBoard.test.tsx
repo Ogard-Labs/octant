@@ -380,22 +380,20 @@ describe("CodeThreadBoard", () => {
     expect(await within(activeFilters).findByText("Project B")).toHaveClass("tag", "tag-value");
   });
 
-  it("keeps secondary card metadata collapsed until Details is opened", async () => {
+  it("keeps checkout and delivery detail off the board card", async () => {
     const loadBoard = vi.fn(async () =>
       view([card({ id: "01", status: "waiting", title: "Waiting thread" })]),
     );
     render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
     await screen.findByText("Waiting thread");
-    const metadata = screen.getByText("Delivery target").closest("dl");
-    expect(metadata).not.toBeNull();
-    if (metadata === null) throw new Error("Expected card metadata");
-    expect(metadata).not.toBeVisible();
-
-    fireEvent.click(screen.getByText("Details"));
-    expect(metadata).toBeVisible();
-    expect(within(metadata).getByText("Project A")).toBeVisible();
-    expect(within(metadata).getByText(/Opened PR/)).toBeVisible();
+    // The card is title, eyebrow, and one line; the detail rows belong to
+    // the list view and the thread itself.
+    expect(screen.queryByText("Delivery target")).toBeNull();
+    expect(screen.queryByText("Details")).toBeNull();
+    expect(cardFor("Waiting thread").querySelector(".board-card-eyebrow")).toHaveTextContent(
+      "Project A",
+    );
   });
 
   it("keeps failing checks and active agents visible in the board scan path", async () => {
@@ -565,23 +563,20 @@ describe("CodeThreadBoard", () => {
     await screen.findByRole("button", { name: "Full card" });
     const article = cardFor("Full card");
     expect(article).toHaveTextContent("Fixing the failing lint rule");
+    // The card carries the Project as an eyebrow and one line under the
+    // title: what the thread waits on, who runs it, when it last moved. The
+    // checkout, branch, plan, and review facts stay on the list view.
+    expect(article.querySelector(".board-card-eyebrow")).toHaveTextContent("Project A");
     const facts = article.querySelector(".board-card-facts");
     if (facts === null) throw new Error("Expected card facts");
-    expect(facts).toHaveTextContent("Project A");
-    expect(facts).toHaveTextContent("Current checkout");
-    expect(facts).toHaveTextContent("feature/board");
-    expect(facts).toHaveTextContent("3 files +12 −3");
-    expect(facts).toHaveTextContent("Studio · model-a");
-    expect(facts).toHaveTextContent("1 active run");
-    expect(facts).toHaveTextContent("3 of 7 tasks");
-    expect(facts).toHaveTextContent("#18 · stale");
-    expect(facts).toHaveTextContent("Checks failing");
-    expect(facts).toHaveTextContent("Review changes requested");
-    expect(facts).toHaveTextContent("Opened PR · pending");
-    expect(facts).toHaveTextContent("Follow-up");
-    const waitingReason = within(article).getByText(/Project projection missing/);
-    expect(waitingReason).toBeVisible();
-    expect(waitingReason).toHaveClass("board-card-blocked");
+    expect(facts).toHaveTextContent(/Project projection missing/);
+    expect(facts).toHaveTextContent("Studio");
+    expect(facts).toHaveTextContent(/\d+d ago/);
+    expect(facts).not.toHaveTextContent("Current checkout");
+    expect(facts).not.toHaveTextContent("feature/board");
+    expect(facts).not.toHaveTextContent("3 of 7 tasks");
+    expect(article.querySelector(".board-card-blocked")).toBeNull();
+    expect(article.querySelector("details")).toBeNull();
   });
 
   it("renders a recoverable error state when the first board query fails", async () => {
