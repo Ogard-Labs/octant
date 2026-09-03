@@ -1127,6 +1127,10 @@ button:focus-visible {
 /* Child threads stay one compact step inside their folder row. */
 .project-threads {
   display: grid;
+  /* The implicit `auto` track sized itself to the longest title, so a long
+     thread name pushed the whole row past the sidebar edge instead of
+     truncating inside it. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   margin: 2px 0 0;
   /* Enough to read as nested under its Project, and no more: the row inside
