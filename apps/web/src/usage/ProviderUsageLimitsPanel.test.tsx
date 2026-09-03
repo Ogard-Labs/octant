@@ -105,13 +105,13 @@ describe("ProviderUsageLimitsPanel", () => {
     render(<ProviderUsageLimitsPanel client={{ list, refresh }} instances={[provider]} />);
 
     expect(await screen.findByText(/25 remaining of 100 requests/)).toBeVisible();
-    expect(screen.getByText(/five_hour · Warning · 75% used/)).toBeVisible();
+    expect(screen.getByText(/5-hour window · Warning · 75% used/)).toBeVisible();
     expect(refresh).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Refresh provider limits" }));
     expect(refresh).toHaveBeenCalledOnce();
   });
 
-  it("labels unsupported facts unavailable rather than zero", async () => {
+  it("says limits are not reported yet rather than showing zero", async () => {
     render(
       <ProviderUsageLimitsPanel
         client={{
@@ -122,7 +122,7 @@ describe("ProviderUsageLimitsPanel", () => {
       />,
     );
 
-    expect(await screen.findByText("Unavailable")).toBeVisible();
+    expect(await screen.findByText(/Not reported yet/)).toBeVisible();
     expect(screen.queryByText(/0 remaining/)).not.toBeInTheDocument();
   });
 
