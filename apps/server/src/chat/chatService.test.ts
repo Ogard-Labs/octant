@@ -3924,8 +3924,7 @@ describe("ChatService", () => {
     });
 
     const first = await service.subscribe(created.thread.id, 0).next();
-    expect(first.done).toBe(false);
-    expect(first.value?.event.kind).toBe("thread-created");
+    expect(first).toMatchObject({ done: false, value: { event: { kind: "thread-created" } } });
     expect(replaySpy.mock.calls[1]?.[0].afterSequence).toBe(100);
   });
 

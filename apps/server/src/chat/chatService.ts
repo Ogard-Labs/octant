@@ -1165,7 +1165,7 @@ export class ChatService {
     threadId: ChatThreadId,
     afterSequence: number,
     signal?: AbortSignal,
-  ): AsyncGenerator<ChatEventFrame> {
+  ): AsyncGenerator<ChatEventFrame, number> {
     this.#assertReadableThread(threadId);
     let cursor = afterSequence;
     while (!signal?.aborted) {
@@ -1182,6 +1182,10 @@ export class ChatService {
       }
       if (events.length < 100) break;
     }
+    // The last journal entry scanned, which is past any entries that belong to
+    // other threads. A held stream that resumed from the last frame it sent
+    // would otherwise re-read that unrelated tail on every wake.
+    return cursor;
   }
 
   async finalizePendingDeletion(threadId: ChatThreadId): Promise<ChatCommandResult> {

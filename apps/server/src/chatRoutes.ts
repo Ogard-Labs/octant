@@ -544,7 +544,10 @@ function jsonResponse(body: unknown, status: number, origin: string | null): Res
 
 function ndjsonStreamResponse(
   source: {
-    readonly frames: (afterSequence: number, signal: AbortSignal) => AsyncIterable<ChatEventFrame>;
+    readonly frames: (
+      afterSequence: number,
+      signal: AbortSignal,
+    ) => AsyncIterable<ChatEventFrame, number>;
     readonly afterSequence: number;
     readonly waitForChange?: (signal: AbortSignal) => Promise<void>;
     readonly idleWaitMs: number;
@@ -554,7 +557,7 @@ function ndjsonStreamResponse(
 ): Response {
   const streamAbort = new AbortController();
   const encoder = new TextEncoder();
-  let iterator: AsyncIterator<ChatEventFrame> | undefined;
+  let iterator: AsyncIterator<ChatEventFrame, number> | undefined;
   const abort = () => streamAbort.abort();
   requestSignal.addEventListener("abort", abort, { once: true });
   const body = new ReadableStream<Uint8Array>({
@@ -564,10 +567,21 @@ function ndjsonStreamResponse(
           let cursor = source.afterSequence;
           let emitted = 0;
           for (;;) {
+            // Armed before the replay so a commit that lands while the replay
+            // runs wakes the next pass. The change feed snapshots its head when
+            // the wait starts, so a wait armed afterwards would sleep past
+            // that commit until the idle bound.
+            const pendingChange =
+              source.waitForChange === undefined
+                ? undefined
+                : armChangeWait(source.waitForChange, streamAbort.signal);
             iterator = source.frames(cursor, streamAbort.signal)[Symbol.asyncIterator]();
             while (!streamAbort.signal.aborted && emitted < MAX_REPLAY_FRAMES) {
               const next = await iterator.next();
-              if (next.done) break;
+              if (next.done) {
+                cursor = next.value;
+                break;
+              }
               cursor = next.value.sequence;
               controller.enqueue(encoder.encode(serializeNdjsonFrame(next.value)));
               emitted += 1;
@@ -577,15 +591,12 @@ function ndjsonStreamResponse(
             if (
               streamAbort.signal.aborted ||
               emitted >= MAX_REPLAY_FRAMES ||
-              source.waitForChange === undefined
+              pendingChange === undefined
             ) {
+              pendingChange?.release();
               break;
             }
-            const changed = await waitForChangeWithin(
-              source.waitForChange,
-              source.idleWaitMs,
-              streamAbort.signal,
-            );
+            const changed = await pendingChange.within(source.idleWaitMs);
             if (!changed) break;
           }
           if (!streamAbort.signal.aborted) controller.close();
@@ -613,36 +624,48 @@ function ndjsonStreamResponse(
 }
 
 /**
- * True when a Chat change was committed before the idle bound, false when the
- * bound passed or the stream was aborted. A wait that fails (the change feed
- * is full or closing) counts as the bound passing rather than as a change, so
- * a client never spins on an unavailable feed.
+ * Starts listening for a Chat commit now; `within` later reports true when one
+ * was committed before the idle bound and false when the bound passed or the
+ * stream was aborted. A wait that fails (the change feed is full or closing)
+ * counts as the bound passing rather than as a change, so a client never spins
+ * on an unavailable feed.
  */
-async function waitForChangeWithin(
+function armChangeWait(
   waitForChange: (signal: AbortSignal) => Promise<void>,
-  idleWaitMs: number,
   signal: AbortSignal,
-): Promise<boolean> {
-  if (signal.aborted) return false;
+): {
+  readonly within: (idleWaitMs: number) => Promise<boolean>;
+  readonly release: () => void;
+} {
   const waitAbort = new AbortController();
   const onAbort = () => waitAbort.abort();
   signal.addEventListener("abort", onAbort, { once: true });
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      waitForChange(waitAbort.signal).then(
-        () => !signal.aborted,
-        () => false,
-      ),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), idleWaitMs);
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
+  const changed = waitForChange(waitAbort.signal).then(
+    () => !signal.aborted,
+    () => false,
+  );
+  const release = () => {
     signal.removeEventListener("abort", onAbort);
     waitAbort.abort();
-  }
+  };
+  return {
+    release,
+    within: async (idleWaitMs) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        if (signal.aborted) return false;
+        return await Promise.race([
+          changed,
+          new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(false), idleWaitMs);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        release();
+      }
+    },
+  };
 }
 
 function serializeNdjsonFrame(frame: ChatEventFrame): string {
