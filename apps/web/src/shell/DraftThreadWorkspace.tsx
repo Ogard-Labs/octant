@@ -44,8 +44,10 @@ import {
 } from "@octant/domain";
 import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { CodeHomeUpNext } from "../code/CodeHomeUpNext";
 import {
   CodeComposerAdapter,
+  type CodeComposerSuggestion,
   type CodeComposerSubmitInput,
 } from "../code/composer/CodeComposerAdapter";
 import { useWorktreeRemoteFacts } from "../code/composer/useWorktreeRemoteFacts";
@@ -154,6 +156,44 @@ export interface DraftThreadWorkspaceProps {
   };
 }
 
+/**
+ * Ready-made first prompts for a Code thread. Each is a complete instruction
+ * the agent can act on in any repository, so choosing one is a real start
+ * rather than a label to finish.
+ */
+const CODE_SUGGESTIONS: ReadonlyArray<CodeComposerSuggestion> = [
+  {
+    id: "fix-failing-test",
+    label: "Fix a failing test",
+    prompt:
+      "Run the test suite, find the failing test, and fix the root cause without weakening the test.",
+  },
+  {
+    id: "add-tests",
+    label: "Add missing tests",
+    prompt:
+      "Find the least-tested module that matters most and add focused tests for its observable behavior.",
+  },
+  {
+    id: "explain-codebase",
+    label: "Explain this codebase",
+    prompt:
+      "Explain how this repository is organised: entry points, main modules, how data flows, and how to run it.",
+  },
+  {
+    id: "review-changes",
+    label: "Review my changes",
+    prompt:
+      "Review the uncommitted changes on this branch for bugs, missing tests, and unclear code, and list what to fix.",
+  },
+  {
+    id: "update-dependencies",
+    label: "Update dependencies",
+    prompt:
+      "Find outdated dependencies, update the ones that are safe, run the checks, and summarise anything that needs a decision.",
+  },
+];
+
 export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | undefined>(
     props.projectId,
@@ -174,6 +214,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         readonly label: string;
       };
   const [createFromSelection, setCreateFromSelection] = useState<CreateFromSelection>();
+  const [promptRequest, setPromptRequest] = useState<{
+    readonly text: string;
+    readonly revision: number;
+  }>();
   const [createFromOpen, setCreateFromOpen] = useState(false);
   const [createFromTab, setCreateFromTab] = useState<"github" | "linear">("github");
   const issuesCreateAvailable = useGithubIssuesCreateAvailable(
@@ -380,9 +424,42 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     ) : null;
 
   if (props.mode === "code") {
+    const upNext =
+      props.githubClient !== undefined && props.githubPluginEnabled !== false ? (
+        <CodeHomeUpNext
+          client={props.githubClient}
+          onPick={(item) => {
+            const reference = `${item.owner}/${item.name}#${String(item.number)}`;
+            if (item.category === "issue") {
+              setCreateFromSelection({
+                kind: "github",
+                request: { owner: item.owner, name: item.name, number: item.number },
+                label: reference,
+              });
+            }
+            setPromptRequest((current) => ({
+              text:
+                item.category === "issue"
+                  ? `Work on ${reference}: ${item.title}`
+                  : `Review pull request ${reference}: ${item.title}`,
+              revision: (current?.revision ?? 0) + 1,
+            }));
+          }}
+        />
+      ) : null;
+    const beneath =
+      upNext === null && (props.recentThreads?.length ?? 0) === 0 ? undefined : (
+        <div className="code-home">
+          {upNext}
+          <RecentThreadList threads={props.recentThreads ?? []} />
+        </div>
+      );
     return (
       <>
         <CodeComposerAdapter
+          suggestions={CODE_SUGGESTIONS}
+          {...(beneath === undefined ? {} : { beneath })}
+          {...(promptRequest === undefined ? {} : { promptRequest })}
           {...hostSelectorBinding}
           {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
           projectAvailable={selectedProject !== undefined}
