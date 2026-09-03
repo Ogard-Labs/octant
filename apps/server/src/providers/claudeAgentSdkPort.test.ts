@@ -1019,6 +1019,18 @@ describe("Claude Agent SDK port", () => {
       uuid: "7",
       session_id: "session-1",
     },
+    // A retry note whose counters are not whole non-negative numbers is not
+    // the frame this allowlist recognizes, so it is reported rather than
+    // silently dropped.
+    {
+      type: "system",
+      subtype: "api_retry",
+      attempt: -1,
+      max_retries: 10.5,
+      retry_delay_ms: 581,
+      uuid: "8",
+      session_id: "session-1",
+    },
   ])("protocol-fails every non-allowlisted message after initialization", async (message) => {
     const failed = await failureOf(
       Effect.scoped(
