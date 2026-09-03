@@ -60,7 +60,7 @@ describe("ShellSidebar", () => {
     expect(search.compareDocumentPosition(collapse)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
-  it("exposes Work destinations backed by exact actions, including the Thread board", async () => {
+  it("exposes Work destinations backed by exact actions, including the Board", async () => {
     const user = userEvent.setup();
     const actions = {
       "new-work-thread": vi.fn(),
@@ -82,7 +82,7 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New thread", "Thread board"]) {
+    for (const label of ["New thread", "Board"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
@@ -116,7 +116,7 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New thread", "Thread board", "Pull requests"]) {
+    for (const label of ["New thread", "Board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));

@@ -11,6 +11,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-policy";
 import { ChevronDown, Filter, GitBranch, GitPullRequest, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { ShellState } from "../shell/ShellState";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -31,6 +32,16 @@ import { ThreadBoardPullRequestSummaries } from "../threadBoard/ThreadBoardPullR
 
 const GROUPING_STORAGE_KEY = "octant.code.board.grouping";
 const SHOW_EMPTY_GROUPS_STORAGE_KEY = "octant.code.board.show-empty-groups";
+const LAYOUT_STORAGE_KEY = "octant.code.board.layout";
+
+type CodeBoardLayout = "board" | "list";
+
+function readStoredLayout(
+  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
+): CodeBoardLayout | undefined {
+  const value = storage?.getItem(LAYOUT_STORAGE_KEY);
+  return value === "board" || value === "list" ? value : undefined;
+}
 const ALL_STATUSES: readonly CodeBoardStatus[] = THREAD_BOARD_STATUS_COLUMN_ORDER;
 
 export interface CodeThreadOpenTarget {
@@ -96,11 +107,13 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
-  // Empty lanes are optional detail. The default scan path spends width on
-  // work that exists; View can still reveal the complete status workflow.
+  // The four status lanes are the workflow, so they all show by default:
+  // a board that hid its empty lanes read as one column of cards. View can
+  // still collapse the empty ones.
   const [showEmptyGroups, setShowEmptyGroups] = useState(
-    () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? false,
+    () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? true,
   );
+  const [layout, setLayout] = useState<CodeBoardLayout>(() => readStoredLayout(storage) ?? "board");
   const [board, setBoard] = useState<BoardState>({ status: "loading" });
   const [refreshNonce, setRefreshNonce] = useState(0);
 
@@ -167,12 +180,26 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   return (
     <Surface ariaLabel="Code Thread Board" className="code-board" measure="wide">
       <SurfaceHeader
-        subtitle="One runtime-derived view of your Code threads and coding agents."
-        title="Threads"
+        subtitle="Your Code threads by status, with the agents working on them."
+        title="Board"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
 
       <div aria-label="Board controls" className="surface-toolbar" role="group">
+        <OctantToggleGroup<CodeBoardLayout>
+          aria-label="Layout"
+          className="code-board__layout"
+          onValueChange={(value) => {
+            const selected = value[0];
+            if (selected !== "board" && selected !== "list") return;
+            setLayout(selected);
+            storage?.setItem(LAYOUT_STORAGE_KEY, selected);
+          }}
+          value={[layout]}
+        >
+          <OctantToggleGroupItem value="board">Board</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="list">List</OctantToggleGroupItem>
+        </OctantToggleGroup>
         <OctantToggleGroup<CodeBoardGrouping>
           aria-label="Group by"
           className="code-board__grouping"
@@ -400,7 +427,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
         board={board}
         filters={filters}
         grouping={grouping}
-        isNarrow={props.isNarrow === true}
+        isNarrow={props.isNarrow === true || layout === "list"}
         onResetFilters={() => setFilters(DEFAULT_FILTERS)}
         projectNames={projectNames}
         projects={props.projects}
@@ -491,8 +518,11 @@ function CodeBoardBody(props: {
       </div>
     ) : null;
   const columns = groupCodeBoardCards(cards, props.grouping, { projects: props.projects });
+  // Lanes are the workflow on the board; stacked into a list, an empty lane
+  // is only a heading with nothing under it, so the list keeps the groups
+  // that hold work.
   const visibleColumns =
-    props.showEmptyGroups || cards.length === 0
+    (props.showEmptyGroups && !props.isNarrow) || cards.length === 0
       ? columns
       : columns.filter((column) => column.cards.length > 0);
   return (
@@ -817,26 +847,11 @@ function cardSummary(
   if (card.lastMeaningfulActivityAt !== null) {
     facts.push({
       key: "activity-at",
-      text: relativeActivity(card.lastMeaningfulActivityAt, Date.now()),
-      title: activityFormatter.format(new Date(card.lastMeaningfulActivityAt)),
+      text: relativeTimeLabel(card.lastMeaningfulActivityAt),
+      title: absoluteTimeFormatter.format(new Date(card.lastMeaningfulActivityAt)),
     });
   }
   return facts;
-}
-
-const activityFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-function relativeActivity(at: string, now: number): string {
-  const elapsedMs = Math.max(0, now - Date.parse(at));
-  const minutes = Math.floor(elapsedMs / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function cardFacts(

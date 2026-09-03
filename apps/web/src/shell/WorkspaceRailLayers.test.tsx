@@ -378,8 +378,8 @@ describe("WorkspaceRailLayers", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Thread board" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Thread board" }));
+    expect(await screen.findByRole("button", { name: "Board" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Board" }));
     expect(await screen.findByRole("region", { name: "Work Thread Board" })).toBeVisible();
     expect(queryBoard).toHaveBeenCalled();
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
@@ -394,7 +394,7 @@ describe("WorkspaceRailLayers", () => {
     ).toBeVisible();
   });
 
-  it("does not offer a Thread board in Chat", async () => {
+  it("does not offer a Board in Chat", async () => {
     render(
       <App
         chatClient={chats()}
@@ -408,7 +408,7 @@ describe("WorkspaceRailLayers", () => {
     );
 
     expect(await screen.findByRole("button", { name: "Workspace mode, Chat" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Thread board" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Board" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
   });
 });
