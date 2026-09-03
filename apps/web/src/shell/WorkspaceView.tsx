@@ -356,6 +356,7 @@ export interface WorkspaceViewProps {
     mode: "chat" | "work" | "code",
     name: string,
     receiptId?: string,
+    initializeGit?: boolean,
   ) => Promise<ProjectId | undefined>;
   readonly onDraftCreating?: boolean;
   readonly onDraftError?: string;
