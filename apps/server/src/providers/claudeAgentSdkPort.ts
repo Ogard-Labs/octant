@@ -9,6 +9,7 @@ import { Effect, Stream, type Scope } from "effect";
 import {
   decodeAccount,
   decodeInitialization,
+  type ClaudeDecodePhase,
   decodeInterruptReceipt,
   decodeMessage,
   decodeModels,
@@ -76,6 +77,12 @@ export interface ClaudeOpenQueryInput {
   readonly effort?: ClaudeEffortLevel;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly resumeSessionId?: string;
+  /**
+   * The id a new session is opened under. The runtime initializes lazily, so
+   * the id is assigned up front and the initialized message must carry it;
+   * ignored when `resumeSessionId` names an existing session.
+   */
+  readonly sessionId?: string;
   readonly tools: readonly string[];
   readonly sandbox?: ClaudeSandboxSettings;
   readonly canUseTool: (request: ClaudeToolRequest) => Promise<ClaudeToolDecision>;
@@ -190,7 +197,10 @@ export type ClaudeDecodedMessage =
       readonly kind: "initialized";
       readonly sessionId: string;
       readonly projectRoot: string;
+      /** The model the runtime reports, which may be what an alias resolved to. */
       readonly model: string;
+      /** The model id Octant asked for; the port already matched the two. */
+      readonly requestedModel: string;
       readonly permissionMode: ClaudePermissionMode;
       readonly tools: readonly string[];
       readonly capabilities: readonly string[];
@@ -286,6 +296,13 @@ export interface ClaudeUserMessage {
 
 export interface ClaudeQueryPort {
   readonly initialization: ClaudeInitialization;
+  /**
+   * The runtime's session id, available from the first message that names
+   * one. Claude Code 2.1.258 only initializes once the first user message
+   * arrives, so a caller that needs the id before sending waits here rather
+   * than on the initialized message.
+   */
+  readonly sessionId: Effect.Effect<string, ProviderFailure>;
   readonly messages: Stream.Stream<ClaudeDecodedMessage, ProviderFailure>;
   readonly send: (message: ClaudeUserMessage) => Effect.Effect<void, ProviderFailure>;
   readonly interrupt: () => Effect.Effect<void, ProviderFailure>;
@@ -345,6 +362,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly effort?: ClaudeEffortLevel;
   readonly pathToClaudeCodeExecutable: string;
   readonly resume?: string;
+  readonly sessionId?: string;
   readonly permissionMode: ClaudePermissionMode;
   readonly allowDangerouslySkipPermissions?: true;
   readonly settingSources: readonly [];
@@ -514,6 +532,26 @@ function liveBridge(): ClaudeAgentSdkBridge {
   };
 }
 
+function rawSessionId(message: unknown): string | undefined {
+  if (typeof message !== "object" || message === null || Array.isArray(message)) return undefined;
+  const sessionId = (message as Record<string, unknown>).session_id;
+  return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined;
+}
+
+function deferredPromise<A>(): {
+  readonly promise: Promise<A>;
+  readonly resolve: (value: A) => void;
+  readonly reject: (error: unknown) => void;
+} {
+  let resolve!: (value: A) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<A>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
 export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): ClaudeAgentSdkPort {
   const sdk = options.sdk ?? liveBridge();
   const inputCapacity = options.inputCapacity ?? DEFAULT_INPUT_CAPACITY;
@@ -659,6 +697,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ...(input.effort === undefined ? {} : { effort: input.effort }),
               pathToClaudeCodeExecutable: input.binaryPath,
               ...(input.resumeSessionId === undefined ? {} : { resume: input.resumeSessionId }),
+              ...(input.resumeSessionId === undefined && input.sessionId !== undefined
+                ? { sessionId: input.sessionId }
+                : {}),
               permissionMode: expectedMode,
               ...(input.executionPolicy === "full-access"
                 ? { allowDangerouslySkipPermissions: true }
@@ -690,31 +731,89 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             };
             query = sdk.query({ prompt, options: invocationOptions });
             const initialization = decodeInitialization(await query.initializationResult());
+            // The runtime echoes the model an alias such as `sonnet` resolved
+            // to, so the initialized message is checked against the resolved
+            // id its own catalogue declares for the requested model.
+            const acceptedModels = new Set(
+              initialization.models.flatMap((model) =>
+                model.id === input.model && model.resolvedId !== undefined
+                  ? [model.resolvedId]
+                  : [],
+              ),
+            );
             const iterator = query[Symbol.asyncIterator]();
-            const first = await iterator.next();
-            if (first.done) throw protocol("Claude did not initialize its runtime stream.");
-            const initialized = decodeMessage(first.value, input, { kind: "initializing" });
-            if (initialized.kind !== "initialized") {
-              throw protocol("Claude returned an unsupported runtime message.");
-            }
-            initializedSessionId = initialized.sessionId;
-            const hasInterruptReceipt = initialized.capabilities.includes("interrupt_receipt_v1");
-            const remaining: AsyncIterable<unknown> = { [Symbol.asyncIterator]: () => iterator };
-            const remainingMessages = Stream.fromAsyncIterable(remaining, () =>
+            // The runtime initializes lazily: nothing but goal and compaction
+            // notes arrives until the first user message. The initialized
+            // message is therefore validated inside the stream, and the
+            // session id is announced from the first message that names one.
+            let phase: ClaudeDecodePhase = { kind: "initializing", acceptedModels };
+            let hasInterruptReceipt = false;
+            let announcedSessionId: string | undefined;
+            const sessionAnnounced = deferredPromise<string>();
+            void sessionAnnounced.promise.catch(() => undefined);
+            const announce = (sessionId: string) => {
+              if (announcedSessionId === undefined) {
+                announcedSessionId = sessionId;
+                sessionAnnounced.resolve(sessionId);
+              }
+            };
+            // A resumed or assigned id is known before the runtime says
+            // anything; the initialized message is later held to it.
+            const expectedSessionId = input.resumeSessionId ?? input.sessionId;
+            if (expectedSessionId !== undefined) announce(expectedSessionId);
+            const streamEnded = (failed: ProviderFailure) => {
+              sessionAnnounced.reject(failed);
+            };
+            const decodeNext = (message: unknown): ClaudeDecodedMessage | undefined => {
+              if (phase.kind !== "initializing") return decodeMessage(message, input, phase);
+              const decoded = decodeMessage(message, input, phase);
+              if (decoded.kind === "initialized") {
+                if (announcedSessionId !== undefined && announcedSessionId !== decoded.sessionId) {
+                  throw protocol("Claude initialized an unexpected runtime surface.");
+                }
+                initializedSessionId = decoded.sessionId;
+                hasInterruptReceipt = decoded.capabilities.includes("interrupt_receipt_v1");
+                phase = { kind: "active", sessionId: decoded.sessionId };
+                announce(decoded.sessionId);
+                return decoded;
+              }
+              const sessionId = rawSessionId(message);
+              if (sessionId !== undefined) announce(sessionId);
+              return undefined;
+            };
+            const remaining: AsyncIterable<unknown> = {
+              [Symbol.asyncIterator]: () => ({
+                next: async () => {
+                  try {
+                    const result = await iterator.next();
+                    if (result.done) {
+                      streamEnded(
+                        failure("unavailable", "Claude did not initialize its runtime stream."),
+                      );
+                    }
+                    return result;
+                  } catch (error) {
+                    streamEnded(failure("provider-failed", "Claude message stream failed."));
+                    throw error;
+                  }
+                },
+              }),
+            };
+            const decodedMessages = Stream.fromAsyncIterable(remaining, () =>
               failure("provider-failed", "Claude message stream failed."),
             ).pipe(
               Stream.mapEffect((message) =>
                 Effect.try({
-                  try: () =>
-                    decodeMessage(message, input, {
-                      kind: "active",
-                      sessionId: initializedSessionId!,
-                    }),
-                  catch: (error) => sanitizeFailure(error, "message decoding"),
+                  try: () => decodeNext(message),
+                  catch: (error) => {
+                    const failed = sanitizeFailure(error, "message decoding");
+                    streamEnded(failed);
+                    return failed;
+                  },
                 }),
               ),
+              Stream.filter((message): message is ClaudeDecodedMessage => message !== undefined),
             );
-            const decodedMessages = Stream.concat(Stream.succeed(initialized), remainingMessages);
             let messageStreamClaimed = false;
             const messages = Stream.unwrap(
               Effect.sync(() => {
@@ -734,6 +833,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               });
             const port: ClaudeQueryPort = {
               initialization,
+              sessionId: Effect.tryPromise({
+                try: () => sessionAnnounced.promise,
+                catch: (error) => sanitizeFailure(error, "session discovery"),
+              }),
               messages,
               send: ({ text }) =>
                 request(() => {
@@ -745,7 +848,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     parent_tool_use_id: null,
                     origin: { kind: "human" },
                     uuid: messageId,
-                    session_id: initializedSessionId!,
+                    session_id: initializedSessionId ?? announcedSessionId ?? "",
                   });
                 }, "input delivery"),
               interrupt: () =>
@@ -774,7 +877,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 ),
               accountInfo: () =>
                 request(async () => decodeAccount(await query!.accountInfo()), "account discovery"),
-              close: () => Effect.promise(closeCoordinator.closeWithRetry),
+              close: () =>
+                Effect.promise(async () => {
+                  streamEnded(failure("unavailable", "Claude connection is closing."));
+                  await closeCoordinator.closeWithRetry();
+                }),
             };
             return port;
           } catch (error) {

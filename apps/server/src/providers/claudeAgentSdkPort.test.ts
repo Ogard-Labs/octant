@@ -201,24 +201,28 @@ describe("Claude Agent SDK port", () => {
     expect(harness.query.close).toHaveBeenCalledOnce();
   });
 
+  test("tolerates the runtime's built-in commands and agents and its chosen output style", async () => {
+    const harness = makeHarness();
+    harness.query.initializationResult.mockResolvedValueOnce({
+      ...initialization,
+      commands: [{ name: "compact", description: "Compact the conversation" }],
+      agents: [{ name: "Explore", description: "Read-only search" }],
+      output_style: "Explanatory",
+      available_output_styles: ["default", "Explanatory"],
+    } as never);
+
+    await expect(
+      Effect.runPromise(Effect.scoped(harness.port.openQuery(openInput))),
+    ).resolves.toBeDefined();
+    expect(harness.query.initializationResult).toHaveBeenCalledOnce();
+  });
+
   test.each([
-    [
-      "nonempty commands",
-      { ...initialization, commands: ["secret-command"] },
-      "Claude initialized an unexpected runtime surface.",
-      "secret-command",
-    ],
     [
       "a malformed commands field",
       { ...initialization, commands: "secret-command" },
       "Claude returned an invalid SDK response.",
       "secret-command",
-    ],
-    [
-      "a nondefault output style",
-      { ...initialization, output_style: "secret-style" },
-      "Claude initialized an unexpected runtime surface.",
-      "secret-style",
     ],
     [
       "malformed available output styles",
@@ -527,17 +531,40 @@ describe("Claude Agent SDK port", () => {
   });
 
   test("bounds and contains cleanup retries when acquisition fails before scope ownership", async () => {
-    const harness = makeHarness([{ ...safeRuntimeInitialization, cwd: "/wrong-root" }]);
+    const harness = makeHarness();
+    harness.query.initializationResult.mockRejectedValueOnce(
+      new Error("private initialization failure"),
+    );
     harness.query.close.mockImplementation(() => {
       throw new Error("private acquisition close failure");
     });
 
     const failed = await failureOf(Effect.scoped(harness.port.openQuery(openInput)));
     expect(failed).toEqual({
+      category: "provider-failed",
+      message: "Claude initialization failed.",
+    });
+    expect(JSON.stringify(failed)).not.toContain("private");
+    expect(harness.query.close).toHaveBeenCalledTimes(2);
+  });
+
+  test("surfaces a mismatched project root when the runtime initializes with the first turn", async () => {
+    const harness = makeHarness([{ ...safeRuntimeInitialization, cwd: "/wrong-root" }]);
+
+    const failed = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+    expect(failed).toEqual({
       category: "protocol",
       message: "Claude initialized an unexpected runtime surface.",
     });
-    expect(harness.query.close).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(failed)).not.toContain("wrong-root");
+    expect(harness.query.close).toHaveBeenCalledOnce();
   });
 
   test("coalesces overlapping close calls into one SDK close", async () => {
@@ -576,7 +603,14 @@ describe("Claude Agent SDK port", () => {
     const harness = makeHarness([
       { ...safeRuntimeInitialization, session_id: "different-session" },
     ]);
-    const failed = await failureOf(Effect.scoped(harness.port.openQuery(openInput)));
+    const failed = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
     expect(failed).toEqual({
       category: "protocol",
       message: "Claude initialized an unexpected runtime surface.",
@@ -591,7 +625,8 @@ describe("Claude Agent SDK port", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          const query = yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          yield* Stream.runHead(query.messages);
           const permission = harness.invocation?.options.canUseTool;
           const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
           if (permission === undefined || preTool === undefined) {
@@ -674,7 +709,8 @@ describe("Claude Agent SDK port", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          const query = yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          yield* Stream.runHead(query.messages);
           const permission = harness.invocation?.options.canUseTool;
           const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
           if (permission === undefined || preTool === undefined) {
@@ -744,7 +780,13 @@ describe("Claude Agent SDK port", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          yield* harness.port.openQuery({ ...openInput, tools, canUseTool, preToolUse });
+          const query = yield* harness.port.openQuery({
+            ...openInput,
+            tools,
+            canUseTool,
+            preToolUse,
+          });
+          yield* Stream.runHead(query.messages);
           const permission = harness.invocation?.options.canUseTool;
           const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
           if (permission === undefined || preTool === undefined) {
@@ -804,7 +846,8 @@ describe("Claude Agent SDK port", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          const query = yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          yield* Stream.runHead(query.messages);
           const permission = harness.invocation?.options.canUseTool;
           const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
           if (permission === undefined || preTool === undefined) {
@@ -923,6 +966,7 @@ describe("Claude Agent SDK port", () => {
         sessionId: "session-1",
         projectRoot: "/repo",
         model: "claude-sonnet",
+        requestedModel: "claude-sonnet",
         permissionMode: "default",
         tools: ["Read", "Grep", "Glob"],
         capabilities: ["interrupt_receipt_v1"],
@@ -1742,22 +1786,10 @@ describe("Claude Agent SDK port", () => {
 
   test.each([
     [
-      "nonempty slash commands",
-      { ...safeRuntimeInitialization, slash_commands: ["secret-command"] },
-      "Claude initialized an unexpected runtime surface.",
-      "secret-command",
-    ],
-    [
       "a malformed slash-command field",
       { ...safeRuntimeInitialization, slash_commands: "secret-command" },
       "Claude returned an unsupported runtime message.",
       "secret-command",
-    ],
-    [
-      "a nondefault active output style",
-      { ...safeRuntimeInitialization, output_style: "secret-style" },
-      "Claude initialized an unexpected runtime surface.",
-      "secret-style",
     ],
     [
       "a malformed active output style",
@@ -1770,7 +1802,14 @@ describe("Claude Agent SDK port", () => {
     async (_name, message, failureMessage, secret) => {
       const harness = makeHarness([message]);
 
-      const failed = await failureOf(Effect.scoped(harness.port.openQuery(openInput)));
+      const failed = await failureOf(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery(openInput);
+            return yield* Stream.runDrain(query.messages);
+          }),
+        ),
+      );
 
       expect(failed).toEqual({ category: "protocol", message: failureMessage });
       expect(JSON.stringify(failed)).not.toContain(secret);
@@ -1778,36 +1817,148 @@ describe("Claude Agent SDK port", () => {
     },
   );
 
-  test("rejects initialized extension or widened authority surfaces", async () => {
-    const unsafe = makeHarness([
+  test("accepts the runtime's built-in agents, skills, commands, and a sorted tool list", async () => {
+    const harness = makeHarness([
       {
-        type: "system",
-        subtype: "init",
-        agents: ["hidden-agent"],
-        apiKeySource: "temporary",
-        claude_code_version: "2.1.211",
-        cwd: "/repo",
-        tools: ["Read", "Grep", "Glob", "WebFetch"],
-        mcp_servers: [{ name: "hidden", status: "connected" }],
-        model: "claude-sonnet",
-        permissionMode: "default",
-        slash_commands: [],
-        output_style: "default",
-        skills: ["hidden-skill"],
-        plugins: [{ name: "hidden-plugin", path: "/secret" }],
-        uuid: "message-1",
-        session_id: "session-1",
+        ...safeRuntimeInitialization,
+        agents: ["Explore", "Plan", "general-purpose"],
+        skills: ["user-skill"],
+        plugins: [{ name: "inert-plugin", path: "/plugins/inert" }],
+        slash_commands: ["clear", "compact", "config"],
+        tools: ["Glob", "Grep", "Read"],
+        output_style: "Explanatory",
       },
     ]);
 
+    const first = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return yield* Stream.runHead(query.messages);
+        }),
+      ),
+    );
+
+    expect(first._tag === "Some" ? first.value.kind : undefined).toBe("initialized");
+  });
+
+  test("accepts a runtime that holds fewer tools than were requested", async () => {
+    const harness = makeHarness([{ ...safeRuntimeInitialization, tools: ["Read", "Grep"] }]);
+
+    const first = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return yield* Stream.runHead(query.messages);
+        }),
+      ),
+    );
+
+    expect(
+      first._tag === "Some" && first.value.kind === "initialized" ? first.value.tools : undefined,
+    ).toEqual(["Read", "Grep"]);
+  });
+
+  test("skips the runtime's goal, compaction, and command notes that precede initialization", async () => {
+    const harness = makeHarness([
+      { type: "active_goal", value: null, uuid: "note-1", session_id: "session-1" },
+      {
+        type: "autocompact_state",
+        value: { enabled: true, threshold: 1 },
+        uuid: "note-2",
+        session_id: "session-1",
+      },
+      {
+        type: "command_lifecycle",
+        command_uuid: "message-1",
+        state: "queued",
+        uuid: "note-3",
+        session_id: "session-1",
+      },
+      safeRuntimeInitialization,
+    ]);
+
+    const kinds = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          const messages = yield* Stream.runCollect(Stream.take(query.messages, 1));
+          return Chunk.toReadonlyArray(messages).map((message) => message.kind);
+        }),
+      ),
+    );
+
+    expect(kinds).toEqual(["initialized"]);
+  });
+
+  test("opens a new session under the assigned id and holds the runtime to it", async () => {
+    const { resumeSessionId: _resume, ...fresh } = openInput;
+    const harness = makeHarness([{ ...safeRuntimeInitialization, session_id: "assigned-1" }]);
+
+    const sessionId = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({ ...fresh, sessionId: "assigned-1" });
+          const announced = yield* query.sessionId;
+          yield* Stream.runHead(query.messages);
+          return announced;
+        }),
+      ),
+    );
+
+    expect(sessionId).toBe("assigned-1");
+    expect(harness.invocation?.options.sessionId).toBe("assigned-1");
+    expect(harness.invocation?.options).not.toHaveProperty("resume");
+
+    const drifted = makeHarness([{ ...safeRuntimeInitialization, session_id: "other-session" }]);
     const failed = await failureOf(
       Effect.scoped(
         Effect.gen(function* () {
-          const query = yield* unsafe.port.openQuery(openInput);
+          const query = yield* drifted.port.openQuery({ ...fresh, sessionId: "assigned-1" });
           return yield* Stream.runDrain(query.messages);
         }),
       ),
     );
+    expect(failed).toEqual({
+      category: "protocol",
+      message: "Claude initialized an unexpected runtime surface.",
+    });
+    expect(JSON.stringify(failed)).not.toContain("other-session");
+  });
+
+  test("accepts the model id the runtime resolved the requested alias to", async () => {
+    const harness = makeHarness([{ ...safeRuntimeInitialization, model: "claude-sonnet-4-5" }]);
+
+    const first = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return yield* Stream.runHead(query.messages);
+        }),
+      ),
+    );
+
+    expect(
+      first._tag === "Some" && first.value.kind === "initialized" ? first.value.model : undefined,
+    ).toBe("claude-sonnet-4-5");
+  });
+
+  test.each([
+    ["a widened tool list", { tools: ["Read", "Grep", "Glob", "WebFetch"] }],
+    ["an attached MCP server", { mcp_servers: [{ name: "hidden", status: "connected" }] }],
+    ["a model outside the requested alias", { model: "hidden-model" }],
+  ])("refuses %s as an unexpected runtime surface", async (_name, override) => {
+    const harness = makeHarness([{ ...safeRuntimeInitialization, ...override }]);
+
+    const failed = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+
     expect(failed).toEqual({
       category: "protocol",
       message: "Claude initialized an unexpected runtime surface.",

@@ -59,6 +59,7 @@ const initialized = (
   sessionId: sdkSessionId,
   projectRoot: root,
   model,
+  requestedModel: model,
   permissionMode: "default",
   tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"],
   capabilities: ["interrupt_receipt_v1"],
@@ -125,6 +126,7 @@ class FakeQuery implements ClaudeQueryPort {
     }),
   );
   readonly messages: Stream.Stream<ClaudeDecodedMessage, ProviderFailure>;
+  readonly sessionId: Effect.Effect<string, ProviderFailure>;
 
   private readonly pubsub = Effect.runSync(PubSub.unbounded<ClaudeDecodedMessage>());
 
@@ -136,8 +138,10 @@ class FakeQuery implements ClaudeQueryPort {
       ready: true,
       apiProvider: "firstParty",
     },
+    announcesSession = true,
   ) {
     this.initialization = { ...this.initialization, account };
+    this.sessionId = announcesSession ? Effect.succeed(sdkSessionId) : Effect.never;
     this.messages =
       stream ??
       Stream.concat(
@@ -2371,24 +2375,17 @@ describe("Claude driver probe", () => {
     });
   });
 
-  it("reports a runtime initialization/version mismatch as incompatible", async () => {
+  it("reports ready without waiting for the runtime message stream", async () => {
     const f = harness("subscription");
     f.setOpenQuery((input) => {
-      const message = initialized("version-mismatch", projectRoot, input.model);
-      const query = new FakeQuery(
-        "version-mismatch",
-        Stream.make({ ...message, runtimeVersion: "9.9.9" } as ClaudeDecodedMessage),
-        input.model,
-      );
+      const query = new FakeQuery("lazy-init", Stream.never, input.model);
+      f.queries.push(query);
       return Effect.acquireRelease(Effect.succeed(query), (value) => value.close());
     });
     const observation = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
-    expect(observation).toMatchObject({
-      readiness: "incompatible",
-      detectedVersion: "2.1.211",
-      models: [],
-      message: "Claude initialization version did not match the configured binary.",
-    });
+    expect(observation).toMatchObject({ readiness: "ready", detectedVersion: "2.1.211" });
+    expect(observation.models.map((model) => model.id)).toEqual([modelId]);
+    expect(f.queries[0]?.close).toHaveBeenCalledOnce();
   });
 
   it("reports a probe that returns no usable models as incompatible", async () => {
@@ -3264,7 +3261,7 @@ describe("Claude exact resume", () => {
     await Effect.runPromise(acquired.connection.stop(sessionId));
     const identityWrites = vi.mocked(f.resumeIdentityPort.put).mock.calls.length;
     const identityLookups = vi.mocked(f.resumeIdentityPort.lookup).mock.calls.length;
-    const heldQuery = new FakeQuery("sdk-session-1", Stream.never, modelId);
+    const heldQuery = new FakeQuery("sdk-session-1", Stream.never, modelId, undefined, false);
     f.setOpenQuery((input) =>
       Effect.acquireRelease(
         Effect.sync(() => {
