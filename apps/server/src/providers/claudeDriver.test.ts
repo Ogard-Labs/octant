@@ -139,8 +139,13 @@ class FakeQuery implements ClaudeQueryPort {
       apiProvider: "firstParty",
     },
     announcesSession = true,
+    models: ClaudeQueryPort["initialization"]["models"] = [],
   ) {
-    this.initialization = { ...this.initialization, account };
+    this.initialization = {
+      ...this.initialization,
+      account,
+      ...(models.length === 0 ? {} : { models }),
+    };
     this.sessionId = announcesSession ? Effect.succeed(sdkSessionId) : Effect.never;
     this.messages =
       stream ??
@@ -162,6 +167,7 @@ class FakeQuery implements ClaudeQueryPort {
 function harness(
   authentication: ClaudeAuthentication = "subscription",
   permissionPersistence: PermissionPersistence = "current-session",
+  options: { readonly models?: ClaudeQueryPort["initialization"]["models"] } = {},
 ) {
   const queries: FakeQuery[] = [];
   const opens: ClaudeOpenQueryInput[] = [];
@@ -176,6 +182,9 @@ function harness(
           input.resumeSessionId ?? `sdk-session-${++queryNumber}`,
           undefined,
           input.model,
+          undefined,
+          true,
+          options.models ?? [],
         );
         queries.push(query);
         sessions.set(query.sdkSessionId, {
@@ -2227,6 +2236,54 @@ describe("Claude driver probe", () => {
     expect(f.queries[0]?.accountInfo).toHaveBeenCalledOnce();
     expect(f.queries[0]?.close).toHaveBeenCalledOnce();
     expect(f.releasedEnvironments).toHaveLength(2);
+  });
+
+  it("names models by the versioned clause the runtime keeps in the description", async () => {
+    const f = harness("subscription", "current-session", {
+      models: [
+        {
+          id: "default",
+          resolvedId: "claude-sonnet-5",
+          displayName: "Default (recommended)",
+          description: "Sonnet 5 · Efficient for routine tasks",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "high"],
+        },
+        {
+          id: "sonnet",
+          resolvedId: "claude-sonnet-5",
+          displayName: "Sonnet",
+          description: "Sonnet 5 · Efficient for routine tasks",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "high"],
+        },
+        {
+          id: "claude-fable-5-1[1m]",
+          resolvedId: "claude-fable-5-1",
+          displayName: "Fable",
+          description: "Fable 5.1 · Most capable for your hardest and longest-running tasks",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "high"],
+        },
+        {
+          id: "haiku",
+          resolvedId: "claude-haiku-4-5",
+          displayName: "Haiku",
+          description: "",
+          supportsEffort: false,
+          supportedEffortLevels: [],
+        },
+      ],
+    });
+
+    const result = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+
+    expect(result.models.map((model) => [String(model.id), model.displayName])).toEqual([
+      ["default", "Default (Sonnet 5)"],
+      ["sonnet", "Sonnet 5"],
+      ["claude-fable-5-1[1m]", "Fable 5.1"],
+      ["haiku", "Haiku"],
+    ]);
   });
 
   it("opens the probe query with only the strict Plan tool allowlist", async () => {

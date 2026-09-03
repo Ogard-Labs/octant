@@ -60,6 +60,11 @@ function nonNegativeNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+function nonNegativeInteger(value: unknown): number | undefined {
+  const decoded = nonNegativeNumber(value);
+  return decoded !== undefined && Number.isInteger(decoded) ? decoded : undefined;
+}
+
 function optionalString(value: unknown): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw protocol("Claude returned an unsupported runtime message.");
@@ -370,6 +375,34 @@ function isHarmlessInformational(message: Record<string, unknown>): boolean {
     );
   }
   if (message.type !== "system") return false;
+  // The runtime narrates each API retry (2.1.234: `api_retry` with the
+  // attempt count, the delay, and the HTTP status it is retrying after).
+  // Refusing it as unsupported ended the turn on the first transient error,
+  // before the retry it was announcing could succeed or the runtime could
+  // report the final outcome; the note itself changes nothing.
+  if (message.subtype === "api_retry") {
+    return (
+      hasOnlyKeys(message, [
+        "type",
+        "subtype",
+        "attempt",
+        "max_retries",
+        "retry_delay_ms",
+        "error_status",
+        "error",
+        "uuid",
+        "session_id",
+      ]) &&
+      nonNegativeInteger(message.attempt) !== undefined &&
+      nonNegativeInteger(message.max_retries) !== undefined &&
+      nonNegativeNumber(message.retry_delay_ms) !== undefined &&
+      (message.error_status === undefined ||
+        nonNegativeInteger(message.error_status) !== undefined) &&
+      (message.error === undefined || typeof message.error === "string") &&
+      typeof message.uuid === "string" &&
+      typeof message.session_id === "string"
+    );
+  }
   // A post-turn summary is the runtime's own one-line status of the turn it
   // just finished (2.1.258); it neither changes state nor grants anything.
   if (message.subtype === "post_turn_summary") {

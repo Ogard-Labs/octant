@@ -439,9 +439,25 @@ function isTerminalEvent(event: ProviderRuntimeEvent): boolean {
   );
 }
 
+/**
+ * The runtime names a model by its family alias ("Sonnet", "Opus", "Default
+ * (recommended)") and keeps the versioned name for the first clause of the
+ * description ("Sonnet 5 · Efficient for routine tasks"; Claude Code 2.1.234).
+ * A picker that says only "Sonnet" hides which generation a thread runs on,
+ * so the versioned clause is the display name when it extends the alias, and
+ * the default entry says what it resolves to.
+ */
+function versionedClaudeModelName(displayName: string, description: string): string {
+  const versioned = description.split("·")[0]?.trim() ?? "";
+  if (versioned.length === 0) return displayName;
+  if (versioned.toLowerCase().startsWith(displayName.toLowerCase())) return versioned;
+  if (displayName.toLowerCase().startsWith("default")) return `Default (${versioned})`;
+  return displayName;
+}
+
 function modelFromClaude(source: ClaudeModelInfo): ProviderModel | undefined {
   const id = source.id.trim();
-  const displayName = source.displayName.trim();
+  const displayName = versionedClaudeModelName(source.displayName.trim(), source.description);
   if (id.length === 0 || displayName.length === 0) return undefined;
   const effort = source.supportsEffort
     ? [...new Set(source.supportedEffortLevels.map((value) => value.trim()))].filter(Boolean)

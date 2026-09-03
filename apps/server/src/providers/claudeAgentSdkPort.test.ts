@@ -948,6 +948,18 @@ describe("Claude Agent SDK port", () => {
         session_id: "session-1",
       },
       { type: "prompt_suggestion", suggestion: "next", uuid: "4", session_id: "session-1" },
+      // Captured from Claude Code 2.1.234 retrying a 401 during a turn.
+      {
+        type: "system",
+        subtype: "api_retry",
+        attempt: 1,
+        max_retries: 10,
+        retry_delay_ms: 581,
+        error_status: 401,
+        error: "authentication_failed",
+        session_id: "session-1",
+        uuid: "b441de81-ec9d-4c62-9be9-9a0b09954fbd",
+      },
       { type: "keep_alive" },
     ]);
 
@@ -972,6 +984,7 @@ describe("Claude Agent SDK port", () => {
         capabilities: ["interrupt_receipt_v1"],
         runtimeVersion: "2.1.211",
       },
+      { kind: "ignored" },
       { kind: "ignored" },
       { kind: "ignored" },
       { kind: "ignored" },
@@ -1004,6 +1017,18 @@ describe("Claude Agent SDK port", () => {
       level: "warning",
       prevent_continuation: true,
       uuid: "7",
+      session_id: "session-1",
+    },
+    // A retry note whose counters are not whole non-negative numbers is not
+    // the frame this allowlist recognizes, so it is reported rather than
+    // silently dropped.
+    {
+      type: "system",
+      subtype: "api_retry",
+      attempt: -1,
+      max_retries: 10.5,
+      retry_delay_ms: 581,
+      uuid: "8",
       session_id: "session-1",
     },
   ])("protocol-fails every non-allowlisted message after initialization", async (message) => {
