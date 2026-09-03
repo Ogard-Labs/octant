@@ -13,6 +13,9 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
 import type { OctantMode } from "@octant/contracts/modes";
+import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type { ImageGenerationProfileView } from "@octant/contracts";
+import { ImageLibraryView } from "../image/ImageLibraryView";
 import { lazy, Suspense, type ReactNode } from "react";
 import type { AgentsCenterThreadTarget } from "../agents/agentsCenterModel";
 import type {
@@ -110,6 +113,11 @@ export interface WorkspaceRailLayersProps {
   readonly onOpenArchivedThread?: (entry: ArchivedThreadEntry) => void;
   readonly artifactLibraryOpen: boolean;
   readonly onCloseArtifactLibrary: () => void;
+  readonly imageLibraryOpen: boolean;
+  readonly onCloseImageLibrary: () => void;
+  readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageProfiles: ReadonlyArray<ImageGenerationProfileView>;
+  readonly onOpenImageSettings?: () => void;
   readonly onCreateArtifact: () => void;
   readonly onOpenArtifact: (entry: ArtifactLibraryEntry) => void;
   readonly serverUrl: string;
@@ -279,6 +287,20 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               onClose={props.onCloseArchive}
               onOpenThread={props.onOpenArchivedThread}
               projects={props.archiveProjects}
+            />
+          </LazyRailSurface>
+        </div>
+      ) : null}
+      {props.imageLibraryOpen && props.imageGenerationClient !== undefined ? (
+        <div className="artifact-library-layer">
+          <LazyRailSurface label="Image generator">
+            <ImageLibraryView
+              client={props.imageGenerationClient}
+              onClose={props.onCloseImageLibrary}
+              {...(props.onOpenImageSettings === undefined
+                ? {}
+                : { onOpenSettings: props.onOpenImageSettings })}
+              profiles={props.imageProfiles}
             />
           </LazyRailSurface>
         </div>

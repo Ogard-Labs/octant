@@ -19,6 +19,7 @@ export type SidebarNavigationDescriptorId =
   | "agents"
   | "automations"
   | "artifact-library"
+  | "image-library"
   | "plugins"
   | "inbox"
   | "thread-board"
@@ -27,7 +28,12 @@ export type SidebarNavigationDescriptorId =
   | "linear-issues"
   | "projects";
 
-export type SidebarAppMenuDescriptorId = "agents" | "automations" | "artifact-library" | "plugins";
+export type SidebarAppMenuDescriptorId =
+  | "agents"
+  | "automations"
+  | "artifact-library"
+  | "image-library"
+  | "plugins";
 
 export interface SidebarNavigationDescriptor {
   readonly id: SidebarNavigationDescriptorId;
@@ -53,6 +59,8 @@ export interface SidebarNavigationInput {
   readonly automationsEnabled: boolean;
   readonly agentsCenterEnabled: boolean;
   readonly artifactLibrary: NavigationAvailability;
+  /** Absent on hosts that serve no image generation. */
+  readonly imageLibrary?: NavigationAvailability;
 }
 
 export interface ChatThreadNavigationSource {
@@ -161,6 +169,7 @@ const descriptors = {
   automations: { id: "automations", label: "Automations" },
   agents: { id: "agents", label: "Agents" },
   "artifact-library": { id: "artifact-library", label: "Artifacts" },
+  "image-library": { id: "image-library", label: "Image generator" },
   plugins: { id: "plugins", label: "Plugins" },
   "thread-board": { id: "thread-board", label: "Board" },
   "pull-requests": { id: "pull-requests", label: "Pull requests" },
@@ -211,6 +220,7 @@ export function buildSidebarAppMenu(
     ...(input.agentsCenterEnabled ? [descriptors.agents] : []),
     ...(input.activeMode !== "chat" && input.automationsEnabled ? [descriptors.automations] : []),
     ...(input.artifactLibrary === "available" ? [descriptors["artifact-library"]] : []),
+    ...(input.imageLibrary === "available" ? [descriptors["image-library"]] : []),
     ...(input.plugins === "available" ? [descriptors.plugins] : []),
   ];
 }

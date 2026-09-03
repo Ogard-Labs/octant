@@ -22,7 +22,6 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeImageGenerationScopeId } from "@octant/contracts";
-import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import { useSteeredSend } from "../composer/useSteeredSend";
 import type { TurnSettlement } from "../composer/steeredSend";
@@ -1300,20 +1299,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ariaLabel: "Thread context",
           leading: (
             <>
-              {props.imageGenerationProfiles === undefined ? null : (
-                <ImageGenerationAction
-                  {...(props.imageGenerationClient === undefined
-                    ? {}
-                    : { client: props.imageGenerationClient })}
-                  {...(props.onOpenSettings === undefined
-                    ? {}
-                    : { onOpenSettings: props.onOpenSettings })}
-                  disabled={busy}
-                  profiles={props.imageGenerationProfiles}
-                  scopeId={decodeImageGenerationScopeId(String(thread.id))}
-                  threadKind="code-thread"
-                />
-              )}
               <ComposerModelPicker
                 ariaLabel="Provider and model"
                 disabled={busy || providerChanging}

@@ -1008,18 +1008,6 @@ function renderNonCodeTab(
           void props.onClosePane(paneId);
         }}
         {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
-        {...(props.providerController.snapshot === undefined ||
-        props.imageGenerationClient === undefined
-          ? {}
-          : {
-              imageGeneration: {
-                profiles: listEligibleImageProfiles(props.providerController.snapshot.instances),
-                client: props.imageGenerationClient,
-                ...(openProviderSettings === undefined
-                  ? {}
-                  : { onOpenSettings: openProviderSettings }),
-              },
-            })}
         {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
         {...(props.onDraftPendingMessage === undefined
           ? {}

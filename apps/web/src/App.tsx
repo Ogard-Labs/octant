@@ -1,6 +1,7 @@
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import { listEligibleImageProfiles } from "@octant/domain";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
@@ -694,6 +695,7 @@ function LaunchedShell(
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
+  const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] =
     useState<import("@octant/contracts/providers").ProviderInstanceId>();
   const [draftModelId, setDraftModelId] =
@@ -3038,7 +3040,21 @@ function LaunchedShell(
     setArchiveOpen(false);
     setAutomationCenterOpen(false);
     setAgentsCenterOpen(false);
+    setImageLibraryOpen(false);
     setArtifactLibraryOpen(true);
+  }
+
+  function openImageLibrary() {
+    setRailPlaceholder(undefined);
+    setCodeBoardOpen(false);
+    setCodePullRequestsOpen(false);
+    setGithubIssuesOpen(false);
+    setWorkBoardOpen(false);
+    setArchiveOpen(false);
+    setAutomationCenterOpen(false);
+    setAgentsCenterOpen(false);
+    setArtifactLibraryOpen(false);
+    setImageLibraryOpen(true);
   }
 
   function openArchive() {
@@ -4131,6 +4147,7 @@ function LaunchedShell(
         transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
           <ShellSidebar
+            imageLibraryAvailable={imageGenerationClient !== undefined}
             {...(federatedHostStates.length < 2
               ? {}
               : {
@@ -4159,6 +4176,7 @@ function LaunchedShell(
                       inbox: openInbox,
                       agents: openAgentsCenter,
                       "artifact-library": openArtifactLibrary,
+                      "image-library": openImageLibrary,
                       plugins: openSkillsSettings,
                     },
                   },
@@ -4173,6 +4191,7 @@ function LaunchedShell(
                       agents: openAgentsCenter,
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
+                      "image-library": openImageLibrary,
                       plugins: openSkillsSettings,
                       ...pluginSidebarDestinationActions,
                     },
@@ -4188,6 +4207,7 @@ function LaunchedShell(
                       agents: openAgentsCenter,
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
+                      "image-library": openImageLibrary,
                       plugins: openSkillsSettings,
                       ...pluginSidebarDestinationActions,
                     },
@@ -4500,6 +4520,13 @@ function LaunchedShell(
                 onOpenArchivedThread={openArchivedThread}
                 artifactLibraryOpen={artifactLibraryOpen}
                 onCloseArtifactLibrary={() => setArtifactLibraryOpen(false)}
+                imageLibraryOpen={imageLibraryOpen}
+                onCloseImageLibrary={() => setImageLibraryOpen(false)}
+                imageGenerationClient={imageGenerationClient}
+                imageProfiles={listEligibleImageProfiles(
+                  providerController.snapshot?.instances ?? [],
+                )}
+                onOpenImageSettings={() => void controller.openSettings({ section: "providers" })}
                 onCreateArtifact={() => {
                   // An artifact carries the thread it was made in, so there
                   // is nowhere to put one that has no origin. Starting a

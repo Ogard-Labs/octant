@@ -27,6 +27,15 @@ export type ImageArtifactId = typeof ImageArtifactId.Type;
 export const ImageGenerationScopeId = brandedUuid("ImageGenerationScopeId");
 export type ImageGenerationScopeId = typeof ImageGenerationScopeId.Type;
 
+/**
+ * The one scope the Image generator surface generates into. It is not a
+ * thread: every registered window of a host shares it, and its artifacts stay
+ * in the host's managed attachment store like any thread's.
+ */
+export const IMAGE_LIBRARY_SCOPE_ID = Schema.decodeSync(ImageGenerationScopeId)(
+  "00000000-0000-4000-8000-00000000f1e1",
+);
+
 export const IMAGE_JOB_AGGREGATE_TYPE = "image-job";
 export const IMAGE_JOB_QUEUED = "image.job-queued@1";
 export const IMAGE_JOB_STATUS_CHANGED = "image.job-status-changed@1";
@@ -94,7 +103,12 @@ export const ImageArtifactRecord = Schema.Struct({
 }).annotations(strict);
 export type ImageArtifactRecord = typeof ImageArtifactRecord.Type;
 
-export const ImageJobThreadKind = Schema.Literal("chat-thread", "work-thread", "code-thread");
+export const ImageJobThreadKind = Schema.Literal(
+  "chat-thread",
+  "work-thread",
+  "code-thread",
+  "image-library",
+);
 export type ImageJobThreadKind = typeof ImageJobThreadKind.Type;
 
 export const ImageJob = Schema.Struct({
