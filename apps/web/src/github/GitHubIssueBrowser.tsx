@@ -18,6 +18,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { describeGithubRemediation } from "./githubRemediation";
 
 /**
  * Host-scoped, read-only GitHub issue browser. Repository selection reuses
@@ -598,7 +599,10 @@ function unavailableMessage(state: {
   readonly remediation?: string;
   readonly retryAfterSeconds?: number;
 }): string {
-  const base = state.remediation ?? UNAVAILABLE_FALLBACKS[state.reason];
+  const base =
+    state.remediation === undefined
+      ? UNAVAILABLE_FALLBACKS[state.reason]
+      : describeGithubRemediation(state.remediation);
   if (state.retryAfterSeconds === undefined) return base;
   return `${base} Retry after ${state.retryAfterSeconds} seconds.`;
 }

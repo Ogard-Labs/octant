@@ -177,7 +177,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           <ShellState
             eyebrow="Pull requests"
             message="Reading the last authorized snapshot."
-            state="neutral"
+            state="loading"
             title="Loading pull requests"
           />
         ) : null}
