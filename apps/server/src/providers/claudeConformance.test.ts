@@ -200,6 +200,7 @@ describe("Claude provider conformance", () => {
 class ConformanceQuery implements ClaudeQueryPort {
   readonly #pubsub = Effect.runSync(PubSub.unbounded<ClaudeDecodedMessage>());
   readonly messages: Stream.Stream<ClaudeDecodedMessage, ProviderFailure>;
+  readonly sessionId: Effect.Effect<string, ProviderFailure>;
   readonly initialization = {
     models: [
       {
@@ -225,6 +226,7 @@ class ConformanceQuery implements ClaudeQueryPort {
     readonly input: ClaudeOpenQueryInput,
     readonly sdkSessionId: string,
   ) {
+    this.sessionId = Effect.succeed(sdkSessionId);
     this.messages = Stream.concat(
       Stream.succeed(initialized(input, sdkSessionId)),
       Stream.fromPubSub(this.#pubsub),
@@ -367,6 +369,7 @@ function initialized(input: ClaudeOpenQueryInput, sdkSessionId: string): ClaudeD
     sessionId: sdkSessionId,
     projectRoot: input.projectRoot,
     model: input.model,
+    requestedModel: input.model,
     permissionMode:
       input.executionPolicy === "full-access"
         ? "bypassPermissions"
