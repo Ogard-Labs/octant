@@ -214,7 +214,7 @@ export function HostSettingsSection({
       <section aria-label="Identity" className="settings-card-section settings-card-section--open">
         <div className="settings-section-head">
           <h2>Identity</h2>
-          <OctantButton onClick={() => void refresh()} size="sm" type="button" variant="secondary">
+          <OctantButton onClick={() => void refresh()} size="sm" type="button" variant="ghost">
             Refresh status
           </OctantButton>
         </div>
