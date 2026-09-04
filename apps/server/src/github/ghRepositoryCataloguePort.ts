@@ -339,10 +339,13 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
 
   /**
    * Open items waiting on the signed-in account, across every repository it
-   * can see. A bounded snapshot rather than a pageable catalogue: three fixed
-   * search reads (assigned issues, assigned pull requests, requested reviews),
-   * first page only. `@me` binds each query to gh's own authentication, so no
-   * caller-chosen login can cross this surface.
+   * can see. A bounded snapshot rather than a pageable catalogue: four fixed
+   * search reads (requested reviews, assigned pull requests, the account's
+   * own open pull requests, assigned issues), first page only. Own pull
+   * requests count because nobody assigns themselves the pull request they
+   * opened, and an open one is the clearest thing waiting on its author.
+   * `@me` binds each query to gh's own authentication, so no caller-chosen
+   * login can cross this surface.
    */
   async listAssignedWork(
     signal: AbortSignal,
@@ -350,6 +353,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
     const searches = [
       { category: "review-request", query: "type:pr is:open archived:false review-requested:@me" },
       { category: "pull-request", query: "type:pr is:open archived:false assignee:@me" },
+      { category: "pull-request", query: "type:pr is:open archived:false author:@me" },
       { category: "issue", query: "type:issue is:open archived:false assignee:@me" },
     ] as const;
     const items = new Map<string, GhAssignedWorkObservationItem>();

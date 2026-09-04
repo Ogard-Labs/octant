@@ -1078,6 +1078,10 @@ function LaunchedShell(
     () => fetchAssignedLinearIssues((input) => linearClient.listIssues(input)),
     [linearClient],
   );
+  const loadOpenLinearIssues = useCallback(
+    () => linearClient.listIssues({ filter: { assigneeId: "unassigned" }, pageSize: 20 }),
+    [linearClient],
+  );
   useEffect(() => {
     let cancelled = false;
     void githubTransport
@@ -4899,6 +4903,7 @@ function LaunchedShell(
                       ...(pendingIssue === undefined ? {} : { pendingIssue }),
                       onPendingIssueConsumed: () => setPendingIssue(undefined),
                       loadAssignedLinearIssues,
+                      loadOpenLinearIssues,
                       projectNames: new Map(
                         codeBoardProjects.map((project) => [String(project.id), project.name]),
                       ),

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   CodeBoardCard,
@@ -9,7 +9,15 @@ import type {
   LinearIssueRow,
   ProjectId,
 } from "@octant/contracts";
-import { CircleCheck, CircleDot, GitPullRequest, ListTodo, type LucideIcon } from "lucide-react";
+import {
+  CircleCheck,
+  CircleDot,
+  FolderOpen,
+  GitBranch,
+  GitPullRequest,
+  ListTodo,
+  type LucideIcon,
+} from "lucide-react";
 import {
   readIssuesAcrossRepositories,
   type RepositoryIssueRow,
@@ -21,10 +29,21 @@ const UP_NEXT_LIMIT = 6;
 const FRESH_ISSUE_LIMIT = 4;
 const CONTINUE_LIMIT = 6;
 
+/**
+ * Up next names why each item is there, so a card here never reads as the
+ * same thing as an open issue nobody has taken: assigned, yours, or asked
+ * of you.
+ */
 const CATEGORY_LABELS: Readonly<Record<GithubAssignedWorkItem["category"], string>> = {
-  issue: "Issue",
-  "pull-request": "Pull request",
+  issue: "Assigned to you",
+  "pull-request": "Your pull request",
   "review-request": "Review requested",
+};
+
+const PULL_REQUEST_STATE_LABELS: Readonly<Record<"open" | "merged" | "closed", string>> = {
+  open: "Open",
+  merged: "Merged",
+  closed: "Closed",
 };
 
 export interface CodeHomeThreadTarget {
@@ -35,6 +54,10 @@ export interface CodeHomeThreadTarget {
 export interface CodeHomeProps {
   readonly githubClient?: GithubClient;
   readonly loadAssignedLinearIssues?: () => Promise<{
+    readonly rows: ReadonlyArray<LinearIssueRow>;
+  }>;
+  /** Open Linear issues nobody is assigned; they join Start something new. */
+  readonly loadOpenLinearIssues?: () => Promise<{
     readonly rows: ReadonlyArray<LinearIssueRow>;
   }>;
   readonly loadBoard?: (query: CodeBoardQuery) => Promise<CodeBoardView>;
@@ -61,7 +84,11 @@ type UpNextState =
 
 type FreshState =
   | { readonly kind: "idle" }
-  | { readonly kind: "ready"; readonly rows: ReadonlyArray<RepositoryIssueRow> };
+  | {
+      readonly kind: "ready";
+      readonly rows: ReadonlyArray<RepositoryIssueRow>;
+      readonly linear: ReadonlyArray<LinearIssueRow>;
+    };
 
 type ContinueState =
   | { readonly kind: "idle" }
@@ -74,7 +101,7 @@ type ContinueState =
  * section hides rather than apologises when its source is not connected.
  */
 export function CodeHome(props: CodeHomeProps) {
-  const { githubClient, loadAssignedLinearIssues, loadBoard } = props;
+  const { githubClient, loadAssignedLinearIssues, loadOpenLinearIssues, loadBoard } = props;
   const [upNext, setUpNext] = useState<UpNextState>({ kind: "loading" });
   const [fresh, setFresh] = useState<FreshState>({ kind: "idle" });
   const [next, setNext] = useState<ContinueState>({ kind: "idle" });
@@ -106,33 +133,24 @@ export function CodeHome(props: CodeHomeProps) {
   }, [githubClient, loadAssignedLinearIssues]);
 
   useEffect(() => {
-    if (githubClient === undefined) {
+    if (githubClient === undefined && loadOpenLinearIssues === undefined) {
       setFresh({ kind: "idle" });
       return;
     }
     let cancelled = false;
     const read = async () => {
-      try {
-        const recents = await githubClient.readCatalogue({ kind: "recent-repositories" });
-        if (cancelled || recents.kind !== "recent-repositories" || recents.rows.length === 0) {
-          return;
-        }
-        const result = await readIssuesAcrossRepositories(githubClient, recents.rows, {
-          state: "open",
-          pageSize: 10,
-        });
-        if (cancelled) return;
-        setFresh({ kind: "ready", rows: result.rows });
-      } catch {
-        // A refused catalogue leaves the section out; the Issues surface
-        // explains the refusal in its own words.
-      }
+      const [rows, linear] = await Promise.all([
+        readOpenGithubIssues(githubClient),
+        readOpenLinear(loadOpenLinearIssues),
+      ]);
+      if (cancelled) return;
+      setFresh({ kind: "ready", rows, linear });
     };
     void read();
     return () => {
       cancelled = true;
     };
-  }, [githubClient]);
+  }, [githubClient, loadOpenLinearIssues]);
 
   useEffect(() => {
     if (loadBoard === undefined) {
@@ -164,11 +182,19 @@ export function CodeHome(props: CodeHomeProps) {
       ? upNext.github.map((item) => `${item.owner}/${item.name}#${String(item.number)}`)
       : [],
   );
+  const assignedLinear = new Set(
+    upNext.kind === "ready" ? upNext.linear.map((row) => String(row.id)) : [],
+  );
   const freshRows =
     fresh.kind === "ready"
-      ? fresh.rows
-          .filter((row) => !assigned.has(`${row.owner}/${row.name}#${String(row.number)}`))
-          .slice(0, FRESH_ISSUE_LIMIT)
+      ? [
+          ...fresh.rows
+            .filter((row) => !assigned.has(`${row.owner}/${row.name}#${String(row.number)}`))
+            .map((row) => ({ kind: "github" as const, row })),
+          ...fresh.linear
+            .filter((row) => !assignedLinear.has(String(row.id)))
+            .map((row) => ({ kind: "linear" as const, row })),
+        ].slice(0, FRESH_ISSUE_LIMIT)
       : [];
   const upNextRows =
     upNext.kind === "ready"
@@ -250,26 +276,40 @@ export function CodeHome(props: CodeHomeProps) {
       {freshRows.length === 0 ? null : (
         <section aria-label="Start something new" className="code-home__section">
           <SectionHead
-            note="Open issues in your recent repositories that nobody has picked up."
+            note="Open issues nobody has picked up, from your recent repositories and Linear."
             title="Start something new"
             {...(props.onOpenIssues === undefined
               ? {}
               : { actionLabel: "Browse all issues", onAction: props.onOpenIssues })}
           />
           <ul className="code-home__grid">
-            {freshRows.map((row) => (
-              <li key={`${row.owner}/${row.name}#${String(row.number)}`}>
-                <HomeCard
-                  badge="Issue"
-                  icon={CircleDot}
-                  meta={row.author}
-                  onClick={() => props.onPickIssue(row)}
-                  source={`${row.owner}/${row.name} #${String(row.number)}`}
-                  title={row.title}
-                  updatedAt={row.updatedAt}
-                />
-              </li>
-            ))}
+            {freshRows.map((entry) =>
+              entry.kind === "github" ? (
+                <li key={`${entry.row.owner}/${entry.row.name}#${String(entry.row.number)}`}>
+                  <HomeCard
+                    badge="Open issue"
+                    icon={CircleDot}
+                    meta={entry.row.author}
+                    onClick={() => props.onPickIssue(entry.row)}
+                    source={`${entry.row.owner}/${entry.row.name} #${String(entry.row.number)}`}
+                    title={entry.row.title}
+                    updatedAt={entry.row.updatedAt}
+                  />
+                </li>
+              ) : (
+                <li key={entry.row.id}>
+                  <HomeCard
+                    badge="Linear"
+                    disabled={props.onPickLinear === undefined}
+                    icon={ListTodo}
+                    meta={entry.row.state.name}
+                    onClick={() => props.onPickLinear?.(entry.row)}
+                    source={entry.row.identifier}
+                    title={entry.row.title}
+                  />
+                </li>
+              ),
+            )}
           </ul>
         </section>
       )}
@@ -280,13 +320,18 @@ export function CodeHome(props: CodeHomeProps) {
           <ul className="code-home__grid">
             {next.cards.map((card) => {
               const badge = cardBadge(card);
-              const facts = cardFacts(card, props.projectNames, props.providerLabels);
               return (
                 <li key={String(card.threadId)}>
                   <HomeCard
                     badge={badge.label}
                     disabled={props.onOpenThread === undefined}
-                    meta={facts.join(" · ")}
+                    facts={
+                      <ContinueFacts
+                        card={card}
+                        projectNames={props.projectNames}
+                        providerLabels={props.providerLabels}
+                      />
+                    }
                     onClick={() =>
                       props.onOpenThread?.({ threadId: card.threadId, projectId: card.projectId })
                     }
@@ -342,6 +387,8 @@ function HomeCard(props: {
   readonly updatedAt?: string;
   readonly title: string;
   readonly meta?: string;
+  /** A structured line of facts (icons and chips) instead of `meta`. */
+  readonly facts?: ReactNode;
   readonly disabled?: boolean;
   readonly onClick: () => void;
 }) {
@@ -375,10 +422,63 @@ function HomeCard(props: {
         )}
       </span>
       <span className="code-home__card-title">{props.title}</span>
-      {props.meta === undefined || props.meta === "" ? null : (
+      {props.facts !== undefined ? (
+        props.facts
+      ) : props.meta === undefined || props.meta === "" ? null : (
         <span className="code-home__card-meta">{props.meta}</span>
       )}
     </OctantButton>
+  );
+}
+
+/**
+ * Where a thread lives and what it has delivered: the Project, the branch
+ * (and whether it is a managed worktree), the linked pull request with its
+ * state, and the provider last. Each fact is named by an icon, not a label.
+ */
+function ContinueFacts(props: {
+  readonly card: CodeBoardCard;
+  readonly projectNames: ReadonlyMap<string, string> | undefined;
+  readonly providerLabels: ReadonlyMap<string, string> | undefined;
+}) {
+  const { card } = props;
+  const project = props.projectNames?.get(String(card.projectId));
+  const provider = props.providerLabels?.get(String(card.providerInstanceId));
+  const branch =
+    card.worktree.kind === "available" && card.worktree.head.kind === "branch"
+      ? card.worktree.head.name
+      : undefined;
+  const pullRequest = card.linkedPullRequest.kind === "linked" ? card.linkedPullRequest : undefined;
+  return (
+    <span className="code-home__facts">
+      {project === undefined ? null : (
+        <span className="code-home__fact">
+          <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+          {project}
+        </span>
+      )}
+      {branch === undefined ? null : (
+        <span
+          className="code-home__fact"
+          title={card.checkoutKind === "managed-worktree" ? "Managed worktree" : undefined}
+        >
+          <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+          {branch}
+          {card.checkoutKind === "managed-worktree" ? (
+            <span className="code-home__fact-note">worktree</span>
+          ) : null}
+        </span>
+      )}
+      {pullRequest === undefined ? null : (
+        <span className="code-home__fact code-home__fact--chip" data-tone={pullRequest.state}>
+          <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#{pullRequest.number}{" "}
+          {PULL_REQUEST_STATE_LABELS[pullRequest.state]}
+        </span>
+      )}
+      {provider === undefined ? null : (
+        <span className="code-home__fact code-home__fact--muted">{provider}</span>
+      )}
+    </span>
   );
 }
 
@@ -408,6 +508,36 @@ async function readAssignedGithub(
   }
 }
 
+async function readOpenGithubIssues(
+  client: GithubClient | undefined,
+): Promise<ReadonlyArray<RepositoryIssueRow>> {
+  if (client === undefined) return [];
+  try {
+    const recents = await client.readCatalogue({ kind: "recent-repositories" });
+    if (recents.kind !== "recent-repositories" || recents.rows.length === 0) return [];
+    const result = await readIssuesAcrossRepositories(client, recents.rows, {
+      state: "open",
+      pageSize: 10,
+    });
+    return result.rows;
+  } catch {
+    // A refused catalogue leaves GitHub out of the section; the Issues
+    // surface explains the refusal in its own words.
+    return [];
+  }
+}
+
+async function readOpenLinear(
+  load: CodeHomeProps["loadOpenLinearIssues"],
+): Promise<ReadonlyArray<LinearIssueRow>> {
+  if (load === undefined) return [];
+  try {
+    return (await load()).rows;
+  } catch {
+    return [];
+  }
+}
+
 async function readAssignedLinear(
   load: CodeHomeProps["loadAssignedLinearIssues"],
 ): Promise<ReadonlyArray<LinearIssueRow>> {
@@ -421,14 +551,15 @@ async function readAssignedLinear(
 
 interface CardBadge {
   readonly label: string;
-  readonly tone: "running" | "merged" | "open" | "done" | "waiting" | "quiet";
+  readonly tone: "running" | "done" | "open" | "waiting" | "quiet";
   readonly detail?: string;
 }
 
 /**
- * The tile names the one fact that says where the thread stands: running
- * beats a pull request state, which beats the board status. Changed lines
- * ride along when the checkout has any.
+ * The badge names the thread's own state: running beats the board status.
+ * The pull request is a fact beside the branch, not the badge, so a merged
+ * thread and a merged pull request read as two things. Changed lines ride
+ * along when the checkout has any.
  */
 export function cardBadge(card: CodeBoardCard): CardBadge {
   const detail =
@@ -439,12 +570,6 @@ export function cardBadge(card: CodeBoardCard): CardBadge {
   const withDetail = (badge: Omit<CardBadge, "detail">): CardBadge =>
     detail === undefined ? badge : { ...badge, detail };
   if (card.executing) return withDetail({ label: "Running", tone: "running" });
-  if (card.linkedPullRequest.kind === "linked") {
-    const pullRequest = card.linkedPullRequest;
-    if (pullRequest.state === "merged") return withDetail({ label: "Merged", tone: "merged" });
-    if (pullRequest.state === "closed") return withDetail({ label: "Closed", tone: "quiet" });
-    return withDetail({ label: `PR #${String(pullRequest.number)}`, tone: "open" });
-  }
   switch (card.status) {
     case "done":
       return withDetail({ label: "Done", tone: "done" });
@@ -455,20 +580,4 @@ export function cardBadge(card: CodeBoardCard): CardBadge {
     case "ready":
       return withDetail({ label: "Ready", tone: "quiet" });
   }
-}
-
-function cardFacts(
-  card: CodeBoardCard,
-  projectNames: ReadonlyMap<string, string> | undefined,
-  providerLabels: ReadonlyMap<string, string> | undefined,
-): ReadonlyArray<string> {
-  const facts: string[] = [];
-  const provider = providerLabels?.get(String(card.providerInstanceId));
-  if (provider !== undefined) facts.push(provider);
-  const project = projectNames?.get(String(card.projectId));
-  if (project !== undefined) facts.push(project);
-  if (card.worktree.kind === "available" && card.worktree.head.kind === "branch") {
-    facts.push(card.worktree.head.name);
-  }
-  return facts;
 }

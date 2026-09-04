@@ -338,13 +338,17 @@ across at the composer's width. Each card opens with a badge naming what it
 is (Issue, Pull request, Review requested, Linear, or a thread's delivery
 state: Running, PR #n, Merged, Done, Waiting), the repository or identifier
 in mono, and the age at the trailing edge; then the title and one line of
-facts (author, or provider · Project · branch). Up next holds assigned GitHub
-work and Linear issues and says "You're all caught up" in a panel when
-empty, with Open Inbox at the section's trailing edge; Start something new
-holds open issues in recent repositories that nobody has picked up, with
-Browse all issues beside it; Continue holds the latest Board cards. Picking
-an item fills the prompt and attaches the issue as the thread's Create from
-context. The start screen has no image control: image generation lives on
+facts. Up next holds what is in flight for the person (review requests,
+their own open pull requests, assigned GitHub issues, assigned Linear
+issues), each badge naming why it is there, and says "You're all caught up"
+in a panel when empty, with Open Inbox at the section's trailing edge. Start
+something new holds open GitHub and Linear issues nobody has picked up, with
+Browse all issues beside it. Continue holds the latest Board cards: the badge
+is the thread's own state (Running, Done, Waiting, In progress, Ready) with
+changed lines, and the facts line names the Project, the branch (marked
+worktree when managed), the linked pull request with its number and state as
+a chip, and the provider last. Picking an item fills the prompt and attaches
+the issue as the thread's Create from context. The start screen has no image control: image generation lives on
 its own surface.
 The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.

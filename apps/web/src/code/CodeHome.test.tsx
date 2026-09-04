@@ -177,6 +177,17 @@ describe("CodeHome", () => {
           ],
         })}
         loadBoard={async () => board}
+        loadOpenLinearIssues={async () => ({
+          rows: [
+            {
+              id: "lin-2",
+              identifier: "OCT-9",
+              title: "Name the Board columns",
+              state: { name: "Backlog", type: "backlog" },
+              url: "https://linear.app/octant/issue/OCT-9",
+            } as never,
+          ],
+        })}
         onOpenThread={onOpenThread}
         onPickGithub={onPickGithub}
         onPickIssue={onPickIssue}
@@ -195,14 +206,20 @@ describe("CodeHome", () => {
     const fresh = await screen.findByRole("region", { name: "Start something new" });
     expect(within(fresh).getByText("Widen the dock")).toBeVisible();
     expect(within(fresh).queryByText("Name the Board")).not.toBeInTheDocument();
+    expect(await within(fresh).findByText("Name the Board columns")).toBeVisible();
+    expect(within(fresh).getByText("OCT-9")).toBeVisible();
+    expect(within(upNext).getByText("Assigned to you")).toBeVisible();
 
     const next = await screen.findByRole("region", { name: "Continue" });
     const cards = within(next).getAllByRole("button");
     expect(cards[0]).toHaveTextContent("Running");
     expect(cards[0]).toHaveTextContent("Open PRs merge order");
-    expect(cards[1]).toHaveTextContent("Merged");
+    expect(cards[1]).toHaveTextContent("Done");
     expect(cards[1]).toHaveTextContent("+610 −0");
-    expect(cards[1]).toHaveTextContent("Claude Code · Octant · octant/ai-slop");
+    expect(cards[1]).toHaveTextContent("Octant");
+    expect(cards[1]).toHaveTextContent("octant/ai-slopworktree");
+    expect(cards[1]).toHaveTextContent("#273 Merged");
+    expect(cards[1]).toHaveTextContent("Claude Code");
     expect(cards[1]).not.toHaveTextContent("Ready");
 
     await user.click(within(upNext).getByText("Name the Board"));
@@ -236,8 +253,8 @@ describe("CodeHome", () => {
     expect(screen.queryByRole("region", { name: "Continue" })).not.toBeInTheDocument();
   });
 
-  it("names the one fact that says where a thread stands", () => {
-    expect(cardBadge(card({}))).toEqual({ label: "Merged", tone: "merged", detail: "+610 −0" });
+  it("names the thread's own state and leaves the pull request to the facts", () => {
+    expect(cardBadge(card({}))).toEqual({ label: "Done", tone: "done", detail: "+610 −0" });
     expect(cardBadge(card({ executing: true })).label).toBe("Running");
     expect(
       cardBadge(

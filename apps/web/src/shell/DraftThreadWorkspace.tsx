@@ -161,6 +161,7 @@ export interface DraftThreadWorkspaceProps {
   readonly codeHome?: Pick<
     CodeHomeProps,
     | "loadAssignedLinearIssues"
+    | "loadOpenLinearIssues"
     | "loadBoard"
     | "projectNames"
     | "providerLabels"
@@ -477,6 +478,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         : undefined;
     const linearHome =
       props.linearPluginEnabled === true ? props.codeHome?.loadAssignedLinearIssues : undefined;
+    const linearFresh =
+      props.linearPluginEnabled === true ? props.codeHome?.loadOpenLinearIssues : undefined;
     const fillPrompt = (text: string) =>
       setPromptRequest((current) => ({ text, revision: (current?.revision ?? 0) + 1 }));
     const beneath =
@@ -490,6 +493,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         <CodeHome
           {...(githubHomeClient === undefined ? {} : { githubClient: githubHomeClient })}
           {...(linearHome === undefined ? {} : { loadAssignedLinearIssues: linearHome })}
+          {...(linearFresh === undefined ? {} : { loadOpenLinearIssues: linearFresh })}
           {...(props.codeHome?.loadBoard === undefined
             ? {}
             : { loadBoard: props.codeHome.loadBoard })}

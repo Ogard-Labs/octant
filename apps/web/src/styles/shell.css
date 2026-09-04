@@ -2494,3 +2494,46 @@ form > .work-composer-adapter__attachments {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.code-home__facts {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px 12px;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+
+.code-home__fact {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.code-home__fact > svg {
+  flex: 0 0 auto;
+  color: var(--oct-muted);
+}
+
+.code-home__fact-note,
+.code-home__fact--muted {
+  color: var(--oct-meta);
+}
+
+.code-home__fact--chip {
+  padding: 1px 7px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--octant-control);
+}
+
+.code-home__fact--chip[data-tone="merged"] {
+  color: var(--octant-success-text);
+  background: var(--octant-success-surface);
+}
+
+.code-home__fact--chip[data-tone="merged"] > svg {
+  color: inherit;
+}
