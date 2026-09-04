@@ -37,7 +37,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         <h2>Detected on this Mac</h2>
         <OctantButton
           size="sm"
-          variant="outline"
+          variant="ghost"
           disabled={scanning}
           onClick={() => void props.onScan()}
           type="button"

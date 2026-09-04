@@ -457,10 +457,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   box-shadow: none;
 }
 
-.settings-panel--danger .settings-panel__header h2 {
-  color: var(--octant-danger-text);
-}
-
 .settings-panel__stack {
   display: grid;
   gap: var(--oct-space-4);
@@ -501,25 +497,24 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   font-size: var(--oct-text-sm);
 }
 
+/* A loading or status line is one quiet sentence on the page ground. Boxed,
+   "Loading GitHub status…" read as a finished empty-state card (DESIGN.md
+   "Spacing, shapes, and depth"). Only an error keeps a boundary, because it
+   is the one state a person has to act on. */
 .settings-state {
   margin: 0;
-  padding: 10px 14px;
+  padding: 8px 0;
   color: var(--octant-text-secondary);
-  background: var(--octant-surface-muted);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-md);
   font-size: var(--oct-text-sm);
-}
-
-.settings-panel__body .settings-state {
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
+  line-height: 1.45;
 }
 
 .settings-state--error {
+  padding: 10px 14px;
   color: var(--octant-danger-text);
+  background: var(--octant-surface-muted);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-sm);
 }
 
 .settings-state--success {
@@ -574,7 +569,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="vision-reviewer"],
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
-.setrow[data-setting-id="app-updates"],
 .setrow[data-setting-id="export-diagnostics"],
 .setrow[data-setting-id="chat-default-model"],
 .setrow[data-setting-id="chat-personality"],
@@ -589,7 +583,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="vision-reviewer"] > .setrow-control,
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
-.setrow[data-setting-id="app-updates"] > .setrow-control,
 .setrow[data-setting-id="export-diagnostics"] > .setrow-control,
 .setrow[data-setting-id="chat-default-model"] > .setrow-control,
 .setrow[data-setting-id="chat-personality"] > .setrow-control,
@@ -828,14 +821,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   text-align: end;
 }
 
-/* A status line in an open section is a sentence, not a boxed callout. */
-.settings-card-section--open .settings-state {
-  padding: 8px 0 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-}
-
 /* Quiet lines that follow the rows: an empty collection, a message after an
    action, guidance that explains the rows above. */
 .settings-card-section--open > .settings-section-line {
@@ -892,6 +877,47 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border-radius: var(--oct-radius-sm);
   outline: none;
   box-shadow: var(--oct-focus-ring);
+}
+
+/* One disclosure recipe for the "more" a row can hold: a custom font stack,
+   network details, the keybindings JSON, what an update check sends. The
+   summary is a 12px line with the app's chevron, never the browser's marker. */
+.settings-disclosure > summary {
+  display: flex;
+  width: fit-content;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  color: var(--octant-text-secondary);
+  font-family: var(--oct-font-display);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-disclosure > summary:hover {
+  color: var(--octant-text-primary);
+}
+
+.settings-disclosure > summary:focus-visible {
+  border-radius: var(--oct-radius-sm);
+  outline: none;
+  box-shadow: var(--oct-focus-ring);
+}
+
+.settings-disclosure > summary > svg {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+.settings-disclosure[open] > summary > svg {
+  transform: rotate(90deg);
 }
 
 .settings-profile-disclosure > summary {
@@ -1083,9 +1109,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 /* The app's own primitives reach the same column. A switch is not a value
    control — it keeps its natural size and lands on the column's right edge like
-   every other control does. */
+   every other control does. A segmented choice is sized by its segments too:
+   forced to the column, "Narrow / Medium / Wide" overflowed its track and
+   "Session / Project" left 40px of empty track. */
 .setrow-control > .settings-view__range,
-.setrow-control > [data-slot="toggle-group"],
 .setrow-control > .octant-number-stepper,
 .setrow-control > .settings-view__select,
 .setrow-control > .settings-font-picker {
@@ -1245,19 +1272,21 @@ textarea.settings-view__text-input {
   white-space: normal;
   text-align: center;
   background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
+  border: 1px solid transparent;
   border-radius: var(--oct-radius-md);
   cursor: pointer;
   transition: border-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .settings-scheme__card:hover {
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  border-color: var(--oct-hairline);
 }
 
+/* One 1px ring says which scheme is chosen. A border plus a shadow ring drew
+   the same edge twice. */
 .settings-scheme__card[aria-checked="true"] {
-  border-color: var(--oct-accent-fg);
-  box-shadow: 0 0 0 1px var(--oct-accent-fg);
+  border-color: var(--oct-fg);
+  box-shadow: none;
 }
 
 /* Same specificity as the checked ring and declared after it, so keyboard
@@ -1366,9 +1395,26 @@ textarea.settings-view__text-input {
   padding: 16px 20px;
 }
 
+/* Typography and Accessibility rows are ordinary setrows: 44px, label in the
+   row-label role, control on the shared edge, a hairline between them. The
+   11px field grammar with a 20px indent put their switches 20px short of the
+   column every other row reaches. */
 .settings-theme-editor .setgroup > .settings-view__field {
-  padding: 16px 20px;
-  border-top: 1px solid var(--oct-border-soft);
+  padding: 6px 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-theme-editor .settings-view__field {
+  min-height: 44px;
+  padding-inline: 0;
+  font-size: var(--oct-text-sm);
+}
+
+.settings-theme-editor .settings-view__field > span:first-child {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  line-height: 1.3;
 }
 
 .settings-theme-editor__scheme-section .setgroup > .settings-view__field {
@@ -1450,30 +1496,32 @@ textarea.settings-view__text-input {
 
 .settings-view__theme-group {
   display: grid;
-  gap: 4px;
-  padding: 12px 0 8px;
+  gap: 0;
+  padding: 0;
   margin: 0;
   border: 0;
-  border-top: 1px solid var(--oct-border-soft);
-}
-
-/* The first sub-group opens the disclosure body, so a rule above it would draw
-   a second edge immediately under the group's own. */
-.settings-view__theme-group:first-of-type {
-  padding-top: 4px;
-  border-top: 0;
 }
 
 /* Placed back into the grid: an unfloated legend is the fieldset's rendered
    legend, which sits on the top rule and cuts a notch through it. Floating
-   it makes it an ordinary grid child. */
+   it makes it an ordinary grid child, and it wears the section-label recipe
+   over its own hairline. */
 .settings-view__theme-group legend {
   float: left;
   width: 100%;
-  padding: 0 0 2px;
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-strong);
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--oct-hairline);
+  color: var(--octant-text-primary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.3;
+}
+
+.settings-view__theme-group > .settings-view__field + .settings-view__field,
+.settings-view__theme-group > details + .settings-view__field {
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .settings-font-picker {
@@ -1499,38 +1547,6 @@ textarea.settings-view__text-input {
 
 .settings-font-picker__custom {
   padding: 0 0 var(--oct-space-2);
-}
-
-/* The rest of Settings discloses with the app's own chevron; only this one
-   still drew the browser's `list-item` triangle, which also pushed its text a
-   marker's width past the label edge every other row starts at. */
-.settings-font-picker__custom summary {
-  display: flex;
-  width: fit-content;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted-foreground);
-  font-size: var(--oct-text-xs);
-  cursor: pointer;
-  list-style: none;
-}
-
-.settings-font-picker__custom summary::-webkit-details-marker {
-  display: none;
-}
-
-.settings-font-picker__custom summary::before {
-  width: 0;
-  height: 0;
-  content: "";
-  border-top: 3.5px solid transparent;
-  border-bottom: 3.5px solid transparent;
-  border-left: 5px solid currentcolor;
-  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
-}
-
-.settings-font-picker__custom[open] summary::before {
-  transform: rotate(90deg);
 }
 
 .settings-font-picker__custom > input {
@@ -1724,8 +1740,31 @@ textarea.settings-view__text-input {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-fg);
+}
+
+/* A federated host is a row: name, facts and state as the hint, actions at
+   the control edge. */
+.federated-hosts-lifecycle__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.federated-hosts-lifecycle__list > .setrow {
+  padding-inline: 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.federated-hosts-lifecycle__guidance {
+  display: block;
+  margin-top: 2px;
+}
+
+.federated-hosts-lifecycle__actions {
+  display: inline-flex;
+  gap: var(--oct-space-2);
 }
 
 .host-settings__controls {
@@ -1932,68 +1971,45 @@ textarea.settings-view__text-input {
  * policy document, because the person deciding whether to leave automatic
  * checks on is the person who should read what those checks send.
  */
-.app-update {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.app-update__version {
-  margin: 0;
-  font-weight: var(--oct-weight-strong);
-}
-
 .app-update__actions {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .app-update__notice {
-  margin: 0;
-  font-size: calc(12 * var(--oct-text-step));
-  color: var(--oct-muted);
+  display: block;
 }
 
-.app-update__ring {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--oct-border-soft);
-}
-
-.app-update__automatic {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--oct-border-soft);
-}
-
+/* The privacy explanation for an update check stays one disclosure under the
+   rows; the person weighing the switch opens it, everyone else reads three
+   rows. */
 .app-update__disclosure {
-  margin: 0;
-  font-size: calc(12 * var(--oct-text-step));
-  color: var(--oct-muted);
+  padding: 4px 0 8px;
 }
 
-.app-update__disclosure-list {
-  margin: 0;
-  padding-left: 18px;
+.app-update__disclosure-body {
+  display: grid;
+  gap: 8px;
+  max-width: 64ch;
+  padding: 4px 0 4px 18px;
+  color: var(--octant-text-secondary);
   font-size: calc(12 * var(--oct-text-step));
-  color: var(--oct-muted);
+  line-height: 1.45;
+}
+
+.app-update__disclosure-body p,
+.app-update__disclosure-body ul {
+  margin: 0;
+}
+
+.app-update__disclosure-body ul {
+  padding-left: 18px;
 }
 
 .marketplace-fetch-settings__details {
   padding: 0 0 10px;
-}
-
-.marketplace-fetch-settings__details summary {
-  width: fit-content;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  font-weight: 500;
-  cursor: pointer;
 }
 
 .marketplace-fetch-settings__details[open] summary {
@@ -2016,79 +2032,24 @@ textarea.settings-view__text-input {
   gap: var(--oct-space-6);
 }
 
-.open-in-settings {
-  min-width: 0;
-  overflow: hidden;
-  padding: 0 0 8px;
-  border: 0;
-  background: var(--octant-settings-card);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-.open-in-settings > legend {
-  float: left;
-  width: 100%;
-  padding: 20px 20px 0;
-  color: var(--octant-text-primary);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: -0.01em;
-}
-
-.open-in-settings > p,
-.open-in-settings__state {
-  margin: 0;
-  padding: 8px 20px 16px;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-}
-
-.open-in-settings__list {
-  border-block: 0;
-}
-
-.open-in-settings__row {
-  display: grid;
-  min-height: 44px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--oct-space-3);
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-.open-in-settings__row:last-child {
-  border-bottom: 0;
-}
-
-.open-in-settings__row > label {
+/* The reorder arrows ride next to the enable switch at the control edge and
+   stay quiet: an enabled row's order matters, a disabled row's does not. */
+.open-in-settings__controls {
   display: inline-flex;
-  min-width: 0;
   align-items: center;
-  gap: var(--oct-space-2);
-  color: var(--oct-fg);
-  cursor: pointer;
+  gap: var(--oct-space-1);
 }
 
-.open-in-settings__availability {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-}
-
-.open-in-settings__order-actions {
-  display: inline-flex;
-  gap: 2px;
-}
-
-.open-in-settings__order-actions button {
+.open-in-settings__controls > button {
   width: 28px;
   min-width: 28px;
   height: 28px;
   min-height: 28px;
   padding: 0;
+}
+
+.open-in-settings__controls > [role="switch"] {
+  margin-left: var(--oct-space-2);
 }
 
 .code-settings {

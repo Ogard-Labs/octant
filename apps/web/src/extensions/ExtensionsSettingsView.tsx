@@ -21,7 +21,7 @@ import type { ExtensionPackagePreview } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
-import { OctantTabs, OctantTabsList, OctantTabsPanel, OctantTabsTab } from "../ui/base/OctantTabs";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
 /**
  * Human-readable labels for the deterministic {@link ExtensionBlockReason}
@@ -229,6 +229,20 @@ const INSTALLED_SKILL_PREVIEW_LIMIT = 12;
 export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const scope = props.scope ?? DEFAULT_EXTENSION_SETTINGS_SCOPE;
   const marketplaceFetchesEnabled = props.marketplaceFetchesEnabled ?? true;
+  const [view, setView] = useState<"installed" | "marketplace">("installed");
+  const viewSwitch = (
+    <OctantToggleGroup<"installed" | "marketplace">
+      aria-label="View"
+      onValueChange={(value) => {
+        const selected = value[0];
+        if (selected !== undefined) setView(selected);
+      }}
+      value={[view]}
+    >
+      <OctantToggleGroupItem value="installed">Installed</OctantToggleGroupItem>
+      <OctantToggleGroupItem value="marketplace">Marketplace</OctantToggleGroupItem>
+    </OctantToggleGroup>
+  );
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [snapshot, setSnapshot] = useState<ExtensionSnapshot | undefined>();
   const [effective, setEffective] = useState<ExtensionEffectiveSnapshot | undefined>();
@@ -650,20 +664,18 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         Skills extend what agents can do. Review the source, then trust and enable only what you
         want available.
       </p>
-      <OctantTabs defaultValue="installed">
-        <OctantTabsList className="surface-tabs">
-          <OctantTabsTab value="installed">Installed</OctantTabsTab>
-          <OctantTabsTab value="marketplace">Marketplace</OctantTabsTab>
-        </OctantTabsList>
-
-        <OctantTabsPanel value="installed">
+      {view === "installed" ? (
+        <>
           <section
             aria-labelledby="installed-extension-packages-heading"
             className="extensions-settings__section"
           >
-            <h3 className="setgroup-head" id="installed-extension-packages-heading">
-              Extension packages
-            </h3>
+            <div className="settings-section-head">
+              <h3 className="setgroup-head" id="installed-extension-packages-heading">
+                Extension packages
+              </h3>
+              {viewSwitch}
+            </div>
             <div className="extensions-settings__body">
               {installedPackages.length === 0 ? (
                 <p className="extensions-settings__state" role="status">
@@ -840,22 +852,26 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               </div>
             </section>
           ) : null}
-        </OctantTabsPanel>
-
-        <OctantTabsPanel value="marketplace">
-          {!marketplaceFetchesEnabled ? (
-            <p className="extensions-settings__state" role="status">
-              Marketplace fetches are off in Settings → General → Marketplace. Catalog search stays
-              local; Inspect, Search skills, preview, and install will not contact registries.
-            </p>
-          ) : null}
+        </>
+      ) : (
+        <>
           <section
             aria-labelledby="extension-catalog-heading"
             className="extensions-settings__section"
           >
-            <h3 className="setgroup-head" id="extension-catalog-heading">
-              Extension catalog
-            </h3>
+            <div className="settings-section-head">
+              <h3 className="setgroup-head" id="extension-catalog-heading">
+                Extension catalog
+              </h3>
+              {viewSwitch}
+            </div>
+            {!marketplaceFetchesEnabled ? (
+              <p className="extensions-settings__state" role="status">
+                Marketplace fetches are off in Settings → General → Marketplace. Catalog search
+                stays local; Inspect, Search skills, preview, and install will not contact
+                registries.
+              </p>
+            ) : null}
             <div className="extensions-settings__body">
               <div className="extensions-settings__search">
                 <OctantInput
@@ -1317,8 +1333,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               ) : null}
             </div>
           </section>
-        </OctantTabsPanel>
-      </OctantTabs>
+        </>
+      )}
 
       {failure !== undefined ? (
         <p className="extensions-settings__failure" role="status">

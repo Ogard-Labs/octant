@@ -771,24 +771,19 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       </details>
       <div className="settings-card-section settings-card-section--open">
         <h2>Updates</h2>
+        <p className="settings-section-note">
+          Octant updates itself only when you ask it to, and never while work is running.
+        </p>
         <div className="setgroup">
-          <SettingRow
-            description="Octant updates itself only when you ask it to, and never while work is running."
+          <AppUpdateSettings
+            automaticChecks={props.settings.automaticUpdateChecks}
             focused={focusedSetting === settingId("app-updates")}
-            label="Application updates"
-            labelledBySection
-            scope="app"
-            settingId="app-updates"
-          >
-            <AppUpdateSettings
-              automaticChecks={props.settings.automaticUpdateChecks}
-              {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-              onAutomaticChecksChange={(enabled) =>
-                props.onSettingsChange({ automaticUpdateChecks: enabled })
-              }
-              onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
-            />
-          </SettingRow>
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+            onAutomaticChecksChange={(enabled) =>
+              props.onSettingsChange({ automaticUpdateChecks: enabled })
+            }
+            onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
+          />
         </div>
       </div>
       <div className="settings-card-section settings-card-section--open">
@@ -1093,6 +1088,28 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           ) : null}
         </div>
       </div>
+      {props.themeController === undefined ? null : (
+        <div className="settings-card-section settings-card-section--open">
+          <h2>Reset</h2>
+          <div className="setgroup">
+            <SettingRow
+              description="Return every appearance setting to its default."
+              label="Reset appearance"
+              scope="app"
+              settingId="reset-appearance"
+            >
+              <OctantButton
+                onClick={() => void props.themeController?.reset()}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Reset appearance
+              </OctantButton>
+            </SettingRow>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
