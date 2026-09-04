@@ -111,7 +111,6 @@ export interface CodeComposerAdapterProps {
    * Optional GitHub repository selection slot rendered on the context tray.
    * Host, Octant Project, and GitHub repository stay distinct visible selections.
    */
-  readonly githubControl?: ReactNode;
   readonly createFromControl?: ReactNode;
   /** Ready-made prompts shown under the composer; choosing one fills the prompt. */
   readonly suggestions?: ReadonlyArray<CodeComposerSuggestion>;
@@ -604,7 +603,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       {...(props.creating === true ? { disabled: true } : {})}
                     />
                   ) : null}
-                  {props.githubControl}
                   {props.createFromControl}
                 </div>
               </div>

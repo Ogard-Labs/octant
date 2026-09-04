@@ -758,17 +758,6 @@
   font-size: var(--oct-text-xs);
 }
 
-.github-onboarding__dialog {
-  width: min(420px, calc(100vw - 24px));
-  padding: 10px;
-}
-
-.github-onboarding__trigger span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .github-onboarding__body {
   display: flex;
   flex-direction: column;

@@ -894,8 +894,11 @@ describe("WorkspaceView Code draft integrations", () => {
         onCreateProject={vi.fn(async () => undefined)}
       />,
     );
-    // The GitHub control loads on demand, so it lands a tick after the rest.
-    expect(await screen.findByRole("button", { name: "GitHub repository" })).toBeVisible();
+    // GitHub lives inside the Project menu as a way to make a new Project.
+    fireEvent.click(await screen.findByRole("button", { name: "Project: Choose a Project" }));
+    expect(
+      await screen.findByRole("option", { name: "New Project from GitHub repository…" }),
+    ).toBeVisible();
   });
 });
 

@@ -33,7 +33,15 @@
 }
 
 .github-issue-browser__search:focus-within {
-  border-color: var(--octant-focus-ring);
+  border-color: var(--oct-border-strong);
+}
+
+/* The inner input clears box-shadow so no ring is drawn inside the 30px
+   control, but that also outranks the global :focus-visible halo and left
+   keyboard focus with only a border tint. The wrapper carries the ring, the
+   way the composer does. */
+.github-issue-browser__search:has(input[type="search"]:focus-visible) {
+  box-shadow: var(--oct-focus-ring);
 }
 
 .github-issue-browser__search input[type="search"] {

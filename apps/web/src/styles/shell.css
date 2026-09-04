@@ -1274,17 +1274,36 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   inset-block-start: calc(100% + 6px);
   inset-inline-start: 0;
   display: grid;
-  width: min(22rem, calc(100vw - 2rem));
-  max-height: min(24rem, 60vh);
+  width: min(24rem, calc(100vw - 2rem));
+  max-height: min(28rem, 64vh);
   gap: 6px;
-  padding: 8px;
+  padding: 6px;
   overflow: auto;
   background: var(--octant-surface-raised, var(--octant-surface));
   border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
+}
+
+/* The GitHub flow carries a picker and a confirmation card, so the same
+   menu opens wider for it. */
+.composer-folder-selector__menu--github {
+  width: min(30rem, calc(100vw - 2rem));
+  padding: 8px;
+}
+
+.composer-folder-selector__head {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.composer-folder-selector__head-title {
+  color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  text-align: left;
+  font-weight: var(--oct-weight-medium);
 }
 
 .composer-folder-selector__search {
@@ -1293,54 +1312,76 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .composer-folder-selector__menu [role="listbox"] {
   display: grid;
-  gap: 2px;
+  gap: 1px;
+}
+
+.composer-folder-selector__group {
+  margin: 0;
+  padding: 6px 8px 2px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .composer-folder-selector__option {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   justify-content: stretch;
+  gap: 0 8px;
   width: 100%;
-  min-height: 34px;
-  padding: 6px 8px;
+  height: auto;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+  font-weight: 400;
   text-align: start;
   white-space: normal;
 }
 
+.composer-folder-selector__option > svg {
+  color: var(--oct-muted);
+}
+
 .composer-folder-selector__option:hover,
 .composer-folder-selector__option--active {
-  background: var(--oct-selection);
+  background: var(--oct-fg-soft);
 }
 
 .composer-folder-selector__option--selected {
-  color: var(--octant-text-primary);
+  background: var(--octant-selection);
 }
 
-.composer-folder-selector__option-name,
-.composer-folder-selector__option-path {
-  grid-column: 2;
+.composer-folder-selector__option-copy {
+  display: grid;
   min-width: 0;
-  overflow-wrap: anywhere;
+  gap: 1px;
 }
 
 .composer-folder-selector__option-name {
-  font-weight: 600;
+  overflow: hidden;
+  font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .composer-folder-selector__option-path {
-  color: var(--octant-text-muted);
-  font-size: 0.8em;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .composer-folder-selector__check {
-  grid-column: 3;
-  grid-row: 1 / span 2;
+  color: var(--oct-fg);
 }
 
 .composer-folder-selector__empty {
-  margin: 6px 8px;
-  color: var(--octant-text-muted);
-  font-size: calc(12 * var(--oct-text-step));
+  margin: 0;
+  padding: 8px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .draft-thread__context-item {
@@ -2266,8 +2307,10 @@ form > .work-composer-adapter__attachments {
    with a tile that names the thread's delivery state. */
 .code-home__suggestions {
   display: grid;
+  width: min(100%, 704px);
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 8px;
+  margin-inline: auto;
 }
 
 .code-home__suggestions button {
@@ -2304,10 +2347,27 @@ form > .work-composer-adapter__attachments {
   line-height: var(--oct-leading-snug);
 }
 
+.code-home__suggestion-label {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-home__suggestion-text {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  line-height: var(--oct-leading-snug);
+}
+
+/* The composer is the widest thing on the start screen; everything under it
+   sits on a narrower measure so the prompt reads as the window and the
+   cards as its contents. */
 .code-home {
   display: grid;
+  width: min(100%, 704px);
   gap: var(--oct-space-6);
-  margin-top: var(--oct-space-5);
+  margin: var(--oct-space-5) auto 0;
 }
 
 .code-home .draft-thread__recent {

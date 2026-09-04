@@ -86,9 +86,11 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 
 ### Colour
 
-Neutral graphite, a monochrome accent, a blue keyboard focus ring, four statuses. Text is three greys (primary,
+Neutral graphite, a monochrome accent, a monochrome keyboard focus ring, four statuses. Text is three greys (primary,
 secondary, muted) and never a fourth. Hairlines separate; fills select. The
-focus ring is painted once, by the global `:focus-visible` rule; a field
+focus ring is painted once, by the global `:focus-visible` rule, as a
+two-pixel halo of the foreground at reduced opacity on every theme: a
+coloured ring read as a website's link outline, not an app control. A field
 recipe does not add a second border or halo of its own. See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
@@ -174,31 +176,31 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 
 ### Semantic roles
 
-| Role                   | CSS variable                                        | Dark      | Light       | Use                                               |
-| ---------------------- | --------------------------------------------------- | --------- | ----------- | ------------------------------------------------- |
-| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings             |
-| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                       |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground            |
-| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor               |
-| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                          |
-| Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles         |
-| Tray                   | `--octant-tray` (derived)                           | workspace | control mix | The rear context card behind the composer         |
-| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons             |
-| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                        |
-| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                     |
-| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                               |
-| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                    |
-| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                           |
-| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                             |
-| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                   |
-| Muted text             | `--octant-text-muted`                               | `#8a8a8a` | `#6b6b6b`   | Metadata and hints; not for essential text        |
-| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                              |
-| Focus ring             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Keyboard focus                                    |
-| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                 |
-| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                 |
-| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                               |
-| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast         |
-| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash |
+| Role                   | CSS variable                                        | Dark      | Light       | Use                                                    |
+| ---------------------- | --------------------------------------------------- | --------- | ----------- | ------------------------------------------------------ |
+| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings                  |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                            |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground                 |
+| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor                    |
+| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                               |
+| Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles              |
+| Tray                   | `--octant-tray` (derived)                           | workspace | control mix | The rear context card behind the composer              |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons                  |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                             |
+| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                          |
+| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                                    |
+| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                         |
+| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                                |
+| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                                  |
+| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                        |
+| Muted text             | `--octant-text-muted`                               | `#8a8a8a` | `#6b6b6b`   | Metadata and hints; not for essential text             |
+| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                                   |
+| Focus ring             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme token only; the shell paints focus in foreground |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                      |
+| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                      |
+| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                                    |
+| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast              |
+| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash      |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
 darker, the reading surface a step lighter, and cards lift one more step. In light the sidebar and the page share one near-white ground and the
@@ -321,8 +323,12 @@ base branch, and Environment sit on the composer's lower band
 prompt and its toolbar, on the tray fill with a hairline above. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
-creating a second environment model. Repository and workspace remain on that rear card after the three primary
-choices; nothing about delivery is asked up front (see "Language"). Access is
+creating a second environment model. Workspace remains on that rear card after the three primary choices;
+nothing about delivery is asked up front (see "Language"). The Project
+control is one menu: saved Projects to search, then New Project from folder
+and New Project from GitHub repository. Choosing GitHub swaps the menu's body
+for the managed-clone flow in place, so there is no second repository control
+beside the Project. Access is
 a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch. The
 Under the Code composer the start screen reads like GitHub Copilot's and
