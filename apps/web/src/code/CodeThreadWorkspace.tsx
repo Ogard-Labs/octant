@@ -22,7 +22,6 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeImageGenerationScopeId } from "@octant/contracts";
-import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import { useSteeredSend } from "../composer/useSteeredSend";
 import type { TurnSettlement } from "../composer/steeredSend";
@@ -426,9 +425,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     steered.pending === undefined ? null : (
       <article className="code-thread-workspace__message code-thread-workspace__message--user">
         <TrackerReferenceText asParagraph text={steered.pending.prompt} />
-        <p className="code-thread-workspace__turn-access">
-          Access · {CODE_ACCESS_POSTURE_LABEL[steered.pending.access]}
-        </p>
+        {steered.pending.access === previousUserPolicy(messages, messages.length) ? null : (
+          <p className="code-thread-workspace__turn-access">
+            Access · {CODE_ACCESS_POSTURE_LABEL[steered.pending.access]}
+          </p>
+        )}
       </article>
     );
   // An unreachable history is not an empty thread. Treating it as one puts the
@@ -1031,7 +1032,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     ) : (
                       <p>{busy ? "Thinking…" : ""}</p>
                     )}
-                    {message.role === "user" && message.executionPolicy !== undefined ? (
+                    {message.role === "user" &&
+                    message.executionPolicy !== undefined &&
+                    message.executionPolicy !== previousUserPolicy(messages, index) ? (
                       <p className="code-thread-workspace__turn-access">
                         Access · {CODE_ACCESS_POSTURE_LABEL[message.executionPolicy]}
                       </p>
@@ -1300,20 +1303,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ariaLabel: "Thread context",
           leading: (
             <>
-              {props.imageGenerationProfiles === undefined ? null : (
-                <ImageGenerationAction
-                  {...(props.imageGenerationClient === undefined
-                    ? {}
-                    : { client: props.imageGenerationClient })}
-                  {...(props.onOpenSettings === undefined
-                    ? {}
-                    : { onOpenSettings: props.onOpenSettings })}
-                  disabled={busy}
-                  profiles={props.imageGenerationProfiles}
-                  scopeId={decodeImageGenerationScopeId(String(thread.id))}
-                  threadKind="code-thread"
-                />
-              )}
               <ComposerModelPicker
                 ariaLabel="Provider and model"
                 disabled={busy || providerChanging}
@@ -1465,6 +1454,24 @@ function codeTurnActions(input: {
   }
   actions.push({ label: "Copy references", value: "copy-references" });
   return actions;
+}
+
+/**
+ * The posture a message ran under is worth a line only where it changed.
+ * Printing "Access · Ask for approvals" under every message repeated the
+ * thread's default on each turn and buried the one turn that differed.
+ */
+function previousUserPolicy(
+  messages: ReadonlyArray<CodeController["conversation"][number]>,
+  index: number,
+) {
+  for (let candidateIndex = index - 1; candidateIndex >= 0; candidateIndex -= 1) {
+    const candidate = messages[candidateIndex];
+    if (candidate?.role === "user" && candidate.executionPolicy !== undefined) {
+      return candidate.executionPolicy;
+    }
+  }
+  return undefined;
 }
 
 function previousAssistantMessage(

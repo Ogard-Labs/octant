@@ -65,6 +65,16 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__nat
   left: var(--octant-window-chrome-leading-width, 148px);
 }
 
+/* The right dock's tab strip lives in the same band. The strip used to run
+   over it, so the tabs and their close controls dragged the window instead
+   of responding; it now ends where the dock begins. */
+html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__native-drag-strip {
+  right: max(
+    var(--octant-window-chrome-reserved-width, 148px),
+    var(--octant-context-sidebar-width, 0px)
+  );
+}
+
 .window-no-drag,
 .window-no-drag * {
   -webkit-app-region: no-drag;
@@ -474,6 +484,15 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--octant-workspace-translucent-strong);
 }
 
+/* The workspace, its panes, and the thread tab band each paint the opaque
+   workspace colour. With the layer beneath them translucent, that fill hid
+   the glass entirely, so the setting appeared to do nothing. */
+.shell--workspace-material-translucent.shell-frame .workspace,
+.shell--workspace-material-translucent.shell-frame .workspace-pane,
+.shell--workspace-material-translucent.shell-frame .workspace-thread-tabs {
+  background: transparent;
+}
+
 html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"]))
   .shell-frame.shell--workspace-material-translucent
   > .workspace-layer {
@@ -738,6 +757,30 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .sidebar-navigation__thread-unread[data-indicator="unread"]::before {
   content: "\25CF ";
+}
+
+/* Unread ends the row as a small filled dot after the title; the row's own
+   label names it, so it is never colour alone. */
+.sidebar-navigation__thread-unread-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: var(--oct-radius-pill);
+  background: var(--octant-text-primary);
+}
+
+/* Show more and Show less are one quiet row at the end of a folded list. */
+.project-threads__more {
+  min-height: 26px;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.project-threads__more:hover,
+.project-threads__more:focus-visible {
+  color: var(--oct-fg);
 }
 
 .sidebar-navigation__thread-row {
@@ -2216,31 +2259,55 @@ form > .work-composer-adapter__attachments {
 }
 
 /* ── Code home ─────────────────────────────────────────────────────────
-   Under the Code composer: ready-made prompts as quiet chips, then what
-   GitHub is waiting on and the threads to continue, as rows over
-   hairlines. Nothing here competes with the prompt above it. */
+   Under the Code composer: suggested prompts as small cards, then the
+   sections that say what is waiting (Up next), what nobody has picked up
+   (Start something new), and where the latest threads stand (Continue).
+   Sections are a label, a note, and a hairline panel; Continue's cards lead
+   with a tile that names the thread's delivery state. */
 .code-home__suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
 }
 
 .code-home__suggestions button {
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
+  display: grid;
+  height: auto;
+  min-height: 0;
+  align-content: start;
+  justify-items: start;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  color: var(--oct-fg);
+  background: var(--octant-card);
+  text-align: left;
+  white-space: normal;
 }
 
 .code-home__suggestions button:hover:not(:disabled) {
+  border-color: var(--oct-border-strong);
+  background: var(--octant-card);
+}
+
+.code-home__suggestion-label {
   color: var(--oct-fg);
-  background: transparent;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-home__suggestion-text {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  line-height: var(--oct-leading-snug);
 }
 
 .code-home {
   display: grid;
-  gap: var(--oct-space-5);
-  margin-top: var(--oct-space-3);
+  gap: var(--oct-space-6);
+  margin-top: var(--oct-space-5);
 }
 
 .code-home .draft-thread__recent {
@@ -2249,66 +2316,177 @@ form > .work-composer-adapter__attachments {
 
 .code-home__section {
   display: grid;
-  gap: var(--oct-space-1);
+  gap: var(--oct-space-3);
 }
 
-.code-home__section-title,
-.code-home__note {
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.code-home__note {
-  padding: 6px 10px;
-}
-
-.code-home__list {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.code-home__list > li + li {
-  border-top: 1px solid var(--oct-hairline);
-}
-
-.code-home__row {
+.code-home__section-head {
   display: flex;
-  width: 100%;
-  height: auto;
-  min-height: 0;
-  align-items: flex-start;
-  gap: var(--oct-space-2);
-  padding: 8px 10px;
-  border-radius: var(--oct-radius-md);
-  font-weight: 400;
-  text-align: left;
-  white-space: normal;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
 }
 
-.code-home__row-icon {
-  flex: 0 0 auto;
-  margin-top: 2px;
-  color: var(--oct-muted);
-}
-
-.code-home__row-copy {
+.code-home__section-copy {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.code-home__row-title {
-  overflow: hidden;
+.code-home__section-title {
+  margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-home__section-note,
+.code-home__note {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-home__panel {
+  display: grid;
+  padding: 12px 14px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+}
+
+.code-home__empty {
+  justify-items: center;
+  gap: 6px;
+  padding: 28px 14px;
+  color: var(--oct-muted);
+  text-align: center;
+}
+
+.code-home__empty-title {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+/* Every section is the same grid of cards: two across at the composer's
+   width, one when the pane narrows, never a centred list of rows. */
+.code-home__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-home__grid > li {
+  display: grid;
+  min-width: 0;
+}
+
+.code-home__card {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  /* The button recipe centres its content; on a grid that shrinks the one
+     column to its content and floats a short title mid-card. */
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  justify-content: stretch;
+  justify-items: start;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+}
+
+.code-home__card:hover:not(:disabled) {
+  border-color: var(--oct-border-strong);
+  background: var(--octant-card);
+}
+
+.code-home__card-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.code-home__badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--oct-radius-pill);
+  color: var(--oct-fg-2);
+  background: var(--octant-control);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.4;
+}
+
+.code-home__badge[data-tone="merged"],
+.code-home__badge[data-tone="done"] {
+  color: var(--octant-success-text);
+  background: var(--octant-success-surface);
+}
+
+.code-home__badge[data-tone="running"] {
+  color: var(--oct-fg);
+  background: var(--octant-selection);
+}
+
+.code-home__badge[data-tone="waiting"] {
+  color: var(--octant-warning-text, var(--oct-fg-2));
+}
+
+.code-home__card-detail {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-home__card-source {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.code-home__row-meta {
+.code-home__card-age {
+  flex: 0 0 auto;
+  margin-left: auto;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+.code-home__card-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-snug);
+}
+
+.code-home__card-meta {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

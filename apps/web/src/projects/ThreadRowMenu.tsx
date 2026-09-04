@@ -31,6 +31,8 @@ export interface ThreadRowActions {
    * test the chat thread-actions menu applies before offering Export.
    */
   readonly onExportThread?: (threadId: string, title: string) => void;
+  /** Absent when no hand-off client resolves for this window. */
+  readonly onHandOffThread?: (threadId: string, title: string) => void;
   /** Absent when nothing tracks read state for this thread. */
   readonly onMarkThreadRead?: (threadId: string) => void;
   /** Absent when nothing tracks read state for this thread. */
@@ -54,6 +56,7 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onCompleteFollowUp === undefined &&
     actions.onMarkFollowUp === undefined &&
     actions.onExportThread === undefined &&
+    actions.onHandOffThread === undefined &&
     actions.onMarkThreadRead === undefined &&
     actions.onMarkThreadUnread === undefined &&
     actions.onPinInPane === undefined &&
@@ -162,6 +165,16 @@ export function ThreadRowMenu(props: {
           }
         >
           Export…
+        </OctantContextMenuItem>
+      )}
+      {props.actions.onHandOffThread === undefined ? null : (
+        <OctantContextMenuItem
+          label="Hand off…"
+          onClick={() =>
+            props.actions.onHandOffThread?.(String(props.thread.threadId), props.thread.title)
+          }
+        >
+          Hand off…
         </OctantContextMenuItem>
       )}
       {props.actions.onArchiveThread === undefined ? null : (

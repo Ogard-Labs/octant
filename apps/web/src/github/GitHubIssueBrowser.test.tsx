@@ -117,6 +117,8 @@ function makeClient(
 }
 
 async function selectFirstRepository() {
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Repository: Choose a repository" }));
   const option = await screen.findByRole("option", { name: /octant\/repo-1/ });
   fireEvent.click(option);
 }
@@ -154,16 +156,21 @@ describe("GitHubIssueBrowser", () => {
       }
       throw new Error(`unexpected ${request.kind}`);
     });
+    const user = userEvent.setup();
     render(<GitHubIssueBrowser client={makeClient(readCatalogue)} />);
 
     const list = await screen.findByRole("list", { name: "GitHub issues" });
     const rows = within(list).getAllByRole("button");
     expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringContaining("octant/repo-2#40 Newest in repo-2"),
-      expect.stringContaining("octant/repo-1#1 Issue 1"),
-      expect.stringContaining("octant/repo-1#2 Login timeout"),
+      expect.stringContaining("#40 Newest in repo-2"),
+      expect.stringContaining("#1 Issue 1"),
+      expect.stringContaining("#2 Login timeout"),
     ]);
-    expect(screen.getByRole("group", { name: "Issue scope" })).toBeVisible();
+    expect(rows[0]).toHaveTextContent("octant/repo-2");
+    expect(rows[1]).toHaveTextContent("octant/repo-1");
+    expect(
+      screen.getByRole("button", { name: "Repository: All recent repositories" }),
+    ).toBeVisible();
     expect(screen.getByText(/Showing the newest 20 from octant\/repo-1/)).toBeVisible();
 
     fireEvent.click(rows[0]!);
@@ -172,8 +179,48 @@ describe("GitHubIssueBrowser", () => {
       expect.objectContaining({ kind: "issue", name: "repo-2", number: 40 }),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "One repository" }));
+    await user.click(screen.getByRole("button", { name: "Repository: All recent repositories" }));
     expect(await screen.findByRole("option", { name: /octant\/repo-1/ })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /All recent repositories/, pressed: true }),
+    ).toBeVisible();
+  });
+
+  it("asks for a repository before listing anything and hands the issue being read to a new thread", async () => {
+    const onStartThread = vi.fn();
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") return recents;
+      if (request.kind === "repositories") return repositories;
+      if (request.kind === "issues") return issuesPageOne;
+      if (request.kind === "issue") {
+        return {
+          kind: "issue",
+          issue: issueDetail(request.number),
+          freshness: { status: "fresh" },
+        } as GithubCatalogueReadResponse;
+      }
+      throw new Error(`unexpected ${request.kind}`);
+    });
+    render(<GitHubIssueBrowser client={makeClient(readCatalogue)} onStartThread={onStartThread} />);
+
+    expect(await screen.findByRole("button", { name: "Choose a repository" })).toBeVisible();
+    expect(screen.queryByRole("list", { name: "GitHub issues" })).not.toBeInTheDocument();
+    expect(readCatalogue).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "issues" }));
+
+    await selectFirstRepository();
+    fireEvent.click(await screen.findByRole("button", { name: /#2 Login timeout/ }));
+    const detail = await screen.findByRole("article", { name: "Issue #2" });
+    fireEvent.click(within(detail).getByRole("button", { name: "Start a Code thread" }));
+    expect(onStartThread).toHaveBeenCalledWith({
+      owner: "octant",
+      name: "repo-1",
+      number: 2,
+      title: "Issue 2",
+      state: "open",
+      author: "octocat",
+      updatedAt: "2026-08-28T09:00:00.000Z",
+      url: "https://github.com/octant/repo-1/issues/2",
+    });
   });
 
   it("lists issues for the selected repository and opens a plain-text detail pane", async () => {

@@ -1,3 +1,5 @@
+import { decodeGithubIssueContextRequest } from "@octant/contracts";
+import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
   decodeProjectId,
@@ -53,7 +55,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { CodeHomeUpNext } from "../code/CodeHomeUpNext";
+import { CodeHome, type CodeHomeProps } from "../code/CodeHome";
 import {
   CodeComposerAdapter,
   type CodeComposerSuggestion,
@@ -157,6 +159,7 @@ export interface DraftThreadWorkspaceProps {
     mode: OctantMode,
     name: string,
     receiptId?: string,
+    initializeGit?: boolean,
   ) => Promise<ProjectId | undefined>;
   readonly onCancel: () => void;
   readonly serverUrl?: string;
@@ -165,10 +168,27 @@ export interface DraftThreadWorkspaceProps {
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
   readonly onCancelFirstTurn?: () => void;
-  readonly imageGeneration?: {
-    readonly profiles: ReadonlyArray<import("@octant/contracts").ImageGenerationProfileView>;
-    readonly client?: import("@octant/client-runtime/image-generation-client").ImageGenerationClient;
-    readonly onOpenSettings?: () => void;
+  /**
+   * What the Code start screen shows under the composer: the board loader for
+   * Continue, the Linear loader for Up next, names for cards, and the openers
+   * the sections hand off to. Absent on hosts that have none of it.
+   */
+  readonly codeHome?: Pick<
+    CodeHomeProps,
+    | "loadAssignedLinearIssues"
+    | "loadBoard"
+    | "projectNames"
+    | "providerLabels"
+    | "onOpenThread"
+    | "onOpenInbox"
+    | "onOpenIssues"
+  > & {
+    /**
+     * An issue the Issues surface handed over: it fills the prompt and the
+     * create-from context once, then the owner clears it.
+     */
+    readonly pendingIssue?: RepositoryIssueRow;
+    readonly onPendingIssueConsumed?: () => void;
   };
 }
 
@@ -236,6 +256,33 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   }>();
   const [createFromOpen, setCreateFromOpen] = useState(false);
   const [createFromTab, setCreateFromTab] = useState<"github" | "linear">("github");
+  const adoptIssue = (row: RepositoryIssueRow) => {
+    const reference = `${row.owner}/${row.name}#${String(row.number)}`;
+    let request: GithubIssueContextRequest | undefined;
+    try {
+      request = decodeGithubIssueContextRequest({
+        owner: row.owner,
+        name: row.name,
+        number: row.number,
+      });
+    } catch {
+      request = undefined;
+    }
+    setCreateFromSelection(
+      request === undefined ? undefined : { kind: "github", request, label: reference },
+    );
+    setPromptRequest((current) => ({
+      text: `Work on ${reference}: ${row.title}`,
+      revision: (current?.revision ?? 0) + 1,
+    }));
+  };
+  const pendingIssue = props.codeHome?.pendingIssue;
+  const onPendingIssueConsumed = props.codeHome?.onPendingIssueConsumed;
+  useEffect(() => {
+    if (pendingIssue === undefined) return;
+    adoptIssue(pendingIssue);
+    onPendingIssueConsumed?.();
+  }, [pendingIssue]);
   const issuesCreateAvailable = useGithubIssuesCreateAvailable(
     props.githubClient,
     props.githubPluginEnabled !== false,
@@ -442,11 +489,44 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     ) : null;
 
   if (props.mode === "code") {
-    const upNext =
-      props.githubClient !== undefined && props.githubPluginEnabled !== false ? (
-        <CodeHomeUpNext
-          client={props.githubClient}
-          onPick={(item) => {
+    const githubHomeClient =
+      props.githubClient !== undefined && props.githubPluginEnabled !== false
+        ? props.githubClient
+        : undefined;
+    const linearHome =
+      props.linearPluginEnabled === true ? props.codeHome?.loadAssignedLinearIssues : undefined;
+    const fillPrompt = (text: string) =>
+      setPromptRequest((current) => ({ text, revision: (current?.revision ?? 0) + 1 }));
+    const beneath =
+      githubHomeClient === undefined && linearHome === undefined && props.codeHome === undefined ? (
+        (props.recentThreads?.length ?? 0) === 0 ? undefined : (
+          <div className="code-home">
+            <RecentThreadList threads={props.recentThreads ?? []} />
+          </div>
+        )
+      ) : (
+        <CodeHome
+          {...(githubHomeClient === undefined ? {} : { githubClient: githubHomeClient })}
+          {...(linearHome === undefined ? {} : { loadAssignedLinearIssues: linearHome })}
+          {...(props.codeHome?.loadBoard === undefined
+            ? {}
+            : { loadBoard: props.codeHome.loadBoard })}
+          {...(props.codeHome?.projectNames === undefined
+            ? {}
+            : { projectNames: props.codeHome.projectNames })}
+          {...(props.codeHome?.providerLabels === undefined
+            ? {}
+            : { providerLabels: props.codeHome.providerLabels })}
+          {...(props.codeHome?.onOpenThread === undefined
+            ? {}
+            : { onOpenThread: props.codeHome.onOpenThread })}
+          {...(props.codeHome?.onOpenInbox === undefined
+            ? {}
+            : { onOpenInbox: props.codeHome.onOpenInbox })}
+          {...(props.codeHome?.onOpenIssues === undefined
+            ? {}
+            : { onOpenIssues: props.codeHome.onOpenIssues })}
+          onPickGithub={(item) => {
             const reference = `${item.owner}/${item.name}#${String(item.number)}`;
             // Only an issue can be attached to the new thread, so picking a
             // pull request has to take the previous issue back off: leaving it
@@ -461,22 +541,22 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   }
                 : undefined,
             );
-            setPromptRequest((current) => ({
-              text:
-                item.category === "issue"
-                  ? `Work on ${reference}: ${item.title}`
-                  : `Review pull request ${reference}: ${item.title}`,
-              revision: (current?.revision ?? 0) + 1,
-            }));
+            fillPrompt(
+              item.category === "issue"
+                ? `Work on ${reference}: ${item.title}`
+                : `Review pull request ${reference}: ${item.title}`,
+            );
+          }}
+          onPickIssue={adoptIssue}
+          onPickLinear={(row) => {
+            setCreateFromSelection({
+              kind: "linear",
+              request: { id: row.id },
+              label: row.identifier,
+            });
+            fillPrompt(`Work on ${row.identifier}: ${row.title}`);
           }}
         />
-      ) : null;
-    const beneath =
-      upNext === null && (props.recentThreads?.length ?? 0) === 0 ? undefined : (
-        <div className="code-home">
-          {upNext}
-          <RecentThreadList threads={props.recentThreads ?? []} />
-        </div>
       );
     return (
       <>
@@ -516,9 +596,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.windowCapability === undefined
             ? {}
             : { windowCapability: props.windowCapability })}
-          {...(props.imageGeneration === undefined
-            ? {}
-            : { imageGeneration: props.imageGeneration })}
           onCreateThread={(input) => {
             const submitted = {
               ...input,
@@ -581,9 +658,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.windowCapability === undefined
             ? {}
             : { windowCapability: props.windowCapability })}
-          {...(props.imageGeneration === undefined
-            ? {}
-            : { imageGeneration: props.imageGeneration })}
           onCreateThread={(prompt, images, threadMentionIds) =>
             issueContext === undefined && linearIssueContext === undefined
               ? props.onCreateThread(prompt, selectedProjectId, undefined, images, threadMentionIds)

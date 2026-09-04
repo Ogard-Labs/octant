@@ -26,7 +26,7 @@ import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
 export const MIN_SIDEBAR_WIDTH = 220;
 export const MAX_SIDEBAR_WIDTH = 420;
 export const MIN_CONTEXT_SIDEBAR_WIDTH = 280;
-export const MAX_CONTEXT_SIDEBAR_WIDTH = 640;
+export const MAX_CONTEXT_SIDEBAR_WIDTH = 960;
 /**
  * Height of the top strip the renderer keeps as a plain window-drag target
  * under macOS `hiddenInset`, which does not make the transparent top edge

@@ -1,6 +1,7 @@
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import { listEligibleImageProfiles } from "@octant/domain";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
@@ -65,6 +66,7 @@ import { markInteraction, markInteractionAfterPaint } from "./polling/interactio
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import type { CodeOperationId } from "@octant/contracts";
 import type {
+  CodeBoardQuery,
   CodeProjectPullRequestDetailQuery,
   CodeProjectPullRequestRow,
   ThreadBoardPullRequestIdentity,
@@ -173,6 +175,7 @@ import {
   resolveWorkProviderChoice,
   UNRESOLVED_DRAFT_PROJECT_MESSAGE,
 } from "./shell/draftThreadResolution";
+import type { RepositoryIssueRow } from "./github/readIssuesAcrossRepositories";
 import {
   activeChatThreadTabId,
   activeCodeThreadTabId,
@@ -264,8 +267,28 @@ import {
   updateThreadUtilityTabBrowserContext,
   updateUtilityTabBrowserContext,
 } from "./shell/rightUtilityDockSelection";
-import { isDockToolLaunchable, isDockToolStillOpenable } from "./shell/dockToolAvailability";
+import {
+  isAuthorizedCanvasDocument,
+  isDockToolLaunchable,
+  isDockToolStillOpenable,
+} from "./shell/dockToolAvailability";
 import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
+import type { DockToolCapabilities } from "./shell/dockToolAvailability";
+import {
+  NO_WRITTEN_DOCUMENTS,
+  forgetDeletedWrittenDocument,
+  isDocumentPath,
+  noteExistingDocuments,
+  noteWrittenDocument,
+  type WrittenDocumentOffers,
+} from "./shell/writtenDocuments";
+import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
+import {
+  handOffThread,
+  resolveThreadHandOffClient,
+  threadHandOffMessage,
+} from "./thread/threadHandOff";
 import { NavigatorPopover } from "./navigator/NavigatorPopover";
 import { useNavigatorAssistant } from "./navigator/useNavigatorAssistant";
 import { ComposerContextMeterShortcut } from "./context/ComposerContextMeter";
@@ -682,6 +705,7 @@ function LaunchedShell(
   // every mode, so the Inbox survives moving between them.
   const [inboxOpen, setInboxOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
+  const [pendingIssue, setPendingIssue] = useState<RepositoryIssueRow>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
   const [linearIssuesRead, setLinearIssuesRead] = useState(false);
@@ -694,6 +718,7 @@ function LaunchedShell(
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
+  const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] =
     useState<import("@octant/contracts/providers").ProviderInstanceId>();
   const [draftModelId, setDraftModelId] =
@@ -745,6 +770,20 @@ function LaunchedShell(
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
   const [addAgentInvokedByThread, setAddAgentInvokedByThread] = useState(() => new Set<string>());
+  // Documents a turn wrote, per thread, and which the dock already offered.
+  // Session-local presentation: nothing here is authority, and a reopened
+  // window starts by offering nothing until a turn writes again.
+  const [writtenDocumentsByThread, setWrittenDocumentsByThread] = useState<
+    ReadonlyMap<ThreadUtilityDockKey, WrittenDocumentOffers>
+  >(new Map());
+  const writtenDocumentsRef = useRef(writtenDocumentsByThread);
+  writtenDocumentsRef.current = writtenDocumentsByThread;
+  /**
+   * Document paths each thread's live turns reported on the previous pass, so
+   * a path that disappears reads as the turn deleting it rather than as a
+   * reopened thread replaying history that never carried written paths.
+   */
+  const writtenPathsSeen = useRef(new Map<string, ReadonlySet<string>>());
   const [dockSidecarsByThread, setDockSidecarsByThread] = useState<
     ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>
   >(new Map());
@@ -855,6 +894,11 @@ function LaunchedShell(
     codePullRequestsOpen && selectedProjectPullRequest !== undefined;
   const dockThreadKey =
     dockThreadId === undefined ? undefined : threadUtilityDockKey(activeMode, String(dockThreadId));
+  // A hand-off can take minutes, and the person is free to move threads while
+  // it runs, so its completion reads the dock's thread as it is then rather
+  // than as it was when the request was made.
+  const dockThreadKeyRef = useRef(dockThreadKey);
+  dockThreadKeyRef.current = dockThreadKey;
   const dockState =
     dockThreadKey === undefined
       ? fallbackDockState
@@ -1041,6 +1085,14 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
+  const threadHandOffClient = useMemo(
+    () =>
+      resolveThreadHandOffClient({
+        serverUrl: props.launch.serverUrl,
+        windowCapability: props.projectWindowCapability,
+      }),
+    [props.launch.serverUrl, props.projectWindowCapability],
+  );
   // The export receipt is a receipt, not a state the sidebar keeps: it clears
   // itself so a "Saved …" line from ten minutes ago is not still standing over
   // the Project list.
@@ -1073,6 +1125,14 @@ function LaunchedShell(
   const loadAssignedLinearIssues = useCallback(
     () => fetchAssignedLinearIssues((input) => linearClient.listIssues(input)),
     [linearClient],
+  );
+  // The Code home reads the board when this identity changes. An inline
+  // callback changes on every App render, and a streaming turn renders often,
+  // so the board would be re-queried for reasons that have nothing to do with
+  // it.
+  const loadCodeBoard = useCallback(
+    (query: CodeBoardQuery) => codeClient.queryBoard(query),
+    [codeClient],
   );
   useEffect(() => {
     let cancelled = false;
@@ -1615,19 +1675,120 @@ function LaunchedShell(
                       )?.checkoutId,
               }),
         };
-  const dockToolCapabilities = useDockToolCapabilities({
+  const observedDockToolCapabilities = useDockToolCapabilities({
     enabled: activeMode !== "code" || activeCodeThreadDisplayReady,
     agentRunClient,
     addAgentInvoked: dockThreadKey !== undefined && addAgentInvokedByThread.has(dockThreadKey),
     canvasClient,
     hasAppleSimulator:
       appleProjects[0]?.projectPath !== undefined && appleToolchainClient !== undefined,
+    hasWrittenDocument:
+      dockThreadKey !== undefined &&
+      writtenDocumentsByThread.get(dockThreadKey)?.current?.kind === "file",
     mode: activeMode,
     planClient,
     ...(activeProjectId === undefined ? {} : { projectId: activeProjectId }),
     shipClient,
     ...(dockThreadId === undefined ? {} : { threadId: String(dockThreadId) }),
   });
+  // A Canvas this window saw written for the thread is a document the host
+  // holds now, even while the capability read from when the thread opened
+  // still says there was none.
+  const writtenCanvasForDock =
+    dockThreadKey === undefined ? undefined : writtenDocumentsByThread.get(dockThreadKey)?.current;
+  const dockToolCapabilities: DockToolCapabilities =
+    writtenCanvasForDock?.kind === "canvas"
+      ? { ...observedDockToolCapabilities, hasCanvasDocument: true }
+      : observedDockToolCapabilities;
+  // A Markdown or text file the active Code turn created or rewrote opens in
+  // the dock's Document tool once, beside the transcript, the way a written
+  // handoff sits next to the conversation. The offer never moves focus: the
+  // composer keeps the caret, and a tab the person closed stays closed.
+  const activeCodeTurnActivity = activeCodeThreadController?.turnActivity;
+  useEffect(() => {
+    if (activeCodeThreadId === undefined || activeCodeTurnActivity === undefined) return;
+    const key = threadUtilityDockKey("code", String(activeCodeThreadId));
+    const offers = writtenDocumentsByThread.get(key) ?? NO_WRITTEN_DOCUMENTS;
+    let next = offers;
+    let open = false;
+    const livePaths = new Set<string>();
+    for (const activity of activeCodeTurnActivity.values()) {
+      for (const path of activity.writtenPaths ?? []) {
+        if (!isDocumentPath(path)) continue;
+        livePaths.add(path);
+        const noted = noteWrittenDocument(next, { kind: "file", path });
+        next = noted.offers;
+        if (noted.open) open = true;
+      }
+    }
+    const previousPaths = writtenPathsSeen.current.get(key) ?? new Set<string>();
+    writtenPathsSeen.current.set(key, livePaths);
+    next = forgetDeletedWrittenDocument(next, previousPaths, livePaths);
+    if (next === offers) return;
+    setWrittenDocumentsByThread((current) => new Map(current).set(key, next));
+    if (!open) return;
+    setDockVisible(true);
+    setDockStatesByThread((current) => openThreadUtilityTab(current, key, "document"));
+  }, [
+    activeCodeThreadId,
+    activeCodeTurnActivity,
+    setDockStatesByThread,
+    setDockVisible,
+    writtenDocumentsByThread,
+  ]);
+  /**
+   * A Canvas the thread authored opens in the dock's Canvas tool once. The
+   * cards the thread already had when it was opened are seen documents, not
+   * new writing, so reopening an old thread never raises the dock.
+   */
+  function noteCanvasReferences(
+    threadId: string,
+    cards: ReadonlyArray<CanvasThreadReferenceCard>,
+  ): void {
+    const key = threadUtilityDockKey("chat", threadId);
+    const documents = cards
+      .filter(isAuthorizedCanvasDocument)
+      .map((card) => ({ kind: "canvas" as const, canvasId: String(card.canvasId) }));
+    const offers = writtenDocumentsRef.current.get(key);
+    if (offers === undefined) {
+      const seeded = noteExistingDocuments(NO_WRITTEN_DOCUMENTS, documents);
+      setWrittenDocumentsByThread((current) => new Map(current).set(key, seeded));
+      return;
+    }
+    let next = offers;
+    let open = false;
+    for (const document of documents) {
+      const noted = noteWrittenDocument(next, document);
+      next = noted.offers;
+      if (noted.open) open = true;
+    }
+    if (next === offers) return;
+    setWrittenDocumentsByThread((current) => new Map(current).set(key, next));
+    if (!open) return;
+    setDockVisible(true);
+    setDockStatesByThread((current) => openThreadUtilityTab(current, key, "canvas"));
+  }
+  /**
+   * The host handed the thread off: its document is a Canvas of that thread,
+   * so the Canvas tool opens on it beside the transcript, once, like any
+   * document a turn wrote. The dock rises only when that thread is the one in
+   * front, because 0079 opens the document without moving focus.
+   */
+  function noteHandedOffDocument(mode: OctantMode, threadId: string, canvasId: string): void {
+    const key = threadUtilityDockKey(mode, threadId);
+    const offers = writtenDocumentsRef.current.get(key) ?? NO_WRITTEN_DOCUMENTS;
+    const noted = noteWrittenDocument(offers, { kind: "canvas", canvasId });
+    setWrittenDocumentsByThread((current) => new Map(current).set(key, noted.offers));
+    if (!noted.open) return;
+    // The tab opens for the thread that was handed off, whichever thread that
+    // is. Raising the dock is the part that only makes sense in front: a row
+    // menu can hand off a thread the pane is not showing, and the dock renders
+    // the pane's thread, so it would open on another thread's tools with no
+    // handed-off Canvas in them. The offer waits instead.
+    setDockStatesByThread((current) => openThreadUtilityTab(current, key, "canvas"));
+    if (dockThreadKeyRef.current !== key) return;
+    setDockVisible(true);
+  }
   const retainedDockState = retainAvailableUtilityTabs(
     dockState,
     new Set(
@@ -2146,6 +2307,10 @@ function LaunchedShell(
     }
     const sidecarThreadId = dockSidecarsByThread.get(dockThreadKey);
     const appleProjectPath = appleProjects[0]?.projectPath;
+    const writtenDocument = writtenDocumentsByThread.get(dockThreadKey)?.current;
+    const writtenDocumentPath = writtenDocument?.kind === "file" ? writtenDocument.path : undefined;
+    const writtenCanvasId =
+      writtenDocument?.kind === "canvas" ? writtenDocument.canvasId : undefined;
     return (
       <ThreadUtilityDockContent
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
@@ -2167,6 +2332,8 @@ function LaunchedShell(
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         planClient={planClient}
         shipClient={shipClient}
+        {...(writtenDocumentPath === undefined ? {} : { writtenDocumentPath })}
+        {...(writtenCanvasId === undefined ? {} : { writtenCanvasId })}
         onOpenFile={(relativePath) => {
           if (dockThread.mode !== "code") return;
           void controller.openCodeSurface({
@@ -2742,6 +2909,26 @@ function LaunchedShell(
   const exportCodeThread = exportThreadFromRow("code");
   const exportChatThread = exportThreadFromRow("chat");
   const exportWorkThread = exportThreadFromRow("work");
+  /**
+   * The Hand off item for a thread row. The host writes the document and
+   * keeps it; the sidebar shows the receipt and the dock opens on the Canvas.
+   */
+  function handOffThreadFromRow(
+    mode: OctantMode,
+  ): ((threadId: string, title: string) => void) | undefined {
+    const client = threadHandOffClient;
+    if (client === undefined) return undefined;
+    return (threadId, title) => {
+      setThreadExportNotice(`Writing the hand-off document for ${title}…`);
+      void handOffThread(client, { mode, threadId }).then((outcome) => {
+        setThreadExportNotice(threadHandOffMessage(outcome));
+        if (outcome.kind === "handed-off") noteHandedOffDocument(mode, threadId, outcome.canvasId);
+      });
+    };
+  }
+  const handOffCodeThread = handOffThreadFromRow("code");
+  const handOffChatThread = handOffThreadFromRow("chat");
+  const handOffWorkThread = handOffThreadFromRow("work");
 
   function pinChatThreadInPane(threadId: string): void {
     if (chatController.status !== "ready") return;
@@ -2792,6 +2979,7 @@ function LaunchedShell(
 
   const codeThreadRowActions: ThreadRowActions = {
     ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
+    ...(handOffCodeThread === undefined ? {} : { onHandOffThread: handOffCodeThread }),
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
     onCompleteFollowUp: (threadId) =>
       void codeController.completeFollowUp(decodeCodeThreadId(threadId)),
@@ -2810,12 +2998,14 @@ function LaunchedShell(
   // that without a list pin they cannot honor.
   const chatThreadRowActions: ThreadRowActions = {
     ...(exportChatThread === undefined ? {} : { onExportThread: exportChatThread }),
+    ...(handOffChatThread === undefined ? {} : { onHandOffThread: handOffChatThread }),
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
     onPinInPane: pinChatThreadInPane,
   };
   const workThreadRowActions: ThreadRowActions = {
     ...(exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread }),
+    ...(handOffWorkThread === undefined ? {} : { onHandOffThread: handOffWorkThread }),
     onPinInPane: pinWorkThreadInPane,
   };
 
@@ -3038,7 +3228,21 @@ function LaunchedShell(
     setArchiveOpen(false);
     setAutomationCenterOpen(false);
     setAgentsCenterOpen(false);
+    setImageLibraryOpen(false);
     setArtifactLibraryOpen(true);
+  }
+
+  function openImageLibrary() {
+    setRailPlaceholder(undefined);
+    setCodeBoardOpen(false);
+    setCodePullRequestsOpen(false);
+    setGithubIssuesOpen(false);
+    setWorkBoardOpen(false);
+    setArchiveOpen(false);
+    setAutomationCenterOpen(false);
+    setAgentsCenterOpen(false);
+    setArtifactLibraryOpen(false);
+    setImageLibraryOpen(true);
   }
 
   function openArchive() {
@@ -4131,6 +4335,7 @@ function LaunchedShell(
         transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
           <ShellSidebar
+            imageLibraryAvailable={imageGenerationClient !== undefined}
             {...(federatedHostStates.length < 2
               ? {}
               : {
@@ -4159,6 +4364,7 @@ function LaunchedShell(
                       inbox: openInbox,
                       agents: openAgentsCenter,
                       "artifact-library": openArtifactLibrary,
+                      "image-library": openImageLibrary,
                       plugins: openSkillsSettings,
                     },
                   },
@@ -4173,6 +4379,7 @@ function LaunchedShell(
                       agents: openAgentsCenter,
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
+                      "image-library": openImageLibrary,
                       plugins: openSkillsSettings,
                       ...pluginSidebarDestinationActions,
                     },
@@ -4188,6 +4395,7 @@ function LaunchedShell(
                       agents: openAgentsCenter,
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
+                      "image-library": openImageLibrary,
                       plugins: openSkillsSettings,
                       ...pluginSidebarDestinationActions,
                     },
@@ -4283,8 +4491,9 @@ function LaunchedShell(
                         ? {
                             addProjectLabel: "chat-project" as const,
                             onAddProject: () => openProjectCreate(),
+                            unfiledLabel: "Chats" as const,
                           }
-                        : {}
+                        : { unfiledLabel: "Chats" as const }
                       : {
                           onAddProject: () => openProjectCreate(),
                           unfiledLabel: "Recents" as const,
@@ -4430,6 +4639,11 @@ function LaunchedShell(
                   setSelectedProjectPullRequest(undefined);
                 }}
                 onCloseGithubIssues={() => setGithubIssuesOpen(false)}
+                onStartThreadFromIssue={(issue) => {
+                  setPendingIssue(issue);
+                  setGithubIssuesOpen(false);
+                  openDraftInActiveProject("code");
+                }}
                 onSelectProjectPullRequest={selectProjectPullRequest}
                 onSelectBoardPullRequest={selectProjectPullRequestIdentity}
                 pullRequestBackgroundRefresh={{
@@ -4500,6 +4714,13 @@ function LaunchedShell(
                 onOpenArchivedThread={openArchivedThread}
                 artifactLibraryOpen={artifactLibraryOpen}
                 onCloseArtifactLibrary={() => setArtifactLibraryOpen(false)}
+                imageLibraryOpen={imageLibraryOpen}
+                onCloseImageLibrary={() => setImageLibraryOpen(false)}
+                imageGenerationClient={imageGenerationClient}
+                imageProfiles={listEligibleImageProfiles(
+                  providerController.snapshot?.instances ?? [],
+                )}
+                onOpenImageSettings={() => void controller.openSettings({ section: "providers" })}
                 onCreateArtifact={() => {
                   // An artifact carries the thread it was made in, so there
                   // is nowhere to put one that has no origin. Starting a
@@ -4825,6 +5046,12 @@ function LaunchedShell(
                         projectId,
                       });
                     }}
+                    onCanvasReferencesObserved={noteCanvasReferences}
+                    onThreadHandedOff={(threadId: string, outcome: ThreadHandOffOutcome) => {
+                      if (outcome.kind === "handed-off") {
+                        noteHandedOffDocument("chat", threadId, outcome.canvasId);
+                      }
+                    }}
                     onOpenCanvas={(entry) =>
                       void controller.openCanvas({
                         mode: entry.mode,
@@ -4860,13 +5087,41 @@ function LaunchedShell(
                       FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true
                     }
                     linearClient={linearClient}
+                    codeHome={{
+                      loadBoard: loadCodeBoard,
+                      ...(pendingIssue === undefined ? {} : { pendingIssue }),
+                      onPendingIssueConsumed: () => setPendingIssue(undefined),
+                      loadAssignedLinearIssues,
+                      projectNames: new Map(
+                        codeBoardProjects.map((project) => [String(project.id), project.name]),
+                      ),
+                      providerLabels: new Map(
+                        codeProviderGroups.map((group) => [
+                          String(group.instance.id),
+                          group.instance.displayName,
+                        ]),
+                      ),
+                      onOpenThread: (target) => {
+                        const thread = codeController.bootstrap?.threads.find(
+                          (candidate) => String(candidate.id) === String(target.threadId),
+                        );
+                        void controller.openCodeThread(
+                          target.threadId,
+                          thread?.title ?? "Code thread",
+                          undefined,
+                          target.projectId,
+                        );
+                      },
+                      onOpenInbox: openInbox,
+                      onOpenIssues: () => setGithubIssuesOpen(true),
+                    }}
                     linearPluginEnabled={
                       FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true
                     }
                     onDraftCreateCodeThread={handleDraftCreateCodeThread}
                     onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}
                     draftCodeExecute={codeController.execute}
-                    onCreateProject={(mode, name, receiptId) => {
+                    onCreateProject={(mode, name, receiptId, initializeGit) => {
                       const destinationHostId = refuseUnlessCreatableDestination({
                         action: "create-project",
                         requiredCapability: mode,
@@ -4875,7 +5130,13 @@ function LaunchedShell(
                       if (destinationHostId === undefined) {
                         return Promise.resolve(undefined);
                       }
-                      return projectController.create(mode, name, receiptId, destinationHostId);
+                      return projectController.create(
+                        mode,
+                        name,
+                        receiptId,
+                        destinationHostId,
+                        initializeGit,
+                      );
                     }}
                     {...(draftCreating ? { onDraftCreating: true } : {})}
                     {...(draftError === undefined ? {} : { onDraftError: draftError })}
@@ -4919,6 +5180,11 @@ function LaunchedShell(
                 bottomPanelOpen && activeBottomSurface?.id === "canvas"
                   ? undefined
                   : threadUtility("canvas")
+              }
+              document={
+                bottomPanelOpen && activeBottomSurface?.id === "document"
+                  ? undefined
+                  : threadUtility("document")
               }
               review={
                 bottomPanelOpen &&
@@ -5054,7 +5320,7 @@ function LaunchedShell(
             setCreateOpen(false);
             setProjectCreateMode(undefined);
           }}
-          onCreateProject={(mode, name, receiptId) => {
+          onCreateProject={(mode, name, receiptId, initializeGit) => {
             const destinationHostId = refuseUnlessCreatableDestination({
               action: "create-project",
               requiredCapability: mode,
@@ -5063,7 +5329,13 @@ function LaunchedShell(
             if (destinationHostId === undefined) {
               return Promise.resolve(undefined);
             }
-            return projectController.create(mode, name, receiptId, destinationHostId);
+            return projectController.create(
+              mode,
+              name,
+              receiptId,
+              destinationHostId,
+              initializeGit,
+            );
           }}
           onCreatedProject={(projectId, mode, name) => {
             // First run is still asking; creating a Project is a prerequisite

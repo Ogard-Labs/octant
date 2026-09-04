@@ -13,6 +13,7 @@ import {
   Sparkles,
   Workflow,
   type LucideIcon,
+  ImagePlus,
 } from "lucide-react";
 import type { ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
@@ -50,6 +51,7 @@ const secondaryIcons: Record<SidebarAppMenuDescriptorId, LucideIcon> = {
   agents: GitFork,
   automations: Workflow,
   "artifact-library": FileStack,
+  "image-library": ImagePlus,
   plugins: Puzzle,
 };
 

@@ -131,11 +131,11 @@ Modes are server-enforced domain policy, not renderer flags. Chat and Work can
 be disabled in settings; Code is always available; disabling a mode never
 deletes its data.
 
-| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                   |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                       |
-| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded, approval-gated writes inside that root; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                        |
-| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. |
+| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                              |
+| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded, approval-gated writes inside that root; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                                               |
+| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; binding without Git remains allowed. |
 
 Work never silently becomes Code. When coding work is detected in a Work
 thread, the server records a **promotion proposal**; only explicit user approval
@@ -228,8 +228,18 @@ Thread utilities live in the Right Utility Dock outside the split tree. The
 top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. An available empty dock shows a compact launcher;
 an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
-Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal, Tests,
-and iOS Simulator, as mode and capability allow. The dock follows the active
+Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
+Tests, and iOS Simulator, as mode and capability allow. Document shows the
+Markdown or text file the Code thread's turn most recently wrote, read through
+the host-authorized file open; the renderer offers a written document (or a
+Chat-authored Canvas) in the dock once per document, never after the person
+closed its tab, and never by moving focus. Hand off (`POST
+/api/threads/hand-off`) starts from the thread export cut, asks the thread's
+own provider for a six-section hand-off document in one tool-free request,
+keeps it as a Canvas of the thread, and opens that Canvas in the dock; a
+running turn, an unready provider, or a thread outside a Project is refused as
+an ordinary answer (see
+[decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md](decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md)). The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
@@ -342,9 +352,10 @@ thread-owned dock tab and may include a truthful child-run summary
 language: true tabs stay flat, segmented values keep an enclosed track, active
 pane identity stays on the grip, routine Settings rows remain open while
 discrete objects are raised, and narrow Settings uses a drawer.
-The dock already hosts live thread-owned tool instances — Files, Browser,
-Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery,
-thread-level Agents, and Review — rather than a generic Thread accordion.
+The dock already hosts live thread-owned tool instances — Files, Document,
+Browser, Terminal, Canvas, Side chat, artifact-gated Plan, conditional
+Delivery, thread-level Agents, and Review — rather than a generic Thread
+accordion.
 Open tools restore as per-window presentation keyed by thread; hiding a
 Browser or Terminal does not stop its server-owned lifecycle. Pane Add tab
 no longer mints those tools as split-tree surfaces. Local checkout changes
@@ -485,10 +496,13 @@ modelId }`, and the model picker is provider-first. Discovery can find
   bounded generated-image attachment scope, and usage rows attributed as
   `image-generation`; see
   [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
-  Composer **Create image…** actions and an app-managed `octant_create_image`
-  tool invoke that job service through `/api/image/` when an enabled image
-  profile exists; generated images preview in the thread by opaque attachment
-  id, chain edits through `parentArtifactRef`, export with the thread, and
+  The **Image generator** surface (profile menu, host-wide `image-library`
+  scope; see
+  [decisions/0081-image-generation-is-its-own-surface.md](decisions/0081-image-generation-is-its-own-surface.md))
+  and an app-managed `octant_create_image` tool invoke that job service
+  through `/api/image/` when an enabled image profile exists; the composers
+  carry no generation action. Agent-generated images preview in the thread by
+  opaque attachment id, chain edits through `parentArtifactRef`, export with the thread, and
   never grant Chat filesystem authority.
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled

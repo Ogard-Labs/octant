@@ -325,7 +325,22 @@ creating a second environment model. Repository and workspace remain on that rea
 choices; nothing about delivery is asked up front (see "Language"). Access is
 a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch. The
-prompt itself is frameless:
+Under the Code composer the start screen reads like GitHub Copilot's and
+Cursor's agent homes: suggested prompts as small cards (a label and the
+sentence they fill in), then three sections that share one card grid, two
+across at the composer's width. Each card opens with a badge naming what it
+is (Issue, Pull request, Review requested, Linear, or a thread's delivery
+state: Running, PR #n, Merged, Done, Waiting), the repository or identifier
+in mono, and the age at the trailing edge; then the title and one line of
+facts (author, or provider · Project · branch). Up next holds assigned GitHub
+work and Linear issues and says "You're all caught up" in a panel when
+empty, with Open Inbox at the section's trailing edge; Start something new
+holds open issues in recent repositories that nobody has picked up, with
+Browse all issues beside it; Continue holds the latest Board cards. Picking
+an item fills the prompt and attaches the issue as the thread's Create from
+context. The start screen has no image control: image generation lives on
+its own surface.
+The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not
 repaint those controls a third time. Opaque shadcn
@@ -357,11 +372,20 @@ remains in the bottom-left identity menu.
 
 The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
 available as a labeled selector, compact list, or icon presentation according
-to the user's setting. Code and Work keep separate Project View sets. Project
-rows and thread rows share one hierarchy: folders/Projects first, then indented
-threads; provider marks are fixed-size inline and can be hidden without changing
-row height or indentation. Project View and Project Overview are real features,
-not decorative shortcuts.
+to the user's setting. Code and Work keep separate Project View sets. The
+sidebar reads as two flat groups parted by one hairline: Projects (each Project
+row with its threads nested beneath it, pinned Projects leading in their own
+labelled band that is absent when nothing is pinned), then Chats (threads filed
+in no Project; Work and Code call the group Recents). Rows are hairline rails, never
+cards; provider marks are fixed-size inline and can be hidden without changing
+row height or indentation. A thread with unread activity ends its row with a
+small filled dot labelled "New activity", driven by the read cursors the
+window already keeps, never by a poll; working and attention states keep the
+leading status dot. A list longer than eight rows folds behind one quiet "Show
+more (n)" row that becomes "Show less"; the active thread stays visible while
+folded. Keyboard focus is the one neutral ring, and the Project row keeps its
+context menu. Project View and Project Overview are real features, not
+decorative shortcuts.
 
 Primary sidebar destinations are New thread, Board, and Pull requests
 when valid for the active mode. The bottom-left identity menu owns Settings,
@@ -406,9 +430,15 @@ The right dock follows the active pane and never leaks another pane's content.
 On wide windows it may use at most 38 percent of the viewport, preserving a
 560px primary workspace; the bottom panel may use at most 38 percent of the
 viewport height while preserving 320px for the primary workspace. It can host
-Review, Files, Browser, Terminal, Canvas, Plan (only for a real
-plan artifact), Delivery (only for a configured target), Agents (when children
-exist or explicitly invoked), Simulator, and Side chat. The dock launcher is
+Review, Files, Document (only once a turn has written one), Browser, Terminal,
+Canvas, Plan (only for a real plan artifact), Delivery (only for a configured
+target), Agents (when children exist or explicitly invoked), Simulator, and
+Side chat. A Markdown or text file a Code turn creates or rewrites, and a
+Canvas a Chat turn authors, open in the dock beside the transcript once, the
+first time they appear: the offer never moves focus from the composer, a
+rewrite never reopens a tab, and a tab the person closed stays closed. Document
+reads the file through the same host-authorized open the editor uses and
+renders Markdown with the preview's own viewer. The dock launcher is
 not a second thread switcher. With no open tab, it shows only capability-valid
 tool rows; the head's Add tool action appears once a tab is open, since with
 none open the body is already the list of tools to add. The bottom panel uses
@@ -419,8 +449,8 @@ session when moved.
 
 Browser and Terminal are repeatable right-dock workspaces: Add tool creates a
 new tab identity, an isolated Browser context or Terminal session, and a stable
-numbered label when siblings are open. Files, Review, Agents, Canvas, Plan,
-Delivery, Simulator, and Side chat are singleton destinations. One instance
+numbered label when siblings are open. Files, Document, Review, Agents, Canvas,
+Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
 still appears in only one region at a time.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
@@ -535,6 +565,16 @@ with at most four concurrent reads, then reconcile in stable Project order under
 the global preview bound. Known closed or merged identities are recovered
 separately. Stale cached data is visibly stale. Provider usage follows the same
 provider-neutral context/limit model and preserves unavailable values.
+
+The Issues surface reads like GitHub's issue list: one toolbar with a
+repository chooser (All recent repositories, or one repository, from the same
+popover), state, sort, and search; then a bordered two-pane card with rows on
+the left (state glyph, `#number title`, repository and author beneath) and the
+reader on the right (kicker, title, state and dates, labels, Start a Code
+thread, the body and each comment in their own cards). With no recent
+repository the page asks for one in a single panel rather than opening on the
+whole catalogue. Start a Code thread leaves the surface with the issue
+attached to a new draft as its Create from context.
 
 ## Iconography and provider marks
 

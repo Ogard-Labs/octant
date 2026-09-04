@@ -13,6 +13,9 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
 import type { OctantMode } from "@octant/contracts/modes";
+import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type { ImageGenerationProfileView } from "@octant/contracts";
+import { ImageLibraryView } from "../image/ImageLibraryView";
 import { lazy, Suspense, type ReactNode } from "react";
 import type { AgentsCenterThreadTarget } from "../agents/agentsCenterModel";
 import type {
@@ -51,6 +54,8 @@ const CodeProjectPullRequests = lazy(() =>
     default: module.CodeProjectPullRequests,
   })),
 );
+import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
+
 const GitHubIssueBrowser = lazy(() =>
   import("../github/GitHubIssueBrowser").then((module) => ({
     default: module.GitHubIssueBrowser,
@@ -90,6 +95,8 @@ export interface WorkspaceRailLayersProps {
   readonly onCloseCodeBoard: () => void;
   readonly onCloseCodePullRequests: () => void;
   readonly onCloseGithubIssues: () => void;
+  /** Leaves the Issues surface with the issue attached to a new Code thread. */
+  readonly onStartThreadFromIssue?: (issue: RepositoryIssueRow) => void;
   readonly onCloseWorkBoard: () => void;
   readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
   readonly onOpenWorkBoardThread: (target: WorkThreadOpenTarget) => void;
@@ -110,6 +117,11 @@ export interface WorkspaceRailLayersProps {
   readonly onOpenArchivedThread?: (entry: ArchivedThreadEntry) => void;
   readonly artifactLibraryOpen: boolean;
   readonly onCloseArtifactLibrary: () => void;
+  readonly imageLibraryOpen: boolean;
+  readonly onCloseImageLibrary: () => void;
+  readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageProfiles: ReadonlyArray<ImageGenerationProfileView>;
+  readonly onOpenImageSettings?: () => void;
   readonly onCreateArtifact: () => void;
   readonly onOpenArtifact: (entry: ArtifactLibraryEntry) => void;
   readonly serverUrl: string;
@@ -182,7 +194,13 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
       {props.githubIssuesOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
           <LazyRailSurface label="GitHub issues">
-            <GitHubIssueBrowser client={props.githubClient} onClose={props.onCloseGithubIssues} />
+            <GitHubIssueBrowser
+              client={props.githubClient}
+              onClose={props.onCloseGithubIssues}
+              {...(props.onStartThreadFromIssue === undefined
+                ? {}
+                : { onStartThread: props.onStartThreadFromIssue })}
+            />
           </LazyRailSurface>
         </div>
       ) : null}
@@ -279,6 +297,20 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               onClose={props.onCloseArchive}
               onOpenThread={props.onOpenArchivedThread}
               projects={props.archiveProjects}
+            />
+          </LazyRailSurface>
+        </div>
+      ) : null}
+      {props.imageLibraryOpen && props.imageGenerationClient !== undefined ? (
+        <div className="artifact-library-layer">
+          <LazyRailSurface label="Image generator">
+            <ImageLibraryView
+              client={props.imageGenerationClient}
+              onClose={props.onCloseImageLibrary}
+              {...(props.onOpenImageSettings === undefined
+                ? {}
+                : { onOpenSettings: props.onOpenImageSettings })}
+              profiles={props.imageProfiles}
             />
           </LazyRailSurface>
         </div>

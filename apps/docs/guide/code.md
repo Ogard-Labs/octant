@@ -13,8 +13,9 @@ Create a Code Project from the sidebar:
 1. Select **Code** as the mode.
 2. Use the native picker to choose a folder. A Git repository root is recommended but not required.
 3. Name the Project.
+4. When the chosen folder is not yet a Git repository, leave **Initialize as a Git repository** checked so Octant runs `git init` during create. Turn it off only if you want to bind without Git.
 
-The server validates that the folder exists and the renderer receives an opaque receipt. If the folder is not a Git repository, Git-dependent features report _unavailable_ until you initialise one.
+The server validates that the folder exists and the renderer receives an opaque receipt. If you create without initializing Git, Git-dependent features report _unavailable_ until you initialise one.
 
 A Code Project can remember how new threads should start: in **this Project's current checkout**, or in **a managed worktree Octant creates**. The default is the current checkout, which creates no worktree the owner did not ask for. Set the habit from the Project overview; the composer still lets one thread override it without rewriting the Project. Desktop and phone both inherit that default, and the new thread shows which root it bound. A missing or unauthorized root fails closed instead of inventing a worktree.
 

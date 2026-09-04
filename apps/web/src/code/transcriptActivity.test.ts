@@ -20,6 +20,17 @@ function tool(state: "started" | "running" | "completed" | "failed"): CodeOperat
 }
 
 describe("transcript activity", () => {
+  it("remembers the files a turn created or rewrote and forgets one it deleted", () => {
+    const change = (path: string, kind: "created" | "modified" | "deleted"): CodeOperationEvent =>
+      ({ kind: "file-change", path, change: kind, reconciled: true }) as CodeOperationEvent;
+    let activity = applyActivityEvent(EMPTY_TURN_ACTIVITY, change("docs/handoff.md", "created"));
+    activity = applyActivityEvent(activity, change("docs/handoff.md", "modified"));
+    activity = applyActivityEvent(activity, change("src/index.ts", "modified"));
+    expect(activity.writtenPaths).toEqual(["docs/handoff.md", "src/index.ts"]);
+    activity = applyActivityEvent(activity, change("src/index.ts", "deleted"));
+    expect(activity.writtenPaths).toEqual(["docs/handoff.md"]);
+  });
+
   it("updates a tool row in place rather than appending each state change", () => {
     const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("started"));
     const finished = applyActivityEvent(started, tool("completed"));

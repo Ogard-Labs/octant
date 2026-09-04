@@ -5,6 +5,7 @@ export type RightUtilityDockSurfaceId =
   | "side-chat"
   | "browser"
   | "files"
+  | "document"
   | "canvas"
   | "plan"
   | "delivery"
@@ -131,6 +132,12 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     scope: "thread",
   },
   {
+    id: "document",
+    label: "Document",
+    modes: ["code"],
+    scope: "thread",
+  },
+  {
     id: "canvas",
     label: "Canvas",
     modes: ["chat", "work", "code"],
@@ -186,14 +193,15 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     "side-chat": RIGHT_UTILITY_DOCK_SURFACES[1],
     browser: RIGHT_UTILITY_DOCK_SURFACES[2],
     files: RIGHT_UTILITY_DOCK_SURFACES[3],
-    canvas: RIGHT_UTILITY_DOCK_SURFACES[4],
-    plan: RIGHT_UTILITY_DOCK_SURFACES[5],
-    delivery: RIGHT_UTILITY_DOCK_SURFACES[6],
-    agents: RIGHT_UTILITY_DOCK_SURFACES[7],
-    review: RIGHT_UTILITY_DOCK_SURFACES[8],
-    terminal: RIGHT_UTILITY_DOCK_SURFACES[9],
-    tests: RIGHT_UTILITY_DOCK_SURFACES[10],
-    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[11],
+    document: RIGHT_UTILITY_DOCK_SURFACES[4],
+    canvas: RIGHT_UTILITY_DOCK_SURFACES[5],
+    plan: RIGHT_UTILITY_DOCK_SURFACES[6],
+    delivery: RIGHT_UTILITY_DOCK_SURFACES[7],
+    agents: RIGHT_UTILITY_DOCK_SURFACES[8],
+    review: RIGHT_UTILITY_DOCK_SURFACES[9],
+    terminal: RIGHT_UTILITY_DOCK_SURFACES[10],
+    tests: RIGHT_UTILITY_DOCK_SURFACES[11],
+    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[12],
   };
 
 export function resolveRightUtilityDockSurface(

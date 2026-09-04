@@ -40,6 +40,7 @@ export interface ShellDialogHostProps {
     mode: OctantMode,
     name: string,
     receiptId?: string,
+    initializeGit?: boolean,
   ) => Promise<ProjectId | undefined>;
   readonly onCreatedProject: (projectId: ProjectId, mode: OctantMode, name: string) => void;
   readonly searchOpen: boolean;
