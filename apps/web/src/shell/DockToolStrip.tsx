@@ -1,5 +1,6 @@
 import { MoreHorizontal, X } from "lucide-react";
-import { memo, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useDismissOnOutsidePointer } from "../lib/useDismissOnOutsidePointer";
 import { DockToolIcon } from "./dockToolIcons";
 import { partitionDockTools } from "./dockToolStripModel";
 import { IconButton } from "./IconButton";
@@ -27,6 +28,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
   const strip = useRef<HTMLDivElement>(null);
   const overflowId = useId();
   const overflowTrigger = useRef<HTMLButtonElement>(null);
+  const overflowRegion = useRef<HTMLSpanElement>(null);
   const capacity = props.capacity ?? measuredCapacity;
   const { visible, overflow } = partitionDockTools(props.tabs, props.active, capacity);
 
@@ -67,6 +69,9 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
   useEffect(() => {
     if (overflow.length === 0) setOverflowOpen(false);
   }, [overflow.length]);
+
+  const dismissOverflow = useCallback(() => setOverflowOpen(false), []);
+  useDismissOnOutsidePointer(overflowOpen, dismissOverflow, overflowRegion);
 
   function onStripKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (props.tabs.length === 0) return;
@@ -129,7 +134,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
         </span>
       ))}
       {overflow.length === 0 ? null : (
-        <span className="dock-tool-strip__overflow">
+        <span className="dock-tool-strip__overflow" ref={overflowRegion}>
           <IconButton
             aria-controls={overflowId}
             aria-expanded={overflowOpen}

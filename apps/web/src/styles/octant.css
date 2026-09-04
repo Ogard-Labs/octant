@@ -1928,6 +1928,17 @@ input.switch:checked::after {
   z-index: var(--oct-z-toast);
 }
 
+/* One focus treatment for every owned button.
+   The recipe drew a 3px ring, which is a filled glow rather than an edge: on a
+   tab it read as a highlighter circle drawn around the label, and inside the
+   composer's own frame it read as a second field. Keyboard focus is one
+   outline, at one width, drawn outside the control — the same mark the rest of
+   the system uses. */
+[data-slot="button"]:focus-visible {
+  outline: 2px solid var(--oct-accent-fg);
+  outline-offset: 1px;
+}
+
 .octant-tooltip {
   max-width: min(280px, calc(100vw - 24px));
   padding: 7px 10px;
@@ -4122,11 +4133,9 @@ input.switch:checked::after {
   border-color: transparent;
   box-shadow: none;
 }
-/* Suppressing the recipe's ring removes the only focus indicator those controls
-   had, so the row restores the system's own: one outline, at one width, drawn
-   outside the control rather than as a glow inside the composer's padding. */
-.composer-row button:focus-visible,
-.composer-row [role="button"]:focus-visible,
+/* Buttons take the system's focus outline wherever they are; these are the
+   row's controls that are not the button recipe and would otherwise be left
+   with no focus mark at all once the ring above is suppressed. */
 .composer-row [role="combobox"]:focus-visible,
 .composer-row input:focus-visible,
 .composer-row .composer-model-picker__trigger:focus-visible {

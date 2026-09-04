@@ -1,5 +1,6 @@
 import { GitPullRequest, Plus } from "lucide-react";
-import { useEffect, useId, useRef, useState, type Ref } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type Ref } from "react";
+import { useDismissOnOutsidePointer } from "../lib/useDismissOnOutsidePointer";
 import { DockToolIcon } from "./dockToolIcons";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
@@ -34,10 +35,14 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
   const disclosureId = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const firstAction = useRef<HTMLButtonElement>(null);
+  const region = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     if (open) firstAction.current?.focus();
   }, [open]);
+
+  const dismiss = useCallback(() => setOpen(false), []);
+  useDismissOnOutsidePointer(open, dismiss, region);
 
   function close() {
     setOpen(false);
@@ -51,7 +56,7 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
   if (props.surfaces.length === 0 && references.length === 0) return null;
 
   return (
-    <span className="dock-utility-launcher">
+    <span className="dock-utility-launcher" ref={region}>
       <OctantButton
         aria-label="Add tool"
         aria-controls={disclosureId}

@@ -22,6 +22,23 @@ describe("right sidebar tool launcher", () => {
     expect(screen.queryByRole("button", { name: "Add tool" })).not.toBeInTheDocument();
   });
 
+  it("closes when the reader turns to something else", () => {
+    render(
+      <div>
+        <button type="button">Elsewhere</button>
+        <DockUtilityLauncher onOpen={vi.fn()} surfaces={[{ id: "terminal", label: "Terminal" }]} />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
+    expect(screen.getByRole("button", { name: "Terminal" })).toBeVisible();
+
+    // Left open over whatever comes next, the reader's following click is spent
+    // dismissing the menu rather than doing what they clicked.
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Elsewhere" }));
+    expect(screen.queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
   it("offers the pull requests this task is already about, not just tool kinds", () => {
     const onOpenPullRequest = vi.fn();
     render(
