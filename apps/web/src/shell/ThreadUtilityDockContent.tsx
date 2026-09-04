@@ -34,7 +34,7 @@ import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
 import { ShipPanel } from "../ship/ShipPanel";
 import type { PickerGroup } from "@octant/domain";
 import type { ProviderController } from "../providers/useProviderController";
-import { WorkFilesPanel } from "../work/WorkFilesPanel";
+import { WorkFilesPanel, type WorkFileOpenRequest } from "../work/WorkFilesPanel";
 import { DockCanvasTool } from "./DockCanvasTool";
 import { DockDocumentTool } from "./DockDocumentTool";
 import type { OctantHostBridge } from "./hostBridge";
@@ -89,6 +89,8 @@ export interface ThreadUtilityDockContentProps {
   readonly serverUrl?: string;
   readonly shipClient?: ShipClient;
   readonly workFileListingClient?: WorkFileListingClient;
+  /** Opens one listed Work file in the preview surface. */
+  readonly onOpenWorkFile?: (request: WorkFileOpenRequest) => void;
   readonly sidecarThreadId?: ChatThreadId;
   readonly subject: ThreadUtilityDockSubject;
   readonly surface: RightUtilityDockSurfaceId;

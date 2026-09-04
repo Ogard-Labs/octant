@@ -59,6 +59,16 @@ never journaled and never attributed to a turn.
   artifact.
 - **A host that cannot watch records nothing.** The observer is optional; its
   absence means no written files, never a guess.
+- **A listed file is opened by a host-minted target, never by a path.** Preview
+  targets are path-free by contract, and the Files tool lists the whole bound
+  folder rather than only recorded artifacts, so the listing mints a target id
+  and opaque ref per path and the host keeps the mapping. The pair is stable for
+  as long as the host remembers the path, which is what makes reopening a file
+  select the tab it already has; a token the host has forgotten, or one replayed
+  against another Project, resolves to nothing rather than to a guess. This
+  grants nothing the listing did not: the resolved path is still confined to the
+  Project root, and the preview route still requires that Project to be the
+  window's active one.
 
 ## Consequences
 

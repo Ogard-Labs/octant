@@ -1,5 +1,6 @@
 import { decodeProjectId, decodeWorkThreadId } from "@octant/contracts";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WorkFilesPanel } from "./WorkFilesPanel";
 
@@ -63,6 +64,70 @@ describe("WorkFilesPanel", () => {
     expect(within(folder).getByText("notes.txt")).toBeVisible();
     expect(within(folder).getByText("research")).toBeVisible();
     expect(within(folder).getByText("Folder")).toBeVisible();
+  });
+
+  it("opens a listed file through the target the host minted for it", async () => {
+    const onOpenFile = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <WorkFilesPanel
+        client={client({
+          status: "listed",
+          listing: {
+            kind: "work-file-listing",
+            threadId,
+            projectId,
+            entries: [
+              {
+                kind: "file",
+                path: "summary.md",
+                byteLength: 10,
+                origin: "authored",
+                preview: {
+                  targetId: "00000000-0000-4000-8000-0000000004a1",
+                  opaqueRef: "00000000-0000-4000-8000-0000000004a2",
+                },
+              },
+            ],
+            previewHostId: "00000000-0000-4000-8000-0000000004a3",
+            truncated: false,
+            observedAt: "2026-09-04T10:00:00.000Z",
+          },
+        })}
+        onOpenFile={onOpenFile}
+        projectId={projectId}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /summary\.md/ }));
+
+    // Every value comes from the host: the renderer never assembles a target of
+    // its own, and never names a path.
+    expect(onOpenFile).toHaveBeenCalledWith({
+      targetId: "00000000-0000-4000-8000-0000000004a1",
+      opaqueRef: "00000000-0000-4000-8000-0000000004a2",
+      hostId: "00000000-0000-4000-8000-0000000004a3",
+      projectId,
+      displayName: "summary.md",
+    });
+  });
+
+  it("leaves a file the host gave no target inert rather than looking clickable", async () => {
+    const onOpenFile = vi.fn();
+    render(
+      <WorkFilesPanel
+        client={client(
+          listing([{ kind: "file", path: "notes.txt", byteLength: 4, origin: "untouched" }]),
+        )}
+        onOpenFile={onOpenFile}
+        projectId={projectId}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByText("notes.txt")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /notes\.txt/ })).not.toBeInTheDocument();
   });
 
   it("states no format for a file the folder already held", async () => {

@@ -8,10 +8,12 @@ import {
   type WorkFileListingResult,
   type WorkThreadId,
 } from "@octant/contracts";
+import type { PreviewHostId } from "@octant/contracts/previews";
 import type { ProjectId } from "@octant/contracts/projects";
 import { canonicalizeWorkRelativePath, WorkConfinementRejected } from "@octant/domain";
 import type { WorkArtifactEntry } from "./workArtifactProjection";
 import type { WorkFilesystemPort } from "./workFilesystemPort";
+import type { WorkFilePreviewTarget } from "./workFilePreviewRefs";
 import {
   compareWorkPathNames,
   joinWorkPath,
@@ -55,6 +57,14 @@ export interface WorkFileListingServiceOptions {
    * format or a version.
    */
   readonly pathsWrittenByTurns?: (projectId: ProjectId) => ReadonlyArray<string>;
+  /**
+   * Mints the path-free token a listed file is opened by. Absent on a host that
+   * serves no preview, which lists files without making them openable.
+   */
+  readonly previewRefs?: {
+    readonly hostId: PreviewHostId;
+    mint(projectId: ProjectId, relativePath: string): WorkFilePreviewTarget;
+  };
   readonly clock?: () => string;
   readonly maxEntries?: number;
   readonly maxDepth?: number;
@@ -89,6 +99,7 @@ export class WorkFileListingService {
   readonly #filesystem: WorkFilesystemPort;
   readonly #artifactsForProject: (projectId: ProjectId) => ReadonlyArray<WorkArtifactEntry>;
   readonly #pathsWrittenByTurns: ((projectId: ProjectId) => ReadonlyArray<string>) | undefined;
+  readonly #previewRefs: WorkFileListingServiceOptions["previewRefs"];
   readonly #clock: () => string;
   readonly #maxEntries: number;
   readonly #maxDepth: number;
@@ -97,6 +108,7 @@ export class WorkFileListingService {
     this.#filesystem = options.filesystem;
     this.#artifactsForProject = options.artifactsForProject;
     this.#pathsWrittenByTurns = options.pathsWrittenByTurns;
+    this.#previewRefs = options.previewRefs;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#maxEntries = options.maxEntries ?? MAX_WORK_FILE_LISTING_ENTRIES;
     this.#maxDepth = options.maxDepth ?? MAX_WORK_FILE_LISTING_DEPTH;
@@ -194,12 +206,14 @@ export class WorkFileListingService {
 
         const artifact = artifacts.get(childRelative);
         const authored = artifact !== undefined || writtenByTurns.has(childRelative);
+        const preview = this.#previewRefs?.mint(request.projectId, childRelative);
         entries.push({
           kind: "file",
           path: childRelative,
           byteLength: child.stat.size,
           origin: authored ? "authored" : "untouched",
           ...(artifact === undefined ? {} : { artifact }),
+          ...(preview === undefined ? {} : { preview }),
         });
       }
     }
@@ -210,6 +224,7 @@ export class WorkFileListingService {
       projectId: request.projectId,
       ...(relativeDirectory === undefined ? {} : { directory: relativeDirectory }),
       entries: orderWorkFirst(entries),
+      ...(this.#previewRefs === undefined ? {} : { previewHostId: this.#previewRefs.hostId }),
       truncated,
       observedAt: this.#clock(),
     });

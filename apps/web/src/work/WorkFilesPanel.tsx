@@ -1,4 +1,7 @@
 import type {
+  PreviewHostId,
+  PreviewOpaqueRef,
+  PreviewTargetId,
   ProjectId,
   WorkArtifactFormat,
   WorkFileListingEntry,
@@ -12,6 +15,15 @@ import { OctantButton } from "../ui/base/OctantButton";
 
 type FileEntry = Extract<WorkFileListingEntry, { readonly kind: "file" }>;
 
+/** Everything the shell needs to open one listed file, all of it host-minted. */
+export interface WorkFileOpenRequest {
+  readonly targetId: PreviewTargetId;
+  readonly opaqueRef: PreviewOpaqueRef;
+  readonly hostId: PreviewHostId;
+  readonly projectId: ProjectId;
+  readonly displayName: string;
+}
+
 type PanelStatus = "loading" | "ready" | "error";
 
 export interface WorkFilesPanelProps {
@@ -21,6 +33,8 @@ export interface WorkFilesPanelProps {
   readonly client?: WorkFileListingClient;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
+  /** Absent on a surface that cannot open a preview; rows then stay read-only. */
+  readonly onOpenFile?: (request: WorkFileOpenRequest) => void;
 }
 
 /**
@@ -36,6 +50,7 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
   const [status, setStatus] = useState<PanelStatus>("loading");
   const [entries, setEntries] = useState<ReadonlyArray<WorkFileListingEntry>>([]);
   const [truncated, setTruncated] = useState(false);
+  const [previewHostId, setPreviewHostId] = useState<PreviewHostId | undefined>(undefined);
   const [message, setMessage] = useState<string | undefined>(undefined);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -78,6 +93,7 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
           return;
         }
         setEntries(result.listing.entries);
+        setPreviewHostId(result.listing.previewHostId);
         setTruncated(result.listing.truncated);
         setStatus("ready");
       })
@@ -93,6 +109,26 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
   }, [client, projectId, props.threadId, reloadKey]);
 
   const refresh = useCallback(() => setReloadKey((current) => current + 1), []);
+
+  const onOpenFile = props.onOpenFile;
+  // Opening needs the host's own target and the host it belongs to. A listing
+  // that carries neither leaves the rows readable and inert rather than letting
+  // the renderer assemble a target of its own.
+  const open = useMemo(() => {
+    if (onOpenFile === undefined || previewHostId === undefined || projectId === undefined) {
+      return undefined;
+    }
+    return (entry: FileEntry) => {
+      if (entry.preview === undefined) return;
+      onOpenFile({
+        targetId: entry.preview.targetId,
+        opaqueRef: entry.preview.opaqueRef,
+        hostId: previewHostId,
+        projectId,
+        displayName: entry.path,
+      });
+    };
+  }, [onOpenFile, previewHostId, projectId]);
 
   const authored = entries.filter(
     (entry): entry is FileEntry => entry.kind === "file" && entry.origin === "authored",
@@ -145,14 +181,16 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
           <h3 className="oct-section-label">Made here</h3>
           <ul className="work-files-panel__list">
             {authored.map((entry) => (
-              <li className="work-files-panel__row" key={entry.path}>
-                <span className="oct-row-label">{entry.path}</span>
-                <span className="oct-row-detail">
-                  {entry.artifact === undefined
+              <FileRow
+                detail={
+                  entry.artifact === undefined
                     ? formatBytes(entry.byteLength)
-                    : `${formatLabel(entry.artifact.format)} · v${entry.artifact.sequence} · ${formatBytes(entry.byteLength)}`}
-                </span>
-              </li>
+                    : `${formatLabel(entry.artifact.format)} · v${entry.artifact.sequence} · ${formatBytes(entry.byteLength)}`
+                }
+                entry={entry}
+                key={entry.path}
+                {...(open === undefined ? {} : { onOpen: open })}
+              />
             ))}
           </ul>
         </section>
@@ -162,14 +200,21 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
         <section aria-label="In this folder" className="work-files-panel__group">
           <h3 className="oct-section-label">In this folder</h3>
           <ul className="work-files-panel__list">
-            {rest.map((entry) => (
-              <li className="work-files-panel__row" key={entry.path}>
-                <span className="oct-row-label">{entry.path}</span>
-                <span className="oct-row-detail">
-                  {entry.kind === "directory" ? "Folder" : formatBytes(entry.byteLength)}
-                </span>
-              </li>
-            ))}
+            {rest.map((entry) =>
+              entry.kind === "directory" ? (
+                <li className="work-files-panel__row" key={entry.path}>
+                  <span className="oct-row-label">{entry.path}</span>
+                  <span className="oct-row-detail">Folder</span>
+                </li>
+              ) : (
+                <FileRow
+                  detail={formatBytes(entry.byteLength)}
+                  entry={entry}
+                  key={entry.path}
+                  {...(open === undefined ? {} : { onOpen: open })}
+                />
+              ),
+            )}
           </ul>
         </section>
       ) : null}
@@ -203,4 +248,39 @@ function formatBytes(byteLength: number): string {
   if (byteLength < 1_024) return `${byteLength} B`;
   if (byteLength < 1_024 * 1_024) return `${Math.round(byteLength / 1_024)} KB`;
   return `${(byteLength / (1_024 * 1_024)).toFixed(1)} MB`;
+}
+
+/**
+ * One listed file. It is a button only when the host gave it a target to open;
+ * otherwise it stays a row, because a control that looks interactive and does
+ * nothing is worse than one that never claimed to be.
+ */
+function FileRow(props: {
+  readonly entry: FileEntry;
+  readonly detail: string;
+  readonly onOpen?: (entry: FileEntry) => void;
+}) {
+  const openable = props.onOpen !== undefined && props.entry.preview !== undefined;
+  if (!openable) {
+    return (
+      <li className="work-files-panel__row">
+        <span className="oct-row-label">{props.entry.path}</span>
+        <span className="oct-row-detail">{props.detail}</span>
+      </li>
+    );
+  }
+  return (
+    <li>
+      <OctantButton
+        className="work-files-panel__row work-files-panel__row--openable"
+        onClick={() => props.onOpen?.(props.entry)}
+        title={`Open ${props.entry.path}`}
+        type="button"
+        variant="ghost"
+      >
+        <span className="oct-row-label">{props.entry.path}</span>
+        <span className="oct-row-detail">{props.detail}</span>
+      </OctantButton>
+    </li>
+  );
 }

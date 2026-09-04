@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
+import { PreviewHostId, PreviewOpaqueRef, PreviewTargetId } from "./previews";
 import { ProjectId } from "./projects";
 import { WorkArtifactFormat, WorkArtifactId } from "./workArtifacts";
 import { WorkThreadId } from "./workThreads";
@@ -44,6 +45,21 @@ export const WorkFileListingArtifact = Schema.Struct({
 export type WorkFileListingArtifact = typeof WorkFileListingArtifact.Type;
 
 /**
+ * How a listed file is opened in the preview surface.
+ *
+ * Both values are minted by the host and stable for as long as it remembers the
+ * path, which is what makes reopening a file select the tab it already has
+ * rather than stacking a second one. The renderer never names a path: it holds
+ * these tokens and the host holds the mapping, so a client cannot ask for a
+ * file the listing did not show it.
+ */
+export const WorkFileListingPreview = Schema.Struct({
+  targetId: PreviewTargetId,
+  opaqueRef: PreviewOpaqueRef,
+}).annotations(strict);
+export type WorkFileListingPreview = typeof WorkFileListingPreview.Type;
+
+/**
  * One listed entry. `path` is always relative to the Project's bound folder —
  * the host absolute path is never part of this contract, so a renderer or
  * remote client cannot learn where the folder lives on the host.
@@ -59,6 +75,7 @@ export const WorkFileListingEntry = Schema.Union(
     byteLength: Schema.Int.pipe(Schema.nonNegative()),
     origin: WorkFileListingOrigin,
     artifact: Schema.optional(WorkFileListingArtifact),
+    preview: Schema.optional(WorkFileListingPreview),
   }).annotations(strict),
 );
 export type WorkFileListingEntry = typeof WorkFileListingEntry.Type;
@@ -75,6 +92,11 @@ export const WorkFileListing = Schema.Struct({
   /** Absent when the listing starts at the bound folder itself. */
   directory: Schema.optional(Schema.NonEmptyTrimmedString),
   entries: Schema.Array(WorkFileListingEntry),
+  /**
+   * The preview host these entries' targets belong to. Absent on a host that
+   * serves no preview, which lists files without making them openable.
+   */
+  previewHostId: Schema.optional(PreviewHostId),
   truncated: Schema.Boolean,
   observedAt: UtcTimestamp,
 }).annotations(strict);

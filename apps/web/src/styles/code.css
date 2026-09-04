@@ -891,3 +891,20 @@
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+
+/* A row is a control only when the host gave it a target to open. The button
+   recipe is card-shaped, so it needs the height release the fixed control
+   height would otherwise clip. */
+.work-files-panel__row--openable {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding-inline: 0;
+  border-radius: 0;
+  text-align: left;
+}
+
+.work-files-panel__row--openable:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}

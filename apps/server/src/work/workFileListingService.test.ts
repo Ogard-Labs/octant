@@ -1,3 +1,8 @@
+import {
+  decodePreviewHostId,
+  decodePreviewOpaqueRef,
+  decodePreviewTargetId,
+} from "@octant/contracts/previews";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { decodeWorkThreadId } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
@@ -161,6 +166,55 @@ describe("WorkFileListingService", () => {
     expect(result.listing.entries[0]).toMatchObject({ path: "draft.md", origin: "authored" });
     expect(result.listing.entries[0]).not.toHaveProperty("artifact");
     expect(result.listing.entries[1]).toMatchObject({ path: "stale.txt", origin: "untouched" });
+  });
+
+  it("gives each listed file a token to open it by, and never a path to name", async () => {
+    const filesystem = workFilesystemFixture(root);
+    await seed(filesystem, [`${root}/summary.md`]);
+    let next = 0;
+    const service = new WorkFileListingService({
+      filesystem,
+      artifactsForProject: () => [],
+      previewRefs: {
+        hostId: decodePreviewHostId("00000000-0000-4000-8000-0000000009f1"),
+        mint: () => {
+          next += 1;
+          const id = `00000000-0000-4000-8000-${String(next).padStart(12, "0")}`;
+          return {
+            targetId: decodePreviewTargetId(id),
+            opaqueRef: decodePreviewOpaqueRef(id),
+          };
+        },
+      },
+      clock: () => "2026-09-04T10:00:00.000Z",
+    });
+
+    const result = await service.list({ threadId, projectId, rootPath: root });
+
+    expect(result.status).toBe("listed");
+    if (result.status !== "listed") return;
+    expect(result.listing.entries[0]).toMatchObject({
+      path: "summary.md",
+      preview: {
+        targetId: "00000000-0000-4000-8000-000000000001",
+        opaqueRef: "00000000-0000-4000-8000-000000000001",
+      },
+    });
+    expect(result.listing.previewHostId).toBe("00000000-0000-4000-8000-0000000009f1");
+  });
+
+  it("lists files without a token on a host that mints none", async () => {
+    const filesystem = workFilesystemFixture(root);
+    await seed(filesystem, [`${root}/summary.md`]);
+
+    const result = await service(filesystem).list({ threadId, projectId, rootPath: root });
+
+    expect(result.status).toBe("listed");
+    if (result.status !== "listed") return;
+    // Readable but not openable is the honest state; inviting the renderer to
+    // name a path of its own would not be.
+    expect(result.listing.entries[0]).not.toHaveProperty("preview");
+    expect(result.listing.previewHostId).toBeUndefined();
   });
 
   it("refuses a directory outside the bound folder", async () => {

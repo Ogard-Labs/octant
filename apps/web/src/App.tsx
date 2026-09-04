@@ -2336,6 +2336,18 @@ function LaunchedShell(
         canvasClient={canvasClient}
         chatClient={chatClient}
         chatReadCursorStore={chatReadCursorStore}
+        onOpenWorkFile={(request) => {
+          void controller.openPreview({
+            mode: "work",
+            title: request.displayName,
+            targetId: request.targetId,
+            projectId: request.projectId,
+            hostId: request.hostId,
+            targetKind: "file",
+            opaqueRef: request.opaqueRef,
+            displayName: request.displayName,
+          });
+        }}
         {...(dockThread.mode === "code" && activeCodeThreadController !== undefined
           ? { codeController: activeCodeThreadController }
           : {})}
