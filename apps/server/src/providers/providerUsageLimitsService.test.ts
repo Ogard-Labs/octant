@@ -534,4 +534,62 @@ describe("ProviderUsageLimitsService", () => {
     expect(clear).toHaveBeenCalledWith(timerHandle);
     clearInterval(timerHandle);
   });
+
+  it("names the runtime's own reason when no evidence exists instead of a pending report", async () => {
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId), instance(secondId)],
+      observe: async () => undefined,
+      unavailableReason: (provider) =>
+        String(provider.id) === String(firstId) ? "runtime-does-not-report" : "endpoint-silent",
+      now: () => "2026-08-23T12:00:00.000Z" as UtcTimestamp,
+    });
+
+    const snapshot = await service.refresh();
+
+    expect(snapshot.entries).toEqual([
+      expect.objectContaining({ status: "unavailable", reason: "runtime-does-not-report" }),
+      expect.objectContaining({ status: "unavailable", reason: "endpoint-silent" }),
+    ]);
+  });
+
+  it("shows header buckets a session reported and lets them go once they refill", async () => {
+    const store = new ProviderRuntimeUsageLimitsStore();
+    let now = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: async () => undefined,
+      runtimeLimits: (instanceId, observedAt) => store.serviceLimits(instanceId, observedAt),
+      unavailableReason: () => "endpoint-silent",
+      now: () => now,
+    });
+    await service.refresh();
+    expect(service.snapshot().entries[0]).toMatchObject({
+      status: "unavailable",
+      reason: "endpoint-silent",
+    });
+
+    store.record({
+      instanceId: firstId,
+      sessionId: "00000000-0000-4000-8000-000000000003" as never,
+      sequence: 1,
+      correlationId: "00000000-0000-4000-8000-000000000004" as never,
+      occurredAt: "2026-08-23T12:01:00.000Z" as UtcTimestamp,
+      kind: "rate-limit-bucket",
+      bucket: "requests",
+      limit: 500,
+      remaining: 120,
+      resetsAt: "2026-08-23T12:07:00.000Z" as UtcTimestamp,
+    });
+
+    expect(service.snapshot().entries[0]).toMatchObject({
+      status: "available",
+      source: "provider-runtime",
+      limits: { requests: { status: "available", limit: 500, remaining: 120 } },
+    });
+
+    now = "2026-08-23T12:10:00.000Z" as UtcTimestamp;
+    const refilled = service.snapshot();
+    expect(refilled.entries[0]).toMatchObject({ status: "unavailable", reason: "endpoint-silent" });
+    expect(JSON.stringify(refilled)).not.toContain("120");
+  });
 });

@@ -37,6 +37,14 @@ limit that is not reported is `unavailable`, never `unlimited`. Octant
 learns service limits from ordinary responses and low-frequency probes — it
 does not poll quotas just to animate the interface.
 
+Settings → Usage lists what each provider has reported. Claude Code and
+Codex narrate their account usage windows during a session; OpenAI-compatible,
+Anthropic-compatible, and Azure AI Foundry endpoints disclose request and
+token buckets in the headers of the responses Octant already asked for. A
+provider that has not spoken yet says so, and a runtime that never will —
+OpenCode, Pi, the ACP agents, or a local Ollama — says that instead, so you
+are not left waiting for a number that cannot come.
+
 ## Overrides
 
 Per-turn overrides let you **pin** or **exclude** content, disable tools,

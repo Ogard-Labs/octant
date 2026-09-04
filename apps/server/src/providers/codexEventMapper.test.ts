@@ -1445,6 +1445,75 @@ describe("mapCodexMessage", () => {
     ]);
   });
 
+  it("reports each account usage window without a thread correlation", () => {
+    const results = map(
+      context(),
+      notification("account/rateLimits/updated", {
+        rateLimits: {
+          limitId: "codex",
+          primary: { usedPercent: 85, windowDurationMins: 300, resetsAt: 1_784_000_000 },
+          secondary: { usedPercent: 12, windowDurationMins: 10_080, resetsAt: null },
+          rateLimitReachedType: null,
+        },
+      }),
+    );
+
+    expect(results).toEqual([
+      {
+        kind: "event",
+        event: expect.objectContaining({
+          kind: "rate-limit-window",
+          window: "primary_5h",
+          status: "warning",
+          utilization: 0.85,
+          resetsAt: "2026-07-14T03:33:20.000Z",
+          sequence: 41,
+        }),
+      },
+      {
+        kind: "event",
+        event: expect.objectContaining({
+          kind: "rate-limit-window",
+          window: "secondary_7d",
+          status: "allowed",
+          utilization: 0.12,
+          sequence: 42,
+        }),
+      },
+    ]);
+    expect(results[1]).not.toHaveProperty("event.resetsAt");
+  });
+
+  it("marks account windows exhausted when the backend says the limit was reached", () => {
+    const results = map(
+      context({ terminal: true }),
+      notification("account/rateLimits/updated", {
+        rateLimits: {
+          primary: { usedPercent: 100 },
+          secondary: { usedPercent: 130, windowDurationMins: 10_080 },
+          rateLimitReachedType: "rate_limit_reached",
+        },
+      }),
+    );
+
+    expect(results.map((result) => (result.kind === "event" ? result.event : result))).toEqual([
+      expect.objectContaining({ window: "primary", status: "exhausted", utilization: 1 }),
+      expect.objectContaining({ window: "secondary_7d", status: "exhausted" }),
+    ]);
+    expect(results[1]).not.toHaveProperty("event.utilization");
+  });
+
+  it("ignores an account usage update that names no window", () => {
+    expect(
+      map(
+        context(),
+        notification("account/rateLimits/updated", {
+          rateLimits: { primary: null, secondary: null },
+        }),
+      ),
+    ).toEqual([{ kind: "ignored" }]);
+  });
+
   it("fails mismatched active correlations without leaking provider data", () => {
     const failure = map(
       context(),

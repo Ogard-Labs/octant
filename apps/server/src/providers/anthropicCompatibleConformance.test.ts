@@ -3,9 +3,11 @@ import {
   decodeProviderSessionId,
   type AnthropicCompatibleProtocol,
   type ProviderModelId,
+  type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { runProviderConformance } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
+import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import type { AnthropicCompatibleFetch } from "./anthropicCompatibleEndpoint";
 import { makeAnthropicCompatibleDriver } from "./anthropicCompatibleDriver";
@@ -140,6 +142,75 @@ describe("Anthropic-compatible provider conformance", () => {
     });
     expect(runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
     expect(chatEvidence).toMatchObject({ nativeAttachmentHonest: true, released: true });
+  });
+
+  it("reports the quota buckets a Messages response disclosed in its headers", async () => {
+    const driver = makeAnthropicCompatibleDriver({
+      instanceId,
+      configuration: configuration("messages"),
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+      fetch: async (url) =>
+        String(url).endsWith("/models")
+          ? models()
+          : new Response(messagesStream("messages answer").body, {
+              headers: {
+                "content-type": "text/event-stream",
+                "anthropic-ratelimit-requests-limit": "50",
+                "anthropic-ratelimit-requests-remaining": "49",
+                "anthropic-ratelimit-requests-reset": "2026-07-15T12:01:00Z",
+                "anthropic-ratelimit-tokens-limit": "40000",
+                "anthropic-ratelimit-tokens-remaining": "39000",
+              },
+            }),
+      clock: () => "2026-07-15T12:00:00.000Z",
+      correlationId: () => "80000000-0000-4000-8000-000000000613",
+    });
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/octant-anthropic-conformance",
+          });
+          yield* connection.start({
+            sessionId: successfulSessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          const collected = yield* Effect.fork(
+            Stream.runCollect(
+              connection.events.pipe(
+                Stream.takeUntil((event: ProviderRuntimeEvent) => event.kind === "completed"),
+              ),
+            ),
+          );
+          yield* connection.send({
+            sessionId: successfulSessionId,
+            prompt: "limits",
+            attachments: [],
+            tools: [],
+          });
+          return Array.from(yield* Fiber.join(collected));
+        }),
+      ),
+    );
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "text-delta",
+      "usage",
+      "rate-limit-bucket",
+      "rate-limit-bucket",
+      "completed",
+    ]);
+    expect(events[2]).toMatchObject({
+      bucket: "requests",
+      limit: 50,
+      remaining: 49,
+      resetsAt: "2026-07-15T12:01:00.000Z",
+    });
+    expect(events[3]).toMatchObject({ bucket: "tokens", limit: 40_000, remaining: 39_000 });
   });
 });
 

@@ -544,6 +544,17 @@ function makeConnection(
       unsubscribeWhenIdle();
     };
     const handleMessage = (message: CodexServerMessage) => {
+      if (message.kind === "notification" && message.method === "account/rateLimits/updated") {
+        // Account usage names no thread; every session mid-turn on this
+        // connection is told, since each of them is spending that account.
+        for (const state of sessions.values()) {
+          if (state.terminal || state.context === undefined) continue;
+          for (const item of mapCodexMessage(state.context, message)) {
+            if (item.kind === "event") offer(item.event);
+          }
+        }
+        return;
+      }
       const state = stateForMessage(message, sessionsByThread, sessions);
       if (state === undefined || state.terminal) return;
       if (
@@ -1028,7 +1039,7 @@ function stateForMessage(
   sessions: ReadonlyMap<ProviderSessionId, SessionState>,
 ): SessionState | undefined {
   if (message.kind === "notification" || message.kind === "request") {
-    return sessionsByThread.get(message.params.threadId);
+    return "threadId" in message.params ? sessionsByThread.get(message.params.threadId) : undefined;
   }
   const active = [...sessions.values()].filter(
     (state) => !state.terminal && state.context !== undefined,

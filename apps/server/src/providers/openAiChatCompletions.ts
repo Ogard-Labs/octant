@@ -18,6 +18,7 @@ import type {
   ProtocolTurnEvent,
   ProtocolUsage,
 } from "./openAiResponses";
+import { readOpenAiRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
 
 export interface ChatCompletionsTurnInput {
   readonly endpoint: OpenAiCompatibleEndpoint;
@@ -44,6 +45,8 @@ export interface ChatCompletionsTurnResult {
   readonly events: readonly ProtocolTurnEvent[];
   readonly toolCalls: readonly ProtocolToolCall[];
   readonly verifiedManualModelId?: string;
+  /** Quota buckets from the response headers. Absent when the endpoint sent none. */
+  readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
 }
 
 interface TrackedChatToolCall {
@@ -208,7 +211,7 @@ async function normalizeStream(
   if (!state.done || !state.terminal) {
     throw protocol("The provider stream ended without a terminal completion.");
   }
-  return result(input, state, "supported");
+  return result(input, state, "supported", response.headers);
 }
 
 function normalizeChunk(
@@ -511,7 +514,7 @@ async function normalizeNonStreaming(
     state.events.push({ kind: "usage", sequence: allocateSequence(state), ...usage });
   }
   for (const event of state.events) input.onEvent?.(event);
-  return result(input, state, "unsupported");
+  return result(input, state, "unsupported", response.headers);
 }
 
 function parseNonStreamingToolCalls(value: unknown): ProtocolToolCall[] {
@@ -546,9 +549,11 @@ function result(
   input: ChatCompletionsTurnInput,
   state: StreamState,
   streaming: "supported" | "unsupported",
+  headers: Headers,
 ): ChatCompletionsTurnResult {
   const terminal: ChatCompletionsTurnResult["terminal"] =
     state.completedToolCalls.length > 0 ? "tool-calls" : "completed";
+  const rateLimitBuckets = readOpenAiRateLimitBuckets(headers, Date.now());
   return {
     protocol: "chat-completions",
     accepted: state.accepted,
@@ -563,6 +568,7 @@ function result(
     ...(input.endpoint.configuration.manualModelIds.includes(input.modelId as never)
       ? { verifiedManualModelId: input.modelId }
       : {}),
+    ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
   };
 }
 

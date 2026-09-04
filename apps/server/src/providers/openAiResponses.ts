@@ -12,6 +12,7 @@ import {
   encodeResponsesToolResults,
   normalizeToolName,
 } from "./openAiToolEncoding";
+import { readOpenAiRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
 
 export interface ProtocolToolResult {
   readonly toolCallId: string;
@@ -60,6 +61,8 @@ export interface ProtocolTurnResult {
   readonly events: readonly ProtocolTurnEvent[];
   readonly toolCalls: readonly ProtocolToolCall[];
   readonly verifiedManualModelId?: string;
+  /** Quota buckets from the response headers. Absent when the endpoint sent none. */
+  readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
 }
 
 export interface ProtocolUsage {
@@ -258,6 +261,7 @@ async function runResponsesTurn(
   }
   const terminal: ProtocolTurnResult["terminal"] =
     state.toolCalls.length > 0 ? "tool-calls" : "completed";
+  const rateLimitBuckets = readOpenAiRateLimitBuckets(response.headers, Date.now());
   return {
     protocol: "responses",
     accepted: state.accepted,
@@ -271,6 +275,7 @@ async function runResponsesTurn(
     ...(input.endpoint.configuration.manualModelIds.includes(input.modelId as never)
       ? { verifiedManualModelId: input.modelId }
       : {}),
+    ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
   };
 }
 
