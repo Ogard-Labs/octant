@@ -103,7 +103,7 @@ function collectImageDataUrl(chunks: ReadonlyArray<PreviewChunk>): string | unde
  * markup into the preview surface. This is intentionally not a full Markdown
  * engine; complex sources surface as `limited-fidelity` or `unsupported`.
  */
-function MarkdownLite({ text }: { readonly text: string }) {
+export function MarkdownLite({ text }: { readonly text: string }) {
   const blocks = splitMarkdownBlocks(text);
   return (
     <>

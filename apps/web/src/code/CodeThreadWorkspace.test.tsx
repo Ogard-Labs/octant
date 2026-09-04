@@ -1076,6 +1076,42 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Access · Auto-accept edits")).toBeVisible();
   });
 
+  it("names the posture only on the turn where it changes", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:user",
+              role: "user",
+              text: "look around",
+              executionPolicy: "approval-gated",
+            },
+            { id: "turn-1:assistant", role: "assistant", text: "Looked." },
+            {
+              id: "turn-2:user",
+              role: "user",
+              text: "keep looking",
+              executionPolicy: "approval-gated",
+            },
+            { id: "turn-2:assistant", role: "assistant", text: "Still looking." },
+            {
+              id: "turn-3:user",
+              role: "user",
+              text: "now edit",
+              executionPolicy: "auto-accept-edits",
+            },
+            { id: "turn-3:assistant", role: "assistant", text: "Edited." },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getAllByText("Access · Ask for approvals")).toHaveLength(1);
+    expect(screen.getByText("Access · Auto-accept edits")).toBeVisible();
+  });
+
   it("answers agent-initiated approvals and questions through the controller", async () => {
     const user = userEvent.setup();
     const answerProviderRequest = vi.fn(

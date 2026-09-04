@@ -93,29 +93,30 @@
   gap: 2px;
 }
 
-/* Tabs fill the 34px bar less a 2px breath, so the whole strip is a target:
-   a 26px tab in a 34px bar left dead rows above and below every tab. */
+/* A tab is a quiet label the height of the bar: icon, name, and its own
+   close control. The active one sits on the selection fill; the rest are
+   muted text that firms on hover. No pill border: the bordered pill read as
+   a button, and the border ate two of the 34px. */
 .dock-tool-strip__tab {
   display: inline-flex;
   flex: none;
   min-width: 0;
   min-height: 30px;
-  max-width: 11rem;
+  max-width: 12rem;
   align-items: stretch;
   overflow: hidden;
-  color: var(--oct-meta);
+  color: var(--oct-muted);
   border-radius: var(--oct-radius-sm);
-  border: 1px solid transparent;
 }
 
-.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]),
 .dock-tool-strip__tab:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
 
 .dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) {
-  border-color: var(--oct-hairline);
+  color: var(--oct-fg);
+  background: var(--octant-selection);
 }
 
 .dock-tool-strip__select {
@@ -140,12 +141,19 @@
   height: auto;
   min-height: 30px;
   border-radius: 0;
-  opacity: 0.7;
+  color: var(--oct-muted);
+  opacity: 0;
 }
 
 .dock-tool-strip__tab:hover .dock-tool-strip__close,
-.dock-tool-strip__tab:focus-within .dock-tool-strip__close {
+.dock-tool-strip__tab:focus-within .dock-tool-strip__close,
+.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) .dock-tool-strip__close {
   opacity: 1;
+}
+
+.dock-tool-strip__close:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .dock-tool-strip__overflow {
@@ -268,6 +276,30 @@
   min-width: 0;
   min-height: 0;
   gap: 8px;
+}
+
+.dock-document-tool {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.dock-document-tool__path {
+  margin: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-document-tool__body {
+  height: auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--oct-space-3);
 }
 
 .dock-canvas-tool__list {
@@ -425,6 +457,7 @@
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-file-explorer-panel),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .canvas-workspace-tab),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .dock-canvas-tool),
+.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .dock-document-tool),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-diff-pane),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) [data-code-tab-kind]) {
   padding: 0;

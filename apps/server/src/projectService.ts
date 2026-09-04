@@ -54,6 +54,10 @@ import type { PersistenceService } from "./persistence/persistenceService";
 import { ProjectionApplicationFailed } from "./persistence/projection";
 import type { ProjectRootPort } from "./projectRootPort";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
+import {
+  initializeGitRepository,
+  type InitializeGitRepositoryResult,
+} from "./code/initializeGitRepository";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
@@ -84,6 +88,13 @@ export interface ProjectServiceOptions {
   readonly observeCodeProjectRepository?: (
     canonicalRoot: string,
   ) => Promise<ConnectedGitHubRepository | undefined>;
+  /**
+   * Optional Git initializer used when create-code-project sets initializeGit.
+   * Tests inject a fake; production uses initializeGitRepository.
+   */
+  readonly initializeGitRepository?: (
+    canonicalRoot: string,
+  ) => Promise<InitializeGitRepositoryResult>;
 }
 
 export class ProjectServiceError extends Error {
@@ -103,6 +114,7 @@ export class ProjectService implements ProjectServiceApi {
   readonly #observeCodeProjectRepository:
     | ((canonicalRoot: string) => Promise<ConnectedGitHubRepository | undefined>)
     | undefined;
+  readonly #initializeGitRepository: NonNullable<ProjectServiceOptions["initializeGitRepository"]>;
   readonly #archiveListeners = new Set<
     (project: Extract<Project, { readonly type: "work" }>) => void
   >();
@@ -115,6 +127,7 @@ export class ProjectService implements ProjectServiceApi {
     this.#clock = options.clock;
     this.#now = options.now ?? Date.now;
     this.#observeCodeProjectRepository = options.observeCodeProjectRepository;
+    this.#initializeGitRepository = options.initializeGitRepository ?? initializeGitRepository;
   }
 
   hasActiveProject(projectId: ProjectId, requiredType: ProjectType): boolean {
@@ -419,6 +432,19 @@ export class ProjectService implements ProjectServiceApi {
             projectType: type,
             now: this.#now(),
           });
+          if (
+            type === "code" &&
+            command.kind === "create-code-project" &&
+            command.initializeGit === true
+          ) {
+            const initialized = await this.#initializeGitRepository(binding.canonicalRoot);
+            if (initialized.status === "failed") {
+              throw new ProjectServiceError({
+                category: "unavailable",
+                message: initialized.message,
+              });
+            }
+          }
           const common = {
             id: command.projectId,
             name: command.name,

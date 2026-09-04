@@ -93,6 +93,7 @@
     "./thread-creation": "./src/threadCreation.ts",
     "./thread-retention": "./src/threadRetention.ts",
     "./thread-export": "./src/threadExport.ts",
+    "./thread-hand-off": "./src/threadHandOff.ts",
     "./zen": "./src/zen.ts",
     "./cursor-acp": "./src/cursorAcp.ts",
     "./github-catalogue": "./src/githubCatalogue.ts",

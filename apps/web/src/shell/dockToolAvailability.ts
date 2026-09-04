@@ -35,6 +35,8 @@ export interface DockToolCapabilities {
   readonly hasPlanArtifact: boolean | "unknown";
   readonly hasDelivery: boolean | "unknown";
   readonly hasCanvasDocument: boolean | "unknown";
+  /** A turn wrote a Markdown or text document this thread can show. */
+  readonly hasWrittenDocument: boolean;
   readonly hasAppleSimulator: boolean;
   readonly hasChildRuns: boolean | "unknown";
   readonly addAgentInvoked: boolean;
@@ -51,6 +53,7 @@ export function isDockToolLaunchable(
   if (surface === "plan") return capabilities.hasPlanArtifact === true;
   if (surface === "delivery") return capabilities.hasDelivery === true;
   if (surface === "canvas") return capabilities.hasCanvasDocument === true;
+  if (surface === "document") return capabilities.hasWrittenDocument;
   if (surface === "ios-simulator") return capabilities.hasAppleSimulator;
   if (surface === "agents") {
     return capabilities.hasChildRuns === true || capabilities.addAgentInvoked;
@@ -65,6 +68,7 @@ export function isDockToolStillOpenable(
   if (surface === "plan") return capabilities.hasPlanArtifact !== false;
   if (surface === "delivery") return capabilities.hasDelivery !== false;
   if (surface === "canvas") return capabilities.hasCanvasDocument !== false;
+  if (surface === "document") return capabilities.hasWrittenDocument;
   if (surface === "ios-simulator") return capabilities.hasAppleSimulator;
   if (surface === "agents") {
     return capabilities.hasChildRuns !== false || capabilities.addAgentInvoked;

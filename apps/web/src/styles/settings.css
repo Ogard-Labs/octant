@@ -1604,11 +1604,32 @@ textarea.settings-view__text-input {
   font-size: var(--oct-text-xs);
 }
 
+/* Import or export is an open section: the JSON field takes the whole
+   width under its label, and the actions sit on one quiet row beneath it.
+   The card with a narrow textarea pinned to its right edge is gone. */
 .settings-view__theme-transfer {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   padding-top: 8px;
-  border-top: 1px solid var(--oct-border);
+}
+
+/* Outranks the two-column Appearance field rule above: this field is a
+   block, label over control. */
+.settings-theme-editor .setgroup .settings-view__theme-transfer .settings-view__field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-height: 0;
+  padding: 0;
+}
+
+.settings-theme-editor__disclosure[open] > summary {
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.settings-view__theme-transfer .settings-view__textarea {
+  width: 100%;
+  min-height: 120px;
 }
 
 .shell--material-translucent .settings-view__effective-note {

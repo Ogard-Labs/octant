@@ -1,8 +1,15 @@
 import type { ThreadExportClient } from "@octant/client-runtime/thread-export-client";
+import type { ThreadHandOffClient } from "@octant/client-runtime/thread-hand-off-client";
 import type { ChatThreadView } from "@octant/contracts/chat";
-import { Copy, Download, Ellipsis, FileDown, PanelsTopLeft } from "lucide-react";
+import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
+import { Copy, Download, Ellipsis, FileDown, Handshake, PanelsTopLeft } from "lucide-react";
 import { useMemo, useState } from "react";
 import { exportThreadBundle, resolveThreadExportClient } from "../thread/threadExport";
+import {
+  handOffThread,
+  resolveThreadHandOffClient,
+  threadHandOffMessage,
+} from "../thread/threadHandOff";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { buildChatMarkdownExport } from "./chatMarkdownExport";
 
@@ -12,6 +19,9 @@ export interface ChatThreadActionsMenuProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly exportClient?: ThreadExportClient;
+  readonly handOffClient?: ThreadHandOffClient;
+  /** Told what the host wrote so the shell can open it beside the transcript. */
+  readonly onHandedOff?: (outcome: ThreadHandOffOutcome) => void;
   /** Present only when this window has a canvas surface to disclose. */
   readonly canvas?: {
     readonly open: boolean;
@@ -34,6 +44,18 @@ export interface ChatThreadActionsMenuProps {
 export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [exporting, setExporting] = useState(false);
+  const [handingOff, setHandingOff] = useState(false);
+  const handOffClient = useMemo(
+    () =>
+      resolveThreadHandOffClient({
+        ...(props.handOffClient === undefined ? {} : { client: props.handOffClient }),
+        ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+        ...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability }),
+      }),
+    [props.handOffClient, props.serverUrl, props.windowCapability],
+  );
   const exportClient = useMemo(
     () =>
       resolveThreadExportClient({
@@ -106,6 +128,24 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
     })();
   }
 
+  function handOff() {
+    if (handOffClient === undefined || handingOff) return;
+    setHandingOff(true);
+    setStatus("Writing the hand-off document…");
+    void (async () => {
+      try {
+        const outcome = await handOffThread(handOffClient, {
+          mode: "chat",
+          threadId: String(props.view.thread.id),
+        });
+        setStatus(threadHandOffMessage(outcome));
+        if (outcome.kind === "handed-off") props.onHandedOff?.(outcome);
+      } finally {
+        setHandingOff(false);
+      }
+    })();
+  }
+
   const items: ReadonlyArray<OctantMenuItem> = [
     {
       icon: <Copy aria-hidden="true" size={14} strokeWidth={1.7} />,
@@ -124,6 +164,15 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
             icon: <FileDown aria-hidden="true" size={14} strokeWidth={1.7} />,
             label: exporting ? "Exporting…" : "Export…",
             value: "export-thread",
+          },
+        ]),
+    ...(handOffClient === undefined
+      ? []
+      : [
+          {
+            icon: <Handshake aria-hidden="true" size={14} strokeWidth={1.7} />,
+            label: handingOff ? "Handing off…" : "Hand off…",
+            value: "hand-off",
           },
         ]),
     ...(props.canvas === undefined
@@ -147,6 +196,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
           if (value === "copy-conversation") copyConversation();
           else if (value === "save-markdown") saveConversation();
           else if (value === "export-thread") exportThread();
+          else if (value === "hand-off") handOff();
           else if (value === "canvas") props.canvas?.onToggle();
         }}
         trigger={<Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />}

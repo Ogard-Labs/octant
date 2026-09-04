@@ -263,6 +263,78 @@ describe("ProjectService", () => {
     expect(fixture.append).not.toHaveBeenCalled();
   });
 
+  it("initializes Git before journaling a Code Project when create asks for it", async () => {
+    const codeReceipts = new BindingReceiptStore(() => Buffer.alloc(32, 9));
+    const codeReceipt = codeReceipts.issue({
+      windowId,
+      projectType: "code",
+      canonicalBinding: { canonicalRoot: "/fresh" },
+      now: 0,
+    });
+    const codeId = decodeProjectId("00000000-0000-4000-8000-000000000677");
+    const initializeGitRepository = vi.fn(async (canonicalRoot: string) => {
+      expect(canonicalRoot).toBe("/fresh");
+      return { status: "initialized" as const };
+    });
+    const codeFixture = fixtureService({
+      receipts: codeReceipts,
+      nowMs: 1,
+      initializeGitRepository,
+    });
+    await expect(
+      codeFixture.service.executeProject(windowId, {
+        kind: "create-code-project",
+        projectId: codeId,
+        expectedVersion: 0,
+        name: "Fresh",
+        receiptId: codeReceipt.receiptId,
+        hostId: "local",
+        initializeGit: true,
+      }),
+    ).resolves.toMatchObject({
+      kind: "code-project-created",
+      project: { id: codeId, binding: { canonicalRoot: "/fresh" } },
+    });
+    expect(initializeGitRepository).toHaveBeenCalledWith("/fresh");
+    expect(codeFixture.append).toHaveBeenCalled();
+  });
+
+  it("refuses Code Project creation when requested Git initialization fails", async () => {
+    const codeReceipts = new BindingReceiptStore(() => Buffer.alloc(32, 10));
+    const codeReceipt = codeReceipts.issue({
+      windowId,
+      projectType: "code",
+      canonicalBinding: { canonicalRoot: "/blocked" },
+      now: 0,
+    });
+    const codeId = decodeProjectId("00000000-0000-4000-8000-000000000678");
+    const codeFixture = fixtureService({
+      receipts: codeReceipts,
+      nowMs: 1,
+      initializeGitRepository: async () => ({
+        status: "failed",
+        message: "Octant could not initialize a Git repository in the chosen folder.",
+      }),
+    });
+    await expect(
+      codeFixture.service.executeProject(windowId, {
+        kind: "create-code-project",
+        projectId: codeId,
+        expectedVersion: 0,
+        name: "Blocked",
+        receiptId: codeReceipt.receiptId,
+        hostId: "local",
+        initializeGit: true,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unavailable",
+        message: "Octant could not initialize a Git repository in the chosen folder.",
+      },
+    });
+    expect(codeFixture.append).not.toHaveBeenCalled();
+  });
+
   it("creates Code, reorders, restores, and relinks without changing Project identity", async () => {
     const codeReceipts = new BindingReceiptStore(() => Buffer.alloc(32, 1));
     const codeReceipt = codeReceipts.issue({
@@ -988,6 +1060,13 @@ function fixtureService(
     observeCodeProjectRepository?: (
       canonicalRoot: string,
     ) => Promise<{ host: "github.com"; owner: string; repository: string } | undefined>;
+    initializeGitRepository?: (
+      canonicalRoot: string,
+    ) => Promise<
+      | { readonly status: "initialized" }
+      | { readonly status: "already-repository" }
+      | { readonly status: "failed"; readonly message: string }
+    >;
   } = {},
 ) {
   const projects = [...(options.projects ?? [])];
@@ -1065,6 +1144,9 @@ function fixtureService(
       ...(options.observeCodeProjectRepository === undefined
         ? {}
         : { observeCodeProjectRepository: options.observeCodeProjectRepository }),
+      ...(options.initializeGitRepository === undefined
+        ? {}
+        : { initializeGitRepository: options.initializeGitRepository }),
     }),
   };
 }

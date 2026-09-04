@@ -44,6 +44,7 @@ export * from "./workTurnPolicy";
 export * from "./dataLifecyclePolicy";
 export * from "./threadRetentionPolicy";
 export * from "./threadExportPolicy";
+export * from "./threadHandOffPolicy";
 export * from "./eventPolicy";
 export * from "./executionCapsulePolicy";
 export * from "./goalPolicy";
