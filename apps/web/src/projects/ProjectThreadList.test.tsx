@@ -130,6 +130,23 @@ describe("ProjectThreadRows", () => {
     expect(screen.queryByRole("button", { name: /Thread 8/ })).toBeNull();
   });
 
+  it("can fold a list back up after unfolding it past the virtualization threshold", async () => {
+    // Unfolding is what pushes the list over the threshold, so the collapsed
+    // list is measured and the expanded one is virtualized.
+    const threads = Array.from({ length: 45 }, (_, index) => ({
+      threadId: `thread-${String(index)}`,
+      title: `Thread ${String(index)}`,
+    }));
+    render(<ProjectThreadRows collapsedLimit={8} onSelectThread={vi.fn()} threads={threads} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Show more (37)" }));
+    const collapse = screen.getByRole("button", { name: "Show less" });
+    expect(collapse).toBeVisible();
+
+    await userEvent.click(collapse);
+    expect(screen.getByRole("button", { name: "Show more (37)" })).toBeVisible();
+  });
+
   it("shows a compact worktree chip only when the host projected one", () => {
     const { rerender } = render(
       <ProjectThreadRows

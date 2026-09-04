@@ -359,8 +359,9 @@ The app has three server-enforced modes—Chat, Work, and Code. Mode switching i
 available as a labeled selector, compact list, or icon presentation according
 to the user's setting. Code and Work keep separate Project View sets. The
 sidebar reads as two flat groups parted by one hairline: Projects (each Project
-row with its threads nested beneath it), then Chats (threads filed in no
-Project; Work and Code call the group Recents). Rows are hairline rails, never
+row with its threads nested beneath it, pinned Projects leading in their own
+labelled band that is absent when nothing is pinned), then Chats (threads filed
+in no Project; Work and Code call the group Recents). Rows are hairline rails, never
 cards; provider marks are fixed-size inline and can be hidden without changing
 row height or indentation. A thread with unread activity ends its row with a
 small filled dot labelled "New activity", driven by the read cursors the

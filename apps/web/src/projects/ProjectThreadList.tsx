@@ -722,33 +722,39 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
       </>
     );
   }
+  // The fold sits outside the measured list on this branch too: expanding a
+  // long list is what turns virtualization on, so leaving it to the unmeasured
+  // branch alone takes Show less away exactly when it is needed.
   return (
-    <div
-      className="project-threads__virtual-list"
-      ref={listRef}
-      style={{ height: virtualizer.getTotalSize() }}
-    >
-      {virtualizer.getVirtualItems().map((virtualItem) => {
-        const thread = threads[virtualItem.index];
-        if (thread === undefined) return null;
-        return (
-          <div
-            data-index={virtualItem.index}
-            key={virtualItem.key}
-            ref={virtualizer.measureElement}
-            style={{
-              left: 0,
-              position: "absolute",
-              top: 0,
-              transform: `translateY(${String(virtualItem.start - scrollMargin)}px)`,
-              width: "100%",
-            }}
-          >
-            {row(thread)}
-          </div>
-        );
-      })}
-    </div>
+    <>
+      <div
+        className="project-threads__virtual-list"
+        ref={listRef}
+        style={{ height: virtualizer.getTotalSize() }}
+      >
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const thread = threads[virtualItem.index];
+          if (thread === undefined) return null;
+          return (
+            <div
+              data-index={virtualItem.index}
+              key={virtualItem.key}
+              ref={virtualizer.measureElement}
+              style={{
+                left: 0,
+                position: "absolute",
+                top: 0,
+                transform: `translateY(${String(virtualItem.start - scrollMargin)}px)`,
+                width: "100%",
+              }}
+            >
+              {row(thread)}
+            </div>
+          );
+        })}
+      </div>
+      {fold}
+    </>
   );
 }
 
