@@ -137,7 +137,7 @@ function makeDriver(input: {
       const behavior = input.behaviors.shift() ?? "complete";
       const queue = Effect.runSync(Queue.unbounded<never>());
       return Effect.succeed({
-        events: Stream.fromQueue(queue),
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
         start: (startInput: { readonly sessionId: string }) =>
           Effect.succeed({ sessionId: startInput.sessionId }),
         send: (turn: {

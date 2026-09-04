@@ -144,12 +144,10 @@ describe("ChatTurnRunner", () => {
     let subscribedBeforeSend = false;
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.unwrap(
-        Effect.sync(() => {
-          subscribedBeforeSend = true;
-          return Stream.fromQueue(queue);
-        }),
-      ),
+      subscribe: Effect.sync(() => {
+        subscribedBeforeSend = true;
+        return Stream.fromQueue(queue);
+      }),
       start: () => Effect.succeed({ sessionId }),
       send: (input: { readonly context?: ReadonlyArray<{ readonly kind: string }> }) =>
         Effect.gen(function* () {
@@ -235,7 +233,7 @@ describe("ChatTurnRunner", () => {
     );
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {
@@ -307,7 +305,7 @@ describe("ChatTurnRunner", () => {
     }));
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {
@@ -425,7 +423,9 @@ describe("ChatTurnRunner", () => {
   it("maps ambiguous provider death to interrupted, never completed", async () => {
     const updates: ChatAttempt[] = [];
     const connection = {
-      events: Stream.fromIterable([{ kind: "text-delta", sessionId, delta: "partial" }] as never),
+      subscribe: Effect.succeed(
+        Stream.fromIterable([{ kind: "text-delta", sessionId, delta: "partial" }] as never),
+      ),
       start: () => Effect.succeed({ sessionId }),
       send: () => Effect.void,
       interrupt: () => Effect.void,
@@ -494,7 +494,7 @@ describe("ChatTurnRunner", () => {
     const updates: ChatAttempt[] = [];
     const removeEventListener = vi.spyOn(controller.signal, "removeEventListener");
     const connection = {
-      events: Stream.never,
+      subscribe: Effect.succeed(Stream.never),
       start: () => Effect.succeed({ sessionId }),
       send: () => Effect.fail({ category: "provider-failed", message: "send failed" } as never),
       interrupt: () => Effect.void,
@@ -559,7 +559,7 @@ describe("ChatTurnRunner", () => {
   it("preserves typed provider start failures as durable outcomes", async () => {
     const updates: ChatAttempt[] = [];
     const connection = {
-      events: Stream.never,
+      subscribe: Effect.succeed(Stream.never),
       start: () => Effect.fail({ category: "rate-limited", message: "retry later" } as never),
       send: vi.fn(() => Effect.void),
       interrupt: () => Effect.void,
@@ -621,7 +621,7 @@ describe("ChatTurnRunner", () => {
     const interrupt = vi.fn(() => Effect.void);
     const send = vi.fn(() => Effect.void);
     const connection = {
-      events: Stream.never,
+      subscribe: Effect.succeed(Stream.never),
       start: () =>
         Effect.sync(() => {
           controller.abort();
@@ -689,7 +689,7 @@ describe("ChatTurnRunner", () => {
     const toolStart = (id: string) =>
       ({ kind: "tool-start", sessionId, toolCallId: id, toolName: "t", input: {} }) as never;
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {
@@ -769,7 +769,7 @@ describe("ChatTurnRunner", () => {
     const otherSessionId = decodeProviderSessionId("82000000-0000-4000-8000-000000000099");
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {
@@ -855,7 +855,7 @@ describe("ChatTurnRunner", () => {
     const updates: ChatAttempt[] = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {
@@ -936,7 +936,7 @@ describe("ChatTurnRunner", () => {
       const updates: ChatAttempt[] = [];
       const queue = Effect.runSync(Queue.unbounded<never>());
       const connection = {
-        events: Stream.fromQueue(queue),
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
         start: () => Effect.succeed({ sessionId }),
         send: () =>
           Queue.offer(queue, {
@@ -1078,7 +1078,7 @@ describe("ChatTurnRunner", () => {
     const updates: ChatAttempt[] = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {
@@ -1166,7 +1166,7 @@ describe("ChatTurnRunner", () => {
     const citationId = decodeChatCitationId("82000000-0000-4000-8000-000000000071");
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {
@@ -1251,7 +1251,7 @@ describe("ChatTurnRunner", () => {
     const bytes = new TextEncoder().encode("attachment-bytes");
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: (input: { readonly attachments: ReadonlyArray<{ readonly bytes: Uint8Array }> }) =>
         Effect.gen(function* () {
@@ -1324,7 +1324,7 @@ describe("ChatTurnRunner", () => {
     const answeredTools: Array<{ readonly isError: boolean; readonly resultJson: string }> = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: (input: { readonly tools: ReadonlyArray<{ readonly name: string }> }) =>
         Effect.gen(function* () {
@@ -1407,7 +1407,7 @@ describe("ChatTurnRunner", () => {
     const execute = vi.fn(async () => ({ result: { status: "ok", attached: true } }));
     const sent: Array<{ readonly tools: ReadonlyArray<{ readonly name: string }> }> = [];
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: (input: { readonly tools: ReadonlyArray<{ readonly name: string }> }) =>
         Effect.gen(function* () {
@@ -1498,7 +1498,7 @@ describe("ChatTurnRunner", () => {
     let sendCalled = false;
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId, resumeCursor }),
       resume: (input: {
         readonly sessionId: string;
@@ -1592,7 +1592,7 @@ describe("ChatTurnRunner", () => {
     };
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId, resumeCursor }),
       resume: () =>
         Effect.fail({
@@ -1670,7 +1670,7 @@ describe("ChatTurnRunner", () => {
     const answers: Array<{ readonly requestId: string; readonly approved: boolean }> = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {
@@ -1756,7 +1756,7 @@ describe("ChatTurnRunner", () => {
     const answers: Array<{ readonly requestId: string; readonly approved: boolean }> = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {
@@ -1840,7 +1840,7 @@ describe("ChatTurnRunner", () => {
     const updates: ChatAttempt[] = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {

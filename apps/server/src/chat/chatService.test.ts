@@ -418,7 +418,7 @@ function openFixture(options?: {
   }> = [];
   const queue = Effect.runSync(Queue.unbounded<never>());
   const connectionDriver = {
-    events: Stream.fromQueue(queue),
+    subscribe: Effect.succeed(Stream.fromQueue(queue)),
     start: (input: {
       readonly sessionId: string;
       readonly modelId: string;
@@ -668,7 +668,7 @@ function compactionDriver(
         const queue = Effect.runSync(Queue.unbounded<never>());
         let maintenanceSession: string | undefined;
         return {
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: {
@@ -742,7 +742,7 @@ function abandonedReplyDriver(
       Effect.sync(() => {
         const queue = Effect.runSync(Queue.unbounded<never>());
         return {
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: {
@@ -1964,7 +1964,7 @@ describe("ChatService", () => {
     const driver = {
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: { readonly sessionId: string }) =>
@@ -2018,7 +2018,7 @@ describe("ChatService", () => {
     const driver = {
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: { readonly sessionId: string }) =>
@@ -2648,7 +2648,7 @@ describe("ChatService", () => {
     const sentTurns: Array<{ readonly sessionId: string; readonly prompt: string }> = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connectionDriver = {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: (input: { readonly sessionId: string }) =>
         Effect.sync(() => {
           return {
@@ -2759,7 +2759,7 @@ describe("ChatService", () => {
       probe: () => Effect.succeed(probeFixture()),
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(noCursorQueue),
+          subscribe: Effect.succeed(Stream.fromQueue(noCursorQueue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           resume: () => Effect.void,
@@ -2816,7 +2816,7 @@ describe("ChatService", () => {
       probe: () => Effect.succeed(probeFixture()),
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(staleResumeQueue),
+          subscribe: Effect.succeed(Stream.fromQueue(staleResumeQueue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({
               sessionId: input.sessionId,
@@ -3291,7 +3291,7 @@ describe("ChatService", () => {
     const driver = {
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: { readonly sessionId: string }) =>
@@ -3359,7 +3359,7 @@ describe("ChatService", () => {
     const driver = {
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: { readonly sessionId: string }) =>
@@ -3800,7 +3800,7 @@ describe("ChatService", () => {
     const driver = {
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: { readonly sessionId: string }) =>
@@ -3933,7 +3933,7 @@ describe("ChatService", () => {
     const driver = {
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: { readonly sessionId: string }) =>
@@ -4125,7 +4125,7 @@ describe("ChatService", () => {
         acquireCount += 1;
         if (acquireCount === 1) {
           return Effect.succeed({
-            events: Stream.fromQueue(failQueue),
+            subscribe: Effect.succeed(Stream.fromQueue(failQueue)),
             start: (startInput: { readonly sessionId: string }) =>
               Effect.sync(() => {
                 startedSessionIds.push(startInput.sessionId);
@@ -4151,7 +4151,7 @@ describe("ChatService", () => {
           });
         }
         return Effect.succeed({
-          events: Stream.fromQueue(successQueue),
+          subscribe: Effect.succeed(Stream.fromQueue(successQueue)),
           start: (startInput: { readonly sessionId: string }) =>
             Effect.sync(() => {
               startedSessionIds.push(startInput.sessionId);
@@ -4337,7 +4337,7 @@ describe("ChatService", () => {
     const driver = {
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: { readonly sessionId: string }) =>
@@ -4395,7 +4395,7 @@ describe("ChatService", () => {
     const driver = {
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: { readonly sessionId: string }) =>
@@ -5543,7 +5543,7 @@ describe("ChatService", () => {
     const driver = {
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: { readonly sessionId: string }) =>
@@ -6425,7 +6425,7 @@ describe("ChatService provider session recovery", () => {
     const driver = {
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromQueue(queue),
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
             Effect.succeed({ sessionId: input.sessionId }),
           send: (input: { readonly sessionId: string }) =>

@@ -196,7 +196,7 @@ describe("structured extensions on the Generic OpenAI-compatible provider", () =
           });
           const terminal = yield* Effect.fork(
             Stream.runCollect(
-              connection.events.pipe(
+              (yield* connection.subscribe).pipe(
                 Stream.filter((event) => event.sessionId === providerSessionId),
                 Stream.takeUntil(
                   (event) =>

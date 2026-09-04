@@ -66,7 +66,9 @@ describe("real Bedrock Mantle endpoint (generic OpenAI-compatible)", () => {
               modelId: model,
               executionPolicy: "approval-gated",
             });
-            const events = yield* Effect.fork(collectSessionEvents(connection.events, sessionId));
+            const events = yield* Effect.fork(
+              collectSessionEvents(yield* connection.subscribe, sessionId),
+            );
             yield* connection.send({
               sessionId,
               prompt: "Reply with exactly: octant-bedrock-mantle-smoke",
@@ -92,11 +94,11 @@ describe("real Bedrock Mantle endpoint (generic OpenAI-compatible)", () => {
               executionPolicy: "approval-gated",
             });
             const interrupted = yield* Effect.fork(
-              collectSessionEvents(connection.events, cancelSessionId),
+              collectSessionEvents(yield* connection.subscribe, cancelSessionId),
             );
             const acceptedOutput = yield* Effect.fork(
               Stream.runHead(
-                connection.events.pipe(
+                (yield* connection.subscribe).pipe(
                   Stream.filter(
                     (event) => event.sessionId === cancelSessionId && event.kind === "text-delta",
                   ),

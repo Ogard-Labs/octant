@@ -13,6 +13,7 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
+  type ProviderRuntimeEvent,
   type ProviderServiceLimits,
   type ProviderSessionId,
   type UtcTimestamp,
@@ -30,6 +31,7 @@ import {
   type ProviderCapacityScheduler,
   type SchedulerCapacityEnforcement,
 } from "../context/providerCapacityScheduler";
+import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { AGENT_RUN_AGGREGATE_TYPE } from "./agentRunEventStore";
 import {
@@ -627,16 +629,18 @@ function runSessionTurn(
       executionPolicy: input.authority.executionPolicy,
     });
 
-    const collected = yield* Effect.forkScoped(collectSessionEvents(connection, input, state));
-
-    yield* connection.send({
-      sessionId: input.sessionId,
-      prompt: input.run.task,
-      context: [...input.context],
-      // This slice grants a managed child no attachments and no app-managed
-      // tools; requests for either are declined rather than silently served.
-      attachments: [],
-      tools: [],
+    const collected = yield* subscribeThenSend({
+      connection,
+      consume: (events) => collectSessionEvents(connection, events, input, state),
+      send: connection.send({
+        sessionId: input.sessionId,
+        prompt: input.run.task,
+        context: [...input.context],
+        // This slice grants a managed child no attachments and no app-managed
+        // tools; requests for either are declined rather than silently served.
+        attachments: [],
+        tools: [],
+      }),
     });
 
     yield* Fiber.join(collected);
@@ -734,13 +738,14 @@ function shutdownProviderSession(
 
 function collectSessionEvents(
   connection: ProviderConnection,
+  events: Stream.Stream<ProviderRuntimeEvent, ProviderFailure>,
   input: ManagedSessionInput,
   state: ManagedSessionState,
 ): Effect.Effect<void, ProviderFailure> {
   const answeredToolRequestIds = new Set<string>();
   const answeredApprovalRequestIds = new Set<string>();
 
-  return connection.events.pipe(
+  return events.pipe(
     Stream.filter((event) => event.sessionId === input.sessionId),
     Stream.take(input.maxEvents + 1),
     Stream.takeUntil(

@@ -119,7 +119,7 @@ describe("installed Codex runtime", () => {
               if (started.resumeCursor?.driverKind !== "codex") {
                 throw new Error("Installed Codex smoke did not receive an opaque resume cursor.");
               }
-              const planEvents = collectEvents(plan.connection.events);
+              const planEvents = collectEvents(Stream.unwrapScoped(plan.connection.subscribe));
               await Effect.runPromise(
                 plan.connection.send({
                   sessionId: planSessionId,
@@ -155,11 +155,14 @@ describe("installed Codex runtime", () => {
               }),
             );
             let interruptionRequested = false;
-            const interruptedEvents = collectEvents(interrupt.connection.events, (event) => {
-              if (event.kind !== "text-delta" || interruptionRequested) return Effect.void;
-              interruptionRequested = true;
-              return interrupt.connection.interrupt(interruptSessionId);
-            });
+            const interruptedEvents = collectEvents(
+              Stream.unwrapScoped(interrupt.connection.subscribe),
+              (event) => {
+                if (event.kind !== "text-delta" || interruptionRequested) return Effect.void;
+                interruptionRequested = true;
+                return interrupt.connection.interrupt(interruptSessionId);
+              },
+            );
             await Effect.runPromise(
               interrupt.connection.send({
                 sessionId: interruptSessionId,
@@ -203,7 +206,7 @@ describe("installed Codex runtime", () => {
                   }),
                 );
                 const approvalEvents = collectApprovalAttempt(
-                  approval.connection.events,
+                  Stream.unwrapScoped(approval.connection.subscribe),
                   (event) => {
                     if (approvalDeclined) return Effect.void;
                     approvalDeclined = true;

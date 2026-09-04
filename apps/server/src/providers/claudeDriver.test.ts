@@ -490,7 +490,9 @@ describe("Claude execution policy", () => {
     const open = f.opens[0]!;
     const signal = new AbortController().signal;
     const input = { file_path: `${projectRoot}/README.md` };
-    const terminalEvent = Effect.runPromise(collectTerminal(acquired.connection.events));
+    const terminalEvent = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
     );
@@ -533,7 +535,7 @@ describe("Claude execution policy", () => {
     const signal = new AbortController().signal;
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(acquired.connection.events, (event) =>
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -630,7 +632,9 @@ describe("Claude execution policy", () => {
     const open = f.opens[0]!;
     const signal = new AbortController().signal;
     for (let turn = 0; turn < 4; turn += 1) {
-      const terminalEvent = Effect.runPromise(collectTerminal(acquired.connection.events));
+      const terminalEvent = Effect.runPromise(
+        collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      );
       await Effect.runPromise(
         acquired.connection.send({ sessionId, prompt: `turn-${turn}`, attachments: [], tools: [] }),
       );
@@ -828,7 +832,7 @@ describe("Claude execution policy", () => {
     const input = { command, cwd: projectRoot };
     const approvalEvent = Effect.runPromise(
       Stream.runHead(
-        acquired.connection.events.pipe(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "approval-request"),
         ),
       ),
@@ -889,7 +893,7 @@ describe("Claude execution policy", () => {
       };
       const collectApproval = Effect.runPromise(
         Stream.runHead(
-          acquired.connection.events.pipe(
+          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
             Stream.filter(
               (event) => event.sessionId === sessionId && event.kind === "approval-request",
             ),
@@ -967,7 +971,7 @@ describe("Claude execution policy", () => {
         persistence === "project-default"
           ? Effect.runPromise(
               Stream.runHead(
-                acquired.connection.events.pipe(
+                Stream.unwrapScoped(acquired.connection.subscribe).pipe(
                   Stream.filter(
                     (candidate) =>
                       candidate.sessionId === sessionId && candidate.kind === "approval-request",
@@ -988,7 +992,7 @@ describe("Claude execution policy", () => {
         const nextInput = { ...input, new_string: "different-approved-input" };
         const collectNextApproval = Effect.runPromise(
           Stream.runHead(
-            acquired.connection.events.pipe(
+            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
               Stream.filter(
                 (candidate) =>
                   candidate.sessionId === sessionId && candidate.kind === "approval-request",
@@ -1143,7 +1147,7 @@ describe("Claude execution policy", () => {
     };
     const collectQuestion = Effect.runPromise(
       Stream.runHead(
-        acquired.connection.events.pipe(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
           Stream.filter(
             (event) => event.sessionId === sessionId && event.kind === "user-input-request",
           ),
@@ -1225,7 +1229,7 @@ describe("Claude execution policy", () => {
     };
     const collectRetriedQuestion = Effect.runPromise(
       Stream.runHead(
-        acquired.connection.events.pipe(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
           Stream.filter(
             (candidate) =>
               candidate.sessionId === sessionId && candidate.kind === "user-input-request",
@@ -1359,7 +1363,7 @@ describe("Claude execution policy", () => {
     };
     const collect = Effect.runPromise(
       Stream.runHead(
-        acquired.connection.events.pipe(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "user-input-request"),
         ),
       ),
@@ -1468,7 +1472,7 @@ describe("Claude execution policy", () => {
     ).resolves.toMatchObject({ behavior: "deny" });
     const collect = Effect.runPromise(
       Stream.runHead(
-        acquired.connection.events.pipe(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "user-input-request"),
         ),
       ),
@@ -1781,7 +1785,9 @@ describe("Claude execution policy", () => {
         executionPolicy: "approval-gated",
       }),
     );
-    const terminalEvent = Effect.runPromise(collectTerminal(acquired.connection.events));
+    const terminalEvent = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
     );
@@ -1989,7 +1995,7 @@ describe("Claude execution policy", () => {
       signal,
     });
     const terminalEvent = Effect.runPromise(
-      collectTerminal(interruptedConnection.connection.events),
+      collectTerminal(Stream.unwrapScoped(interruptedConnection.connection.subscribe)),
     );
     const interruptExit = Effect.runPromise(
       Effect.exit(interruptedConnection.connection.interrupt(sessionId)),
@@ -2122,7 +2128,9 @@ describe("Claude execution policy", () => {
       toolUseId: "failed-question",
       signal,
     });
-    const terminalEvent = Effect.runPromise(collectTerminal(acquired.connection.events));
+    const terminalEvent = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
     await f.queries[0]!.end();
     const terminalResult = await terminalEvent;
     expect(terminalResult._tag).toBe("Some");
@@ -2606,7 +2614,7 @@ describe("Claude session lifecycle", () => {
     const acquired = await acquire(f.driver);
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(acquired.connection.events, (event) =>
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -2896,14 +2904,16 @@ describe("Claude session lifecycle", () => {
     );
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(acquired.connection.events, (event) =>
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
       ),
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const terminal = Effect.runPromise(collectTerminal(acquired.connection.events));
+    const terminal = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
     );
@@ -2934,7 +2944,9 @@ describe("Claude session lifecycle", () => {
       acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
 
-    const firstTerminal = Effect.runPromise(collectTerminal(acquired.connection.events));
+    const firstTerminal = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
     );
@@ -2942,7 +2954,9 @@ describe("Claude session lifecycle", () => {
     await expect(firstTerminal).resolves.toMatchObject({ value: { kind: "completed" } });
     expect(f.queries[0]!.close).not.toHaveBeenCalled();
 
-    const secondTerminal = Effect.runPromise(collectTerminal(acquired.connection.events));
+    const secondTerminal = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
     );
@@ -2964,7 +2978,7 @@ describe("Claude session lifecycle", () => {
     );
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(acquired.connection.events, (event) =>
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -3009,7 +3023,9 @@ describe("Claude session lifecycle", () => {
         await f.queries[0]!.emit(interrupted("sdk-session-1"));
       }),
     );
-    const terminal = Effect.runPromise(collectTerminal(acquired.connection.events));
+    const terminal = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "interrupt me", attachments: [], tools: [] }),
     );
@@ -3027,7 +3043,9 @@ describe("Claude session lifecycle", () => {
     await Effect.runPromise(
       acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const terminal = Effect.runPromise(collectTerminal(acquired.connection.events));
+    const terminal = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "accepted", attachments: [], tools: [] }),
     );
@@ -3061,7 +3079,9 @@ describe("Claude session lifecycle", () => {
     await Effect.runPromise(
       acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const terminal = Effect.runPromise(collectTerminal(acquired.connection.events));
+    const terminal = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
     await f.queries[0]!.end();
     await expect(terminal).resolves.toMatchObject({ value: { kind: "waiting" } });
     expect(clearObservedState).toHaveBeenCalledOnce();
@@ -3108,7 +3128,7 @@ describe("Claude session lifecycle", () => {
     const acquired = await acquire(f.driver);
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(acquired.connection.events, (event) =>
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -3117,7 +3137,9 @@ describe("Claude session lifecycle", () => {
     await Effect.runPromise(
       acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const terminal = Effect.runPromise(collectTerminal(acquired.connection.events));
+    const terminal = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
 
     failStream();
 
@@ -3180,7 +3202,7 @@ describe("Claude session lifecycle", () => {
     const acquired = await acquire(f.driver);
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(acquired.connection.events, (event) =>
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -3277,7 +3299,7 @@ describe("Claude session lifecycle", () => {
     const acquired = await acquire(f.driver);
     const events = Effect.runPromise(
       Stream.runCollect(
-        acquired.connection.events.pipe(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.sessionId === sessionId),
           Stream.take(2),
         ),
@@ -3331,7 +3353,7 @@ describe("Claude exact resume", () => {
     );
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(acquired.connection.events, (event) =>
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),

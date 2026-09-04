@@ -340,9 +340,9 @@ async function takeEvents(
   connection: Awaited<ReturnType<typeof acquireConnection>>["connection"],
   count: number,
 ): Promise<ReadonlyArray<ProviderRuntimeEvent>> {
-  return Effect.runPromise(Stream.runCollect(connection.events.pipe(Stream.take(count)))).then(
-    (chunk) => [...chunk],
-  );
+  return Effect.runPromise(
+    Stream.runCollect(Stream.unwrapScoped(connection.subscribe).pipe(Stream.take(count))),
+  ).then((chunk) => [...chunk]);
 }
 
 afterEach(() => {
@@ -1094,9 +1094,9 @@ describe("Codex thread and turn lifecycle", () => {
 
       const first = await acquireConnection(driver);
       await startSession(first.connection);
-      const terminal = Effect.runPromise(Stream.runCollect(first.connection.events)).then(
-        (events) => [...events],
-      );
+      const terminal = Effect.runPromise(
+        Stream.runCollect(Stream.unwrapScoped(first.connection.subscribe)),
+      ).then((events) => [...events]);
       await Effect.runPromise(
         first.connection.send({ sessionId, prompt: "break transport", attachments: [], tools: [] }),
       );
@@ -1515,7 +1515,9 @@ describe("Codex execution authority and approvals", () => {
     ]);
 
     const terminal = Promise.race([
-      Effect.runPromise(Stream.runCollect(acquired.connection.events)).then((chunk) => [...chunk]),
+      Effect.runPromise(Stream.runCollect(Stream.unwrapScoped(acquired.connection.subscribe))).then(
+        (chunk) => [...chunk],
+      ),
       new Promise<ReadonlyArray<ProviderRuntimeEvent>>((resolveTimeout) =>
         setTimeout(() => resolveTimeout([]), 50),
       ),

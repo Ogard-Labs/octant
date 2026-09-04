@@ -56,12 +56,10 @@ describe("ProviderService", () => {
     let subscriptions = 0;
     const answerApproval = vi.fn(() => Effect.void);
     const connection = {
-      events: Stream.unwrap(
-        Effect.sync(() => {
-          subscriptions += 1;
-          return Stream.fromQueue(queue);
-        }),
-      ),
+      subscribe: Effect.sync(() => {
+        subscriptions += 1;
+        return Stream.fromQueue(queue);
+      }),
       start: () => Effect.succeed({ sessionId }) as never,
       send: () =>
         Effect.gen(function* () {
@@ -105,10 +103,11 @@ describe("ProviderService", () => {
       const canonicalRootsAtAcquire: string[] = [];
       const sessionId = "80000000-0000-4000-8000-000000000024";
       const connection = {
-        events:
+        subscribe: Effect.succeed(
           outcome === "timeout"
             ? Stream.never
             : Stream.fromIterable([{ kind: "completed", sessionId }] as never),
+        ),
         start: () =>
           outcome === "start-failure"
             ? Effect.fail({ category: "provider-failed", message: "start failed" })
@@ -155,7 +154,7 @@ describe("ProviderService", () => {
     const roots: string[] = [];
     const sessionId = "80000000-0000-4000-8000-000000000025";
     const connection = {
-      events: Stream.fromIterable([{ kind: "completed", sessionId }] as never),
+      subscribe: Effect.succeed(Stream.fromIterable([{ kind: "completed", sessionId }] as never)),
       start: () => Effect.succeed({ sessionId }) as never,
       send: () => Effect.void,
       interrupt: () => Effect.void,
@@ -189,7 +188,7 @@ describe("ProviderService", () => {
     const start = vi.fn(() => Effect.succeed({ sessionId }) as never);
     const acquire = vi.fn(() =>
       Effect.succeed({
-        events: Stream.fromIterable([{ kind: "completed", sessionId }] as never),
+        subscribe: Effect.succeed(Stream.fromIterable([{ kind: "completed", sessionId }] as never)),
         start,
         send: () => Effect.void,
         interrupt: () => Effect.void,
@@ -235,7 +234,7 @@ describe("ProviderService", () => {
       { kind: "completed", sessionId: "80000000-0000-4000-8000-000000000014" },
     ] as never;
     const connection = {
-      events: Stream.fromIterable(events),
+      subscribe: Effect.succeed(Stream.fromIterable(events)),
       start: () => Effect.sync(() => void calls.push("start")) as never,
       send: () => Effect.sync(() => void calls.push("send")) as never,
       interrupt: () => Effect.sync(() => void calls.push("interrupt")) as never,
@@ -261,7 +260,7 @@ describe("ProviderService", () => {
     ] as never;
     const cancelledConnection = {
       ...(connection as unknown as Record<string, unknown>),
-      events: Stream.fromIterable(cancelledEvents),
+      subscribe: Effect.succeed(Stream.fromIterable(cancelledEvents)),
     };
     await expect(
       runPackagedProviderSmokeTurn(
@@ -323,7 +322,7 @@ describe("ProviderService", () => {
       { kind: "completed", sessionId },
     ] as never;
     const connection = {
-      events: Stream.fromIterable(events),
+      subscribe: Effect.succeed(Stream.fromIterable(events)),
       start: () => Effect.succeed({ sessionId }) as never,
       send: () => Effect.void,
       interrupt: () => Effect.void,
@@ -355,7 +354,7 @@ describe("ProviderService", () => {
     fixture.runtime.setObservedState(observation());
     const sessionId = "80000000-0000-4000-8000-000000000017";
     const connection = {
-      events: Stream.fromIterable([{ kind: "completed", sessionId }] as never),
+      subscribe: Effect.succeed(Stream.fromIterable([{ kind: "completed", sessionId }] as never)),
       start: () => Effect.succeed({ sessionId }) as never,
       send: () => Effect.void,
       interrupt: () => Effect.void,
@@ -426,7 +425,7 @@ describe("ProviderService", () => {
       { kind: "completed", sessionId },
     ] as never);
     const connection = {
-      events,
+      subscribe: Effect.succeed(events),
       start: () => Effect.succeed({ sessionId }) as never,
       send: () => Effect.void,
       interrupt: () => Effect.void,
@@ -451,16 +450,18 @@ describe("ProviderService", () => {
   it("rejects a mismatched normalized smoke request kind", async () => {
     const sessionId = "80000000-0000-4000-8000-000000000022";
     const connection = {
-      events: Stream.fromIterable([
-        {
-          kind: "user-input-request",
-          sessionId,
-          requestId: "question-1",
-          prompt: "Wrong request kind",
-          options: [],
-        },
-        { kind: "completed", sessionId },
-      ] as never),
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          {
+            kind: "user-input-request",
+            sessionId,
+            requestId: "question-1",
+            prompt: "Wrong request kind",
+            options: [],
+          },
+          { kind: "completed", sessionId },
+        ] as never),
+      ),
       start: () => Effect.succeed({ sessionId }) as never,
       send: () => Effect.void,
       interrupt: () => Effect.void,
@@ -485,7 +486,7 @@ describe("ProviderService", () => {
     const stop = vi.fn(() => Effect.void);
     const sessionId = "80000000-0000-4000-8000-000000000018";
     const connection = {
-      events: Stream.never,
+      subscribe: Effect.succeed(Stream.never),
       start: () => Effect.succeed({ sessionId }) as never,
       send: () =>
         Effect.fail({ category: "provider-failed", message: "sanitized smoke failure" }) as never,
@@ -511,8 +512,10 @@ describe("ProviderService", () => {
     const sessionId = "80000000-0000-4000-8000-000000000019";
     const stop = vi.fn(() => Effect.void);
     const connection = {
-      events: Stream.fromIterable(
-        ["one", "two", "three"].map((text) => ({ kind: "text-delta", sessionId, text })) as never,
+      subscribe: Effect.succeed(
+        Stream.fromIterable(
+          ["one", "two", "three"].map((text) => ({ kind: "text-delta", sessionId, text })) as never,
+        ),
       ),
       start: () => Effect.succeed({ sessionId }) as never,
       send: () => Effect.void,

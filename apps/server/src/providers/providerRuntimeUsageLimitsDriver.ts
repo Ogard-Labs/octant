@@ -32,11 +32,15 @@ function wrapConnection(
 ): ProviderConnection {
   return {
     ...connection,
-    events: connection.events.pipe(
-      Stream.tap((event: ProviderRuntimeEvent) =>
-        String(event.instanceId) === String(instanceId)
-          ? Effect.sync(() => store.record(event))
-          : Effect.void,
+    subscribe: connection.subscribe.pipe(
+      Effect.map((events) =>
+        events.pipe(
+          Stream.tap((event: ProviderRuntimeEvent) =>
+            String(event.instanceId) === String(instanceId)
+              ? Effect.sync(() => store.record(event))
+              : Effect.void,
+          ),
+        ),
       ),
     ),
   };

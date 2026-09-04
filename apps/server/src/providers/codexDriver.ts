@@ -740,7 +740,7 @@ function makeConnection(
     };
 
     return {
-      events: Stream.fromQueue(queue).pipe(Stream.takeUntil(isTerminal)),
+      subscribe: Effect.succeed(Stream.fromQueue(queue).pipe(Stream.takeUntil(isTerminal))),
       start: (input) =>
         withPendingLifecycle(() =>
           Effect.gen(function* () {

@@ -8,7 +8,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -142,7 +142,10 @@ async function runInstalledClaudeSmoke(authentication: ClaudeAuthentication): Pr
           }),
         );
         assertSmoke(handle.resumeCursor?.driverKind === "claude", "Resume cursor was missing.");
-        const eventsPromise = collectTurn(acquired.connection.events, ids.plan);
+        const eventsPromise = collectTurn(
+          Stream.unwrapScoped(acquired.connection.subscribe),
+          ids.plan,
+        );
         await Effect.runPromise(
           acquired.connection.send({
             sessionId: ids.plan,
@@ -176,15 +179,19 @@ async function runInstalledClaudeSmoke(authentication: ClaudeAuthentication): Pr
           }),
         );
         let approvals = 0;
-        const eventsPromise = collectTurn(acquired.connection.events, ids.decline, (event) => {
-          if (event.kind !== "approval-request") return Effect.void;
-          approvals += 1;
-          return acquired.connection.answerApproval({
-            sessionId: ids.decline,
-            requestId: event.requestId,
-            approved: false,
-          });
-        });
+        const eventsPromise = collectTurn(
+          Stream.unwrapScoped(acquired.connection.subscribe),
+          ids.decline,
+          (event) => {
+            if (event.kind !== "approval-request") return Effect.void;
+            approvals += 1;
+            return acquired.connection.answerApproval({
+              sessionId: ids.decline,
+              requestId: event.requestId,
+              approved: false,
+            });
+          },
+        );
         await Effect.runPromise(
           acquired.connection.send({
             sessionId: ids.decline,
@@ -214,15 +221,19 @@ async function runInstalledClaudeSmoke(authentication: ClaudeAuthentication): Pr
           }),
         );
         let approvals = 0;
-        const eventsPromise = collectTurn(acquired.connection.events, ids.accept, (event) => {
-          if (event.kind !== "approval-request") return Effect.void;
-          approvals += 1;
-          return acquired.connection.answerApproval({
-            sessionId: ids.accept,
-            requestId: event.requestId,
-            approved: true,
-          });
-        });
+        const eventsPromise = collectTurn(
+          Stream.unwrapScoped(acquired.connection.subscribe),
+          ids.accept,
+          (event) => {
+            if (event.kind !== "approval-request") return Effect.void;
+            approvals += 1;
+            return acquired.connection.answerApproval({
+              sessionId: ids.accept,
+              requestId: event.requestId,
+              approved: true,
+            });
+          },
+        );
         await Effect.runPromise(
           acquired.connection.send({
             sessionId: ids.accept,
@@ -252,15 +263,19 @@ async function runInstalledClaudeSmoke(authentication: ClaudeAuthentication): Pr
           }),
         );
         let questions = 0;
-        const eventsPromise = collectTurn(acquired.connection.events, ids.question, (event) => {
-          if (event.kind !== "user-input-request") return Effect.void;
-          questions += 1;
-          return acquired.connection.answerUserInput({
-            sessionId: ids.question,
-            requestId: event.requestId,
-            answer: "alpha",
-          });
-        });
+        const eventsPromise = collectTurn(
+          Stream.unwrapScoped(acquired.connection.subscribe),
+          ids.question,
+          (event) => {
+            if (event.kind !== "user-input-request") return Effect.void;
+            questions += 1;
+            return acquired.connection.answerUserInput({
+              sessionId: ids.question,
+              requestId: event.requestId,
+              answer: "alpha",
+            });
+          },
+        );
         await Effect.runPromise(
           acquired.connection.send({
             sessionId: ids.question,
@@ -287,11 +302,15 @@ async function runInstalledClaudeSmoke(authentication: ClaudeAuthentication): Pr
           }),
         );
         let interruptedAfterOutput = false;
-        const eventsPromise = collectTurn(acquired.connection.events, ids.interrupt, (event) => {
-          if (event.kind !== "text-delta" || interruptedAfterOutput) return Effect.void;
-          interruptedAfterOutput = true;
-          return acquired.connection.interrupt(ids.interrupt);
-        });
+        const eventsPromise = collectTurn(
+          Stream.unwrapScoped(acquired.connection.subscribe),
+          ids.interrupt,
+          (event) => {
+            if (event.kind !== "text-delta" || interruptedAfterOutput) return Effect.void;
+            interruptedAfterOutput = true;
+            return acquired.connection.interrupt(ids.interrupt);
+          },
+        );
         await Effect.runPromise(
           acquired.connection.send({
             sessionId: ids.interrupt,
@@ -324,7 +343,10 @@ async function runInstalledClaudeSmoke(authentication: ClaudeAuthentication): Pr
             resumed.resumeCursor.value === resumeCursor.value,
           "Exact resume returned a different cursor.",
         );
-        const eventsPromise = collectTurn(acquired.connection.events, ids.plan);
+        const eventsPromise = collectTurn(
+          Stream.unwrapScoped(acquired.connection.subscribe),
+          ids.plan,
+        );
         await Effect.runPromise(
           acquired.connection.send({
             sessionId: ids.plan,

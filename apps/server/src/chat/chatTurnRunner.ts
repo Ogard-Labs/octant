@@ -26,6 +26,7 @@ import type { ContextHarnessService } from "../context/contextHarnessService";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { countsTowardTurnEventBudget, makeIdleTimeout } from "../providers/turnBudget";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 
@@ -450,226 +451,200 @@ export class ChatTurnRunner {
         ),
       );
 
-      const collected = yield* Effect.forkScoped(
-        connection.events.pipe(
-          Stream.filter((event) => event.sessionId === input.attempt.providerSessionId),
-          Stream.takeUntil(
-            (event) =>
-              event.kind === "waiting" ||
-              event.kind === "completed" ||
-              event.kind === "interrupted" ||
-              event.kind === "failed",
-          ),
-          Stream.runForEach((event) =>
-            Effect.gen(function* () {
-              yield* idle.touch;
-              if (countsTowardTurnEventBudget(event)) handledEvents += 1;
-              if (handledEvents > maxEvents) {
-                yield* persistOutcome("interrupted");
-                terminalOutcome = "interrupted";
-                return yield* Effect.fail(
-                  decodeChatFailure({
-                    category: "interrupted",
-                    message: "Chat turn exceeded the bounded event budget.",
-                  }),
-                );
-              }
-              if (input.signal?.aborted) {
-                yield* cancelOwnedSession();
-                return yield* Effect.fail(
-                  decodeChatFailure({
-                    category: "interrupted",
-                    message: "Chat turn was cancelled.",
-                  }),
-                );
-              }
-              if (event.kind === "text-delta") {
-                if (event.text.trim().length > 0) sawVisibleResponse = true;
-                if (currentAttempt.outcome === "queued") {
-                  currentAttempt = transitionChatAttempt(currentAttempt, {
-                    outcome: "streaming",
-                    updatedAt: updatedAt(),
-                  });
-                }
-                const responseRef = yield* input.persistResponse(event.text);
-                currentAttempt = {
-                  ...currentAttempt,
-                  responseRefs: [...currentAttempt.responseRefs, responseRef],
-                  updatedAt: updatedAt(),
-                };
-                yield* input.persistAttempt(currentAttempt);
-                return;
-              }
-              if (event.kind === "usage") {
-                sawUsage = true;
-                actualInputTokens = event.inputTokens;
-                actualOutputTokens = event.outputTokens;
-                const observation = usageFromRuntimeEvent(event);
-                if (observation !== undefined) {
-                  actualInputTokens = observation.inputTokens;
-                  actualOutputTokens = observation.outputTokens;
-                  reasoningTokens = observation.reasoningTokens ?? reasoningTokens;
-                  cacheReadInputTokens = observation.cacheReadInputTokens ?? cacheReadInputTokens;
-                  cacheWriteInputTokens =
-                    observation.cacheWriteInputTokens ?? cacheWriteInputTokens;
-                  providerExecutionDurationMs =
-                    observation.providerExecutionDurationMs ?? providerExecutionDurationMs;
-                }
-                return;
-              }
-              if (event.kind === "approval-request") {
-                if (answeredApprovalRequestIds.has(event.requestId)) return;
-                answeredApprovalRequestIds.add(event.requestId);
-                // Chat has no filesystem, shell, or network authority. Decline
-                // Codex-native approvals so the turn can finish instead of
-                // aborting the pending tool as a user interrupt.
-                yield* connection.answerApproval({
-                  sessionId: input.attempt.providerSessionId,
-                  requestId: event.requestId,
-                  approved: false,
-                });
-                return;
-              }
-              if (event.kind === "tool-request") {
-                if (answeredToolRequestIds.has(event.requestId)) return;
-                answeredToolRequestIds.add(event.requestId);
-                if (event.toolName === RESEARCH_TOOL_NAME) {
-                  if (!input.researchEnabled) {
-                    yield* connection.answerTool({
-                      sessionId: input.attempt.providerSessionId,
-                      requestId: event.requestId,
-                      resultJson: JSON.stringify({ error: "research-disabled" }),
-                      isError: true,
-                    });
-                    return;
-                  }
-                  let parsedQuery = "";
-                  try {
-                    const parsed = JSON.parse(event.inputJson) as { readonly query?: string };
-                    parsedQuery = typeof parsed.query === "string" ? parsed.query : input.prompt;
-                  } catch {
-                    parsedQuery = input.prompt;
-                  }
-                  const route = input.researchRoute;
-                  if (route.kind !== "ready" || route.backend !== "searxng") {
-                    yield* connection.answerTool({
-                      sessionId: input.attempt.providerSessionId,
-                      requestId: event.requestId,
-                      resultJson: JSON.stringify({ error: "research-unavailable" }),
-                      isError: true,
-                    });
-                    return;
-                  }
-                  selectedResearchBackend = route.backend;
-                  const results = yield* Effect.tryPromise({
-                    try: () =>
-                      route.execute({
-                        query: parsedQuery,
-                        limit: 5,
-                        ...(input.signal === undefined ? {} : { signal: input.signal }),
-                      }),
-                    catch: () =>
-                      decodeChatFailure({ category: "failed", message: "Research failed." }),
-                  });
-                  yield* connection.answerTool({
-                    sessionId: input.attempt.providerSessionId,
-                    requestId: event.requestId,
-                    resultJson: JSON.stringify(results),
-                    isError: false,
-                  });
-                  return;
-                }
-
-                const toolSet = input.appManagedTools;
-                const allowed = toolSet?.definitions.some(
-                  (definition) => definition.name === event.toolName,
-                );
-                if (toolSet === undefined || allowed !== true) {
-                  yield* connection.answerTool({
-                    sessionId: input.attempt.providerSessionId,
-                    requestId: event.requestId,
-                    resultJson: JSON.stringify({ error: "tool-unavailable" }),
-                    isError: true,
-                  });
-                  return;
-                }
-                const execution = yield* Effect.tryPromise({
-                  try: () =>
-                    toolSet.execute({
-                      name: event.toolName,
-                      inputJson: event.inputJson,
-                      ...(input.signal === undefined ? {} : { signal: input.signal }),
-                    }),
-                  catch: () =>
-                    decodeChatFailure({
-                      category: "failed",
-                      message: "App-managed tool execution failed.",
-                    }),
-                });
-                yield* connection.answerTool({
-                  sessionId: input.attempt.providerSessionId,
-                  requestId: event.requestId,
-                  resultJson: JSON.stringify(execution.result),
-                  isError: execution.isError === true,
-                });
-                return;
-              }
-              if (event.kind === "citation" && input.persistCitation !== undefined) {
-                const citationId = yield* input.persistCitation(event, selectedResearchBackend);
-                currentAttempt = {
-                  ...currentAttempt,
-                  citationIds: [...currentAttempt.citationIds, citationId],
-                  updatedAt: updatedAt(),
-                };
-                yield* input.persistAttempt(currentAttempt);
-                return;
-              }
-              if (event.kind === "waiting") {
-                yield* persistOutcome("waiting");
-                terminalOutcome = "waiting";
-                return;
-              }
-              if (event.kind === "completed") {
-                if (currentAttempt.outcome === "queued") {
-                  yield* persistOutcome("streaming");
-                }
-                if (currentAttempt.responseRefs.length === 0 || !sawVisibleResponse) {
-                  yield* persistOutcome("failed");
-                  terminalOutcome = "failed";
+      const collected = yield* subscribeThenSend({
+        connection,
+        consume: (runtimeEvents) =>
+          runtimeEvents.pipe(
+            Stream.filter((event) => event.sessionId === input.attempt.providerSessionId),
+            Stream.takeUntil(
+              (event) =>
+                event.kind === "waiting" ||
+                event.kind === "completed" ||
+                event.kind === "interrupted" ||
+                event.kind === "failed",
+            ),
+            Stream.runForEach((event) =>
+              Effect.gen(function* () {
+                yield* idle.touch;
+                if (countsTowardTurnEventBudget(event)) handledEvents += 1;
+                if (handledEvents > maxEvents) {
+                  yield* persistOutcome("interrupted");
+                  terminalOutcome = "interrupted";
                   return yield* Effect.fail(
                     decodeChatFailure({
-                      category: "failed",
-                      message: "The provider completed without a visible reply.",
+                      category: "interrupted",
+                      message: "Chat turn exceeded the bounded event budget.",
                     }),
                   );
                 }
-                currentAttempt = {
-                  ...transitionChatAttempt(currentAttempt, {
-                    outcome: "completed",
+                if (input.signal?.aborted) {
+                  yield* cancelOwnedSession();
+                  return yield* Effect.fail(
+                    decodeChatFailure({
+                      category: "interrupted",
+                      message: "Chat turn was cancelled.",
+                    }),
+                  );
+                }
+                if (event.kind === "text-delta") {
+                  if (event.text.trim().length > 0) sawVisibleResponse = true;
+                  if (currentAttempt.outcome === "queued") {
+                    currentAttempt = transitionChatAttempt(currentAttempt, {
+                      outcome: "streaming",
+                      updatedAt: updatedAt(),
+                    });
+                  }
+                  const responseRef = yield* input.persistResponse(event.text);
+                  currentAttempt = {
+                    ...currentAttempt,
+                    responseRefs: [...currentAttempt.responseRefs, responseRef],
                     updatedAt: updatedAt(),
-                  }),
-                  ...(sawUsage
-                    ? {
-                        usage: { inputTokens: actualInputTokens, outputTokens: actualOutputTokens },
-                      }
-                    : {}),
-                };
-                yield* input.persistAttempt(currentAttempt);
-                terminalOutcome = "completed";
-                return;
-              }
-              if (event.kind === "interrupted") {
-                if (
-                  !input.signal?.aborted &&
-                  terminalOutcome !== "cancelled" &&
-                  answeredApprovalRequestIds.size > 0 &&
-                  sawVisibleResponse &&
-                  currentAttempt.responseRefs.length > 0
-                ) {
-                  // Codex reports declined native tools as a user interrupt.
-                  // Keep the already-visible Chat reply instead of a Retry card.
+                  };
+                  yield* input.persistAttempt(currentAttempt);
+                  return;
+                }
+                if (event.kind === "usage") {
+                  sawUsage = true;
+                  actualInputTokens = event.inputTokens;
+                  actualOutputTokens = event.outputTokens;
+                  const observation = usageFromRuntimeEvent(event);
+                  if (observation !== undefined) {
+                    actualInputTokens = observation.inputTokens;
+                    actualOutputTokens = observation.outputTokens;
+                    reasoningTokens = observation.reasoningTokens ?? reasoningTokens;
+                    cacheReadInputTokens = observation.cacheReadInputTokens ?? cacheReadInputTokens;
+                    cacheWriteInputTokens =
+                      observation.cacheWriteInputTokens ?? cacheWriteInputTokens;
+                    providerExecutionDurationMs =
+                      observation.providerExecutionDurationMs ?? providerExecutionDurationMs;
+                  }
+                  return;
+                }
+                if (event.kind === "approval-request") {
+                  if (answeredApprovalRequestIds.has(event.requestId)) return;
+                  answeredApprovalRequestIds.add(event.requestId);
+                  // Chat has no filesystem, shell, or network authority. Decline
+                  // Codex-native approvals so the turn can finish instead of
+                  // aborting the pending tool as a user interrupt.
+                  yield* connection.answerApproval({
+                    sessionId: input.attempt.providerSessionId,
+                    requestId: event.requestId,
+                    approved: false,
+                  });
+                  return;
+                }
+                if (event.kind === "tool-request") {
+                  if (answeredToolRequestIds.has(event.requestId)) return;
+                  answeredToolRequestIds.add(event.requestId);
+                  if (event.toolName === RESEARCH_TOOL_NAME) {
+                    if (!input.researchEnabled) {
+                      yield* connection.answerTool({
+                        sessionId: input.attempt.providerSessionId,
+                        requestId: event.requestId,
+                        resultJson: JSON.stringify({ error: "research-disabled" }),
+                        isError: true,
+                      });
+                      return;
+                    }
+                    let parsedQuery = "";
+                    try {
+                      const parsed = JSON.parse(event.inputJson) as { readonly query?: string };
+                      parsedQuery = typeof parsed.query === "string" ? parsed.query : input.prompt;
+                    } catch {
+                      parsedQuery = input.prompt;
+                    }
+                    const route = input.researchRoute;
+                    if (route.kind !== "ready" || route.backend !== "searxng") {
+                      yield* connection.answerTool({
+                        sessionId: input.attempt.providerSessionId,
+                        requestId: event.requestId,
+                        resultJson: JSON.stringify({ error: "research-unavailable" }),
+                        isError: true,
+                      });
+                      return;
+                    }
+                    selectedResearchBackend = route.backend;
+                    const results = yield* Effect.tryPromise({
+                      try: () =>
+                        route.execute({
+                          query: parsedQuery,
+                          limit: 5,
+                          ...(input.signal === undefined ? {} : { signal: input.signal }),
+                        }),
+                      catch: () =>
+                        decodeChatFailure({ category: "failed", message: "Research failed." }),
+                    });
+                    yield* connection.answerTool({
+                      sessionId: input.attempt.providerSessionId,
+                      requestId: event.requestId,
+                      resultJson: JSON.stringify(results),
+                      isError: false,
+                    });
+                    return;
+                  }
+
+                  const toolSet = input.appManagedTools;
+                  const allowed = toolSet?.definitions.some(
+                    (definition) => definition.name === event.toolName,
+                  );
+                  if (toolSet === undefined || allowed !== true) {
+                    yield* connection.answerTool({
+                      sessionId: input.attempt.providerSessionId,
+                      requestId: event.requestId,
+                      resultJson: JSON.stringify({ error: "tool-unavailable" }),
+                      isError: true,
+                    });
+                    return;
+                  }
+                  const execution = yield* Effect.tryPromise({
+                    try: () =>
+                      toolSet.execute({
+                        name: event.toolName,
+                        inputJson: event.inputJson,
+                        ...(input.signal === undefined ? {} : { signal: input.signal }),
+                      }),
+                    catch: () =>
+                      decodeChatFailure({
+                        category: "failed",
+                        message: "App-managed tool execution failed.",
+                      }),
+                  });
+                  yield* connection.answerTool({
+                    sessionId: input.attempt.providerSessionId,
+                    requestId: event.requestId,
+                    resultJson: JSON.stringify(execution.result),
+                    isError: execution.isError === true,
+                  });
+                  return;
+                }
+                if (event.kind === "citation" && input.persistCitation !== undefined) {
+                  const citationId = yield* input.persistCitation(event, selectedResearchBackend);
+                  currentAttempt = {
+                    ...currentAttempt,
+                    citationIds: [...currentAttempt.citationIds, citationId],
+                    updatedAt: updatedAt(),
+                  };
+                  yield* input.persistAttempt(currentAttempt);
+                  return;
+                }
+                if (event.kind === "waiting") {
+                  yield* persistOutcome("waiting");
+                  terminalOutcome = "waiting";
+                  return;
+                }
+                if (event.kind === "completed") {
                   if (currentAttempt.outcome === "queued") {
                     yield* persistOutcome("streaming");
+                  }
+                  if (currentAttempt.responseRefs.length === 0 || !sawVisibleResponse) {
+                    yield* persistOutcome("failed");
+                    terminalOutcome = "failed";
+                    return yield* Effect.fail(
+                      decodeChatFailure({
+                        category: "failed",
+                        message: "The provider completed without a visible reply.",
+                      }),
+                    );
                   }
                   currentAttempt = {
                     ...transitionChatAttempt(currentAttempt, {
@@ -689,42 +664,73 @@ export class ChatTurnRunner {
                   terminalOutcome = "completed";
                   return;
                 }
-                yield* persistOutcome("interrupted");
-                terminalOutcome = "interrupted";
-                return yield* Effect.fail(
-                  decodeChatFailure({ category: "interrupted", message: event.message }),
-                );
-              }
-              if (event.kind === "failed") {
-                return yield* persistProviderFailure(event.failure);
-              }
-            }),
+                if (event.kind === "interrupted") {
+                  if (
+                    !input.signal?.aborted &&
+                    terminalOutcome !== "cancelled" &&
+                    answeredApprovalRequestIds.size > 0 &&
+                    sawVisibleResponse &&
+                    currentAttempt.responseRefs.length > 0
+                  ) {
+                    // Codex reports declined native tools as a user interrupt.
+                    // Keep the already-visible Chat reply instead of a Retry card.
+                    if (currentAttempt.outcome === "queued") {
+                      yield* persistOutcome("streaming");
+                    }
+                    currentAttempt = {
+                      ...transitionChatAttempt(currentAttempt, {
+                        outcome: "completed",
+                        updatedAt: updatedAt(),
+                      }),
+                      ...(sawUsage
+                        ? {
+                            usage: {
+                              inputTokens: actualInputTokens,
+                              outputTokens: actualOutputTokens,
+                            },
+                          }
+                        : {}),
+                    };
+                    yield* input.persistAttempt(currentAttempt);
+                    terminalOutcome = "completed";
+                    return;
+                  }
+                  yield* persistOutcome("interrupted");
+                  terminalOutcome = "interrupted";
+                  return yield* Effect.fail(
+                    decodeChatFailure({ category: "interrupted", message: event.message }),
+                  );
+                }
+                if (event.kind === "failed") {
+                  return yield* persistProviderFailure(event.failure);
+                }
+              }),
+            ),
           ),
-        ),
-      );
-
-      yield* Effect.yieldNow();
-      yield* Effect.sleep(1);
-
-      if (input.signal?.aborted || terminalOutcome !== undefined) {
-        yield* cancelOwnedSession();
-        return yield* Effect.fail(
-          decodeChatFailure({ category: "interrupted", message: "Chat turn was cancelled." }),
-        );
-      }
-
-      yield* connection
-        .send({
-          sessionId: input.attempt.providerSessionId,
-          prompt: input.prompt,
-          context: [...(input.context ?? [])],
-          attachments: [...input.attachments],
-          tools: [
-            ...(input.researchEnabled ? researchToolsForRoute(input.researchRoute) : []),
-            ...(input.appManagedTools?.definitions ?? []),
-          ],
-        })
-        .pipe(Effect.catchAll(persistProviderFailure));
+        send: Effect.gen(function* () {
+          // The abort and timeout watchers forked above get a turn to record a
+          // cancellation before this send commits the turn to the provider.
+          yield* Effect.sleep(1);
+          if (input.signal?.aborted || terminalOutcome !== undefined) {
+            yield* cancelOwnedSession();
+            return yield* Effect.fail(
+              decodeChatFailure({ category: "interrupted", message: "Chat turn was cancelled." }),
+            );
+          }
+          yield* connection
+            .send({
+              sessionId: input.attempt.providerSessionId,
+              prompt: input.prompt,
+              context: [...(input.context ?? [])],
+              attachments: [...input.attachments],
+              tools: [
+                ...(input.researchEnabled ? researchToolsForRoute(input.researchRoute) : []),
+                ...(input.appManagedTools?.definitions ?? []),
+              ],
+            })
+            .pipe(Effect.catchAll(persistProviderFailure));
+        }),
+      });
 
       const waitForEvents =
         abortWatcher === undefined

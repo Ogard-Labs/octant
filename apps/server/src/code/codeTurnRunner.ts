@@ -10,6 +10,7 @@ import {
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type { ProviderAcquireInput, ProviderConnection } from "@octant/provider-sdk/driver";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { countsTowardTurnEventBudget, makeIdleTimeout } from "../providers/turnBudget";
 
 export const MAX_CODE_TURN_EVENT_BYTES = 64 * 1024;
@@ -206,132 +207,133 @@ export class CodeTurnRunner {
       }
 
       const idle = yield* makeIdleTimeout(timeoutMs);
-      const collected = yield* Effect.forkScoped(
-        connection.events.pipe(
-          Stream.filter((event) => event.sessionId === input.sessionId),
-          Stream.takeUntil(isTerminalProviderEvent),
-          Stream.runForEach((event) =>
-            Effect.gen(function* () {
-              yield* idle.touch;
-              if (countsTowardTurnEventBudget(event)) handledEvents += 1;
-              if (handledEvents > maxEvents) {
-                yield* connection
-                  .interrupt(input.sessionId)
-                  .pipe(Effect.catchAll(() => Effect.void));
-                return yield* fail("failed", "Code turn exceeded the bounded event budget.");
-              }
-              if (input.signal?.aborted) {
-                yield* connection
-                  .interrupt(input.sessionId)
-                  .pipe(Effect.catchAll(() => Effect.void));
-                return yield* fail("interrupted", "Code turn was cancelled.");
-              }
-
-              const boundedEvent = boundProviderEventInput(event);
-              const sanitizedEvent = boundProviderEventInput(
-                yield* input.sanitizeProviderEvent({
-                  checkoutRoot: input.checkoutRoot,
-                  event: boundedEvent,
-                }),
-              );
-              if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
-                return yield* fail("failed", "Provider event sanitization failed closed.");
-              }
-              const normalized = yield* normalizeProviderEvent(input, sanitizedEvent);
-              if (serializedBytes(normalized) > MAX_CODE_TURN_EVENT_BYTES) {
-                return yield* fail("failed", "Normalized Code event exceeded its byte budget.");
-              }
-              if (
-                normalized.reconciliation !== undefined &&
-                normalized.reconciliation.status !== "confirmed"
-              ) {
-                unresolvedReconciliation = true;
-              }
-
-              if (sanitizedEvent.kind === "completed") {
-                if (unresolvedReconciliation) {
-                  return yield* fail(
-                    "waiting",
-                    "Provider completed with unresolved checkout reconciliation.",
-                  );
+      const collected = yield* subscribeThenSend({
+        connection,
+        consume: (runtimeEvents) =>
+          runtimeEvents.pipe(
+            Stream.filter((event) => event.sessionId === input.sessionId),
+            Stream.takeUntil(isTerminalProviderEvent),
+            Stream.runForEach((event) =>
+              Effect.gen(function* () {
+                yield* idle.touch;
+                if (countsTowardTurnEventBudget(event)) handledEvents += 1;
+                if (handledEvents > maxEvents) {
+                  yield* connection
+                    .interrupt(input.sessionId)
+                    .pipe(Effect.catchAll(() => Effect.void));
+                  return yield* fail("failed", "Code turn exceeded the bounded event budget.");
                 }
-                yield* input.persistEvent(normalized);
-                providerCompleted = true;
-              } else {
-                yield* input.persistEvent(normalized);
-                if (sanitizedEvent.kind === "tool-request") {
-                  if (answeredToolRequestIds.has(sanitizedEvent.requestId)) return;
-                  answeredToolRequestIds.add(sanitizedEvent.requestId);
-                  const toolSet = input.appManagedTools;
-                  const allowed = toolSet?.definitions.some(
-                    (definition) => definition.name === sanitizedEvent.toolName,
-                  );
-                  if (toolSet === undefined || allowed !== true) {
+                if (input.signal?.aborted) {
+                  yield* connection
+                    .interrupt(input.sessionId)
+                    .pipe(Effect.catchAll(() => Effect.void));
+                  return yield* fail("interrupted", "Code turn was cancelled.");
+                }
+
+                const boundedEvent = boundProviderEventInput(event);
+                const sanitizedEvent = boundProviderEventInput(
+                  yield* input.sanitizeProviderEvent({
+                    checkoutRoot: input.checkoutRoot,
+                    event: boundedEvent,
+                  }),
+                );
+                if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
+                  return yield* fail("failed", "Provider event sanitization failed closed.");
+                }
+                const normalized = yield* normalizeProviderEvent(input, sanitizedEvent);
+                if (serializedBytes(normalized) > MAX_CODE_TURN_EVENT_BYTES) {
+                  return yield* fail("failed", "Normalized Code event exceeded its byte budget.");
+                }
+                if (
+                  normalized.reconciliation !== undefined &&
+                  normalized.reconciliation.status !== "confirmed"
+                ) {
+                  unresolvedReconciliation = true;
+                }
+
+                if (sanitizedEvent.kind === "completed") {
+                  if (unresolvedReconciliation) {
+                    return yield* fail(
+                      "waiting",
+                      "Provider completed with unresolved checkout reconciliation.",
+                    );
+                  }
+                  yield* input.persistEvent(normalized);
+                  providerCompleted = true;
+                } else {
+                  yield* input.persistEvent(normalized);
+                  if (sanitizedEvent.kind === "tool-request") {
+                    if (answeredToolRequestIds.has(sanitizedEvent.requestId)) return;
+                    answeredToolRequestIds.add(sanitizedEvent.requestId);
+                    const toolSet = input.appManagedTools;
+                    const allowed = toolSet?.definitions.some(
+                      (definition) => definition.name === sanitizedEvent.toolName,
+                    );
+                    if (toolSet === undefined || allowed !== true) {
+                      yield* connection.answerTool({
+                        sessionId: input.sessionId,
+                        requestId: sanitizedEvent.requestId,
+                        resultJson: JSON.stringify({ error: "tool-unavailable" }),
+                        isError: true,
+                      });
+                      return;
+                    }
+                    const execution = yield* Effect.promise(async () => {
+                      try {
+                        return await toolSet.execute({
+                          name: sanitizedEvent.toolName,
+                          inputJson: sanitizedEvent.inputJson,
+                          ...(input.signal === undefined ? {} : { signal: input.signal }),
+                        });
+                      } catch {
+                        return {
+                          result: { error: "tool-execution-failed" },
+                          isError: true,
+                        } as const;
+                      }
+                    });
+                    const answer = boundedToolAnswer(execution.result, execution.isError === true);
                     yield* connection.answerTool({
                       sessionId: input.sessionId,
                       requestId: sanitizedEvent.requestId,
-                      resultJson: JSON.stringify({ error: "tool-unavailable" }),
-                      isError: true,
+                      resultJson: answer.resultJson,
+                      isError: answer.isError,
+                    });
+                    yield* input.persistEvent({
+                      ...normalized,
+                      status: answer.isError ? "failed" : "completed",
+                      text: answer.isError
+                        ? "App-managed action failed."
+                        : "App-managed action completed.",
                     });
                     return;
                   }
-                  const execution = yield* Effect.promise(async () => {
-                    try {
-                      return await toolSet.execute({
-                        name: sanitizedEvent.toolName,
-                        inputJson: sanitizedEvent.inputJson,
-                        ...(input.signal === undefined ? {} : { signal: input.signal }),
-                      });
-                    } catch {
-                      return {
-                        result: { error: "tool-execution-failed" },
-                        isError: true,
-                      } as const;
-                    }
-                  });
-                  const answer = boundedToolAnswer(execution.result, execution.isError === true);
-                  yield* connection.answerTool({
-                    sessionId: input.sessionId,
-                    requestId: sanitizedEvent.requestId,
-                    resultJson: answer.resultJson,
-                    isError: answer.isError,
-                  });
-                  yield* input.persistEvent({
-                    ...normalized,
-                    status: answer.isError ? "failed" : "completed",
-                    text: answer.isError
-                      ? "App-managed action failed."
-                      : "App-managed action completed.",
-                  });
-                  return;
+                  if (sanitizedEvent.kind === "waiting") yield* persistOutcome("waiting");
+                  else if (sanitizedEvent.kind === "interrupted") {
+                    return yield* fail("interrupted", sanitizedEvent.message);
+                  } else if (sanitizedEvent.kind === "failed") {
+                    return yield* failForProvider(sanitizedEvent.failure, fail);
+                  }
                 }
-                if (sanitizedEvent.kind === "waiting") yield* persistOutcome("waiting");
-                else if (sanitizedEvent.kind === "interrupted") {
-                  return yield* fail("interrupted", sanitizedEvent.message);
-                } else if (sanitizedEvent.kind === "failed") {
-                  return yield* failForProvider(sanitizedEvent.failure, fail);
-                }
-              }
-            }),
+              }),
+            ),
           ),
-        ),
-      );
-
-      // Give the scoped collector an opportunity to install lazy stream subscriptions before send.
-      yield* Effect.yieldNow();
-      if (input.signal?.aborted) {
-        yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
-        return yield* fail("interrupted", "Code turn was cancelled before provider send.");
-      }
-      yield* connection
-        .send({
-          sessionId: input.sessionId,
-          prompt: input.prompt,
-          ...(input.context === undefined ? {} : { context: input.context }),
-          attachments: input.attachments ?? [],
-          tools: [...(input.appManagedTools?.definitions ?? [])],
-        })
-        .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+        send: Effect.gen(function* () {
+          if (input.signal?.aborted) {
+            yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
+            return yield* fail("interrupted", "Code turn was cancelled before provider send.");
+          }
+          yield* connection
+            .send({
+              sessionId: input.sessionId,
+              prompt: input.prompt,
+              ...(input.context === undefined ? {} : { context: input.context }),
+              attachments: input.attachments ?? [],
+              tools: [...(input.appManagedTools?.definitions ?? [])],
+            })
+            .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+        }),
+      });
 
       const awaitCollection = Fiber.join(collected).pipe(
         Effect.catchAll((error) =>

@@ -474,9 +474,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 
 - **Driver interface.** A `ProviderDriver` exposes `probe` (readiness and
   capability report without side effects), `acquire` (a `ProviderConnection`
-  for a workspace), and tool verification. A connection offers a normalized
-  event stream plus `start`, `resume`, `send`, `interrupt`, `stop`,
-  `answerApproval`, `answerUserInput`, and `answerTool`. Every driver passes
+  for a workspace), and tool verification. A connection offers `subscribe` — a
+  scoped subscription to its normalized events, established before a caller
+  sends so a provider that answers immediately is not missed (0082) — plus
+  `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,
+  `answerUserInput`, and `answerTool`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
   suites) before it is selectable.
 - **Registry.** Providers are multi-instance: each instance has a stable id,

@@ -1433,8 +1433,9 @@ export async function runPackagedProviderSmokeTurn(
           let answeredRequestId: string | undefined;
           let matchingRequestCount = 0;
           let interruptedAfterOutput = false;
+          const runtimeEvents = yield* connection.subscribe;
           const collected = yield* Effect.fork(
-            connection.events.pipe(
+            runtimeEvents.pipe(
               Stream.filter((event) => event.sessionId === input.sessionId),
               Stream.take(maxEvents + 1),
               Stream.takeUntil(

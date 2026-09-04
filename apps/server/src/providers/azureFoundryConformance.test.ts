@@ -358,7 +358,7 @@ describe("Azure AI Foundry provider conformance", () => {
           });
           const collected = yield* Effect.fork(
             Stream.runCollect(
-              connection.events.pipe(
+              (yield* connection.subscribe).pipe(
                 Stream.takeUntil((event: ProviderRuntimeEvent) => event.kind === "completed"),
               ),
             ),
