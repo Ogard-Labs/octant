@@ -91,34 +91,11 @@
   line-height: 1.2;
 }
 
-/* ── Operational details: a disclosure that reads as a section ──────── */
+/* ── Operational details: the shared disclosure recipe (settings.css) ── */
 
 .usage-dashboard__operational-details {
   display: grid;
   gap: var(--oct-space-3);
-}
-
-.usage-dashboard__operational-details > summary {
-  display: flex;
-  align-items: center;
-  padding: 10px 0 8px;
-  border-bottom: 1px solid var(--oct-hairline);
-  cursor: pointer;
-  list-style: none;
-}
-
-.usage-dashboard__operational-details > summary::-webkit-details-marker {
-  display: none;
-}
-
-.usage-dashboard__operational-details > summary::after {
-  margin-inline-start: auto;
-  color: var(--oct-meta);
-  content: "+";
-}
-
-.usage-dashboard__operational-details[open] > summary::after {
-  content: "−";
 }
 
 .usage-dashboard__operational-metrics {
@@ -138,12 +115,16 @@
 
 /* ── Quality and controls ───────────────────────────────────────────── */
 
-.usage-dashboard__quality,
-.usage-dashboard__controls {
+.usage-dashboard__quality {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--oct-space-2);
+}
+
+.usage-dashboard__controls {
+  display: grid;
+  gap: var(--oct-space-4);
 }
 
 /* Border STYLE, not colour, separates the measurement qualities, so the
@@ -423,11 +404,6 @@ p.provider-limits__warning {
   .provider-limits__details {
     min-width: 0;
   }
-}
-
-/* Destructive exports read as danger text, not as red pills. */
-.usage-dashboard__danger {
-  color: var(--oct-danger-fg);
 }
 
 /* The queried line closes the exports block before the next section label. */

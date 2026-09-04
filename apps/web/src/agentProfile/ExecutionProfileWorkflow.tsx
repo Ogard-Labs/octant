@@ -165,7 +165,7 @@ export function ExecutionProfileWorkflow(props: {
               onClick={() => setEditing("create")}
               size="sm"
               type="button"
-              variant="outline"
+              variant="ghost"
             >
               <Plus aria-hidden="true" size={14} />
               Create profile

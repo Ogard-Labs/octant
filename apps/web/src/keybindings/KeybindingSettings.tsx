@@ -7,7 +7,7 @@ import {
   type OctantKeybindingActionId,
 } from "@octant/domain";
 import { useState, type KeyboardEvent } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { isApplePlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -123,10 +123,10 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
           default.
         </p>
       )}
-      <details className="keybinding-settings__advanced">
+      <details className="settings-disclosure keybinding-settings__advanced">
         <summary>
+          <ChevronRight aria-hidden="true" size={12} />
           <span>Edit keybindings JSON</span>
-          <ChevronDown aria-hidden="true" size={16} strokeWidth={1.5} />
         </summary>
         <div className="keybinding-settings__advanced-body">
           <label className="keybinding-settings__json">

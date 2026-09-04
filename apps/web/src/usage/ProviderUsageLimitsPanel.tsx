@@ -8,7 +8,7 @@ import type {
   ProviderUsageLimitsSnapshot,
   ServiceLimitBucket,
 } from "@octant/contracts";
-import { SurfaceEmpty, SurfaceSection } from "../surface/SurfaceHeader";
+import { SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 
@@ -49,22 +49,7 @@ export function ProviderUsageLimitsPanel(props: {
 
   return (
     <SurfaceSection
-      className="provider-limits"
-      label="Provider limits"
-      note="Live provider capacity is separate from Octant's local recorded usage."
-    >
-      <div className="surface-toolbar">
-        {message === undefined ? null : (
-          <p className="oct-row-detail" role="status">
-            {message}
-          </p>
-        )}
-        {snapshot === undefined && message === undefined ? (
-          <p className="oct-row-detail" role="status">
-            Loading provider limits…
-          </p>
-        ) : null}
-        <span className="surface-toolbar__spacer" />
+      actions={
         <OctantButton
           aria-label="Refresh provider limits"
           disabled={busy}
@@ -76,9 +61,25 @@ export function ProviderUsageLimitsPanel(props: {
           <RefreshCw aria-hidden="true" size={14} />
           Refresh
         </OctantButton>
-      </div>
+      }
+      className="provider-limits"
+      label="Provider limits"
+      note="Live provider capacity is separate from Octant's local recorded usage. Most runtimes report their windows only while a session runs, so an idle provider shows nothing yet."
+    >
+      {message === undefined ? null : (
+        <p className="surface-section__note" role="status">
+          {message}
+        </p>
+      )}
+      {snapshot === undefined && message === undefined ? (
+        <p className="surface-section__note" role="status">
+          Loading provider limits…
+        </p>
+      ) : null}
       {snapshot?.entries.length === 0 ? (
-        <SurfaceEmpty title="No configured providers have reported limits." />
+        <p className="surface-section__note" role="status">
+          No configured providers have reported limits.
+        </p>
       ) : null}
       {snapshot === undefined || snapshot.entries.length === 0 ? null : (
         <ul className="surface-list">
@@ -118,13 +119,13 @@ export function ProviderUsageLimitsPanel(props: {
 
 /**
  * A flat "Unavailable" said nothing about whether limits could ever appear.
- * The reason names the actual state: most runtimes only report their windows
- * while a session runs, so an idle provider has simply not reported yet.
+ * The row carries one short value naming the actual state; the section note
+ * explains once why an idle provider has not reported yet.
  */
 const UNAVAILABLE_COPY: Readonly<Record<"unsupported" | "not-configured" | "not-ready", string>> = {
-  unsupported: "Not reported yet. Limits appear once a session with this runtime reports them.",
-  "not-configured": "Provider is off.",
-  "not-ready": "Waiting for the provider.",
+  unsupported: "Not reported yet",
+  "not-configured": "Provider off",
+  "not-ready": "Waiting for the provider",
 };
 
 const WINDOW_LABELS: Readonly<Record<string, string>> = {

@@ -264,6 +264,17 @@ function client(
   } as never;
 }
 
+/* The Installed / Marketplace view switch is a segmented choice at the first
+   section's head; its two buttons are read through the group so a button
+   elsewhere that mentions the marketplace cannot be mistaken for it. */
+function viewButton(name: RegExp) {
+  return within(screen.getByRole("group", { name: "View" })).getByRole("button", { name });
+}
+
+async function findViewButton(name: RegExp) {
+  return within(await screen.findByRole("group", { name: "View" })).getByRole("button", { name });
+}
+
 describe("ExtensionsSettingsView", () => {
   it("uses open collection sections for installed packages and standalone skills", async () => {
     const c = client({ snapshot: installedSnapshot({ activation: baseActivation() }) });
@@ -613,31 +624,21 @@ describe("ExtensionsSettingsView", () => {
     );
   });
 
-  it("marks the current view in the Installed / Marketplace tabs", async () => {
+  it("marks the current view in the Installed / Marketplace switch", async () => {
     render(<ExtensionsSettingsView client={client()} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
 
-    expect(screen.getByRole("tablist")).toHaveClass("surface-tabs");
-    expect(screen.getByRole("tab", { name: /installed/i })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
-    expect(screen.getByRole("tab", { name: /marketplace/i })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByRole("tab", { name: /installed/i })).toHaveAttribute(
-      "aria-selected",
-      "false",
-    );
+    expect(viewButton(/installed/i)).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(viewButton(/marketplace/i));
+    expect(viewButton(/marketplace/i)).toHaveAttribute("aria-pressed", "true");
+    expect(viewButton(/installed/i)).toHaveAttribute("aria-pressed", "false");
   });
 
   it("searches the marketplace, inspects a package, then requires explicit confirmation before install", async () => {
     const c = client();
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(viewButton(/marketplace/i));
 
     const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "build" } });
@@ -700,7 +701,7 @@ describe("ExtensionsSettingsView", () => {
     }) as never;
 
     render(<ExtensionsSettingsView client={c} scope={scope} />);
-    fireEvent.click(await screen.findByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(await findViewButton(/marketplace/i));
     const search = screen.getByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "build" } });
     fireEvent.click(screen.getByRole("button", { name: /run search/i }));
@@ -717,7 +718,7 @@ describe("ExtensionsSettingsView", () => {
   it("clears catalog cards when a refreshed effective snapshot becomes offline", async () => {
     const available = client();
     const view = render(<ExtensionsSettingsView client={available} scope={scope} />);
-    fireEvent.click(await screen.findByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(await findViewButton(/marketplace/i));
     const search = screen.getByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "build" } });
     fireEvent.click(screen.getByRole("button", { name: /run search/i }));
@@ -732,7 +733,7 @@ describe("ExtensionsSettingsView", () => {
     });
     view.rerender(<ExtensionsSettingsView client={offline} scope={scope} />);
 
-    fireEvent.click(await screen.findByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(await findViewButton(/marketplace/i));
     expect(await screen.findByRole("status", { name: /catalog unavailable/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /inspect build helper/i })).toBeNull();
   });
@@ -774,7 +775,7 @@ describe("ExtensionsSettingsView", () => {
     }) as never;
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(viewButton(/marketplace/i));
 
     const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "build" } });
@@ -845,7 +846,7 @@ describe("ExtensionsSettingsView", () => {
     }) as never;
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(viewButton(/marketplace/i));
 
     const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "build" } });
@@ -933,7 +934,7 @@ describe("ExtensionsSettingsView", () => {
     }) as never;
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(viewButton(/marketplace/i));
 
     const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "ios" } });
@@ -975,7 +976,7 @@ describe("ExtensionsSettingsView", () => {
     });
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(viewButton(/marketplace/i));
     expect(await screen.findByRole("status", { name: /catalog unavailable/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /run search/i })).toBeDisabled();
   });
@@ -1081,7 +1082,7 @@ describe("ExtensionsSettingsView", () => {
 
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(viewButton(/marketplace/i));
 
     // First search: returns version A / digest A.
     const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
@@ -1179,7 +1180,7 @@ describe("ExtensionsSettingsView", () => {
 
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(viewButton(/marketplace/i));
 
     const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
     fireEvent.change(search, { target: { value: "build" } });
@@ -1269,7 +1270,7 @@ describe("ExtensionsSettingsView", () => {
 
       render(<ExtensionsSettingsView client={c} scope={scope} />);
       await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-      fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
+      fireEvent.click(viewButton(/marketplace/i));
 
       const search = await screen.findByRole("searchbox", { name: /search marketplace/i });
       fireEvent.change(search, { target: { value: "build" } });
@@ -1371,7 +1372,7 @@ describe("ExtensionsSettingsView", () => {
     }) as never;
 
     render(<ExtensionsSettingsView client={c} scope={scope} />);
-    fireEvent.click(await screen.findByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(await findViewButton(/marketplace/i));
     fireEvent.change(screen.getByRole("searchbox", { name: /search skills\.sh and npm/i }), {
       target: { value: "frontend" },
     });
@@ -1400,7 +1401,7 @@ describe("ExtensionsSettingsView", () => {
         digest,
       }),
     );
-    fireEvent.click(screen.getByRole("tab", { name: /installed/i }));
+    fireEvent.click(viewButton(/installed/i));
     expect(await screen.findByText("1 need review")).toBeInTheDocument();
     expect(screen.queryByText("Blocked — Untrusted")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show details for Frontend Design" }));
@@ -1449,7 +1450,7 @@ describe("ExtensionsSettingsView", () => {
     }) as never;
 
     render(<ExtensionsSettingsView client={c} scope={scope} />);
-    fireEvent.click(await screen.findByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(await findViewButton(/marketplace/i));
     fireEvent.change(screen.getByRole("searchbox", { name: /search skills\.sh and npm/i }), {
       target: { value: "frontend" },
     });
@@ -1510,7 +1511,7 @@ describe("ExtensionsSettingsView", () => {
     }) as never;
 
     render(<ExtensionsSettingsView client={c} scope={scope} />);
-    fireEvent.click(await screen.findByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(await findViewButton(/marketplace/i));
     fireEvent.change(screen.getByRole("searchbox", { name: /search skills\.sh and npm/i }), {
       target: { value: "frontend" },
     });
@@ -1570,7 +1571,7 @@ describe("ExtensionsSettingsView", () => {
     }) as never;
 
     render(<ExtensionsSettingsView client={c} scope={scope} />);
-    fireEvent.click(await screen.findByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(await findViewButton(/marketplace/i));
     const search = screen.getByRole("searchbox", { name: /search skills\.sh and npm/i });
     fireEvent.change(search, { target: { value: "react" } });
     fireEvent.click(screen.getByRole("button", { name: /search skills/i }));
@@ -1587,7 +1588,7 @@ describe("ExtensionsSettingsView", () => {
     const c = client({ snapshot });
 
     render(<ExtensionsSettingsView client={c} marketplaceFetchesEnabled={false} scope={scope} />);
-    fireEvent.click(await screen.findByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(await findViewButton(/marketplace/i));
     expect(
       screen.getByText(/Marketplace fetches are off in Settings → General → Marketplace/i),
     ).toBeInTheDocument();
@@ -1607,7 +1608,7 @@ describe("local Agent Plugin import", () => {
     await waitFor(() =>
       expect(screen.getByText("No extension packages are installed.")).toBeInTheDocument(),
     );
-    fireEvent.click(screen.getByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(viewButton(/marketplace/i));
     expect(
       screen.queryByRole("textbox", { name: /local agent plugin folder path/i }),
     ).not.toBeInTheDocument();
@@ -1668,7 +1669,7 @@ describe("local Agent Plugin import", () => {
         scope={scope}
       />,
     );
-    fireEvent.click(await screen.findByRole("tab", { name: /marketplace/i }));
+    fireEvent.click(await findViewButton(/marketplace/i));
     fireEvent.click(await screen.findByRole("button", { name: /import local agent plugin/i }));
     await waitFor(() => expect(pickLocalPluginFolder).toHaveBeenCalled());
     await waitFor(() => expect(c.importLocalPluginReceipt).toHaveBeenCalledWith(receiptId));
