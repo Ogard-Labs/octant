@@ -132,88 +132,112 @@
   width: 100%;
 }
 
-/* Scroll lives here and only here, so the popover never scrolls its receipt
-   and actions out from under the pointer. The 2px padding keeps option focus
-   rings from being clipped by the scroll box. */
+/* In the composer popover the scroll lives here and only here, so the popover
+   never scrolls its receipt and actions out from under the pointer. On the
+   Settings page the list grows to its content like every other open list. */
 .execution-context-picker__listbox {
   display: grid;
-  gap: var(--oct-space-1);
+  gap: 0;
   max-height: min(240px, 38vh);
   overflow: auto;
-  padding: 2px;
+  outline: none;
+}
+
+.execution-profile-workflow--settings .execution-context-picker__listbox {
+  max-height: none;
+  overflow: visible;
+}
+
+.execution-context-picker__listbox:focus-visible {
+  border-radius: var(--oct-radius-sm);
+  box-shadow: var(--oct-focus-ring);
 }
 
 /*
- * A plain button styled as an option row, not a `.btn`: the button recipe
- * centers a single non-wrapping label at a fixed control height, which is how
- * model names ended up half-cut across the card's bottom border. This row
- * grows with its content and wraps everything.
+ * An option is a hairline row (0072), not a bordered card: the OctantButton
+ * recipe centres one non-wrapping label at a fixed control height, so the row
+ * resets to a content-sized grid. Selection is a fill; the fill bleeds 8px
+ * past the text edge on each side so the text keeps the page's edge.
  */
 .execution-context-picker__option {
   display: grid;
-  width: 100%;
+  width: calc(100% + 16px);
   height: auto;
-  min-height: 48px;
+  min-height: 44px;
   justify-content: stretch;
   align-content: center;
-  gap: 4px;
-  padding: 7px 9px;
-  border: 1px solid var(--oct-border);
+  gap: 2px;
+  margin-inline: -8px;
+  padding: 10px 8px;
+  border: 0;
   border-radius: var(--oct-radius-sm);
   background: transparent;
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-xs);
-  line-height: 1.3;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  line-height: 1.35;
   text-align: start;
   white-space: normal;
+  box-shadow: none;
+}
+
+.execution-context-picker__option + .execution-context-picker__option {
+  border-top: 1px solid var(--oct-hairline);
+  border-radius: 0;
 }
 
 .execution-context-picker__option:hover:not(:disabled),
 .execution-context-picker__option--active {
-  background: var(--oct-fg-soft);
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  background: var(--octant-surface-hover);
   color: var(--oct-fg);
 }
 
 .execution-context-picker__option--selected {
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
-  box-shadow: inset 2px 0 0 var(--oct-accent-fg);
+  background: var(--oct-fg-soft);
 }
 
 .execution-context-picker__option:disabled {
   opacity: var(--oct-disabled-opacity);
 }
 
-.execution-context-picker__option-main,
-.execution-context-picker__option-meta {
+.execution-context-picker__option-main {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-1) var(--oct-space-2);
+  align-items: baseline;
+  gap: 2px var(--oct-space-2);
   min-width: 0;
 }
 
+.execution-context-picker__option-meta {
+  min-width: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
 .execution-context-picker__provider {
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .execution-context-picker__model {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.execution-context-picker__profile {
   color: var(--oct-muted);
 }
 
 .execution-context-picker__unavailable {
   margin: 0;
   color: var(--oct-warn-fg);
+  font-size: var(--oct-text-detail);
 }
 
 .execution-context-picker__empty {
   margin: 0;
-  border: 1px dashed var(--oct-border);
-  border-radius: var(--oct-radius-sm);
+  padding: var(--oct-space-2) 0;
   color: var(--oct-muted);
-  padding: var(--oct-space-3);
+  font-size: var(--oct-text-detail);
 }
 
 .execution-profile-workflow__profile {
