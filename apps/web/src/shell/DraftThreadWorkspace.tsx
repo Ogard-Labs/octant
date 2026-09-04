@@ -45,7 +45,16 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { CodeHome, type CodeHomeProps } from "../code/CodeHome";
 import {
   CodeComposerAdapter,
@@ -145,6 +154,7 @@ export interface DraftThreadWorkspaceProps {
     mode: OctantMode,
     name: string,
     receiptId?: string,
+    initializeGit?: boolean,
   ) => Promise<ProjectId | undefined>;
   readonly onCancel: () => void;
   readonly serverUrl?: string;

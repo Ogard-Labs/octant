@@ -65,6 +65,16 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__nat
   left: var(--octant-window-chrome-leading-width, 148px);
 }
 
+/* The right dock's tab strip lives in the same band. The strip used to run
+   over it, so the tabs and their close controls dragged the window instead
+   of responding; it now ends where the dock begins. */
+html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__native-drag-strip {
+  right: max(
+    var(--octant-window-chrome-reserved-width, 148px),
+    var(--octant-context-sidebar-width, 0px)
+  );
+}
+
 .window-no-drag,
 .window-no-drag * {
   -webkit-app-region: no-drag;
@@ -474,6 +484,15 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--octant-workspace-translucent-strong);
 }
 
+/* The workspace, its panes, and the thread tab band each paint the opaque
+   workspace colour. With the layer beneath them translucent, that fill hid
+   the glass entirely, so the setting appeared to do nothing. */
+.shell--workspace-material-translucent.shell-frame .workspace,
+.shell--workspace-material-translucent.shell-frame .workspace-pane,
+.shell--workspace-material-translucent.shell-frame .workspace-thread-tabs {
+  background: transparent;
+}
+
 html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"]))
   .shell-frame.shell--workspace-material-translucent
   > .workspace-layer {
@@ -738,6 +757,30 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .sidebar-navigation__thread-unread[data-indicator="unread"]::before {
   content: "\25CF ";
+}
+
+/* Unread ends the row as a small filled dot after the title; the row's own
+   label names it, so it is never colour alone. */
+.sidebar-navigation__thread-unread-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: var(--oct-radius-pill);
+  background: var(--octant-text-primary);
+}
+
+/* Show more and Show less are one quiet row at the end of a folded list. */
+.project-threads__more {
+  min-height: 26px;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.project-threads__more:hover,
+.project-threads__more:focus-visible {
+  color: var(--oct-fg);
 }
 
 .sidebar-navigation__thread-row {
@@ -2289,6 +2332,19 @@ form > .work-composer-adapter__attachments {
 .code-home__suggestions button:hover:not(:disabled) {
   border-color: var(--oct-border-strong);
   background: var(--octant-card);
+}
+
+.code-home__suggestion-label {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-home__suggestion-text {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  line-height: var(--oct-leading-snug);
 }
 
 .code-home__suggestion-label {

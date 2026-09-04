@@ -1118,6 +1118,13 @@ strong {
   margin-top: 2px;
 }
 
+/* Projects, then Chats: two flat groups parted by one hairline, never cards. */
+.project-section + .project-section {
+  margin-top: var(--oct-space-2);
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+
 /* Child threads stay one compact step inside their folder row. */
 .project-threads {
   display: grid;
@@ -1512,12 +1519,15 @@ strong {
   display: none;
 }
 
+/* Thread tabs follow the dock's tab grammar: quiet labels, the active one
+   on the selection fill, no border or shadow. The bordered, shadowed pill
+   read as a button dropped into the breadcrumb. */
 .workspace-thread-tabs__item {
   display: inline-flex;
   min-width: 0;
   flex: 0 1 auto;
   align-items: center;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
   background: transparent;
@@ -1530,16 +1540,14 @@ strong {
 
 .workspace-thread-tabs__item[data-active="true"] {
   color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border-color: var(--octant-border);
-  box-shadow: var(--octant-shadow-xs);
+  background: var(--octant-selection);
 }
 
 .workspace-thread-tabs__select {
   min-width: 0;
   max-width: 30ch;
-  height: 27px;
-  padding: 0 7px;
+  height: 28px;
+  padding: 0 8px;
   color: inherit;
   font-size: var(--oct-text-xs);
 }
@@ -2741,6 +2749,20 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: var(--oct-text-xs);
 }
 
+.project-dialog__git-init {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  color: var(--octant-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.project-dialog__git-init input {
+  margin-top: 0.15rem;
+}
+
 .project-dialog__actions {
   display: flex;
   justify-content: flex-end;
@@ -3007,6 +3029,21 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin: 0;
   color: var(--octant-danger-text);
   font-size: calc(12 * var(--oct-text-step));
+}
+
+.folder-picker__git-init {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  padding: 0 0.25rem;
+  color: var(--octant-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.folder-picker__git-init input {
+  margin-top: 0.15rem;
 }
 
 .folder-picker__actions {

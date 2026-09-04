@@ -139,6 +139,38 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     expect(onSelectThread).toHaveBeenCalledWith("thread-a");
   });
 
+  it("lists Projects with their threads first and unfiled chats after them as one flat Chats group", () => {
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projects={[chatProjectA]}
+        threads={[
+          { projectId: String(chatProjectA.id), threadId: "thread-a", title: "Planning" },
+          { threadId: "thread-loose", title: "Loose chat", unread: true },
+        ]}
+        unfiledLabel="Chats"
+      />,
+    );
+    const headings = screen.getAllByRole("heading").map((heading) => heading.textContent);
+    expect(headings.indexOf("Projects")).toBeLessThan(headings.indexOf("Chats"));
+    expect(screen.queryByRole("heading", { name: "Unfiled" })).toBeNull();
+    const chats = screen.getByRole("region", { name: "Chats" });
+    expect(within(chats).getByRole("button", { name: /Loose chat/ })).toBeVisible();
+    expect(within(chats).getByRole("img", { name: "New activity" })).toBeVisible();
+    expect(
+      within(screen.getByRole("region", { name: "Projects" })).getByRole("button", {
+        name: /Planning/,
+      }),
+    ).toBeVisible();
+  });
+
   it("reads and filters a separate Work Project View set", async () => {
     window.localStorage.setItem(
       "octant.work.project-views.v1",

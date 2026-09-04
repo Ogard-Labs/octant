@@ -19,6 +19,7 @@ import { listEligibleImageProfiles } from "@octant/domain";
 import type { CanvasInventoryEntry } from "@octant/contracts";
 import type { CanvasId } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type {
   CanvasContextSelection,
   CanvasContextSelectionId,
@@ -302,6 +303,11 @@ export interface WorkspaceViewProps {
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
+  readonly onCanvasReferencesObserved?: (
+    threadId: string,
+    cards: ReadonlyArray<CanvasThreadReferenceCard>,
+  ) => void;
+  readonly onThreadHandedOff?: (threadId: string, outcome: ThreadHandOffOutcome) => void;
   readonly draftProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly codeProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly workProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
@@ -357,6 +363,7 @@ export interface WorkspaceViewProps {
     mode: "chat" | "work" | "code",
     name: string,
     receiptId?: string,
+    initializeGit?: boolean,
   ) => Promise<ProjectId | undefined>;
   readonly onDraftCreating?: boolean;
   readonly onDraftError?: string;
@@ -1055,6 +1062,12 @@ function renderNonCodeTab(
         {...(props.onOpenCanvasReference === undefined
           ? {}
           : { onOpenCanvasReference: props.onOpenCanvasReference })}
+        {...(props.onCanvasReferencesObserved === undefined
+          ? {}
+          : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
+        {...(props.onThreadHandedOff === undefined
+          ? {}
+          : { onThreadHandedOff: props.onThreadHandedOff })}
         {...(props.onOpenChatThread === undefined ? {} : { onOpenThread: props.onOpenChatThread })}
         {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
         threadId={tab.threadId}
@@ -1758,6 +1771,11 @@ function ChatThreadWorkspace(props: {
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly hostId?: string;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
+  readonly onCanvasReferencesObserved?: (
+    threadId: string,
+    cards: ReadonlyArray<CanvasThreadReferenceCard>,
+  ) => void;
+  readonly onThreadHandedOff?: (threadId: string, outcome: ThreadHandOffOutcome) => void;
   /** Opens another Chat thread as a workspace tab — e.g. a branch just minted. */
   readonly onOpenThread?: (threadId: ChatThreadId, title: string, projectId?: ProjectId) => void;
   /** Opens the Side Chat tab for a sidecar the host has already resolved. */
@@ -1828,6 +1846,12 @@ function ChatThreadWorkspace(props: {
         {...(props.onOpenCanvasReference === undefined
           ? {}
           : { onOpenCanvas: props.onOpenCanvasReference })}
+        {...(props.onCanvasReferencesObserved === undefined
+          ? {}
+          : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
+        {...(props.onThreadHandedOff === undefined
+          ? {}
+          : { onThreadHandedOff: props.onThreadHandedOff })}
         {...(props.onOpenThread === undefined
           ? {}
           : {

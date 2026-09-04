@@ -263,6 +263,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     name: string,
     receiptId?: string,
     hostId: HostId = LOCAL_HOST_ID,
+    initializeGit?: boolean,
   ): Promise<ProjectId | undefined> {
     const projectId = decodeProjectId(crypto.randomUUID());
     const base = { projectId, expectedVersion: 0 as AggregateVersion, name, hostId };
@@ -282,6 +283,7 @@ export function useProjectController(options: ProjectControllerOptions) {
         kind: "create-code-project",
         ...base,
         receiptId: decodeBindingReceiptId(receiptId),
+        ...(initializeGit === true ? { initializeGit: true } : {}),
       };
     }
     return (await execute(command, `${modeLabel(type)} Project created.`)) ? projectId : undefined;

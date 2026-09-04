@@ -17,6 +17,7 @@ export interface RightUtilityDockProps {
   readonly canvas?: ReactNode;
   readonly review?: ReactNode;
   readonly delivery?: ReactNode;
+  readonly document?: ReactNode;
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
   readonly isNarrow: boolean;
@@ -56,6 +57,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.canvas === undefined ? {} : { canvas: props.canvas })}
       {...(props.review === undefined ? {} : { review: props.review })}
       {...(props.delivery === undefined ? {} : { delivery: props.delivery })}
+      {...(props.document === undefined ? {} : { document: props.document })}
       {...(props.files === undefined ? {} : { files: props.files })}
       {...(props.iosSimulator === undefined ? {} : { iosSimulator: props.iosSimulator })}
       launchableSurfaces={props.launchableSurfaces}

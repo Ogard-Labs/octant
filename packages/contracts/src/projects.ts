@@ -316,6 +316,12 @@ export const ProjectCommand = Schema.Union(
     name: Schema.NonEmptyTrimmedString,
     receiptId: BindingReceiptId,
     hostId: HostId,
+    /**
+     * When true, initialize the bound folder as a Git repository before the
+     * Project is journaled if it is not already one. Absent or false keeps
+     * 0017's bind-without-Git behavior. Decision 0079.
+     */
+    initializeGit: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("rename-project"),
