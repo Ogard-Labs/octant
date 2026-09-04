@@ -21,7 +21,6 @@ import {
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
   renderProviderTurnPrompt,
-  textOnlyInputModalities,
   unsupportedAnswerTool,
   unsupportedChatCapabilities,
   validateChatTurnInput,
@@ -468,7 +467,10 @@ function modelFromClaude(source: ClaudeModelInfo): ProviderModel | undefined {
     source: "discovered",
     verification: "verified",
     reasoning: source.supportsEffort ? "supported" : "unavailable",
-    inputModalities: textOnlyInputModalities,
+    // Every model Claude Code offers takes images. Reporting text only made
+    // the composer refuse a pasted screenshot on Sonnet with "does not
+    // support images", which was Octant's claim, not the model's.
+    inputModalities: ["text", "image"],
     options:
       effort.length === 0
         ? []

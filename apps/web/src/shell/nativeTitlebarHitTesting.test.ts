@@ -150,6 +150,18 @@ describe("native titlebar hit-test boundary", () => {
     ).toContain("left: var(--octant-window-chrome-leading-width, 148px);");
   });
 
+  it("ends the drag strip where the open right dock begins so its tabs take clicks", () => {
+    const rule = cssRule(
+      shellStyles,
+      'html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__native-drag-strip',
+    );
+    // The strip has to stop at whichever is wider, so naming either width
+    // alone would still let the dock's tabs sit under the drag region.
+    expect(rule).toContain("right: max(");
+    expect(rule).toContain("var(--octant-window-chrome-reserved-width, 148px)");
+    expect(rule).toContain("var(--octant-context-sidebar-width, 0px)");
+  });
+
   it("would cover Show sidebar if the drag strip kept the expanded 112px origin after collapse", () => {
     const leading = { left: 0, top: 0, width: 148, height: 34 };
     const staleDrag = {

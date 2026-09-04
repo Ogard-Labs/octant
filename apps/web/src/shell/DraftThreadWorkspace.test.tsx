@@ -690,7 +690,7 @@ describe("DraftThreadWorkspace", () => {
     await user.click(screen.getByRole("option", { name: "Add local folder…" }));
     await user.click(await screen.findByRole("button", { name: "Select" }));
 
-    expect(onCreateProject).toHaveBeenCalledWith("code", "new-repository", "R".repeat(43));
+    expect(onCreateProject).toHaveBeenCalledWith("code", "new-repository", "R".repeat(43), true);
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep this exact prompt",
     );
