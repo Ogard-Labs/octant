@@ -144,17 +144,17 @@ describe("ProviderUsageLimitsPanel", () => {
     {
       reason: "runtime-does-not-report" as const,
       driverKind: "opencode" as const,
-      copy: /OpenCode does not report limits; they belong to the account behind it\./,
+      copy: /Not reported by OpenCode/,
     },
     {
       reason: "local-runtime" as const,
       driverKind: "ollama" as const,
-      copy: /Runs on this computer\. No account limits to report\./,
+      copy: /Runs locally, no account limits/,
     },
     {
       reason: "endpoint-silent" as const,
       driverKind: "openai-compatible" as const,
-      copy: /The endpoint sent no rate-limit headers on the last request\./,
+      copy: /No rate-limit headers on the last request/,
     },
   ])(
     "names the runtime and closes the question for $reason",
