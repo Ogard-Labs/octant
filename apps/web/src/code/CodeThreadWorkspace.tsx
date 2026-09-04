@@ -37,6 +37,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController, CodeTurnStatus } from "./useCodeController";
 import { ChatRichText } from "../chat/ChatRichText";
+import { CodeCheckoutBar } from "./CodeCheckoutBar";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
@@ -119,6 +120,8 @@ export interface CodeThreadWorkspaceProps {
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenSettings?: () => void;
+  /** Opens the pull-request surface from the checkout bar. Absent hides the control. */
+  readonly onCreatePullRequest?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /**
@@ -1168,6 +1171,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadKind="code-thread"
         />
       )}
+      <CodeCheckoutBar
+        {...(props.onCreatePullRequest === undefined
+          ? {}
+          : { onCreatePullRequest: props.onCreatePullRequest })}
+      />
       <ThreadComposer
         className="code-thread-workspace__composer thread-column"
         chips={

@@ -13,6 +13,7 @@ import type {
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
 import type { ReactNode } from "react";
+import { CodeCheckoutProvider } from "./CodeCheckoutContext";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
@@ -295,7 +296,13 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           </EnvironmentGroup>
         )}
       </ThreadEnvironmentPanel>
-      <div className="code-thread-environment__content">{props.children}</div>
+      <div className="code-thread-environment__content">
+        <CodeCheckoutProvider
+          {...(readyObservation === undefined ? {} : { observation: readyObservation })}
+        >
+          {props.children}
+        </CodeCheckoutProvider>
+      </div>
     </div>
   );
 }

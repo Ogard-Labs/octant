@@ -3465,6 +3465,22 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: calc(9 * var(--oct-text-step));
 }
 
+/* Added and removed read as one measurement, so they sit together and take the
+   two colours the rest of the app uses for the same idea. */
+.environment-git-group__diffstat {
+  display: inline-flex;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.environment-git-group__insertions {
+  color: var(--oct-success-fg);
+}
+
+.environment-git-group__deletions {
+  color: var(--oct-danger-fg);
+}
+
 .environment-git-group__detached {
   display: flex;
   min-width: 0;
@@ -5960,6 +5976,65 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: var(--oct-text-xs);
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+/* Sits directly on the composer, sharing its column, so the branch reads as
+   part of the box the next message is typed into rather than as a banner
+   floating above the transcript. */
+.code-checkout-bar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-3);
+  width: min(100% - 40px, var(--oct-thread-measure));
+  margin-inline: auto;
+  padding: 6px 14px 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-checkout-bar__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-checkout-bar__project {
+  flex: 0 0 auto;
+  color: var(--oct-fg);
+  font-weight: 500;
+}
+
+.code-checkout-bar__branch {
+  overflow: hidden;
+  min-width: 0;
+  font-family: var(--oct-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-checkout-bar__diffstat {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-checkout-bar__insertions {
+  color: var(--oct-success-fg);
+}
+
+.code-checkout-bar__deletions {
+  color: var(--oct-danger-fg);
+}
+
+/* The action is the last thing on the line, so the facts read first. */
+.code-checkout-bar__action {
+  margin-inline-start: auto;
+  height: 26px;
+  min-height: 26px;
+  padding-inline: 8px;
 }
 
 .code-thread-workspace__turn-status {

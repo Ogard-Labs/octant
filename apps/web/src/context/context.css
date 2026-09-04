@@ -27,10 +27,20 @@
   stroke-width: 2.5;
 }
 
+/* The arc moves to its new length rather than jumping to it: the ring is the
+   only place the reader sees the window filling, and a value that snaps
+   between renders reads as a redraw rather than as consumption. */
 .composer-context-meter__used {
   stroke: currentColor;
   stroke-width: 2.5;
   stroke-linecap: round;
+  transition: stroke-dasharray 480ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-context-meter__used {
+    transition: none;
+  }
 }
 
 .composer-context-meter[data-health="watch"] .composer-context-meter__used,
@@ -187,6 +197,40 @@
   padding-top: 9px;
   margin-top: 9px;
   border-top: 1px solid var(--octant-border);
+}
+
+/* A window's share is a quantity, and a number alone makes the reader compare
+   percentages in their head. Each limit carries the same bar the context
+   window has, so one glance ranks them. */
+.context-window-popover__limit-meter {
+  display: block;
+  height: 3px;
+  margin: 4px 0 8px;
+  overflow: hidden;
+  background: var(--octant-border);
+  border-radius: var(--oct-radius-pill);
+}
+
+.context-window-popover__limit-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--oct-accent-fg);
+  border-radius: inherit;
+  transition: width 480ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.context-window-popover__limit-meter[data-tone="warn"] > span {
+  background: var(--oct-warn-fg);
+}
+
+.context-window-popover__limit-meter[data-tone="danger"] > span {
+  background: var(--oct-danger-fg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-window-popover__limit-meter > span {
+    transition: none;
+  }
 }
 
 .context-window-popover__capabilities p,
