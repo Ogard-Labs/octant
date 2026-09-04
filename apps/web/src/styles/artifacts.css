@@ -6,6 +6,13 @@
    rem/em so 200% zoom scales the whole page; the grid reflows by available
    width rather than by a device breakpoint. */
 
+.image-library__note {
+  margin: 0;
+  padding: var(--oct-space-4) 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
+
 .artifact-library-layer {
   position: absolute;
   inset: 0;

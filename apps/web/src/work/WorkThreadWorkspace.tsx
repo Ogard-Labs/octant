@@ -52,7 +52,6 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeImageGenerationScopeId } from "@octant/contracts";
-import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -1153,19 +1152,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     >
                       <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
                     </OctantButton>
-                    {props.imageGenerationClient === undefined ||
-                    props.imageGenerationProfiles === undefined ? null : (
-                      <ImageGenerationAction
-                        client={props.imageGenerationClient}
-                        {...(props.onOpenSettings === undefined
-                          ? {}
-                          : { onOpenSettings: props.onOpenSettings })}
-                        disabled={creating || completionLocked}
-                        profiles={props.imageGenerationProfiles}
-                        scopeId={decodeImageGenerationScopeId(String(props.threadId))}
-                        threadKind="work-thread"
-                      />
-                    )}
                   </>
                 ),
               actions: {

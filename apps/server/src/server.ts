@@ -1,3 +1,4 @@
+import { IMAGE_LIBRARY_SCOPE_ID } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
@@ -4736,6 +4737,9 @@ export function startOctantServer(
       listInstances: () => persistence.readProviderInstances(),
       authorizeScope: async (windowId, threadKind, scopeId) => {
         const threadId = String(scopeId);
+        // The library is host-wide: window capability already proved the
+        // caller is a registered window, and the scope id is fixed.
+        if (threadKind === "image-library") return threadId === String(IMAGE_LIBRARY_SCOPE_ID);
         try {
           if (threadKind === "chat-thread") {
             const view = chatService.read(decodeChatThreadId(threadId));

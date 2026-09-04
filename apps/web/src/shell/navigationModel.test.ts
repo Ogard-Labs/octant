@@ -82,6 +82,21 @@ describe("buildSidebarNavigation", () => {
     ).toEqual(["agents", "automations", "artifact-library", "plugins"]);
   });
 
+  it("offers the Image generator only when the host serves image generation", () => {
+    const ids = (imageLibrary: "available" | "unavailable") =>
+      buildSidebarAppMenu({
+        ...availableBaseCapabilities,
+        activeMode: "code",
+        agentsCenterEnabled: false,
+        automationsEnabled: false,
+        artifactLibrary: "available",
+        imageLibrary,
+        plugins: "unavailable",
+      }).map((descriptor) => descriptor.id);
+    expect(ids("available")).toEqual(["artifact-library", "image-library"]);
+    expect(ids("unavailable")).toEqual(["artifact-library"]);
+  });
+
   it.each(["disabled", "unavailable", "unauthorized"] as const)(
     "omits %s capabilities rather than presenting false authority",
     (availability) => {

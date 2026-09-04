@@ -33,6 +33,7 @@ export interface ShellSidebarProps {
   readonly agentsCenterEnabled?: boolean;
   /** Absent on a host that serves no library, which keeps the row off entirely. */
   readonly artifactLibraryAvailable?: boolean;
+  readonly imageLibraryAvailable?: boolean;
   /**
    * The connected hosts this window gathers from, and which one is this
    * machine. Absent on a window with no federation, which hides the filter
@@ -118,6 +119,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
     activeMode,
     inbox: navigationActions.inbox === undefined ? "unavailable" : "available",
     artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
+    imageLibrary: props.imageLibraryAvailable === true ? "available" : "unavailable",
     automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
     agentsCenterEnabled: props.agentsCenterEnabled ?? AGENTS_CENTER_NAVIGATION_ENABLED,
     createThread:

@@ -22,9 +22,6 @@ import {
 import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
 import { FolderOpen, GitBranch, Paperclip } from "lucide-react";
-import type { ImageGenerationProfileView, ImageGenerationScopeId } from "@octant/contracts";
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import { ImageGenerationAction } from "../../image/ImageGenerationAction";
 import {
   useCallback,
   useEffect,
@@ -142,12 +139,6 @@ export interface CodeComposerAdapterProps {
   ) => Promise<CodeCommandResult | undefined>;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
-  readonly imageGeneration?: {
-    readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
-    readonly client?: ImageGenerationClient;
-    readonly scopeId?: ImageGenerationScopeId;
-    readonly onOpenSettings?: () => void;
-  };
 }
 
 export interface CodeComposerSuggestion {
@@ -562,22 +553,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   >
                     <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
                   </OctantButton>
-                  {props.imageGeneration === undefined ? null : (
-                    <ImageGenerationAction
-                      {...(props.imageGeneration.client === undefined
-                        ? {}
-                        : { client: props.imageGeneration.client })}
-                      {...(props.imageGeneration.scopeId === undefined
-                        ? {}
-                        : { scopeId: props.imageGeneration.scopeId })}
-                      {...(props.imageGeneration.onOpenSettings === undefined
-                        ? {}
-                        : { onOpenSettings: props.imageGeneration.onOpenSettings })}
-                      disabled={props.creating === true}
-                      profiles={props.imageGeneration.profiles}
-                      threadKind="code-thread"
-                    />
-                  )}
+
                   <span aria-hidden="true" className="composer-gap" />
                   <span className="code-composer-adapter__context-picker">
                     <ComposerModelPicker
