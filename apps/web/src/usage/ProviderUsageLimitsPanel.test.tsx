@@ -139,4 +139,98 @@ describe("ProviderUsageLimitsPanel", () => {
     expect(screen.getByText(/Last successful read/)).toBeVisible();
     expect(screen.getByText(/25 remaining of 100 requests/)).toBeVisible();
   });
+
+  it.each([
+    {
+      reason: "runtime-does-not-report" as const,
+      driverKind: "opencode" as const,
+      copy: /OpenCode does not report limits; they belong to the account behind it\./,
+    },
+    {
+      reason: "local-runtime" as const,
+      driverKind: "ollama" as const,
+      copy: /Runs on this computer\. No account limits to report\./,
+    },
+    {
+      reason: "endpoint-silent" as const,
+      driverKind: "openai-compatible" as const,
+      copy: /The endpoint sent no rate-limit headers on the last request\./,
+    },
+  ])(
+    "names the runtime and closes the question for $reason",
+    async ({ reason, driverKind, copy }) => {
+      const unavailable = decodeProviderUsageLimitsSnapshot({
+        version: 1,
+        refreshedAt: "2026-08-23T12:00:00.000Z",
+        entries: [
+          {
+            providerInstanceId,
+            status: "unavailable",
+            source: "provider-runtime",
+            reason,
+            observedAt: "2026-08-23T12:00:00.000Z",
+          },
+        ],
+      });
+      render(
+        <ProviderUsageLimitsPanel
+          client={{ list: async () => unavailable, refresh: async () => unavailable }}
+          instances={[{ ...provider, driverKind } as ProviderInstance]}
+        />,
+      );
+
+      expect(await screen.findByText(copy)).toBeVisible();
+      expect(screen.queryByText(/Not reported yet/)).not.toBeInTheDocument();
+    },
+  );
+
+  it("labels Codex account windows by their length", async () => {
+    const codex = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: "2026-08-23T12:00:00.000Z",
+      entries: [
+        {
+          providerInstanceId,
+          status: "available",
+          source: "provider-runtime",
+          observedAt: "2026-08-23T12:00:00.000Z",
+          limits: {
+            providerInstanceId,
+            scope: "provider-instance",
+            requests: { status: "unavailable" },
+            tokens: { status: "unavailable" },
+            concurrency: { status: "unavailable" },
+            retry: { status: "inactive" },
+            quota: "unknown",
+            source: "runtime-reported",
+            confidence: "high",
+            updatedAt: "2026-08-23T12:00:00.000Z",
+            rateLimitWindows: [
+              {
+                window: "primary_5h",
+                status: "allowed",
+                utilization: 0.4,
+                observedAt: "2026-08-23T12:00:00.000Z",
+              },
+              {
+                window: "secondary_7d",
+                status: "warning",
+                utilization: 0.85,
+                observedAt: "2026-08-23T12:00:00.000Z",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => codex, refresh: async () => codex }}
+        instances={[provider]}
+      />,
+    );
+
+    expect(await screen.findByText(/5-hour window \(primary\) · Allowed · 40% used/)).toBeVisible();
+    expect(screen.getByText(/7-day window \(secondary\) · Warning · 85% used/)).toBeVisible();
+  });
 });

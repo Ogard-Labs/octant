@@ -3,10 +3,11 @@ import {
   decodeProviderSessionId,
   type OpenAiCompatibleProtocol,
   type ProviderModelId,
+  type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { runProviderConformance } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
-import { Cause, Effect, Exit, Option } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
 import { makeAzureFoundryDriver } from "./azureFoundryDriver";
@@ -318,6 +319,70 @@ describe("Azure AI Foundry provider conformance", () => {
       Effect.scoped(driver.verifyToolCapability!({ instanceId, modelId })),
     );
     expect(result.appManagedTools).toBe("supported");
+  });
+
+  it("reports the quota buckets a Foundry response disclosed in its headers", async () => {
+    const driver = makeAzureFoundryDriver({
+      instanceId,
+      configuration: configuration("responses"),
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+      fetch: async (url) =>
+        String(url).endsWith("/models")
+          ? models()
+          : new Response(responsesTextStream("responses answer").body, {
+              headers: {
+                "content-type": "text/event-stream",
+                "x-ratelimit-limit-requests": "120",
+                "x-ratelimit-remaining-requests": "118",
+                "x-ratelimit-reset-requests": "60s",
+                "x-ratelimit-limit-tokens": "20000",
+                "x-ratelimit-remaining-tokens": "19750",
+              },
+            }),
+      clock: () => "2026-07-19T12:00:00.000Z",
+      correlationId: () => "80000000-0000-4000-8000-000000000627",
+    });
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/octant-foundry-conformance",
+          });
+          yield* connection.start({
+            sessionId: successfulSessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          const collected = yield* Effect.fork(
+            Stream.runCollect(
+              connection.events.pipe(
+                Stream.takeUntil((event: ProviderRuntimeEvent) => event.kind === "completed"),
+              ),
+            ),
+          );
+          yield* connection.send({
+            sessionId: successfulSessionId,
+            prompt: "limits",
+            attachments: [],
+            tools: [],
+          });
+          return Array.from(yield* Fiber.join(collected));
+        }),
+      ),
+    );
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "text-delta",
+      "usage",
+      "rate-limit-bucket",
+      "rate-limit-bucket",
+      "completed",
+    ]);
+    expect(events[2]).toMatchObject({ bucket: "requests", limit: 120, remaining: 118 });
+    expect(events[3]).toMatchObject({ bucket: "tokens", limit: 20_000, remaining: 19_750 });
   });
 });
 
