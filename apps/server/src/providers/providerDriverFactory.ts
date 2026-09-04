@@ -28,7 +28,7 @@ export interface ProviderDriverFactoryOptions {
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly openCodeProcess: OpenCodeProcessPort;
   readonly codexProcess: CodexProcessPort;
-  /** Shared runtime port for ACP-speaking agents (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build). */
+  /** Shared runtime port for ACP-speaking agents (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent). */
   readonly acpProcess?: AcpProcessPort;
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
   readonly ohMyPiProcess?: import("./ohMyPiProcess").OhMyPiProcessPort;
@@ -131,7 +131,13 @@ export function makeProviderDriver(
     case "devin":
     case "mistral-vibe":
     case "kimi-code":
-    case "grok": {
+    case "grok":
+    case "goose":
+    case "glm":
+    case "gemini":
+    case "copilot":
+    case "cline":
+    case "qwen": {
       if (options.acpProcess === undefined || options.acpHome === undefined) {
         throw new ProviderDriverConfigurationError();
       }
@@ -143,7 +149,12 @@ export function makeProviderDriver(
         managedHome: options.acpHome(instance.driverKind, instance.id),
         process: options.acpProcess,
         runtimeRegistry: options.runtimeRegistry,
-        ...(configuration.kind === "mistral-vibe-acp" || configuration.kind === "grok-acp"
+        ...(configuration.kind === "mistral-vibe-acp" ||
+        configuration.kind === "grok-acp" ||
+        configuration.kind === "glm-acp" ||
+        configuration.kind === "gemini-acp" ||
+        configuration.kind === "cline-acp" ||
+        configuration.kind === "qwen-acp"
           ? { authentication: configuration.authentication }
           : {}),
         ...(options.credentialResolver === undefined

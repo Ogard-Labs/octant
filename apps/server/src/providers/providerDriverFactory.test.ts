@@ -37,7 +37,19 @@ describe("bundled provider-driver plugins", () => {
       BUNDLED_PROVIDER_DRIVER_PLUGINS.filter((plugin) =>
         isAcpHostProfileDriver(plugin.driverKind),
       ).map((plugin) => plugin.driverKind),
-    ).toEqual(["kilo", "devin", "mistral-vibe", "kimi-code", "grok"]);
+    ).toEqual([
+      "kilo",
+      "devin",
+      "mistral-vibe",
+      "kimi-code",
+      "grok",
+      "goose",
+      "glm",
+      "gemini",
+      "copilot",
+      "cline",
+      "qwen",
+    ]);
   });
 });
 

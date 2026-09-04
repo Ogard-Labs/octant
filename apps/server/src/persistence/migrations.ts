@@ -306,6 +306,72 @@ CREATE INDEX provider_instance_projection_enabled_idx
   ON provider_instance_projection(enabled);
 `;
 
+const ADD_GOOSE_GLM_PROVIDER_PROJECTION_SQL = `
+DROP INDEX provider_instance_projection_driver_idx;
+DROP INDEX provider_instance_projection_enabled_idx;
+
+ALTER TABLE provider_instance_projection RENAME TO provider_instance_projection_v55;
+
+CREATE TABLE provider_instance_projection (
+  instance_id TEXT PRIMARY KEY CHECK(length(trim(instance_id)) > 0),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  driver_kind TEXT NOT NULL CHECK(driver_kind IN (
+    'codex', 'claude', 'cursor', 'opencode', 'kilo', 'pi', 'oh-my-pi', 'devin',
+    'mistral-vibe', 'ollama', 'openai-compatible', 'kimi-code', 'anthropic-compatible',
+    'azure-foundry', 'grok', 'goose', 'glm'
+  )),
+  enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+  instance_json TEXT NOT NULL CHECK(json_valid(instance_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0)
+) STRICT;
+
+INSERT INTO provider_instance_projection (
+  instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+)
+SELECT instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+FROM provider_instance_projection_v55;
+
+DROP TABLE provider_instance_projection_v55;
+
+CREATE INDEX provider_instance_projection_driver_idx
+  ON provider_instance_projection(driver_kind);
+CREATE INDEX provider_instance_projection_enabled_idx
+  ON provider_instance_projection(enabled);
+`;
+
+const ADD_GEMINI_COPILOT_CLINE_QWEN_PROVIDER_PROJECTION_SQL = `
+DROP INDEX provider_instance_projection_driver_idx;
+DROP INDEX provider_instance_projection_enabled_idx;
+
+ALTER TABLE provider_instance_projection RENAME TO provider_instance_projection_v56;
+
+CREATE TABLE provider_instance_projection (
+  instance_id TEXT PRIMARY KEY CHECK(length(trim(instance_id)) > 0),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  driver_kind TEXT NOT NULL CHECK(driver_kind IN (
+    'codex', 'claude', 'cursor', 'opencode', 'kilo', 'pi', 'oh-my-pi', 'devin',
+    'mistral-vibe', 'ollama', 'openai-compatible', 'kimi-code', 'anthropic-compatible',
+    'azure-foundry', 'grok', 'goose', 'glm', 'gemini', 'copilot', 'cline', 'qwen'
+  )),
+  enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+  instance_json TEXT NOT NULL CHECK(json_valid(instance_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0)
+) STRICT;
+
+INSERT INTO provider_instance_projection (
+  instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+)
+SELECT instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+FROM provider_instance_projection_v56;
+
+DROP TABLE provider_instance_projection_v56;
+
+CREATE INDEX provider_instance_projection_driver_idx
+  ON provider_instance_projection(driver_kind);
+CREATE INDEX provider_instance_projection_enabled_idx
+  ON provider_instance_projection(enabled);
+`;
+
 const ZEN_PROJECTION_SQL = `
 CREATE TABLE zen_space_projection (
   space_id TEXT PRIMARY KEY CHECK(length(trim(space_id)) > 0),
@@ -1690,6 +1756,16 @@ ALTER TABLE code_runtime_projection
     version: 55,
     name: "create_chat_transcript_search_projection",
     sql: CHAT_TRANSCRIPT_SEARCH_PROJECTION_SQL,
+  },
+  {
+    version: 56,
+    name: "add_goose_glm_provider_projection",
+    sql: ADD_GOOSE_GLM_PROVIDER_PROJECTION_SQL,
+  },
+  {
+    version: 57,
+    name: "add_gemini_copilot_cline_qwen_provider_projection",
+    sql: ADD_GEMINI_COPILOT_CLINE_QWEN_PROVIDER_PROJECTION_SQL,
   },
 ];
 

@@ -64,6 +64,12 @@ export function driverLabel(
   | "Ollama"
   | "Mistral Vibe"
   | "Grok Build"
+  | "Goose"
+  | "GLM Agent ACP"
+  | "Gemini CLI"
+  | "GitHub Copilot"
+  | "Cline"
+  | "Qwen Code"
   | "OpenAI-compatible"
   | "Anthropic-compatible"
   | "Azure AI Foundry"
@@ -80,6 +86,12 @@ export function driverLabel(
   if (driverKind === "ollama") return "Ollama";
   if (driverKind === "mistral-vibe") return "Mistral Vibe";
   if (driverKind === "grok") return "Grok Build";
+  if (driverKind === "goose") return "Goose";
+  if (driverKind === "glm") return "GLM Agent ACP";
+  if (driverKind === "gemini") return "Gemini CLI";
+  if (driverKind === "copilot") return "GitHub Copilot";
+  if (driverKind === "cline") return "Cline";
+  if (driverKind === "qwen") return "Qwen Code";
   if (driverKind === "anthropic-compatible") return "Anthropic-compatible";
   if (driverKind === "azure-foundry") return "Azure AI Foundry";
   if (driverKind === "openai-image") return "OpenAI Image";

@@ -1195,6 +1195,176 @@ describe("provider instance policy", () => {
     ).toThrow("Stop active sessions before changing this provider runtime.");
   });
 
+  it("creates and immutably updates Goose with provider-owned configuration", () => {
+    const policy = providerPolicy as unknown as {
+      createGooseProvider: (input: Record<string, unknown>) => ProviderInstance;
+      changeGooseConfiguration: (
+        provider: Extract<ProviderInstance, { driverKind: "goose" }>,
+        configuration: Record<string, unknown>,
+        updatedAt: UtcTimestamp,
+        activeSessionCount?: number,
+      ) => ProviderInstance;
+    };
+    const original = policy.createGooseProvider({
+      id: ids.local,
+      displayName: "  Goose local  ",
+      configuration: {
+        kind: "goose-acp",
+        binaryPath: " /Users/example/.local/bin/goose ",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(original).toEqual({
+      id: ids.local,
+      displayName: "Goose local",
+      driverKind: "goose",
+      configuration: {
+        kind: "goose-acp",
+        binaryPath: "/Users/example/.local/bin/goose",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  });
+
+  it("creates and immutably updates GLM Agent with api-key authentication", () => {
+    const policy = providerPolicy as unknown as {
+      createGlmProvider: (input: Record<string, unknown>) => ProviderInstance;
+      changeGlmConfiguration: (
+        provider: Extract<ProviderInstance, { driverKind: "glm" }>,
+        configuration: Record<string, unknown>,
+        updatedAt: UtcTimestamp,
+        activeSessionCount?: number,
+      ) => ProviderInstance;
+    };
+    const original = policy.createGlmProvider({
+      id: ids.local,
+      displayName: "  GLM local  ",
+      configuration: {
+        kind: "glm-acp",
+        binaryPath: " /Users/example/.local/bin/glm-acp-agent ",
+        authentication: "api-key",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(original.configuration).toEqual({
+      kind: "glm-acp",
+      binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+      authentication: "api-key",
+    });
+    expect(() =>
+      policy.createGlmProvider({
+        id: ids.local,
+        displayName: "GLM local",
+        configuration: {
+          kind: "glm-acp",
+          binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+          authentication: "subscription",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("GLM Agent authentication must be api-key.");
+  });
+
+  it("creates and immutably updates Gemini CLI with api-key authentication", () => {
+    const policy = providerPolicy as unknown as {
+      createGeminiProvider: (input: Record<string, unknown>) => ProviderInstance;
+    };
+    const original = policy.createGeminiProvider({
+      id: ids.local,
+      displayName: "  Gemini local  ",
+      configuration: {
+        kind: "gemini-acp",
+        binaryPath: " /Users/example/.local/bin/gemini ",
+        authentication: "api-key",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(original.configuration).toEqual({
+      kind: "gemini-acp",
+      binaryPath: "/Users/example/.local/bin/gemini",
+      authentication: "api-key",
+    });
+  });
+
+  it("creates and immutably updates GitHub Copilot with provider-owned configuration", () => {
+    const policy = providerPolicy as unknown as {
+      createCopilotProvider: (input: Record<string, unknown>) => ProviderInstance;
+    };
+    const original = policy.createCopilotProvider({
+      id: ids.local,
+      displayName: "  Copilot local  ",
+      configuration: {
+        kind: "copilot-acp",
+        binaryPath: " /Users/example/.local/bin/copilot ",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(original.configuration).toEqual({
+      kind: "copilot-acp",
+      binaryPath: "/Users/example/.local/bin/copilot",
+    });
+  });
+
+  it("creates and immutably updates Cline with api-key authentication", () => {
+    const policy = providerPolicy as unknown as {
+      createClineProvider: (input: Record<string, unknown>) => ProviderInstance;
+    };
+    const original = policy.createClineProvider({
+      id: ids.local,
+      displayName: "  Cline local  ",
+      configuration: {
+        kind: "cline-acp",
+        binaryPath: " /Users/example/.local/bin/cline ",
+        authentication: "api-key",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(original.configuration).toEqual({
+      kind: "cline-acp",
+      binaryPath: "/Users/example/.local/bin/cline",
+      authentication: "api-key",
+    });
+  });
+
+  it("creates and immutably updates Qwen Code with api-key authentication", () => {
+    const policy = providerPolicy as unknown as {
+      createQwenProvider: (input: Record<string, unknown>) => ProviderInstance;
+    };
+    const original = policy.createQwenProvider({
+      id: ids.local,
+      displayName: "  Qwen local  ",
+      configuration: {
+        kind: "qwen-acp",
+        binaryPath: " /Users/example/.local/bin/qwen ",
+        authentication: "api-key",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(original.configuration).toEqual({
+      kind: "qwen-acp",
+      binaryPath: "/Users/example/.local/bin/qwen",
+      authentication: "api-key",
+    });
+  });
+
   it("creates and immutably updates Devin with subscription authentication", () => {
     const policy = providerPolicy as unknown as {
       createDevinProvider: (input: Record<string, unknown>) => ProviderInstance;

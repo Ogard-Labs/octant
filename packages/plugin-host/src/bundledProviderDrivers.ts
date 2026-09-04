@@ -30,6 +30,12 @@ const BUNDLED_PROVIDER_DRIVERS = [
   { driverKind: "ollama", displayName: "Ollama", digestNibble: "8", uuidNibble: "09" },
   { driverKind: "kimi-code", displayName: "Kimi Code CLI", digestNibble: "9", uuidNibble: "0a" },
   { driverKind: "grok", displayName: "Grok Build", digestNibble: "a", uuidNibble: "0b" },
+  { driverKind: "goose", displayName: "Goose ACP", digestNibble: "e", uuidNibble: "0f" },
+  { driverKind: "glm", displayName: "GLM Agent", digestNibble: "f", uuidNibble: "10" },
+  { driverKind: "gemini", displayName: "Gemini CLI", digestNibble: "10", uuidNibble: "11" },
+  { driverKind: "copilot", displayName: "GitHub Copilot", digestNibble: "11", uuidNibble: "12" },
+  { driverKind: "cline", displayName: "Cline", digestNibble: "12", uuidNibble: "13" },
+  { driverKind: "qwen", displayName: "Qwen Code", digestNibble: "13", uuidNibble: "14" },
   {
     driverKind: "openai-compatible",
     displayName: "OpenAI-compatible HTTP",
@@ -51,6 +57,7 @@ const BUNDLED_PROVIDER_DRIVERS = [
 ] as const satisfies ReadonlyArray<{
   readonly driverKind: ProviderDriverKind;
   readonly displayName: string;
+  /** Single-hex nibble or two-hex seed for bundled digest derivation. */
   readonly digestNibble: string;
   readonly uuidNibble: string;
 }>;
@@ -62,7 +69,12 @@ export interface BundledProviderDriverPlugin {
   readonly manifest: ExtensionPackageManifest;
 }
 
-const digest = (nibble: string) => decodeExtensionContentDigest(`sha256:${nibble.repeat(64)}`);
+const digest = (seed: string) => {
+  const hex = seed.length === 1 ? seed.repeat(64) : seed.repeat(32);
+  // `11`.repeat(32) equals `1`.repeat(64), which Claude already uses.
+  const normalized = seed.length !== 1 && hex === "1".repeat(64) ? "1b".repeat(32) : hex;
+  return decodeExtensionContentDigest(`sha256:${normalized}`);
+};
 
 function bundledProviderDriverManifest(spec: (typeof BUNDLED_PROVIDER_DRIVERS)[number]) {
   return decodeExtensionPackageManifest({

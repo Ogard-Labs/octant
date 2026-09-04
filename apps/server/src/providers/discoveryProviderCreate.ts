@@ -18,6 +18,12 @@ type DiscoveryCreateCommand = Extract<
       | "create-claude-provider"
       | "create-mistral-vibe-provider"
       | "create-grok-provider"
+      | "create-goose-provider"
+      | "create-glm-provider"
+      | "create-gemini-provider"
+      | "create-copilot-provider"
+      | "create-cline-provider"
+      | "create-qwen-provider"
       | "create-devin-provider"
       | "create-kilo-provider"
       | "create-pi-provider"
@@ -117,6 +123,100 @@ export function createProviderFromDiscoveryCandidate(
             kind: "grok-acp",
             binaryPath: candidate.binaryPath,
             authentication: "subscription",
+          },
+          enabled: options.enabled,
+        },
+      };
+    case "goose":
+      return {
+        instanceId,
+        command: {
+          kind: "create-goose-provider",
+          instanceId,
+          expectedVersion,
+          displayName: candidate.displayName,
+          configuration: {
+            kind: "goose-acp",
+            binaryPath: candidate.binaryPath,
+          },
+          enabled: options.enabled,
+        },
+      };
+    case "glm":
+      return {
+        instanceId,
+        command: {
+          kind: "create-glm-provider",
+          instanceId,
+          expectedVersion,
+          displayName: candidate.displayName,
+          configuration: {
+            kind: "glm-acp",
+            binaryPath: candidate.binaryPath,
+            authentication: "api-key",
+          },
+          enabled: options.enabled,
+        },
+      };
+    case "gemini":
+      return {
+        instanceId,
+        command: {
+          kind: "create-gemini-provider",
+          instanceId,
+          expectedVersion,
+          displayName: candidate.displayName,
+          configuration: {
+            kind: "gemini-acp",
+            binaryPath: candidate.binaryPath,
+            authentication: "api-key",
+          },
+          enabled: options.enabled,
+        },
+      };
+    case "copilot":
+      return {
+        instanceId,
+        command: {
+          kind: "create-copilot-provider",
+          instanceId,
+          expectedVersion,
+          displayName: candidate.displayName,
+          configuration: {
+            kind: "copilot-acp",
+            binaryPath: candidate.binaryPath,
+          },
+          enabled: options.enabled,
+        },
+      };
+    case "cline":
+      return {
+        instanceId,
+        command: {
+          kind: "create-cline-provider",
+          instanceId,
+          expectedVersion,
+          displayName: candidate.displayName,
+          configuration: {
+            kind: "cline-acp",
+            binaryPath: candidate.binaryPath,
+            authentication: "api-key",
+          },
+          enabled: options.enabled,
+        },
+      };
+    case "qwen":
+      return {
+        instanceId,
+        command: {
+          kind: "create-qwen-provider",
+          instanceId,
+          expectedVersion,
+          displayName: candidate.displayName,
+          configuration: {
+            kind: "qwen-acp",
+            binaryPath: candidate.binaryPath,
+            authentication: "api-key",
           },
           enabled: options.enabled,
         },

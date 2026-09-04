@@ -654,6 +654,12 @@ function ProvidersSection(props: {
         onChangeOllamaConfiguration={props.providerController.changeOllamaConfiguration}
         onChangeMistralVibeConfiguration={props.providerController.changeMistralVibeConfiguration}
         onChangeGrokConfiguration={props.providerController.changeGrokConfiguration}
+        onChangeGooseConfiguration={props.providerController.changeGooseConfiguration}
+        onChangeGlmConfiguration={props.providerController.changeGlmConfiguration}
+        onChangeGeminiConfiguration={props.providerController.changeGeminiConfiguration}
+        onChangeCopilotConfiguration={props.providerController.changeCopilotConfiguration}
+        onChangeClineConfiguration={props.providerController.changeClineConfiguration}
+        onChangeQwenConfiguration={props.providerController.changeQwenConfiguration}
         onChangeOpenAiCompatibleConfiguration={
           props.providerController.changeOpenAiCompatibleConfiguration
         }
@@ -670,6 +676,10 @@ function ProvidersSection(props: {
         onCreateClaude={props.providerController.createClaude}
         onCreateMistralVibe={props.providerController.createMistralVibe}
         onCreateGrok={props.providerController.createGrok}
+        onCreateGlm={props.providerController.createGlm}
+        onCreateGemini={props.providerController.createGemini}
+        onCreateCline={props.providerController.createCline}
+        onCreateQwen={props.providerController.createQwen}
         onCreateOllama={props.providerController.createOllama}
         onCreateOpenAiCompatible={props.providerController.createOpenAiCompatible}
         onCreateAnthropicCompatible={props.providerController.createAnthropicCompatible}

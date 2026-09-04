@@ -598,11 +598,75 @@ function parseVersion(
   return { version: `${match[1]}.${match[2]}.${match[3]}`, supported };
 }
 
+function resolveNpmPackageVersion(
+  profile: AcpProviderProfile,
+  binaryPath: string,
+): string | undefined {
+  const npmPackageName = profile.process.npmPackageName;
+  if (npmPackageName === undefined) return undefined;
+  let directory: string;
+  try {
+    directory = dirname(realpathSync(binaryPath));
+  } catch {
+    return undefined;
+  }
+  let current = directory;
+  while (true) {
+    const packageJsonPath = join(current, "package.json");
+    if (existsSync(packageJsonPath)) {
+      try {
+        const content = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+          readonly name?: string;
+          readonly version?: string;
+        };
+        if (content.name === npmPackageName && typeof content.version === "string") {
+          return content.version;
+        }
+      } catch {
+        // Keep walking for a matching package manifest.
+      }
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return undefined;
+}
+
+function probeNpmPackageVersion(
+  profile: AcpProviderProfile,
+  binaryPath: string,
+): Effect.Effect<AcpBinaryProbe, ProviderFailure> {
+  const name = profile.displayName;
+  const invalid = validateBinaryPath(profile, binaryPath);
+  if (invalid !== undefined) return Effect.fail(invalid);
+  const resolved = resolveNpmPackageVersion(profile, binaryPath);
+  if (resolved === undefined) {
+    return Effect.fail(
+      failure("protocol", `${name} package version could not be resolved from its install tree.`),
+    );
+  }
+  const parsed = parseVersion(profile, resolved);
+  if (parsed === undefined) {
+    return Effect.fail(
+      failure("protocol", `${name} returned an unrecognized package version response.`),
+    );
+  }
+  if (!parsed.supported) {
+    const minimum = profile.process.minimumVersion.join(".");
+    return Effect.fail(failure("incompatible", `${name} ${minimum} or later is required.`));
+  }
+  return Effect.succeed({ binaryPath, version: parsed.version });
+}
+
 export function probeAcpBinary(
   profile: AcpProviderProfile,
   binaryPath: string,
   options: AcpProbeOptions = {},
 ): Effect.Effect<AcpBinaryProbe, ProviderFailure> {
+  if (profile.process.npmPackageName !== undefined) {
+    return probeNpmPackageVersion(profile, binaryPath);
+  }
   const name = profile.displayName;
   const invalid = validateBinaryPath(profile, binaryPath);
   if (invalid !== undefined) return Effect.fail(invalid);

@@ -35,6 +35,12 @@ import {
   changeDevinConfiguration,
   changeGeminiImageConfiguration,
   changeGrokConfiguration,
+  changeGooseConfiguration,
+  changeGlmConfiguration,
+  changeGeminiConfiguration,
+  changeCopilotConfiguration,
+  changeClineConfiguration,
+  changeQwenConfiguration,
   changeKiloConfiguration,
   changeMistralVibeConfiguration,
   changeOllamaConfiguration,
@@ -48,6 +54,12 @@ import {
   createDevinProvider,
   createGeminiImageProvider,
   createGrokProvider,
+  createGooseProvider,
+  createGlmProvider,
+  createGeminiProvider,
+  createCopilotProvider,
+  createClineProvider,
+  createQwenProvider,
   createKiloProvider,
   createOpenAiCompatibleProvider,
   createOpenAiImageProvider,
@@ -498,6 +510,12 @@ export class ProviderService implements ProviderServiceApi {
           command.kind === "create-ollama-provider" ||
           command.kind === "create-mistral-vibe-provider" ||
           command.kind === "create-grok-provider" ||
+          command.kind === "create-goose-provider" ||
+          command.kind === "create-glm-provider" ||
+          command.kind === "create-gemini-provider" ||
+          command.kind === "create-copilot-provider" ||
+          command.kind === "create-cline-provider" ||
+          command.kind === "create-qwen-provider" ||
           command.kind === "create-openai-compatible-provider" ||
           command.kind === "create-anthropic-compatible-provider" ||
           command.kind === "create-azure-foundry-provider" ||
@@ -571,6 +589,42 @@ export class ProviderService implements ProviderServiceApi {
               break;
             case "create-grok-provider":
               instance = createGrokProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
+            case "create-goose-provider":
+              instance = createGooseProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
+            case "create-glm-provider":
+              instance = createGlmProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
+            case "create-gemini-provider":
+              instance = createGeminiProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
+            case "create-copilot-provider":
+              instance = createCopilotProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
+            case "create-cline-provider":
+              instance = createClineProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
+            case "create-qwen-provider":
+              instance = createQwenProvider({
                 ...common,
                 configuration: command.configuration,
               });
@@ -751,6 +805,78 @@ export class ProviderService implements ProviderServiceApi {
           );
           await this.#runtime.invalidateRuntime(current.id);
           eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-goose-configuration") {
+          if (current.driverKind !== "goose") {
+            throw this.#unsupported("This provider does not use Goose configuration.");
+          }
+          instance = changeGooseConfiguration(
+            current,
+            command.configuration,
+            updatedAt,
+            this.#runtime.activeSessionCount(current.id),
+          );
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-glm-configuration") {
+          if (current.driverKind !== "glm") {
+            throw this.#unsupported("This provider does not use GLM Agent configuration.");
+          }
+          instance = changeGlmConfiguration(
+            current,
+            command.configuration,
+            updatedAt,
+            this.#runtime.activeSessionCount(current.id),
+          );
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-gemini-configuration") {
+          if (current.driverKind !== "gemini") {
+            throw this.#unsupported("This provider does not use Gemini CLI configuration.");
+          }
+          instance = changeGeminiConfiguration(
+            current,
+            command.configuration,
+            updatedAt,
+            this.#runtime.activeSessionCount(current.id),
+          );
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-copilot-configuration") {
+          if (current.driverKind !== "copilot") {
+            throw this.#unsupported("This provider does not use GitHub Copilot configuration.");
+          }
+          instance = changeCopilotConfiguration(
+            current,
+            command.configuration,
+            updatedAt,
+            this.#runtime.activeSessionCount(current.id),
+          );
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-cline-configuration") {
+          if (current.driverKind !== "cline") {
+            throw this.#unsupported("This provider does not use Cline configuration.");
+          }
+          instance = changeClineConfiguration(
+            current,
+            command.configuration,
+            updatedAt,
+            this.#runtime.activeSessionCount(current.id),
+          );
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-qwen-configuration") {
+          if (current.driverKind !== "qwen") {
+            throw this.#unsupported("This provider does not use Qwen Code configuration.");
+          }
+          instance = changeQwenConfiguration(
+            current,
+            command.configuration,
+            updatedAt,
+            this.#runtime.activeSessionCount(current.id),
+          );
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
         } else if (command.kind === "change-devin-configuration") {
           if (current.driverKind !== "devin") {
             throw this.#unsupported("This provider does not use Devin configuration.");
@@ -833,6 +959,10 @@ export class ProviderService implements ProviderServiceApi {
           command.kind === "change-claude-configuration" ||
           command.kind === "change-mistral-vibe-configuration" ||
           command.kind === "change-grok-configuration" ||
+          command.kind === "change-glm-configuration" ||
+          command.kind === "change-gemini-configuration" ||
+          command.kind === "change-cline-configuration" ||
+          command.kind === "change-qwen-configuration" ||
           command.kind === "change-devin-configuration"
         ) {
           this.#publishSelectedAuthenticationObservation(authoritative);
@@ -1175,6 +1305,10 @@ export class ProviderService implements ProviderServiceApi {
       instance.driverKind !== "claude" &&
       instance.driverKind !== "mistral-vibe" &&
       instance.driverKind !== "grok" &&
+      instance.driverKind !== "glm" &&
+      instance.driverKind !== "gemini" &&
+      instance.driverKind !== "cline" &&
+      instance.driverKind !== "qwen" &&
       instance.driverKind !== "devin"
     ) {
       return;

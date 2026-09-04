@@ -38,6 +38,12 @@ export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimit
     case "mistral-vibe":
     case "kimi-code":
     case "grok":
+    case "goose":
+    case "glm":
+    case "gemini":
+    case "copilot":
+    case "cline":
+    case "qwen":
     case "openai-image":
     case "gemini-native-image":
       return "runtime-does-not-report";
