@@ -60,6 +60,8 @@ export async function readIssuesAcrossRepositories(
     readonly search?: string;
     readonly pageSize: number;
     readonly concurrency?: number;
+    /** Narrows every repository read to issues nobody has been assigned. */
+    readonly assignee?: "none";
   },
 ): Promise<IssuesAcrossRepositories> {
   const rows: RepositoryIssueRow[] = [];
@@ -83,6 +85,7 @@ export async function readIssuesAcrossRepositories(
           ...(options.search === undefined || options.search === ""
             ? {}
             : { search: options.search }),
+          ...(options.assignee === undefined ? {} : { assignee: options.assignee }),
         });
         if (response.kind === "unavailable") {
           refused.push({

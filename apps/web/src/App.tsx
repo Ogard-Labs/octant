@@ -66,6 +66,7 @@ import { markInteraction, markInteractionAfterPaint } from "./polling/interactio
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import type { CodeOperationId } from "@octant/contracts";
 import type {
+  CodeBoardQuery,
   CodeProjectPullRequestDetailQuery,
   CodeProjectPullRequestRow,
   ThreadBoardPullRequestIdentity,
@@ -1122,6 +1123,14 @@ function LaunchedShell(
   const loadAssignedLinearIssues = useCallback(
     () => fetchAssignedLinearIssues((input) => linearClient.listIssues(input)),
     [linearClient],
+  );
+  // The Code home reads the board when this identity changes. An inline
+  // callback changes on every App render, and a streaming turn renders often,
+  // so the board would be re-queried for reasons that have nothing to do with
+  // it.
+  const loadCodeBoard = useCallback(
+    (query: CodeBoardQuery) => codeClient.queryBoard(query),
+    [codeClient],
   );
   useEffect(() => {
     let cancelled = false;
@@ -5071,6 +5080,32 @@ function LaunchedShell(
                       FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true
                     }
                     linearClient={linearClient}
+                    codeHome={{
+                      loadBoard: loadCodeBoard,
+                      loadAssignedLinearIssues,
+                      projectNames: new Map(
+                        codeBoardProjects.map((project) => [String(project.id), project.name]),
+                      ),
+                      providerLabels: new Map(
+                        codeProviderGroups.map((group) => [
+                          String(group.instance.id),
+                          group.instance.displayName,
+                        ]),
+                      ),
+                      onOpenThread: (target) => {
+                        const thread = codeController.bootstrap?.threads.find(
+                          (candidate) => String(candidate.id) === String(target.threadId),
+                        );
+                        void controller.openCodeThread(
+                          target.threadId,
+                          thread?.title ?? "Code thread",
+                          undefined,
+                          target.projectId,
+                        );
+                      },
+                      onOpenInbox: openInbox,
+                      onOpenIssues: () => setGithubIssuesOpen(true),
+                    }}
                     linearPluginEnabled={
                       FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true
                     }

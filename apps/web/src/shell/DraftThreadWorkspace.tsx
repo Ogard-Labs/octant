@@ -1,3 +1,4 @@
+import { decodeGithubIssueContextRequest } from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
   decodeProjectId,
@@ -53,7 +54,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { CodeHomeUpNext } from "../code/CodeHomeUpNext";
+import { CodeHome, type CodeHomeProps } from "../code/CodeHome";
 import {
   CodeComposerAdapter,
   type CodeComposerSuggestion,
@@ -166,6 +167,21 @@ export interface DraftThreadWorkspaceProps {
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
   readonly onCancelFirstTurn?: () => void;
+  /**
+   * What the Code start screen shows under the composer: the board loader for
+   * Continue, the Linear loader for Up next, names for cards, and the openers
+   * the sections hand off to. Absent on hosts that have none of it.
+   */
+  readonly codeHome?: Pick<
+    CodeHomeProps,
+    | "loadAssignedLinearIssues"
+    | "loadBoard"
+    | "projectNames"
+    | "providerLabels"
+    | "onOpenThread"
+    | "onOpenInbox"
+    | "onOpenIssues"
+  >;
 }
 
 /**
@@ -438,11 +454,44 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     ) : null;
 
   if (props.mode === "code") {
-    const upNext =
-      props.githubClient !== undefined && props.githubPluginEnabled !== false ? (
-        <CodeHomeUpNext
-          client={props.githubClient}
-          onPick={(item) => {
+    const githubHomeClient =
+      props.githubClient !== undefined && props.githubPluginEnabled !== false
+        ? props.githubClient
+        : undefined;
+    const linearHome =
+      props.linearPluginEnabled === true ? props.codeHome?.loadAssignedLinearIssues : undefined;
+    const fillPrompt = (text: string) =>
+      setPromptRequest((current) => ({ text, revision: (current?.revision ?? 0) + 1 }));
+    const beneath =
+      githubHomeClient === undefined && linearHome === undefined && props.codeHome === undefined ? (
+        (props.recentThreads?.length ?? 0) === 0 ? undefined : (
+          <div className="code-home">
+            <RecentThreadList threads={props.recentThreads ?? []} />
+          </div>
+        )
+      ) : (
+        <CodeHome
+          {...(githubHomeClient === undefined ? {} : { githubClient: githubHomeClient })}
+          {...(linearHome === undefined ? {} : { loadAssignedLinearIssues: linearHome })}
+          {...(props.codeHome?.loadBoard === undefined
+            ? {}
+            : { loadBoard: props.codeHome.loadBoard })}
+          {...(props.codeHome?.projectNames === undefined
+            ? {}
+            : { projectNames: props.codeHome.projectNames })}
+          {...(props.codeHome?.providerLabels === undefined
+            ? {}
+            : { providerLabels: props.codeHome.providerLabels })}
+          {...(props.codeHome?.onOpenThread === undefined
+            ? {}
+            : { onOpenThread: props.codeHome.onOpenThread })}
+          {...(props.codeHome?.onOpenInbox === undefined
+            ? {}
+            : { onOpenInbox: props.codeHome.onOpenInbox })}
+          {...(props.codeHome?.onOpenIssues === undefined
+            ? {}
+            : { onOpenIssues: props.codeHome.onOpenIssues })}
+          onPickGithub={(item) => {
             const reference = `${item.owner}/${item.name}#${String(item.number)}`;
             // Only an issue can be attached to the new thread, so picking a
             // pull request has to take the previous issue back off: leaving it
@@ -457,22 +506,38 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   }
                 : undefined,
             );
-            setPromptRequest((current) => ({
-              text:
-                item.category === "issue"
-                  ? `Work on ${reference}: ${item.title}`
-                  : `Review pull request ${reference}: ${item.title}`,
-              revision: (current?.revision ?? 0) + 1,
-            }));
+            fillPrompt(
+              item.category === "issue"
+                ? `Work on ${reference}: ${item.title}`
+                : `Review pull request ${reference}: ${item.title}`,
+            );
+          }}
+          onPickIssue={(row) => {
+            const reference = `${row.owner}/${row.name}#${String(row.number)}`;
+            let request: GithubIssueContextRequest | undefined;
+            try {
+              request = decodeGithubIssueContextRequest({
+                owner: row.owner,
+                name: row.name,
+                number: row.number,
+              });
+            } catch {
+              request = undefined;
+            }
+            setCreateFromSelection(
+              request === undefined ? undefined : { kind: "github", request, label: reference },
+            );
+            fillPrompt(`Work on ${reference}: ${row.title}`);
+          }}
+          onPickLinear={(row) => {
+            setCreateFromSelection({
+              kind: "linear",
+              request: { id: row.id },
+              label: row.identifier,
+            });
+            fillPrompt(`Work on ${row.identifier}: ${row.title}`);
           }}
         />
-      ) : null;
-    const beneath =
-      upNext === null && (props.recentThreads?.length ?? 0) === 0 ? undefined : (
-        <div className="code-home">
-          {upNext}
-          <RecentThreadList threads={props.recentThreads ?? []} />
-        </div>
       );
     return (
       <>
