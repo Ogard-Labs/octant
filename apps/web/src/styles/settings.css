@@ -501,25 +501,24 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   font-size: var(--oct-text-sm);
 }
 
+/* A loading or status line is one quiet sentence on the page ground. Boxed,
+   "Loading GitHub status…" read as a finished empty-state card (DESIGN.md
+   "Spacing, shapes, and depth"). Only an error keeps a boundary, because it
+   is the one state a person has to act on. */
 .settings-state {
   margin: 0;
-  padding: 10px 14px;
+  padding: 8px 0;
   color: var(--octant-text-secondary);
-  background: var(--octant-surface-muted);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-md);
   font-size: var(--oct-text-sm);
-}
-
-.settings-panel__body .settings-state {
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
+  line-height: 1.45;
 }
 
 .settings-state--error {
+  padding: 10px 14px;
   color: var(--octant-danger-text);
+  background: var(--octant-surface-muted);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-sm);
 }
 
 .settings-state--success {
@@ -826,14 +825,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   color: var(--octant-text-secondary);
   font-size: calc(12 * var(--oct-text-step));
   text-align: end;
-}
-
-/* A status line in an open section is a sentence, not a boxed callout. */
-.settings-card-section--open .settings-state {
-  padding: 8px 0 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
 }
 
 /* Quiet lines that follow the rows: an empty collection, a message after an
