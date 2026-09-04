@@ -10,6 +10,7 @@ import { ChevronRight, FolderOpen, GitBranch, Home, Search } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 
@@ -17,7 +18,11 @@ export interface FolderPickerProps {
   readonly client: FolderBrowseClient;
   readonly mode: FolderBrowseMode;
   readonly hostId: string;
-  readonly onSelect: (receiptId: string, displayName: string) => void;
+  readonly onSelect: (
+    receiptId: string,
+    displayName: string,
+    selection?: { readonly initializeGit?: boolean },
+  ) => void;
   readonly onCancel: () => void;
 }
 
@@ -34,6 +39,7 @@ export function FolderPicker(props: FolderPickerProps) {
   const [searchInput, setSearchInput] = useState("");
   const [searching, setSearching] = useState(false);
   const [selecting, setSelecting] = useState(false);
+  const [initializeGit, setInitializeGit] = useState(true);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const mounted = useRef(true);
   const parentCandidateIdRef = useRef<string | undefined>(undefined);
@@ -105,7 +111,11 @@ export function FolderPicker(props: FolderPickerProps) {
         mode: props.mode,
         candidateId: candidate.candidateId as FolderCandidateId,
       });
-      props.onSelect(selection.receiptId, selection.displayName);
+      props.onSelect(
+        selection.receiptId,
+        selection.displayName,
+        props.mode === "code" ? { initializeGit } : undefined,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Cannot select folder.";
       setErrorMessage(message);
@@ -262,6 +272,17 @@ export function FolderPicker(props: FolderPickerProps) {
           {errorMessage}
         </p>
       )}
+      {props.mode === "code" ? (
+        <label className="folder-picker__git-init" htmlFor="folder-picker-initialize-git">
+          <OctantCheckbox
+            checked={initializeGit}
+            disabled={selecting}
+            id="folder-picker-initialize-git"
+            onChange={(event) => setInitializeGit(event.target.checked)}
+          />
+          <span>Initialize as a Git repository when needed</span>
+        </label>
+      ) : null}
       <div className="folder-picker__actions">
         <OctantButton
           className="project-button project-button--quiet"

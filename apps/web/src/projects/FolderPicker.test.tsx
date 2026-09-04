@@ -56,7 +56,9 @@ describe("FolderPicker", () => {
     expect(screen.getByRole("option")).toHaveAttribute("aria-disabled", "false");
 
     await user.click(screen.getByRole("button", { name: "Select" }));
-    await waitFor(() => expect(onSelect).toHaveBeenCalledWith("receipt-1", "Dev"));
+    await waitFor(() =>
+      expect(onSelect).toHaveBeenCalledWith("receipt-1", "Dev", { initializeGit: true }),
+    );
     expect(select.mock.calls[0]?.[0]).toMatchObject({
       candidateId: alphaCandidateId,
     });
