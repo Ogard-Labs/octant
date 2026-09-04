@@ -9,7 +9,7 @@ import type {
   LinearIssueRow,
   ProjectId,
 } from "@octant/contracts";
-import { CircleCheck, CircleDot, GitPullRequest, ListTodo } from "lucide-react";
+import { CircleCheck, CircleDot, GitPullRequest, ListTodo, type LucideIcon } from "lucide-react";
 import {
   readIssuesAcrossRepositories,
   type RepositoryIssueRow,
@@ -186,175 +186,117 @@ export function CodeHome(props: CodeHomeProps) {
     <div className="code-home">
       {showUpNext ? (
         <section aria-label="Up next" className="code-home__section">
-          <header className="code-home__section-head">
-            <p className="code-home__section-title">Up next</p>
-            <p className="code-home__section-note">
-              Issues and pull requests waiting on you across your connected repositories.
-            </p>
-          </header>
-          <div className="code-home__panel">
-            {upNext.kind === "loading" ? (
+          <SectionHead
+            note="Issues and pull requests waiting on you across your connected repositories."
+            title="Up next"
+            {...(props.onOpenInbox === undefined
+              ? {}
+              : { actionLabel: "Open Inbox", onAction: props.onOpenInbox })}
+          />
+          {upNext.kind === "loading" ? (
+            <div className="code-home__panel">
               <p className="code-home__note" role="status">
                 Checking what is assigned to you…
               </p>
-            ) : upNext.kind === "failed" ? (
+            </div>
+          ) : upNext.kind === "failed" ? (
+            <div className="code-home__panel">
               <p className="code-home__note" role="status">
                 {upNext.message}
               </p>
-            ) : upNextRows.length === 0 ? (
-              <div className="code-home__empty">
-                <CircleCheck aria-hidden="true" size={20} strokeWidth={1.6} />
-                <p>You're all caught up.</p>
-                {props.onOpenInbox === undefined ? null : (
-                  <OctantButton
-                    onClick={props.onOpenInbox}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Open Inbox
-                  </OctantButton>
-                )}
-              </div>
-            ) : (
-              <ul className="code-home__list">
-                {upNextRows.map((entry) =>
-                  entry.kind === "github" ? (
-                    <li key={`${entry.item.owner}/${entry.item.name}#${String(entry.item.number)}`}>
-                      <OctantButton
-                        className="code-home__row"
-                        onClick={() => props.onPickGithub(entry.item)}
-                        type="button"
-                        variant="ghost"
-                      >
-                        {entry.item.category === "issue" ? (
-                          <CircleDot aria-hidden="true" className="code-home__row-icon" size={14} />
-                        ) : (
-                          <GitPullRequest
-                            aria-hidden="true"
-                            className="code-home__row-icon"
-                            size={14}
-                          />
-                        )}
-                        <span className="code-home__row-copy">
-                          <span className="code-home__row-title">{entry.item.title}</span>
-                          <span className="code-home__row-meta">
-                            {CATEGORY_LABELS[entry.item.category]} · {entry.item.owner}/
-                            {entry.item.name}#{entry.item.number} ·{" "}
-                            <span
-                              title={absoluteTimeFormatter.format(new Date(entry.item.updatedAt))}
-                            >
-                              {relativeTimeLabel(entry.item.updatedAt)}
-                            </span>
-                          </span>
-                        </span>
-                      </OctantButton>
-                    </li>
-                  ) : (
-                    <li key={entry.row.id}>
-                      <OctantButton
-                        className="code-home__row"
-                        disabled={props.onPickLinear === undefined}
-                        onClick={() => props.onPickLinear?.(entry.row)}
-                        type="button"
-                        variant="ghost"
-                      >
-                        <ListTodo aria-hidden="true" className="code-home__row-icon" size={14} />
-                        <span className="code-home__row-copy">
-                          <span className="code-home__row-title">{entry.row.title}</span>
-                          <span className="code-home__row-meta">
-                            Linear · {entry.row.identifier} · {entry.row.state.name}
-                          </span>
-                        </span>
-                      </OctantButton>
-                    </li>
-                  ),
-                )}
-              </ul>
-            )}
-          </div>
+            </div>
+          ) : upNextRows.length === 0 ? (
+            <div className="code-home__panel code-home__empty">
+              <CircleCheck aria-hidden="true" size={20} strokeWidth={1.6} />
+              <p className="code-home__empty-title">You're all caught up.</p>
+              <p className="code-home__note">
+                Nothing is assigned to you or waiting on your review.
+              </p>
+            </div>
+          ) : (
+            <ul className="code-home__grid">
+              {upNextRows.map((entry) =>
+                entry.kind === "github" ? (
+                  <li key={`${entry.item.owner}/${entry.item.name}#${String(entry.item.number)}`}>
+                    <HomeCard
+                      badge={CATEGORY_LABELS[entry.item.category]}
+                      icon={entry.item.category === "issue" ? CircleDot : GitPullRequest}
+                      meta={entry.item.author}
+                      onClick={() => props.onPickGithub(entry.item)}
+                      source={`${entry.item.owner}/${entry.item.name} #${String(entry.item.number)}`}
+                      title={entry.item.title}
+                      updatedAt={entry.item.updatedAt}
+                    />
+                  </li>
+                ) : (
+                  <li key={entry.row.id}>
+                    <HomeCard
+                      badge="Linear"
+                      disabled={props.onPickLinear === undefined}
+                      icon={ListTodo}
+                      meta={entry.row.state.name}
+                      onClick={() => props.onPickLinear?.(entry.row)}
+                      source={entry.row.identifier}
+                      title={entry.row.title}
+                    />
+                  </li>
+                ),
+              )}
+            </ul>
+          )}
         </section>
       ) : null}
 
       {freshRows.length === 0 ? null : (
         <section aria-label="Start something new" className="code-home__section">
-          <header className="code-home__section-head">
-            <p className="code-home__section-title">Start something new</p>
-            <p className="code-home__section-note">
-              Open issues in your recent repositories that nobody has picked up.
-            </p>
-          </header>
-          <div className="code-home__panel">
-            <ul className="code-home__list">
-              {freshRows.map((row) => (
-                <li key={`${row.owner}/${row.name}#${String(row.number)}`}>
-                  <OctantButton
-                    className="code-home__row"
-                    onClick={() => props.onPickIssue(row)}
-                    type="button"
-                    variant="ghost"
-                  >
-                    <CircleDot aria-hidden="true" className="code-home__row-icon" size={14} />
-                    <span className="code-home__row-copy">
-                      <span className="code-home__row-title">{row.title}</span>
-                      <span className="code-home__row-meta">
-                        {row.owner}/{row.name}#{row.number} · {row.author} ·{" "}
-                        <span title={absoluteTimeFormatter.format(new Date(row.updatedAt))}>
-                          {relativeTimeLabel(row.updatedAt)}
-                        </span>
-                      </span>
-                    </span>
-                  </OctantButton>
-                </li>
-              ))}
-            </ul>
-            {props.onOpenIssues === undefined ? null : (
-              <div className="code-home__panel-foot">
-                <OctantButton onClick={props.onOpenIssues} size="sm" type="button" variant="ghost">
-                  Browse all issues
-                </OctantButton>
-              </div>
-            )}
-          </div>
+          <SectionHead
+            note="Open issues in your recent repositories that nobody has picked up."
+            title="Start something new"
+            {...(props.onOpenIssues === undefined
+              ? {}
+              : { actionLabel: "Browse all issues", onAction: props.onOpenIssues })}
+          />
+          <ul className="code-home__grid">
+            {freshRows.map((row) => (
+              <li key={`${row.owner}/${row.name}#${String(row.number)}`}>
+                <HomeCard
+                  badge="Issue"
+                  icon={CircleDot}
+                  meta={row.author}
+                  onClick={() => props.onPickIssue(row)}
+                  source={`${row.owner}/${row.name} #${String(row.number)}`}
+                  title={row.title}
+                  updatedAt={row.updatedAt}
+                />
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
       {next.kind === "ready" && next.cards.length > 0 ? (
         <section aria-label="Continue" className="code-home__section">
-          <header className="code-home__section-head">
-            <p className="code-home__section-title">Continue</p>
-            <p className="code-home__section-note">
-              Your latest threads and where each one stands.
-            </p>
-          </header>
-          <ul className="code-home__cards">
+          <SectionHead note="Your latest threads and where each one stands." title="Continue" />
+          <ul className="code-home__grid">
             {next.cards.map((card) => {
               const badge = cardBadge(card);
               const facts = cardFacts(card, props.projectNames, props.providerLabels);
               return (
                 <li key={String(card.threadId)}>
-                  <OctantButton
-                    className="code-home__card"
+                  <HomeCard
+                    badge={badge.label}
                     disabled={props.onOpenThread === undefined}
+                    meta={facts.join(" · ")}
                     onClick={() =>
                       props.onOpenThread?.({ threadId: card.threadId, projectId: card.projectId })
                     }
-                    type="button"
-                    variant="ghost"
-                  >
-                    <span className="code-home__tile">
-                      <span className="code-home__badge" data-tone={badge.tone}>
-                        {badge.label}
-                      </span>
-                      {badge.detail === undefined ? null : (
-                        <span className="code-home__tile-detail">{badge.detail}</span>
-                      )}
-                    </span>
-                    <span className="code-home__card-copy">
-                      <span className="code-home__card-title">{card.title}</span>
-                      <span className="code-home__card-meta">{facts.join(" · ")}</span>
-                    </span>
-                  </OctantButton>
+                    title={card.title}
+                    tone={badge.tone}
+                    {...(badge.detail === undefined ? {} : { detail: badge.detail })}
+                    {...(card.lastMeaningfulActivityAt === null
+                      ? {}
+                      : { updatedAt: card.lastMeaningfulActivityAt })}
+                  />
                 </li>
               );
             })}
@@ -362,6 +304,81 @@ export function CodeHome(props: CodeHomeProps) {
         </section>
       ) : null}
     </div>
+  );
+}
+
+function SectionHead(props: {
+  readonly title: string;
+  readonly note: string;
+  readonly actionLabel?: string;
+  readonly onAction?: () => void;
+}) {
+  return (
+    <header className="code-home__section-head">
+      <div className="code-home__section-copy">
+        <p className="code-home__section-title">{props.title}</p>
+        <p className="code-home__section-note">{props.note}</p>
+      </div>
+      {props.onAction === undefined || props.actionLabel === undefined ? null : (
+        <OctantButton onClick={props.onAction} size="sm" type="button" variant="ghost">
+          {props.actionLabel}
+        </OctantButton>
+      )}
+    </header>
+  );
+}
+
+/**
+ * One card shape for every section: what kind of thing it is, where it
+ * lives, when it last moved, then the title and one line of facts. A
+ * thread's tone colours the badge; issues and pull requests keep it quiet.
+ */
+function HomeCard(props: {
+  readonly badge: string;
+  readonly icon?: LucideIcon;
+  readonly tone?: CardBadge["tone"];
+  readonly detail?: string;
+  readonly source?: string;
+  readonly updatedAt?: string;
+  readonly title: string;
+  readonly meta?: string;
+  readonly disabled?: boolean;
+  readonly onClick: () => void;
+}) {
+  const Icon = props.icon;
+  return (
+    <OctantButton
+      className="code-home__card"
+      disabled={props.disabled === true}
+      onClick={props.onClick}
+      type="button"
+      variant="ghost"
+    >
+      <span className="code-home__card-head">
+        <span className="code-home__badge" data-tone={props.tone ?? "plain"}>
+          {Icon === undefined ? null : <Icon aria-hidden="true" size={12} strokeWidth={1.9} />}
+          {props.badge}
+        </span>
+        {props.detail === undefined ? null : (
+          <span className="code-home__card-detail">{props.detail}</span>
+        )}
+        {props.source === undefined ? null : (
+          <span className="code-home__card-source">{props.source}</span>
+        )}
+        {props.updatedAt === undefined ? null : (
+          <span
+            className="code-home__card-age"
+            title={absoluteTimeFormatter.format(new Date(props.updatedAt))}
+          >
+            {relativeTimeLabel(props.updatedAt)}
+          </span>
+        )}
+      </span>
+      <span className="code-home__card-title">{props.title}</span>
+      {props.meta === undefined || props.meta === "" ? null : (
+        <span className="code-home__card-meta">{props.meta}</span>
+      )}
+    </OctantButton>
   );
 }
 
@@ -452,9 +469,6 @@ function cardFacts(
   if (project !== undefined) facts.push(project);
   if (card.worktree.kind === "available" && card.worktree.head.kind === "branch") {
     facts.push(card.worktree.head.name);
-  }
-  if (card.lastMeaningfulActivityAt !== null) {
-    facts.push(relativeTimeLabel(card.lastMeaningfulActivityAt));
   }
   return facts;
 }

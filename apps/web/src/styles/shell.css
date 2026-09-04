@@ -2264,7 +2264,7 @@ form > .work-composer-adapter__attachments {
 .code-home {
   display: grid;
   gap: var(--oct-space-6);
-  margin-top: var(--oct-space-4);
+  margin-top: var(--oct-space-5);
 }
 
 .code-home .draft-thread__recent {
@@ -2277,7 +2277,15 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-home__section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.code-home__section-copy {
   display: grid;
+  min-width: 0;
   gap: 2px;
 }
 
@@ -2297,114 +2305,56 @@ form > .work-composer-adapter__attachments {
 
 .code-home__panel {
   display: grid;
+  padding: 12px 14px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--octant-card);
 }
 
-.code-home__panel > .code-home__note {
-  padding: 12px 14px;
-}
-
-.code-home__panel-foot {
-  display: flex;
-  justify-content: flex-start;
-  padding: 4px 8px 6px;
-  border-top: 1px solid var(--oct-hairline);
-}
-
 .code-home__empty {
-  display: grid;
   justify-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 28px 14px;
   color: var(--oct-muted);
   text-align: center;
 }
 
-.code-home__empty p {
+.code-home__empty-title {
   margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
 }
 
-.code-home__list {
+/* Every section is the same grid of cards: two across at the composer's
+   width, one when the pane narrows, never a centred list of rows. */
+.code-home__grid {
   display: grid;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.code-home__list > li + li {
-  border-top: 1px solid var(--oct-hairline);
-}
-
-.code-home__row {
-  display: flex;
-  width: 100%;
-  height: auto;
-  min-height: 0;
-  justify-content: flex-start;
-  align-items: flex-start;
-  gap: var(--oct-space-2);
-  padding: 10px 14px;
-  border-radius: 0;
-  font-weight: 400;
-  text-align: left;
-  white-space: normal;
-}
-
-.code-home__list > li:first-child .code-home__row {
-  border-radius: var(--oct-radius-md) var(--oct-radius-md) 0 0;
-}
-
-.code-home__list > li:last-child .code-home__row {
-  border-radius: 0 0 var(--oct-radius-md) var(--oct-radius-md);
-}
-
-.code-home__row-icon {
-  flex: 0 0 auto;
-  margin-top: 2px;
-  color: var(--oct-muted);
-}
-
-.code-home__row-copy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.code-home__row-title {
-  overflow: hidden;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-home__row-meta {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.code-home__cards {
-  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+.code-home__grid > li {
+  display: grid;
+  min-width: 0;
+}
+
 .code-home__card {
-  display: flex;
+  display: grid;
   width: 100%;
-  height: auto;
+  height: 100%;
   min-height: 0;
-  justify-content: flex-start;
-  align-items: center;
-  gap: 14px;
-  padding: 6px 12px 6px 6px;
+  /* The button recipe centres its content; on a grid that shrinks the one
+     column to its content and floats a short title mid-card. */
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  justify-content: stretch;
+  justify-items: start;
+  gap: 6px;
+  padding: 12px 14px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--octant-card);
@@ -2418,27 +2368,26 @@ form > .work-composer-adapter__attachments {
   background: var(--octant-card);
 }
 
-.code-home__tile {
-  display: grid;
-  flex: 0 0 auto;
-  width: 120px;
-  height: 64px;
-  align-content: center;
-  justify-items: center;
-  gap: 4px;
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface-inset);
+.code-home__card-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .code-home__badge {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
+  gap: 4px;
   padding: 2px 8px;
   border-radius: var(--oct-radius-pill);
   color: var(--oct-fg-2);
   background: var(--octant-control);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
+  line-height: 1.4;
 }
 
 .code-home__badge[data-tone="merged"],
@@ -2456,28 +2405,44 @@ form > .work-composer-adapter__attachments {
   color: var(--octant-warning-text, var(--oct-fg-2));
 }
 
-.code-home__tile-detail {
+.code-home__card-detail {
+  flex: 0 0 auto;
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
 }
 
-.code-home__card-copy {
-  display: grid;
+.code-home__card-source {
   min-width: 0;
-  gap: 3px;
-}
-
-.code-home__card-title {
   overflow: hidden;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.code-home__card-age {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-home__card-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-snug);
+}
+
 .code-home__card-meta {
+  max-width: 100%;
   overflow: hidden;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
