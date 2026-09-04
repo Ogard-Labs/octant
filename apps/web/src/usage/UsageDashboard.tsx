@@ -12,6 +12,7 @@ import type { UsageClient } from "@octant/client-runtime/usage-client";
 import {
   AlertTriangle,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Download,
   Eraser,
@@ -252,7 +253,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
           onClick={() => setFiltersOpen((current) => !current)}
           size="sm"
           type="button"
-          variant="outline"
+          variant="ghost"
         >
           <Filter aria-hidden="true" size={14} />
           <span>Filters</span>
@@ -407,8 +408,11 @@ export function UsageDashboard(props: UsageDashboardProps) {
         </>
       )}
 
-      <details className="usage-dashboard__operational-details">
-        <summary className="oct-section-label">Operational details</summary>
+      <details className="settings-disclosure usage-dashboard__operational-details">
+        <summary>
+          <ChevronRight aria-hidden="true" size={12} />
+          Operational details
+        </summary>
         <div
           aria-label="Operational metrics"
           className="usage-dashboard__operational-metrics"
@@ -862,38 +866,66 @@ interface UsageControlsProps {
   readonly message?: string;
 }
 
+/*
+ * Export is a section-head action. Erasure is its own group at the end of the
+ * page: two rows whose buttons stay neutral, because the colour that says
+ * "this destroys" belongs to the confirm they open, not to a row a person
+ * scrolls past.
+ */
 function UsageControls(props: UsageControlsProps) {
   return (
     <div className="usage-dashboard__controls" role="group" aria-label="Usage data controls">
-      <OctantButton onClick={props.onExportCsv} size="sm" type="button" variant="outline">
-        <Download aria-hidden="true" size={14} /> Export CSV
-      </OctantButton>
-      <OctantButton onClick={props.onExportJson} size="sm" type="button" variant="outline">
-        <Download aria-hidden="true" size={14} /> Export JSON
-      </OctantButton>
-      <OctantButton
-        onClick={props.onRetain}
-        className="usage-dashboard__danger"
-        size="sm"
-        type="button"
-        variant="ghost"
+      <SurfaceSection
+        actions={
+          <>
+            <OctantButton onClick={props.onExportCsv} size="sm" type="button" variant="ghost">
+              <Download aria-hidden="true" size={14} /> Export CSV
+            </OctantButton>
+            <OctantButton onClick={props.onExportJson} size="sm" type="button" variant="ghost">
+              <Download aria-hidden="true" size={14} /> Export JSON
+            </OctantButton>
+          </>
+        }
+        className="usage-dashboard__section"
+        label="Export"
+        note="Only safe reference fields are included; no prompts, file contents, credentials, or account identifiers."
       >
-        <Eraser aria-hidden="true" size={14} /> Purge older than 30 days
-      </OctantButton>
-      <OctantButton
-        onClick={props.onReset}
-        className="usage-dashboard__danger"
-        size="sm"
-        type="button"
-        variant="ghost"
-      >
-        <Trash2 aria-hidden="true" size={14} /> Reset all usage
-      </OctantButton>
-      {props.message !== undefined ? (
-        <p className="usage-dashboard__action-message" role="status">
-          {props.message}
-        </p>
-      ) : null}
+        {props.message !== undefined ? (
+          <p className="usage-dashboard__action-message" role="status">
+            {props.message}
+          </p>
+        ) : null}
+      </SurfaceSection>
+      <SurfaceSection className="usage-dashboard__section" label="Delete usage data">
+        <ul className="surface-list">
+          <li className="surface-row">
+            <div className="surface-row__copy">
+              <span className="oct-row-label">Older than 30 days</span>
+              <span className="oct-row-detail">
+                Removes durable usage records older than the retention threshold.
+              </span>
+            </div>
+            <div className="surface-row__control">
+              <OctantButton onClick={props.onRetain} size="sm" type="button" variant="ghost">
+                <Eraser aria-hidden="true" size={14} /> Purge older than 30 days
+              </OctantButton>
+            </div>
+          </li>
+          <li className="surface-row">
+            <div className="surface-row__copy">
+              <span className="oct-row-label">All usage</span>
+              <span className="oct-row-detail">
+                Clears the local usage projection. This cannot be undone.
+              </span>
+            </div>
+            <div className="surface-row__control">
+              <OctantButton onClick={props.onReset} size="sm" type="button" variant="ghost">
+                <Trash2 aria-hidden="true" size={14} /> Reset all usage
+              </OctantButton>
+            </div>
+          </li>
+        </ul>
+      </SurfaceSection>
     </div>
   );
 }
