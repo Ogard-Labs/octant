@@ -2742,6 +2742,20 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: var(--oct-text-xs);
 }
 
+.project-dialog__git-init {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  color: var(--octant-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.project-dialog__git-init input {
+  margin-top: 0.15rem;
+}
+
 .project-dialog__actions {
   display: flex;
   justify-content: flex-end;
@@ -3008,6 +3022,21 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin: 0;
   color: var(--octant-danger-text);
   font-size: calc(12 * var(--oct-text-step));
+}
+
+.folder-picker__git-init {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  padding: 0 0.25rem;
+  color: var(--octant-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.folder-picker__git-init input {
+  margin-top: 0.15rem;
 }
 
 .folder-picker__actions {
