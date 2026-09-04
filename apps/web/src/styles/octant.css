@@ -1041,6 +1041,13 @@ input.switch:checked::after {
   box-shadow: none;
   transition: background var(--oct-motion-base) var(--oct-ease-standard);
 }
+/* The track's `box-shadow: none` drops the adapter's own drop shadow, but it
+   also outranks the global `:focus-visible` ring, which is a box-shadow over
+   `outline: none`. Keyboard focus has to put that ring back explicitly or the
+   switch takes focus with nothing to show for it. */
+.octant-switch[data-slot="switch"]:focus-visible {
+  box-shadow: var(--oct-focus-ring);
+}
 .octant-switch[data-slot="switch"][data-checked] {
   background: var(--oct-fg);
 }

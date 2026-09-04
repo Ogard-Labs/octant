@@ -454,11 +454,13 @@ describe("WindowChrome", () => {
   });
 
   it("clears the workspace, pane, and tab band fills under a translucent workspace so the glass shows", () => {
-    const rule = cssRule(".shell--workspace-material-translucent.shell-frame .workspace");
-    expect(rule).toContain("background: transparent;");
-    expect(styles).toContain(
-      ".shell--workspace-material-translucent.shell-frame .workspace-thread-tabs",
-    );
+    // Each surface paints the opaque workspace colour on its own, so any one
+    // of them left filled hides the glass behind the whole workspace.
+    for (const surface of [".workspace", ".workspace-pane", ".workspace-thread-tabs"]) {
+      expect(cssRule(`.shell--workspace-material-translucent.shell-frame ${surface}`)).toContain(
+        "background: transparent;",
+      );
+    }
   });
 
   it("keeps the near-opaque native sidebar wash until the host reports applied window vibrancy", () => {
