@@ -1074,9 +1074,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 /* The app's own primitives reach the same column. A switch is not a value
    control — it keeps its natural size and lands on the column's right edge like
-   every other control does. */
+   every other control does. A segmented choice is sized by its segments too:
+   forced to the column, "Narrow / Medium / Wide" overflowed its track and
+   "Session / Project" left 40px of empty track. */
 .setrow-control > .settings-view__range,
-.setrow-control > [data-slot="toggle-group"],
 .setrow-control > .octant-number-stepper,
 .setrow-control > .settings-view__select,
 .setrow-control > .settings-font-picker {
