@@ -5,6 +5,7 @@ import {
   type AutomationNotificationClient,
 } from "@octant/client-runtime/automation-notification-client";
 import { OctantButton } from "../ui/base/OctantButton";
+import { SettingRow, SettingsFactList } from "../settings/primitives";
 
 /**
  * Host Settings → Automation notifications. Opt-in preferences plus honest
@@ -100,59 +101,52 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
   const deliveryLabel = status.deliveryEnabled ? "Enabled" : "Unavailable";
 
   return (
-    <section aria-label="Automation notifications" className="host-settings__notifications">
-      <h2 className="host-settings__heading">Automation notifications</h2>
-      <p className="host-settings__note">
+    <section
+      aria-label="Automation notifications"
+      className="settings-card-section settings-card-section--open host-settings__notifications"
+    >
+      <h2>Automation notifications</h2>
+      <p className="settings-section-note">
         Opt in to redacted host notifications for waiting, approval, failure, and completion.
         Payloads never include tokens, prompts, diffs, paths, credentials, or authority receipts.
       </p>
+      <div className="setgroup">
+        <SettingRow
+          description="Deliver redacted notifications from this host."
+          label="Notifications"
+          scope="host"
+          settingId="host-automation-notifications"
+        >
+          <OctantButton
+            disabled={saving}
+            onClick={() => void toggleEnabled()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            {status.preferences.enabled ? "Disable notifications" : "Enable notifications"}
+          </OctantButton>
+        </SettingRow>
+      </div>
+      <SettingsFactList
+        facts={[
+          { label: "Preference", value: status.preferences.enabled ? "Enabled" : "Disabled" },
+          { label: "Provider delivery", value: providerLabel },
+          { label: "Registered destinations", value: status.registeredDestinationCount },
+          { label: "Delivery", value: deliveryLabel },
+        ]}
+      />
       {message === undefined ? null : (
-        <p className="host-settings__note" role="status">
+        <p className="settings-section-line" role="status">
           {message}
         </p>
       )}
-      <dl className="host-settings__facts">
-        <dt>Preference</dt>
-        <dd>{status.preferences.enabled ? "Enabled" : "Disabled"}</dd>
-        <dt>Provider delivery</dt>
-        <dd
-          className={
-            status.providerDelivery === "available"
-              ? "github-settings__capability-state--available"
-              : "github-settings__capability-state--unavailable"
-          }
-        >
-          {providerLabel}
-        </dd>
-        <dt>Registered destinations</dt>
-        <dd>{status.registeredDestinationCount}</dd>
-        <dt>Delivery</dt>
-        <dd
-          className={
-            status.deliveryEnabled
-              ? "github-settings__capability-state--available"
-              : "github-settings__capability-state--unavailable"
-          }
-        >
-          {deliveryLabel}
-        </dd>
-      </dl>
       {status.providerDelivery === "unavailable" ? (
-        <p className="host-settings__note">
+        <p className="settings-section-line">
           Credentialed APNs/FCM delivery is unavailable on this host until provider credentials are
           configured. Preferences and receipts still persist.
         </p>
       ) : null}
-      <div className="host-settings__controls">
-        <OctantButton
-          disabled={saving}
-          onClick={() => void toggleEnabled()}
-          type="button"
-          variant={status.preferences.enabled ? "secondary" : "default"}
-        >
-          {status.preferences.enabled ? "Disable notifications" : "Enable notifications"}
-        </OctantButton>
-      </div>
     </section>
   );
 }
