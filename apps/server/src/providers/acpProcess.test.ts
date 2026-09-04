@@ -58,7 +58,7 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   copilot: [
     "GitHub Copilot CLI 1.0.82.",
     "GitHub Copilot CLI 1.0.81.",
-    "copilot release 1.0.82 private-noise",
+    "GitHub Copilot CLI 1.0.82. trailing-noise",
   ],
   cline: ["3.0.61", "3.0.60", "cline release 3.0.61 private-noise"],
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],

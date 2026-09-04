@@ -1005,6 +1005,7 @@ function ProviderRow(props: ProviderRowProps) {
                 />
               ) : isGemini ? (
                 <GeminiConfigurationForm
+                  credentialManagementAvailable={props.credentialManagementAvailable}
                   disabled={disabled}
                   instance={props.instance}
                   key={`gemini:${props.instance.version}`}
@@ -1021,6 +1022,7 @@ function ProviderRow(props: ProviderRowProps) {
                 />
               ) : isCline ? (
                 <ClineConfigurationForm
+                  credentialManagementAvailable={props.credentialManagementAvailable}
                   disabled={disabled}
                   instance={props.instance}
                   key={`cline:${props.instance.version}`}
@@ -1030,6 +1032,7 @@ function ProviderRow(props: ProviderRowProps) {
                 />
               ) : isQwen ? (
                 <QwenConfigurationForm
+                  credentialManagementAvailable={props.credentialManagementAvailable}
                   disabled={disabled}
                   instance={props.instance}
                   key={`qwen:${props.instance.version}`}

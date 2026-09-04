@@ -1153,6 +1153,7 @@ export function GlmConfigurationForm(props: {
           aria-label={`Z.AI API key for ${props.instance.displayName}`}
           autoComplete="off"
           className="settings-view__text-input"
+          disabled={!props.credentialManagementAvailable}
           name="apiKey"
           ref={credentialInput}
           spellCheck={false}
@@ -1237,6 +1238,7 @@ function ApiKeyAcpConfigurationForm<
   T extends GeminiProviderConfiguration | ClineProviderConfiguration | QwenProviderConfiguration,
 >(props: {
   readonly disabled: boolean;
+  readonly credentialManagementAvailable: boolean;
   readonly instance: ProviderInstance;
   readonly driverLabel: string;
   readonly binaryLabel: string;
@@ -1286,6 +1288,7 @@ function ApiKeyAcpConfigurationForm<
           aria-label={`${props.apiKeyLabel} for ${props.instance.displayName}`}
           autoComplete="off"
           className="settings-view__text-input"
+          disabled={!props.credentialManagementAvailable}
           name="apiKey"
           ref={credentialInput}
           spellCheck={false}
@@ -1334,6 +1337,7 @@ function ApiKeyAcpConfigurationForm<
 export function GeminiConfigurationForm(props: {
   readonly instance: Extract<ProviderInstance, { driverKind: "gemini" }>;
   readonly disabled: boolean;
+  readonly credentialManagementAvailable: boolean;
   readonly onChange: ProviderSettingsViewProps["onChangeGeminiConfiguration"];
   readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
   readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
@@ -1343,6 +1347,7 @@ export function GeminiConfigurationForm(props: {
       apiKeyLabel="Gemini API key (leave blank to preserve)"
       binaryLabel="gemini binary path"
       configuration={props.instance.configuration}
+      credentialManagementAvailable={props.credentialManagementAvailable}
       disabled={props.disabled}
       driverLabel="Gemini CLI"
       instance={props.instance}
@@ -1357,6 +1362,7 @@ export function GeminiConfigurationForm(props: {
 export function ClineConfigurationForm(props: {
   readonly instance: Extract<ProviderInstance, { driverKind: "cline" }>;
   readonly disabled: boolean;
+  readonly credentialManagementAvailable: boolean;
   readonly onChange: ProviderSettingsViewProps["onChangeClineConfiguration"];
   readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
   readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
@@ -1366,6 +1372,7 @@ export function ClineConfigurationForm(props: {
       apiKeyLabel="Cline API key (leave blank to preserve)"
       binaryLabel="cline binary path"
       configuration={props.instance.configuration}
+      credentialManagementAvailable={props.credentialManagementAvailable}
       disabled={props.disabled}
       driverLabel="Cline"
       instance={props.instance}
@@ -1380,6 +1387,7 @@ export function ClineConfigurationForm(props: {
 export function QwenConfigurationForm(props: {
   readonly instance: Extract<ProviderInstance, { driverKind: "qwen" }>;
   readonly disabled: boolean;
+  readonly credentialManagementAvailable: boolean;
   readonly onChange: ProviderSettingsViewProps["onChangeQwenConfiguration"];
   readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
   readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
@@ -1389,6 +1397,7 @@ export function QwenConfigurationForm(props: {
       apiKeyLabel="OpenAI-compatible API key (leave blank to preserve)"
       binaryLabel="qwen binary path"
       configuration={props.instance.configuration}
+      credentialManagementAvailable={props.credentialManagementAvailable}
       disabled={props.disabled}
       driverLabel="Qwen Code"
       instance={props.instance}

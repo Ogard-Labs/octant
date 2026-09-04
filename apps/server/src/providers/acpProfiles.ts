@@ -611,7 +611,7 @@ const copilotProfile: AcpProviderProfile = {
   unauthenticatedMessage: "GitHub Copilot is not authenticated. Run `copilot login`, then retry.",
   process: {
     agentName: "Copilot",
-    versionPattern: /^GitHub Copilot CLI (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.?\r?\n?/,
+    versionPattern: /^GitHub Copilot CLI (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.?\r?\n?$/,
     minimumVersion: [1, 0, 82],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: { NO_COLOR: "1" },

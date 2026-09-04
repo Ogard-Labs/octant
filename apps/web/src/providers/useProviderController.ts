@@ -1425,19 +1425,9 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
-          const bridge = hostBridge;
-          if (mustSet && bridge !== undefined) {
-            try {
-              await bridge.setProviderCredential(instanceId, credentialValue);
-            } catch {
-              if (mounted.current) {
-                setMessage(
-                  "The provider credential could not be stored, so the configuration was unchanged.",
-                );
-              }
-              return false;
-            }
-          }
+          const priorConfiguration = instance.configuration;
+          // Validate the configuration server-side before rotating the Keychain credential so a
+          // rejected path or stale version leaves the prior key intact.
           try {
             applyResult(
               await client.execute({
@@ -1449,11 +1439,53 @@ export function useProviderController(options: ProviderControllerOptions) {
               current,
               install,
             );
-            return true;
           } catch (error) {
             await recoverRegistryFailure(error, "Provider configuration could not be updated.");
             return false;
           }
+          if (mustSet) {
+            try {
+              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              const rolledBackCurrent = authoritative.current;
+              const rolledBackInstance =
+                rolledBackCurrent === undefined
+                  ? undefined
+                  : findProvider(rolledBackCurrent, instanceId);
+              let rollbackConfirmed = false;
+              if (
+                rolledBackCurrent !== undefined &&
+                rolledBackInstance !== undefined &&
+                rolledBackInstance.driverKind === "glm"
+              ) {
+                try {
+                  applyResult(
+                    await client.execute({
+                      kind: "change-glm-configuration",
+                      instanceId,
+                      expectedVersion: rolledBackInstance.version,
+                      configuration: priorConfiguration,
+                    }),
+                    rolledBackCurrent,
+                    install,
+                  );
+                  rollbackConfirmed = true;
+                } catch {
+                  // Best-effort rollback failed; the saved config may still
+                  // point at the new path with the old key.
+                }
+              }
+              if (mounted.current) {
+                setMessage(
+                  rollbackConfirmed
+                    ? "The new API key could not be stored. The configuration was rolled back; the prior settings and key remain active."
+                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved configuration and re-enter the API key.",
+                );
+              }
+              return false;
+            }
+          }
+          return true;
         }),
       ),
     [client, hostBridge, install, recoverRegistryFailure],
@@ -1478,19 +1510,9 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
-          const bridge = hostBridge;
-          if (mustSet && bridge !== undefined) {
-            try {
-              await bridge.setProviderCredential(instanceId, credentialValue);
-            } catch {
-              if (mounted.current) {
-                setMessage(
-                  "The provider credential could not be stored, so the configuration was unchanged.",
-                );
-              }
-              return false;
-            }
-          }
+          const priorConfiguration = instance.configuration;
+          // Validate the configuration server-side before rotating the Keychain credential so a
+          // rejected path or stale version leaves the prior key intact.
           try {
             applyResult(
               await client.execute({
@@ -1502,11 +1524,53 @@ export function useProviderController(options: ProviderControllerOptions) {
               current,
               install,
             );
-            return true;
           } catch (error) {
             await recoverRegistryFailure(error, "Provider configuration could not be updated.");
             return false;
           }
+          if (mustSet) {
+            try {
+              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              const rolledBackCurrent = authoritative.current;
+              const rolledBackInstance =
+                rolledBackCurrent === undefined
+                  ? undefined
+                  : findProvider(rolledBackCurrent, instanceId);
+              let rollbackConfirmed = false;
+              if (
+                rolledBackCurrent !== undefined &&
+                rolledBackInstance !== undefined &&
+                rolledBackInstance.driverKind === "gemini"
+              ) {
+                try {
+                  applyResult(
+                    await client.execute({
+                      kind: "change-gemini-configuration",
+                      instanceId,
+                      expectedVersion: rolledBackInstance.version,
+                      configuration: priorConfiguration,
+                    }),
+                    rolledBackCurrent,
+                    install,
+                  );
+                  rollbackConfirmed = true;
+                } catch {
+                  // Best-effort rollback failed; the saved config may still
+                  // point at the new path with the old key.
+                }
+              }
+              if (mounted.current) {
+                setMessage(
+                  rollbackConfirmed
+                    ? "The new API key could not be stored. The configuration was rolled back; the prior settings and key remain active."
+                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved configuration and re-enter the API key.",
+                );
+              }
+              return false;
+            }
+          }
+          return true;
         }),
       ),
     [client, hostBridge, install, recoverRegistryFailure],
@@ -1531,19 +1595,9 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
-          const bridge = hostBridge;
-          if (mustSet && bridge !== undefined) {
-            try {
-              await bridge.setProviderCredential(instanceId, credentialValue);
-            } catch {
-              if (mounted.current) {
-                setMessage(
-                  "The provider credential could not be stored, so the configuration was unchanged.",
-                );
-              }
-              return false;
-            }
-          }
+          const priorConfiguration = instance.configuration;
+          // Validate the configuration server-side before rotating the Keychain credential so a
+          // rejected path or stale version leaves the prior key intact.
           try {
             applyResult(
               await client.execute({
@@ -1555,11 +1609,53 @@ export function useProviderController(options: ProviderControllerOptions) {
               current,
               install,
             );
-            return true;
           } catch (error) {
             await recoverRegistryFailure(error, "Provider configuration could not be updated.");
             return false;
           }
+          if (mustSet) {
+            try {
+              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              const rolledBackCurrent = authoritative.current;
+              const rolledBackInstance =
+                rolledBackCurrent === undefined
+                  ? undefined
+                  : findProvider(rolledBackCurrent, instanceId);
+              let rollbackConfirmed = false;
+              if (
+                rolledBackCurrent !== undefined &&
+                rolledBackInstance !== undefined &&
+                rolledBackInstance.driverKind === "cline"
+              ) {
+                try {
+                  applyResult(
+                    await client.execute({
+                      kind: "change-cline-configuration",
+                      instanceId,
+                      expectedVersion: rolledBackInstance.version,
+                      configuration: priorConfiguration,
+                    }),
+                    rolledBackCurrent,
+                    install,
+                  );
+                  rollbackConfirmed = true;
+                } catch {
+                  // Best-effort rollback failed; the saved config may still
+                  // point at the new path with the old key.
+                }
+              }
+              if (mounted.current) {
+                setMessage(
+                  rollbackConfirmed
+                    ? "The new API key could not be stored. The configuration was rolled back; the prior settings and key remain active."
+                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved configuration and re-enter the API key.",
+                );
+              }
+              return false;
+            }
+          }
+          return true;
         }),
       ),
     [client, hostBridge, install, recoverRegistryFailure],
@@ -1584,19 +1680,9 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
-          const bridge = hostBridge;
-          if (mustSet && bridge !== undefined) {
-            try {
-              await bridge.setProviderCredential(instanceId, credentialValue);
-            } catch {
-              if (mounted.current) {
-                setMessage(
-                  "The provider credential could not be stored, so the configuration was unchanged.",
-                );
-              }
-              return false;
-            }
-          }
+          const priorConfiguration = instance.configuration;
+          // Validate the configuration server-side before rotating the Keychain credential so a
+          // rejected path or stale version leaves the prior key intact.
           try {
             applyResult(
               await client.execute({
@@ -1608,11 +1694,53 @@ export function useProviderController(options: ProviderControllerOptions) {
               current,
               install,
             );
-            return true;
           } catch (error) {
             await recoverRegistryFailure(error, "Provider configuration could not be updated.");
             return false;
           }
+          if (mustSet) {
+            try {
+              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              const rolledBackCurrent = authoritative.current;
+              const rolledBackInstance =
+                rolledBackCurrent === undefined
+                  ? undefined
+                  : findProvider(rolledBackCurrent, instanceId);
+              let rollbackConfirmed = false;
+              if (
+                rolledBackCurrent !== undefined &&
+                rolledBackInstance !== undefined &&
+                rolledBackInstance.driverKind === "qwen"
+              ) {
+                try {
+                  applyResult(
+                    await client.execute({
+                      kind: "change-qwen-configuration",
+                      instanceId,
+                      expectedVersion: rolledBackInstance.version,
+                      configuration: priorConfiguration,
+                    }),
+                    rolledBackCurrent,
+                    install,
+                  );
+                  rollbackConfirmed = true;
+                } catch {
+                  // Best-effort rollback failed; the saved config may still
+                  // point at the new path with the old key.
+                }
+              }
+              if (mounted.current) {
+                setMessage(
+                  rollbackConfirmed
+                    ? "The new API key could not be stored. The configuration was rolled back; the prior settings and key remain active."
+                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved configuration and re-enter the API key.",
+                );
+              }
+              return false;
+            }
+          }
+          return true;
         }),
       ),
     [client, hostBridge, install, recoverRegistryFailure],
