@@ -244,7 +244,7 @@ function harness(
         source: "discovered",
         verification: "verified",
         reasoning: "supported",
-        inputModalities: ["text"],
+        inputModalities: ["text", "image"],
         options: [
           { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
         ],
