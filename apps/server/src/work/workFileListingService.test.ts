@@ -42,13 +42,19 @@ async function seed(filesystem: WorkFilesystemFixture, paths: ReadonlyArray<stri
 function service(
   filesystem: WorkFilesystemFixture,
   artifacts: ReadonlyArray<WorkArtifactEntry> = [],
-  options: { readonly maxEntries?: number; readonly maxDepth?: number } = {},
+  options: {
+    readonly maxEntries?: number;
+    readonly maxDepth?: number;
+    readonly writtenByTurns?: ReadonlyArray<string>;
+  } = {},
 ) {
+  const { writtenByTurns, ...rest } = options;
   return new WorkFileListingService({
     filesystem,
     artifactsForProject: () => artifacts,
+    ...(writtenByTurns === undefined ? {} : { pathsWrittenByTurns: () => writtenByTurns }),
     clock: () => "2026-09-04T10:00:00.000Z",
-    ...options,
+    ...rest,
   });
 }
 
@@ -136,6 +142,25 @@ describe("WorkFileListingService", () => {
     if (result.status !== "listed") return;
     expect(result.listing.entries[0]).toMatchObject({ origin: "untouched" });
     expect(result.listing.entries[0]).not.toHaveProperty("artifact");
+  });
+
+  it("counts a file a turn wrote as the work's own even with no artifact record", async () => {
+    const filesystem = workFilesystemFixture(root);
+    await seed(filesystem, [`${root}/draft.md`, `${root}/stale.txt`]);
+
+    // A provider writes with its own tools, so the host has a path and no
+    // format or version. The file still belongs above the rest of the folder.
+    const result = await service(filesystem, [], { writtenByTurns: ["draft.md"] }).list({
+      threadId,
+      projectId,
+      rootPath: root,
+    });
+
+    expect(result.status).toBe("listed");
+    if (result.status !== "listed") return;
+    expect(result.listing.entries[0]).toMatchObject({ path: "draft.md", origin: "authored" });
+    expect(result.listing.entries[0]).not.toHaveProperty("artifact");
+    expect(result.listing.entries[1]).toMatchObject({ path: "stale.txt", origin: "untouched" });
   });
 
   it("refuses a directory outside the bound folder", async () => {

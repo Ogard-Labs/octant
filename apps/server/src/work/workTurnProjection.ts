@@ -82,6 +82,7 @@ export class WorkTurnProjection {
       status: updated.status,
       ...(updated.response === undefined ? {} : { response: updated.response }),
       transcript,
+      ...(updated.wroteFiles === undefined ? {} : { wroteFiles: updated.wroteFiles }),
       ...(updated.failure === undefined ? { failure: undefined } : { failure: updated.failure }),
       version: current.version + 1,
       updatedAt: updated.updatedAt,

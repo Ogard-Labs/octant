@@ -47,6 +47,14 @@ export interface WorkFileListingServiceOptions {
    * written by Work rather than merely found in the folder.
    */
   readonly artifactsForProject: (projectId: ProjectId) => ReadonlyArray<WorkArtifactEntry>;
+  /**
+   * Paths the Project's own turns observed changing in the bound folder. A
+   * provider writes with its own tools and never calls the mutation service, so
+   * without this most real output would list as a file the folder happened to
+   * hold. These carry no artifact facts: watching sees a path change, never a
+   * format or a version.
+   */
+  readonly pathsWrittenByTurns?: (projectId: ProjectId) => ReadonlyArray<string>;
   readonly clock?: () => string;
   readonly maxEntries?: number;
   readonly maxDepth?: number;
@@ -80,6 +88,7 @@ interface PendingDirectory {
 export class WorkFileListingService {
   readonly #filesystem: WorkFilesystemPort;
   readonly #artifactsForProject: (projectId: ProjectId) => ReadonlyArray<WorkArtifactEntry>;
+  readonly #pathsWrittenByTurns: ((projectId: ProjectId) => ReadonlyArray<string>) | undefined;
   readonly #clock: () => string;
   readonly #maxEntries: number;
   readonly #maxDepth: number;
@@ -87,6 +96,7 @@ export class WorkFileListingService {
   constructor(options: WorkFileListingServiceOptions) {
     this.#filesystem = options.filesystem;
     this.#artifactsForProject = options.artifactsForProject;
+    this.#pathsWrittenByTurns = options.pathsWrittenByTurns;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#maxEntries = options.maxEntries ?? MAX_WORK_FILE_LISTING_ENTRIES;
     this.#maxDepth = options.maxDepth ?? MAX_WORK_FILE_LISTING_DEPTH;
@@ -120,6 +130,7 @@ export class WorkFileListingService {
     }
 
     const artifacts = this.#artifactIndex(request.projectId);
+    const writtenByTurns = new Set(this.#pathsWrittenByTurns?.(request.projectId) ?? []);
     const entries: WorkFileListingEntry[] = [];
     const queue: PendingDirectory[] = [
       { absolute: start.canonical, relative: relativeDirectory ?? "", depth: 0 },
@@ -182,11 +193,12 @@ export class WorkFileListingService {
         if (!child.stat.isFile) continue;
 
         const artifact = artifacts.get(childRelative);
+        const authored = artifact !== undefined || writtenByTurns.has(childRelative);
         entries.push({
           kind: "file",
           path: childRelative,
           byteLength: child.stat.size,
-          origin: artifact === undefined ? "untouched" : "authored",
+          origin: authored ? "authored" : "untouched",
           ...(artifact === undefined ? {} : { artifact }),
         });
       }

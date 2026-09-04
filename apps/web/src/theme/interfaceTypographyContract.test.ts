@@ -9,6 +9,9 @@ const technicalMonoSelectors = new Set([
   ".code-worktree-source__disclosure-label",
   ".settings-view__textarea",
   ".github-settings__device-code",
+  // A path the host observed changing is an identifier, not prose: mono is
+  // what keeps `research/notes.txt` legible and its segments distinguishable.
+  ".work-thread-workspace__file",
 ]);
 
 describe("interface typography contract", () => {

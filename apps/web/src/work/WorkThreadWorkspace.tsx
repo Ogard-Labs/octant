@@ -25,7 +25,7 @@ import {
   type WorkTurnClient,
 } from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
-import { Check, Globe2, Paperclip } from "lucide-react";
+import { Check, FileText, Globe2, Paperclip } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -105,6 +105,11 @@ type WorkTranscriptRow =
     }
   | { readonly kind: "steered"; readonly key: string; readonly prompt: string }
   | { readonly kind: "request"; readonly key: string; readonly request: WorkRequest }
+  | {
+      readonly kind: "files";
+      readonly key: string;
+      readonly wrote: NonNullable<WorkTurnState["wroteFiles"]>;
+    }
   | { readonly kind: "status"; readonly key: "status"; readonly text: string };
 
 const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
@@ -321,6 +326,15 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           kind: "message",
           key: `${String(turn.requestId)}-${String(turnIndex)}-${entry.role}-${String(index)}`,
           entry,
+        });
+      }
+      // The files land after the turn that produced them, so the transcript
+      // reads as what was said and then what came out of it.
+      if (turn.wroteFiles !== undefined) {
+        rows.push({
+          kind: "files",
+          key: `${String(turn.requestId)}-${String(turnIndex)}-files`,
+          wrote: turn.wroteFiles,
         });
       }
     }
@@ -962,6 +976,33 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   <TrackerReferenceText asParagraph text={row.prompt} />
                 </div>
               </article>
+            );
+          }
+          if (row.kind === "files") {
+            return (
+              <section
+                aria-label="Files this turn changed"
+                className="work-thread-workspace__files"
+              >
+                <h3 className="oct-section-label">
+                  {row.wrote.paths.length === 1
+                    ? "1 file changed while this ran"
+                    : `${String(row.wrote.paths.length)} files changed while this ran`}
+                </h3>
+                <ul className="work-thread-workspace__file-list">
+                  {row.wrote.paths.map((path) => (
+                    <li className="work-thread-workspace__file" key={path}>
+                      <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
+                      <span>{path}</span>
+                    </li>
+                  ))}
+                </ul>
+                {row.wrote.truncated ? (
+                  <p className="oct-row-detail" role="status">
+                    More changed than Octant could record. Open Files for the folder itself.
+                  </p>
+                ) : null}
+              </section>
             );
           }
           if (row.kind === "request") {

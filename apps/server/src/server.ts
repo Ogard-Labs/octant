@@ -89,6 +89,7 @@ import { ThreadCheckpointService } from "./checkpoint/threadCheckpointService";
 import { createWorkMutationRouteHandler } from "./workMutationRoutes";
 import { createWorkFileListingRouteHandler } from "./workFileListingRoutes";
 import { WorkFileListingService } from "./work/workFileListingService";
+import { WorkTurnFileObserver } from "./work/workTurnFileObserver";
 import { createWorkOverviewRouteHandler } from "./workOverviewRoutes";
 import { WorkArtifactProjection } from "./work/workArtifactProjection";
 import { liveWorkFilesystem } from "./work/workFilesystemPort";
@@ -4156,6 +4157,7 @@ export function startOctantServer(
     });
     const workTurnService = new WorkTurnService({
       persistence,
+      turnFileObserver: new WorkTurnFileObserver(),
       threads: workThreadService,
       peekIssueContextFramed: peekCreateFromIssueFramed,
       consumeIssueContextFramed: consumeCreateFromIssueFramed,
@@ -4760,6 +4762,14 @@ export function startOctantServer(
           [...workArtifactProjection.snapshot().values()].filter(
             (entry) => String(entry.projectId) === String(projectId),
           ),
+        // A provider writes with its own tools and never calls the mutation
+        // service, so the artifact projection alone would show most of a
+        // Project's real output as files the folder merely happened to hold.
+        // The turns' own observations are the other half of that answer.
+        pathsWrittenByTurns: (projectId) =>
+          workTurnProjection
+            .listForProject(projectId)
+            .flatMap((turn) => turn.wroteFiles?.paths ?? []),
       }),
       persistence,
       projects: projectService,

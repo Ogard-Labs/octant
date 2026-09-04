@@ -44,10 +44,12 @@ import {
   WORK_TURN_SAFE_INPUT_TOKENS,
   type WorkTurnContextContribution,
 } from "./workTurnContext";
+import type { WorkTurnWrittenFiles } from "@octant/contracts/work-turns";
 import { Schema } from "effect";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import type { WorkTurnFileObserver } from "./workTurnFileObserver";
 import {
   WorkAttachmentInvalid,
   WorkAttachmentTooLarge,
@@ -150,6 +152,11 @@ export interface WorkTurnServiceDependencies {
   }) => boolean;
   readonly turnRuntime?: WorkTurnRuntimePort;
   /**
+   * Watches the bound folder for the length of a turn. Absent on a host that
+   * cannot watch, which records no written files rather than guessing at them.
+   */
+  readonly turnFileObserver?: WorkTurnFileObserver;
+  /**
    * Resolves the `#thread` mentions a Work turn names. Absent on a host that
    * cannot re-derive Open authority, which reports every mention unread rather
    * than inventing transcript.
@@ -192,6 +199,7 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #turnRuntime: WorkTurnRuntimePort;
+  readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
   readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
   readonly #takeIssueContextFramed: WorkTurnServiceDependencies["takeIssueContextFramed"];
@@ -216,6 +224,7 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
+    this.#turnFileObserver = dependencies.turnFileObserver;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
     this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
     if (dependencies.takeIssueContextFramed !== undefined) {
@@ -541,6 +550,12 @@ export class WorkTurnService {
     if (current === undefined) return;
     this.#persistUpdate(current, { status: "running" });
 
+    // Watching starts before the provider does, so a file written in the first
+    // moments of the turn is seen. The provider writes with its own tools
+    // inside the bound folder and never calls the mutation service, so this is
+    // the only way the host learns what a turn produced.
+    const observation = this.#turnFileObserver?.observe(input.projectRoot);
+
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
@@ -563,12 +578,14 @@ export class WorkTurnService {
         this.#liveUpdates.appendResponse(input.command.threadId, input.command.requestId, delta);
       },
     });
+    const wroteFiles = observation?.finish();
     const latest = this.#projection.lookup(input.command.requestId);
     if (latest === undefined || latest.status === "cancelled") return;
     const live = this.#liveResponses.get(String(input.command.requestId));
     this.#persistOutcome(
       live === undefined ? latest : decodeWorkTurnState({ ...latest, response: live }),
       outcome,
+      wroteFiles,
     );
     const settled = this.#projection.lookup(input.command.requestId);
     if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
@@ -677,21 +694,35 @@ export class WorkTurnService {
     }
   }
 
-  #persistOutcome(turn: WorkTurnState, outcome: WorkTurnRuntimeOutcome): void {
+  #persistOutcome(
+    turn: WorkTurnState,
+    outcome: WorkTurnRuntimeOutcome,
+    // Recorded on every settled outcome, not only a completed one: a turn that
+    // failed or was interrupted may still have written a file, and leaving that
+    // out would tell the person the folder is untouched when it is not.
+    wroteFiles?: WorkTurnWrittenFiles,
+  ): void {
+    const written = wroteFiles === undefined ? {} : { wroteFiles };
     if (outcome.kind === "completed") {
-      this.#persistUpdate(turn, { status: "completed", response: outcome.response });
+      this.#persistUpdate(turn, {
+        status: "completed",
+        response: outcome.response,
+        ...written,
+      });
       return;
     }
     if (outcome.kind === "cancelled") {
       this.#persistUpdate(turn, {
         status: "cancelled",
         ...(turn.response === undefined ? {} : { response: turn.response }),
+        ...written,
       });
       return;
     }
     this.#persistUpdate(turn, {
       status: outcome.kind === "waiting" ? "waiting" : "failed",
       ...(turn.response === undefined ? {} : { response: turn.response }),
+      ...written,
       failure: outcome.failure,
     });
   }
@@ -701,6 +732,7 @@ export class WorkTurnService {
     update: {
       readonly status: "running" | "completed" | "cancelled" | "failed" | "waiting";
       readonly response?: string;
+      readonly wroteFiles?: WorkTurnWrittenFiles;
       readonly failure?: WorkTurnState["failure"];
     },
   ): void {
@@ -730,6 +762,7 @@ export class WorkTurnService {
         status: update.status,
         ...(response === undefined ? {} : { response }),
         transcript,
+        ...(update.wroteFiles === undefined ? {} : { wroteFiles: update.wroteFiles }),
         ...(update.failure === undefined ? {} : { failure: update.failure }),
         updatedAt,
       });

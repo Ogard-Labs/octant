@@ -137,6 +137,34 @@ export const WorkTranscriptEntry = Schema.Struct({
 }).annotations(strict);
 export type WorkTranscriptEntry = typeof WorkTranscriptEntry.Type;
 
+/**
+ * Bound on how many written paths one turn names. Past this the record says
+ * `truncated` and the surface re-reads the folder, which is cheaper and more
+ * honest than naming a thousand files in a transcript.
+ */
+export const MAX_WORK_TURN_WRITTEN_PATHS = 32;
+
+/**
+ * The files in the bound folder that changed while one turn ran.
+ *
+ * This is an observation, not a claim about authorship. Work runs the provider
+ * inside the folder and the provider writes with its own tools, so the host
+ * cannot be told what was written — it can only watch. Anything else changing
+ * the folder during the turn is recorded here too, which is why the vocabulary
+ * is "changed while this ran" and never "the assistant created".
+ *
+ * `truncated` is authoritative: a turn that touched more paths than the record
+ * holds says so, and the surface refreshes wholesale rather than presenting a
+ * partial list as everything that happened.
+ */
+export const WorkTurnWrittenFiles = Schema.Struct({
+  paths: Schema.Array(Schema.NonEmptyTrimmedString).pipe(
+    Schema.maxItems(MAX_WORK_TURN_WRITTEN_PATHS),
+  ),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type WorkTurnWrittenFiles = typeof WorkTurnWrittenFiles.Type;
+
 export const WorkTurnState = Schema.Struct({
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
@@ -152,6 +180,8 @@ export const WorkTurnState = Schema.Struct({
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
   ),
   failure: Schema.optional(WorkTurnFailure),
+  /** Files that changed in the bound folder while this turn ran. */
+  wroteFiles: Schema.optional(WorkTurnWrittenFiles),
   capabilities: WorkTurnCapabilityFacts,
   version: AggregateVersion,
   acceptedAt: UtcTimestamp,
@@ -296,6 +326,7 @@ export const WorkTurnUpdated = Schema.Struct({
   status: Schema.Literal("running", "completed", "cancelled", "failed", "waiting"),
   response: Schema.optional(boundedText(MAX_WORK_TURN_RESPONSE_BYTES)),
   transcript: Schema.optional(Schema.Array(WorkTranscriptEntry).pipe(Schema.maxItems(8))),
+  wroteFiles: Schema.optional(WorkTurnWrittenFiles),
   failure: Schema.optional(WorkTurnFailure),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -334,3 +365,4 @@ export const decodeWorkThreadTranscript = Schema.decodeUnknownSync(WorkThreadTra
 export const decodeWorkTurnStreamFrame = Schema.decodeUnknownSync(WorkTurnStreamFrame);
 export const decodeWorkTurnAccepted = Schema.decodeUnknownSync(WorkTurnAccepted);
 export const decodeWorkTurnUpdated = Schema.decodeUnknownSync(WorkTurnUpdated);
+export const decodeWorkTurnWrittenFiles = Schema.decodeUnknownSync(WorkTurnWrittenFiles);
