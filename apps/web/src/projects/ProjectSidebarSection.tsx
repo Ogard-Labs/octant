@@ -99,6 +99,9 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
+
+/** Thread rows a Project or the Chats group shows before folding behind Show more. */
+const SIDEBAR_THREAD_LIMIT = 8;
 type ProjectSort = "manual" | "updated" | "name";
 
 const CODE_PROJECT_VIEW_ICON_COMPONENTS: Readonly<Record<CodeProjectViewIcon, LucideIcon>> = {
@@ -224,7 +227,7 @@ export interface ProjectSidebarSectionProps {
   /** Absent when the host cannot accept a thread rename, which hides the affordance. */
   readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
-  readonly unfiledLabel?: "Unfiled" | "Recents";
+  readonly unfiledLabel?: "Unfiled" | "Recents" | "Chats";
   readonly threads?: ReadonlyArray<ChatThreadNavigationItem>;
   readonly threadGroups?: Readonly<Record<ThreadGroupId, ReadonlyArray<ChatThreadNavigationItem>>>;
   readonly threadStatus?: "loading" | "ready" | "unavailable";
@@ -591,6 +594,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                   {...(props.onRenameThread === undefined
                     ? {}
                     : { onRenameThread: props.onRenameThread })}
+                  collapsedLimit={SIDEBAR_THREAD_LIMIT}
                   onSelectThread={props.onSelectThread}
                   projectNameForThread={projectNameForThread}
                   threads={unfiled}
@@ -802,6 +806,7 @@ function ProjectGroup(props: {
                 {...(props.onRenameThread === undefined
                   ? {}
                   : { onRenameThread: props.onRenameThread })}
+                collapsedLimit={SIDEBAR_THREAD_LIMIT}
                 id={projectThreadListId(project.id)}
                 label={`Threads in ${project.name}`}
                 onSelectThread={props.onSelectThread!}

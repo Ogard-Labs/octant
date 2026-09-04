@@ -22,6 +22,7 @@
     "./context-client": "./src/contextClient.ts",
     "./diagnostics-export-client": "./src/diagnosticsExportClient.ts",
     "./thread-export-client": "./src/threadExportClient.ts",
+    "./thread-hand-off-client": "./src/threadHandOffClient.ts",
     "./discovery-client": "./src/discoveryClient.ts",
     "./extension-client": "./src/extensionClient.ts",
     "./github-client": "./src/githubClient.ts",

@@ -42,6 +42,7 @@ import {
   EMPTY_TURN_ACTIVITY,
   appendReasoning,
   applyActivityEvent,
+  forgetWrittenPath,
   type CodeTurnActivity,
 } from "./transcriptActivity";
 import { samePollingData } from "../polling/samePollingData";
@@ -431,6 +432,22 @@ export function useCodeController(options: CodeControllerOptions) {
       const key = String(operationId);
       const existing = current.get(key) ?? EMPTY_TURN_ACTIVITY;
       const next = applyActivityEvent(existing, event);
+      // A deletion answers for the whole thread: the turn that removes a file
+      // is rarely the turn that wrote it, so the path leaves every turn's
+      // written paths rather than only the one that reported the change.
+      if (event.kind === "file-change" && event.change === "deleted") {
+        const path = String(event.path);
+        const updated = new Map(current);
+        updated.set(key, next);
+        let changed = next !== existing;
+        for (const [turn, activity] of updated) {
+          const forgotten = forgetWrittenPath(activity, path);
+          if (forgotten === activity) continue;
+          updated.set(turn, forgotten);
+          changed = true;
+        }
+        return changed ? updated : current;
+      }
       if (next === existing) return current;
       const updated = new Map(current);
       updated.set(key, next);

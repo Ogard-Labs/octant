@@ -5,7 +5,7 @@ import type {
 } from "@octant/contracts/canvas-cards";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { CanvasThreadReferenceCard as CardView } from "./CanvasThreadReferenceCard";
 
@@ -16,11 +16,16 @@ export interface CanvasThreadReferenceCardListProps {
   readonly projectId: ProjectId | null;
   readonly refreshKey?: number;
   readonly onOpen?: (card: CanvasThreadReferenceCard) => void;
+  /** The cards the host currently lists for this thread, each time they are read. */
+  readonly onCardsObserved?: (cards: ReadonlyArray<CanvasThreadReferenceCard>) => void;
 }
 
 export function CanvasThreadReferenceCardList(props: CanvasThreadReferenceCardListProps) {
   const [cards, setCards] = useState<ReadonlyArray<CanvasThreadReferenceCard>>([]);
   const [error, setError] = useState<string | null>(null);
+  // Read through a ref so an inline observer does not refetch on every render.
+  const onCardsObserved = useRef(props.onCardsObserved);
+  onCardsObserved.current = props.onCardsObserved;
   useEffect(() => {
     let cancelled = false;
     setError(null);
@@ -31,7 +36,9 @@ export function CanvasThreadReferenceCardList(props: CanvasThreadReferenceCardLi
         projectId: props.projectId,
       })
       .then((outcome) => {
-        if (!cancelled) setCards(outcome.cards);
+        if (cancelled) return;
+        setCards(outcome.cards);
+        onCardsObserved.current?.(outcome.cards);
       })
       .catch(() => {
         if (!cancelled) setError("Canvas references are unavailable.");
