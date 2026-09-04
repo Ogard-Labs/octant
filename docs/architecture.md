@@ -486,7 +486,7 @@ modelId }`, and the model picker is provider-first. Discovery can find
   [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope; see
-  [decisions/0080-image-generation-is-its-own-surface.md](decisions/0080-image-generation-is-its-own-surface.md))
+  [decisions/0079-image-generation-is-its-own-surface.md](decisions/0079-image-generation-is-its-own-surface.md))
   and an app-managed `octant_create_image` tool invoke that job service
   through `/api/image/` when an enabled image profile exists; the composers
   carry no generation action. Agent-generated images preview in the thread by

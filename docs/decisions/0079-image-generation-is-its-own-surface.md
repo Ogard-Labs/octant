@@ -1,4 +1,4 @@
-# 0080. Image generation is its own surface
+# 0079. Image generation is its own surface
 
 **Status:** Accepted
 
