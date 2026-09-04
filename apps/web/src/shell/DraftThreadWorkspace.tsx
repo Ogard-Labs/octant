@@ -1,4 +1,5 @@
 import { decodeGithubIssueContextRequest } from "@octant/contracts";
+import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
   decodeProjectId,
@@ -181,7 +182,14 @@ export interface DraftThreadWorkspaceProps {
     | "onOpenThread"
     | "onOpenInbox"
     | "onOpenIssues"
-  >;
+  > & {
+    /**
+     * An issue the Issues surface handed over: it fills the prompt and the
+     * create-from context once, then the owner clears it.
+     */
+    readonly pendingIssue?: RepositoryIssueRow;
+    readonly onPendingIssueConsumed?: () => void;
+  };
 }
 
 /**
@@ -248,6 +256,33 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   }>();
   const [createFromOpen, setCreateFromOpen] = useState(false);
   const [createFromTab, setCreateFromTab] = useState<"github" | "linear">("github");
+  const adoptIssue = (row: RepositoryIssueRow) => {
+    const reference = `${row.owner}/${row.name}#${String(row.number)}`;
+    let request: GithubIssueContextRequest | undefined;
+    try {
+      request = decodeGithubIssueContextRequest({
+        owner: row.owner,
+        name: row.name,
+        number: row.number,
+      });
+    } catch {
+      request = undefined;
+    }
+    setCreateFromSelection(
+      request === undefined ? undefined : { kind: "github", request, label: reference },
+    );
+    setPromptRequest((current) => ({
+      text: `Work on ${reference}: ${row.title}`,
+      revision: (current?.revision ?? 0) + 1,
+    }));
+  };
+  const pendingIssue = props.codeHome?.pendingIssue;
+  const onPendingIssueConsumed = props.codeHome?.onPendingIssueConsumed;
+  useEffect(() => {
+    if (pendingIssue === undefined) return;
+    adoptIssue(pendingIssue);
+    onPendingIssueConsumed?.();
+  }, [pendingIssue]);
   const issuesCreateAvailable = useGithubIssuesCreateAvailable(
     props.githubClient,
     props.githubPluginEnabled !== false,
@@ -512,23 +547,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 : `Review pull request ${reference}: ${item.title}`,
             );
           }}
-          onPickIssue={(row) => {
-            const reference = `${row.owner}/${row.name}#${String(row.number)}`;
-            let request: GithubIssueContextRequest | undefined;
-            try {
-              request = decodeGithubIssueContextRequest({
-                owner: row.owner,
-                name: row.name,
-                number: row.number,
-              });
-            } catch {
-              request = undefined;
-            }
-            setCreateFromSelection(
-              request === undefined ? undefined : { kind: "github", request, label: reference },
-            );
-            fillPrompt(`Work on ${reference}: ${row.title}`);
-          }}
+          onPickIssue={adoptIssue}
           onPickLinear={(row) => {
             setCreateFromSelection({
               kind: "linear",

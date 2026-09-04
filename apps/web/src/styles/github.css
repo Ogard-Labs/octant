@@ -2,13 +2,10 @@
    surfaces: this overlay lists issues from any accessible repository. */
 
 /* ── Issues ─────────────────────────────────────────────────────────────
-   A Surface: header, one toolbar (repository, state, search), then two
-   panes. The list is rows over hairlines with the number as a quiet
-   identifier; the reader keeps the body as plain text on purpose. */
-.github-issue-browser__choose {
-  max-width: 560px;
-}
-
+   A Surface: header, one toolbar (repository chooser, state, sort, search),
+   then two panes. The list reads like GitHub's: a state glyph, the title,
+   one line of attribution. The reader keeps the body as plain text on
+   purpose, in a card, with the comments as cards under it. */
 .github-issue-browser__repository {
   gap: 6px;
 }
@@ -16,8 +13,7 @@
 .github-issue-browser__repository-name {
   max-width: 28ch;
   overflow: hidden;
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-detail);
+  font-size: var(--oct-text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -53,18 +49,65 @@
 }
 
 .github-issue-browser__repository-popup {
+  display: grid;
+  gap: var(--oct-space-2);
   width: min(36rem, calc(100vw - 2rem));
   max-height: min(60vh, 32rem);
   padding: 12px;
   overflow: auto;
 }
 
+.github-issue-browser__all-recent {
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+}
+
+/* The select recipe fills its row; on a toolbar it is one control among
+   several and the search takes the slack instead. */
+.github-issue-browser__sort {
+  width: auto;
+  min-width: 11rem;
+  flex: 0 0 auto;
+}
+
+.github-issue-browser__empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--oct-space-2);
+  max-width: 36rem;
+  padding: var(--oct-space-8) var(--oct-space-6);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  color: var(--oct-muted);
+  background: var(--octant-card);
+  text-align: center;
+}
+
+.github-issue-browser__empty-title {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.github-issue-browser__empty > .github-issue-browser__note {
+  max-width: 40ch;
+}
+
+.github-issue-browser__empty > button {
+  margin-top: var(--oct-space-1);
+}
+
 .github-issue-browser__body {
   display: grid;
-  grid-template-columns: minmax(280px, 34%) minmax(0, 1fr);
-  min-height: 0;
+  grid-template-columns: minmax(300px, 36%) minmax(0, 1fr);
+  /* The surface scrolls as a page, so the panes claim most of the viewport
+     up front rather than growing with the four rows a short list holds. */
+  min-height: min(72vh, 760px);
   flex: 1 1 auto;
-  border-top: 1px solid var(--oct-border);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
 }
 
 .github-issue-browser__list-pane,
@@ -75,12 +118,21 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: var(--oct-space-3) 0;
+}
+
+.github-issue-browser__list-pane {
+  padding: var(--oct-space-1) 0;
 }
 
 .github-issue-browser__detail-pane {
-  padding: var(--oct-space-4) var(--oct-space-2) var(--oct-space-6) var(--oct-space-6);
+  padding: var(--oct-space-5) var(--oct-space-6) var(--oct-space-8);
   border-left: 1px solid var(--oct-border);
+}
+
+.github-issue-browser__pad,
+.github-issue-browser__list-pane > .github-issue-browser__stale,
+.github-issue-browser__list-pane > .github-issue-browser__across-notes {
+  padding: var(--oct-space-2) var(--oct-space-4);
 }
 
 .github-issue-browser__list {
@@ -92,19 +144,18 @@
 }
 
 .github-issue-browser__list > li + li {
-  border-top: 1px solid var(--oct-border-soft);
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .github-issue-browser__row {
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
   justify-content: flex-start;
-  gap: 4px;
+  gap: var(--oct-space-3);
   width: 100%;
   height: auto;
   min-height: 0;
-  padding: 10px var(--oct-space-3) 10px var(--oct-space-2);
+  padding: 10px var(--oct-space-4);
   border: 0;
   border-radius: 0;
   text-align: start;
@@ -120,14 +171,23 @@
 
 .github-issue-browser__row[aria-current="true"] {
   background: var(--octant-selection);
+  box-shadow: inset 2px 0 0 var(--oct-fg);
 }
 
-/* The select recipe fills its row; on a toolbar it is one control among
-   several and the search takes the slack instead. */
-.github-issue-browser__sort {
-  width: auto;
-  min-width: 11rem;
+.github-issue-browser__row-state {
   flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--oct-meta);
+}
+
+.github-issue-browser__row-state[data-state="open"] {
+  color: var(--octant-success-text);
+}
+
+.github-issue-browser__row-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
 }
 
 .github-issue-browser__row-repository {
@@ -135,7 +195,7 @@
   max-width: 100%;
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-detail);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -151,8 +211,9 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
   overflow-wrap: anywhere;
+  color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
   line-height: var(--oct-leading-snug);
 }
 
@@ -183,7 +244,7 @@
 
 .github-issue-browser__more {
   align-self: flex-start;
-  margin-top: var(--oct-space-2);
+  margin: var(--oct-space-2) var(--oct-space-3);
 }
 
 .github-issue-browser__stale {
@@ -201,13 +262,18 @@
 }
 
 .github-issue-browser__placeholder {
-  padding: var(--oct-space-6) 0;
+  display: grid;
+  justify-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-8) 0;
+  color: var(--oct-meta);
+  text-align: center;
 }
 
 .github-issue-browser__detail {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-4);
+  gap: var(--oct-space-5);
   min-width: 0;
   max-width: 76ch;
 }
@@ -218,6 +284,14 @@
   gap: var(--oct-space-2);
 }
 
+.github-issue-browser__detail-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  margin: 0;
+  font-size: var(--oct-text-xs);
+}
+
 .github-issue-browser__detail-title {
   margin: 0;
   overflow-wrap: anywhere;
@@ -226,6 +300,21 @@
   font-weight: 500;
   letter-spacing: var(--oct-tracking-tight);
   line-height: 1.25;
+}
+
+.github-issue-browser__detail-actions {
+  display: flex;
+  gap: var(--oct-space-2);
+  padding-top: var(--oct-space-1);
+}
+
+.github-issue-browser__reader {
+  display: grid;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-4);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-app-background);
 }
 
 .github-issue-browser__url {
@@ -259,7 +348,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-3);
-  padding-top: var(--oct-space-2);
 }
 
 .github-issue-browser__comments-title {
@@ -268,31 +356,31 @@
   gap: var(--oct-space-2);
   margin: 0;
   padding-bottom: var(--oct-space-2);
-  border-bottom: 1px solid var(--oct-border);
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 .github-issue-browser__comments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
   margin: 0;
   padding: 0;
   list-style: none;
-  display: flex;
-  flex-direction: column;
 }
 
 .github-issue-browser__comment {
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-3) 0;
-}
-
-.github-issue-browser__comment + .github-issue-browser__comment {
-  border-top: 1px solid var(--oct-border-soft);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-app-background);
 }
 
 .github-issue-browser__comment-author {
   color: var(--oct-fg-2);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-medium);
 }
 
 @media (max-width: 680px) {
@@ -301,7 +389,7 @@
   }
 
   .github-issue-browser__detail-pane {
-    padding-left: 0;
+    padding: var(--oct-space-4);
     border-left: 0;
     border-top: 1px solid var(--oct-border);
   }

@@ -566,6 +566,16 @@ the global preview bound. Known closed or merged identities are recovered
 separately. Stale cached data is visibly stale. Provider usage follows the same
 provider-neutral context/limit model and preserves unavailable values.
 
+The Issues surface reads like GitHub's issue list: one toolbar with a
+repository chooser (All recent repositories, or one repository, from the same
+popover), state, sort, and search; then a bordered two-pane card with rows on
+the left (state glyph, `#number title`, repository and author beneath) and the
+reader on the right (kicker, title, state and dates, labels, Start a Code
+thread, the body and each comment in their own cards). With no recent
+repository the page asks for one in a single panel rather than opening on the
+whole catalogue. Start a Code thread leaves the surface with the issue
+attached to a new draft as its Create from context.
+
 ## Iconography and provider marks
 
 Lucide is the product icon library. Use 14–16px for compact controls and

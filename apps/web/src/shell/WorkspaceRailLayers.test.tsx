@@ -207,6 +207,12 @@ describe("WorkspaceRailLayers", () => {
     await user.click(screen.getByRole("button", { name: "Issues" }));
     expect(await screen.findByRole("region", { name: "GitHub issues" })).toBeVisible();
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
+    // With no recent repository the page asks for one rather than listing
+    // the catalogue; the chooser on the toolbar is where the list lives.
+    expect(screen.queryByRole("option", { name: /octant\/octant/ })).not.toBeInTheDocument();
+    await user.click(
+      await screen.findByRole("button", { name: "Repository: Choose a repository" }),
+    );
     expect(await screen.findByRole("option", { name: /octant\/octant/ })).toBeVisible();
   });
 
