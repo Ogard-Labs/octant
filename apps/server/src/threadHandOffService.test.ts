@@ -58,6 +58,7 @@ function setup(input: {
   readonly exported?: ThreadExportBundle;
   readonly readiness?: "ready" | "unavailable" | undefined;
   readonly markdown?: string;
+  readonly saveRefusal?: string;
 }) {
   const exportThread = vi.fn(async () =>
     input.exported === undefined
@@ -67,11 +68,15 @@ function setup(input: {
   const complete = vi.fn(
     async () => input.markdown ?? "## Objective\nShip it.\n\n## How to continue\n- Run the tests.",
   );
-  const save = vi.fn(async () => ({
-    kind: "saved" as const,
-    canvasId: "30000000-0000-4000-8000-000000000001",
-    versionId: "30000000-0000-4000-8000-000000000002",
-  }));
+  const save = vi.fn(async () =>
+    input.saveRefusal === undefined
+      ? ({
+          kind: "saved" as const,
+          canvasId: "30000000-0000-4000-8000-000000000001",
+          versionId: "30000000-0000-4000-8000-000000000002",
+        } as const)
+      : ({ kind: "refused" as const, message: input.saveRefusal } as const),
+  );
   const service = new ThreadHandOffService({
     exports: { exportThread: exportThread as never },
     provider: { readiness: () => ("readiness" in input ? input.readiness : "ready"), complete },
@@ -154,6 +159,16 @@ describe("handing off a thread", () => {
       kind: "refused",
       reason: "not-found",
     });
+  });
+
+  it("still refuses readably when the document port denies at length", async () => {
+    // The contract bounds a refusal message at 400 characters and the port's
+    // own denial text is unbounded, so an over-long denial must stay a
+    // refusal rather than fail to decode into one.
+    const { service } = setup({ exported: bundle(), saveRefusal: "n".repeat(900) });
+    const outcome = await service.handOff(windowId, "local-window", { mode: "code", threadId });
+    expect(outcome).toMatchObject({ kind: "refused", reason: "document-refused" });
+    expect(outcome.kind === "refused" ? outcome.message : "").toHaveLength(400);
   });
 
   it("says so when the provider answers with nothing usable", async () => {

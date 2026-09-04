@@ -273,6 +273,7 @@ import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
 import type { DockToolCapabilities } from "./shell/dockToolAvailability";
 import {
   NO_WRITTEN_DOCUMENTS,
+  forgetDeletedWrittenDocument,
   isDocumentPath,
   noteExistingDocuments,
   noteWrittenDocument,
@@ -772,6 +773,12 @@ function LaunchedShell(
   >(new Map());
   const writtenDocumentsRef = useRef(writtenDocumentsByThread);
   writtenDocumentsRef.current = writtenDocumentsByThread;
+  /**
+   * Document paths each thread's live turns reported on the previous pass, so
+   * a path that disappears reads as the turn deleting it rather than as a
+   * reopened thread replaying history that never carried written paths.
+   */
+  const writtenPathsSeen = useRef(new Map<string, ReadonlySet<string>>());
   const [dockSidecarsByThread, setDockSidecarsByThread] = useState<
     ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>
   >(new Map());
@@ -882,6 +889,11 @@ function LaunchedShell(
     codePullRequestsOpen && selectedProjectPullRequest !== undefined;
   const dockThreadKey =
     dockThreadId === undefined ? undefined : threadUtilityDockKey(activeMode, String(dockThreadId));
+  // A hand-off can take minutes, and the person is free to move threads while
+  // it runs, so its completion reads the dock's thread as it is then rather
+  // than as it was when the request was made.
+  const dockThreadKeyRef = useRef(dockThreadKey);
+  dockThreadKeyRef.current = dockThreadKey;
   const dockState =
     dockThreadKey === undefined
       ? fallbackDockState
@@ -1686,14 +1698,19 @@ function LaunchedShell(
     const offers = writtenDocumentsByThread.get(key) ?? NO_WRITTEN_DOCUMENTS;
     let next = offers;
     let open = false;
+    const livePaths = new Set<string>();
     for (const activity of activeCodeTurnActivity.values()) {
       for (const path of activity.writtenPaths ?? []) {
         if (!isDocumentPath(path)) continue;
+        livePaths.add(path);
         const noted = noteWrittenDocument(next, { kind: "file", path });
         next = noted.offers;
         if (noted.open) open = true;
       }
     }
+    const previousPaths = writtenPathsSeen.current.get(key) ?? new Set<string>();
+    writtenPathsSeen.current.set(key, livePaths);
+    next = forgetDeletedWrittenDocument(next, previousPaths, livePaths);
     if (next === offers) return;
     setWrittenDocumentsByThread((current) => new Map(current).set(key, next));
     if (!open) return;
@@ -1741,7 +1758,8 @@ function LaunchedShell(
   /**
    * The host handed the thread off: its document is a Canvas of that thread,
    * so the Canvas tool opens on it beside the transcript, once, like any
-   * document a turn wrote.
+   * document a turn wrote. The dock rises only when that thread is the one in
+   * front, because 0079 opens the document without moving focus.
    */
   function noteHandedOffDocument(mode: OctantMode, threadId: string, canvasId: string): void {
     const key = threadUtilityDockKey(mode, threadId);
@@ -1749,8 +1767,14 @@ function LaunchedShell(
     const noted = noteWrittenDocument(offers, { kind: "canvas", canvasId });
     setWrittenDocumentsByThread((current) => new Map(current).set(key, noted.offers));
     if (!noted.open) return;
-    setDockVisible(true);
+    // The tab opens for the thread that was handed off, whichever thread that
+    // is. Raising the dock is the part that only makes sense in front: a row
+    // menu can hand off a thread the pane is not showing, and the dock renders
+    // the pane's thread, so it would open on another thread's tools with no
+    // handed-off Canvas in them. The offer waits instead.
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "canvas"));
+    if (dockThreadKeyRef.current !== key) return;
+    setDockVisible(true);
   }
   const retainedDockState = retainAvailableUtilityTabs(
     dockState,

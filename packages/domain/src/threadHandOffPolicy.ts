@@ -121,8 +121,12 @@ function boundedTranscript(bundle: ThreadExportBundle): {
  * Markdown from the provider becomes the closed Canvas catalog: `#` lines are
  * headings, blank lines separate paragraphs, list items keep their bullet as
  * text. Inline emphasis marks are dropped rather than rendered, because a
- * rich-text block shows its text as written. Nothing else — no HTML, no
- * links, no code — reaches the document.
+ * rich-text block shows its text as written. Nothing else — no HTML and no
+ * links — reaches the document.
+ *
+ * A fence the provider was told not to write loses its markers and keeps its
+ * text. The document is a summary a person reads, so prose the provider
+ * wrongly fenced is worth more inside it than dropped from it.
  */
 export function threadHandOffDocumentBlocks(markdown: string): ReadonlyArray<CanvasBlock> {
   const blocks: CanvasBlock[] = [];

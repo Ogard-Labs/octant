@@ -159,10 +159,16 @@ export class ThreadHandOffService {
   }
 }
 
+/** The contract bounds a refusal message; a port's own denial text is not. */
+const MAX_REFUSAL_MESSAGE_CHARS = 400;
+
 function refused(reason: ThreadHandOffRefusalReason, message?: string): ThreadHandOffOutcome {
   return decodeThreadHandOffOutcome({
     kind: "refused",
     reason,
-    ...(message === undefined ? {} : { message }),
+    // Clamped rather than passed through: a long Canvas denial would fail to
+    // decode here and turn a refusal the person can read into a request that
+    // simply failed.
+    ...(message === undefined ? {} : { message: message.slice(0, MAX_REFUSAL_MESSAGE_CHARS) }),
   });
 }

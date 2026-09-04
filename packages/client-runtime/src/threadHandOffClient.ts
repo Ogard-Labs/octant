@@ -33,43 +33,48 @@ export function createThreadHandOffClient(
     async handOffThread(request) {
       let response: Response;
       const controller = new AbortController();
+      // The timer has to outlive the headers. `fetch` settles once they
+      // arrive, so a body that then stalls would otherwise leave the call
+      // pending forever with the composer still reading as busy.
       const timer = setTimeout(() => controller.abort(), HAND_OFF_TIMEOUT_MS);
       try {
-        response = await resolvedFetch(
-          new URL("/api/threads/hand-off", options.baseUrl).toString(),
-          {
-            method: "POST",
-            headers: {
-              "x-octant-window-capability": options.windowCapability,
-              "content-type": "application/json",
+        try {
+          response = await resolvedFetch(
+            new URL("/api/threads/hand-off", options.baseUrl).toString(),
+            {
+              method: "POST",
+              headers: {
+                "x-octant-window-capability": options.windowCapability,
+                "content-type": "application/json",
+              },
+              body: JSON.stringify(request),
+              signal: controller.signal,
             },
-            body: JSON.stringify(request),
-            signal: controller.signal,
-          },
-        );
-      } catch {
-        throw new ThreadHandOffClientError("Thread hand-off is unavailable.");
+          );
+        } catch {
+          throw new ThreadHandOffClientError("Thread hand-off is unavailable.");
+        }
+
+        if (!response.ok && response.status !== 404 && response.status !== 401) {
+          throw new ThreadHandOffClientError(
+            `Thread hand-off failed with status ${response.status}.`,
+          );
+        }
+
+        let body: unknown;
+        try {
+          body = await response.json();
+        } catch {
+          throw new ThreadHandOffClientError("Thread hand-off returned an invalid response.");
+        }
+
+        try {
+          return decodeThreadHandOffOutcome(body);
+        } catch {
+          throw new ThreadHandOffClientError("Thread hand-off returned an invalid response.");
+        }
       } finally {
         clearTimeout(timer);
-      }
-
-      if (!response.ok && response.status !== 404 && response.status !== 401) {
-        throw new ThreadHandOffClientError(
-          `Thread hand-off failed with status ${response.status}.`,
-        );
-      }
-
-      let body: unknown;
-      try {
-        body = await response.json();
-      } catch {
-        throw new ThreadHandOffClientError("Thread hand-off returned an invalid response.");
-      }
-
-      try {
-        return decodeThreadHandOffOutcome(body);
-      } catch {
-        throw new ThreadHandOffClientError("Thread hand-off returned an invalid response.");
       }
     },
   };
