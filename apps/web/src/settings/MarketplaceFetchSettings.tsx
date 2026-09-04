@@ -1,4 +1,5 @@
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { ChevronRight } from "lucide-react";
 
 export interface MarketplaceFetchSettingsProps {
   readonly enabled: boolean;
@@ -24,8 +25,11 @@ export function MarketplaceFetchSettings(props: MarketplaceFetchSettingsProps) {
 
 export function MarketplaceFetchDisclosure() {
   return (
-    <details className="marketplace-fetch-settings__details">
-      <summary>Network details</summary>
+    <details className="settings-disclosure marketplace-fetch-settings__details">
+      <summary>
+        <ChevronRight aria-hidden="true" size={12} />
+        Network details
+      </summary>
       <p className="marketplace-fetch-settings__disclosure">
         Search contacts skills.sh and the npm registry with the text you typed. Inspecting or
         installing catalog packages fetches from GitHub. Opening Marketplace never fetches.

@@ -30,10 +30,25 @@
   margin-top: var(--oct-space-6);
 }
 
-.extensions-settings__section > .setgroup-head {
+/* Section labels wear the section-label recipe (13/500 over a hairline), not
+   the bolder group head. The first section of each view carries the
+   Installed / Marketplace switch on its label line. */
+.extensions-settings__section > .setgroup-head,
+.extensions-settings__section > .settings-section-head > .setgroup-head {
   min-height: auto;
   padding: 10px 0 8px;
   border-bottom: 0;
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.3;
+}
+
+.extensions-settings__section > .settings-section-head {
+  padding: 0;
+}
+
+.extensions-settings__section > .settings-section-head > .setgroup-head {
+  padding: 0;
 }
 
 .extensions-settings__section--attention .extensions-settings__body {
@@ -113,10 +128,21 @@
   justify-self: start;
 }
 
+/* A skill's state is a word in secondary text, coloured only through the
+   status colours: "Available" and "Needs review" read at one size with no
+   pill around either. */
+.extensions-settings__state-label,
+.extensions-settings .extcard-right > .badge {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: var(--oct-text-detail);
+  white-space: nowrap;
+}
+
 .extensions-settings__state-label {
   color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  white-space: nowrap;
 }
 
 .extensions-settings__search,
@@ -153,14 +179,12 @@
   white-space: nowrap;
 }
 
+/* Expanded details are facts over hairlines, not a grey well inside the row. */
 .extensions-settings__technical-details {
   grid-column: 2 / -1;
   display: grid;
-  gap: var(--oct-space-3);
+  gap: var(--oct-space-1);
   margin-top: var(--oct-space-3);
-  padding: var(--oct-space-3) var(--oct-space-4);
-  background: var(--oct-surface-warm);
-  border-radius: var(--oct-radius-sm);
 }
 
 .extensions-settings__technical-source {
@@ -239,8 +263,8 @@
 
 .extensions-settings__compatibility {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: var(--oct-space-2) var(--oct-space-5);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   margin: 0;
 }
 
@@ -250,21 +274,29 @@
 }
 
 .extensions-settings__compatibility > div {
+  display: grid;
   min-width: 0;
+  min-height: 36px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-4);
+  padding: 8px 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .extensions-settings__compatibility dt {
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
   letter-spacing: 0;
   text-transform: none;
-  color: var(--oct-meta);
+  color: var(--oct-fg);
 }
 
 .extensions-settings__compatibility dd {
   margin: 0;
-  font-size: var(--oct-text-xs);
-  color: var(--oct-fg-2);
+  font-size: var(--oct-text-detail);
+  color: var(--oct-muted);
+  text-align: end;
   overflow-wrap: anywhere;
 }
 
@@ -272,23 +304,19 @@
   color: var(--oct-warn-fg);
 }
 
+/* A failure is one sentence in the warning colour: "code: message". */
 .extensions-settings__failure {
   grid-column: 2 / -1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-1);
+  display: block;
   margin: var(--oct-space-2) 0 0;
-  padding: 6px 9px;
+  padding: 0;
   color: var(--oct-warn-fg);
-  background: transparent;
-  border-left: 2px solid var(--oct-warn-fg);
-  border-radius: 0;
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
 }
 
-.extensions-settings__failure span:first-child {
-  text-transform: capitalize;
-  font-weight: var(--oct-weight-strong);
+.extensions-settings__failure span:first-child::after {
+  content: ": ";
 }
 
 .extensions-settings__diagnostics {

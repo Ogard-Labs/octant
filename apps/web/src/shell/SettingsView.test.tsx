@@ -1021,7 +1021,11 @@ describe("SettingsView", () => {
     renderSettings({ extensionClient: extensionClient as never });
     navigateTo("Skills & Extensions");
     expect(await screen.findAllByRole("heading", { name: "Skills & Extensions" })).toHaveLength(1);
-    expect(await screen.findByRole("tab", { name: /installed/i })).toBeVisible();
+    expect(
+      within(await screen.findByRole("group", { name: "View" })).getByRole("button", {
+        name: /installed/i,
+      }),
+    ).toBeVisible();
   });
 
   it("mounts the Host section when a host control client is provided", async () => {
