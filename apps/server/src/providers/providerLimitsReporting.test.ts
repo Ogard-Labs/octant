@@ -14,7 +14,20 @@ describe("provider limits reporting", () => {
   });
 
   it("closes the question for runtimes that never report and for local models", () => {
-    for (const kind of ["opencode", "pi", "oh-my-pi", "kilo", "devin", "mistral-vibe"] as const) {
+    for (const kind of [
+      "opencode",
+      "pi",
+      "oh-my-pi",
+      "kilo",
+      "devin",
+      "mistral-vibe",
+      "goose",
+      "glm",
+      "gemini",
+      "copilot",
+      "cline",
+      "qwen",
+    ] as const) {
       expect(unavailableLimitsReason(kind, undefined)).toBe("runtime-does-not-report");
     }
     expect(unavailableLimitsReason("ollama", "silent")).toBe("local-runtime");
