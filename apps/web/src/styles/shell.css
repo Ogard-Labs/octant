@@ -2408,7 +2408,6 @@ form > .work-composer-adapter__attachments {
 .code-home__card-detail {
   flex: 0 0 auto;
   color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
 }
 
@@ -2416,7 +2415,6 @@ form > .work-composer-adapter__attachments {
   min-width: 0;
   overflow: hidden;
   color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
