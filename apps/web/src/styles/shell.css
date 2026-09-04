@@ -484,6 +484,15 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--octant-workspace-translucent-strong);
 }
 
+/* The workspace, its panes, and the thread tab band each paint the opaque
+   workspace colour. With the layer beneath them translucent, that fill hid
+   the glass entirely, so the setting appeared to do nothing. */
+.shell--workspace-material-translucent.shell-frame .workspace,
+.shell--workspace-material-translucent.shell-frame .workspace-pane,
+.shell--workspace-material-translucent.shell-frame .workspace-thread-tabs {
+  background: transparent;
+}
+
 html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"]))
   .shell-frame.shell--workspace-material-translucent
   > .workspace-layer {
