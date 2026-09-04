@@ -69,7 +69,9 @@ export function SurfaceHeader(props: SurfaceHeaderProps) {
 export interface SurfaceSectionProps {
   readonly label: string;
   readonly note?: ReactNode;
-  readonly children: ReactNode;
+  /** Ghost actions that act on the whole section, on the label's line. */
+  readonly actions?: ReactNode;
+  readonly children?: ReactNode;
   readonly className?: string;
 }
 
@@ -82,7 +84,14 @@ export function SurfaceSection(props: SurfaceSectionProps) {
         props.className === undefined ? "surface-section" : `surface-section ${props.className}`
       }
     >
-      <h2 className="oct-section-label">{props.label}</h2>
+      {props.actions === undefined ? (
+        <h2 className="oct-section-label">{props.label}</h2>
+      ) : (
+        <div className="surface-section__head">
+          <h2 className="oct-section-label">{props.label}</h2>
+          <div className="surface-section__actions">{props.actions}</div>
+        </div>
+      )}
       {props.note === undefined ? null : <p className="surface-section__note">{props.note}</p>}
       {props.children}
     </section>
