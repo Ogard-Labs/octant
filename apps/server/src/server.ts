@@ -458,8 +458,13 @@ import {
 import { createCodeThreadLocalServerScopeResolver } from "./localServers/localServerScopeResolver";
 import { LocalServerService } from "./localServers/localServerService";
 import { createDiagnosticsExportRouteHandler } from "./diagnosticsExportRoutes";
-import { createThreadExportRouteHandler } from "./threadExportRoutes";
+import {
+  createThreadExportRouteHandler,
+  createThreadHandOffRouteHandler,
+} from "./threadExportRoutes";
 import { ThreadExportService } from "./threadExportService";
+import { makeThreadHandOffCompletion } from "./threadHandOffCompletion";
+import { ThreadHandOffService } from "./threadHandOffService";
 import { createValidationEvidenceRouteHandler } from "./validationEvidenceRoutes";
 import { createValidationEvidenceLoader } from "./validation/validationEvidenceLoader";
 import { createExtensionRouteHandler } from "./extensionRoutes";
@@ -5029,9 +5034,13 @@ export function startOctantServer(
     };
     // Resolved from the Canvas's own provenance and durable host state, so
     // the scope a client echoes is never the scope that authorizes it.
-    const resolveCanvasWorkspace = (
-      provenance: import("@octant/contracts").CanvasProvenance,
-    ): import("@octant/contracts/canvas-cards").CanvasWorkspaceScope | undefined => {
+    // Takes only what it reads, so a caller that has a thread but no full
+    // provenance — a hand-off, for one — derives its scope the same way
+    // rather than building a parallel one.
+    const resolveCanvasWorkspace = (provenance: {
+      readonly mode: OctantMode;
+      readonly threadId: string;
+    }): import("@octant/contracts/canvas-cards").CanvasWorkspaceScope | undefined => {
       if (provenance.mode === "chat") {
         const thread = persistence.readChatThread(provenance.threadId as never);
         if (thread === undefined || thread.lifecycle !== "active") return undefined;
@@ -5536,6 +5545,100 @@ export function startOctantServer(
     });
     const artifactMirrorRoutes = createArtifactMirrorRouteHandler({
       mirror: artifactMirrorService,
+      windowAuthorityStore,
+    });
+    // Hand-off starts from the export cut and keeps its document as a Canvas
+    // of the thread, resolved from the thread the way an authoring agent's
+    // Canvas is — never from whichever Project the window happens to show.
+    const threadHandOffService = new ThreadHandOffService({
+      exports: threadExportService,
+      provider: {
+        readiness: (providerInstanceId) => {
+          const instance = persistence.readProviderInstance(providerInstanceId);
+          if (instance === undefined || !instance.enabled) return undefined;
+          return providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
+        },
+        complete: makeThreadHandOffCompletion({
+          resolveDriver: (providerInstanceId) => {
+            const instance = persistence.readProviderInstance(providerInstanceId);
+            if (instance === undefined || !instance.enabled) return undefined;
+            try {
+              return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+            } catch {
+              return undefined;
+            }
+          },
+          scratchRoot: (threadId) => {
+            const root = join(persistence.dataDirectory, "hand-off-scratch", threadId);
+            mkdirSync(root, { recursive: true, mode: 0o700 });
+            return root;
+          },
+          uuid: randomUUID,
+        }),
+      },
+      documents: {
+        save: async ({ windowId, mode, threadId, projectId, title, blocks }) => {
+          const bootstrap = await projectService.bootstrap(windowId);
+          const project = bootstrap.active.find(
+            (candidate) => String(candidate.id) === String(projectId),
+          );
+          if (project === undefined || project.lifecycle !== "active" || project.type !== mode) {
+            return { kind: "refused", message: "The thread's Project is unavailable." };
+          }
+          // The scope is derived by the resolver the Canvas surfaces already
+          // use, not built alongside it. A hand-built scope disagreed with the
+          // resolver on all three modes, and `validateCanvasRefreshRequest`
+          // compares the two, so a handed-off Canvas could refuse its own
+          // refresh as a scope mismatch.
+          //
+          // It also answers with `undefined` rather than throwing: the provider
+          // call before this is bounded at 180 seconds, and the thread can be
+          // archived or its checkout can go away while that runs.
+          const workspace = resolveCanvasWorkspace({ mode, threadId });
+          if (workspace === undefined) {
+            return { kind: "refused", message: "The thread's workspace is unavailable." };
+          }
+          const created = canvasService.create(
+            {
+              schemaVersion: 1,
+              kind: "canvas-create",
+              requestId: randomUUID(),
+              intent: "blank",
+              hostId: LOCAL_HOST_ID,
+              mode,
+              workspace,
+              originThreadId: threadId,
+              title,
+              sourceManifest: [],
+              // A hand-off is a document: it reads nothing and runs nothing.
+              requestedAuthority: {
+                filesystem: false,
+                shell: false,
+                git: false,
+                network: false,
+                tools: false,
+                subagents: false,
+                executionPolicy: "plan",
+                permissionPersistence: "current-session",
+              },
+            },
+            { mode, projectId: String(projectId) },
+            { id: String(project.id), type: mode, lifecycle: "active" },
+            blocks,
+          );
+          if (created.kind !== "accepted") {
+            return { kind: "refused", message: created.message };
+          }
+          return {
+            kind: "saved",
+            canvasId: String(created.card.canvasId),
+            versionId: String(created.card.versionId),
+          };
+        },
+      },
+    });
+    const threadHandOffRoutes = createThreadHandOffRouteHandler({
+      service: threadHandOffService,
       windowAuthorityStore,
     });
     const canvasRoutes = createCanvasRouteHandler({
@@ -6082,6 +6185,7 @@ export function startOctantServer(
       (await usageRoutes(request)) ??
       (await diagnosticsExportRoutes(request)) ??
       (await threadExportRoutes(request)) ??
+      (await threadHandOffRoutes(request)) ??
       (await computerUseRoutes(request)) ??
       (await validationEvidenceRoutes(request)) ??
       (await extensionRoutes(request)) ??

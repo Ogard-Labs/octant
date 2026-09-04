@@ -87,6 +87,7 @@ distilled successor of the earlier long-form design specifications.
 | [0077](0077-environment-is-a-dock-tool.md)                                  | Environment is a context-aware dock tool                                                    | Accepted           |
 | [0078](0078-the-welcome-composer-carries-its-context-beneath-the-prompt.md) | The welcome composer carries its context beneath the prompt                                 | Accepted           |
 | [0079](0079-code-project-creation-may-initialize-git.md)                    | Code Project creation may initialize Git on request                                         | Accepted           |
+| [0080](0080-hand-off-writes-a-canvas-from-the-export-cut.md)                | Hand off writes a Canvas from the export cut                                                | Accepted           |
 
 ## Adding an ADR
 

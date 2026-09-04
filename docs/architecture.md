@@ -233,7 +233,13 @@ Tests, and iOS Simulator, as mode and capability allow. Document shows the
 Markdown or text file the Code thread's turn most recently wrote, read through
 the host-authorized file open; the renderer offers a written document (or a
 Chat-authored Canvas) in the dock once per document, never after the person
-closed its tab, and never by moving focus. The dock follows the active
+closed its tab, and never by moving focus. Hand off (`POST
+/api/threads/hand-off`) starts from the thread export cut, asks the thread's
+own provider for a six-section hand-off document in one tool-free request,
+keeps it as a Canvas of the thread, and opens that Canvas in the dock; a
+running turn, an unready provider, or a thread outside a Project is refused as
+an ordinary answer (see
+[decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md](decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md)). The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal

@@ -301,6 +301,25 @@ describe("ProjectThreadRows", () => {
     expect(onExportThread).toHaveBeenCalledWith("thread-one", "Controller foundation");
   });
 
+  it("hands off a thread from its own right-click menu", async () => {
+    const onHandOffThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onHandOffThread }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Hand off…" }));
+
+    expect(onHandOffThread).toHaveBeenCalledWith("thread-one", "Controller foundation");
+  });
+
   it("offers no export when the host resolves no export client", async () => {
     render(
       <ProjectThreadRows

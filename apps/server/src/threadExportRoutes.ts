@@ -2,23 +2,28 @@ import {
   decodeThreadExportOutcome,
   type ThreadExportOutcome,
 } from "@octant/contracts/thread-export";
+import {
+  decodeThreadHandOffOutcome,
+  type ThreadHandOffOutcome,
+} from "@octant/contracts/thread-hand-off";
 import type { ThreadExportActorKind } from "@octant/domain";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import type { ThreadExportService } from "./threadExportService";
+import type { ThreadHandOffService } from "./threadHandOffService";
 
 const METHODS = "POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 const BODY_LIMIT = 8_192;
 
 /**
- * The one HTTP entry for the authenticated thread export command.
+ * The HTTP entries for the authenticated thread export and hand-off commands.
  *
  * Loopback and an allow-listed renderer origin, then a principal the
  * transport already proved — a local window capability, or a paired device
  * the gateway bound. The service re-checks that the caller may Open the
- * named thread before it cuts the bundle.
+ * named thread before it cuts the bundle; hand-off starts from that same cut.
  */
 
 export interface ThreadExportRouteDependencies {
@@ -27,15 +32,69 @@ export interface ThreadExportRouteDependencies {
   readonly now?: () => number;
 }
 
+export interface ThreadHandOffRouteDependencies {
+  readonly service: ThreadHandOffService;
+  readonly windowAuthorityStore: WindowAuthorityStore;
+  readonly now?: () => number;
+}
+
 export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDependencies) {
-  const now = dependencies.now ?? Date.now;
+  return createThreadCommandRouteHandler({
+    label: "Thread export",
+    path: "/api/threads/export",
+    windowAuthorityStore: dependencies.windowAuthorityStore,
+    ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+    execute: (windowId, actorKind, body) =>
+      dependencies.service.exportThread(windowId, actorKind, body),
+    status: (outcome: ThreadExportOutcome) =>
+      outcome.kind === "exported" ? 200 : outcome.reason === "unauthorized" ? 401 : 404,
+    encode: decodeThreadExportOutcome,
+  });
+}
+
+export function createThreadHandOffRouteHandler(dependencies: ThreadHandOffRouteDependencies) {
+  return createThreadCommandRouteHandler({
+    label: "Thread hand-off",
+    path: "/api/threads/hand-off",
+    windowAuthorityStore: dependencies.windowAuthorityStore,
+    ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+    execute: (windowId, actorKind, body) => dependencies.service.handOff(windowId, actorKind, body),
+    // A refusal the person can act on is an ordinary answer, not an HTTP failure.
+    status: (outcome: ThreadHandOffOutcome) =>
+      outcome.kind === "handed-off"
+        ? 200
+        : outcome.reason === "unauthorized"
+          ? 401
+          : outcome.reason === "not-found"
+            ? 404
+            : 200,
+    encode: decodeThreadHandOffOutcome,
+  });
+}
+
+function createThreadCommandRouteHandler<Outcome>(options: {
+  /** Names the command in refusals, so one handler does not answer for the other. */
+  readonly label: string;
+  readonly path: string;
+  readonly windowAuthorityStore: WindowAuthorityStore;
+  readonly now?: () => number;
+  readonly execute: (
+    windowId: ReturnType<typeof authenticateRouteWindowId>,
+    actorKind: ThreadExportActorKind,
+    body: unknown,
+  ) => Promise<Outcome>;
+  readonly status: (outcome: Outcome) => number;
+  readonly encode: (outcome: Outcome) => unknown;
+}) {
+  const now = options.now ?? Date.now;
+  const dependencies = { windowAuthorityStore: options.windowAuthorityStore };
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== "/api/threads/export") return undefined;
+    if (url.pathname !== options.path) return undefined;
 
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
-      return failureResponse("Thread export requests must use loopback.", 400, null);
+      return failureResponse(`${options.label} requests must use loopback.`, 400, null);
     }
     if (origin !== null && !isAllowedOrigin(origin)) {
       return failureResponse("Renderer origin is not allowed.", 400, origin);
@@ -44,7 +103,7 @@ export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDe
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
     if (request.method !== "POST") {
-      return failureResponse("Thread export requires POST.", 405, origin);
+      return failureResponse(`${options.label} requires POST.`, 405, origin);
     }
 
     let windowId;
@@ -63,9 +122,9 @@ export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDe
       }
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
-        return failureResponse("Thread export is unauthorized.", 401, origin);
+        return failureResponse(`${options.label} is unauthorized.`, 401, origin);
       }
-      return failureResponse("Thread export request is invalid.", 400, origin);
+      return failureResponse(`${options.label} request is invalid.`, 400, origin);
     }
 
     const decoded = await readJson(request, BODY_LIMIT);
@@ -76,14 +135,8 @@ export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDe
       return failureResponse("Request body must be valid JSON.", 400, origin);
     }
 
-    const outcome: ThreadExportOutcome = await dependencies.service.exportThread(
-      windowId,
-      actorKind,
-      decoded.value,
-    );
-    const status =
-      outcome.kind === "exported" ? 200 : outcome.reason === "unauthorized" ? 401 : 404;
-    return jsonResponse(decodeThreadExportOutcome(outcome), status, origin);
+    const outcome = await options.execute(windowId, actorKind, decoded.value);
+    return jsonResponse(options.encode(outcome), options.status(outcome), origin);
   };
 }
 
