@@ -133,7 +133,11 @@ export function makeProviderDriver(
     case "kimi-code":
     case "grok":
     case "goose":
-    case "glm": {
+    case "glm":
+    case "gemini":
+    case "copilot":
+    case "cline":
+    case "qwen": {
       if (options.acpProcess === undefined || options.acpHome === undefined) {
         throw new ProviderDriverConfigurationError();
       }
@@ -147,7 +151,10 @@ export function makeProviderDriver(
         runtimeRegistry: options.runtimeRegistry,
         ...(configuration.kind === "mistral-vibe-acp" ||
         configuration.kind === "grok-acp" ||
-        configuration.kind === "glm-acp"
+        configuration.kind === "glm-acp" ||
+        configuration.kind === "gemini-acp" ||
+        configuration.kind === "cline-acp" ||
+        configuration.kind === "qwen-acp"
           ? { authentication: configuration.authentication }
           : {}),
         ...(options.credentialResolver === undefined

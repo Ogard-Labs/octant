@@ -20,6 +20,17 @@ import type {
   GlmAuthentication,
   GlmProviderConfiguration,
   GlmProviderInstance,
+  GeminiAuthentication,
+  GeminiProviderConfiguration,
+  GeminiProviderInstance,
+  CopilotProviderConfiguration,
+  CopilotProviderInstance,
+  ClineAuthentication,
+  ClineProviderConfiguration,
+  ClineProviderInstance,
+  QwenAuthentication,
+  QwenProviderConfiguration,
+  QwenProviderInstance,
   GooseProviderConfiguration,
   GooseProviderInstance,
   KimiCodeProviderInstance,
@@ -315,6 +326,29 @@ export interface GlmConfigurationInput {
   readonly authentication: GlmAuthentication;
 }
 
+export interface GeminiConfigurationInput {
+  readonly kind: GeminiProviderConfiguration["kind"];
+  readonly binaryPath: string;
+  readonly authentication: GeminiAuthentication;
+}
+
+export interface CopilotConfigurationInput {
+  readonly kind: CopilotProviderConfiguration["kind"];
+  readonly binaryPath: string;
+}
+
+export interface ClineConfigurationInput {
+  readonly kind: ClineProviderConfiguration["kind"];
+  readonly binaryPath: string;
+  readonly authentication: ClineAuthentication;
+}
+
+export interface QwenConfigurationInput {
+  readonly kind: QwenProviderConfiguration["kind"];
+  readonly binaryPath: string;
+  readonly authentication: QwenAuthentication;
+}
+
 export interface DevinConfigurationInput {
   readonly kind: DevinProviderConfiguration["kind"];
   readonly binaryPath: string;
@@ -461,6 +495,52 @@ function normalizeGlmConfiguration(configuration: GlmConfigurationInput): GlmPro
   }
   return {
     kind: "glm-acp",
+    binaryPath: normalizeBinaryPath(configuration.binaryPath),
+    authentication: "api-key",
+  };
+}
+
+function normalizeGeminiConfiguration(
+  configuration: GeminiConfigurationInput,
+): GeminiProviderConfiguration {
+  if (configuration.authentication !== "api-key") {
+    reject("invalid-authentication", "Gemini CLI authentication must be api-key.");
+  }
+  return {
+    kind: "gemini-acp",
+    binaryPath: normalizeBinaryPath(configuration.binaryPath),
+    authentication: "api-key",
+  };
+}
+
+function normalizeCopilotConfiguration(
+  configuration: CopilotConfigurationInput,
+): CopilotProviderConfiguration {
+  return {
+    kind: "copilot-acp",
+    binaryPath: normalizeBinaryPath(configuration.binaryPath),
+  };
+}
+
+function normalizeClineConfiguration(
+  configuration: ClineConfigurationInput,
+): ClineProviderConfiguration {
+  if (configuration.authentication !== "api-key") {
+    reject("invalid-authentication", "Cline authentication must be api-key.");
+  }
+  return {
+    kind: "cline-acp",
+    binaryPath: normalizeBinaryPath(configuration.binaryPath),
+    authentication: "api-key",
+  };
+}
+
+function normalizeQwenConfiguration(configuration: QwenConfigurationInput): QwenProviderConfiguration {
+  if (configuration.authentication !== "api-key") {
+    reject("invalid-authentication", "Qwen Code authentication must be api-key.");
+  }
+  return {
+    kind: "qwen-acp",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
     authentication: "api-key",
   };
@@ -667,6 +747,170 @@ export function changeGlmConfiguration(
   return {
     ...provider,
     configuration: normalizeGlmConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+interface CreateGeminiProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: GeminiConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createGeminiProvider(input: CreateGeminiProviderInput): GeminiProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "gemini",
+    configuration: normalizeGeminiConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeGeminiConfiguration(
+  provider: GeminiProviderInstance,
+  configuration: GeminiConfigurationInput,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): GeminiProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
+  }
+  return {
+    ...provider,
+    configuration: normalizeGeminiConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+interface CreateCopilotProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: CopilotConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createCopilotProvider(input: CreateCopilotProviderInput): CopilotProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "copilot",
+    configuration: normalizeCopilotConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeCopilotConfiguration(
+  provider: CopilotProviderInstance,
+  configuration: CopilotConfigurationInput,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): CopilotProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
+  }
+  return {
+    ...provider,
+    configuration: normalizeCopilotConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+interface CreateClineProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: ClineConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createClineProvider(input: CreateClineProviderInput): ClineProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "cline",
+    configuration: normalizeClineConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeClineConfiguration(
+  provider: ClineProviderInstance,
+  configuration: ClineConfigurationInput,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): ClineProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
+  }
+  return {
+    ...provider,
+    configuration: normalizeClineConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+interface CreateQwenProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: QwenConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createQwenProvider(input: CreateQwenProviderInput): QwenProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "qwen",
+    configuration: normalizeQwenConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeQwenConfiguration(
+  provider: QwenProviderInstance,
+  configuration: QwenConfigurationInput,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): QwenProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
+  }
+  return {
+    ...provider,
+    configuration: normalizeQwenConfiguration(configuration),
     version: nextVersion(provider.version),
     updatedAt,
   };

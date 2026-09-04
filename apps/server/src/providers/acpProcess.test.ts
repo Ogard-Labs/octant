@@ -34,8 +34,12 @@ const kimi = acpProviderProfiles["kimi-code"];
 const grok = acpProviderProfiles.grok;
 const goose = acpProviderProfiles.goose;
 const glm = acpProviderProfiles.glm;
+const gemini = acpProviderProfiles.gemini;
+const copilot = acpProviderProfiles.copilot;
+const cline = acpProviderProfiles.cline;
+const qwen = acpProviderProfiles.qwen;
 const profiles = Object.values(acpProviderProfiles);
-const denyDefaultProfiles = [kilo, devin, vibe, grok, goose, glm];
+const denyDefaultProfiles = [kilo, devin, vibe, grok, goose, glm, gemini, copilot, cline, qwen];
 
 /** `--version` outputs per profile: [ready, too-old, malformed]. */
 const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, string, string]> = {
@@ -50,6 +54,14 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   ],
   goose: ["1.48.0", "1.47.9", "goose release 1.48.0 private-noise"],
   glm: ["1.8.0", "1.7.9", "glm-acp-agent 1.8.0 private-noise"],
+  gemini: ["0.58.0", "0.57.9", "gemini-cli release 0.58.0 private-noise"],
+  copilot: [
+    "GitHub Copilot CLI 1.0.82.",
+    "GitHub Copilot CLI 1.0.81.",
+    "copilot release 1.0.82 private-noise",
+  ],
+  cline: ["3.0.61", "3.0.60", "cline release 3.0.61 private-noise"],
+  qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
 };
 const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   kilo: "7.4.11",
@@ -59,6 +71,10 @@ const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   grok: "1.0.4",
   goose: "1.48.0",
   glm: "1.8.0",
+  gemini: "0.58.0",
+  copilot: "1.0.82",
+  cline: "3.0.61",
+  qwen: "0.23.0",
 };
 
 function fixture(profile: AcpProviderProfile, mode = "ready") {

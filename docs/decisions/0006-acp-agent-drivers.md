@@ -72,14 +72,14 @@ returns GO.
 - Some agents cannot meet the contract (no stable resume, no separable
   authentication, tools executing unconfined). Those stay reserved and
   unselectable rather than being approximated.
-- The seven shipped ACP providers are profiles over one driver, process,
+- The eleven shipped ACP providers are profiles over one driver, process,
   protocol, and event-mapper module; the conformance suite runs once per
-  profile.
+  profile. Devin ACP shipped earlier on the same stack.
 - Strong next registry candidates, each still needing a live profile probe
-  before shipping: Gemini CLI (`gemini --acp`), Google Antigravity
-  (`agy_acp_server` binary distribution), GitHub Copilot CLI (`--acp`),
-  Cline (`cline --acp`), Qwen Code, and JetBrains Junie. Cursor ACP remains
-  outside the production surface until its compatibility probe returns GO.
+  before shipping: Google Antigravity (`agy_acp_server` binary distribution)
+  and JetBrains Junie. Cursor ACP remains outside the production surface until
+  its compatibility probe returns GO. Gemini CLI, GitHub Copilot CLI, Cline,
+  and Qwen Code now ship as host-profile providers on the shared ACP stack.
 
 ## Related
 

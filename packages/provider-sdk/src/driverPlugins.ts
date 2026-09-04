@@ -22,6 +22,10 @@ const ACP_HOST_PROFILE_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
   "grok",
   "goose",
   "glm",
+  "gemini",
+  "copilot",
+  "cline",
+  "qwen",
 ]);
 
 export function providerDriverHostRuntime(

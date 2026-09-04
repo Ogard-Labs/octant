@@ -79,7 +79,11 @@ disabled until you enable them):
 - Mistral Vibe ACP
 - Grok Build ACP
 - Goose ACP
-- GLM Agent
+- GLM Agent ACP
+- Gemini CLI ACP
+- GitHub Copilot ACP
+- Cline ACP
+- Qwen Code ACP
 - Ollama (local HTTP)
 
 Direct API endpoints:

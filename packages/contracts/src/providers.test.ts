@@ -56,6 +56,10 @@ describe("provider registry contracts", () => {
     "grok",
     "goose",
     "glm",
+    "gemini",
+    "copilot",
+    "cline",
+    "qwen",
     "openai-compatible",
     "anthropic-compatible",
     "azure-foundry",
@@ -718,6 +722,133 @@ describe("provider registry contracts", () => {
         configuration: { ...glm.configuration, authentication: "subscription" },
       }),
     ).toThrow();
+  });
+
+  it("decodes only strict non-secret Gemini instances, events, and commands", () => {
+    const gemini = {
+      id: ids.instance,
+      displayName: "Gemini local",
+      driverKind: "gemini",
+      configuration: {
+        kind: "gemini-acp",
+        binaryPath: "/Users/example/.local/bin/gemini",
+        authentication: "api-key",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(decodeProviderInstance(gemini)).toEqual(gemini);
+    expect(decodeProviderInstanceConfigurationChanged({ instance: gemini })).toEqual({
+      instance: gemini,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-gemini-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: gemini.displayName,
+        configuration: gemini.configuration,
+      }),
+    ).toMatchObject({ kind: "create-gemini-provider" });
+  });
+
+  it("decodes only strict non-secret Copilot instances, events, and commands", () => {
+    const copilot = {
+      id: ids.instance,
+      displayName: "Copilot local",
+      driverKind: "copilot",
+      configuration: {
+        kind: "copilot-acp",
+        binaryPath: "/Users/example/.local/bin/copilot",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(decodeProviderInstance(copilot)).toEqual(copilot);
+    expect(decodeProviderInstanceConfigurationChanged({ instance: copilot })).toEqual({
+      instance: copilot,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-copilot-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: copilot.displayName,
+        configuration: copilot.configuration,
+      }),
+    ).toMatchObject({ kind: "create-copilot-provider" });
+  });
+
+  it("decodes only strict non-secret Cline instances, events, and commands", () => {
+    const cline = {
+      id: ids.instance,
+      displayName: "Cline local",
+      driverKind: "cline",
+      configuration: {
+        kind: "cline-acp",
+        binaryPath: "/Users/example/.local/bin/cline",
+        authentication: "api-key",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(decodeProviderInstance(cline)).toEqual(cline);
+    expect(decodeProviderInstanceConfigurationChanged({ instance: cline })).toEqual({
+      instance: cline,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-cline-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: cline.displayName,
+        configuration: cline.configuration,
+      }),
+    ).toMatchObject({ kind: "create-cline-provider" });
+  });
+
+  it("decodes only strict non-secret Qwen instances, events, and commands", () => {
+    const qwen = {
+      id: ids.instance,
+      displayName: "Qwen local",
+      driverKind: "qwen",
+      configuration: {
+        kind: "qwen-acp",
+        binaryPath: "/Users/example/.local/bin/qwen",
+        authentication: "api-key",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(decodeProviderInstance(qwen)).toEqual(qwen);
+    expect(decodeProviderInstanceConfigurationChanged({ instance: qwen })).toEqual({
+      instance: qwen,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-qwen-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: qwen.displayName,
+        configuration: qwen.configuration,
+      }),
+    ).toMatchObject({ kind: "create-qwen-provider" });
   });
 
   it("decodes only strict subscription-backed Devin instances, events, and commands", () => {

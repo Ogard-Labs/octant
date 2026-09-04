@@ -164,6 +164,45 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     isDirectEndpoint: false,
   },
   {
+    driverKind: "gemini",
+    displayName: "Gemini CLI",
+    executableNames: ["gemini"],
+    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
+    versionProbeArgs: ["--version"],
+    onboardingGuidance:
+      "Sign in to Gemini CLI from Provider Settings with a Gemini API key, then check the connection again.",
+    isDirectEndpoint: false,
+  },
+  {
+    driverKind: "copilot",
+    displayName: "GitHub Copilot",
+    executableNames: ["copilot"],
+    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
+    versionProbeArgs: ["--version"],
+    onboardingGuidance: "Run `copilot login`, then check the connection again.",
+    isDirectEndpoint: false,
+  },
+  {
+    driverKind: "cline",
+    displayName: "Cline",
+    executableNames: ["cline"],
+    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
+    versionProbeArgs: ["--version"],
+    onboardingGuidance:
+      "Sign in to Cline from Provider Settings with a Cline API key, then check the connection again.",
+    isDirectEndpoint: false,
+  },
+  {
+    driverKind: "qwen",
+    displayName: "Qwen Code",
+    executableNames: ["qwen"],
+    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
+    versionProbeArgs: ["--version"],
+    onboardingGuidance:
+      "Sign in to Qwen Code from Provider Settings with an OpenAI-compatible API key, then check the connection again.",
+    isDirectEndpoint: false,
+  },
+  {
     driverKind: "ollama",
     displayName: "Ollama",
     executableNames: ["ollama"],

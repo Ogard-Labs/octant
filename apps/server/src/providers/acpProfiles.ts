@@ -15,7 +15,17 @@ import type { AcpInitializeResult } from "./acpProtocol";
 
 export type AcpProviderKind = Extract<
   ProviderDriverKind,
-  "kilo" | "devin" | "mistral-vibe" | "kimi-code" | "grok" | "goose" | "glm"
+  | "kilo"
+  | "devin"
+  | "mistral-vibe"
+  | "kimi-code"
+  | "grok"
+  | "goose"
+  | "glm"
+  | "gemini"
+  | "copilot"
+  | "cline"
+  | "qwen"
 >;
 export type AcpSessionMode = "chat" | "work" | "code";
 
@@ -545,6 +555,167 @@ const glmProfile: AcpProviderProfile = {
   },
 };
 
+const geminiProfile: AcpProviderProfile = {
+  kind: "gemini",
+  displayName: "Gemini CLI",
+  reasoningOptionId: "thinking",
+  // `autoEdit` auto-approves edits inside the agent and would bypass Octant's
+  // approval bridge, so it is never selected.
+  sessionMode: (mode, policy) => {
+    if (mode === "chat") return "default";
+    if (policy === "plan") return "plan";
+    if (policy === "full-access") return "yolo";
+    return "default";
+  },
+  setModeCall: (sessionId, mode) => ({
+    method: "session/set_mode",
+    params: { sessionId, modeId: mode },
+  }),
+  chatSessionRoot: "managed-home",
+  userQuestions: "supported",
+  resumeMethod: "session/load",
+  closesSessions: true,
+  authenticateOnProbe: false,
+  authentication: { kind: "delegated-browser", apiKeyVariable: "GEMINI_API_KEY" },
+  unauthenticatedMessage:
+    "Gemini CLI is not authenticated. Sign in from Provider Settings, then retry.",
+  process: {
+    agentName: "gemini-cli",
+    versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
+    minimumVersion: [0, 58, 0],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    guards: { NO_COLOR: "1" },
+    environment: ({ managedHome, apiKey }) => ({
+      HOME: managedHome,
+      XDG_CONFIG_HOME: join(managedHome, ".config"),
+      XDG_DATA_HOME: join(managedHome, ".local/share"),
+      XDG_STATE_HOME: join(managedHome, ".local/state"),
+      ...(apiKey === undefined ? {} : { GEMINI_API_KEY: apiKey }),
+    }),
+    args: () => ["--acp"],
+    managedFiles: () => [],
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
+
+const copilotProfile: AcpProviderProfile = {
+  kind: "copilot",
+  displayName: "GitHub Copilot",
+  reasoningOptionId: "thinking",
+  sessionMode: () => "default",
+  chatSessionRoot: "managed-home",
+  userQuestions: "supported",
+  resumeMethod: "session/load",
+  closesSessions: true,
+  authenticateOnProbe: false,
+  authentication: { kind: "provider-owned" },
+  unauthenticatedMessage:
+    "GitHub Copilot is not authenticated. Run `copilot login`, then retry.",
+  process: {
+    agentName: "Copilot",
+    versionPattern:
+      /^GitHub Copilot CLI (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.?\r?\n?/,
+    minimumVersion: [1, 0, 82],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    guards: { NO_COLOR: "1" },
+    environment: ({ managedHome }) => ({
+      HOME: managedHome,
+      XDG_CONFIG_HOME: join(managedHome, ".config"),
+    }),
+    args: () => ["--acp"],
+    managedFiles: () => [],
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".copilot"),
+      loginHint: "Run `copilot login`, then retry.",
+    },
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
+
+const clineProfile: AcpProviderProfile = {
+  kind: "cline",
+  displayName: "Cline",
+  reasoningOptionId: "thinking",
+  sessionMode: (_mode, policy) => {
+    if (policy === "full-access") return "act";
+    return "plan";
+  },
+  setModeCall: (sessionId, mode) => ({
+    method: "session/set_mode",
+    params: { sessionId, modeId: mode },
+  }),
+  chatSessionRoot: "managed-home",
+  userQuestions: "supported",
+  resumeMethod: "session/load",
+  closesSessions: true,
+  authenticateOnProbe: false,
+  authentication: { kind: "delegated-browser", apiKeyVariable: "CLINE_API_KEY" },
+  unauthenticatedMessage:
+    "Cline is not authenticated. Sign in from Provider Settings, then retry.",
+  process: {
+    agentName: "cline",
+    versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
+    minimumVersion: [3, 0, 61],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    guards: { NO_COLOR: "1" },
+    environment: ({ managedHome, apiKey }) => ({
+      HOME: managedHome,
+      XDG_CONFIG_HOME: join(managedHome, ".config"),
+      ...(apiKey === undefined ? {} : { CLINE_API_KEY: apiKey }),
+    }),
+    args: () => ["--acp"],
+    managedFiles: () => [],
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".cline"),
+      loginHint: "Run `cline auth`, then retry.",
+    },
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
+
+const qwenProfile: AcpProviderProfile = {
+  kind: "qwen",
+  displayName: "Qwen Code",
+  reasoningOptionId: "thinking",
+  // `auto-edit` and `auto` auto-approve edits inside the agent and would bypass
+  // Octant's approval bridge, so they are never selected.
+  sessionMode: (mode, policy) => {
+    if (mode === "chat") return "default";
+    if (policy === "plan") return "plan";
+    if (policy === "full-access") return "yolo";
+    return "default";
+  },
+  setModeCall: (sessionId, mode) => ({
+    method: "session/set_mode",
+    params: { sessionId, modeId: mode },
+  }),
+  chatSessionRoot: "managed-home",
+  userQuestions: "supported",
+  resumeMethod: "session/load",
+  closesSessions: true,
+  authenticateOnProbe: false,
+  authentication: { kind: "delegated-browser", apiKeyVariable: "OPENAI_API_KEY" },
+  unauthenticatedMessage:
+    "Qwen Code is not authenticated. Sign in from Provider Settings, then retry.",
+  process: {
+    agentName: "qwen-code",
+    versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
+    minimumVersion: [0, 23, 0],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    guards: { NO_COLOR: "1" },
+    environment: ({ managedHome, apiKey }) => ({
+      HOME: managedHome,
+      XDG_CONFIG_HOME: join(managedHome, ".config"),
+      ...(apiKey === undefined ? {} : { OPENAI_API_KEY: apiKey }),
+    }),
+    args: () => ["--acp"],
+    managedFiles: () => [],
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
+
 const KIMI_REVIEWED_COMMANDS = [
   "compact",
   "status",
@@ -645,6 +816,10 @@ export const acpProviderProfiles: Readonly<Record<AcpProviderKind, AcpProviderPr
   grok: grokProfile,
   goose: gooseProfile,
   glm: glmProfile,
+  gemini: geminiProfile,
+  copilot: copilotProfile,
+  cline: clineProfile,
+  qwen: qwenProfile,
 };
 
 export function isAcpProviderKind(kind: ProviderDriverKind): kind is AcpProviderKind {

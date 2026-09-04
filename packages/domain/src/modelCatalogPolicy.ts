@@ -104,6 +104,10 @@ const nativeToolRuntimeDrivers: ReadonlySet<ProviderDriverKind> = new Set([
   "grok",
   "goose",
   "glm",
+  "gemini",
+  "copilot",
+  "cline",
+  "qwen",
 ]);
 
 export function isNativeToolRuntimeDriver(driverKind: ProviderDriverKind): boolean {
@@ -259,6 +263,12 @@ function authenticationOf(instance: ProviderInstance): string | undefined {
       return instance.configuration.authentication;
     case "glm-acp":
       return instance.configuration.authentication;
+    case "gemini-acp":
+      return instance.configuration.authentication;
+    case "cline-acp":
+      return instance.configuration.authentication;
+    case "qwen-acp":
+      return instance.configuration.authentication;
     case "devin-acp":
       return instance.configuration.authentication;
     default:
@@ -278,6 +288,10 @@ function binaryOf(instance: ProviderInstance): string | undefined {
     case "grok-acp":
     case "goose-acp":
     case "glm-acp":
+    case "gemini-acp":
+    case "copilot-acp":
+    case "cline-acp":
+    case "qwen-acp":
     case "claude-agent-sdk":
       return instance.configuration.binaryPath;
     default:

@@ -7,6 +7,10 @@ import type {
   DiscoverySnapshot,
   GrokProviderConfiguration,
   GlmProviderConfiguration,
+  GeminiProviderConfiguration,
+  CopilotProviderConfiguration,
+  ClineProviderConfiguration,
+  QwenProviderConfiguration,
   GooseProviderConfiguration,
   KiloProviderConfiguration,
   MistralVibeProviderConfiguration,
@@ -44,7 +48,7 @@ export interface ProviderSettingsViewProps {
   readonly credentialManagementAvailable: boolean;
   readonly message?: string;
   readonly onCreate: (
-    driverKind: "opencode" | "codex" | "kimi-code" | "devin" | "kilo" | "pi" | "oh-my-pi" | "goose",
+    driverKind: "opencode" | "codex" | "kimi-code" | "devin" | "kilo" | "pi" | "oh-my-pi" | "goose" | "copilot",
     displayName: string,
     binaryPath: string,
   ) => Promise<boolean>;
@@ -91,6 +95,21 @@ export interface ProviderSettingsViewProps {
   readonly onCreateGlm: (
     displayName: string,
     configuration: GlmProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onCreateGemini: (
+    displayName: string,
+    configuration: GeminiProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onCreateCline: (
+    displayName: string,
+    configuration: ClineProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onCreateQwen: (
+    displayName: string,
+    configuration: QwenProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onCreateOllama: (
@@ -146,6 +165,25 @@ export interface ProviderSettingsViewProps {
   readonly onChangeGlmConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: GlmProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeGeminiConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: GeminiProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeCopilotConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: CopilotProviderConfiguration,
+  ) => Promise<boolean>;
+  readonly onChangeClineConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: ClineProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeQwenConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: QwenProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeDevinConfiguration: (
@@ -231,6 +269,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             onCreateClaude={props.onCreateClaude}
             onCreateGrok={props.onCreateGrok}
             onCreateGlm={props.onCreateGlm}
+            onCreateGemini={props.onCreateGemini}
+            onCreateCline={props.onCreateCline}
+            onCreateQwen={props.onCreateQwen}
             onCreateMistralVibe={props.onCreateMistralVibe}
             onCreateOllama={props.onCreateOllama}
             onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
@@ -255,6 +296,10 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeGrokConfiguration={props.onChangeGrokConfiguration}
         onChangeGooseConfiguration={props.onChangeGooseConfiguration}
         onChangeGlmConfiguration={props.onChangeGlmConfiguration}
+        onChangeGeminiConfiguration={props.onChangeGeminiConfiguration}
+        onChangeCopilotConfiguration={props.onChangeCopilotConfiguration}
+        onChangeClineConfiguration={props.onChangeClineConfiguration}
+        onChangeQwenConfiguration={props.onChangeQwenConfiguration}
         onChangeKiloConfiguration={props.onChangeKiloConfiguration}
         onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
         onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}

@@ -77,10 +77,10 @@ describe("applyMigrations", () => {
       const before = connection.prepare("SELECT * FROM event_journal").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 56,
+        currentVersion: 57,
         appliedVersions: [
           24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-          46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56,
+          46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -138,11 +138,11 @@ describe("applyMigrations", () => {
 
     try {
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 56,
+        currentVersion: 57,
         appliedVersions: [
           1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
           26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
-          48, 49, 50, 51, 52, 53, 54, 55, 56,
+          48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
         ],
       });
 
@@ -444,11 +444,11 @@ describe("applyMigrations", () => {
         .run("existing-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 56,
+        currentVersion: 57,
         appliedVersions: [
           5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
           29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
-          51, 52, 53, 54, 55, 56,
+          51, 52, 53, 54, 55, 56, 57,
         ],
       });
       expect(
@@ -486,11 +486,11 @@ describe("applyMigrations", () => {
         .run("kimi-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 56,
+        currentVersion: 57,
         appliedVersions: [
           11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
           33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54,
-          55, 56,
+          55, 56, 57,
         ],
       });
       expect(
@@ -537,10 +537,10 @@ describe("applyMigrations", () => {
         .run("anthropic-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 56,
+        currentVersion: 57,
         appliedVersions: [
           13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
-          35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56,
+          35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
         ],
       });
       expect(
@@ -578,8 +578,8 @@ describe("applyMigrations", () => {
         .run("foundry-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 56,
-        appliedVersions: [45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56],
+        currentVersion: 57,
+        appliedVersions: [45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57],
       });
       expect(
         connection
@@ -616,8 +616,8 @@ describe("applyMigrations", () => {
         .run("grok-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 56,
-        appliedVersions: [56],
+        currentVersion: 57,
+        appliedVersions: [56, 57],
       });
       expect(() =>
         connection
@@ -636,6 +636,64 @@ describe("applyMigrations", () => {
             ) VALUES (?, 1, 'glm', 1, '{}', 1)
           `)
           .run("glm-provider"),
+      ).not.toThrow();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("adds Gemini, Copilot, Cline, and Qwen to provider projections without rewriting existing rows", () => {
+    const connection = openTemporaryDatabase();
+
+    try {
+      applyMigrations(connection, MIGRATIONS.slice(0, 56), clock);
+      connection
+        .prepare(`
+          INSERT INTO provider_instance_projection (
+            instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+          ) VALUES (?, 1, 'glm', 1, '{}', 1)
+        `)
+        .run("glm-provider");
+
+      expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
+        currentVersion: 57,
+        appliedVersions: [57],
+      });
+      expect(() =>
+        connection
+          .prepare(`
+            INSERT INTO provider_instance_projection (
+              instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+            ) VALUES (?, 1, 'gemini', 1, '{}', 1)
+          `)
+          .run("gemini-provider"),
+      ).not.toThrow();
+      expect(() =>
+        connection
+          .prepare(`
+            INSERT INTO provider_instance_projection (
+              instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+            ) VALUES (?, 1, 'copilot', 1, '{}', 1)
+          `)
+          .run("copilot-provider"),
+      ).not.toThrow();
+      expect(() =>
+        connection
+          .prepare(`
+            INSERT INTO provider_instance_projection (
+              instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+            ) VALUES (?, 1, 'cline', 1, '{}', 1)
+          `)
+          .run("cline-provider"),
+      ).not.toThrow();
+      expect(() =>
+        connection
+          .prepare(`
+            INSERT INTO provider_instance_projection (
+              instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+            ) VALUES (?, 1, 'qwen', 1, '{}', 1)
+          `)
+          .run("qwen-provider"),
       ).not.toThrow();
     } finally {
       connection.close();
@@ -680,11 +738,11 @@ describe("applyMigrations", () => {
       const providerBefore = connection.prepare("SELECT * FROM provider_instance_projection").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 56,
+        currentVersion: 57,
         appliedVersions: [
           6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
           29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
-          51, 52, 53, 54, 55, 56,
+          51, 52, 53, 54, 55, 56, 57,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -706,7 +764,7 @@ describe("applyMigrations", () => {
       const before = connection.prepare("SELECT * FROM schema_migrations").all();
 
       expect(applyMigrations(connection, MIGRATIONS, () => "2099-01-01T00:00:00.000Z")).toEqual({
-        currentVersion: 56,
+        currentVersion: 57,
         appliedVersions: [],
       });
       expect(connection.prepare("SELECT * FROM schema_migrations").all()).toEqual(before);
@@ -759,11 +817,11 @@ describe("applyMigrations", () => {
       const projectBefore = connection.prepare("SELECT * FROM project_projection").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 56,
+        currentVersion: 57,
         appliedVersions: [
           8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
           31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
-          53, 54, 55, 56,
+          53, 54, 55, 56, 57,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(

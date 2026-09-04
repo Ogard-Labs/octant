@@ -1744,6 +1744,10 @@ function ControllerBackedProviderSettings(props: {
       onChangeGrokConfiguration={controller.changeGrokConfiguration}
       onChangeGooseConfiguration={controller.changeGooseConfiguration}
       onChangeGlmConfiguration={controller.changeGlmConfiguration}
+      onChangeGeminiConfiguration={controller.changeGeminiConfiguration}
+      onChangeCopilotConfiguration={controller.changeCopilotConfiguration}
+      onChangeClineConfiguration={controller.changeClineConfiguration}
+      onChangeQwenConfiguration={controller.changeQwenConfiguration}
       onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
       onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
       onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
@@ -1757,6 +1761,9 @@ function ControllerBackedProviderSettings(props: {
       onCreateMistralVibe={controller.createMistralVibe}
       onCreateGrok={controller.createGrok}
       onCreateGlm={controller.createGlm}
+      onCreateGemini={controller.createGemini}
+      onCreateCline={controller.createCline}
+      onCreateQwen={controller.createQwen}
       onCreateOllama={controller.createOllama}
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}
@@ -1864,6 +1871,18 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onCreateGemini: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onCreateCline: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onCreateQwen: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
     onCreateOllama: vi.fn(async () => true),
     onCreateOpenAiCompatible: vi.fn(async (_name, _configuration, credential) => {
       credential.clear();
@@ -1906,6 +1925,19 @@ function fixture(
     }),
     onChangeGooseConfiguration: vi.fn(async () => true),
     onChangeGlmConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeGeminiConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeCopilotConfiguration: vi.fn(async () => true),
+    onChangeClineConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeQwenConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
     }),

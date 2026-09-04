@@ -22,6 +22,10 @@ import {
   GeminiImageConfigurationForm,
   GrokConfigurationForm,
   GlmConfigurationForm,
+  GeminiConfigurationForm,
+  CopilotConfigurationForm,
+  ClineConfigurationForm,
+  QwenConfigurationForm,
   GooseConfigurationForm,
   HttpConfigurationForm,
   OpenAiImageConfigurationForm,
@@ -64,6 +68,10 @@ export type ProviderSettingsListProps = Pick<
   | "onChangeGrokConfiguration"
   | "onChangeGooseConfiguration"
   | "onChangeGlmConfiguration"
+  | "onChangeGeminiConfiguration"
+  | "onChangeCopilotConfiguration"
+  | "onChangeClineConfiguration"
+  | "onChangeQwenConfiguration"
   | "onChangeOpenAiCompatibleConfiguration"
   | "onChangeAnthropicCompatibleConfiguration"
   | "onChangeAzureFoundryConfiguration"
@@ -183,6 +191,10 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onChangeGrokConfiguration={props.onChangeGrokConfiguration}
                 onChangeGooseConfiguration={props.onChangeGooseConfiguration}
                 onChangeGlmConfiguration={props.onChangeGlmConfiguration}
+                onChangeGeminiConfiguration={props.onChangeGeminiConfiguration}
+                onChangeCopilotConfiguration={props.onChangeCopilotConfiguration}
+                onChangeClineConfiguration={props.onChangeClineConfiguration}
+                onChangeQwenConfiguration={props.onChangeQwenConfiguration}
                 onChangeDevinConfiguration={props.onChangeDevinConfiguration}
                 onChangeKiloConfiguration={props.onChangeKiloConfiguration}
                 onChangePiConfiguration={props.onChangePiConfiguration}
@@ -403,6 +415,10 @@ interface ProviderRowProps {
   readonly onChangeGrokConfiguration: ProviderSettingsViewProps["onChangeGrokConfiguration"];
   readonly onChangeGooseConfiguration: ProviderSettingsViewProps["onChangeGooseConfiguration"];
   readonly onChangeGlmConfiguration: ProviderSettingsViewProps["onChangeGlmConfiguration"];
+  readonly onChangeGeminiConfiguration: ProviderSettingsViewProps["onChangeGeminiConfiguration"];
+  readonly onChangeCopilotConfiguration: ProviderSettingsViewProps["onChangeCopilotConfiguration"];
+  readonly onChangeClineConfiguration: ProviderSettingsViewProps["onChangeClineConfiguration"];
+  readonly onChangeQwenConfiguration: ProviderSettingsViewProps["onChangeQwenConfiguration"];
   readonly onChangeOpenAiCompatibleConfiguration: ProviderSettingsViewProps["onChangeOpenAiCompatibleConfiguration"];
   readonly onChangeAnthropicCompatibleConfiguration: ProviderSettingsViewProps["onChangeAnthropicCompatibleConfiguration"];
   readonly onChangeAzureFoundryConfiguration: ProviderSettingsViewProps["onChangeAzureFoundryConfiguration"];
@@ -436,6 +452,10 @@ function ProviderRow(props: ProviderRowProps) {
   const isGrok = props.instance.driverKind === "grok";
   const isGoose = props.instance.driverKind === "goose";
   const isGlm = props.instance.driverKind === "glm";
+  const isGemini = props.instance.driverKind === "gemini";
+  const isCopilot = props.instance.driverKind === "copilot";
+  const isCline = props.instance.driverKind === "cline";
+  const isQwen = props.instance.driverKind === "qwen";
   const isDevin = props.instance.driverKind === "devin";
   const isKilo = props.instance.driverKind === "kilo";
   const isPi = props.instance.driverKind === "pi";
@@ -452,12 +472,13 @@ function ProviderRow(props: ProviderRowProps) {
     isAnthropicHttp ||
     isFoundry ||
     isImageProfile ||
-    ((isClaude || isVibe || isGrok || isGlm) && props.instance.configuration.authentication === "api-key");
+    ((isClaude || isVibe || isGrok || isGlm || isGemini || isCline || isQwen) &&
+      props.instance.configuration.authentication === "api-key");
   const credential = useCredentialStatus(props, !usesCredential);
   const label = driverLabel(props.instance.driverKind);
   const runtimeLabel = isClaude
     ? "Agent SDK"
-    : isVibe || isGrok || isGoose || isGlm || isDevin || isKilo
+    : isVibe || isGrok || isGoose || isGlm || isGemini || isCopilot || isCline || isQwen || isDevin || isKilo
       ? "ACP"
       : isPi || isOhMyPi
         ? "RPC"
@@ -709,6 +730,35 @@ function ProviderRow(props: ProviderRowProps) {
               </span>
             </div>
           )}
+          {!isGemini ? null : (
+            <div className="provider-card__facts provider-card__facts--gemini">
+              <span>Authentication: Gemini API key</span>
+              <span>
+                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+              </span>
+            </div>
+          )}
+          {!isCopilot ? null : (
+            <div className="provider-card__facts provider-card__facts--copilot">
+              <span>Authentication: provider-owned GitHub Copilot credentials</span>
+            </div>
+          )}
+          {!isCline ? null : (
+            <div className="provider-card__facts provider-card__facts--cline">
+              <span>Authentication: Cline API key</span>
+              <span>
+                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+              </span>
+            </div>
+          )}
+          {!isQwen ? null : (
+            <div className="provider-card__facts provider-card__facts--qwen">
+              <span>Authentication: OpenAI-compatible API key</span>
+              <span>
+                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+              </span>
+            </div>
+          )}
           {!isDevin ? null : (
             <div className="provider-card__facts provider-card__facts--devin">
               <span>Authentication: Devin subscription</span>
@@ -784,6 +834,10 @@ function ProviderRow(props: ProviderRowProps) {
           isGrok ||
           isGoose ||
           isGlm ||
+          isGemini ||
+          isCopilot ||
+          isCline ||
+          isQwen ||
           isDevin ||
           isKilo ||
           isPi ||
@@ -938,6 +992,40 @@ function ProviderRow(props: ProviderRowProps) {
                   key={`glm:${props.instance.version}`}
                   onBeginAuthentication={props.onBeginProviderAuthentication}
                   onChange={props.onChangeGlmConfiguration}
+                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
+                />
+              ) : isGemini ? (
+                <GeminiConfigurationForm
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`gemini:${props.instance.version}`}
+                  onBeginAuthentication={props.onBeginProviderAuthentication}
+                  onChange={props.onChangeGeminiConfiguration}
+                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
+                />
+              ) : isCopilot ? (
+                <CopilotConfigurationForm
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`copilot:${props.instance.version}`}
+                  onChange={props.onChangeCopilotConfiguration}
+                />
+              ) : isCline ? (
+                <ClineConfigurationForm
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`cline:${props.instance.version}`}
+                  onBeginAuthentication={props.onBeginProviderAuthentication}
+                  onChange={props.onChangeClineConfiguration}
+                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
+                />
+              ) : isQwen ? (
+                <QwenConfigurationForm
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`qwen:${props.instance.version}`}
+                  onBeginAuthentication={props.onBeginProviderAuthentication}
+                  onChange={props.onChangeQwenConfiguration}
                   onCompleteAuthentication={props.onCompleteProviderAuthentication}
                 />
               ) : isDevin ? (
@@ -1146,7 +1234,15 @@ function guidance(
                               ? "Run `goose configure` in your terminal, then check the connection again."
                               : driverKind === "glm"
                                 ? "Add or replace the Z.AI API key in the Octant host, then check the connection again."
-                                : driverKind === "anthropic-compatible"
+                                : driverKind === "gemini"
+                                  ? "Add or replace the Gemini API key in the Octant host, then check the connection again."
+                                  : driverKind === "copilot"
+                                    ? "Run `copilot login` in your terminal, then check the connection again."
+                                    : driverKind === "cline"
+                                      ? "Add or replace the Cline API key in the Octant host, then check the connection again."
+                                      : driverKind === "qwen"
+                                        ? "Add or replace the OpenAI-compatible API key in the Octant host, then check the connection again."
+                                        : driverKind === "anthropic-compatible"
                               ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
                               : driverKind === "azure-foundry"
                                 ? "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again."

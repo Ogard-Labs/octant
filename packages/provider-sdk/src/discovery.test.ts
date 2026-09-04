@@ -16,6 +16,10 @@ describe("provider discovery descriptors", () => {
     expect(kinds).toContain("grok");
     expect(kinds).toContain("goose");
     expect(kinds).toContain("glm");
+    expect(kinds).toContain("gemini");
+    expect(kinds).toContain("copilot");
+    expect(kinds).toContain("cline");
+    expect(kinds).toContain("qwen");
     expect(kinds).toContain("ollama");
     expect(kinds).toContain("openai-compatible");
     expect(kinds).toContain("anthropic-compatible");

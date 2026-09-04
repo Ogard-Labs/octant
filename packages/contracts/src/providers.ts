@@ -37,6 +37,10 @@ export const ProviderDriverKind = Schema.Literal(
   "grok",
   "goose",
   "glm",
+  "gemini",
+  "copilot",
+  "cline",
+  "qwen",
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
@@ -256,6 +260,39 @@ export const GlmProviderConfiguration = Schema.Struct({
   authentication: GlmAuthentication,
 }).annotations(strict);
 export type GlmProviderConfiguration = typeof GlmProviderConfiguration.Type;
+
+export const GeminiAuthentication = Schema.Literal("api-key");
+export type GeminiAuthentication = typeof GeminiAuthentication.Type;
+export const GeminiProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("gemini-acp"),
+  binaryPath: AbsoluteBinaryPath,
+  authentication: GeminiAuthentication,
+}).annotations(strict);
+export type GeminiProviderConfiguration = typeof GeminiProviderConfiguration.Type;
+
+export const CopilotProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("copilot-acp"),
+  binaryPath: AbsoluteBinaryPath,
+}).annotations(strict);
+export type CopilotProviderConfiguration = typeof CopilotProviderConfiguration.Type;
+
+export const ClineAuthentication = Schema.Literal("api-key");
+export type ClineAuthentication = typeof ClineAuthentication.Type;
+export const ClineProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("cline-acp"),
+  binaryPath: AbsoluteBinaryPath,
+  authentication: ClineAuthentication,
+}).annotations(strict);
+export type ClineProviderConfiguration = typeof ClineProviderConfiguration.Type;
+
+export const QwenAuthentication = Schema.Literal("api-key");
+export type QwenAuthentication = typeof QwenAuthentication.Type;
+export const QwenProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("qwen-acp"),
+  binaryPath: AbsoluteBinaryPath,
+  authentication: QwenAuthentication,
+}).annotations(strict);
+export type QwenProviderConfiguration = typeof QwenProviderConfiguration.Type;
 
 export const DevinProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("devin-acp"),
@@ -508,6 +545,34 @@ export const GlmProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type GlmProviderInstance = typeof GlmProviderInstance.Type;
 
+export const GeminiProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("gemini"),
+  configuration: GeminiProviderConfiguration,
+}).annotations(strict);
+export type GeminiProviderInstance = typeof GeminiProviderInstance.Type;
+
+export const CopilotProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("copilot"),
+  configuration: CopilotProviderConfiguration,
+}).annotations(strict);
+export type CopilotProviderInstance = typeof CopilotProviderInstance.Type;
+
+export const ClineProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("cline"),
+  configuration: ClineProviderConfiguration,
+}).annotations(strict);
+export type ClineProviderInstance = typeof ClineProviderInstance.Type;
+
+export const QwenProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("qwen"),
+  configuration: QwenProviderConfiguration,
+}).annotations(strict);
+export type QwenProviderInstance = typeof QwenProviderInstance.Type;
+
 export const DevinProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
   driverKind: Schema.Literal("devin"),
@@ -581,6 +646,10 @@ export const ProviderInstance = Schema.Union(
   GrokProviderInstance,
   GooseProviderInstance,
   GlmProviderInstance,
+  GeminiProviderInstance,
+  CopilotProviderInstance,
+  ClineProviderInstance,
+  QwenProviderInstance,
   DevinProviderInstance,
   PiProviderInstance,
   OhMyPiProviderInstance,
@@ -657,6 +726,10 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     GrokProviderInstance,
     GooseProviderInstance,
     GlmProviderInstance,
+    GeminiProviderInstance,
+    CopilotProviderInstance,
+    ClineProviderInstance,
+    QwenProviderInstance,
     KiloProviderInstance,
     DevinProviderInstance,
     PiProviderInstance,
@@ -1053,6 +1126,30 @@ export const ProviderRegistryCommand = Schema.Union(
     configuration: GlmProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("create-gemini-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: GeminiProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("create-copilot-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: CopilotProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("create-cline-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: ClineProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("create-qwen-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: QwenProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-devin-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
@@ -1141,6 +1238,26 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-glm-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: GlmProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-gemini-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: GeminiProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-copilot-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: CopilotProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-cline-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: ClineProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-qwen-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: QwenProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-devin-configuration"),

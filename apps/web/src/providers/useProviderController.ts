@@ -7,6 +7,10 @@ import {
   type DevinProviderConfiguration,
   type GrokProviderConfiguration,
   type GlmProviderConfiguration,
+  type GeminiProviderConfiguration,
+  type CopilotProviderConfiguration,
+  type ClineProviderConfiguration,
+  type QwenProviderConfiguration,
   type GooseProviderConfiguration,
   type KiloProviderConfiguration,
   type MistralVibeProviderConfiguration,
@@ -252,7 +256,7 @@ export function useProviderController(options: ProviderControllerOptions) {
 
   const create = useCallback(
     (
-      driverKind: "opencode" | "codex" | "kimi-code" | "devin" | "kilo" | "pi" | "oh-my-pi" | "goose",
+      driverKind: "opencode" | "codex" | "kimi-code" | "devin" | "kilo" | "pi" | "oh-my-pi" | "goose" | "copilot",
       displayName: string,
       binaryPath: string,
     ) =>
@@ -311,6 +315,15 @@ export function useProviderController(options: ProviderControllerOptions) {
             expectedVersion,
             displayName,
             configuration: { kind: "goose-acp", binaryPath },
+          };
+        }
+        if (driverKind === "copilot") {
+          return {
+            kind: "create-copilot-provider",
+            instanceId,
+            expectedVersion,
+            displayName,
+            configuration: { kind: "copilot-acp", binaryPath },
           };
         }
         return {
@@ -824,6 +837,169 @@ export function useProviderController(options: ProviderControllerOptions) {
     [client, hostBridge, install, recoverRegistryFailure],
   );
 
+  const createGemini = useCallback(
+    (
+      displayName: string,
+      configuration: GeminiProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) => {
+      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          if (hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          if (credentialValue.length === 0) {
+            if (mounted.current) {
+              setMessage("Enter a Gemini API key before creating this provider.");
+            }
+            return false;
+          }
+          const current = authoritative.current;
+          if (client === undefined || current === undefined) return false;
+          let created = false;
+          try {
+            applyResult(
+              await client.execute({
+                kind: "create-gemini-provider",
+                instanceId,
+                expectedVersion: 0 as ProviderDefaults["version"],
+                displayName,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            created = true;
+            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            return true;
+          } catch (error) {
+            if (created) {
+              if (mounted.current) {
+                setMessage("The provider was created, but its credential could not be stored.");
+              }
+            } else {
+              await recoverRegistryFailure(error, "Provider configuration could not be created.");
+            }
+            return false;
+          }
+        }),
+      );
+    },
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const createCline = useCallback(
+    (
+      displayName: string,
+      configuration: ClineProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) => {
+      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          if (hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          if (credentialValue.length === 0) {
+            if (mounted.current) {
+              setMessage("Enter a Cline API key before creating this provider.");
+            }
+            return false;
+          }
+          const current = authoritative.current;
+          if (client === undefined || current === undefined) return false;
+          let created = false;
+          try {
+            applyResult(
+              await client.execute({
+                kind: "create-cline-provider",
+                instanceId,
+                expectedVersion: 0 as ProviderDefaults["version"],
+                displayName,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            created = true;
+            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            return true;
+          } catch (error) {
+            if (created) {
+              if (mounted.current) {
+                setMessage("The provider was created, but its credential could not be stored.");
+              }
+            } else {
+              await recoverRegistryFailure(error, "Provider configuration could not be created.");
+            }
+            return false;
+          }
+        }),
+      );
+    },
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const createQwen = useCallback(
+    (
+      displayName: string,
+      configuration: QwenProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) => {
+      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          if (hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          if (credentialValue.length === 0) {
+            if (mounted.current) {
+              setMessage("Enter an OpenAI-compatible API key before creating this provider.");
+            }
+            return false;
+          }
+          const current = authoritative.current;
+          if (client === undefined || current === undefined) return false;
+          let created = false;
+          try {
+            applyResult(
+              await client.execute({
+                kind: "create-qwen-provider",
+                instanceId,
+                expectedVersion: 0 as ProviderDefaults["version"],
+                displayName,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            created = true;
+            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            return true;
+          } catch (error) {
+            if (created) {
+              if (mounted.current) {
+                setMessage("The provider was created, but its credential could not be stored.");
+              }
+            } else {
+              await recoverRegistryFailure(error, "Provider configuration could not be created.");
+            }
+            return false;
+          }
+        }),
+      );
+    },
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+
   const beginProviderAuthentication = useCallback(
     async (instanceId: ProviderInstanceId): Promise<ProviderAuthenticationAttempt | undefined> => {
       if (client === undefined) return undefined;
@@ -1272,6 +1448,179 @@ export function useProviderController(options: ProviderControllerOptions) {
         }),
       ),
     [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const changeGeminiConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: GeminiProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const current = authoritative.current;
+          const instance = current === undefined ? undefined : findProvider(current, instanceId);
+          if (client === undefined || current === undefined || instance?.driverKind !== "gemini") {
+            return false;
+          }
+          const mustSet = credentialValue.length > 0;
+          if (mustSet && hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          const bridge = hostBridge;
+          if (mustSet && bridge !== undefined) {
+            try {
+              await bridge.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              if (mounted.current) {
+                setMessage(
+                  "The provider credential could not be stored, so the configuration was unchanged.",
+                );
+              }
+              return false;
+            }
+          }
+          try {
+            applyResult(
+              await client.execute({
+                kind: "change-gemini-configuration",
+                instanceId,
+                expectedVersion: instance.version,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            return true;
+          } catch (error) {
+            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
+            return false;
+          }
+        }),
+      ),
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const changeClineConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: ClineProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const current = authoritative.current;
+          const instance = current === undefined ? undefined : findProvider(current, instanceId);
+          if (client === undefined || current === undefined || instance?.driverKind !== "cline") {
+            return false;
+          }
+          const mustSet = credentialValue.length > 0;
+          if (mustSet && hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          const bridge = hostBridge;
+          if (mustSet && bridge !== undefined) {
+            try {
+              await bridge.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              if (mounted.current) {
+                setMessage(
+                  "The provider credential could not be stored, so the configuration was unchanged.",
+                );
+              }
+              return false;
+            }
+          }
+          try {
+            applyResult(
+              await client.execute({
+                kind: "change-cline-configuration",
+                instanceId,
+                expectedVersion: instance.version,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            return true;
+          } catch (error) {
+            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
+            return false;
+          }
+        }),
+      ),
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const changeQwenConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: QwenProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const current = authoritative.current;
+          const instance = current === undefined ? undefined : findProvider(current, instanceId);
+          if (client === undefined || current === undefined || instance?.driverKind !== "qwen") {
+            return false;
+          }
+          const mustSet = credentialValue.length > 0;
+          if (mustSet && hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          const bridge = hostBridge;
+          if (mustSet && bridge !== undefined) {
+            try {
+              await bridge.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              if (mounted.current) {
+                setMessage(
+                  "The provider credential could not be stored, so the configuration was unchanged.",
+                );
+              }
+              return false;
+            }
+          }
+          try {
+            applyResult(
+              await client.execute({
+                kind: "change-qwen-configuration",
+                instanceId,
+                expectedVersion: instance.version,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            return true;
+          } catch (error) {
+            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
+            return false;
+          }
+        }),
+      ),
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const changeCopilotConfiguration = useCallback(
+    (instanceId: ProviderInstanceId, configuration: CopilotProviderConfiguration) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        if (instance?.driverKind !== "copilot") return undefined;
+        return {
+          kind: "change-copilot-configuration",
+          instanceId,
+          expectedVersion: instance.version,
+          configuration,
+        };
+      }),
+    [execute],
   );
   const changeDevinConfiguration = useCallback(
     (instanceId: ProviderInstanceId, configuration: DevinProviderConfiguration) =>
@@ -1971,6 +2320,9 @@ export function useProviderController(options: ProviderControllerOptions) {
     createMistralVibe,
     createGrok,
     createGlm,
+    createGemini,
+    createCline,
+    createQwen,
     createOllama,
     createOpenAiCompatible,
     createAnthropicCompatible,
@@ -1989,6 +2341,10 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeGrokConfiguration,
     changeGooseConfiguration,
     changeGlmConfiguration,
+    changeGeminiConfiguration,
+    changeCopilotConfiguration,
+    changeClineConfiguration,
+    changeQwenConfiguration,
     changeOpenAiCompatibleConfiguration,
     changeOpenAiImageConfiguration,
     changeGeminiImageConfiguration,
