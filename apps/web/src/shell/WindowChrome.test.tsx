@@ -453,6 +453,16 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
   });
 
+  it("clears the workspace, pane, and tab band fills under a translucent workspace so the glass shows", () => {
+    // Each surface paints the opaque workspace colour on its own, so any one
+    // of them left filled hides the glass behind the whole workspace.
+    for (const surface of [".workspace", ".workspace-pane", ".workspace-thread-tabs"]) {
+      expect(cssRule(`.shell--workspace-material-translucent.shell-frame ${surface}`)).toContain(
+        "background: transparent;",
+      );
+    }
+  });
+
   it("keeps the near-opaque native sidebar wash until the host reports applied window vibrancy", () => {
     // The wash matches only while data-octant-host-vibrancy is absent, and the
     // gate lives in :where() so the prefers-reduced-transparency override

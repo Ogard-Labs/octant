@@ -86,7 +86,8 @@ distilled successor of the earlier long-form design specifications.
 | [0076](0076-pull-request-snapshot-survives-restart.md)                      | The pull-request snapshot survives host restart                                             | Accepted           |
 | [0077](0077-environment-is-a-dock-tool.md)                                  | Environment is a context-aware dock tool                                                    | Accepted           |
 | [0078](0078-the-welcome-composer-carries-its-context-beneath-the-prompt.md) | The welcome composer carries its context beneath the prompt                                 | Accepted           |
-| [0079](0079-hand-off-writes-a-canvas-from-the-export-cut.md)                | Hand off writes a Canvas from the export cut                                                | Accepted           |
+| [0079](0079-code-project-creation-may-initialize-git.md)                    | Code Project creation may initialize Git on request                                         | Accepted           |
+| [0080](0080-hand-off-writes-a-canvas-from-the-export-cut.md)                | Hand off writes a Canvas from the export cut                                                | Accepted           |
 
 ## Adding an ADR
 

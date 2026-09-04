@@ -5050,7 +5050,7 @@ function LaunchedShell(
                     onDraftCreateCodeThread={handleDraftCreateCodeThread}
                     onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}
                     draftCodeExecute={codeController.execute}
-                    onCreateProject={(mode, name, receiptId) => {
+                    onCreateProject={(mode, name, receiptId, initializeGit) => {
                       const destinationHostId = refuseUnlessCreatableDestination({
                         action: "create-project",
                         requiredCapability: mode,
@@ -5059,7 +5059,13 @@ function LaunchedShell(
                       if (destinationHostId === undefined) {
                         return Promise.resolve(undefined);
                       }
-                      return projectController.create(mode, name, receiptId, destinationHostId);
+                      return projectController.create(
+                        mode,
+                        name,
+                        receiptId,
+                        destinationHostId,
+                        initializeGit,
+                      );
                     }}
                     {...(draftCreating ? { onDraftCreating: true } : {})}
                     {...(draftError === undefined ? {} : { onDraftError: draftError })}
@@ -5243,7 +5249,7 @@ function LaunchedShell(
             setCreateOpen(false);
             setProjectCreateMode(undefined);
           }}
-          onCreateProject={(mode, name, receiptId) => {
+          onCreateProject={(mode, name, receiptId, initializeGit) => {
             const destinationHostId = refuseUnlessCreatableDestination({
               action: "create-project",
               requiredCapability: mode,
@@ -5252,7 +5258,13 @@ function LaunchedShell(
             if (destinationHostId === undefined) {
               return Promise.resolve(undefined);
             }
-            return projectController.create(mode, name, receiptId, destinationHostId);
+            return projectController.create(
+              mode,
+              name,
+              receiptId,
+              destinationHostId,
+              initializeGit,
+            );
           }}
           onCreatedProject={(projectId, mode, name) => {
             // First run is still asking; creating a Project is a prerequisite

@@ -5,6 +5,7 @@ import { FolderOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { FolderPicker } from "./FolderPicker";
@@ -19,6 +20,7 @@ export interface ProjectCreateDialogProps {
     mode: OctantMode,
     name: string,
     receiptId?: string,
+    initializeGit?: boolean,
   ) => Promise<ProjectId | undefined>;
   readonly onCreated: (projectId: ProjectId, mode: OctantMode, name: string) => void;
 }
@@ -161,6 +163,8 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
     readonly receiptId: string;
     readonly displayName: string;
   }>();
+  /** Code-only: initialize the chosen folder as a Git repository on create. */
+  const [initializeGit, setInitializeGit] = useState(true);
 
   useEffect(() => {
     alive.current = true;
@@ -174,12 +178,21 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
     props.onClose();
   }
 
-  async function createProject(receiptId: string, projectName: string) {
+  async function createProject(
+    receiptId: string,
+    projectName: string,
+    initializeGitRepository = false,
+  ) {
     const operation = ++operationGeneration.current;
     setSubmitting(true);
     setStatus("");
     try {
-      const projectId = await props.onCreate(mode, projectName, receiptId);
+      const projectId = await props.onCreate(
+        mode,
+        projectName,
+        receiptId,
+        ...(mode === "code" ? [initializeGitRepository] : []),
+      );
       if (!alive.current || operation !== operationGeneration.current) return;
       if (projectId !== undefined) {
         props.onCreated(projectId, mode, projectName);
@@ -233,7 +246,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
     const normalized = name.trim();
     const chosen = folder;
     if (chosen === undefined || normalized === "" || submitting) return;
-    void createProject(chosen.receiptId, normalized);
+    void createProject(chosen.receiptId, normalized, mode === "code" && initializeGit);
   }
 
   if (props.hostBridge !== undefined) {
@@ -262,7 +275,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         </div>
         <p>
           {mode === "code"
-            ? "One folder, bound as this Code Project. Git tools become available when the folder is a repository."
+            ? "One folder, bound as this Code Project. Initialize Git here so a Code thread can start immediately."
             : "One folder, bound as this Project's root. Octant records the binding."}
         </p>
         <form noValidate onSubmit={submit}>
@@ -296,6 +309,17 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
               <span className="project-dialog__folder-change">Change</span>
             )}
           </OctantButton>
+          {mode === "code" ? (
+            <label className="project-dialog__git-init" htmlFor="project-initialize-git">
+              <OctantCheckbox
+                checked={initializeGit}
+                disabled={submitting || choosing}
+                id="project-initialize-git"
+                onChange={(event) => setInitializeGit(event.target.checked)}
+              />
+              <span>Initialize as a Git repository</span>
+            </label>
+          ) : null}
           <div className="project-dialog__actions">
             <OctantButton onClick={requestClose} type="button" variant="ghost">
               Cancel
@@ -322,8 +346,12 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         hostId={props.hostId}
         mode={mode}
         onCancel={props.onClose}
-        onSelect={(receiptId, displayName) => {
-          void createProject(receiptId, displayName);
+        onSelect={(receiptId, displayName, selection) => {
+          void createProject(
+            receiptId,
+            displayName,
+            mode === "code" && (selection?.initializeGit ?? true),
+          );
         }}
       />
     );

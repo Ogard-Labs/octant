@@ -117,7 +117,9 @@ describe("ProjectCreateDialog renderer flows", () => {
     expect(screen.getByLabelText("Project name")).toHaveValue("Ledger");
 
     await user.click(screen.getByRole("button", { name: "Create Project" }));
-    await waitFor(() => expect(onCreate).toHaveBeenCalledWith("code", "Ledger", bindingReceipt));
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith("code", "Ledger", bindingReceipt, true),
+    );
   });
 
   it("redacts native picker rejection details", async () => {
@@ -175,6 +177,54 @@ describe("ProjectCreateDialog renderer flows", () => {
     );
     expect(onCreate).not.toHaveBeenCalled();
     expect(onCreated).not.toHaveBeenCalled();
+  });
+
+  it("creates a Code Project with Git initialization enabled by default", async () => {
+    const user = userEvent.setup();
+    const bridge = hostBridge(selectsDocuments());
+    const onCreate = vi.fn(async () => projectId);
+    render(
+      <ProjectCreateDialog
+        hostBridge={bridge}
+        mode="code"
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose a folder" }));
+    await waitFor(() => expect(bridge.selectProjectRoot).toHaveBeenCalledWith("code"));
+    expect(screen.getByRole("checkbox", { name: /Initialize as a Git repository/i })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Create Project" }));
+
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith("code", "Documents", bindingReceipt, true),
+    );
+  });
+
+  it("lets the person decline Git initialization for a Code Project", async () => {
+    const user = userEvent.setup();
+    const bridge = hostBridge(selectsDocuments());
+    const onCreate = vi.fn(async () => projectId);
+    render(
+      <ProjectCreateDialog
+        hostBridge={bridge}
+        mode="code"
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose a folder" }));
+    await screen.findByRole("checkbox", { name: /Initialize as a Git repository/i });
+    await user.click(screen.getByRole("checkbox", { name: /Initialize as a Git repository/i }));
+    await user.click(screen.getByRole("button", { name: "Create Project" }));
+
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith("code", "Documents", bindingReceipt, false),
+    );
   });
 
   it("keeps Cancel usable while creation is in flight and ignores the late result", async () => {

@@ -132,6 +132,20 @@ describe("the public-block visual language", () => {
     );
   });
 
+  it("keeps the keyboard focus ring on the switch its own reset would swallow", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const track = system.match(/\.octant-switch\[data-slot="switch"\]\s*\{[^}]+\}/)?.[0] ?? "";
+
+    // The track drops the adapter's drop shadow, and the global ring is a
+    // box-shadow over `outline: none`, so the reset outranks it on
+    // specificity. Focus has to name the ring back or the switch shows
+    // nothing when it is tabbed to.
+    expect(track).toMatch(/box-shadow:\s*none/);
+    expect(system).toMatch(
+      /\.octant-switch\[data-slot="switch"\]:focus-visible\s*\{\s*box-shadow:\s*var\(--oct-focus-ring\)/,
+    );
+  });
+
   it("keeps empty composer pickers as quiet toolbar items instead of nested fields", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const emptyPicker =

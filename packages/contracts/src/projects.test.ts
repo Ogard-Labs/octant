@@ -286,6 +286,20 @@ describe("Project command contracts", () => {
     },
   ] as const;
 
+  it("decodes create-code-project with initializeGit", () => {
+    expect(
+      decodeProjectCommand({
+        kind: "create-code-project",
+        projectId: ids.project,
+        name: "Project Atlas",
+        receiptId: ids.receipt,
+        expectedVersion: 0,
+        hostId: "local",
+        initializeGit: true,
+      }),
+    ).toMatchObject({ kind: "create-code-project", initializeGit: true });
+  });
+
   it.each(commands)("decodes $kind", (command) => {
     expect(decodeProjectCommand(command)).toMatchObject(command);
   });
