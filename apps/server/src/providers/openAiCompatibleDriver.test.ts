@@ -492,6 +492,56 @@ describe("makeOpenAiCompatibleDriver", () => {
       ),
     );
   });
+
+  it("reports the quota buckets an accepted response disclosed in its headers", async () => {
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/models")) return new Response(null, { status: 404 });
+      return new Response(chatStream("answer").body, {
+        headers: {
+          "content-type": "text/event-stream",
+          "x-ratelimit-limit-requests": "5000",
+          "x-ratelimit-remaining-requests": "4990",
+          "x-ratelimit-reset-requests": "6m0s",
+          "x-ratelimit-limit-tokens": "800000",
+          "x-ratelimit-remaining-tokens": "799000",
+        },
+      });
+    });
+    const driver = makeDriver({ fetch });
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(collectSessionEvents(connection.events, sessionId));
+          yield* connection.send({ sessionId, prompt: "limits", attachments: [], tools: [] });
+          const value = Array.from(yield* Fiber.join(collected));
+          yield* connection.stop(sessionId);
+          return value;
+        }),
+      ),
+    );
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "text-delta",
+      "usage",
+      "rate-limit-bucket",
+      "rate-limit-bucket",
+      "completed",
+    ]);
+    expect(events[2]).toMatchObject({
+      bucket: "requests",
+      limit: 5000,
+      remaining: 4990,
+      resetsAt: expect.stringMatching(/Z$/),
+    });
+    expect(events[3]).toMatchObject({ bucket: "tokens", limit: 800_000, remaining: 799_000 });
+    expect(events[3]).not.toHaveProperty("resetsAt");
+    expect(
+      events.every((event, index) => index === 0 || event.sequence > events[index - 1]!.sequence),
+    ).toBe(true);
+  });
 });
 
 function makeDriver(options: {

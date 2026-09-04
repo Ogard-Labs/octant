@@ -516,6 +516,18 @@ function normalizeProviderEvent(
         ...(event.utilization === undefined ? {} : { utilization: event.utilization }),
         ...(event.resetsAt === undefined ? {} : { resetsAt: event.resetsAt }),
       });
+    case "rate-limit-bucket":
+      // A header bucket is exact, so its share spent is arithmetic rather
+      // than a guess; the provider gave no warning threshold, so only an
+      // empty bucket counts as exhausted and nothing is ever "warning".
+      return Effect.succeed({
+        ...base,
+        category: "provider-limit",
+        text: text(event.bucket),
+        status: event.remaining === 0 ? "exhausted" : "allowed",
+        utilization: (event.limit - event.remaining) / event.limit,
+        ...(event.resetsAt === undefined ? {} : { resetsAt: event.resetsAt }),
+      });
     case "citation":
       return Effect.succeed({
         ...base,

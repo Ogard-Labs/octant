@@ -5,6 +5,7 @@ import {
   type ProviderUsageLimitsEntry,
   type ProviderUsageLimitsSnapshot,
   type ProviderUsageLimitsSource,
+  type ProviderUsageLimitsUnavailableReason,
   type ProviderInstanceId,
   type ProviderServiceLimits,
   UtcTimestamp as UtcTimestampSchema,
@@ -38,6 +39,12 @@ export interface ProviderUsageLimitsServiceOptions {
     instanceId: ProviderInstanceId,
     observedAt: UtcTimestamp,
   ) => ProviderServiceLimits | undefined;
+  /**
+   * Why an enabled instance with no evidence shows nothing. Defaults to
+   * `unsupported`, which means the runtime may still report; a caller that
+   * knows the runtime never will names that instead.
+   */
+  readonly unavailableReason?: (instance: ProviderInstance) => ProviderUsageLimitsUnavailableReason;
   readonly now: () => UtcTimestamp;
   readonly refreshIntervalMs?: number;
   readonly refreshTimeoutMs?: number;
@@ -48,10 +55,17 @@ export interface ProviderUsageLimitsServiceOptions {
 const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 15_000;
 
+/**
+ * Where an entry's runtime evidence sits. `runtime-only` entries are nothing
+ * but live session evidence and vanish with it; `merged` entries belong to a
+ * direct observer and only borrow the runtime's rolling windows.
+ */
+type RuntimeEvidenceOrigin = "runtime-only" | "merged";
+
 export class ProviderUsageLimitsService {
   readonly #options: ProviderUsageLimitsServiceOptions;
   readonly #entries = new Map<string, ProviderUsageLimitsEntry>();
-  readonly #runtimeWindowOwners = new Set<string>();
+  readonly #runtimeOrigins = new Map<string, RuntimeEvidenceOrigin>();
   #inFlight: Promise<ProviderUsageLimitsSnapshot> | undefined;
   #refreshAbortController: AbortController | undefined;
   #scheduleHandle: ReturnType<typeof setInterval> | undefined;
@@ -98,7 +112,7 @@ export class ProviderUsageLimitsService {
   async #refresh(signal: AbortSignal): Promise<ProviderUsageLimitsSnapshot> {
     const observedAt = this.#options.now();
     const instances = this.#options.listInstances();
-    this.#pruneRuntimeWindowOwners(instances);
+    this.#pruneRuntimeOrigins(instances);
     const next = await Promise.all(
       instances.map((instance) => this.#observe(instance, observedAt, signal)),
     );
@@ -113,14 +127,14 @@ export class ProviderUsageLimitsService {
     observedAt: UtcTimestamp,
     refreshSignal: AbortSignal,
   ): Promise<ProviderUsageLimitsEntry> {
-    const previous = this.#entries.get(String(instance.id));
+    const key = String(instance.id);
+    const previous = this.#entries.get(key);
     if (refreshSignal.aborted) {
       return previous ?? this.#unavailable(instance, observedAt, "not-ready");
     }
     const retryAt = this.#retryAt(previous);
     if (previous !== undefined && retryAt !== undefined && retryAt > observedAt) return previous;
     if (!instance.enabled) {
-      this.#runtimeWindowOwners.delete(String(instance.id));
       return this.#unavailable(instance, observedAt, "not-configured");
     }
     const controller = new AbortController();
@@ -152,14 +166,9 @@ export class ProviderUsageLimitsService {
       const runtimeLimits = this.#options.runtimeLimits?.(instance.id, observedAt);
       if (observation === undefined) {
         if (runtimeLimits === undefined) {
-          this.#runtimeWindowOwners.delete(String(instance.id));
-          return this.#unavailable(instance, observedAt, "unsupported");
+          return this.#unavailable(instance, observedAt, this.#noEvidenceReason(instance));
         }
-        if (runtimeLimits.rateLimitWindows === undefined) {
-          this.#runtimeWindowOwners.delete(String(instance.id));
-        } else {
-          this.#runtimeWindowOwners.add(String(instance.id));
-        }
+        this.#runtimeOrigins.set(key, "runtime-only");
         return {
           providerInstanceId: instance.id,
           status: "available",
@@ -169,9 +178,9 @@ export class ProviderUsageLimitsService {
         };
       }
       if (runtimeLimits?.rateLimitWindows === undefined) {
-        this.#runtimeWindowOwners.delete(String(instance.id));
+        this.#runtimeOrigins.delete(key);
       } else {
-        this.#runtimeWindowOwners.add(String(instance.id));
+        this.#runtimeOrigins.set(key, "merged");
       }
       return {
         providerInstanceId: instance.id,
@@ -191,9 +200,6 @@ export class ProviderUsageLimitsService {
         return previous ?? this.#unavailable(instance, observedAt, "not-ready");
       }
       const runtimeLimits = this.#options.runtimeLimits?.(instance.id, observedAt);
-      if (runtimeLimits?.rateLimitWindows !== undefined) {
-        this.#runtimeWindowOwners.add(String(instance.id));
-      }
       const priorStaleLimits =
         previous?.status === "available"
           ? previous.limits
@@ -204,6 +210,12 @@ export class ProviderUsageLimitsService {
         priorStaleLimits === undefined || runtimeLimits?.rateLimitWindows === undefined
           ? priorStaleLimits
           : { ...priorStaleLimits, rateLimitWindows: runtimeLimits.rateLimitWindows };
+      if (this.#runtimeOrigins.get(key) === "runtime-only" || priorStaleLimits === runtimeLimits) {
+        if (staleLimits === undefined) this.#runtimeOrigins.delete(key);
+        else this.#runtimeOrigins.set(key, "runtime-only");
+      } else if (runtimeLimits?.rateLimitWindows !== undefined) {
+        this.#runtimeOrigins.set(key, "merged");
+      }
       const lastSuccessfulAt =
         previous?.status === "available"
           ? previous.observedAt
@@ -242,13 +254,17 @@ export class ProviderUsageLimitsService {
     }
   }
 
+  #noEvidenceReason(instance: ProviderInstance): ProviderUsageLimitsUnavailableReason {
+    return this.#options.unavailableReason?.(instance) ?? "unsupported";
+  }
+
   #unavailable(
     instance: ProviderInstance,
     observedAt: UtcTimestamp,
-    reason: "unsupported" | "not-configured" | "not-ready",
-    clearRuntimeOwnership = true,
+    reason: ProviderUsageLimitsUnavailableReason,
+    clearRuntimeOrigin = true,
   ): ProviderUsageLimitsEntry {
-    if (clearRuntimeOwnership) this.#runtimeWindowOwners.delete(String(instance.id));
+    if (clearRuntimeOrigin) this.#runtimeOrigins.delete(String(instance.id));
     return {
       providerInstanceId: instance.id,
       status: "unavailable",
@@ -279,50 +295,27 @@ export class ProviderUsageLimitsService {
     const runtimeLimits = this.#options.runtimeLimits;
     if (runtimeLimits !== undefined) {
       const instances = this.#options.listInstances();
-      this.#pruneRuntimeWindowOwners(instances);
+      this.#pruneRuntimeOrigins(instances);
       for (const instance of instances) {
         if (!instance.enabled) continue;
+        const key = String(instance.id);
         const limits = runtimeLimits(instance.id, refreshedAt);
-        const previous = entries.get(String(instance.id));
+        const previous = entries.get(key);
+        const origin = this.#runtimeOrigins.get(key);
         if (limits === undefined) {
-          if (
-            previous?.status === "available" &&
-            this.#runtimeWindowOwners.has(String(instance.id)) &&
-            previous.limits.rateLimitWindows !== undefined
-          ) {
-            const { rateLimitWindows: _expiredWindows, ...withoutWindows } = previous.limits;
-            entries.set(
-              String(instance.id),
-              hasServiceLimitEvidence(withoutWindows)
-                ? {
-                    ...previous,
-                    limits: withoutWindows,
-                  }
-                : this.#unavailable(instance, refreshedAt, "unsupported", false),
-            );
-          }
-          if (
-            previous?.status === "failed" &&
-            this.#runtimeWindowOwners.has(String(instance.id)) &&
-            previous.staleLimits?.rateLimitWindows !== undefined
-          ) {
-            const { staleLimits: _staleLimits, ...withoutStaleLimits } = previous;
-            const { rateLimitWindows: _expiredWindows, ...withoutWindows } = previous.staleLimits;
-            entries.set(
-              String(instance.id),
-              hasServiceLimitEvidence(withoutWindows)
-                ? { ...withoutStaleLimits, staleLimits: withoutWindows }
-                : withoutStaleLimits,
-            );
-          }
+          const expired = this.#withoutRuntimeEvidence(instance, previous, origin, refreshedAt);
+          if (expired !== undefined) entries.set(key, expired);
           continue;
         }
         if (previous?.status === "failed") {
           const staleLimits =
-            previous.staleLimits === undefined || limits.rateLimitWindows === undefined
-              ? (previous.staleLimits ?? limits)
-              : { ...previous.staleLimits, rateLimitWindows: limits.rateLimitWindows };
-          entries.set(String(instance.id), {
+            origin === "runtime-only" || previous.staleLimits === undefined
+              ? limits
+              : limits.rateLimitWindows === undefined
+                ? withoutWindows(previous.staleLimits)
+                : { ...previous.staleLimits, rateLimitWindows: limits.rateLimitWindows };
+          if (previous.staleLimits === undefined) this.#runtimeOrigins.set(key, "runtime-only");
+          entries.set(key, {
             ...previous,
             staleLimits,
             ...(previous.lastSuccessfulAt === undefined
@@ -332,7 +325,28 @@ export class ProviderUsageLimitsService {
           continue;
         }
         const previousAvailable = previous?.status === "available" ? previous : undefined;
-        entries.set(String(instance.id), {
+        if (previousAvailable !== undefined && origin !== "runtime-only") {
+          // A direct observer owns this entry; the runtime only lends it
+          // rolling windows, and takes them back once they expire.
+          if (limits.rateLimitWindows === undefined) {
+            if (origin === "merged") {
+              entries.set(key, {
+                ...previousAvailable,
+                limits: withoutWindows(previousAvailable.limits),
+              });
+            }
+            continue;
+          }
+          this.#runtimeOrigins.set(key, "merged");
+          entries.set(key, {
+            ...previousAvailable,
+            observedAt: latestTimestamp(previousAvailable.observedAt, limits.updatedAt),
+            limits: { ...previousAvailable.limits, rateLimitWindows: limits.rateLimitWindows },
+          });
+          continue;
+        }
+        this.#runtimeOrigins.set(key, "runtime-only");
+        entries.set(key, {
           providerInstanceId: instance.id,
           status: "available",
           source: previousAvailable?.source ?? "provider-runtime",
@@ -340,10 +354,7 @@ export class ProviderUsageLimitsService {
             previousAvailable === undefined
               ? limits.updatedAt
               : latestTimestamp(previousAvailable.observedAt, limits.updatedAt),
-          limits:
-            previousAvailable !== undefined && limits.rateLimitWindows !== undefined
-              ? { ...previousAvailable.limits, rateLimitWindows: limits.rateLimitWindows }
-              : limits,
+          limits,
         });
       }
     }
@@ -356,12 +367,54 @@ export class ProviderUsageLimitsService {
     });
   }
 
-  #pruneRuntimeWindowOwners(instances: ReadonlyArray<ProviderInstance>): void {
+  /**
+   * The entry once every live runtime fact behind it has expired. Evidence
+   * that was only ever the runtime's disappears with it; an observer-owned
+   * entry merely loses the windows it borrowed. The origin is kept: the
+   * refreshed entry still holds the expired facts, so every later read must
+   * reach the same answer until the next refresh replaces it.
+   */
+  #withoutRuntimeEvidence(
+    instance: ProviderInstance,
+    previous: ProviderUsageLimitsEntry | undefined,
+    origin: RuntimeEvidenceOrigin | undefined,
+    refreshedAt: UtcTimestamp,
+  ): ProviderUsageLimitsEntry | undefined {
+    if (origin === undefined || previous === undefined) return undefined;
+    if (previous.status === "available") {
+      if (origin === "runtime-only") {
+        return this.#unavailable(instance, refreshedAt, this.#noEvidenceReason(instance), false);
+      }
+      if (previous.limits.rateLimitWindows === undefined) return undefined;
+      const remaining = withoutWindows(previous.limits);
+      return hasServiceLimitEvidence(remaining)
+        ? { ...previous, limits: remaining }
+        : this.#unavailable(instance, refreshedAt, this.#noEvidenceReason(instance), false);
+    }
+    if (previous.status === "failed" && previous.staleLimits !== undefined) {
+      const { staleLimits, ...withoutStaleLimits } = previous;
+      if (origin === "runtime-only" || staleLimits.rateLimitWindows === undefined) {
+        return origin === "runtime-only" ? withoutStaleLimits : undefined;
+      }
+      const remaining = withoutWindows(staleLimits);
+      return hasServiceLimitEvidence(remaining)
+        ? { ...withoutStaleLimits, staleLimits: remaining }
+        : withoutStaleLimits;
+    }
+    return undefined;
+  }
+
+  #pruneRuntimeOrigins(instances: ReadonlyArray<ProviderInstance>): void {
     const currentIds = new Set(instances.map((instance) => String(instance.id)));
-    for (const ownerId of this.#runtimeWindowOwners) {
-      if (!currentIds.has(ownerId)) this.#runtimeWindowOwners.delete(ownerId);
+    for (const ownerId of this.#runtimeOrigins.keys()) {
+      if (!currentIds.has(ownerId)) this.#runtimeOrigins.delete(ownerId);
     }
   }
+}
+
+function withoutWindows(limits: ProviderServiceLimits): ProviderServiceLimits {
+  const { rateLimitWindows: _expiredWindows, ...rest } = limits;
+  return rest;
 }
 
 function hasServiceLimitEvidence(limits: ProviderServiceLimits): boolean {

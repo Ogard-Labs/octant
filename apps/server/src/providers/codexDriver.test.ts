@@ -838,6 +838,43 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("tells the running session about account usage windows that name no thread", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await startSession(acquired.connection);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "usage", attachments: [], tools: [] }),
+    );
+    const events = takeEvents(acquired.connection, 2);
+    f.emit(
+      notification("account/rateLimits/updated", {
+        rateLimits: {
+          limitId: "codex",
+          primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: 1_784_000_000 },
+          secondary: null,
+        },
+      }),
+    );
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed" },
+      }),
+    );
+
+    await expect(events).resolves.toMatchObject([
+      {
+        kind: "rate-limit-window",
+        window: "primary_5h",
+        status: "allowed",
+        utilization: 0.4,
+        sessionId,
+      },
+      { kind: "completed" },
+    ]);
+    await acquired.close();
+  });
+
   it("retries saturation three times before accepted output with 50/100/200ms delays", async () => {
     let attempts = 0;
     const delays: number[] = [];

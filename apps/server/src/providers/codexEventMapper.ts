@@ -13,6 +13,7 @@ import {
   type CodexRpcId,
   type CodexServerMessage,
   type CodexServerRequest,
+  type RateLimitSnapshot,
   type UnmodeledThreadItem,
 } from "./codexProtocol";
 
@@ -605,7 +606,56 @@ function mapNotification(
           cacheReadInputTokens: message.params.tokenUsage.total.cachedInputTokens,
         }),
       ];
+    case "account/rateLimits/updated":
+      return rateLimitWindowEvents(context, message.params.rateLimits);
   }
+}
+
+/**
+ * Codex's account windows, normalized. The app-server names them only by
+ * slot (`primary`, `secondary`) and length, so the window name carries both;
+ * a percent outside 0–100 is left out rather than clamped, and a window that
+ * reports nothing usable is skipped rather than invented.
+ */
+function rateLimitWindowEvents(
+  context: CodexEventContext,
+  snapshot: RateLimitSnapshot,
+): ReadonlyArray<CodexMappedMessage> {
+  const reached =
+    snapshot.rateLimitReachedType !== undefined && snapshot.rateLimitReachedType !== null;
+  const results: CodexMappedMessage[] = [];
+  for (const slot of ["primary", "secondary"] as const) {
+    const window = snapshot[slot];
+    if (window === undefined || window === null || !Number.isFinite(window.usedPercent)) continue;
+    const utilization = window.usedPercent / 100;
+    const resetsAt = resetTimestamp(window.resetsAt ?? undefined);
+    results.push(
+      event(context, {
+        kind: "rate-limit-window",
+        window: windowName(slot, window.windowDurationMins ?? undefined),
+        status:
+          reached || utilization >= 1 ? "exhausted" : utilization >= 0.8 ? "warning" : "allowed",
+        ...(utilization < 0 || utilization > 1 ? {} : { utilization }),
+        ...(resetsAt === undefined ? {} : { resetsAt }),
+      }),
+    );
+  }
+  return results.length === 0 ? [{ kind: "ignored" }] : results;
+}
+
+function windowName(slot: "primary" | "secondary", durationMinutes: number | undefined): string {
+  if (durationMinutes === undefined || durationMinutes <= 0) return slot;
+  if (durationMinutes % 1_440 === 0) return `${slot}_${durationMinutes / 1_440}d`;
+  if (durationMinutes % 60 === 0) return `${slot}_${durationMinutes / 60}h`;
+  return `${slot}_${durationMinutes}m`;
+}
+
+/** Codex reports a reset instant in Unix seconds; milliseconds are accepted too. */
+function resetTimestamp(resetsAt: number | undefined): UtcTimestamp | undefined {
+  if (resetsAt === undefined || !Number.isFinite(resetsAt) || resetsAt <= 0) return undefined;
+  const absolute = resetsAt < 10_000_000_000 ? resetsAt * 1_000 : resetsAt;
+  const at = new Date(absolute);
+  return Number.isNaN(at.getTime()) ? undefined : (at.toISOString() as UtcTimestamp);
 }
 
 function isActiveRuntimeMethod(method: string): boolean {
@@ -616,10 +666,14 @@ export function mapCodexMessage(
   context: CodexEventContext,
   message: CodexServerMessage,
 ): ReadonlyArray<CodexMappedMessage> {
+  // Account usage is not turn activity: it may land after the turn ended
+  // and still describes the account truthfully.
   if (
     context.terminal &&
     (message.kind === "request" ||
-      (message.kind === "notification" && message.method !== "turn/completed"))
+      (message.kind === "notification" &&
+        message.method !== "turn/completed" &&
+        message.method !== "account/rateLimits/updated"))
   ) {
     return protocolFailure("Provider emitted runtime activity after the terminal event.");
   }

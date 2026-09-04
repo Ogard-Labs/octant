@@ -5,6 +5,7 @@ import {
   requestAnthropicGeneration,
 } from "./anthropicCompatibleEndpoint";
 import { decodeSse } from "./openAiCompatibleSse";
+import { readAnthropicRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
 
 export interface AnthropicHistoryMessage {
   readonly role: "user" | "assistant";
@@ -37,6 +38,8 @@ export interface AnthropicTurnResult {
   readonly usage?: AnthropicUsage;
   readonly events: readonly AnthropicTurnEvent[];
   readonly verifiedManualModelId?: string;
+  /** Quota buckets from the response headers. Absent when the endpoint sent none. */
+  readonly rateLimitBuckets?: ReadonlyArray<ObservedRateLimitBucket>;
 }
 
 export interface AnthropicMessagesTurnInput {
@@ -126,7 +129,7 @@ async function runMessagesTurn(input: AnthropicMessagesTurnInput): Promise<Anthr
       throw protocol("The provider stream ended with unresolved content blocks.");
     }
   }
-  return result(input, state);
+  return result(input, state, response.headers);
 }
 
 function normalizeEvent(
@@ -341,7 +344,12 @@ function normalizeMessageDelta(
   }
 }
 
-function result(input: AnthropicMessagesTurnInput, state: StreamState): AnthropicTurnResult {
+function result(
+  input: AnthropicMessagesTurnInput,
+  state: StreamState,
+  headers: Headers,
+): AnthropicTurnResult {
+  const rateLimitBuckets = readAnthropicRateLimitBuckets(headers);
   return {
     protocol: "messages",
     accepted: state.accepted,
@@ -355,6 +363,7 @@ function result(input: AnthropicMessagesTurnInput, state: StreamState): Anthropi
     ...(input.endpoint.configuration.manualModelIds.includes(input.modelId as never)
       ? { verifiedManualModelId: input.modelId }
       : {}),
+    ...(rateLimitBuckets.length === 0 ? {} : { rateLimitBuckets }),
   };
 }
 
