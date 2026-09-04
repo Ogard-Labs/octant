@@ -2008,79 +2008,24 @@ textarea.settings-view__text-input {
   gap: var(--oct-space-6);
 }
 
-.open-in-settings {
-  min-width: 0;
-  overflow: hidden;
-  padding: 0 0 8px;
-  border: 0;
-  background: var(--octant-settings-card);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-.open-in-settings > legend {
-  float: left;
-  width: 100%;
-  padding: 20px 20px 0;
-  color: var(--octant-text-primary);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: -0.01em;
-}
-
-.open-in-settings > p,
-.open-in-settings__state {
-  margin: 0;
-  padding: 8px 20px 16px;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-}
-
-.open-in-settings__list {
-  border-block: 0;
-}
-
-.open-in-settings__row {
-  display: grid;
-  min-height: 44px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--oct-space-3);
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-.open-in-settings__row:last-child {
-  border-bottom: 0;
-}
-
-.open-in-settings__row > label {
+/* The reorder arrows ride next to the enable switch at the control edge and
+   stay quiet: an enabled row's order matters, a disabled row's does not. */
+.open-in-settings__controls {
   display: inline-flex;
-  min-width: 0;
   align-items: center;
-  gap: var(--oct-space-2);
-  color: var(--oct-fg);
-  cursor: pointer;
+  gap: var(--oct-space-1);
 }
 
-.open-in-settings__availability {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-}
-
-.open-in-settings__order-actions {
-  display: inline-flex;
-  gap: 2px;
-}
-
-.open-in-settings__order-actions button {
+.open-in-settings__controls > button {
   width: 28px;
   min-width: 28px;
   height: 28px;
   min-height: 28px;
   padding: 0;
+}
+
+.open-in-settings__controls > .octant-switch {
+  margin-left: var(--oct-space-2);
 }
 
 .code-settings {
