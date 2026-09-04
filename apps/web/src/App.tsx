@@ -273,6 +273,7 @@ import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
 import type { DockToolCapabilities } from "./shell/dockToolAvailability";
 import {
   NO_WRITTEN_DOCUMENTS,
+  forgetDeletedWrittenDocument,
   isDocumentPath,
   noteExistingDocuments,
   noteWrittenDocument,
@@ -772,6 +773,12 @@ function LaunchedShell(
   >(new Map());
   const writtenDocumentsRef = useRef(writtenDocumentsByThread);
   writtenDocumentsRef.current = writtenDocumentsByThread;
+  /**
+   * Document paths each thread's live turns reported on the previous pass, so
+   * a path that disappears reads as the turn deleting it rather than as a
+   * reopened thread replaying history that never carried written paths.
+   */
+  const writtenPathsSeen = useRef(new Map<string, ReadonlySet<string>>());
   const [dockSidecarsByThread, setDockSidecarsByThread] = useState<
     ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>
   >(new Map());
@@ -1691,14 +1698,19 @@ function LaunchedShell(
     const offers = writtenDocumentsByThread.get(key) ?? NO_WRITTEN_DOCUMENTS;
     let next = offers;
     let open = false;
+    const livePaths = new Set<string>();
     for (const activity of activeCodeTurnActivity.values()) {
       for (const path of activity.writtenPaths ?? []) {
         if (!isDocumentPath(path)) continue;
+        livePaths.add(path);
         const noted = noteWrittenDocument(next, { kind: "file", path });
         next = noted.offers;
         if (noted.open) open = true;
       }
     }
+    const previousPaths = writtenPathsSeen.current.get(key) ?? new Set<string>();
+    writtenPathsSeen.current.set(key, livePaths);
+    next = forgetDeletedWrittenDocument(next, previousPaths, livePaths);
     if (next === offers) return;
     setWrittenDocumentsByThread((current) => new Map(current).set(key, next));
     if (!open) return;
