@@ -88,6 +88,7 @@ distilled successor of the earlier long-form design specifications.
 | [0078](0078-the-welcome-composer-carries-its-context-beneath-the-prompt.md) | The welcome composer carries its context beneath the prompt                                 | Accepted           |
 | [0079](0079-code-project-creation-may-initialize-git.md)                    | Code Project creation may initialize Git on request                                         | Accepted           |
 | [0080](0080-hand-off-writes-a-canvas-from-the-export-cut.md)                | Hand off writes a Canvas from the export cut                                                | Accepted           |
+| [0081](0081-image-generation-is-its-own-surface.md)                         | Image generation is its own surface                                                         | Accepted           |
 
 ## Adding an ADR
 

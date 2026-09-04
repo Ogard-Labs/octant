@@ -166,11 +166,6 @@ export interface DraftThreadWorkspaceProps {
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
   readonly onCancelFirstTurn?: () => void;
-  readonly imageGeneration?: {
-    readonly profiles: ReadonlyArray<import("@octant/contracts").ImageGenerationProfileView>;
-    readonly client?: import("@octant/client-runtime/image-generation-client").ImageGenerationClient;
-    readonly onOpenSettings?: () => void;
-  };
 }
 
 /**
@@ -517,9 +512,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.windowCapability === undefined
             ? {}
             : { windowCapability: props.windowCapability })}
-          {...(props.imageGeneration === undefined
-            ? {}
-            : { imageGeneration: props.imageGeneration })}
           onCreateThread={(input) => {
             const submitted = {
               ...input,
@@ -582,9 +574,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.windowCapability === undefined
             ? {}
             : { windowCapability: props.windowCapability })}
-          {...(props.imageGeneration === undefined
-            ? {}
-            : { imageGeneration: props.imageGeneration })}
           onCreateThread={(prompt, images, threadMentionIds) =>
             issueContext === undefined && linearIssueContext === undefined
               ? props.onCreateThread(prompt, selectedProjectId, undefined, images, threadMentionIds)
