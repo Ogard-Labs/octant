@@ -185,6 +185,7 @@ import {
   activeSurfaceTitle,
   activeWorkThreadTabId,
   openLocalCodeThreadIds,
+  openThreadIds,
 } from "./shell/workspaceTabLifecycle";
 import {
   readSidebarCollapsed,
@@ -865,6 +866,12 @@ function LaunchedShell(
     controller.workspace === undefined || activePaneId === undefined
       ? undefined
       : activeProjectTabId(controller.workspace.layouts[activeMode], activePaneId);
+  // Every thread the current mode's panes are showing, so the sidebar can mark
+  // all of them rather than only the one holding focus.
+  const openSidebarThreadIds =
+    controller.workspace === undefined
+      ? undefined
+      : openThreadIds(controller.workspace.layouts[activeMode]);
   const activeChatThreadId =
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "chat"
       ? undefined
@@ -3822,9 +3829,7 @@ function LaunchedShell(
         const providerInstanceId = workProviderChoice?.instanceId;
         const modelId = workProviderChoice?.modelId;
         if (providerInstanceId === undefined || modelId === undefined) {
-          setDraftError(
-            "No provider is available. Configure a provider before starting a Work thread.",
-          );
+          setDraftError("No provider is available. Configure a provider before starting a task.");
           return false;
         }
         const bindingRevisionId = project.bindingRevisionId;
@@ -3842,7 +3847,7 @@ function LaunchedShell(
           ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
         });
         if (!("kind" in created) || created.kind !== "thread-created") {
-          setDraftError("The Work thread could not be created.");
+          setDraftError("The task could not be created.");
           return false;
         }
         await controller.openWorkThread(
@@ -4486,6 +4491,9 @@ function LaunchedShell(
                                 : String(activeChatThreadId),
                         }
                       : {})}
+                    {...(openSidebarThreadIds === undefined || openSidebarThreadIds.length === 0
+                      ? {}
+                      : { openThreadIds: openSidebarThreadIds })}
                     archivedProjects={projectController.archivedProjects}
                     availabilityByProject={projectController.availabilityByProject}
                     contextHealthByProject={contextHealthByProject}
@@ -4705,7 +4713,7 @@ function LaunchedShell(
                   setWorkBoardOpen(false);
                   void controller.openWorkThread(
                     target.threadId,
-                    thread?.title ?? "Work thread",
+                    thread?.title ?? "Task",
                     undefined,
                     target.projectId,
                   );
@@ -4980,7 +4988,7 @@ function LaunchedShell(
                       );
                       void controller.openWorkThread(
                         threadId,
-                        thread?.title ?? "Work thread",
+                        thread?.title ?? "Task",
                         undefined,
                         projectId,
                       );

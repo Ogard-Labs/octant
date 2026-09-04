@@ -377,6 +377,8 @@ export interface ProjectThreadRowsProps {
   /** What the row offers on right-click. Absent leaves the rows without a menu. */
   readonly actions?: ThreadRowActions;
   readonly activeThreadId?: string;
+  /** Every thread this window has open, so a split view marks all of them. */
+  readonly openThreadIds?: ReadonlyArray<string>;
   /** Absent when the host cannot accept a rename, which hides the affordance. */
   readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly onSelectThread: (threadId: string) => void;
@@ -416,6 +418,8 @@ function scrollMarginFor(list: HTMLElement, scrollElement: HTMLElement): number 
 interface ProjectThreadRowProps {
   readonly actions: ThreadRowActions;
   readonly activeThreadId?: string;
+  /** Every thread this window has open, so a split view marks all of them. */
+  readonly openThreadIds?: ReadonlyArray<string>;
   readonly isRenaming: boolean;
   readonly lineageThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly onCancelRename: () => void;
@@ -478,6 +482,13 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     <OctantButton
       aria-current={props.activeThreadId === rowId ? "page" : undefined}
       className="sidebar-navigation__thread project-threads__thread justify-start"
+      /* Open is not the same as focused. With several panes showing several
+         threads, marking only the focused row misstates what the window
+         holds, so every open thread carries a quiet mark and the focused one
+         keeps the stronger current-page treatment on top of it. */
+      data-open={
+        props.openThreadIds?.some((candidate) => candidate === rowId) === true ? "true" : undefined
+      }
       data-follow-up={
         props.thread.followUp === undefined ? undefined : props.thread.followUp ? "true" : "false"
       }
@@ -688,6 +699,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
     <ProjectThreadRow
       actions={actions}
       {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+      {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
       isRenaming={renameable && (thread.navigationId ?? thread.threadId) === renamingThreadId}
       onCancelRename={onCancelRename}
       {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
@@ -795,6 +807,8 @@ export interface ProjectThreadListProps {
   readonly collapsedLimit?: number;
   readonly actions?: ThreadRowActions;
   readonly activeThreadId?: string;
+  /** Every thread this window has open, so a split view marks all of them. */
+  readonly openThreadIds?: ReadonlyArray<string>;
   readonly onRenameThread?: (threadId: string, title: string) => void;
   /** Shown only when the list is ready and genuinely holds no threads. */
   readonly emptyMessage?: string;
@@ -840,6 +854,7 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
         <ProjectThreadRows
           {...(props.actions === undefined ? {} : { actions: props.actions })}
           {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+          {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
           {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
           onSelectThread={props.onSelectThread}
           {...(props.projectNameForThread === undefined

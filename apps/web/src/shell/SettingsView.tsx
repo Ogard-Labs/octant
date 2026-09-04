@@ -146,7 +146,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   appearance: "Choose how Octant looks. Use a built-in theme or make your own.",
   keybindings: "Change the shortcuts that reach Octant's global surfaces.",
   chat: "Defaults for new Chat conversations.",
-  work: "Defaults for Work threads.",
+  work: "Defaults for tasks.",
   code: "Defaults for Code threads and delivery.",
   "navigator-assistant": "The models Navigator uses to converse and to review images.",
   providers: "Connect providers, manage authentication, and pick default models.",

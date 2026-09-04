@@ -1552,8 +1552,38 @@ strong {
   font-size: var(--oct-text-xs);
 }
 
-.workspace-thread-tabs__select > span {
+.workspace-thread-tabs__select {
+  gap: 6px;
+}
+
+.workspace-thread-tabs__where {
+  flex: 0 0 auto;
+  opacity: 0.7;
+}
+
+.workspace-thread-tabs__item[data-active="true"] .workspace-thread-tabs__where {
+  opacity: 1;
+}
+
+.workspace-thread-tabs__title {
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The Project rides on the tab rather than heading the whole strip, so a
+   strip holding threads from two Projects names each one. It stays quiet:
+   the thread is what the person is looking for, the Project is the answer to
+   "which one is this". */
+.workspace-thread-tabs__project {
+  flex: 0 0 auto;
+  max-width: 14ch;
+  overflow: hidden;
+  padding: 1px 5px 2px;
+  border-radius: var(--oct-radius-xs, 3px);
+  color: var(--octant-text-muted);
+  background: var(--oct-fg-soft);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

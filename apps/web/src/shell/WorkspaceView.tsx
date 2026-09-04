@@ -470,8 +470,13 @@ export function WorkspaceView(props: WorkspaceViewProps) {
     () =>
       activeSurface === undefined
         ? undefined
-        : workspaceThreadTabFromSurface(activeSurface, contextProjectId, activeCodeThreadTitle),
-    [activeCodeThreadTitle, activeSurface, contextProjectId],
+        : workspaceThreadTabFromSurface(
+            activeSurface,
+            contextProjectId,
+            activeCodeThreadTitle,
+            contextProject?.name,
+          ),
+    [activeCodeThreadTitle, activeSurface, contextProjectId, contextProject?.name],
   );
 
   function activateThreadTab(tab: WorkspaceThreadTab) {
@@ -1084,8 +1089,8 @@ function renderNonCodeTab(
     if (workThreadClient === undefined) {
       return (
         <ShellState
-          eyebrow="Work thread"
-          message="Work thread service is unavailable in this window."
+          eyebrow="Task"
+          message="Work is unavailable in this window."
           state="warning"
           title={tab.title}
         />

@@ -1,4 +1,5 @@
 import { decodeChatThreadId, decodeCodeThreadId, decodeProjectId } from "@octant/contracts";
+import { decodeHostId } from "@octant/contracts/host";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -21,6 +22,43 @@ const second: WorkspaceThreadTab = {
 };
 
 describe("WorkspaceThreadTabs", () => {
+  it("names each tab by its thread, its Project, and where the thread runs", async () => {
+    render(
+      <WorkspaceThreadTabs
+        activeTab={{ ...first, projectLabel: "Planning" }}
+        contextLabel="Planning"
+        fallbackTitle="First thread"
+        mode="chat"
+        onActivate={vi.fn()}
+      />,
+    );
+
+    // The Project rides on the tab, so a strip holding two Projects names both.
+    expect(screen.getByText("Planning")).toBeVisible();
+    // A local thread says so without the reader hunting for a legend.
+    expect(screen.getByRole("tab", { name: "First thread" })).toHaveAttribute(
+      "title",
+      "First thread — Planning — this machine",
+    );
+  });
+
+  it("says a thread on a paired host runs somewhere else", async () => {
+    render(
+      <WorkspaceThreadTabs
+        activeTab={{ ...second, hostId: decodeHostId("workstation") }}
+        contextLabel="Planning"
+        fallbackTitle="Second thread"
+        mode="code"
+        onActivate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("tab", { name: "Second thread" })).toHaveAttribute(
+      "title",
+      "Second thread — Planning — a paired host",
+    );
+  });
+
   it("keeps one preview tab until the user pins it", async () => {
     const { rerender } = render(
       <WorkspaceThreadTabs

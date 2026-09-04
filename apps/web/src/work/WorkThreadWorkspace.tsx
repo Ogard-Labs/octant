@@ -360,7 +360,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               );
         if (thread === undefined) {
           composerDraft.purge(String(props.threadId));
-          setErrorMessage("This Work thread is no longer available.");
+          setErrorMessage("This task is no longer available.");
           return;
         }
         setThread(thread);
@@ -426,7 +426,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         };
         await Promise.all([transcriptRead(), requestRead()]);
       } catch {
-        if (!cancelled) setErrorMessage("Work thread state could not be loaded.");
+        if (!cancelled) setErrorMessage("This task could not be loaded.");
       }
     })();
     return () => {
@@ -574,7 +574,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         props.turnClient !== undefined
       ) {
         setErrorMessage(
-          "This Work thread must be rebound before sending a follow-up. The Project folder is no longer authorized for this thread.",
+          "This task must be rebound before sending a follow-up. Its Project folder is no longer authorized.",
         );
         return false;
       }
@@ -799,7 +799,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         satisfactionEvidence: evidence,
       });
       if (!("kind" in result) || result.kind !== "thread-completion-confirmed") {
-        setErrorMessage("The delivery target could not be marked complete.");
+        setErrorMessage("This task could not be marked complete.");
         return;
       }
       setThread(result.thread);
@@ -808,7 +808,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       setCompletionEvidence("");
       setStatus("Delivery target marked complete.");
     } catch {
-      setErrorMessage("The delivery target could not be marked complete. Try again.");
+      setErrorMessage("This task could not be marked complete. Try again.");
     } finally {
       setCompleting(false);
     }
@@ -851,7 +851,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   }
 
   return (
-    <section aria-label="Work thread workspace" className="work-thread-workspace">
+    <section aria-label="Task workspace" className="work-thread-workspace">
       <header className="work-thread-workspace__header">
         {/* The pane's tab already names the task; repeating it here cost a
             heading, an eyebrow, and a subtitle for nothing. Chat resolved the
@@ -871,7 +871,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           )}
           {thread?.lifecycle === "active" && thread.completionConfirmed !== true ? (
             <OctantButton
-              aria-label="Mark delivery target complete"
+              aria-label="Mark this task complete"
               disabled={completing || providerChanging || creating}
               onClick={() => setCompletionFormOpen(true)}
               size="sm"
@@ -886,23 +886,21 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       </header>
 
       {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
-        <section
-          aria-label="Confirm delivery target completion"
-          className="work-thread-workspace__completion"
-        >
+        <section aria-label="Mark this task complete" className="work-thread-workspace__completion">
           <p>
-            Confirm satisfaction of: <strong>{thread.title}</strong>
+            Say what <strong>{thread.title}</strong> delivered. Octant records your words as the
+            evidence that this task is done.
           </p>
           <OctantTextarea
-            aria-label="Delivery satisfaction evidence"
+            aria-label="What this task delivered"
             disabled={completing}
             onChange={(event) => setCompletionEvidence(event.target.value)}
-            placeholder="Describe the delivered result and how it satisfies the target…"
+            placeholder="Describe what was delivered…"
             rows={3}
             value={completionEvidence}
           />
           <OctantButton
-            aria-label="Confirm delivery target completion"
+            aria-label="Confirm this task is complete"
             disabled={completing || completionEvidence.trim().length === 0}
             onClick={() => void confirmCompletion()}
             size="sm"
@@ -1189,7 +1187,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           )}
           <p className="draft-thread__hint">
             {completionLocked
-              ? "Reactivate this Work thread before creating another artifact or changing its provider."
+              ? "Reactivate this task before creating another file or changing its provider."
               : turnRunning
                 ? "Press Enter to send · it runs when this response finishes · Shift+Enter for a new line"
                 : props.turnClient === undefined

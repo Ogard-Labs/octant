@@ -1079,7 +1079,7 @@ describe("App", () => {
       />,
     );
 
-    const prompt = await screen.findByRole("textbox", { name: "Start a new Work thread" });
+    const prompt = await screen.findByRole("textbox", { name: "Start a new task" });
     await user.type(prompt, "Draft brief");
     const start = screen.getByRole("button", { name: "Start thread" });
     expect(start).toBeEnabled();
@@ -1185,7 +1185,7 @@ describe("App", () => {
       />,
     );
 
-    const prompt = await screen.findByRole("textbox", { name: "Start a new Work thread" });
+    const prompt = await screen.findByRole("textbox", { name: "Start a new task" });
     await user.type(prompt, "Keep this overview draft");
     await user.click(screen.getByRole("button", { name: "Start thread" }));
 

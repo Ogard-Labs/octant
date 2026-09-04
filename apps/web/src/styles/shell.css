@@ -578,6 +578,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
      radius, type size) so tree rows and shell nav rows read as one list; the
      class itself stays off because these rows carry row-only affordances
      (status dot, provider mark, context menu) the shell items do not. */
+  position: relative;
   display: flex;
   width: 100%;
   min-width: 0;
@@ -618,6 +619,28 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--sidebar-accent);
   box-shadow: none;
   font-weight: 500;
+}
+
+/* A window can show several threads at once, and exactly one marked row
+   misstates that. Every open thread takes the darker ink; only the focused
+   one also takes the fill and the weight, so "open" and "the one I am in"
+   stay two readable states rather than one. */
+.sidebar-navigation__thread[data-open="true"] {
+  color: var(--oct-fg);
+}
+
+.sidebar-navigation__thread[data-open="true"]::before {
+  position: absolute;
+  left: 0;
+  width: 2px;
+  height: 14px;
+  border-radius: 0 1px 1px 0;
+  background: var(--oct-fg-soft);
+  content: "";
+}
+
+.sidebar-navigation__thread[aria-current="page"]::before {
+  background: var(--oct-fg);
 }
 
 .sidebar-navigation__thread-copy {
