@@ -514,7 +514,9 @@ describe("makeOpenAiCompatibleDriver", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const collected = yield* Effect.fork(collectSessionEvents(connection.events, sessionId));
+          const collected = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
           yield* connection.send({ sessionId, prompt: "limits", attachments: [], tools: [] });
           const value = Array.from(yield* Fiber.join(collected));
           yield* connection.stop(sessionId);
