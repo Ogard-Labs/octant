@@ -10,11 +10,10 @@ import type { ProjectId } from "@octant/contracts/projects";
 import {
   canonicalizeWorkRelativePath,
   classifyExcerptSupport,
-  classifyPathContainment,
-  classifySymlinkContainment,
   WorkConfinementRejected,
 } from "@octant/domain";
 import { readConfinedWorkFile } from "./workConfinedRead";
+import { joinWorkPath, resolveContainedWorkPath } from "./workPathConfinement";
 import type { WorkFilesystemPort } from "./workFilesystemPort";
 import type { WorkResearchSourcePort } from "./workResearchService";
 
@@ -90,31 +89,15 @@ export function createWorkResearchSourcePort(
       throw error;
     }
 
-    const absolutePath = joinPath(canonicalRoot, relativePath);
+    const absolutePath = joinWorkPath(canonicalRoot, relativePath);
     try {
-      const stat = await options.filesystem.lstat(absolutePath);
-      if (stat.isSymbolicLink) {
-        const target = await options.filesystem.readlink(absolutePath);
-        // A relative link target is relative to the link's own directory, not
-        // to the server process's working directory. Canonicalizing it raw
-        // would misjudge an ordinary in-root link as escaping; joining it to
-        // the link's parent first keeps the containment check below the only
-        // thing that decides, so an escaping target is still refused.
-        const resolvedTarget = await options.filesystem.realpath(
-          target.startsWith("/") ? target : joinPath(parentPath(absolutePath), target),
-        );
-        if (classifySymlinkContainment(canonicalRoot, resolvedTarget) === "escapes-root") {
-          return undefined;
-        }
-      }
-
-      const canonicalAbsolute = await options.filesystem.realpath(absolutePath);
-      if (classifyPathContainment(canonicalRoot, canonicalAbsolute) === "escapes-root") {
-        return undefined;
-      }
-
-      const resolvedStat = await options.filesystem.stat(canonicalAbsolute);
-      if (!resolvedStat.isFile || resolvedStat.size > maxSourceBytes) return undefined;
+      const resolved = await resolveContainedWorkPath(
+        options.filesystem,
+        canonicalRoot,
+        absolutePath,
+      );
+      if (resolved === undefined) return undefined;
+      if (!resolved.stat.isFile || resolved.stat.size > maxSourceBytes) return undefined;
       if (input.signal?.aborted === true) return undefined;
 
       // The canonical path is handed to the confined read once and never
@@ -123,8 +106,8 @@ export function createWorkResearchSourcePort(
       // they report from this one buffer.
       return await readConfinedWorkFile({
         filesystem: options.filesystem,
-        canonicalPath: canonicalAbsolute,
-        expected: resolvedStat,
+        canonicalPath: resolved.canonical,
+        expected: resolved.stat,
         maximumBytes: maxSourceBytes,
       });
     } catch {
@@ -171,15 +154,6 @@ function decodeUtf8Text(bytes: Uint8Array): string | undefined {
 
 function isObservableKind(kind: WorkSourceKind): boolean {
   return kind === "file";
-}
-
-function joinPath(root: string, relativePath: string): string {
-  return `${root.replace(/\/+$/, "")}/${relativePath}`;
-}
-
-function parentPath(absolutePath: string): string {
-  const index = absolutePath.lastIndexOf("/");
-  return index <= 0 ? "/" : absolutePath.slice(0, index);
 }
 
 function computeSourceVersion(bytes: Uint8Array): PreviewSourceVersion {

@@ -823,3 +823,71 @@
     max-width: 140px;
   }
 }
+
+/* ─── Work files panel ─────────────────────────────────────────────────
+   Work's Files tool is a grouped list, not a repository tree: it answers
+   "what did this produce" first and "what else is in the folder" second,
+   so it wears the surface language's section labels and row roles rather
+   than the explorer's tree recipe. */
+.work-files-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-space-4) var(--oct-space-5);
+  overflow: auto;
+}
+
+.work-files-panel__toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.work-files-panel__status,
+.work-files-panel__error {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+.work-files-panel__error {
+  color: var(--oct-danger-fg);
+}
+
+.work-files-panel__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.work-files-panel__list {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.work-files-panel__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-4);
+  padding-block: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.work-files-panel__row .oct-row-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.work-files-panel__row .oct-row-detail {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}

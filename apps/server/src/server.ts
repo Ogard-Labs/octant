@@ -87,6 +87,8 @@ import {
 } from "./checkpoint/threadCheckpointPorts";
 import { ThreadCheckpointService } from "./checkpoint/threadCheckpointService";
 import { createWorkMutationRouteHandler } from "./workMutationRoutes";
+import { createWorkFileListingRouteHandler } from "./workFileListingRoutes";
+import { WorkFileListingService } from "./work/workFileListingService";
 import { createWorkOverviewRouteHandler } from "./workOverviewRoutes";
 import { WorkArtifactProjection } from "./work/workArtifactProjection";
 import { liveWorkFilesystem } from "./work/workFilesystemPort";
@@ -4749,6 +4751,20 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const workFileListingRoutes = createWorkFileListingRouteHandler({
+      service: new WorkFileListingService({
+        filesystem: liveWorkFilesystem,
+        // The same projection the mutation service writes to, so a file the
+        // panel calls Work's own is one this host recorded writing.
+        artifactsForProject: (projectId) =>
+          [...workArtifactProjection.snapshot().values()].filter(
+            (entry) => String(entry.projectId) === String(projectId),
+          ),
+      }),
+      persistence,
+      projects: projectService,
+      windowAuthorityStore,
+    });
     const imageRoutes = createImageRouteHandler({
       jobs: imageJobService,
       listInstances: () => persistence.readProviderInstances(),
@@ -6181,6 +6197,7 @@ export function startOctantServer(
       (await workTurnRoutes(request)) ??
       (await workOverviewRoutes(request)) ??
       (await workMutationRoutes(request)) ??
+      (await workFileListingRoutes(request)) ??
       (await previewRoutes(request)) ??
       (await canvasRoutes(request)) ??
       (await imageRoutes(request)) ??

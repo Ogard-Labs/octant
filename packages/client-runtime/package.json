@@ -15,6 +15,7 @@
     "./computer-use-client": "./src/computerUseClient.ts",
     "./code-client": "./src/codeClient.ts",
     "./work-mutation-client": "./src/workMutationClient.ts",
+    "./work-file-listing-client": "./src/workFileListingClient.ts",
     "./work-promotion-client": "./src/workPromotionClient.ts",
     "./work-request-client": "./src/workRequestClient.ts",
     "./work-thread-client": "./src/workThreadClient.ts",

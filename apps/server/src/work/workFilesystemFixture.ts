@@ -73,36 +73,56 @@ export function workFilesystemFixture(root = "/work"): WorkFilesystemFixture {
     }
     return parent === "/" ? `/${name}` : `${parent}/${name}`;
   };
-  const directoryHandle = (captured: string, inode: string): WorkOpenDirectory => ({
-    stat: async () => ({
-      isDirectory: true,
-      device: "1",
-      inode,
-    }),
-    openDirectory: async (name) => {
-      const child = childPath(captured, name);
-      if (symlinks.has(child)) throw new Error(`ELOOP ${child}`);
-      if (!dirs.has(child)) throw new Error(`no dir at ${child}`);
-      return directoryHandle(child, inodeForDir(child));
-    },
-    mkdir: async (name) => {
-      dirs.add(childPath(captured, name));
-    },
-    openWriteFile: async (name, options) => {
-      const child = childPath(captured, name);
-      if (symlinks.has(child)) throw new Error(`ELOOP ${child}`);
-      if (options.exclusiveCreate) {
-        if (files.has(child) || dirs.has(child)) throw new Error(`EEXIST ${child}`);
-        const node: FileNode = { bytes: new Uint8Array(), inode: mintInode() };
-        files.set(child, node);
-        return writeHandle(node);
-      }
-      const opened = files.get(child);
-      if (opened === undefined) throw new Error(`no file at ${child}`);
-      return writeHandle(opened);
-    },
-    close: async () => {},
-  });
+  const directoryHandle = (captured: string, inode: string): WorkOpenDirectory => {
+    // The enumeration cursor belongs to the handle, so a second read continues
+    // where the first stopped exactly as an open directory stream does.
+    let offset = 0;
+    return {
+      stat: async () => ({
+        isDirectory: true,
+        device: "1",
+        inode,
+      }),
+      read: async (maximumEntries) => {
+        const prefix = captured === "/" ? "/" : `${captured}/`;
+        const names = new Set<string>();
+        for (const path of [...dirs, ...files.keys(), ...symlinks.keys()]) {
+          if (path === captured || !path.startsWith(prefix)) continue;
+          const rest = path.slice(prefix.length);
+          if (rest.length === 0) continue;
+          const head = rest.split("/")[0];
+          if (head !== undefined && head.length > 0) names.add(head);
+        }
+        const ordered = [...names].sort();
+        const page = ordered.slice(offset, offset + Math.max(0, maximumEntries));
+        offset += page.length;
+        return page.map((name) => ({ name }));
+      },
+      openDirectory: async (name) => {
+        const child = childPath(captured, name);
+        if (symlinks.has(child)) throw new Error(`ELOOP ${child}`);
+        if (!dirs.has(child)) throw new Error(`no dir at ${child}`);
+        return directoryHandle(child, inodeForDir(child));
+      },
+      mkdir: async (name) => {
+        dirs.add(childPath(captured, name));
+      },
+      openWriteFile: async (name, options) => {
+        const child = childPath(captured, name);
+        if (symlinks.has(child)) throw new Error(`ELOOP ${child}`);
+        if (options.exclusiveCreate) {
+          if (files.has(child) || dirs.has(child)) throw new Error(`EEXIST ${child}`);
+          const node: FileNode = { bytes: new Uint8Array(), inode: mintInode() };
+          files.set(child, node);
+          return writeHandle(node);
+        }
+        const opened = files.get(child);
+        if (opened === undefined) throw new Error(`no file at ${child}`);
+        return writeHandle(opened);
+      },
+      close: async () => {},
+    };
+  };
   const realpath = async (path: string): Promise<string> => resolve(path);
   const statFor = (path: string): WorkFileStat => {
     if (symlinks.has(path)) {

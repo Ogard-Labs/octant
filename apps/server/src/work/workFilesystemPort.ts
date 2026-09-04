@@ -4,6 +4,7 @@ import {
   lstat,
   stat,
   open,
+  opendir,
   readlink,
   readFile,
   writeFile,
@@ -12,6 +13,7 @@ import {
   rename,
   type FileHandle,
 } from "node:fs/promises";
+import type { Dir } from "node:fs";
 
 /**
  * Filesystem metadata for a Work-confined path. The port exposes only the
@@ -89,6 +91,16 @@ export interface WorkOpenDirectory {
     readonly device: string;
     readonly inode: string;
   }>;
+  /**
+   * At most `maximumEntries` names, taken from where the last read stopped.
+   *
+   * Bounded because a directory has no size to check first: a host directory
+   * raced in, or a folder holding a million files, must cost the caller its
+   * budget rather than the whole listing. The enumeration is bound to the
+   * object open when it started, so replacing the name it was opened under
+   * cannot change which entries it yields.
+   */
+  read(maximumEntries: number): Promise<ReadonlyArray<{ readonly name: string }>>;
   openDirectory(name: string): Promise<WorkOpenDirectory>;
   mkdir(name: string): Promise<void>;
   openWriteFile(
@@ -239,6 +251,10 @@ function childOpenPath(handle: FileHandle, directoryPath: string, name: string):
 }
 
 function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirectory {
+  // Opened on the first read rather than with the handle: most directory
+  // handles are opened to prove identity or to reach a child and never
+  // enumerate, and an unread stream still holds a descriptor.
+  let stream: Dir | undefined;
   return {
     stat: async () => {
       const info = await handle.stat({ bigint: true });
@@ -247,6 +263,21 @@ function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirec
         device: String(info.dev),
         inode: String(info.ino),
       };
+    },
+    read: async (maximumEntries) => {
+      // `opendir` resolves the path again, which is a second resolution the
+      // held handle cannot make atomic. What closes that window is the
+      // caller's identity comparison against `stat()` above — the handle pins
+      // the inode for as long as the enumeration runs, so a directory swapped
+      // in under the same name is refused rather than enumerated.
+      stream ??= await opendir(directoryPath);
+      const names: { readonly name: string }[] = [];
+      while (names.length < maximumEntries) {
+        const entry = await stream.read();
+        if (entry === null) break;
+        names.push({ name: entry.name });
+      }
+      return names;
     },
     openDirectory: async (name) =>
       liveDirectory(
@@ -283,7 +314,10 @@ function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirec
     },
     openWriteFile: async (name, options) =>
       openLiveWriteFile(childOpenPath(handle, directoryPath, name), options, childNoFollow),
-    close: () => handle.close(),
+    close: async () => {
+      await stream?.close().catch(() => undefined);
+      await handle.close();
+    },
   };
 }
 
