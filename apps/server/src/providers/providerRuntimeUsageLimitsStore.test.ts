@@ -206,7 +206,7 @@ describe("ProviderRuntimeUsageLimitsStore", () => {
         bucket: "tokens",
         limit: 30_000,
         remaining: 29_000,
-        resetsAt: "2026-08-24T01:06:00.000Z",
+        resetsAt: timestamp("2026-08-24T01:06:00.000Z"),
       }),
     );
 
