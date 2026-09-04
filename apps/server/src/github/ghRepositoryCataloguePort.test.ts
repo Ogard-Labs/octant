@@ -24,10 +24,17 @@ function portReturning(pages: ReadonlyArray<readonly unknown[]>) {
 }
 
 describe("listAssignedWork", () => {
-  it("merges the three viewer searches and keeps one row per item", async () => {
+  it("merges the four viewer searches, own pull requests included, and keeps one row per item", async () => {
     const { port, run } = portReturning([
       [searchItem()],
       [searchItem()],
+      [
+        searchItem({
+          number: 31,
+          html_url: "https://github.com/octant/octant/pull/31",
+          pull_request: { url: "https://api.github.com/repos/octant/octant/pulls/31" },
+        }),
+      ],
       [
         searchItem({
           number: 7,
@@ -40,10 +47,12 @@ describe("listAssignedWork", () => {
       kind: "ok",
       value: [
         { category: "review-request", owner: "octant", name: "octant", number: 12 },
+        { category: "pull-request", owner: "octant", name: "octant", number: 31 },
         { category: "issue", owner: "octant", name: "octant", number: 7 },
       ],
     });
-    expect(run).toHaveBeenCalledTimes(3);
+    expect(run).toHaveBeenCalledTimes(4);
+    expect(String(run.mock.calls[2]?.[0])).toContain("author%3A%40me");
     const queries = run.mock.calls.map(
       (call_) => (call_ as unknown as [readonly string[]])[0][1] ?? "",
     );
