@@ -457,10 +457,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   box-shadow: none;
 }
 
-.settings-panel--danger .settings-panel__header h2 {
-  color: var(--octant-danger-text);
-}
-
 .settings-panel__stack {
   display: grid;
   gap: var(--oct-space-4);
@@ -1716,8 +1712,31 @@ textarea.settings-view__text-input {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  font-size: calc(12 * var(--oct-text-step));
   color: var(--oct-fg);
+}
+
+/* A federated host is a row: name, facts and state as the hint, actions at
+   the control edge. */
+.federated-hosts-lifecycle__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.federated-hosts-lifecycle__list > .setrow {
+  padding-inline: 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.federated-hosts-lifecycle__guidance {
+  display: block;
+  margin-top: 2px;
+}
+
+.federated-hosts-lifecycle__actions {
+  display: inline-flex;
+  gap: var(--oct-space-2);
 }
 
 .host-settings__controls {
@@ -2024,7 +2043,7 @@ textarea.settings-view__text-input {
   padding: 0;
 }
 
-.open-in-settings__controls > .octant-switch {
+.open-in-settings__controls > [role="switch"] {
   margin-left: var(--oct-space-2);
 }
 
