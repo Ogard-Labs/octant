@@ -496,7 +496,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
         // Nothing to list until a repository is chosen; the page says so in
         // one panel rather than opening on the whole catalogue.
         <div className="github-issue-browser__empty">
-          <FolderGit2 aria-hidden="true" size={22} strokeWidth={1.5} />
+          <FolderGit2 aria-hidden="true" size={20} strokeWidth={1.5} />
           <p className="github-issue-browser__empty-title">Choose a repository</p>
           <p className="github-issue-browser__note">
             Issues are read from any repository this host can reach. Repositories a Code thread has
