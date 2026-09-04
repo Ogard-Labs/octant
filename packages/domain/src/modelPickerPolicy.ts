@@ -113,6 +113,75 @@ export interface PickerModel {
   readonly badges: ReadonlyArray<ModelBadge>;
   readonly toolCapable: boolean;
   readonly unavailableReason?: string;
+  /**
+   * The upstream catalog the model came from, when the provider namespaces its
+   * model ids. One OpenCode or router instance fronts many catalogs and reports
+   * `anthropic/claude-sonnet-4` or `alibaba/qwen3-14b`, while its display name
+   * carries only the bare model, so without this the picker shows a hundred
+   * models with no way to tell who serves them. Absent when the id is not
+   * namespaced. Unrelated to `MultiModelRoutingVendorId`, which names the
+   * driver a turn routes through, not where the weights came from.
+   */
+  readonly catalog?: string;
+}
+
+const catalogLabels: Readonly<Record<string, string>> = {
+  ai21: "AI21",
+  "amazon-bedrock": "Amazon Bedrock",
+  deepinfra: "DeepInfra",
+  deepseek: "DeepSeek",
+  "fireworks-ai": "Fireworks AI",
+  "github-copilot": "GitHub Copilot",
+  "github-models": "GitHub Models",
+  "google-vertex": "Google Vertex",
+  "google-vertex-anthropic": "Google Vertex",
+  huggingface: "Hugging Face",
+  lmstudio: "LM Studio",
+  "meta-llama": "Meta Llama",
+  moonshotai: "Moonshot AI",
+  openai: "OpenAI",
+  opencode: "OpenCode",
+  openrouter: "OpenRouter",
+  togetherai: "Together AI",
+  xai: "xAI",
+  "z-ai": "Z.ai",
+  zai: "Z.ai",
+  "zai-coding-plan": "Z.ai Coding Plan",
+  zhipuai: "Zhipu AI",
+};
+
+/**
+ * The catalog segment of a namespaced model id, presented for reading. Ids
+ * without a namespace ("claude-sonnet-4", "llama3.1:8b") have no catalog: the
+ * provider serves one catalog and naming it would invent a fact.
+ */
+export function modelCatalog(modelId: ProviderModelId): string | undefined {
+  const raw = String(modelId);
+  const separator = raw.indexOf("/");
+  if (separator < 1) return undefined;
+  const segment = raw.slice(0, separator).toLowerCase();
+  const known = catalogLabels[segment];
+  if (known !== undefined) return known;
+  return segment
+    .split(/[-_.]/)
+    .filter((word) => word !== "")
+    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
+}
+
+/**
+ * Every catalog a provider's models come from, in reading order. Empty when the
+ * provider does not namespace its ids, which is how a surface decides whether
+ * grouping by catalog would tell the user anything.
+ */
+export function pickerCatalogs(group: PickerGroup): ReadonlyArray<string> {
+  const seen = new Set<string>();
+  for (const section of group.sections) {
+    for (const picker of section.models) {
+      if (picker.catalog !== undefined) seen.add(picker.catalog);
+    }
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b));
 }
 
 export type PickerSectionId = "tool-capable" | "chat-and-analysis-only" | "all-models";
@@ -319,10 +388,12 @@ function toPickerModel(
   driverKind: ProviderDriverKind,
   verifiedToolModelIds: ReadonlyArray<ProviderModelId>,
 ): PickerModel {
+  const catalog = modelCatalog(model.id);
   return {
     model,
     badges: modelBadges(model, driverKind, verifiedToolModelIds),
     toolCapable: hasWorkToolAuthority(driverKind, model, verifiedToolModelIds),
+    ...(catalog === undefined ? {} : { catalog }),
   };
 }
 
@@ -345,6 +416,7 @@ function unavailableCurrentModel(
   driverKind: ProviderDriverKind,
   verifiedToolModelIds: ReadonlyArray<ProviderModelId>,
 ): PickerModel {
+  const catalog = modelCatalog(modelId);
   const existing = observed?.models.find((m) => m.id === modelId);
   if (existing !== undefined) {
     return {
@@ -352,6 +424,7 @@ function unavailableCurrentModel(
       badges: modelBadges(existing, driverKind, verifiedToolModelIds),
       toolCapable: hasWorkToolAuthority(driverKind, existing, verifiedToolModelIds),
       unavailableReason: "This selection is not available from the provider right now.",
+      ...(catalog === undefined ? {} : { catalog }),
     };
   }
   const placeholder = placeholderModel(modelId);
@@ -360,6 +433,7 @@ function unavailableCurrentModel(
     badges: [],
     toolCapable: false,
     unavailableReason: "This model is no longer listed by the provider. Choose a current model.",
+    ...(catalog === undefined ? {} : { catalog }),
   };
 }
 

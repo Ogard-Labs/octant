@@ -1,5 +1,6 @@
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
+import { pickerCatalogs } from "@octant/domain";
 import { ChevronDown, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -45,6 +46,7 @@ interface ModelRow {
 export function ComposerModelPicker(props: ComposerModelPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [catalogFilter, setCatalogFilter] = useState<string | undefined>(undefined);
   const [favorites, setFavorites] = useState<ReadonlySet<string>>(() => readModelFavorites());
   const ariaLabel = props.ariaLabel ?? "Provider and model";
 
@@ -59,6 +61,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   useEffect(() => {
     if (!open) return;
     setActiveRailId(selectedGroup?.instance.id ?? props.groups[0]?.instance.id);
+    setCatalogFilter(undefined);
     setFavorites(readModelFavorites());
   }, [open, props.groups, selectedGroup?.instance.id]);
 
@@ -97,11 +100,9 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   // With a search query, matches span every provider; the Favorites rail entry
   // lists starred models across providers; otherwise the list shows the active
   // provider's models.
-  const models: ReadonlyArray<ModelRow> = searching
+  const allModels: ReadonlyArray<ModelRow> = searching
     ? props.groups.flatMap((group) =>
-        flattenModels(group).filter((row) =>
-          row.picker.model.displayName.toLowerCase().includes(trimmedQuery),
-        ),
+        flattenModels(group).filter((row) => matchesQuery(row, trimmedQuery)),
       )
     : favoritesActive
       ? props.groups.flatMap((group) =>
@@ -110,6 +111,22 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           ),
         )
       : flattenModels(activeGroup);
+  // One OpenCode or router instance fronts many upstream catalogs, so its pane
+  // is where "which of these hundred models is a Qwen model" gets answered. A
+  // provider serving a single catalog gains nothing from the split.
+  const catalogs = searching || favoritesActive ? [] : pickerCatalogs(activeGroup);
+  const filteringCatalog = catalogs.length > 1 ? catalogFilter : undefined;
+  const models: ReadonlyArray<ModelRow> =
+    filteringCatalog === undefined
+      ? allModels
+      : allModels.filter((row) => row.picker.catalog === filteringCatalog);
+  const blocks: ReadonlyArray<{
+    readonly catalog: string | undefined;
+    readonly rows: ReadonlyArray<ModelRow>;
+  }> =
+    catalogs.length > 1 && filteringCatalog === undefined
+      ? groupByCatalog(models, catalogs)
+      : [{ catalog: undefined, rows: models }];
 
   function toggleFavorite(key: string) {
     setFavorites((current) => {
@@ -117,6 +134,86 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       writeModelFavorites(next);
       return next;
     });
+  }
+
+  function renderModelRow(row: ModelRow, showCatalog: boolean) {
+    const { picker, sectionId, sectionLabel, group } = row;
+    const modelId = picker.model.id;
+    const favoriteKey = modelFavoriteKey(group.instance.id, modelId);
+    const favorited = favorites.has(favoriteKey);
+    const selected =
+      props.selectedProviderInstanceId === group.instance.id && props.selectedModelId === modelId;
+    const unavailable = picker.unavailableReason !== undefined;
+    // The generic "all models" section adds nothing next to the provider name;
+    // only informative sections get a suffix. The catalog is left out when a
+    // heading directly above the row already names it.
+    const detail = [
+      group.instance.displayName,
+      showCatalog ? picker.catalog : undefined,
+      sectionId === "all-models" || sectionLabel === group.instance.displayName
+        ? undefined
+        : sectionLabel,
+    ]
+      .filter((part): part is string => part !== undefined)
+      .join(" · ");
+    return (
+      <div
+        className={`composer-model-picker__row${selected ? " composer-model-picker__row--selected" : ""}`}
+        key={`${String(group.instance.id)}:${sectionLabel}:${String(modelId)}`}
+      >
+        <OctantButton
+          aria-label={picker.model.displayName}
+          aria-selected={selected}
+          className={`composer-model-picker__model${selected ? " composer-model-picker__model--selected" : ""}${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
+          disabled={unavailable || props.disabled}
+          onClick={() => {
+            if (unavailable) return;
+            props.onSelect({ providerInstanceId: group.instance.id, modelId });
+            setOpen(false);
+          }}
+          role="option"
+          title={picker.unavailableReason}
+          type="button"
+          variant="ghost"
+        >
+          <span className="composer-model-picker__model-copy">
+            <span className="composer-model-picker__model-name">{picker.model.displayName}</span>
+            <span className="composer-model-picker__model-detail">
+              <ProviderGlyph
+                displayName={group.instance.displayName}
+                driverKind={group.instance.driverKind}
+                size={12}
+              />
+              {detail}
+            </span>
+          </span>
+          {unavailable ? (
+            <OctantBadge className="composer-model-picker__model-badge" variant="secondary">
+              {compactUnavailableLabel(picker.unavailableReason)}
+            </OctantBadge>
+          ) : null}
+        </OctantButton>
+        <OctantButton
+          aria-label={favorited ? "Remove from favorites" : "Add to favorites"}
+          aria-pressed={favorited}
+          className={`composer-model-picker__star${favorited ? " composer-model-picker__star--on" : ""}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleFavorite(favoriteKey);
+          }}
+          title={favorited ? "Remove from favorites" : "Add to favorites"}
+          type="button"
+          variant="ghost"
+        >
+          <Star
+            aria-hidden="true"
+            fill={favorited ? "currentColor" : "none"}
+            size={14}
+            strokeWidth={1.75}
+          />
+        </OctantButton>
+      </div>
+    );
   }
 
   return (
@@ -148,6 +245,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             className={`composer-model-picker__rail-item composer-model-picker__rail-item--favorites${favoritesActive ? " composer-model-picker__rail-item--active" : ""}`}
             onClick={() => {
               setQuery("");
+              setCatalogFilter(undefined);
               setActiveRailId(FAVORITES_RAIL_ID);
             }}
             role="option"
@@ -169,10 +267,16 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                 key={String(group.instance.id)}
                 onClick={() => {
                   setQuery("");
+                  setCatalogFilter(undefined);
                   setActiveRailId(group.instance.id);
                 }}
                 onMouseEnter={() => {
-                  if (!searching) setActiveRailId(group.instance.id);
+                  if (searching) return;
+                  // Moving across the rail lands on a different catalog set, so
+                  // a filter chosen for the provider you left must not silently
+                  // hide models on the one you arrived at.
+                  if (group.instance.id !== activeRailId) setCatalogFilter(undefined);
+                  setActiveRailId(group.instance.id);
                 }}
                 role="option"
                 title={group.instance.displayName}
@@ -207,6 +311,31 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               value={query}
             />
           </label>
+          {catalogs.length > 1 ? (
+            <div aria-label="Catalogs" className="composer-model-picker__catalogs" role="group">
+              <OctantButton
+                aria-pressed={filteringCatalog === undefined}
+                className={`composer-model-picker__catalog${filteringCatalog === undefined ? " composer-model-picker__catalog--on" : ""}`}
+                onClick={() => setCatalogFilter(undefined)}
+                type="button"
+                variant="ghost"
+              >
+                All
+              </OctantButton>
+              {catalogs.map((catalog) => (
+                <OctantButton
+                  aria-pressed={filteringCatalog === catalog}
+                  className={`composer-model-picker__catalog${filteringCatalog === catalog ? " composer-model-picker__catalog--on" : ""}`}
+                  key={catalog}
+                  onClick={() => setCatalogFilter(catalog)}
+                  type="button"
+                  variant="ghost"
+                >
+                  {catalog}
+                </OctantButton>
+              ))}
+            </div>
+          ) : null}
           <div aria-label="Models" className="composer-model-picker__models" role="listbox">
             {models.length === 0 ? (
               <p className="composer-model-picker__models-empty" role="status">
@@ -214,87 +343,25 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                   ? "No models match the search."
                   : favoritesActive
                     ? "No favorites yet. Star a model to keep it here."
-                    : "No models reported for this provider."}
+                    : filteringCatalog === undefined
+                      ? "No models reported for this provider."
+                      : `No ${filteringCatalog} models from this provider.`}
               </p>
             ) : (
-              models.map(({ picker, sectionId, sectionLabel, group }) => {
-                const modelId = picker.model.id;
-                const favoriteKey = modelFavoriteKey(group.instance.id, modelId);
-                const favorited = favorites.has(favoriteKey);
-                const selected =
-                  props.selectedProviderInstanceId === group.instance.id &&
-                  props.selectedModelId === modelId;
-                const unavailable = picker.unavailableReason !== undefined;
-                // The generic "all models" section adds nothing next to the
-                // provider name; only informative sections get a suffix.
-                const detail =
-                  sectionId === "all-models" || sectionLabel === group.instance.displayName
-                    ? group.instance.displayName
-                    : `${group.instance.displayName} · ${sectionLabel}`;
+              blocks.map((block) => {
+                const rows = block.rows.map((row) =>
+                  renderModelRow(row, block.catalog === undefined),
+                );
+                if (block.catalog === undefined) return rows;
                 return (
                   <div
-                    className={`composer-model-picker__row${selected ? " composer-model-picker__row--selected" : ""}`}
-                    key={`${String(group.instance.id)}:${sectionLabel}:${String(modelId)}`}
+                    aria-label={block.catalog}
+                    className="composer-model-picker__catalog-group"
+                    key={block.catalog}
+                    role="group"
                   >
-                    <OctantButton
-                      aria-label={picker.model.displayName}
-                      aria-selected={selected}
-                      className={`composer-model-picker__model${selected ? " composer-model-picker__model--selected" : ""}${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
-                      disabled={unavailable || props.disabled}
-                      onClick={() => {
-                        if (unavailable) return;
-                        props.onSelect({
-                          providerInstanceId: group.instance.id,
-                          modelId,
-                        });
-                        setOpen(false);
-                      }}
-                      role="option"
-                      title={picker.unavailableReason}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <span className="composer-model-picker__model-copy">
-                        <span className="composer-model-picker__model-name">
-                          {picker.model.displayName}
-                        </span>
-                        <span className="composer-model-picker__model-detail">
-                          <ProviderGlyph
-                            displayName={group.instance.displayName}
-                            driverKind={group.instance.driverKind}
-                            size={12}
-                          />
-                          {detail}
-                        </span>
-                      </span>
-                      {unavailable ? (
-                        <OctantBadge
-                          className="composer-model-picker__model-badge"
-                          variant="secondary"
-                        >
-                          {compactUnavailableLabel(picker.unavailableReason)}
-                        </OctantBadge>
-                      ) : null}
-                    </OctantButton>
-                    <OctantButton
-                      aria-label={favorited ? "Remove from favorites" : "Add to favorites"}
-                      aria-pressed={favorited}
-                      className={`composer-model-picker__star${favorited ? " composer-model-picker__star--on" : ""}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleFavorite(favoriteKey);
-                      }}
-                      title={favorited ? "Remove from favorites" : "Add to favorites"}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Star
-                        aria-hidden="true"
-                        fill={favorited ? "currentColor" : "none"}
-                        size={14}
-                        strokeWidth={1.75}
-                      />
-                    </OctantButton>
+                    <p className="composer-model-picker__catalog-heading">{block.catalog}</p>
+                    {rows}
                   </div>
                 );
               })
@@ -304,6 +371,31 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       </OctantPopover>
     </div>
   );
+}
+
+function matchesQuery(row: ModelRow, trimmedQuery: string): boolean {
+  // The catalog counts as a match so "qwen" finds every Qwen-served model even
+  // when the provider's display name for it never says Qwen.
+  return (
+    row.picker.model.displayName.toLowerCase().includes(trimmedQuery) ||
+    (row.picker.catalog ?? "").toLowerCase().includes(trimmedQuery)
+  );
+}
+
+function groupByCatalog(
+  rows: ReadonlyArray<ModelRow>,
+  catalogs: ReadonlyArray<string>,
+): ReadonlyArray<{ readonly catalog: string | undefined; readonly rows: ReadonlyArray<ModelRow> }> {
+  const blocks: Array<{ catalog: string | undefined; rows: ModelRow[] }> = [];
+  // Models the provider left un-namespaced lead, unheaded: inventing a catalog
+  // name for them would claim an origin the provider never reported.
+  const loose = rows.filter((row) => row.picker.catalog === undefined);
+  if (loose.length > 0) blocks.push({ catalog: undefined, rows: loose });
+  for (const catalog of catalogs) {
+    const matching = rows.filter((row) => row.picker.catalog === catalog);
+    if (matching.length > 0) blocks.push({ catalog, rows: matching });
+  }
+  return blocks;
 }
 
 function flattenModels(group: PickerGroup): ReadonlyArray<ModelRow> {

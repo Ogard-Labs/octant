@@ -5565,6 +5565,67 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--octant-text-muted);
 }
 
+.composer-model-picker__catalogs {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 62px;
+  margin: 0 10px 4px;
+  overflow-y: auto;
+  scrollbar-color: var(--octant-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.composer-model-picker__catalog {
+  min-height: 22px;
+  padding: 0 8px;
+  color: var(--octant-text-secondary);
+  background: var(--octant-control);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-pill);
+  cursor: pointer;
+  font: inherit;
+  font-size: calc(11 * var(--oct-text-step));
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.composer-model-picker__catalog:hover {
+  background: var(--octant-control-hover);
+}
+
+.composer-model-picker__catalog:focus-visible {
+  outline: 2px solid var(--oct-muted);
+  outline-offset: -2px;
+}
+
+.composer-model-picker__catalog--on {
+  color: var(--octant-text-primary);
+  background: var(--octant-accent-tint);
+  border-color: var(--octant-border-strong);
+}
+
+.composer-model-picker__catalog-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Sticks so the catalog stays named while its models scroll past. */
+.composer-model-picker__catalog-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 6px 0 2px;
+  padding: 3px 10px;
+  color: var(--octant-text-muted);
+  background: var(--octant-surface);
+  font-size: calc(10.5 * var(--oct-text-step));
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 .composer-model-picker__models {
   display: flex;
   flex: 1 1 auto;
