@@ -24,8 +24,8 @@ describe("OpenInApplicationSettings", () => {
     );
 
     expect(await screen.findAllByText("Installed")).toHaveLength(2);
-    expect(screen.getByLabelText("Zed")).toBeDisabled();
-    await user.click(screen.getByLabelText("VS Code"));
+    expect(screen.getByRole("switch", { name: "Zed" })).toHaveAttribute("aria-disabled", "true");
+    await user.click(screen.getByRole("switch", { name: "VS Code" }));
     expect(onChange).toHaveBeenCalledWith(["finder"]);
 
     await user.click(screen.getByRole("button", { name: "Move Finder up" }));
