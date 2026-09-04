@@ -36,6 +36,15 @@ scheduled.
   evidence on `ProviderServiceLimits`. A window may report utilization and a
   reset instant without an absolute quota; Octant keeps those facts separate
   and does not derive a numeric limit or remaining count from a percentage.
+  Any runtime that narrates its account windows during a turn is a source
+  (Claude Code and the Codex app-server both do); the window keeps the
+  runtime's own name for it.
+- Rate-limit headers on a response Octant already requested are a sanctioned
+  source of absolute quota buckets (`requests`, `tokens`) for the HTTP
+  providers. They are read from the generation the user asked for, never
+  from a request made to learn limits, and a bucket that contradicts itself
+  is dropped rather than clamped. A bucket expires at its reset instant; the
+  refilled count is not assumed.
 - Hosts may expose provider service-limit facts through an authenticated,
   loopback-only usage-limits read and an explicit refresh command. Refreshes
   are coalesced, bounded by cancellation-aware timeouts, and honor provider
@@ -43,9 +52,13 @@ scheduled.
   visibly stale; drivers without `contextFacts.observeServiceLimits` report
   `unavailable` when no independently observed runtime evidence exists rather
   than causing a guessed network request. Normalized runtime rate-limit
-  windows are valid evidence on their own and remain visibly scoped to those
-  windows. The surface never stores cookies, credentials, raw provider
-  payloads, or account data.
+  windows and header buckets are valid evidence on their own and remain
+  visibly scoped to what was reported. An `unavailable` entry names why: a
+  runtime that can report but has not yet, a protocol with no limits channel,
+  a model that runs locally with no account, or an endpoint whose completed
+  turn carried no headers. Image profiles are not listed; they have no
+  account channel to report on. The surface never stores cookies,
+  credentials, raw provider payloads, or account data.
 - Safe input budget is the context window minus reserved response budget,
   reasoning reserve where applicable, provider framing estimate,
   observed-variance reserve, and safety margin. No turn is sent when planned

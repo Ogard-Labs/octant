@@ -24,6 +24,27 @@ describe("provider usage limits", () => {
     expect(snapshot.entries[0]).not.toHaveProperty("limits");
   });
 
+  it.each(["runtime-does-not-report", "local-runtime", "endpoint-silent"] as const)(
+    "names %s as a reason limits will not appear rather than a pending report",
+    (reason) => {
+      const snapshot = decodeProviderUsageLimitsSnapshot({
+        version: 1,
+        refreshedAt: "2026-08-23T12:00:00.000Z",
+        entries: [
+          {
+            providerInstanceId,
+            status: "unavailable",
+            source: "provider-runtime",
+            reason,
+            observedAt: "2026-08-23T12:00:00.000Z",
+          },
+        ],
+      });
+
+      expect(snapshot.entries[0]).toMatchObject({ status: "unavailable", reason });
+    },
+  );
+
   it("represents a failed refresh with the last successful limits visibly stale", () => {
     const snapshot = decodeProviderUsageLimitsSnapshot({
       version: 1,

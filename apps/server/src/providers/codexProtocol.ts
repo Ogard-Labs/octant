@@ -306,6 +306,36 @@ const TokenUsageNotification = Schema.Struct({
   }),
 });
 
+/**
+ * One rolling usage window of the account behind the app-server, as the
+ * `account/rateLimits/updated` notification and `account/rateLimits/read`
+ * response describe it. `resetsAt` is a Unix instant; `usedPercent` is the
+ * share spent on a 0–100 scale.
+ */
+const RateLimitWindow = Schema.Struct({
+  usedPercent: Schema.Number,
+  windowDurationMins: Schema.optional(NullableNonNegativeInteger),
+  resetsAt: Schema.optional(NullableNonNegativeInteger),
+});
+const NullableRateLimitWindow = Schema.NullOr(RateLimitWindow);
+
+export const RateLimitSnapshot = Schema.Struct({
+  limitId: Schema.optional(NullableString),
+  limitName: Schema.optional(NullableString),
+  primary: Schema.optional(NullableRateLimitWindow),
+  secondary: Schema.optional(NullableRateLimitWindow),
+  rateLimitReachedType: Schema.optional(NullableString),
+});
+export type RateLimitSnapshot = typeof RateLimitSnapshot.Type;
+
+/**
+ * Account-scoped and therefore carrying no thread or turn: the app-server
+ * sends it whenever the backend reports usage, not as part of a turn.
+ */
+const AccountRateLimitsNotification = Schema.Struct({
+  rateLimits: RateLimitSnapshot,
+});
+
 const stableNotificationSchemas = {
   "turn/started": TurnStartedNotification,
   "turn/completed": TurnCompletedNotification,
@@ -318,6 +348,7 @@ const stableNotificationSchemas = {
   "turn/diff/updated": TurnDiffNotification,
   "turn/plan/updated": TurnPlanNotification,
   "thread/tokenUsage/updated": TokenUsageNotification,
+  "account/rateLimits/updated": AccountRateLimitsNotification,
 } as const;
 
 export type CodexStableNotificationMethod = keyof typeof stableNotificationSchemas;
@@ -347,6 +378,7 @@ const stableNotificationDecoders: Record<
   "turn/diff/updated": decode(TurnDiffNotification),
   "turn/plan/updated": decode(TurnPlanNotification),
   "thread/tokenUsage/updated": decode(TokenUsageNotification),
+  "account/rateLimits/updated": decode(AccountRateLimitsNotification),
 };
 
 const StartedAt = { startedAtMs: NonNegativeInteger } as const;
