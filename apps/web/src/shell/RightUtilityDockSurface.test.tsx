@@ -18,14 +18,14 @@ function surface(id: "browser" | "terminal" | "files") {
 }
 
 describe("the right sidebar surface", () => {
-  it("keeps Add tool beside the visible tabs and gives multiple tabs a selected edge", () => {
+  it("keeps Add tool beside the visible tabs and gives the selected tab the selection fill", () => {
     expect(ruleBody(dockStylesheet, ".dock-tool-strip")).toMatch(/flex:\s*0\s+1\s+auto/);
     expect(
       ruleBody(
         dockStylesheet,
         '.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"])',
       ),
-    ).toMatch(/border-color:\s*var\(--oct-hairline\)/);
+    ).toMatch(/background:\s*var\(--octant-selection\)/);
   });
   it("shows the active thread work map with no tool open", async () => {
     const user = userEvent.setup();

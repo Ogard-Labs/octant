@@ -184,7 +184,7 @@ describe("shell settings policy", () => {
     expect(replaceShellSettings(current, replacement)).toEqual({
       ...replacement,
       sidebarWidth: 420,
-      contextSidebarWidth: 640,
+      contextSidebarWidth: 960,
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
     });
     expect(current.chatEnabled).toBe(true);
