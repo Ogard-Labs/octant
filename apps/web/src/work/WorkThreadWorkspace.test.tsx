@@ -279,8 +279,9 @@ describe("WorkThreadWorkspace", () => {
 
     expect(await screen.findByText("Summarize the brief")).toBeInTheDocument();
     expect(screen.getByText("Here is the confined summary.")).toBeInTheDocument();
-    expect(screen.getByText("Approval required")).toBeInTheDocument();
-    expect(screen.getByText("write-file: Save notes.md in the Project root.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Approval required — write-file: Save notes.md in the Project root."),
+    ).toBeInTheDocument();
     expect(turnClient.transcript).toHaveBeenCalledWith(threadId, expect.any(AbortSignal));
     expect(requestClient.list).toHaveBeenCalledWith(
       "20000000-0000-4000-8000-000000000101",
@@ -733,7 +734,9 @@ describe("WorkThreadWorkspace", () => {
     ];
 
     await waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(1), { timeout: 2_500 });
-    expect(await screen.findByText("Approval required")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Approval required — write-file: Save notes.md in the Project root."),
+    ).toBeInTheDocument();
   });
 
   it("does not commit again when transcript polling returns the same data", async () => {

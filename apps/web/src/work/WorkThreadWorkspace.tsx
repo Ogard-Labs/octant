@@ -853,11 +853,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   return (
     <section aria-label="Work thread workspace" className="work-thread-workspace">
       <header className="work-thread-workspace__header">
-        <div>
-          <p className="work-thread-workspace__eyebrow">Work thread</p>
-          <h1>{props.title}</h1>
-          <p>Confined Project transcript</p>
-        </div>
+        {/* The pane's tab already names the task; repeating it here cost a
+            heading, an eyebrow, and a subtitle for nothing. Chat resolved the
+            same duplication by keeping the name for assistive technology only. */}
+        <h1 className="sr-only">{props.title}</h1>
         {props.childRunStatus}
         <div aria-label="Work tools" className="work-thread-workspace__toolbar" role="toolbar">
           {props.onOpenBrowser === undefined ? null : (
@@ -926,56 +925,60 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         renderItem={(row) => {
           if (row.kind === "empty") {
             return (
-              <article className="work-thread-workspace__message">
-                <strong>Octant Work</strong>
-                <p>
-                  Start from Project Overview quick start to run the first provider-backed turn in
-                  this confined Project. Approvals and user-input waits appear from the durable
-                  request projection.
-                </p>
-              </article>
+              <p className="work-thread-workspace__opening">
+                Describe what you want made. Files this task writes stay inside its folder.
+              </p>
             );
           }
           if (row.kind === "message") {
+            if (row.entry.role === "user") {
+              return (
+                <article aria-label="Your message" className="turn-user">
+                  <div className="bubble">
+                    <TrackerReferenceText asParagraph text={row.entry.text} />
+                  </div>
+                </article>
+              );
+            }
             return (
-              <article className="work-thread-workspace__message">
-                <strong>{row.entry.role === "user" ? "You" : "Assistant"}</strong>
+              <article aria-label="Assistant message" className="turn-agent">
                 {row.entry.text === "" ? (
-                  <p>Working…</p>
+                  <p className="runstatus" role="status">
+                    Working…
+                  </p>
                 ) : (
                   <TrackerReferenceText asParagraph text={row.entry.text} />
                 )}
-                {row.entry.status === undefined ? null : <p role="status">{row.entry.status}</p>}
+                {row.entry.status === undefined ? null : (
+                  <p className="runstatus" role="status">
+                    {row.entry.status}
+                  </p>
+                )}
               </article>
             );
           }
           if (row.kind === "steered") {
             return (
-              <article className="work-thread-workspace__message">
-                <strong>You</strong>
-                <TrackerReferenceText asParagraph text={row.prompt} />
+              <article aria-label="Your message" className="turn-user">
+                <div className="bubble">
+                  <TrackerReferenceText asParagraph text={row.prompt} />
+                </div>
               </article>
             );
           }
           if (row.kind === "request") {
             return (
-              <article className="work-thread-workspace__message" role="status">
-                <strong>
-                  {row.request.detail.kind === "approval" ? "Approval required" : "Input required"}
-                </strong>
-                <p>
-                  {row.request.detail.kind === "approval"
-                    ? `${row.request.detail.action}: ${row.request.detail.description}`
-                    : row.request.detail.prompt}
-                </p>
-              </article>
+              <p className="runstatus" role="status">
+                {row.request.detail.kind === "approval"
+                  ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
+                  : `Input required — ${row.request.detail.prompt}`}
+              </p>
             );
           }
           return (
-            <article className="work-thread-workspace__message" role="status">
-              <strong>Saved locally</strong>
-              <p>{row.text}</p>
-            </article>
+            <p className="runstatus" role="status">
+              {row.text}
+            </p>
           );
         }}
         restoreKey={`work:${String(props.threadId)}`}
@@ -1013,21 +1016,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       />
 
       <div className="work-thread-workspace__composer">
-        {thread === undefined ? null : (
-          <div className="work-thread-workspace__context" aria-label="Thread context">
-            <span aria-label="Bound provider and model">
-              {boundProviderModelLabel(props.providerGroups ?? [], thread)}
-            </span>
-            <ComposerModelPicker
-              ariaLabel="Provider and model"
-              disabled={providerChanging || creating || completionLocked}
-              groups={props.providerGroups ?? []}
-              onSelect={(selection) => void changeProvider(selection)}
-              selectedModelId={thread.modelId}
-              selectedProviderInstanceId={thread.providerInstanceId}
-            />
-          </div>
-        )}
         <div className="work-thread-workspace__composer-shell">
           <ThreadComposer
             chips={
@@ -1111,49 +1099,71 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               </>
             }
             row={{
-              leading:
-                props.turnClient === undefined ? null : (
-                  <>
-                    <label>
-                      <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-                      {/* ui-boundary-exception: native-file-input */}
-                      <input
-                        aria-label="Choose attachment file"
-                        accept="image/png,image/jpeg,image/webp,image/gif"
-                        className="work-composer-adapter__file-input"
-                        disabled={creating || completionLocked || imageSupport === false}
-                        onChange={(event) => {
-                          const file = event.currentTarget.files?.item(0);
-                          if (file !== null && file !== undefined) {
-                            if (imageSupport === false) {
-                              images.refuse(
-                                "The selected model does not accept images. Choose an image-capable model.",
-                              );
-                            } else {
-                              images.attach([file]);
-                            }
-                          }
-                          event.currentTarget.value = "";
-                        }}
-                        type="file"
-                      />
-                    </label>
-                    <OctantButton
-                      aria-label="Add attachment"
-                      disabled={creating || completionLocked || imageSupport === false}
-                      onClick={(event) => {
-                        event.currentTarget.parentElement
-                          ?.querySelector<HTMLInputElement>('input[type="file"]')
-                          ?.click();
-                      }}
-                      size="icon"
-                      type="button"
-                      variant="ghost"
+              leading: (
+                <>
+                  {/* Model sits beside send, not on a strip above the composer:
+                      the bar holds how the task runs (0073). */}
+                  {thread === undefined ? null : (
+                    <span
+                      aria-label="Bound provider and model"
+                      className="work-thread-workspace__bound-model"
                     >
-                      <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
-                    </OctantButton>
-                  </>
-                ),
+                      <ComposerModelPicker
+                        ariaLabel="Provider and model"
+                        disabled={providerChanging || creating || completionLocked}
+                        groups={props.providerGroups ?? []}
+                        onSelect={(selection) => void changeProvider(selection)}
+                        selectedModelId={thread.modelId}
+                        selectedProviderInstanceId={thread.providerInstanceId}
+                      />
+                    </span>
+                  )}
+                  {props.turnClient === undefined ? null : (
+                    <>
+                      <label>
+                        <span className="work-composer-adapter__visually-hidden">
+                          Add attachment
+                        </span>
+                        {/* ui-boundary-exception: native-file-input */}
+                        <input
+                          aria-label="Choose attachment file"
+                          accept="image/png,image/jpeg,image/webp,image/gif"
+                          className="work-composer-adapter__file-input"
+                          disabled={creating || completionLocked || imageSupport === false}
+                          onChange={(event) => {
+                            const file = event.currentTarget.files?.item(0);
+                            if (file !== null && file !== undefined) {
+                              if (imageSupport === false) {
+                                images.refuse(
+                                  "The selected model does not accept images. Choose an image-capable model.",
+                                );
+                              } else {
+                                images.attach([file]);
+                              }
+                            }
+                            event.currentTarget.value = "";
+                          }}
+                          type="file"
+                        />
+                      </label>
+                      <OctantButton
+                        aria-label="Add attachment"
+                        disabled={creating || completionLocked || imageSupport === false}
+                        onClick={(event) => {
+                          event.currentTarget.parentElement
+                            ?.querySelector<HTMLInputElement>('input[type="file"]')
+                            ?.click();
+                        }}
+                        size="icon"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
+                      </OctantButton>
+                    </>
+                  )}
+                </>
+              ),
               actions: {
                 kind: "send",
                 send: {
@@ -1208,17 +1218,4 @@ function workTurnSettlement(turns: ReadonlyArray<WorkTurnState>): TurnSettlement
     case "failed":
       return "failed";
   }
-}
-
-function boundProviderModelLabel(
-  groups: ReadonlyArray<PickerGroup>,
-  thread: Pick<WorkThread, "providerInstanceId" | "modelId">,
-): string {
-  const group = groups.find(
-    (candidate) => String(candidate.instance.id) === String(thread.providerInstanceId),
-  );
-  const model = group?.sections
-    .flatMap((section) => section.models)
-    .find((candidate) => String(candidate.model.id) === String(thread.modelId));
-  return `${group?.instance.displayName ?? String(thread.providerInstanceId)} — ${model?.model.displayName ?? String(thread.modelId)}`;
 }

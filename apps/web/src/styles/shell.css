@@ -1575,16 +1575,6 @@ form > .work-composer-adapter__attachments {
   text-decoration: underline;
 }
 
-.work-thread-workspace__context {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  color: var(--octant-text-secondary);
-  font-size: calc(11 * var(--oct-text-step));
-}
-
 .work-thread-workspace__header {
   display: flex;
   min-height: 52px;
@@ -1593,31 +1583,6 @@ form > .work-composer-adapter__attachments {
   gap: 12px 20px;
   padding: 8px clamp(16px, 3vw, 28px);
   border-bottom: 1px solid var(--octant-border);
-}
-
-.work-thread-workspace__header h1,
-.work-thread-workspace__header p {
-  margin: 0;
-}
-
-.work-thread-workspace__header h1 {
-  font-size: calc(14 * var(--oct-text-step));
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.work-thread-workspace__header > div > p:last-child {
-  margin-top: 3px;
-  color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
-}
-
-.work-thread-workspace__eyebrow {
-  color: var(--octant-text-muted);
-  font-size: calc(9 * var(--oct-text-step));
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
 }
 
 .work-thread-workspace__toolbar {
@@ -1647,20 +1612,13 @@ form > .work-composer-adapter__attachments {
   margin: 0 auto;
 }
 
-.work-thread-workspace__message {
-  display: grid;
-  gap: 6px;
-  color: var(--octant-text-primary);
-}
-
-.work-thread-workspace__message strong {
-  color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
-}
-
-.work-thread-workspace__message p {
+/* The transcript itself wears the design system's turn vocabulary
+   (`.turn-user`/`.bubble`, `.turn-agent`, `.runstatus`) so a Work message and
+   a Chat message are the same object. Only the opening line is Work's own. */
+.work-thread-workspace__opening {
   max-width: 62ch;
   margin: 0;
+  color: var(--octant-text-muted);
   font-size: var(--oct-transcript-font-size);
   line-height: 1.55;
   text-wrap: pretty;
@@ -1678,6 +1636,13 @@ form > .work-composer-adapter__attachments {
 .work-thread-workspace__composer-shell {
   display: grid;
   gap: 7px;
+}
+
+/* Names the model control for assistive technology without repeating the
+   selection as text: the picker's own trigger already shows it. */
+.work-thread-workspace__bound-model {
+  display: inline-flex;
+  min-width: 0;
 }
 
 .code-composer-adapter {
