@@ -52,7 +52,10 @@ describe("listAssignedWork", () => {
       ],
     });
     expect(run).toHaveBeenCalledTimes(4);
-    expect(String(run.mock.calls[2]?.[0])).toContain("author%3A%40me");
+    const ownPullRequests = run.mock.calls.map(
+      (call_) => (call_ as unknown as [readonly string[]])[0][1] ?? "",
+    )[2];
+    expect(ownPullRequests).toContain("author%3A%40me");
     const queries = run.mock.calls.map(
       (call_) => (call_ as unknown as [readonly string[]])[0][1] ?? "",
     );
