@@ -8200,30 +8200,6 @@ ul.board-col-body {
   margin-top: 4px;
 }
 
-.keybinding-settings__advanced > summary {
-  display: flex;
-  width: fit-content;
-  align-items: center;
-  gap: 6px;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  font-weight: 500;
-  cursor: pointer;
-  list-style: none;
-}
-
-.keybinding-settings__advanced > summary::-webkit-details-marker {
-  display: none;
-}
-
-.keybinding-settings__advanced > summary svg {
-  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
-}
-
-.keybinding-settings__advanced[open] > summary svg {
-  transform: rotate(180deg);
-}
-
 .keybinding-settings__advanced-body {
   display: grid;
   gap: 10px;

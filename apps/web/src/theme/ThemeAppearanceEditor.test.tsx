@@ -74,17 +74,14 @@ describe("ThemeAppearanceEditor", () => {
     );
   });
 
-  it("keeps visual and routine Appearance sections open while JSON transfer stays raised", () => {
+  it("keeps every Appearance section open, the JSON transfer disclosure included", () => {
     render(<ThemeAppearanceEditor controller={controller()} />);
 
-    for (const name of ["Color scheme", "Typography", "Accessibility"]) {
+    for (const name of ["Color scheme", "Typography", "Accessibility", "Import or export theme"]) {
       expect(screen.getByText(name).closest(".settings-card-section")).toHaveClass(
         "settings-card-section--open",
       );
     }
-    expect(
-      screen.getByText("Import or export theme").closest(".settings-card-section"),
-    ).not.toHaveClass("settings-card-section--open");
   });
 
   it("searches friendly font names and keeps raw stacks behind an advanced disclosure", async () => {

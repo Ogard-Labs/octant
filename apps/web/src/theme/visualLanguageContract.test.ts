@@ -218,11 +218,14 @@ describe("the public-block visual language", () => {
     const themeGroup = settings.match(/\.settings-view__theme-group \{[^}]+\}/)?.[0] ?? "";
     const legend = settings.match(/\.settings-view__theme-group legend \{[^}]+\}/)?.[0] ?? "";
 
-    expect(themeGroup).toMatch(/padding:\s*12px 0 8px/);
+    expect(themeGroup).toMatch(/padding:\s*0;/);
     expect(themeGroup).not.toMatch(/padding:\s*12px 20px 8px/);
     // An unfloated legend is the fieldset's rendered legend and notches the
-    // group's top rule; the subgroup label has to lay out as an ordinary child.
+    // group's top rule; the subgroup label has to lay out as an ordinary child
+    // wearing the section-label recipe over its own hairline.
     expect(legend).toMatch(/float:\s*left/);
+    expect(legend).toMatch(/border-bottom:\s*1px solid var\(--oct-hairline\)/);
+    expect(legend).toMatch(/font-size:\s*var\(--oct-text-sm\)/);
   });
 
   it("uses open Settings groups for routine controls and raised cards for discrete objects", () => {

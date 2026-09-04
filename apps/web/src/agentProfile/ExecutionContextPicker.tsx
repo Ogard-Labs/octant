@@ -83,7 +83,7 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
           role="listbox"
           tabIndex={props.disabled ? -1 : 0}
         >
-          {filtered.map((entry, index) => {
+          {filtered.map((entry) => {
             const isAvailable = entry.unavailableReason === undefined;
             const isActive = availableEntries[activeIndex] === entry;
             const isSelected =

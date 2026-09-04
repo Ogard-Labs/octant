@@ -1,6 +1,6 @@
 import type { ThemeSettings } from "@octant/contracts/theme";
 import { THEME_PRESETS } from "@octant/theme";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ThemeController } from "./useThemeController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -214,7 +214,7 @@ export function ThemeAppearanceEditor(props: {
           </label>
         </div>
       </fieldset>
-      <details className="settings-card-section settings-theme-editor__disclosure">
+      <details className="settings-card-section settings-card-section--open settings-theme-editor__disclosure">
         <summary>
           <span>Import or export theme</span>
           <ChevronDown
@@ -257,8 +257,11 @@ function TypographyControl(props: {
           value={props.value.family}
         />
       </label>
-      <details className="settings-font-picker__custom">
-        <summary>Custom font stack</summary>
+      <details className="settings-disclosure settings-font-picker__custom">
+        <summary>
+          <ChevronRight aria-hidden="true" size={12} />
+          Custom font stack
+        </summary>
         <OctantInput
           aria-label={`${props.familyLabel} custom stack`}
           onChange={(event) => props.onChange({ family: event.currentTarget.value })}
@@ -323,7 +326,7 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
           {`The export left out ${String(dropped.length)} override this theme does not accept: ${[...new Set(dropped)].join(", ")}.`}
         </p>
       )}
-      <label className="settings-view__field">
+      <label className="settings-view__field settings-view__field--block">
         <span>Theme JSON</span>
         <OctantTextarea
           aria-label="Theme JSON"
@@ -335,8 +338,9 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
       <div className="settings-view__actions">
         <OctantButton
           onClick={() => props.controller.importJson(value)}
+          size="sm"
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
           Import theme JSON
         </OctantButton>
@@ -345,8 +349,9 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
             const exported = props.controller.exportJson();
             if (exported !== undefined) setValue(exported);
           }}
+          size="sm"
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
           Export theme JSON
         </OctantButton>
@@ -360,8 +365,9 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
             setValue(exported.content);
             setDropped(exported.droppedOverrides.map((entry) => entry.role));
           }}
+          size="sm"
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
           Export design tokens (CSS)
         </OctantButton>
@@ -372,13 +378,11 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
             setValue(exported.content);
             setDropped(exported.droppedOverrides.map((entry) => entry.role));
           }}
+          size="sm"
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
           Export design tokens (JSON)
-        </OctantButton>
-        <OctantButton onClick={props.controller.reset} type="button" variant="secondary">
-          Reset appearance
         </OctantButton>
       </div>
     </div>
