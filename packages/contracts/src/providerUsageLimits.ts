@@ -22,6 +22,24 @@ const ProviderUsageLimitsIdentity = {
   observedAt: UtcTimestamp,
 };
 
+/**
+ * Why no limits are shown. `unsupported` means the runtime can report limits
+ * but has not yet; the other reasons say the runtime never will, so a reader
+ * is not left waiting for a report that cannot come: an ACP or CLI protocol
+ * without a limits channel, a runtime that runs on this computer with no
+ * account behind it, or an HTTP endpoint that completed a turn without
+ * rate-limit headers.
+ */
+export const ProviderUsageLimitsUnavailableReason = Schema.Literal(
+  "unsupported",
+  "not-configured",
+  "not-ready",
+  "runtime-does-not-report",
+  "local-runtime",
+  "endpoint-silent",
+);
+export type ProviderUsageLimitsUnavailableReason = typeof ProviderUsageLimitsUnavailableReason.Type;
+
 export const ProviderUsageLimitsEntry = Schema.Union(
   Schema.Struct({
     ...ProviderUsageLimitsIdentity,
@@ -31,7 +49,7 @@ export const ProviderUsageLimitsEntry = Schema.Union(
   Schema.Struct({
     ...ProviderUsageLimitsIdentity,
     status: Schema.Literal("unavailable"),
-    reason: Schema.Literal("unsupported", "not-configured", "not-ready"),
+    reason: ProviderUsageLimitsUnavailableReason,
   }).annotations(strict),
   Schema.Struct({
     ...ProviderUsageLimitsIdentity,

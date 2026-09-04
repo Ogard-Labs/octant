@@ -11,6 +11,7 @@ import type {
 import { SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { driverLabel } from "../providers/providerSettingsPresentation";
 
 export function ProviderUsageLimitsPanel(props: {
   readonly client: ProviderUsageLimitsClient;
@@ -106,7 +107,12 @@ export function ProviderUsageLimitsPanel(props: {
                   </span>
                 </div>
                 <div className="surface-row__control">
-                  <EntryDetails entry={entry} />
+                  <EntryDetails
+                    entry={entry}
+                    runtime={
+                      instance === undefined ? "This runtime" : driverLabel(instance.driverKind)
+                    }
+                  />
                 </div>
               </li>
             );
@@ -120,13 +126,28 @@ export function ProviderUsageLimitsPanel(props: {
 /**
  * A flat "Unavailable" said nothing about whether limits could ever appear.
  * The row carries one short value naming the actual state; the section note
- * explains once why an idle provider has not reported yet.
+ * explains once why an idle provider has not reported yet. A runtime with no
+ * limits channel, a local model, or a silent endpoint says which it is.
  */
-const UNAVAILABLE_COPY: Readonly<Record<"unsupported" | "not-configured" | "not-ready", string>> = {
-  unsupported: "Not reported yet",
-  "not-configured": "Provider off",
-  "not-ready": "Waiting for the provider",
-};
+function unavailableCopy(
+  reason: Extract<ProviderUsageLimitsEntry, { status: "unavailable" }>["reason"],
+  runtime: string,
+): string {
+  switch (reason) {
+    case "unsupported":
+      return "Not reported yet";
+    case "not-configured":
+      return "Provider off";
+    case "not-ready":
+      return "Waiting for the provider";
+    case "runtime-does-not-report":
+      return `Not reported by ${runtime}`;
+    case "local-runtime":
+      return "Runs locally, no account limits";
+    case "endpoint-silent":
+      return "No rate-limit headers on the last request";
+  }
+}
 
 const WINDOW_LABELS: Readonly<Record<string, string>> = {
   five_hour: "5-hour window",
@@ -135,13 +156,32 @@ const WINDOW_LABELS: Readonly<Record<string, string>> = {
   seven_day_sonnet: "7-day Sonnet window",
 };
 
+const DURATION_UNITS: Readonly<Record<string, string>> = { m: "minute", h: "hour", d: "day" };
+
+/**
+ * Codex names its windows by slot and length (`primary_5h`, `secondary_7d`);
+ * the length is what a reader recognizes, so it leads the label.
+ */
 function windowLabel(window: string): string {
-  return WINDOW_LABELS[window] ?? window.replaceAll("_", " ");
+  const known = WINDOW_LABELS[window];
+  if (known !== undefined) return known;
+  const codex = /^(primary|secondary)(?:_(\d+)([mhd]))?$/.exec(window);
+  if (codex === null) return window.replaceAll("_", " ");
+  const [, slot, amount, unit] = codex;
+  const length =
+    amount === undefined || unit === undefined ? "" : `${amount}-${DURATION_UNITS[unit]} `;
+  return `${length}window (${slot})`;
 }
 
-function EntryDetails({ entry }: { readonly entry: ProviderUsageLimitsEntry }) {
+function EntryDetails({
+  entry,
+  runtime,
+}: {
+  readonly entry: ProviderUsageLimitsEntry;
+  readonly runtime: string;
+}) {
   if (entry.status === "unavailable") {
-    return <p className="provider-limits__state">{UNAVAILABLE_COPY[entry.reason]}</p>;
+    return <p className="provider-limits__state">{unavailableCopy(entry.reason, runtime)}</p>;
   }
   const limits = entry.status === "available" ? entry.limits : entry.staleLimits;
   return (

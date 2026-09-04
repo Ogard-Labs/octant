@@ -196,4 +196,96 @@ describe("ProviderRuntimeUsageLimitsStore", () => {
     expect(store.windows(instanceId)).toEqual([]);
     expect(store.serviceLimits(instanceId, timestamp("2026-08-24T01:02:00.000Z"))).toBeUndefined();
   });
+
+  it("exposes header quota buckets as exact limits until they refill", () => {
+    const store = new ProviderRuntimeUsageLimitsStore();
+    store.record(bucketEvent({ bucket: "requests", limit: 500, remaining: 120 }));
+    store.record(
+      bucketEvent({
+        sequence: 2,
+        bucket: "tokens",
+        limit: 30_000,
+        remaining: 29_000,
+        resetsAt: timestamp("2026-08-24T01:06:00.000Z"),
+      }),
+    );
+
+    expect(store.serviceLimits(instanceId, timestamp("2026-08-24T01:03:00.000Z"))).toMatchObject({
+      source: "runtime-reported",
+      requests: { status: "available", limit: 500, remaining: 120 },
+      tokens: { status: "available", limit: 30_000, remaining: 29_000 },
+      concurrency: { status: "unavailable" },
+    });
+    expect(
+      store.serviceLimits(instanceId, timestamp("2026-08-24T01:03:00.000Z")),
+    ).not.toHaveProperty("rateLimitWindows");
+
+    const afterRefill = store.serviceLimits(instanceId, timestamp("2026-08-24T01:06:00.000Z"));
+    expect(afterRefill?.requests).toMatchObject({ status: "available", remaining: 120 });
+    expect(afterRefill?.tokens).toEqual({ status: "unavailable" });
+  });
+
+  it("keeps the newest bucket observation when an older one arrives late", () => {
+    const store = new ProviderRuntimeUsageLimitsStore();
+    store.record(
+      bucketEvent({
+        sequence: 2,
+        occurredAt: timestamp("2026-08-24T01:01:00.000Z"),
+        bucket: "requests",
+        limit: 500,
+        remaining: 100,
+      }),
+    );
+    store.record(bucketEvent({ bucket: "requests", limit: 500, remaining: 400 }));
+
+    expect(
+      store.serviceLimits(instanceId, timestamp("2026-08-24T01:02:00.000Z"))?.requests,
+    ).toMatchObject({ remaining: 100 });
+  });
+
+  it("remembers whether the last completed turn carried quota buckets", () => {
+    const store = new ProviderRuntimeUsageLimitsStore();
+    expect(store.lastCompletedTurn(instanceId)).toBeUndefined();
+
+    store.record(terminalEvent("completed"));
+    expect(store.lastCompletedTurn(instanceId)).toBe("silent");
+
+    store.record(bucketEvent({ sequence: 2, bucket: "requests", limit: 500, remaining: 120 }));
+    store.record(terminalEvent("completed", 3));
+    expect(store.lastCompletedTurn(instanceId)).toBe("reported");
+
+    // A failed turn proves nothing about headers; the verdict stays.
+    store.record(terminalEvent("failed", 4));
+    expect(store.lastCompletedTurn(instanceId)).toBe("reported");
+  });
 });
+
+function bucketEvent(
+  overrides: Partial<Extract<ProviderRuntimeEvent, { kind: "rate-limit-bucket" }>>,
+): ProviderRuntimeEvent {
+  return decodeProviderRuntimeEvent({
+    instanceId,
+    sessionId,
+    sequence: 1,
+    correlationId: "00000000-0000-4000-8000-000000000003",
+    occurredAt,
+    kind: "rate-limit-bucket",
+    bucket: "requests",
+    limit: 100,
+    remaining: 50,
+    ...overrides,
+  });
+}
+
+function terminalEvent(kind: "completed" | "failed", sequence = 1): ProviderRuntimeEvent {
+  return decodeProviderRuntimeEvent({
+    instanceId,
+    sessionId,
+    sequence,
+    correlationId: "00000000-0000-4000-8000-000000000003",
+    occurredAt,
+    ...(kind === "completed"
+      ? { kind }
+      : { kind, failure: { category: "provider-failed", message: "Provider stopped" } }),
+  });
+}

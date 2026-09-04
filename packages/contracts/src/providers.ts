@@ -1314,6 +1314,24 @@ export const ProviderRuntimeEvent = Schema.Union(
     /** When the window next resets. Absent when the provider gives none. */
     resetsAt: Schema.optional(UtcTimestamp),
   }).annotations(strict),
+  /**
+   * An absolute quota bucket the provider disclosed on a response it already
+   * sent, such as the rate-limit headers of the HTTP providers. Only the two
+   * buckets `ProviderServiceLimits` can hold exist here; a bucket whose
+   * remaining count exceeds its limit is refused rather than clamped because
+   * the provider, not Octant, owns those numbers.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("rate-limit-bucket"),
+    bucket: Schema.Literal("requests", "tokens"),
+    limit: Schema.Int.pipe(Schema.positive()),
+    remaining: Schema.Int.pipe(Schema.nonNegative()),
+    /** When the bucket refills. Absent when the provider gives none. */
+    resetsAt: Schema.optional(UtcTimestamp),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((event) => event.remaining <= event.limit)),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("task-progress"),

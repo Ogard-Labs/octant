@@ -419,6 +419,7 @@ import {
   ReviewedModelManifest,
 } from "./providers/reviewedModelManifest";
 import { ProviderUsageLimitsService } from "./providers/providerUsageLimitsService";
+import { unavailableLimitsReason } from "./providers/providerLimitsReporting";
 import { createProviderUsageLimitsRouteHandler } from "./providers/providerUsageLimitsRoutes";
 import { ProviderRuntimeUsageLimitsStore } from "./providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "./providers/providerRuntimeUsageLimitsDriver";
@@ -3001,8 +3002,19 @@ export function startOctantServer(
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
     };
     const providerUsageLimitsService = new ProviderUsageLimitsService({
-      listInstances: () => persistence.readProviderInstances(),
+      // Image profiles are jobs against a generation endpoint, not runtimes
+      // with an account to meter; listing them would promise a report that
+      // has no channel to arrive on.
+      listInstances: () =>
+        persistence
+          .readProviderInstances()
+          .filter((instance) => !isImageProfileDriverKind(instance.driverKind)),
       now: () => new Date().toISOString() as UtcTimestamp,
+      unavailableReason: (instance) =>
+        unavailableLimitsReason(
+          instance.driverKind,
+          providerRuntimeUsageLimitsStore.lastCompletedTurn(instance.id),
+        ),
       observe: async (instance, signal) => {
         let driver: ProviderDriver;
         try {
