@@ -478,7 +478,16 @@ function ProviderRow(props: ProviderRowProps) {
   const label = driverLabel(props.instance.driverKind);
   const runtimeLabel = isClaude
     ? "Agent SDK"
-    : isVibe || isGrok || isGoose || isGlm || isGemini || isCopilot || isCline || isQwen || isDevin || isKilo
+    : isVibe ||
+        isGrok ||
+        isGoose ||
+        isGlm ||
+        isGemini ||
+        isCopilot ||
+        isCline ||
+        isQwen ||
+        isDevin ||
+        isKilo
       ? "ACP"
       : isPi || isOhMyPi
         ? "RPC"
@@ -1243,10 +1252,10 @@ function guidance(
                                       : driverKind === "qwen"
                                         ? "Add or replace the OpenAI-compatible API key in the Octant host, then check the connection again."
                                         : driverKind === "anthropic-compatible"
-                              ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
-                              : driverKind === "azure-foundry"
-                                ? "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again."
-                                : "Add a bearer API key in the Octant host, then check the connection again."}
+                                          ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
+                                          : driverKind === "azure-foundry"
+                                            ? "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again."
+                                            : "Add a bearer API key in the Octant host, then check the connection again."}
       </p>
     );
   if (readiness === "incompatible") {

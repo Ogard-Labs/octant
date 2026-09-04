@@ -39,7 +39,19 @@ describe("provider-driver host runtime", () => {
       DISCOVERY_DESCRIPTORS.filter((descriptor) =>
         isAcpHostProfileDriver(descriptor.driverKind),
       ).map((descriptor) => descriptor.driverKind),
-    ).toEqual(["kimi-code", "devin", "kilo", "mistral-vibe", "grok", "goose", "glm", "gemini", "copilot", "cline", "qwen"]);
+    ).toEqual([
+      "kimi-code",
+      "devin",
+      "kilo",
+      "mistral-vibe",
+      "grok",
+      "goose",
+      "glm",
+      "gemini",
+      "copilot",
+      "cline",
+      "qwen",
+    ]);
   });
 
   it("omits models from discovery when a driver plugin is not admitted", () => {

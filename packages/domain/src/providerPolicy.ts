@@ -535,7 +535,9 @@ function normalizeClineConfiguration(
   };
 }
 
-function normalizeQwenConfiguration(configuration: QwenConfigurationInput): QwenProviderConfiguration {
+function normalizeQwenConfiguration(
+  configuration: QwenConfigurationInput,
+): QwenProviderConfiguration {
   if (configuration.authentication !== "api-key") {
     reject("invalid-authentication", "Qwen Code authentication must be api-key.");
   }

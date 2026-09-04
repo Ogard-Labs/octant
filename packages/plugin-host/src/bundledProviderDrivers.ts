@@ -70,13 +70,9 @@ export interface BundledProviderDriverPlugin {
 }
 
 const digest = (seed: string) => {
-  const hex =
-    seed.length === 1
-      ? seed.repeat(64)
-      : seed.repeat(32);
+  const hex = seed.length === 1 ? seed.repeat(64) : seed.repeat(32);
   // `11`.repeat(32) equals `1`.repeat(64), which Claude already uses.
-  const normalized =
-    seed.length !== 1 && hex === "1".repeat(64) ? "1b".repeat(32) : hex;
+  const normalized = seed.length !== 1 && hex === "1".repeat(64) ? "1b".repeat(32) : hex;
   return decodeExtensionContentDigest(`sha256:${normalized}`);
 };
 

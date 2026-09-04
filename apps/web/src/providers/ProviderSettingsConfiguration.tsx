@@ -1130,7 +1130,11 @@ export function GlmConfigurationForm(props: {
           binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
           authentication: "api-key",
         };
-        void props.onChange(props.instance.id, configuration, transientCredential(credentialInput.current));
+        void props.onChange(
+          props.instance.id,
+          configuration,
+          transientCredential(credentialInput.current),
+        );
       }}
     >
       <label>

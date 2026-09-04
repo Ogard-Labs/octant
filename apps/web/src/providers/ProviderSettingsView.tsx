@@ -48,7 +48,16 @@ export interface ProviderSettingsViewProps {
   readonly credentialManagementAvailable: boolean;
   readonly message?: string;
   readonly onCreate: (
-    driverKind: "opencode" | "codex" | "kimi-code" | "devin" | "kilo" | "pi" | "oh-my-pi" | "goose" | "copilot",
+    driverKind:
+      | "opencode"
+      | "codex"
+      | "kimi-code"
+      | "devin"
+      | "kilo"
+      | "pi"
+      | "oh-my-pi"
+      | "goose"
+      | "copilot",
     displayName: string,
     binaryPath: string,
   ) => Promise<boolean>;

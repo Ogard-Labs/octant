@@ -530,8 +530,7 @@ const glmProfile: AcpProviderProfile = {
   process: {
     agentName: "glm-acp-agent",
     npmPackageName: "glm-acp-agent",
-    versionPattern:
-      /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?\r?\n?$/,
+    versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?\r?\n?$/,
     minimumVersion: [1, 8, 0],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: {
@@ -609,12 +608,10 @@ const copilotProfile: AcpProviderProfile = {
   closesSessions: true,
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
-  unauthenticatedMessage:
-    "GitHub Copilot is not authenticated. Run `copilot login`, then retry.",
+  unauthenticatedMessage: "GitHub Copilot is not authenticated. Run `copilot login`, then retry.",
   process: {
     agentName: "Copilot",
-    versionPattern:
-      /^GitHub Copilot CLI (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.?\r?\n?/,
+    versionPattern: /^GitHub Copilot CLI (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.?\r?\n?/,
     minimumVersion: [1, 0, 82],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: { NO_COLOR: "1" },
@@ -651,8 +648,7 @@ const clineProfile: AcpProviderProfile = {
   closesSessions: true,
   authenticateOnProbe: false,
   authentication: { kind: "delegated-browser", apiKeyVariable: "CLINE_API_KEY" },
-  unauthenticatedMessage:
-    "Cline is not authenticated. Sign in from Provider Settings, then retry.",
+  unauthenticatedMessage: "Cline is not authenticated. Sign in from Provider Settings, then retry.",
   process: {
     agentName: "cline",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,

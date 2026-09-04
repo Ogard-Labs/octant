@@ -256,7 +256,16 @@ export function useProviderController(options: ProviderControllerOptions) {
 
   const create = useCallback(
     (
-      driverKind: "opencode" | "codex" | "kimi-code" | "devin" | "kilo" | "pi" | "oh-my-pi" | "goose" | "copilot",
+      driverKind:
+        | "opencode"
+        | "codex"
+        | "kimi-code"
+        | "devin"
+        | "kilo"
+        | "pi"
+        | "oh-my-pi"
+        | "goose"
+        | "copilot",
       displayName: string,
       binaryPath: string,
     ) =>
