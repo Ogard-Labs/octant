@@ -5034,9 +5034,13 @@ export function startOctantServer(
     };
     // Resolved from the Canvas's own provenance and durable host state, so
     // the scope a client echoes is never the scope that authorizes it.
-    const resolveCanvasWorkspace = (
-      provenance: import("@octant/contracts").CanvasProvenance,
-    ): import("@octant/contracts/canvas-cards").CanvasWorkspaceScope | undefined => {
+    // Takes only what it reads, so a caller that has a thread but no full
+    // provenance — a hand-off, for one — derives its scope the same way
+    // rather than building a parallel one.
+    const resolveCanvasWorkspace = (provenance: {
+      readonly mode: OctantMode;
+      readonly threadId: string;
+    }): import("@octant/contracts/canvas-cards").CanvasWorkspaceScope | undefined => {
       if (provenance.mode === "chat") {
         const thread = persistence.readChatThread(provenance.threadId as never);
         if (thread === undefined || thread.lifecycle !== "active") return undefined;
@@ -5581,22 +5585,18 @@ export function startOctantServer(
           if (project === undefined || project.lifecycle !== "active" || project.type !== mode) {
             return { kind: "refused", message: "The thread's Project is unavailable." };
           }
-          let workspace: import("@octant/contracts/canvas-cards").CanvasWorkspaceScope;
-          if (mode === "chat") {
-            workspace = { kind: "chat-virtual", projectId };
-          } else if (mode === "work") {
-            // The renderer's own Create Canvas names the thread as the Work root.
-            workspace = { kind: "work-root", projectId, rootId: threadId as never };
-          } else {
-            const view = await routeCodeService.read(windowId, decodeCodeThreadId(threadId));
-            workspace = {
-              kind: "code-worktree",
-              projectId,
-              repositoryId: view.thread.repositoryId,
-              bindingRevisionId: view.thread.bindingRevisionId,
-              checkoutId: view.thread.checkoutId,
-              verified: true,
-            };
+          // The scope is derived by the resolver the Canvas surfaces already
+          // use, not built alongside it. A hand-built scope disagreed with the
+          // resolver on all three modes, and `validateCanvasRefreshRequest`
+          // compares the two, so a handed-off Canvas could refuse its own
+          // refresh as a scope mismatch.
+          //
+          // It also answers with `undefined` rather than throwing: the provider
+          // call before this is bounded at 180 seconds, and the thread can be
+          // archived or its checkout can go away while that runs.
+          const workspace = resolveCanvasWorkspace({ mode, threadId });
+          if (workspace === undefined) {
+            return { kind: "refused", message: "The thread's workspace is unavailable." };
           }
           const created = canvasService.create(
             {

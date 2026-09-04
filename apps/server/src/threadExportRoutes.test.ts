@@ -146,6 +146,11 @@ describe("thread export routes", () => {
       makeRequest("/api/threads/hand-off", { body: { mode: "code", threadId } }),
     );
     expect(unauthenticated?.status).toBe(401);
+    // One handler serves both commands, so a hand-off refusal has to name the
+    // hand-off rather than tell the person their export was unauthorized.
+    expect(await unauthenticated?.json()).toMatchObject({
+      error: "Thread hand-off is unauthorized.",
+    });
     expect(await handler(makeRequest("/api/threads/export", { capability }))).toBeUndefined();
   });
 });

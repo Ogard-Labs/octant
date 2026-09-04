@@ -40,6 +40,7 @@ export interface ThreadHandOffRouteDependencies {
 
 export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDependencies) {
   return createThreadCommandRouteHandler({
+    label: "Thread export",
     path: "/api/threads/export",
     windowAuthorityStore: dependencies.windowAuthorityStore,
     ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
@@ -53,6 +54,7 @@ export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDe
 
 export function createThreadHandOffRouteHandler(dependencies: ThreadHandOffRouteDependencies) {
   return createThreadCommandRouteHandler({
+    label: "Thread hand-off",
     path: "/api/threads/hand-off",
     windowAuthorityStore: dependencies.windowAuthorityStore,
     ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
@@ -71,6 +73,8 @@ export function createThreadHandOffRouteHandler(dependencies: ThreadHandOffRoute
 }
 
 function createThreadCommandRouteHandler<Outcome>(options: {
+  /** Names the command in refusals, so one handler does not answer for the other. */
+  readonly label: string;
   readonly path: string;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
@@ -90,7 +94,7 @@ function createThreadCommandRouteHandler<Outcome>(options: {
 
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
-      return failureResponse("Thread export requests must use loopback.", 400, null);
+      return failureResponse(`${options.label} requests must use loopback.`, 400, null);
     }
     if (origin !== null && !isAllowedOrigin(origin)) {
       return failureResponse("Renderer origin is not allowed.", 400, origin);
@@ -99,7 +103,7 @@ function createThreadCommandRouteHandler<Outcome>(options: {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
     if (request.method !== "POST") {
-      return failureResponse("Thread export requires POST.", 405, origin);
+      return failureResponse(`${options.label} requires POST.`, 405, origin);
     }
 
     let windowId;
@@ -118,9 +122,9 @@ function createThreadCommandRouteHandler<Outcome>(options: {
       }
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
-        return failureResponse("Thread export is unauthorized.", 401, origin);
+        return failureResponse(`${options.label} is unauthorized.`, 401, origin);
       }
-      return failureResponse("Thread export request is invalid.", 400, origin);
+      return failureResponse(`${options.label} request is invalid.`, 400, origin);
     }
 
     const decoded = await readJson(request, BODY_LIMIT);
